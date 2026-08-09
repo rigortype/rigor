@@ -3,6 +3,7 @@
 require_relative "../trinary"
 require_relative "../value_semantics"
 require_relative "acceptance_router"
+require_relative "anonymous_class_name"
 require_relative "plain_lattice"
 
 module Rigor
@@ -26,10 +27,12 @@ module Rigor
       end
 
       def describe(_verbosity = :short)
-        "singleton(#{class_name})"
+        "singleton(#{AnonymousClassName.display(class_name)})"
       end
 
       def erase_to_rbs
+        return "untyped" if AnonymousClassName.match?(class_name)
+
         "singleton(#{class_name})"
       end
 

@@ -8,6 +8,7 @@ require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
 require_relative "../source/constant_path"
+require_relative "anonymous_meta_class"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "dynamic_origin"
@@ -1822,7 +1823,20 @@ module Rigor
         return unless block.is_a?(Prism::BlockNode)
 
         block_entry = build_block_entry_scope(node, block)
-        sub_eval(block, block_entry)
+        # #319 — `Class.new do ... end` and friends evaluate their block as a CLASS BODY (`class_eval`
+        # semantics): `self` is the freshly created class, so a `def` inside defines an instance method on it
+        # and `attr_reader` runs as a class-level macro. Enter the block under the same `self_type` /
+        # class-context a `class Foo ... end` body gets, keyed by the call site's anonymous name — the name
+        # `ScopeIndexer` registered the body's methods under. Without it the body inherits the enclosing
+        # scope, and at file top level that means `Scope#toplevel?` (a nil `self_type`) reports every macro
+        # call in the body as `call.unresolved-toplevel`.
+        #
+        # Outer locals stay visible: unlike a `class` keyword body, the block is a closure.
+        anonymous = AnonymousMetaClass.name_for(node, scope.source_path)
+        return sub_eval(block, block_entry) if anonymous.nil?
+
+        sub_eval(block, block_entry.with_self_type(Type::Combinator.singleton_of(anonymous)),
+                 class_context: [ClassFrame.new(name: anonymous, singleton: false)])
       end
 
       # Slice 6 phase C sub-phase 3b/3c. When the call carries a block whose receiving method is NOT proven

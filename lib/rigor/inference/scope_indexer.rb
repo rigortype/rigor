@@ -7,6 +7,7 @@ require_relative "../type"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../cache/file_digest"
+require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "mutation_widening"
 require_relative "narrowing"
@@ -133,7 +134,7 @@ module Rigor
       # file_def_nodes]` so the caller can thread the def-node table into {#merge_project_method_indexes} without
       # walking the file a second time.
       def seed_discovered_methods(seeded_scope, default_scope, root)
-        file_methods, file_def_nodes = build_methods_and_def_nodes(root)
+        file_methods, file_def_nodes = build_methods_and_def_nodes(root, default_scope.source_path)
         discovered_methods = deep_merge_class_methods(default_scope.discovered_methods, file_methods)
         scope = seeded_scope.with_discovery(seeded_scope.discovery.with(discovered_methods: discovered_methods))
         [scope, file_def_nodes]
@@ -161,7 +162,7 @@ module Rigor
           build_discovered_singleton_def_nodes(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
         superclasses = default_scope.discovered_superclasses.merge(
-          build_discovered_superclasses(root)
+          build_discovered_superclasses(root, default_scope.source_path)
         )
         includes = default_scope.discovered_includes.merge(
           build_discovered_includes(root)
@@ -1266,10 +1267,10 @@ module Rigor
       # `walk_methods` and `walk_def_nodes` had byte-identical class / module / singleton / meta-block descents (both
       # stop at `DefNode`), so a single combined walk records both accumulators at once instead of traversing every file
       # twice.
-      def build_methods_and_def_nodes(root)
+      def build_methods_and_def_nodes(root, source_path = nil)
         methods = {}
         def_nodes = {}
-        walk_methods_and_def_nodes(root, [], false, methods, def_nodes)
+        walk_methods_and_def_nodes(root, [], false, methods, def_nodes, source_path)
         apply_alias_def_nodes(root, def_nodes)
         [methods.transform_values(&:freeze).freeze, def_nodes.transform_values(&:freeze).freeze]
       end
@@ -1315,7 +1316,8 @@ module Rigor
       # right accumulator) and the original `walk_methods` returning at `AliasMethodNode` (its symbol-only children
       # carry no def / class node, so not descending them is byte-identical for `def_nodes` too). See
       # {#build_methods_and_def_nodes}.
-      def walk_methods_and_def_nodes(node, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc)
+      def walk_methods_and_def_nodes(node, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
+                                     source_path = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -1324,21 +1326,27 @@ module Rigor
           if name
             child_prefix = qualified_prefix + [name]
             record_meta_superclass_members(node, child_prefix, methods_acc) if node.is_a?(Prism::ClassNode)
-            walk_methods_and_def_nodes(node.body, child_prefix, false, methods_acc, def_nodes_acc) if node.body
+            if node.body
+              walk_methods_and_def_nodes(node.body, child_prefix, false, methods_acc, def_nodes_acc, source_path)
+            end
             return
           end
         when Prism::SingletonClassNode
           if node.body
             singleton_prefix = singleton_class_prefix(node, qualified_prefix)
             if singleton_prefix
-              walk_methods_and_def_nodes(node.body, singleton_prefix, true, methods_acc, def_nodes_acc)
+              walk_methods_and_def_nodes(node.body, singleton_prefix, true, methods_acc, def_nodes_acc, source_path)
               return
             end
           end
         when Prism::ConstantWriteNode
           if meta_new_block_body(node)
             child_prefix = qualified_prefix + [node.name.to_s]
-            walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc)
+            walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc,
+                                       source_path)
+            # No anonymous registration here: the constant IS the name, and `StatementEvaluator` never routes a
+            # constant-write rvalue through the block-body narrowing (its scope index still shows `self` as
+            # `Dynamic[top]` inside such a body), so the two passes agree on the constant name alone.
             return
           end
         when Prism::DefNode
@@ -1349,14 +1357,43 @@ module Rigor
           record_alias_method(node, qualified_prefix, in_singleton_class, methods_acc)
           return
         when Prism::CallNode
-          record_define_method(node, qualified_prefix, in_singleton_class, methods_acc) if node.name == :define_method
-          if ATTR_MACROS.include?(node.name)
-            record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc)
+          anonymous = record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
+          if anonymous
+            walk_anonymous_meta_block(node, anonymous, qualified_prefix, in_singleton_class, methods_acc,
+                                      def_nodes_acc, source_path)
+            return
           end
         end
 
         node.rigor_each_child do |child|
-          walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc)
+          walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
+                                     source_path)
+        end
+      end
+
+      # The `Prism::CallNode` leaf actions of {#walk_methods_and_def_nodes}: the `define_method` / `attr_*` macro
+      # recorders, plus the {AnonymousMetaClass} name of a class-creating meta call carrying a block (nil for
+      # every other call), which the caller uses to decide whether the block body needs the anonymous-class-body
+      # descent.
+      def record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
+        record_define_method(node, qualified_prefix, in_singleton_class, methods_acc) if node.name == :define_method
+        record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc) if ATTR_MACROS.include?(node.name)
+        AnonymousMetaClass.name_for(node, source_path)
+      end
+
+      # #319 — walks a `Class.new do ... end` / `Module.new do ... end` / `Struct.new(*sym) do ... end` /
+      # `Data.define(*sym) do ... end` block body as the class body it is at runtime, keyed by the call site's
+      # synthetic anonymous `name`; the call's other children (receiver, arguments) keep the enclosing prefix.
+      def walk_anonymous_meta_block(call_node, name, qualified_prefix, in_singleton_class, methods_acc,
+                                    def_nodes_acc, source_path)
+        call_node.rigor_each_child do |child|
+          if child.equal?(call_node.block)
+            body = call_node.block.body
+            walk_methods_and_def_nodes(body, [name], false, methods_acc, def_nodes_acc, source_path) if body
+          else
+            walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
+                                       source_path)
+          end
         end
       end
 
@@ -1483,6 +1520,24 @@ module Rigor
         class_name = qualified_prefix.empty? ? TOP_LEVEL_DEF_KEY : qualified_prefix.join("::")
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = def_node
+        record_anonymous_body_def_as_toplevel(def_node, qualified_prefix, accumulator)
+      end
+
+      # #319 — a `def` inside an anonymous `Class.new` / `Module.new` body ALSO stays in the `<toplevel>` table.
+      # Before the anonymous class had a name the body was walked with an empty prefix, so every such `def`
+      # landed there; that is the same leniency this key already grants a `def` nested in any other DSL block
+      # (see {TOP_LEVEL_DEF_KEY}), and it is what lets an implicit-self call elsewhere in the file resolve
+      # against a method the anonymous module contributes to some other object's `self` — the
+      # `Module.new { def start; end }` mixed into a spawned actor environment, then called from the sibling
+      # `spawn(...) { start }` block. Giving the body a class of its own must not silently retract it: the call
+      # resolves at runtime, and `call.unresolved-toplevel` firing on it would be a new false positive traded
+      # for the ones this change retires. Never clobbers a real top-level `def` of the same name.
+      def record_anonymous_body_def_as_toplevel(def_node, qualified_prefix, accumulator)
+        return unless qualified_prefix.length == 1
+        return unless Type::AnonymousClassName.match?(qualified_prefix.first)
+
+        table = (accumulator[TOP_LEVEL_DEF_KEY] ||= {})
+        table[def_node.name] ||= def_node
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of `build_discovered_def_nodes`.
@@ -1617,16 +1672,18 @@ module Rigor
       # `class Foo < Bar` declaration. Only constant superclasses are recorded (`class Foo < Struct.new(...)` and other
       # non-constant superclasses produce no entry). The as-written name is resolved to a qualified class at the call
       # site against the subclass's lexical nesting — see `ExpressionTyper#resolve_ancestor_class_name`.
-      def build_discovered_superclasses(root)
+      def build_discovered_superclasses(root, source_path = nil)
         accumulator = {}
-        walk_class_superclasses(root, [], accumulator)
+        walk_class_superclasses(root, [], accumulator, source_path)
         accumulator.freeze
       end
 
-      def walk_class_superclasses(node, qualified_prefix, accumulator)
+      def walk_class_superclasses(node, qualified_prefix, accumulator, source_path = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
+        when Prism::CallNode
+          record_anonymous_meta_superclass(node, accumulator, source_path)
         when Prism::ClassNode
           name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
@@ -1645,8 +1702,25 @@ module Rigor
         end
 
         node.rigor_each_child do |child|
-          walk_class_superclasses(child, qualified_prefix, accumulator)
+          walk_class_superclasses(child, qualified_prefix, accumulator, source_path)
         end
+      end
+
+      # #319 — `Class.new(Parent) do ... end` names its superclass in the first positional. Recording it under the
+      # call site's anonymous name keeps `Parent`'s surface reachable from the block body (whose `self_type` is now
+      # `Singleton[<anonymous>]`) and from an instance of the resulting class, so giving the anonymous class an
+      # identity does not cost the inheritance the old `Singleton[Parent]` answer carried for free.
+      def record_anonymous_meta_superclass(call_node, accumulator, source_path)
+        return unless AnonymousMetaClass.block_form_receiver(call_node) == :Class
+
+        arg = call_node.arguments&.arguments&.first
+        return if arg.nil?
+
+        superclass = Source::ConstantPath.qualified_name(arg)
+        return if superclass.nil?
+
+        name = AnonymousMetaClass.name_for(call_node, source_path)
+        accumulator[name] = superclass if name
       end
 
       # ADR-48 — per qualified class name -> ordered `Data.define` member-name list, for both the named-subclass form
@@ -2511,7 +2585,7 @@ module Rigor
         # One combined descent yields both the methods existence table and the def-node table; the latter is also
         # consumed by `record_class_sources`, so a def-dense file is walked once here instead of three times (methods +
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
-        file_methods, file_def_nodes = build_methods_and_def_nodes(root)
+        file_methods, file_def_nodes = build_methods_and_def_nodes(root, path)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,
         # the exact mirror of the instance-side `merge_discovered_defs`, so a class/singleton-method body edit
@@ -2519,7 +2593,7 @@ module Rigor
         # silently degrading to the file's full ancestry closure.
         merge_discovered_defs(acc[:singleton_def_nodes], acc[:singleton_def_sources], path,
                               build_discovered_singleton_def_nodes(root))
-        superclasses = build_discovered_superclasses(root)
+        superclasses = build_discovered_superclasses(root, path)
         includes = build_discovered_includes(root)
         acc[:superclasses].merge!(superclasses)
         includes.each do |class_name, mods|

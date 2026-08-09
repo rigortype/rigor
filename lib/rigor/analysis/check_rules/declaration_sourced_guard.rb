@@ -21,10 +21,19 @@ module Rigor
       #
       # **The mark is deliberately NOT transitive.** `Scope#with_declaration_sourced_local`
       # ({Inference::StatementEvaluator#eval_local_write}) stamps `:local` only when the RHS is a *pure read of a
-      # currently declaration-sourced ivar*. A second hop (`c = @count; d = c`), a copy joined out of a
-      # conditional, and an `||=` rewrite all land on the plain `with_local` path and carry no mark — verified
-      # empirically, not assumed. So `marked?` matches exactly the two node shapes the scope actually models and
-      # invents no propagation of its own; anything else is flow-live and keeps firing.
+      # currently declaration-sourced ivar*, so a second hop (`c = @count; d = c`) and an `||=` rewrite land on
+      # the plain `with_local` path and carry no mark.
+      #
+      # A branch join is NOT one of those cases, contrary to what this comment claimed when it landed: both
+      # arms of `if c then r = @count else r = @count end` stamp `(:local, :r)`, and `join_declaration_sourced`
+      # INTERSECTS, so the mark survives. Only an *asymmetric* join drops it, and by that intersection rather
+      # than by reaching `with_local`. The normative statement — establishment, drop, join and the full list of
+      # unmarked shapes, each verified against the implementation — is
+      # `docs/internal-spec/inference-engine.md` § "Declaration-sourced provenance mark (ADR-58)"; keep this
+      # comment subordinate to it.
+      #
+      # So `marked?` matches exactly the two node shapes the scope actually models and invents no propagation
+      # of its own; anything flow-live keeps firing.
       module DeclarationSourcedGuard
         module_function
 

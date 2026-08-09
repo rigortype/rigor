@@ -14,6 +14,14 @@ module Rigor
     #
     # Non-Prism children (literals embedded in node attributes, virtual nodes, or `nil` slots) are silently
     # skipped so callers can rely on every yielded value responding to the `Prism::Node` API.
+    #
+    # Issue #318 — a `Prism::DefinedNode`'s operand is never evaluated at runtime (`defined?` inspects the
+    # expression statically; it does not run it), so the walk yields the `DefinedNode` itself but does NOT
+    # descend into its `value` subtree. Every consumer of this walker treats a yielded node as "reachable,
+    # evaluated code" (mutation/break/return scans, the check-rules main-pass oracle, coverage and precision
+    # probes); walking into the operand would make them reason about code that can never run, which is
+    # exactly the false-positive class the issue reports (`defined?(@x) && ...` flagging a call that is
+    # actually inert).
     module NodeWalker
       module_function
 
@@ -30,6 +38,8 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         yield node
+        return if node.is_a?(Prism::DefinedNode)
+
         node.rigor_each_child { |child| walk(child, &) }
       end
 
@@ -52,6 +62,8 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         block.call(node, ancestors)
+        return if node.is_a?(Prism::DefinedNode)
+
         ancestors.push(node)
         node.rigor_each_child { |child| walk_with_ancestors(child, ancestors, &block) }
         ancestors.pop

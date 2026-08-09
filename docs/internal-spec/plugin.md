@@ -104,9 +104,13 @@ as a `:plugin_loader` `runtime-error` diagnostic rather than crashing
 is a class-level DSL (the `producer`-style shape) declaring a
 node-scoped diagnostic rule. The engine walks each analysed file's AST
 **once** and dispatches every node where `node.is_a?(node_type)` to the
-rule, so the plugin author writes the check and never the traversal —
-this is what lets a plugin drop the hand-rolled `def walk` /
-`compact_child_nodes.each` recursion. The block runs through
+rule, so the plugin author writes the check and never the traversal.
+The walk yields a `Prism::DefinedNode` itself but does not descend into
+its operand (issue #318): `defined?` inspects its argument statically
+and never evaluates it, so a rule never sees the nodes underneath one,
+same as any other node this per-file walk reaches — this is what lets a
+plugin drop the hand-rolled `def walk` / `compact_child_nodes.each`
+recursion. The block runs through
 `instance_exec` (so `self` is the plugin instance — `config`,
 `services`, `services.fact_store`, `diagnostic` are all in scope),
 receives `(node, scope, path, file_context, context)`, and returns an

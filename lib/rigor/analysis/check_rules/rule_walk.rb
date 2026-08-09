@@ -145,6 +145,13 @@ module Rigor
             return unless node.is_a?(Prism::Node)
 
             dispatch(node, hooks, context)
+            # Issue #318 — `defined?`'s operand is never evaluated (the runtime inspects it statically), so
+            # nothing under a `DefinedNode` is reachable, evaluated code. Dispatching the DefinedNode itself
+            # is fine (a collector may care that it exists); descending into `#value` would feed collectors
+            # source that can never execute, e.g. `undefined_method_diagnostic` flagging a call inside
+            # `defined? @x && @x.method_call`.
+            return if node.is_a?(Prism::DefinedNode)
+
             child_context = descend(node, context)
             node.rigor_each_child { |child| walk(child, hooks, child_context) }
           end

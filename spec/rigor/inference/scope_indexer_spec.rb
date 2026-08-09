@@ -905,6 +905,42 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(outer_scope.discovered_method?("Foo", :bar, :singleton)).to be(true)
     end
 
+    # #320 — the private-singleton-object idiom. Ruby evaluates the assignment, then opens the singleton of the
+    # resulting object, which is the object the constant now holds; the body's methods are therefore reachable as
+    # `Merger.<name>` exactly as for a body opened on a plain constant read.
+    it "registers methods inside `class << Merger = Object.new` on the written constant's singleton" do
+      program = parse(<<~RUBY)
+        class << Merger = Object.new
+          def merge_attributes!(a, b) = a
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      expect(outer_scope.discovered_method?("Merger", :merge_attributes!, :singleton)).to be(true)
+    end
+
+    it "registers a `class << Outer::Merger = Object.new` body on the written constant path" do
+      program = parse(<<~RUBY)
+        class << Outer::Merger = Object.new
+          def call = 1
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      expect(outer_scope.discovered_method?("Outer::Merger", :call, :singleton)).to be(true)
+    end
+
+    it "leaves a `class << local = Object.new` body unregistered (no constant to key on)" do
+      program = parse(<<~RUBY)
+        class << merger = Object.new
+          def call = 1
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      expect(outer_scope.discovered_method?("merger", :call, :singleton)).to be(false)
+    end
+
     it "leaves cross-class explicit-receiver defs unpromoted (instance, current behaviour)" do
       program = parse(<<~RUBY)
         module Foo

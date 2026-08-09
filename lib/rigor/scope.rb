@@ -352,8 +352,11 @@ module Rigor
     # whose type is an open-call-site *lower bound* — firing against a lower bound is a false positive by
     # construction (the ADR-67 WD1 reasoning at the parameter boundary, carried one hop into the body). The
     # distinct kind keeps the inferred-param sites separable from ADR-58's ivar-copy `:local` mark, which a
-    # later un-guarding slice (WD6b) needs. `with_local` drops it on any flow-live rewrite of the local
-    # (`drop_local_declaration_marks`), so only the pristine parameter binding carries it.
+    # later un-guarding slice (WD6b) needs — and the two kinds behave OPPOSITELY on both axes: `:local` is
+    # dropped by `with_local` and intersected by `join`, while `:inferred_param` is sticky across `with_local`
+    # and unioned by `join`. See {#without_inferred_param_mark} below for the clearing contract, and
+    # `docs/internal-spec/inference-engine.md` § "Declaration-sourced provenance mark (ADR-58)" for the
+    # normative statement of both.
     def with_inferred_param_mark(name)
       rebuild(declaration_sourced: add_declaration_sourced(:inferred_param, name))
     end

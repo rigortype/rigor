@@ -12,23 +12,39 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-09
+
+v0.3.3 is a false-positive clearance release: six patterns where Rigor reported an error on Ruby that runs correctly are retired, and most are plain idioms rather than exotic corners. `Class.new do … end` bodies, `Array.new(n) { … }`, `defined?` operands, singleton bodies opened on a constant, a project helper colliding with a DSL matcher, and a nil guard on a literal-hash lookup all stop warning. Inference is also more precise where it was merely vague: a generic method that passes an argument straight through now returns that argument's own type, and `inspect` / `to_s` / `Array#*` fold to exact values. The rest is correctness housekeeping, including a suppression marker that recognised its own documentation.
+
 ### Added
 
-- **[engine]** A generic method whose signature passes an argument straight through, such as `Ractor.make_shareable(obj)` typed `[T] (T) -> T`, now comes back as the argument's own type rather than untyped, and carries that type into a generic return like `Array[T]` — with the binding deliberately declined wherever a method you defined yourself shadows the signature that resolved, so an imprecise answer never becomes a confidently wrong one ([#303](https://github.com/rigortype/rigor/issues/303)).
-- **[engine]** `Array#inspect` / `#to_s` and `Hash#inspect` / `#to_s` now fold to the exact `Constant[String]` when every element (or, for a Hash, every value of a fully-known shape) is a constant, and `Array#*` now folds both its join-alias string form and its repetition integer form to a precise result ([#121](https://github.com/rigortype/rigor/issues/121)).
+- **[engine]** A generic method whose signature passes an argument straight through, such as `Ractor.make_shareable(obj)` typed `[T] (T) -> T`, now returns the argument's own type instead of untyped ([#304](https://github.com/rigortype/rigor/pull/304), [#303](https://github.com/rigortype/rigor/issues/303)).
+  - The bound type carries into a generic return such as `Array[T]`. The binding is deliberately declined wherever a method you defined yourself shadows the signature that resolved, so an imprecise answer never becomes a confidently wrong one.
+- **[engine]** `Array#inspect` / `#to_s` and `Hash#inspect` / `#to_s` now fold to the exact string when every element, or every value of a fully-known hash shape, is a constant ([#305](https://github.com/rigortype/rigor/pull/305), [#121](https://github.com/rigortype/rigor/issues/121)).
+  - `Array#*` folds both of its forms: a String argument joins, an Integer argument repeats.
 
 ### Fixed
 
-- **[rigor check]** A diagnostic whose severity the configured profile re-stamps (for example `def.return-type-mismatch` under the default `balanced` profile) no longer loses its structured `method_name`, `receiver_type`, and `project_definition_site` fields in JSON output and `rigor triage`.
-- **[engine]** A nil guard on a lookup in a literal hash — `rank = RANKS[name]` followed by `return if rank.nil?`, and the `||` / `&&` spellings that guard two lookups at once — no longer warns that the condition is always true or always false, and the branch it guards is no longer dropped from the inferred type: a key that is not in the table really does read as nil at runtime, so the guard is live code ([#313](https://github.com/rigortype/rigor/issues/313)).
-- **[engine]** Copying a nilable attribute into a local before passing it — `r = @right` then `insert(r)` — no longer warns about an argument type mismatch when passing the attribute directly would not have: the same value with the same origin now gets the same answer from every check, instead of only from the one that reports calling a method on it ([#324](https://github.com/rigortype/rigor/issues/324)).
-- **[engine]** A helper your project defines at the top level of one file — a `def output(obj)` in a standalone script, say — no longer captures a same-named method a DSL block gets from a mixin somewhere else, so calling RSpec's `output` / `include` / `match` matchers in a spec file stops being checked against your helper's return value and reporting errors on correct code ([#316](https://github.com/rigortype/rigor/issues/316)).
-- **[engine]** Code inside `Class.new do ... end` (and the `Module.new` / `Struct.new` / `Data.define` block forms) is now analyzed as the new class's own body rather than as top-level code, so `attr_reader` and friends stop being reported as unresolved top-level calls, and the class the call returns carries the methods and the `initialize` arity that body declares instead of `Object`'s ([#319](https://github.com/rigortype/rigor/issues/319)).
-- **[engine]** A constant that holds a plain object with its own singleton body — the `class << Merger = Object.new` idiom, as in haml's attribute merger — no longer reports every method in that body as undefined; calls on the constant now resolve to the method you wrote and take its inferred return type, while a name the body does not define still reports ([#320](https://github.com/rigortype/rigor/issues/320)).
-- **[rigor coverage]** A forked `--protection --mutation` worker no longer abandons its scratch file in the system temp directory, so repeated whole-project runs stop accumulating one stray file per worker per run ([#330](https://github.com/rigortype/rigor/issues/330)).
-- **[engine]** Code written inside `defined?(...)` — including the whole right-hand side of a `&&`/`||` chain that low-precedence `defined? x && y` keyword syntax swallows as its operand — is no longer analyzed as if it ran, so a guard like `defined? @subject && !@subject.options.empty?` no longer flags a call the runtime never makes ([#318](https://github.com/rigortype/rigor/issues/318)).
-- **[rigor check]** A `# rigor:disable` / `# rigor:disable-file` marker is now recognised only when it opens the comment, so a comment that merely quotes the syntax — documentation prose, a doc-tool `##` line, or an `=begin` block — no longer silences diagnostics and no longer warns about its own quoted examples; a whole-line or trailing directive keeps working exactly as before, including with no space after the `#` ([#306](https://github.com/rigortype/rigor/issues/306)).
-- **[engine]** `Array.new(n) { ... }` now takes its element type from the block's return value instead of the no-block overload's `nil` fill, so `Array.new(2) { "s" }[0].upcase` no longer warns about calling a method on nil ([#317](https://github.com/rigortype/rigor/issues/317)).
+- **[engine]** Code inside `Class.new do … end` is now analyzed as the new class's own body rather than as top-level code ([#338](https://github.com/rigortype/rigor/pull/338), [#319](https://github.com/rigortype/rigor/issues/319)).
+  - `attr_reader` and friends stop being reported as unresolved top-level calls, and the class the call returns carries the methods and the `initialize` arity that body declares instead of `Object`'s. The `Module.new`, `Struct.new` and `Data.define` block forms are covered by the same change.
+- **[engine]** `Array.new(n) { … }` now takes its element type from the block instead of the no-block overload's `nil` fill ([#336](https://github.com/rigortype/rigor/pull/336), [#317](https://github.com/rigortype/rigor/issues/317)).
+  - `Array.new(2) { "s" }[0].upcase` no longer warns about calling a method on nil, while `Array.new(2)[0].upcase` still does, because those elements really are nil.
+- **[engine]** Code written inside `defined?(…)` is no longer analyzed as if it ran ([#337](https://github.com/rigortype/rigor/pull/337), [#318](https://github.com/rigortype/rigor/issues/318)).
+  - The bare `defined? x && y` spelling swallows the whole `&&` chain as its operand, so a guard like `defined? @subject && !@subject.options.empty?` stops flagging a call the runtime never makes. The parenthesised `defined?(x) && y` form is a different expression that really does evaluate its right-hand side, and still reports.
+- **[engine]** A constant holding a plain object with its own singleton body no longer reports every method in that body as undefined ([#339](https://github.com/rigortype/rigor/pull/339), [#320](https://github.com/rigortype/rigor/issues/320)).
+  - Both the `class << Merger = Object.new` idiom, as in haml's attribute merger, and a separate `class << Merger` on an already-assigned constant now resolve to the method you wrote and take its inferred return type. A name the body does not define still reports.
+- **[engine]** A helper your project defines at the top level of one file no longer captures a same-named method a DSL block gets from a mixin somewhere else ([#340](https://github.com/rigortype/rigor/pull/340), [#316](https://github.com/rigortype/rigor/issues/316)).
+  - Calling RSpec's `output`, `include` or `match` matchers in a spec file stops being checked against your helper's return value. A helper called from genuine top-level code, or defined in the same file as the block that calls it, resolves exactly as before.
+- **[engine]** A nil guard on a lookup in a literal hash no longer warns that the condition is always true or always false ([#327](https://github.com/rigortype/rigor/pull/327), [#313](https://github.com/rigortype/rigor/issues/313)).
+  - `rank = RANKS[name]` followed by `return if rank.nil?`, and the `||` / `&&` spellings that guard two lookups at once, are live code: a key that is not in the table really does read as nil at runtime. The branch such a guard protects is no longer dropped from the inferred type either.
+- **[engine]** Copying a nilable attribute into a local before passing it no longer warns about an argument type mismatch ([#328](https://github.com/rigortype/rigor/pull/328), [#324](https://github.com/rigortype/rigor/issues/324)).
+  - `r = @right` followed by `insert(r)` now gets the same answer as passing `@right` directly, instead of only from the check that reports calling a method on it.
+- **[rigor check]** A `# rigor:disable` / `# rigor:disable-file` marker is now recognised only when it opens the comment ([#314](https://github.com/rigortype/rigor/pull/314), [#306](https://github.com/rigortype/rigor/issues/306)).
+  - A comment that merely quotes the syntax, such as documentation prose, a doc-tool `##` line or an `=begin` block, no longer silences diagnostics and no longer warns about its own quoted examples. A whole-line or trailing directive works exactly as before, including with no space after the `#`.
+- **[rigor check]** A diagnostic whose severity the configured profile re-stamps no longer loses its structured fields ([#312](https://github.com/rigortype/rigor/pull/312)).
+  - `method_name`, `receiver_type` and `project_definition_site` now survive into JSON output and `rigor triage`, for example on `def.return-type-mismatch` under the default `balanced` profile.
+- **[rigor coverage]** A forked `--protection --mutation` worker no longer abandons its scratch file in the system temp directory ([#334](https://github.com/rigortype/rigor/pull/334), [#330](https://github.com/rigortype/rigor/issues/330)).
+  - Repeated whole-project runs stop accumulating one stray file per worker per run.
 
 ## [0.3.2] - 2026-08-08
 
@@ -331,7 +347,8 @@ This release is dominated by a performance arc that makes repeat and incremental
 - **[plugin]** The plugin isolation worker no longer dies with an opaque `Inflector::Unavailable: process isolation worker failed (EOFError)` when a target library cannot be loaded ([#109](https://github.com/rigortype/rigor/pull/109)).
   - `Rigor::Plugin::LoadError` lexically shadowed the global `LoadError`, so the worker loop's bare `rescue` matched the wrong class and the real `::LoadError` killed the forked worker; the rescues are now `::`-qualified. The same shadowing bug is fixed in `rigor-rspec-rails`'s Rack status-table loader.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/rigortype/rigor/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/rigortype/rigor/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/rigortype/rigor/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/rigortype/rigor/compare/v0.2.9...v0.3.0

@@ -19,11 +19,13 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.2 is released** (2026-08-08). No version bump is due — releases wait for an explicit ask.
-  `make verify` is green on master at `13a5b456`, verified on the INTEGRATED tree after this arc's
-  parallel batch (see the collision below for why that matters).
+  `make verify` is green on master at `9229d2a2`, verified on the INTEGRATED tree after each of this
+  arc's two parallel batches (see the collision below for why that matters).
 - **Landed this arc**: #303 (PR #304, argument-position `[T]` binding) · #121's final fold slice
-  (PR #305) · #307 (mutation-harness `SpecMap` directory convention) · #306 (PR #314) · the #135
-  checkbox-1 wave-1 specs (PRs #309/#310/#311) · #308 (PR #312) and its repair (PR #315).
+  (PR #305, and #121 is now CLOSED — six passes, zero queued work) · #307 (mutation-harness `SpecMap`
+  directory convention) · #306 (PR #314) · #313 (PR #327) · #308 (PR #312) and its repair (PR #315) ·
+  the #135 checkbox-1 specs, waves 1 and 2 (PRs #309/#310/#311/#314/#325/#326 — 136 examples, 54
+  survivors closed).
 - **`check_rules.rb` had never been type-checked**, and that is the arc's largest finding. Its own doc
   comment quotes `` `# rigor:disable-file all` `` in backticks, and the suppression patterns matched
   anywhere inside a comment, so the documentation file-suppressed the 3,063-line file that defines
@@ -31,11 +33,16 @@ this file is the one that is wrong.
   **0 of 914** there against 24/24 on a control. Fixed by anchoring every marker pattern to the start
   of the comment (#306); the file is now provably live (poisoning a `Diagnostic.from_name_loc` call
   surfaces six errors). **A structurally impossible measurement is a finding, never a zero to report.**
-- **#313 is the one defect that arc left open**: an optimistic nil-free HashShape read launders
-  through `.nil?` into the `&&`/`||` polarity gate, so `return false if MAP[a].nil? || MAP[b].nil?`
-  fires "always falsey" on live defensive code while the single-operand form correctly stays silent.
-  `check_rules.rb:2743` carries a justified directive whose removal is the acceptance test. Check
-  #152's landed change against the spec clause it was warned to preserve.
+- **#313 closed (PR #327), and its diagnosis overturned all three of the issue's premises** — worth
+  knowing because the issue was mine and each premise sounded right. The single-operand form was
+  never protected by the exclusion at all (it is silent only through a *syntactic* `.nil?` skip in
+  the collector, so `if UNIFORM[key]` on a uniform-valued table fired with no composition involved);
+  the branch elision was laundered too and that is the damaging half (`x.nil? ? "missing" : "found"`
+  typed `"found"`, deleting the arm a miss takes); and a `Constant`-only gate is not the protection
+  the spec assumed, because a uniform-valued table reads as a lone `Constant` — `[UNIFORM[k] || 9]`
+  typed `[1]`. **That last one lives only on the `ExpressionTyper` path**; the statement path keeps
+  the union, which is why a first probe reads clean. #152 was not the regression point: it landed no
+  code. `OptimisticOrigin.resolve` now owns the judgment for all three consumers.
 - **Two correct-in-isolation PRs collided and turned master red.** PR #310 pinned #308's
   then-current broken behaviour; PR #312 fixed #308. Disjoint files, no conflict, both green, red on
   merge. Two habits follow: a spec pinning known-wrong behaviour MUST carry an in-place "flip this
@@ -44,21 +51,22 @@ this file is the one that is wrong.
 
 ## Next session
 
-- **#135 checkbox 1, wave 2 is in flight**: `argument_type` (8 survivors, the ADR-58 ivar-provenance
-  gate in `declaration_sourced_nil_only_mismatch?` the densest cluster) and the small remaining
-  families (`nil_receiver` 5, `undefined_method` 4, `always_raises` 3, `dump_type`/`assert_type` 2,
-  `visibility_mismatch` 1, `pipeline` 1). When it lands, this file's **biteable** survivors are
-  exhausted — but the honest next step is a **re-measure**, because every number on the issue is
-  test-axis-only: the type axis was structurally dead until #306. `--site biteable` is a complete
-  169-site census (~63 min); `--site all` is 914 sites ≈ 6.1 h of rspec and stays infeasible, so
-  745 sites remain unmeasured and the per-family `:all` inventory on the issue is the visible gap.
-  #135's other four checkboxes are untouched.
-- **#121 carries ZERO queued work** after six passes — the record, including the `Tuple#concat` and
-  `compare_by_identity` 🚫 adjudications, is on the issue. Closing it or leaving it as the standing
-  P3 category is the user's call.
-- **`ready-for-agent`**: #313 (the open engine FP above), #147 (**demand-gated** — its three items
-  really are unimplemented, verified, but the issue waits on a concrete editor-extension author),
-  #135's remainder.
+- **#135 checkbox 1: both waves have landed, and a RE-MEASURE is in flight** on branch
+  `check-rules-remeasure-135`. Do not treat any funnel number on the issue as a baseline until it
+  reports: they are all test-axis-only, because `DiagnosticOracle` killed 0/914 on this file until
+  #306 landed, and 136 examples plus #313's engine change have arrived since. The re-measure decides
+  whether a wave 3 is warranted. `--site biteable` is a complete ~169-site census (~63 min);
+  `--site all` is ~914 sites ≈ 6.1 h of rspec and stays infeasible, so ~745 sites remain unmeasured
+  and the per-family `:all` inventory on the issue is the visible gap. Checkbox 1's remaining tier
+  members are the giant files the issue body lists that PRs #282/#287/#289 did not sweep; #135's
+  other four checkboxes are untouched.
+- **#324 is the sharpest open engine item**: the ADR-58 declaration-sourced mark is honoured by
+  `possible-nil-receiver` for an ivar copied into a local but ignored by `argument-type`, so the two
+  rules disagree about exactly the `r = @right; r.key` shape ADR-58's own survey names as the FP
+  driver. Widening an excuse, so the corpus arm can only lose firings. `argument_type_spec.rb`'s
+  "still fires on a LOCAL COPY" example pins the current behaviour and says to flip it.
+- **`ready-for-agent`**: #324, #147 (**demand-gated** — its three items really are unimplemented,
+  verified, but the issue waits on a concrete editor-extension author), #135's remainder.
 - **Three tooling traps recorded this arc**, all hit for real: `Style/ArrayJoin` autocorrects a
   literal-array `[1, 2] * "-"` into `.join`, silently defeating a `*`-with-String assertion (use a
   variable receiver); parallel `make verify` runs in two worktrees flake each other, so serialize

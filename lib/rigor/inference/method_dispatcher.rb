@@ -6,6 +6,7 @@ require_relative "../flow_contribution"
 require_relative "../flow_contribution/merger"
 require_relative "../builtins/hkt_builtins"
 require_relative "../builtins/static_return_refinements"
+require_relative "anonymous_meta_class"
 require_relative "dynamic_origin"
 require_relative "flow_tracer"
 require_relative "void_tail_summary"
@@ -760,9 +761,7 @@ module Rigor
         struct_result = StructFolding.try_dispatch(context)
         return struct_result if struct_result
 
-        meta_result = try_meta_introspection(
-          context.receiver, context.method_name, context.args, context.block_type
-        )
+        meta_result = try_meta_introspection(context.receiver, context.method_name, context.args, context)
         return meta_result if meta_result
 
         PRECISE_TIERS_HEAD.each do |tier|
@@ -870,10 +869,10 @@ module Rigor
       # `Foo.class` as `Singleton[Class]` (deliberate; calling `.class` on a class object yields
       # `Class`, the metaclass). We also special-case `is_a?`-adjacent calls and the trivial
       # `instance_of?(self)` later as the rule catalogue grows; for now only `class` is handled.
-      def try_meta_introspection(receiver_type, method_name, arg_types = [], block_type = nil)
+      def try_meta_introspection(receiver_type, method_name, arg_types = [], context = nil)
         case method_name
         when :class then meta_class(receiver_type)
-        when :new then meta_new(receiver_type, arg_types, block_type)
+        when :new then meta_new(receiver_type, arg_types, context)
         end
       end
 
@@ -893,13 +892,13 @@ module Rigor
       # `Type::Constant::SCALAR_CLASSES` accepts (today: `Pathname`), `.new(Constant<…>)` lifts
       # to a `Constant<…>` carrier so downstream method calls fold through the standard catalog
       # tier.
-      def meta_new(receiver_type, arg_types = [], block_type = nil)
+      def meta_new(receiver_type, arg_types = [], context = nil)
         return nil unless receiver_type.is_a?(Type::Singleton)
 
         constant_lift = constant_constructor_lift(receiver_type.class_name, arg_types)
         return constant_lift if constant_lift
 
-        array_lift = array_new_lift(receiver_type.class_name, arg_types, block_type)
+        array_lift = array_new_lift(receiver_type.class_name, arg_types, context&.block_type)
         return array_lift if array_lift
 
         range_lift = range_new_lift(receiver_type.class_name, arg_types)
@@ -920,7 +919,7 @@ module Rigor
         struct_new_lift = struct_new_lift(receiver_type.class_name, arg_types)
         return struct_new_lift if struct_new_lift
 
-        class_new_lift = class_new_lift(receiver_type.class_name, arg_types)
+        class_new_lift = class_new_lift(receiver_type.class_name, arg_types, context)
         return class_new_lift if class_new_lift
 
         Type::Combinator.nominal_of(receiver_type.class_name)
@@ -957,15 +956,38 @@ module Rigor
       # so `Singleton[Parent]` lets downstream `klass.some_class_method` resolve. No parent →
       # `singleton(Object)`. Anything else (dynamic parent, more than one positional, …) falls
       # back to `Nominal[Class]` via the surrounding `meta_new` tail.
-      def class_new_lift(class_name, arg_types)
+      # #319 — a `Class.new do ... end` with no parent is NOT `Object`: the block body is a class body, so the
+      # class owns whatever that body defines. Answering `Singleton[Object]` handed the call site `Object`'s
+      # zero-arity `new` and `Object`'s method surface, so an `initialize(bucket)` written right there produced
+      # `wrong number of arguments ... (given 1, expected 0)` on code Ruby runs happily. `ScopeIndexer` registers
+      # the body's methods under the call site's anonymous name; return that name so the lookups reach them.
+      #
+      # Scoped to the parentless form on purpose. `Class.new(Parent) { ... }` keeps `Singleton[Parent]`: the
+      # anonymous name would have to carry the full ancestor chain for `Parent`'s own surface to stay reachable,
+      # and the parentless case is where the false positive lives.
+      def class_new_lift(class_name, arg_types, context = nil)
         return nil unless class_name == "Class"
-        return Type::Combinator.singleton_of("Object") if arg_types.empty?
+
+        if arg_types.empty?
+          anonymous = anonymous_class_new_name(context)
+          return Type::Combinator.singleton_of(anonymous || "Object")
+        end
         return nil unless arg_types.size == 1
 
         parent = arg_types.first
         return parent if parent.is_a?(Type::Singleton)
 
         nil
+      end
+
+      # The synthetic name `ScopeIndexer` keyed this call site's block body by, or nil when the context carries no
+      # call node (internal dispatcher callers) or the call has no block. The source path is passed through
+      # verbatim — including when it is nil, which is exactly what `ScopeIndexer` saw for the same file — so the
+      # two passes derive the same name whether or not the caller supplied a path.
+      def anonymous_class_new_name(context)
+        return nil if context.nil?
+
+        AnonymousMetaClass.name_for(context.call_node, context.scope&.source_path)
       end
 
       # ADR-15 Phase 4b.x — `Ractor.make_shareable` on both the outer Hash and each lambda value.

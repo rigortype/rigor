@@ -1,4 +1,5 @@
 ---
 locals:
-  empty_klass: singleton(Object)
+  empty_klass: singleton(#<Class>)
   klass_with_parent: singleton(StandardError)
+  parented: singleton(StandardError)

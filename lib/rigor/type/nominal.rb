@@ -3,6 +3,7 @@
 require_relative "../trinary"
 require_relative "../value_semantics"
 require_relative "acceptance_router"
+require_relative "anonymous_class_name"
 require_relative "plain_lattice"
 
 module Rigor
@@ -35,13 +36,15 @@ module Rigor
       end
 
       def describe(verbosity = :short)
-        return class_name if type_args.empty?
+        rendered_name = AnonymousClassName.display(class_name)
+        return rendered_name if type_args.empty?
 
         rendered = type_args.map { |t| t.describe(verbosity) }.join(", ")
-        "#{class_name}[#{rendered}]"
+        "#{rendered_name}[#{rendered}]"
       end
 
       def erase_to_rbs
+        return "untyped" if AnonymousClassName.match?(class_name)
         return class_name if type_args.empty?
 
         rendered = type_args.map(&:erase_to_rbs).join(", ")

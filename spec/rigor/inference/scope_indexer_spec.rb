@@ -317,6 +317,59 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(scope.discovered_method?("AnonBase", :foo, :instance)).to be(true)
     end
 
+    # #319 — the same idiom away from constant-write position. There is no constant to key the body's methods by, so
+    # the call site supplies a synthetic name; without it the whole body was walked in the ENCLOSING scope, and at file
+    # top level that meant `def initialize` never reached the class the call returns.
+    it "registers an anonymous Class.new block body under the call site's synthetic name" do
+      program = parse(<<~RUBY)
+        observer = Class.new do
+          attr_reader :count
+
+          def initialize(bucket)
+            @bucket = bucket
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      name = Rigor::Inference::AnonymousMetaClass.name_for(program.statements.body.first.value)
+
+      expect(scope.discovered_method?(name, :initialize, :instance)).to be(true)
+      expect(scope.discovered_method?(name, :count, :instance)).to be(true)
+      expect(scope.user_def_for(name, :initialize)).to be_a(Prism::DefNode)
+    end
+
+    it "keeps a nested anonymous Module.new body out of the enclosing class's method table" do
+      program = parse(<<~RUBY)
+        class Host
+          def build
+            Module.new do
+              def helper
+              end
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.discovered_method?("Host", :helper, :instance)).to be(false)
+    end
+
+    it "records the superclass a Class.new(Parent) block form was given" do
+      program = parse(<<~RUBY)
+        klass = Class.new(StandardError) do
+          def alpha
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      name = Rigor::Inference::AnonymousMetaClass.name_for(program.statements.body.first.value)
+
+      expect(scope.superclass_of(name)).to eq("StandardError")
+    end
+
     it "qualifies Module.new / Class.new block-body methods under the surrounding module path" do
       program = parse(<<~RUBY)
         module Resolv

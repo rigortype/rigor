@@ -92,6 +92,12 @@ module Rigor
         dispatch_plugins(node, ancestors, path, scope, states)
         collector_driver&.visit(node, context)
 
+        # Issue #318 — `defined?`'s operand is never evaluated, so nothing under a `Prism::DefinedNode` is
+        # reachable code. Dispatching plugin rules / the collector driver against the DefinedNode itself is
+        # fine; descending into `#value` would feed both plugin node_rules and the built-in collectors
+        # source that can never run.
+        return if node.is_a?(Prism::DefinedNode)
+
         child_context = collector_driver&.descend(node, context)
         ancestors.push(node)
         node.rigor_each_child do |child|

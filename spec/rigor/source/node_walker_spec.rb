@@ -45,6 +45,19 @@ RSpec.describe Rigor::Source::NodeWalker do
       expect(visited.first).to eq(root)
       expect(visited).to include(an_instance_of(Prism::NilNode))
     end
+
+    # Issue #318 — `defined?`'s operand is never evaluated at runtime, so the walk must yield the
+    # `DefinedNode` itself (its presence is real source) but must NOT descend into `#value`: nothing under
+    # it is reachable, evaluated code.
+    it "yields a DefinedNode but does not descend into its operand" do
+      root = parse("defined?(@subject && @subject.options.empty?)\n")
+
+      visited = described_class.each(root).to_a
+
+      expect(visited).to include(an_instance_of(Prism::DefinedNode))
+      expect(visited).not_to include(an_instance_of(Prism::CallNode))
+      expect(visited).not_to include(an_instance_of(Prism::InstanceVariableReadNode))
+    end
   end
 
   describe ".each_with_ancestors" do
@@ -85,6 +98,17 @@ RSpec.describe Rigor::Source::NodeWalker do
       expect(integer_nodes.size).to eq(2)
       # Each IntegerNode's ancestors should include the CallNode
       expect(integer_nodes.map { |_, a| a.map(&:class) }).to all(include(Prism::CallNode))
+    end
+
+    # Issue #318 — same non-descent contract as `.each`.
+    it "yields a DefinedNode but does not descend into its operand" do
+      root = parse("defined?(@subject && @subject.options.empty?)\n")
+
+      visited = described_class.each_with_ancestors(root).to_a
+
+      expect(visited.map(&:first)).to include(an_instance_of(Prism::DefinedNode))
+      expect(visited.map(&:first)).not_to include(an_instance_of(Prism::CallNode))
+      expect(visited.map(&:first)).not_to include(an_instance_of(Prism::InstanceVariableReadNode))
     end
   end
 end

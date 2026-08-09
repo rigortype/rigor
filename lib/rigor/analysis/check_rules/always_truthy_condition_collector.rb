@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "../../inference/optimistic_origin"
 require_relative "inferred_param_guard"
 
 module Rigor
@@ -107,6 +108,13 @@ module Rigor
           # because the seed's lower-bound type pinned it; a wider real caller would not. Declining preserves
           # the precision-additive contract.
           return if InferredParamGuard.rooted?(predicate, scope)
+
+          # Issue #313 — a predicate whose constancy rests on an optimistically nil-free carrier is a bet, not
+          # proof: `MAP[key]` omits `nil` because pessimising the defaulted-Hash idiom costs more false
+          # positives than the miss it would model, so `MAP[key].nil?` folding to `false` says nothing about
+          # whether the key was there. The spec forbids this rule concluding from such a value; the derivation
+          # is what carries the mark across `.nil?`, `!` and `&&` / `||` to the predicate the rule reads.
+          return unless Inference::OptimisticOrigin.resolve(predicate, scope).nil?
 
           predicate_type = scope.type_of(predicate)
           return unless predicate_type.is_a?(Type::Constant)

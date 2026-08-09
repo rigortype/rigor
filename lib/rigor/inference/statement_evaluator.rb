@@ -20,6 +20,7 @@ require_relative "method_parameter_binder"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
+require_relative "optimistic_origin"
 
 module Rigor
   module Inference
@@ -259,17 +260,11 @@ module Rigor
         optimistic_origin_for(value_node, scope_after_rhs)
       end
 
-      # The effective optimistic-nil-free cause of an expression: the mark on its own node, else — for a bare
-      # local read or a local write used in value position (`if (x = MAP[k])`, where the write has already
-      # bound the mark) — the one propagated onto the binding.
+      # The effective optimistic-nil-free cause of an expression. {Inference::OptimisticOrigin.resolve} owns
+      # the judgment — the mark on the node itself, the binding a bare local / ivar read resolves through, and
+      # the predicate-fold derivation of issue #313.
       def optimistic_origin_for(node, scope)
-        recorded = scope.optimistic_origins[node]
-        return recorded if recorded
-
-        case node
-        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
-        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
-        end
+        Inference::OptimisticOrigin.resolve(node, scope)
       end
 
       # ADR-82 WD1 — the {Inference::DynamicOrigin} cause to propagate onto a local / ivar being bound to `rhs`.

@@ -2281,6 +2281,96 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(truthy_diags(result)).to be_empty
       end
 
+      # Issue #313 — a nil guard on a literal-hash lookup with a dynamic key. `MAP[:absent]` really is nil at
+      # runtime; the read omits `nil` only because pessimising it costs more false positives than the miss it
+      # models, so nothing folded from it is proof. The `.nil?` skip above covers the bare form by syntax
+      # alone, which is why only the composed spellings ever surfaced this.
+      describe "optimistically nil-free carriers" do
+        let(:rank_table) { "MAP = { public: 2, protected: 1, private: 0 }.freeze\n" }
+
+        it "does not fire on a bare `.nil?` guard over the lookup" do
+          result = analyze(<<~RUBY)
+            #{rank_table}
+            def rank(a)
+              x = MAP[a]
+              return false if x.nil?
+
+              x
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on a `||` composition of two such guards" do
+          result = analyze(<<~RUBY)
+            #{rank_table}
+            def reduced?(a, b)
+              x = MAP[a]
+              y = MAP[b]
+              return false if x.nil? || y.nil?
+
+              x < y
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on a `&&` composition of two negated guards" do
+          result = analyze(<<~RUBY)
+            #{rank_table}
+            def reduced?(a, b)
+              x = MAP[a]
+              y = MAP[b]
+              return false unless !x.nil? && !y.nil?
+
+              x < y
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire when the lookup is the predicate itself" do
+          # A uniform-valued table reads as a lone `Constant`, so the rule's `Constant` test cannot tell this
+          # from a proof — the shape that made the exclusion unenforceable without provenance.
+          result = analyze(<<~RUBY)
+            UNIFORM = { public: 1, protected: 1 }.freeze
+            def known?(a)
+              return false if UNIFORM[a]
+
+              true
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "still fires on a composed guard over proof-carrying carriers (the control)" do
+          result = analyze(<<~RUBY)
+            def both_present?
+              s = "a"
+              t = "b"
+              return false if s.nil? || t.nil?
+
+              true
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always falsey"))
+        end
+
+        it "still fires on a composed guard over static-key reads, which cannot miss (the control)" do
+          result = analyze(<<~RUBY)
+            #{rank_table}
+            def fixed_pair
+              x = MAP[:public]
+              y = MAP[:private]
+              return false if x.nil? || y.nil?
+
+              x < y
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always falsey"))
+        end
+      end
+
       it "does not fire on `.empty?` (defensive predicate skip)" do
         result = analyze(<<~RUBY)
           arr = []

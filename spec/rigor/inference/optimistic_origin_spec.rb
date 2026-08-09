@@ -116,6 +116,157 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
   end
 
+  # Issue #313. The mark attaches to a value, but every consumer reads a predicate *expression*, and the
+  # guard people actually write is `v.nil?` rather than the bare carrier. Each of these shapes folded to an
+  # unmarked `Constant` before the derivation, so the elision deleted the branch the program takes on a miss.
+  describe "derives the mark through the predicate fold" do
+    it "declines through `.nil?`" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        if v.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines through a `||` composition of two `.nil?` guards" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        w = h[other]
+        if v.nil? || w.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines through a `&&` composition of two negated `.nil?` guards" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        w = h[other]
+        if !v.nil? && !w.nil? then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines when only one operand of the composition is optimistic" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        s = "abc".upcase
+        if s.nil? || v.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines through a parenthesised guard" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        if (v.nil?) then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "carries the derived mark onto a local bound to the guard's result" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        missing = v.nil?
+        if missing then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    # The control side of the derivation: the same syntax over proof-carrying carriers MUST still elide,
+    # otherwise the four declines above are passing because `.nil?` stopped folding at all.
+    it "still elides `.nil?` over a proof-carrying carrier" do
+      type, = evaluate(<<~RUBY)
+        v = "abc".upcase
+        if v.nil? then "none" else 1 end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides a `||` composition over proof-carrying carriers" do
+      type, = evaluate(<<~RUBY)
+        v = "abc".upcase
+        w = "def".upcase
+        if v.nil? || w.nil? then "none" else 1 end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides a `&&` composition of negated guards over proof-carrying carriers" do
+      type, = evaluate(<<~RUBY)
+        v = "abc".upcase
+        w = "def".upcase
+        if !v.nil? && !w.nil? then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides `.nil?` over a static-key read, which cannot miss" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[:a]
+        if v.nil? then "none" else 1 end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "does not derive through a value predicate, which is not a statement about nil-ness" do
+      # `empty?` folds from the carrier's *value*, and the mark is about its nil-freeness only. Deriving
+      # through it would widen this channel into a general taint and silence honest verdicts.
+      expect(described_class::NIL_COLLAPSING_PREDICATES).to contain_exactly(:nil?, :!)
+    end
+  end
+
+  # The `&&` / `||` value-position gate, the second of the three consumers the spec binds. Its failure mode
+  # is not a diagnostic but a discarded operand: `MAP[key] || key` is written because the lookup can miss.
+  describe "the `&&` / `||` value-polarity gate" do
+    def type_of_last_write(source)
+      ast = Prism.parse(source).value
+      _type, after = scope.evaluate(ast)
+      target = nil
+      collect = lambda do |node|
+        return unless node.is_a?(Prism::Node)
+
+        target = node.value if node.is_a?(Prism::LocalVariableWriteNode) && node.name == :probe
+        node.compact_child_nodes.each { |child| collect.call(child) }
+      end
+      collect.call(ast)
+      after.type_of(target)
+    end
+
+    it "keeps the author's fallback when the left operand is optimistically nil-free" do
+      # A uniform-valued literal hash reads as a lone `Constant`, so the `Constant`-only gate cannot see the
+      # difference — this is the `MAP[key] || key` counter-example the spec names.
+      type = type_of_last_write(<<~RUBY)
+        h = { a: 1, b: 1 }
+        probe = h[key] || 5
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, 5)
+    end
+
+    it "still short-circuits on a genuine constant left operand (the control)" do
+      type = type_of_last_write("probe = 1 || 5")
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+  end
+
   describe "still elides when nil-freeness is a property of the value (the control)" do
     it "elides on a Nominal whose class excludes nil — the same carrier class as the declining case" do
       # The pair that carries this ADR: `xs.first` above and `xs` here are the same carrier class, and only

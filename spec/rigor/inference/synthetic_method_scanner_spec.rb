@@ -32,8 +32,16 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
     end
   end
 
+  # Every example calls `write_files` at least once and hands the resulting paths to `.scan`, so each directory
+  # has to outlive the call that made it — but not the example. Collected and removed here; this helper was the
+  # suite's largest single leak before #330 (one abandoned directory per example, 18 per run).
+  let(:scanner_tmpdirs) { [] }
+
+  after { scanner_tmpdirs.each { |dir| FileUtils.rm_rf(dir) } }
+
   def write_files(files)
     dir = Dir.mktmpdir("rigor-scanner-spec-")
+    scanner_tmpdirs << dir
     files.each do |relpath, body|
       full = File.join(dir, relpath)
       FileUtils.mkdir_p(File.dirname(full))

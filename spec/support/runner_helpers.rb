@@ -8,6 +8,8 @@ require "rigor/analysis/runner"
 require "rigor/cache/store"
 require "rigor/configuration"
 
+require_relative "spec_tmpdir"
+
 module RunnerHelpers
   # Per-spec-process shared `Cache::Store`. Specs typically
   # exercise `Analysis::Runner` against many small fixtures
@@ -46,16 +48,19 @@ module RunnerHelpers
       @shared_cache_store ||= Rigor::Cache::Store.new(root: shared_cache_root)
     end
 
+    # All three are process-wide by design — that is what the memo buys — so there is no block to close them
+    # with and no example whose `after` hook could own them. {SpecTmpdir.suite_lifetime} registers them for
+    # release when the suite ends; before #330 they were three of the directories every `make test` abandoned.
     def shared_cache_root
-      @shared_cache_root ||= Dir.mktmpdir("rigor-spec-cache-")
+      @shared_cache_root ||= SpecTmpdir.suite_lifetime("rigor-spec-cache-")
     end
 
     def shared_workspace_root
-      @shared_workspace_root ||= Dir.mktmpdir("rigor-spec-workspace-")
+      @shared_workspace_root ||= SpecTmpdir.suite_lifetime("rigor-spec-workspace-")
     end
 
     def sig_cache_root
-      @sig_cache_root ||= Dir.mktmpdir("rigor-spec-sig-")
+      @sig_cache_root ||= SpecTmpdir.suite_lifetime("rigor-spec-sig-")
     end
 
     # Materialises a `sig:` hash to a content-keyed directory under {.sig_cache_root}. Returns the directory path so the

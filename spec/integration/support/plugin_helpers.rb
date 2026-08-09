@@ -3,6 +3,8 @@
 require "fileutils"
 require "tmpdir"
 
+require_relative "../../support/spec_tmpdir"
+
 module Rigor
   module IntegrationSupport
     # Shared helpers for the plugin integration specs under `spec/integration/plugins/` (production plugins)
@@ -54,8 +56,10 @@ module Rigor
           @shared_cache_store ||= Rigor::Cache::Store.new(root: shared_cache_root)
         end
 
+        # Process-wide by design, so it has no block to close and no example to hang an `after` hook on;
+        # {SpecTmpdir.suite_lifetime} releases it when the suite ends (issue #330).
         def shared_cache_root
-          @shared_cache_root ||= Dir.mktmpdir("rigor-plugin-spec-cache-")
+          @shared_cache_root ||= SpecTmpdir.suite_lifetime("rigor-plugin-spec-cache-")
         end
       end
 

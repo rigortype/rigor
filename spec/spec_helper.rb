@@ -44,6 +44,13 @@ end
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 
+# Issue #330 — every temp path this process (and anything it forks or shells out to) creates goes into one
+# private root, so the `after(:suite)` residue check below can say "this rspec process leaked" without ever
+# mistaking a sibling binpacker worker's live directory for a leak. Installed before anything else that could
+# reach for `Dir.tmpdir`; see `spec/support/spec_tmpdir.rb` for why the leak mattered.
+require_relative "support/spec_tmpdir"
+SpecTmpdir.install!
+
 # Silence MRI's once-per-process "Ractor API is experimental" warning during test runs. Rigor uses Ractors as a
 # committed production feature (ADR-15 Phase 4 — `Analysis::Runner` worker pool), so the warning is informational noise
 # on every `make verify`. Suppressed only here — downstream `rigortype` users keep the warning.
@@ -102,4 +109,19 @@ RSpec.configure do |config|
   # the earlier example's engine and pass without exercising anything. Cleared per example instead of asking
   # each cache spec to remember.
   config.before { Rigor::Cache::EngineSource.reset_process_identity! }
+
+  # Issue #330 — the guard that keeps the suite leak-free rather than merely leak-free today. Everything scoped
+  # to an example must already have been reclaimed by its own block or `after` hook, and the process-lifetime
+  # directories are released here; whatever is still inside the private root at this point is a leak, and naming
+  # it fails the run instead of letting it accumulate into the next session's `ENOSPC`. Raising from
+  # `after(:suite)` is what makes rspec exit non-zero — there is no example left to attach a failure to.
+  config.after(:suite) do
+    SpecTmpdir.release_registered!
+    residue = SpecTmpdir.residue
+    unless residue.empty?
+      raise "spec suite leaked #{residue.size} temp #{residue.size == 1 ? 'entry' : 'entries'} into " \
+            "#{SpecTmpdir::ROOT}: #{residue.take(20).join(', ')}#{', …' if residue.size > 20}. " \
+            "Give each one a `Dir.mktmpdir` block, an `after` hook, or `SpecTmpdir.suite_lifetime` (issue #330)."
+    end
+  end
 end

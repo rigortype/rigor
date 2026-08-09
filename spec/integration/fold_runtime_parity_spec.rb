@@ -24,8 +24,11 @@ require "date"
 
 # One environment for the whole file. `for_project` loads `DEFAULT_LIBRARIES` (shellwords / cgi / uri / digest /
 # ...), which the stdlib-module folds need; RBS itself loads lazily on the first inference query.
+#
+# The project root is an empty directory that has to outlive every example in the file, so it is registered for
+# release at the end of the suite rather than left behind — issue #330.
 FOLD_PARITY_SCOPE = Rigor::Scope.empty(
-  environment: Rigor::Environment.for_project(root: Dir.mktmpdir)
+  environment: Rigor::Environment.for_project(root: SpecTmpdir.suite_lifetime("rigor-fold-parity-"))
 )
 
 # method group => list of expression sources. Each source is parsed + typed by the engine AND `eval`-ed by MRI;

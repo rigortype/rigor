@@ -27,6 +27,12 @@ class BruteForceMutationOracle
     @baseline = signatures
   end
 
+  # The throwaway tree is a whole copy of the fixture project and lives as long as the example that built the
+  # oracle, so the example releases it explicitly — there is no block to close (issue #330).
+  def discard!
+    FileUtils.rm_rf(@root)
+  end
+
   def killed?(mutant_source, path)
     copy = File.join(@root, path)
     original = File.read(copy)
@@ -203,6 +209,8 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     expect(verdicts).not_to be_empty
     expect(verdicts.count { |_, closure, _| closure }).to be >= 1 # non-vacuity: something really is killed
     expect(verdicts.reject { |_, closure, whole| closure == whole }).to eq([])
+  ensure
+    reference&.discard!
   end
 
   # One file's `[label, closure verdict, whole-project verdict]` triples. The label carries enough to name a

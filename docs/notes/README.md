@@ -79,6 +79,7 @@ comparison) appears nowhere else in this index.
 | 2026-06-17 | [Type-guided mutation testing — internal teeth vs. an external test-suite tool (strategy)](20260617-type-guided-mutation-testing-strategy.md) |
 | 2026-06-17 | [Fused protection (`--with-tests`) — broad survey sweep across 12 OSS targets](20260617-fused-protection-survey-sweep.md) |
 | 2026-06-18 | [Mutation-testing Rigor's own codebase — plan (RSpec ∪ self-check, independent type oracle)](20260618-self-mutation-testing-plan.md) |
+| 2026-08-09 | [`check_rules.rb` fused-protection re-measure — the first census with a live type axis](20260809-check-rules-mutation-remeasure.md) |
 
 ## Outside research & essay reviews
 

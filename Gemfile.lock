@@ -48,7 +48,7 @@ GEM
     rack (3.2.6)
     rainbow (3.1.1)
     rake (13.4.2)
-    rbs (4.1.1)
+    rbs (4.1.2)
       logger
       prism (>= 1.6.0)
       tsort
@@ -141,7 +141,7 @@ CHECKSUMS
   rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
   rainbow (3.1.1) sha256=039491aa3a89f42efa1d6dec2fc4e62ede96eb6acd95e52f1ad581182b79bc6a
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
-  rbs (4.1.1) sha256=1bf118f2f95d1cd3956357645d495152b661e0257e57781d18ceecd461622b9e
+  rbs (4.1.2) sha256=050eb1d8b508f1233bed929c0f2c7052302f7adf295230d9cb314e9024078f48
   rbs-inline (0.14.0) sha256=eaf47b46690d63acddab1f6804c9cc205a4bc78e637cfc421a0b1239874ef51c
   regexp_parser (2.12.0) sha256=35a916a1d63190ab5c9009457136ae5f3c0c7512d60291d0d1378ba18ce08ebb
   rigortype (0.3.3)

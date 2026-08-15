@@ -262,3 +262,56 @@ that slice.
 **conference-app is the clean case**: 2 candidates out of 103 declarations, no undecidable rows. A
 small app with a real `sig/` tree and few dynamic constructions is the shape the report handles best,
 which is worth knowing when setting expectations in the manual.
+
+## Addendum 2026-08-15 — #349, plugin-supplied route roots
+
+Same command, same two Rails targets, same configs; the only change is that `rigor unused` now loads
+the project's plugins and seeds the sweep with every published `:reachability_roots` fact, and
+`rigor-rails-routes` publishes the controllers `config/routes.rb` dispatches to.
+
+| target | metric | before #349 | after #349 |
+| --- | --- | ---: | ---: |
+| redmine | roots | 53 | 108 |
+| redmine | candidates | 129 | **57** |
+| redmine | cannot decide | 99 | 77 |
+| redmine | test-only | 2 | 2 |
+| mastodon | roots | 125 | 404 |
+| mastodon | candidates | 278 | **45** |
+| mastodon | cannot decide | 118 | 25 |
+| mastodon | test-only | 454 | **186** |
+
+−56 % of redmine's candidates and −84 % of mastodon's, from one root source. That is the same shape
+the #345 stage-3 subtraction predicted (40 % / 62 % / 67 % with a regex extractor), and it lands
+higher because a router-shaped reading reaches routes the regex could not.
+
+Redmine's 57 survivors are the number the ADR-102 § Context adjudication was performed against, which
+is a useful independent check on the extractor: the hand-audited funnel and the shipped one agree.
+
+Mastodon's test-only bucket behaved as the note predicted — 454 → 186 — confirming the diagnosis that
+its size was missing route roots rather than a finding about mastodon. The residue is dominated by
+models and services, which is the next root source rather than a defect in this one.
+
+### Over-supply check
+
+An over-claiming root source silently hides real dead code, so the count of supplied roots naming
+nothing the project declares is now part of the report output.
+
+| target | roots supplied | matched no declaration |
+| --- | ---: | ---: |
+| redmine | 56 | 1 |
+| mastodon | 288 | 0 |
+
+Redmine's single unmatched root is `Rails::HealthController` (`get "/health" => "rails/health#show"`)
+— a framework class, correctly named and correctly not project-owned.
+
+Reading it the other way, 288 of mastodon's 309 declared `*Controller` classes are rooted. The 21 that
+are not break down as: 11 abstract `*::BaseController` parents (reached through the superclass edge
+from a rooted subclass, so not candidates); 3 Devise `Auth::*` and 3 Doorkeeper `OAuth::*` controllers,
+whose `controllers:` remapping this slice deliberately does not model; `Admin::SettingsController`;
+`Api::V1::Timelines::TopicController`, which the routes genuinely never name — i.e. a real candidate.
+
+Three route shapes were found only by running this measurement, and each is pinned by a spec:
+`module:` as an option on `resources` / `resource` (8 uses in mastodon's admin routes alone), a target
+inherited from an enclosing `with_options to:`, and `only: []` with an action declared in the block.
+Mastodon's `inflect.acronym` declarations are also read out of `config/initializers/inflections.rb`,
+without which 19 emitted roots were spelled `Activitypub::…` for an `ActivityPub::…` class.

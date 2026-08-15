@@ -40,7 +40,11 @@ module Rigor
         #   (`"api_v4"`), composed by {GrapeApiDiscoverer} from the project's own `prefix` / `version`
         #   declarations. The names beyond the prefix come from grape's runtime route table and cannot be
         #   enumerated statically, so the namespace is open — same contract as the OmniAuth family above.
-        def initialize(entries, custom_helpers: [], devise_resources: [], grape_prefixes: [])
+        # @param controllers [Enumerable<String>] fully-qualified controller class names the routes file
+        #   dispatches to (`"Admin::UsersController"`). Published as the plugin's `:reachability_roots` fact
+        #   (ADR-102 WD3) — a controller is an entry point nothing in the project references, so without this
+        #   every routed controller reads as unused. Deliberately NOT consulted by any helper-name check.
+        def initialize(entries, custom_helpers: [], devise_resources: [], grape_prefixes: [], controllers: [])
           @entries = entries.freeze
           # Multimap: a single helper name can map to multiple entries when an uncountable-noun resource
           # registers both an arity-0 index helper and an arity-1 show helper under the same `news_path`
@@ -50,7 +54,15 @@ module Rigor
           @custom_helpers = custom_helpers.to_set.freeze
           @devise_resources = devise_resources.to_set(&:to_s).freeze
           @grape_prefixes = grape_prefixes.to_set(&:to_s).freeze
+          @controllers = controllers.map(&:to_s).uniq.sort.freeze
           freeze
+        end
+
+        # @return [Array<String>] the routed controller class names (see the `controllers:` parameter). Reads
+        #   through a nil guard rather than `attr_reader` so a table deserialised from a cache slot written
+        #   before this field existed answers `[]` instead of `nil`.
+        def controllers
+          @controllers || []
         end
 
         # @return [Entry, nil] First matching entry; for the uncountable-noun case this is the index helper

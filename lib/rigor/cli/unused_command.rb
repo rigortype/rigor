@@ -7,6 +7,7 @@ require_relative "../configuration"
 require_relative "../analysis/path_expansion"
 require_relative "../analysis/reachability/scan"
 require_relative "../analysis/reachability/graph"
+require_relative "../analysis/reachability/plugin_roots"
 require_relative "options"
 require_relative "command"
 require_relative "probe_environment"
@@ -48,12 +49,13 @@ module Rigor
         references.concat(signature_references(configuration))
         dynamic_uses.concat(template_mentions(declarations))
 
+        plugin_roots = Analysis::Reachability::PluginRoots.collect(configuration: configuration)
         graph = Analysis::Reachability::Graph.new(
           declarations: declarations, references: references, dynamic_uses: dynamic_uses,
-          root_fqns: root_fqns(declarations, options.fetch(:entry_points)),
+          root_fqns: root_fqns(declarations, options.fetch(:entry_points)) + plugin_roots,
           foreign: foreign_predicate(configuration)
         )
-        emit(graph.report, options)
+        emit(graph.report, options, supply: root_supply(plugin_roots, declarations))
         0
       end
 
@@ -193,14 +195,29 @@ module Rigor
         ->(_fqn) { false }
       end
 
-      def emit(report, options)
-        @out.puts(options.fetch(:format) == "json" ? json(report, options) : text(report, options))
+      # ADR-102 § Consequences — "a root source that OVER-supplies silently hides real dead code, which is
+      # worse than one that under-supplies, so each plugin's contribution needs its own corpus check". A
+      # supplied root naming a constant the project does not declare is inert in the graph, but it is the
+      # observable symptom of a root source drifting away from the code — a renamed controller, an
+      # inflection the plugin gets wrong, a convention that stopped holding. Reporting the count makes that
+      # drift measurable on a real project instead of invisible.
+      Supply = Data.define(:supplied, :unmatched)
+      private_constant :Supply
+
+      def root_supply(plugin_roots, declarations)
+        declared = declarations.to_set(&:fqn)
+        Supply.new(supplied: plugin_roots.size, unmatched: plugin_roots.count { |fqn| !declared.include?(fqn) })
       end
 
-      def json(report, options)
+      def emit(report, options, supply:)
+        @out.puts(options.fetch(:format) == "json" ? json(report, options, supply) : text(report, options, supply))
+      end
+
+      def json(report, options, supply)
         JSON.pretty_generate(
           declared: report.declared, reachable: report.reachable, roots: report.roots, edges: report.edges,
           namespaces: report.namespaces,
+          plugin_roots: supply.supplied, plugin_roots_unmatched: supply.unmatched,
           candidates: rows_json(report.candidates, options), test_only: rows_json(report.test_only, options),
           undecidable: limited(report.undecidable, options).map do |u|
             { name: u.fqn, path: u.path, line: u.line, reason: u.reason }
@@ -212,9 +229,9 @@ module Rigor
         limited(rows, options).map { |c| { name: c.fqn, path: c.path, line: c.line } }
       end
 
-      def text(report, options)
+      def text(report, options, supply)
         lines = ["Reachability", "  declared (project-owned): #{report.declared}",
-                 "  roots:                    #{report.roots}",
+                 "  roots:                    #{report.roots}#{plugin_root_note(supply)}",
                  "  reachable:                #{report.reachable}",
                  "  candidates:               #{report.candidates.size}",
                  "  reachable only from tests: #{report.test_only.size}",
@@ -226,9 +243,18 @@ module Rigor
         lines.concat(undecidable_section(report.undecidable, options))
         lines << ""
         lines << "These are CANDIDATES, not findings. The measured precision of this report on an adjudicated"
-        lines << "corpus target is 7% — every row needs a human to confirm it. Route- and plugin-derived roots"
-        lines << "are not wired yet (issue #349), so this list is an upper bound."
+        lines << "corpus target is 7% — every row needs a human to confirm it. Roots a framework supplies come"
+        lines << "from the project's plugins, so a framework Rigor has no plugin for still reads as an upper bound."
         lines.join("\n")
+      end
+
+      # `(N from plugins, M matched nothing)` — omitted entirely when no plugin contributed, so a
+      # non-Rails project's report is unchanged. A non-zero `matched nothing` is the over-supply signal
+      # described on {#root_supply}: those roots claim constants this project does not declare.
+      def plugin_root_note(supply)
+        return "" if supply.supplied.zero?
+
+        " (#{supply.supplied} from plugins, #{supply.unmatched} matched no declaration)"
       end
 
       def undecidable_section(rows, options)

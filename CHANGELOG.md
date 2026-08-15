@@ -12,6 +12,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[engine]** `rigor unused` no longer treats a class's own RBS signature as a reference to that class, so a project that ships generated signatures stops hiding its own dead code ([#363](https://github.com/rigortype/rigor/issues/363)).
+  - Signature files both declare and reference, and only references count: `class Talk < ApplicationRecord` in `sig/` references `ApplicationRecord`, while the `Talk` it declares is not evidence that anything uses `Talk`. On one application 48 of 101 roots came from `sig/` and eleven rows never appeared in the report.
+
 ### Added
 
 - **[cli]** `rigor unused` reports project classes and modules that nothing reachable references — a starting point for dead-code removal ([#347](https://github.com/rigortype/rigor/issues/347), [ADR-102](docs/adr/102-unused-code-reachability-report.md)).

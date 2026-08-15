@@ -315,3 +315,65 @@ Three route shapes were found only by running this measurement, and each is pinn
 inherited from an enclosing `with_options to:`, and `only: []` with an action declared in the block.
 Mastodon's `inflect.acronym` declarations are also read out of `config/initializers/inflections.rb`,
 without which 19 emitted roots were spelled `Activitypub::…` for an `ActivityPub::…` class.
+
+## Addendum 2026-08-16 — #350, root supply for the remaining plugins
+
+Six plugins were surveyed against one rule: a plugin should contribute exactly those constants its
+framework reaches by a name that **never appears as a constant reference in the source**. Two clear it,
+four do not, and the four declines are the more consequential half — an over-supplying root source
+hides real dead code silently, so publishing a discovered set ("every class under `app/workers`") is
+strictly worse than publishing nothing.
+
+| plugin | decision | reason |
+| --- | --- | --- |
+| `rigor-pundit` | roots | `authorize @post` reaches `PostPolicy`, a name written nowhere. |
+| `rigor-factorybot` | **references**, `:test` role | `factory :user, class: "Admin::User"` is a string, but factories are test-tree code. |
+| `rigor-sidekiq` | decline | `MyWorker.perform_async` is an ordinary constant reference. String-named workers in queue/cron config would qualify; not parsed yet. |
+| `rigor-rspec`, `rigor-rspec-rails` | decline | Rooting spec references would strip the `:test` role and erase WD8's category outright. |
+| `rigor-activejob`, `rigor-actionmailer` | decline | `perform_later` / `welcome` are ordinary constant references. |
+
+### Measurement
+
+`rigor unused --format json`, before and after, cwd = target. Redmine's committed config declares
+neither plugin, so it is the control.
+
+| target | metric | before | after |
+| --- | --- | ---: | ---: |
+| redmine | candidates / test-only / cannot-decide | 57 / 2 / 77 | 57 / 2 / 77 |
+| mastodon | candidates / test-only / cannot-decide | 45 / 186 / 25 | 45 / **164** / 25 |
+| gitlab | candidates / test-only / cannot-decide | 66 / 1794 / 427 | 66 / **1796** / **425** |
+
+Mastodon (`rigor-pundit` in its committed plugin list) moved 22 policies out of *reachable only from
+test code* into production-reachable — `UserPolicy`, `ReportPolicy`, `InvitePolicy` and 19 more, each
+previously kept alive only by its own `spec/policies/` file. Roots rose 404 → 428. **No candidate
+moved**, which is the point: the contribution corrected a mis-attribution rather than shrinking the
+review queue by hiding rows.
+
+GitLab is the FactoryBot target (`spec/factories/`, 249 entries; measured with `rigor-factorybot`
+appended to its committed plugin list). Two classes moved out of *cannot decide* into *test-only* —
+`SupplyChain::Slsa::ProvenanceStatement::{Builder,BuildMetadata}`, named by a factory `class:` and
+otherwise only guessable. Again no candidate moved.
+
+Redmine's numbers are byte-identical before and after. That is the expected result for a project using
+neither gem, not a null measurement: the mechanism is pinned by
+`spec/integration/plugins/reachability_contribution_plugin_spec.rb`, which drives both plugins through
+the real protocol and fails if the plugin never loads, so "no change here" is a control rather than an
+absence of signal.
+
+### Over-supply check
+
+| target | roots supplied | matched no declaration |
+| --- | ---: | ---: |
+| redmine | 56 | 1 (unchanged — `Rails::HealthController`) |
+| mastodon | 312 (288 routes + 24 policies) | 0 |
+| gitlab | 373 | 14 (unchanged — all from routes) |
+
+Every pundit-supplied root matched a declaration, which is what the intersection in
+`Pundit#prepare` buys: a derived policy name that names nothing is dropped before publication. The
+supply is deliberately partial — 24 roots against 43 policy files in mastodon's `app/policies`,
+because namespaced `Admin::*Policy` classes and non-controller call sites are not derived. Those
+policies stay in the report, which is the correct failure direction.
+
+`rigor-factorybot` does not move the roots counter at all, by construction: its contribution is a
+reference, so it can move a class between the report's buckets but can never seed production
+reachability.

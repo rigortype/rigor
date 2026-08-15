@@ -300,6 +300,46 @@ rigor triage --format json | jq '[.selectors[] | select(.receiver == "String")]'
 The same `receiver_type` / `method_name` fields ride on each
 diagnostic of `rigor check --format json`, for per-site (rather than
 aggregated) grouping.
+## `rigor unused`
+
+Report project constants that nothing reachable references — a
+starting point for dead-code removal.
+
+```sh
+rigor unused [paths] --entry-point='lib/cli.rb'
+```
+
+**Read the output as a review queue, not a defect list.** On a
+hand-adjudicated corpus target only **7% of the rows were genuinely
+unused**; the rest were reachable by means static analysis cannot
+see. That is why this is a separate command and never a `rigor check`
+diagnostic — see
+[ADR-102](https://github.com/rigortype/rigor/blob/master/docs/adr/102-unused-code-reachability-report.md).
+
+Reachability is computed from **roots**, not by counting references,
+so a cluster of classes that only reference each other is still
+reported. Roots are the declarations in files matching
+`--entry-point=GLOB` (repeatable), plus anything referenced at file
+level by non-test code. Route- and framework-derived roots are not
+wired yet, so today's output is an upper bound.
+
+Two things the report separates rather than merges:
+
+- **Reachable only from test code** gets its own section — a class
+  used solely by its own spec is dead production code with a live
+  test, which is a more actionable finding than either bucket alone.
+- **Constants Rigor cannot decide about** are not claimed as unused.
+  Only class and module constants are reported at all; value
+  constants are omitted because they do not resolve across files.
+
+References are harvested from a wider file set than the analysed
+paths — `.rake` tasks, `config/`, specs and the project's own `sig/`
+all count as references — because a constant used only from a Rake
+task is not dead.
+
+`--format json` emits the same data; `--limit=N` truncates the
+printed lists. `--incremental` is refused: reachability is only sound
+over a whole-project run.
 
 ## `rigor coverage`
 

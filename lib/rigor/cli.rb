@@ -44,6 +44,7 @@ module Rigor
       "mcp" => :run_mcp,
       "baseline" => :run_baseline,
       "triage" => :run_triage,
+      "unused" => :run_unused,
       "coverage" => :run_coverage,
       "plugins" => :run_plugins,
       "plugin" => :run_plugin,
@@ -260,6 +261,12 @@ module Rigor
       require_relative "cli/triage_command"
 
       CLI::TriageCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
+    def run_unused
+      require_relative "cli/unused_command"
+
+      CLI::UnusedCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
     def run_coverage

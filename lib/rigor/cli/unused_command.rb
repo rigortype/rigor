@@ -9,6 +9,7 @@ require_relative "../analysis/reachability/scan"
 require_relative "../analysis/reachability/graph"
 require_relative "../analysis/reachability/plugin_roots"
 require_relative "../analysis/reachability/signature_scan"
+require_relative "../analysis/reachability/project_files"
 require_relative "options"
 require_relative "command"
 require_relative "probe_environment"
@@ -29,10 +30,6 @@ module Rigor
       # artifacts on two of three corpus targets. Harvesting references from a file is far cheaper than
       # type-checking it, so the report takes the wider set.
       REFERENCE_GLOB = "**/*.{rb,rake}"
-
-      # Trees that are never the project's own source. Globbing them costs far more than every analysed file
-      # combined on a real app, and a reference found inside a vendored gem is not evidence about this project.
-      VENDOR_DIRS = %r{\A(vendor|node_modules|tmp|\.git|\.rigor|coverage)/}
 
       # Templates and data files that carry class names as strings. A name here is NOT counted as a reference —
       # a YAML value is far weaker evidence than a constant node, and treating it as proof would silently hide
@@ -116,7 +113,7 @@ module Rigor
       # Widening the *declaration* set the same way would cancel the gain (measured: +1 / −3 / +2 candidates,
       # ADR-102 WD2), which is exactly why the two corpora are separated rather than both widened.
       def reference_files(_paths, configuration)
-        relative = Dir.glob(REFERENCE_GLOB, base: Dir.pwd).grep_v(VENDOR_DIRS)
+        relative = Analysis::Reachability::ProjectFiles.own(Dir.glob(REFERENCE_GLOB, base: Dir.pwd), Dir.pwd)
         absolute = relative.map { |rel| File.expand_path(rel) }
         Analysis::PathExpansion.reject_excluded(absolute, configuration.exclude_patterns).to_set
       end
@@ -162,8 +159,8 @@ module Rigor
         names = declarations.map(&:fqn)
         return [] if names.empty?
 
-        Dir.glob(TEMPLATE_GLOB, base: Dir.pwd).grep_v(VENDOR_DIRS).flat_map do |rel|
-          text = File.read(File.expand_path(rel))
+        Analysis::Reachability::ProjectFiles.own(Dir.glob(TEMPLATE_GLOB, base: Dir.pwd), Dir.pwd).flat_map do |rel|
+          text = File.read(File.expand_path(rel)).scrub
           names.filter_map do |fqn|
             next unless text.include?(fqn)
 

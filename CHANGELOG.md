@@ -36,6 +36,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** `rigor unused` no longer crashes on a source file with a magic encoding comment, and no longer reads git submodules ([#365](https://github.com/rigortype/rigor/issues/365)).
+  - A string literal in a `# encoding: big5` file parses to bytes that are not valid UTF-8; the report took one as a constant name and died on the whole run. A name that is not valid UTF-8 cannot be a constant, so it is dropped. Submodules are separate projects whose files are neither your declarations nor references to them — on a checkout that vendors upstream sources they were 77% of the files read.
 - **[engine]** `rigor unused` no longer treats a class's own RBS signature as a reference to that class, so a project that ships generated signatures stops hiding its own dead code ([#363](https://github.com/rigortype/rigor/issues/363)).
   - Signature files both declare and reference, and only references count: `class Talk < ApplicationRecord` in `sig/` references `ApplicationRecord`, while the `Talk` it declares is not evidence that anything uses `Talk`. On one application 48 of 101 roots came from `sig/` and eleven rows never appeared in the report.
 - **[engine]** A constant inherited from a superclass or an included module now resolves from the subclass body, and no longer loses to a same-named constant at the top level ([#354](https://github.com/rigortype/rigor/issues/354)).

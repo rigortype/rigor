@@ -213,6 +213,34 @@ RSpec.describe Rigor::Analysis::Reachability do
     end
   end
 
+  # A byte sequence that is not valid UTF-8 cannot be a constant name. Carrying one forward crashed the whole
+  # run on the first `String#sub` downstream — `rigor unused` on Rigor's own repository, which vendors a CRuby
+  # checkout containing deliberately ill-encoded encoding fixtures.
+  describe "ill-encoded source" do
+    # The real shape, taken from the file that crashed the run: a magic encoding comment makes Prism parse
+    # SUCCESSFULLY and hand back an `unescaped` string tagged Big5 / ISO-8859-9 whose bytes are not valid
+    # UTF-8. A source that merely fails to parse would not reproduce this — the scan already contributes
+    # nothing for those.
+    let(:ill_encoded) do
+      (+"# encoding: big5\nx = \"\xA7\xA6\".constantize\n").force_encoding(Encoding::ASCII_8BIT)
+    end
+
+    it "parses, and contributes no dynamic use rather than raising" do
+      result = nil
+      expect { result = Rigor::Analysis::Reachability::Scan.call(path: "lib/a.rb", source: ill_encoded) }
+        .not_to raise_error
+      expect(result).not_to be_nil # the premise: this source DOES parse
+      expect(result.dynamic_uses).to eq([])
+    end
+
+    # The control: a well-formed literal in the same position must still be recorded, or the guard above would
+    # be indistinguishable from dropping every literal `constantize`.
+    it "still records a well-formed literal constantize" do
+      result = Rigor::Analysis::Reachability::Scan.call(path: "lib/a.rb", source: %(x = "Target".constantize\n))
+      expect(result.dynamic_uses.map(&:name)).to eq(["Target"])
+    end
+  end
+
   describe "meta-new declarations" do
     it "treats a constant assigned Class.new / Data.define as a declaration" do
       found = candidates({ "lib/a.rb" => "class Root\nend\n",

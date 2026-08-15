@@ -335,7 +335,7 @@ strictly worse than publishing nothing.
 | --- | --- | --- |
 | `rigor-pundit` | roots | `authorize @post` reaches `PostPolicy`, a name written nowhere. |
 | `rigor-factorybot` | **references**, `:test` role | `factory :user, class: "Admin::User"` is a string, but factories are test-tree code. |
-| `rigor-sidekiq` | decline | `MyWorker.perform_async` is an ordinary constant reference. String-named workers in queue/cron config would qualify; not parsed yet. |
+| `rigor-sidekiq` | decline | `MyWorker.perform_async` is an ordinary constant reference. String-named workers in queue/cron config would qualify; not parsed yet. *(Superseded by [#367](https://github.com/rigortype/rigor/issues/367): the `class:` key of a schedule file is now read; the queue list is still declined.)* |
 | `rigor-rspec`, `rigor-rspec-rails` | decline | Rooting spec references would strip the `:test` role and erase WD8's category outright. |
 | `rigor-activejob`, `rigor-actionmailer` | decline | `perform_later` / `welcome` are ordinary constant references. |
 

@@ -25,6 +25,7 @@ plugins/rigor-sidekiq/
 │       └── sidekiq/
 │           ├── worker_index.rb         ← frozen `{class_name => Entry}` value object
 │           ├── worker_discoverer.rb    ← walks app/workers, builds the index
+│           ├── schedule_scan.rb        ← reads `class:` out of schedule YAML
 │           └── analyzer.rb             ← per-call validation
 └── demo/
     ├── .rigor.yml
@@ -47,9 +48,11 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 
 | Surface | Used for |
 | --- | --- |
-| `manifest(... config_schema:)` | `worker_search_paths` / `worker_marker_modules` knobs (ADR-40 declared defaults). |
+| `manifest(... config_schema:, produces:)` | `worker_search_paths` / `worker_marker_modules` / `schedule_paths` knobs (ADR-40 declared defaults) + the `:reachability_roots` fact. |
 | `Plugin::Base.producer :worker_index` | Caches the discovered worker index across runs (cache invalidates via `producer watch:`). |
-| `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `worker_search_paths` through the trusted scope; the digest list feeds the cache descriptor. |
+| `Plugin::Base.producer :scheduled_workers` | Caches the schedule-YAML scan; watched separately, because editing a schedule changes which workers are reached without touching `app/workers`. |
+| `#prepare(services)` (ADR-9) | Publishes the reachability roots below. |
+| `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `worker_search_paths`, and each `schedule_paths` document, through the trusted scope; the digest list feeds the cache descriptor. |
 | `Plugin::Base#diagnostics_for_file` | Emits the once-per-file `load-error` when worker discovery fails (file-level only). |
 | `node_rule(Prism::CallNode)` (ADR-37) | Per-call arity validation of every `Worker.perform_*` over the engine-owned walk. |
 | Two-pass walk (collect → validate) | Discoverer + analyzer; mirrors `rigor-activejob` / `rigor-actionmailer`. |
@@ -69,13 +72,50 @@ validation) but differ in three places:
 A user running both ActiveJob and Sidekiq in the same project can
 enable both plugins; their indexes are independent.
 
-## Why this plugin supplies no `rigor unused` roots
+## Schedule roots for `rigor unused`
 
-It was considered for the reachability report ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3) and **deliberately contributes nothing**.
+The plugin publishes exactly one kind of reachability root ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3): **a worker named under a `class:` key in schedule configuration.**
 
-`MyWorker.perform_async(...)` writes the worker's name as an ordinary constant, so `rigor unused`'s constant scan already records the edge and a plugin root would add nothing. What a root *would* add is the discovered worker set — and "a file exists under `app/workers`" is not evidence that anything enqueues it. Publishing that set would mark every orphaned worker in the project as reachable forever, which is the exact failure mode ADR-102 § Consequences names: an over-supplying root source silently hides real dead code, and nothing downstream can tell you it happened.
+That worker is enqueued from YAML by name, so `MyWorker` may appear nowhere in the repository — the constant scan sees nothing, and a job that runs every night reads as dead code. Two layouts carry the same key, and `schedule_paths` (default `config/schedule.yml`, `config/sidekiq.yml`) says where to look:
 
-The one genuinely Sidekiq-specific root source is a worker named as a **string** in queue or cron configuration (`sidekiq.yml`, `sidekiq-cron` schedules, a `Sidekiq::Cron::Job.load_from_hash!` payload). That name is invisible to the constant scan, so it qualifies — but this plugin does not parse those files today. Tracked as follow-on work rather than approximated by rooting every worker.
+```yaml
+# config/schedule.yml — sidekiq-cron: the document IS the schedule map
+nightly_report:
+  cron: "0 3 * * *"
+  class: "NightlyReportWorker"
+```
+
+```yaml
+# config/sidekiq.yml — sidekiq-scheduler nests the same entries
+:scheduler:
+  :schedule:
+    nightly_report:
+      every: "1h"
+      class: "NightlyReportWorker"
+```
+
+Parsing is `YAML.safe_load` (`aliases: true`, `Symbol` permitted, nothing else). No Rails environment, no sidekiq runtime.
+
+**Everything else is still a decline, and the declines are what make the contribution worth having.**
+
+- **`MyWorker.perform_async(...)` supplies nothing.** It writes the worker's name as an ordinary constant, which the report's scan already records; a root would add nothing.
+- **The discovered worker set supplies nothing.** "A file exists under `app/workers`" is not evidence that anything enqueues it. Publishing that set would mark every orphaned worker reachable forever — the failure mode ADR-102 § Consequences names, where an over-supplying root source silently hides real dead code and nothing downstream can tell you it happened.
+- **A queue name supplies nothing.** `:queues:` in `sidekiq.yml` holds queue names, and a queue name is not a class name. Inflecting `report_worker` into `ReportWorker` would manufacture a root out of a naming coincidence, which is the same over-supply in a smaller costume.
+- **A `class:` value the plugin never discovered supplies nothing.** Every name read from YAML is intersected with the `WorkerIndex`, exactly as `rigor-pundit` intersects its derived policy names. A typo, a renamed class, or a job living outside `worker_search_paths` therefore costs coverage rather than manufacturing a root, and the report's `matched no declaration` counter stays meaningful.
+- **A malformed or absent schedule supplies nothing, and costs nothing else.** A missing file, an unreadable one, a YAML syntax error, or a non-Hash document is skipped; the roots the other configured paths supply still arrive.
+
+Known under-supply, both by the same "read only what is written" rule: `sidekiq-cron`'s alternative `klass:` spelling, and a schedule loaded from Ruby (`Sidekiq::Cron::Job.load_from_hash!`) rather than from a file under `schedule_paths`.
+
+### Corpus measurement (2026-08-16)
+
+| target | schedule names | discovered workers | roots published | effect |
+| --- | ---: | ---: | ---: | --- |
+| mastodon (`:scheduler: :schedule:`) | 17 | 97 | 17 | *reachable only from tests* 164 → 134; candidates unchanged at 45; `matched no declaration` stays 0 |
+| gitlab (`config/schedule.yml`) | 111 | 0 | 0 | report byte-identical |
+
+Mastodon is the case the slice exists for: its schedulers were reported as *reachable only from their own specs* — a wrong answer for a job that runs every five minutes — and rooting them moved the 17 schedulers plus 13 classes they transitively reach (`Vacuum::*`, `AccountStatusesCleanupService`, …) into production-reachable, without adding a single candidate.
+
+GitLab is the under-supply direction working as designed, and worth reading as a configuration lesson rather than a bug: every GitLab worker mixes in the project's own `ApplicationWorker` concern instead of `Sidekiq::Job`, so `worker_marker_modules` discovers nothing and all 111 schedule names are dropped. Add `ApplicationWorker` to `worker_marker_modules` and the same schedule yields 100 roots (the remaining 11 live outside `worker_search_paths`, under `ee/`).
 
 ## Future direction
 

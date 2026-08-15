@@ -12,6 +12,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[cli]** `rigor unused` reports project classes and modules that nothing reachable references — a starting point for dead-code removal ([#347](https://github.com/rigortype/rigor/issues/347), [ADR-102](docs/adr/102-unused-code-reachability-report.md)).
+  - Read it as a review queue rather than a defect list: on a hand-adjudicated corpus target only 7% of the rows were genuinely unused, which is why this is its own command and never a `rigor check` diagnostic. Reachability is computed from roots — `--entry-point=GLOB` plus anything referenced at file level — so a cluster of classes that only reference each other is still reported. Classes reachable only from test code get their own section, because a class used solely by its own spec is dead production code with a live test. References are harvested from `.rake` tasks, `config/`, specs and your `sig/` as well as the analysed paths.
+
 ### Fixed
 
 - **[engine]** A constant inherited from a superclass or an included module now resolves from the subclass body, and no longer loses to a same-named constant at the top level ([#354](https://github.com/rigortype/rigor/issues/354)).

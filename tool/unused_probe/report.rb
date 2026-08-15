@@ -136,6 +136,12 @@ value_candidates = split[0]
 class_candidates = split[1]
 
 if options[:json]
+  # `bucket` is the tier the text report prints the candidate under, so a downstream stage filter
+  # (tool/unused_probe/stages.rb) does not have to re-derive the ownership + prefix logic.
+  bucket = {}
+  artifacts.each { |n, _| bucket[n] = "prefix_artifact" }
+  value_candidates.each { |n, _| bucket[n] = "value" }
+  class_candidates.each { |n, _| bucket[n] = "class" }
   puts JSON.pretty_generate(
     "declared_owned" => declared.size,
     "referenced_distinct" => referenced.size,
@@ -143,7 +149,7 @@ if options[:json]
     "candidates_prefix_of_reference" => artifacts.size,
     "candidates_value_kind" => value_candidates.size,
     "candidates_class_kind" => class_candidates.size,
-    "candidates_list" => candidates.map { |n, e| { "name" => n }.merge(e) }
+    "candidates_list" => candidates.map { |n, e| { "name" => n, "bucket" => bucket[n] }.merge(e) }
   )
   exit 0
 end

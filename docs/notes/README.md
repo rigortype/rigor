@@ -70,6 +70,7 @@ comparison) appears nowhere else in this index.
 | 2026-08-05 | [`&&` / `\|\|` value-polarity gate — FP-risk evaluation (issue #152)](20260805-issue-152-and-or-polarity-gate-fp-evaluation.md) |
 | 2026-08-05 | [`if` / `unless` truthiness elision — corpus census of what the verdict rests on (issue #286)](20260805-issue-286-if-unless-truthiness-elision-census.md) |
 | 2026-08-06 | [`if` / `unless` elision — provenance census of the optimistic carrier, and a two-directional A/B (issue #286)](20260806-issue-286-optimistic-carrier-provenance-census.md) |
+| 2026-08-13 | [Unused-constant false-positive baseline — three-project corpus measurement (issue #345)](20260813-unused-constant-fp-baseline.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

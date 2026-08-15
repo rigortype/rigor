@@ -61,6 +61,11 @@ flag, key, or command that *acts* on it.
     and your tests into one safety net (`rigor coverage
     --protection [--mutation --with-tests --include-dynamic]`).
 
+18. [Removing dead code](18-removing-dead-code.md) — working
+    `rigor unused` as a campaign on an old codebase: why the list
+    starts long, which lever actually shortens it, what to confirm
+    before deleting, and how to make the case to a reviewer.
+
 ### Integration and operations
 
 9. [Editor integration](09-editor-integration.md) — wiring

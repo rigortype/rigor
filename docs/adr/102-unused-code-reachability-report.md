@@ -2,10 +2,9 @@
 
 Status: **Proposed, 2026-08-15.** Nothing implemented. Fixes the decisions the
 `rigor unused` slices build against ([#344](https://github.com/rigortype/rigor/issues/344)
-umbrella; [#347](https://github.com/rigortype/rigor/issues/347) tracer bullet). Two
-working decisions — WD5's incremental interaction and WD8's treatment of test-only
-references — are **open** and MUST be closed before #347 lands; every other WD is settled
-by the measurement below.
+umbrella; [#347](https://github.com/rigortype/rigor/issues/347) tracer bullet). All eight
+working decisions are settled — WD5 and WD8 were carried open for one revision and closed
+on 2026-08-15.
 
 Grounding: [`docs/notes/20260813-unused-constant-fp-baseline.md`](../notes/20260813-unused-constant-fp-baseline.md)
 (three-project corpus measurement, redmine adjudicated in full) and
@@ -85,16 +84,18 @@ names as data in YAML / locales, and ERB templates all demote. Stratify with
 [ADR-65](65-diagnostic-evidence-tier-and-doc-url.md)'s evidence tier so a reader sorts by
 confidence instead of reading a flat list.
 
-### WD5 — Whole-project only *(OPEN — decide before #347)*
+### WD5 — Whole-project only; `--incremental` is refused, not absorbed
 
 A reachability answer is sound only over a full run, which collides with
 [ADR-45](45-unchanged-project-fast-path.md)'s run-result cache and
-[ADR-46](46-incremental-dependency-graph.md)'s per-file incremental path. Two candidates:
-**(a)** `rigor unused` refuses under `--incremental` with a diagnostic message, or **(b)**
-it silently forces a full pass. (a) is recommended — a silently-slow command is worse than
-an explicit refusal, and it keeps the soundness boundary visible. Whichever is chosen MUST
-be pinned by a spec; leaving it to emerge is not an option, because the failure mode is a
-confidently-wrong candidate list rather than an error.
+[ADR-46](46-incremental-dependency-graph.md)'s per-file incremental path.
+
+`rigor unused` MUST refuse `--incremental` with an explanatory message and a non-zero
+exit, rather than silently forcing a full pass. The rejected option hides a real cost —
+a user who asked for the fast path gets the slow one with no signal — and it makes the
+soundness boundary invisible at exactly the place someone would later try to optimise it
+away. A refusal is self-documenting. The behaviour MUST be pinned by a spec: the failure
+mode of getting this wrong is a confidently-wrong candidate list, not an error.
 
 ### WD6 — Class and module constants only at launch
 
@@ -114,13 +115,17 @@ artifacts from a single initializer.
 read — pure artifacts on two of three targets. Reading a file to harvest references is far
 cheaper than type-checking it, and the report MUST take the wider corpus.
 
-### WD8 — Test-only references *(OPEN — decide before #349)*
+### WD8 — A reference carries its referrer's role
 
-A class referenced only from its own spec is dead production code with a live test. Options:
-count test references as reachability (simple, hides real findings), ignore them (noisy),
-or **track the referencing file's role and report the distinction** — recommended, because
-"used only by its own test" is the most actionable row the report can produce. The choice
-changes the data model, not just a filter, so it cannot be deferred past #349.
+A class referenced only from its own spec is dead production code with a live test.
+Counting test references as reachability hides that finding; ignoring them manufactures
+noise. Neither is right, because the two are different answers rather than a stricter and
+a looser one.
+
+So an edge in the reference graph MUST carry the **role of the file it came from**
+(production / test / task / config), and `used only by its own test` MUST be a reported
+category rather than a bucket boundary. This is a data-model decision, not a filter: the
+role has to be recorded when the edge is, so it cannot be retrofitted after #349.
 
 ### Re-evaluation triggers
 
@@ -157,7 +162,7 @@ makes users stop opening it. Root supply also carries an asymmetry: a root sourc
 *over*-supplies silently hides real dead code, which is worse than one that under-supplies,
 so each plugin's contribution needs its own corpus check.
 
-**Carry-over.** WD5 and WD8 are open. The #345 probe instrumentation lives in four engine
+**Carry-over.** The #345 probe instrumentation lives in four engine
 files until #349's re-measurement is done, then comes out (tracked on #344).
 
 ## Relationship to other ADRs

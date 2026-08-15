@@ -1,0 +1,19 @@
+{
+  "skill_name": "rigor-unused-adjudicate",
+  "evals": [
+    {
+      "id": 0,
+      "name": "find-dead-code-in-a-real-rails-app",
+      "prompt": "~/repo/ruby/conference-app にある Rails アプリ、そろそろ棚卸ししたいんだけど、消せるコードってどれくらいある? Rigor は入ってる。",
+      "expected_output": "Runs `rigor unused`, adjudicates all 9 rows, concludes roughly 3 rails-scaffolding classes (ApplicationMailer, ApplicationCable::Channel/Connection) and correctly rejects the 4 helper modules (include_all_helpers) and SendTalkReminderPushNotificationJob + DigestedAssetsPathResolver (config/recurring.yml).",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "triage-a-report-already-in-hand",
+      "prompt": "rigor unused の結果がこれなんだけど、この6件は本当にテストからしか使われてないの? 消していい?\n\n  reachable only from tests: 6\n    1  DigestedAssetsPathResolver    lib/digested_assets_path_resolver.rb:3\n    2  HomeHelper                    app/helpers/home_helper.rb:1\n    3  ProfilesHelper                app/helpers/profiles_helper.rb:1\n    4  SendTalkReminderPushNotificationJob  app/jobs/send_talk_reminder_push_notification_job.rb:1\n    5  SignageHelper                 app/helpers/signage_helper.rb:1\n    6  TalksHelper                   app/helpers/talks_helper.rb:1\n\nプロジェクトは ~/repo/ruby/conference-app",
+      "expected_output": "Recognises the helper-convention cluster via include_all_helpers, finds config/recurring.yml naming the job, notes DigestedAssetsPathResolver cascades from the job, and concludes none of the 6 should be deleted.",
+      "files": []
+    }
+  ]
+}

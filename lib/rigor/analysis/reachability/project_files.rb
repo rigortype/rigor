@@ -36,6 +36,16 @@ module Rigor
           []
         end
 
+        # Does an `--entry-point` glob match this path?
+        #
+        # `File::FNM_PATHNAME` is what makes `**` mean "zero or more directories" rather than "one or more".
+        # Without it `lib/workers/**/*.rb` does not match `lib/workers/a.rb` — only files nested a level
+        # deeper — and a user writing that glob means the whole tree. The failure is silent and in the bad
+        # direction: the top-level declarations stay in the report and read as dead code.
+        def entry_point_match?(pattern, path)
+          File.fnmatch?(pattern, path, File::FNM_PATHNAME)
+        end
+
         # @param relative_paths [Array<String>] paths relative to `root`.
         # @return [Array<String>] those that belong to the project itself.
         def own(relative_paths, root)

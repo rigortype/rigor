@@ -56,6 +56,17 @@ module Rigor
         # @param target_ruby [String, nil] Prism version string, threaded from the project configuration.
         # @return [Result, nil] nil when the file does not parse (a parse error is the analyzer's business, not
         #   this scan's — it simply contributes nothing rather than half a file).
+        # A constant name is ASCII by construction, so a byte sequence that is not valid UTF-8 cannot be one.
+        # Dropping it is both correct and the only safe answer: carrying it forward crashed the whole run on
+        # the first `String#sub` downstream, which is how this surfaced — `rigor unused` on Rigor's own
+        # repository, which vendors a CRuby checkout containing deliberately ill-encoded encoding fixtures.
+        def self.usable_name(raw)
+          return nil if raw.nil?
+
+          name = raw.dup.force_encoding(Encoding::UTF_8)
+          name.valid_encoding? ? name : nil
+        end
+
         def self.call(path:, source:, target_ruby: nil)
           parsed = if target_ruby
                      Prism.parse(source, filepath: path,
@@ -175,17 +186,26 @@ module Rigor
             subject = node.name == :const_get ? node.arguments&.arguments&.first : node.receiver
             return if subject.nil?
 
-            reason = "#{node.name} on #{SUBJECT_SHAPES.fetch(subject.class, 'a computed value')}"
+            name, prefix = dynamic_target(subject)
+            # A literal whose bytes are not valid UTF-8 cannot name a constant; dropping it is the only safe
+            # answer, and carrying it forward crashed the whole run downstream.
+            return if subject.is_a?(Prism::StringNode) && name.nil?
+            return if subject.is_a?(Prism::SymbolNode) && name.nil?
+
+            @dynamic_uses << DynamicUse.new(
+              name: name, prefix: prefix, site: site(node), path: @path, line: node.location.start_line,
+              reason: "#{node.name} on #{SUBJECT_SHAPES.fetch(subject.class, 'a computed value')}"
+            )
+          end
+
+          # `[exact name, bounded namespace]` for a dynamic-resolution subject. A literal names its constant
+          # exactly; an interpolation can only bound the namespace its literal head names; anything else bounds
+          # nothing.
+          def dynamic_target(subject)
             case subject
-            when Prism::StringNode, Prism::SymbolNode
-              @dynamic_uses << DynamicUse.new(name: subject.unescaped, prefix: nil, reason: reason,
-                                              site: site(node), path: @path, line: node.location.start_line)
-            when Prism::InterpolatedStringNode
-              @dynamic_uses << DynamicUse.new(name: nil, prefix: literal_prefix(subject), reason: reason,
-                                              site: site(node), path: @path, line: node.location.start_line)
-            else
-              @dynamic_uses << DynamicUse.new(name: nil, prefix: nil, reason: reason,
-                                              site: site(node), path: @path, line: node.location.start_line)
+            when Prism::StringNode, Prism::SymbolNode then [Scan.usable_name(subject.unescaped), nil]
+            when Prism::InterpolatedStringNode then [nil, literal_prefix(subject)]
+            else [nil, nil]
             end
           end
 
@@ -199,7 +219,10 @@ module Rigor
             head = node.parts.first
             return nil unless head.is_a?(Prism::StringNode)
 
-            trimmed = head.unescaped.sub(/::\z/, "")
+            literal = Scan.usable_name(head.unescaped)
+            return nil if literal.nil?
+
+            trimmed = literal.sub(/::\z/, "")
             trimmed.empty? ? nil : trimmed
           end
 

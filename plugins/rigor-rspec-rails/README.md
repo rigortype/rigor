@@ -45,6 +45,10 @@ status-group aliases are a small, stable constant set kept in
 | Target-library invocation (ADR-39) | Lazy `require "rack/utils"` with a graceful no-flag fallback when Rack is absent. |
 | `Plugin::Base.suggest` | Did-you-mean suggestion for the `unknown-symbol` diagnostic. |
 
+## Why this plugin supplies no `rigor unused` roots
+
+It was considered for the reachability report ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3) and **deliberately contributes nothing**, for the reason [`rigor-rspec`'s README](../rigor-rspec/README.md#why-this-plugin-supplies-no-rigor-unused-roots) sets out in full: a spec's constant reference is already recorded by the ordinary scan, and rooting it would strip the `:test` role that makes "reachable only from tests" a reportable answer (ADR-102 WD8).
+
 ## Deferred matchers (rspec-rails surface)
 
 Queued for follow-up slices — each needs cross-plugin coordination or

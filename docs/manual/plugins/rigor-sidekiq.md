@@ -68,6 +68,14 @@ The default `worker_marker_modules` covers both modern Sidekiq
   `perform_at` is consumed as the schedule regardless of its type.
 - **Chained `set(...)`** (`Worker.set(queue: "low").perform_async(...)`)
   is validated as a normal call; `set`'s own options are not checked.
+- **No roots for [`rigor unused`](../02-cli-reference.md#rigor-unused).**
+  `MyWorker.perform_async` is an ordinary constant reference the report
+  already sees, so a root would add nothing; the alternative — rooting
+  every class under `app/workers` — would claim that a file's location
+  proves something enqueues it, and silently hide a genuinely orphaned
+  worker. A worker named as a *string* in `sidekiq.yml` or a cron
+  schedule would qualify, but this plugin does not read those files
+  yet.
 
 ## Plugin internals
 

@@ -67,6 +67,14 @@ to enable project-wide alongside non-spec files.
   not flagged.
 - Constant validation (`RSpec.describe SomeClass`) is the
   engine's job, not this plugin's.
+- **No roots for [`rigor unused`](../02-cli-reference.md#rigor-unused).**
+  `RSpec.describe User` is already recorded as a reference, stamped
+  with the `test` role because it came from a spec. Publishing spec
+  references as roots would strip that role, promote every
+  spec-referenced class to production-reachable, and delete the
+  report's **Reachable only from test code** section — the row that
+  tells you a class is dead production code with a live test. The
+  ordinary handling is the correct one.
 
 ## Related plugins
 

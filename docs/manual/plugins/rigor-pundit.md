@@ -48,7 +48,33 @@ plugins:
     config:
       policy_search_paths: ["app/policies"]    # default
       policy_base_classes: ["ApplicationPolicy"]  # default
+      authorization_call_paths: ["app/controllers"]  # default
 ```
+
+`authorization_call_paths` is where the plugin looks for the
+`authorize` / `policy` / `policy_scope` calls behind the reachability
+roots below. Widen it if you also authorize from `app/graphql` or
+`app/services`; it defaults narrow because the walk is a parse per
+file on every run.
+
+## Policy roots for `rigor unused`
+
+`authorize @post` runs `PostPolicy#update?`, and the name
+`PostPolicy` is never written down. So without help,
+[`rigor unused`](../02-cli-reference.md#rigor-unused) reports every
+policy in your app as possibly dead. This plugin supplies the
+policies your code actually authorizes against, so they drop out of
+the candidate list.
+
+It publishes the policies **an authorization call names**, not every
+class under `policy_search_paths`. A policy nothing authorizes
+against stays in the report, which is the answer you wanted to see:
+a root source that claims more than it can show hides real dead code
+without telling you.
+
+A policy the plugin cannot attribute to a call — a namespaced
+`Admin::PostPolicy`, a record argument it cannot read — stays a
+candidate rather than being guessed at.
 
 ## Limitations
 

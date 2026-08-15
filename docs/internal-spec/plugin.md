@@ -247,6 +247,56 @@ Three contract points, in order of how expensive they are to get wrong:
 `rigor unused` reports how many supplied roots matched no declaration
 so a contribution can be corpus-checked on a real project.
 
+#### Contributing reachability references — the `:reachability_references` fact (WD3 / WD8)
+
+`:reachability_references` is the second reserved fact name, and the
+sibling of the one above. It answers a different question: not "what
+does the framework call from outside?" but "what does this file name
+that the constant scan cannot see?".
+
+A plugin declares `produces: [:reachability_references]` and publishes
+an `Array<Hash>` of `{name:, role:}` from `#prepare`:
+
+```ruby
+manifest(id: "factorybot", version: "0.3.0",
+         produces: [:reachability_references])
+
+def prepare(services)
+  services.fact_store.publish(plugin_id: manifest.id, name: :reachability_references,
+                              value: [{ name: "Admin::User", role: :test }])
+end
+```
+
+`name` is validated exactly as a root is. `role` MUST be one of
+`:production`, `:test`, `:task`, `:config` — the roles
+`Reachability::Scan.role_for` assigns a file (WD8). An unrecognised
+role drops the entry rather than defaulting to `:production`:
+defaulting would silently promote a test-tree reference, which is the
+one outcome WD8 exists to prevent. String keys and String roles are
+accepted, so a value round-tripped through a cache slot still arrives.
+
+The entry enters the graph as a file-level reference carrying that
+role, **not** as a root. Choose between the two facts by asking who
+does the naming:
+
+| Who names the class | Fact |
+| --- | --- |
+| The framework, from outside the analysed code | `:reachability_roots` |
+| The code itself, but not as a constant node | `:reachability_references` |
+
+`rigor-factorybot` is the motivating case for the second row.
+`factory :user, class: "Admin::User"` names a class as a string, and a
+bare `factory :user` is FactoryBot's own constantization of the factory
+name — neither leaves a constant node anywhere. But factories live in
+the test tree, so publishing them as roots would make every factoried
+class production-reachable and erase WD8's "reachable only from tests"
+answer for exactly the classes it is most likely to be about. The role
+keeps the finding.
+
+Both facts are optional and fail-soft in the same way: a plugin that
+raises in `#prepare`, or publishes junk, loses its own contribution and
+nothing else.
+
 #### Extracting argument literals — `Source::Literals` (boilerplate plan § 0a)
 
 `Rigor::Source::Literals` is the shared answer to "is this Prism

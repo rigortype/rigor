@@ -4,6 +4,7 @@ require "rigor/plugin"
 
 require_relative "pundit/policy_index"
 require_relative "pundit/policy_discoverer"
+require_relative "pundit/authorization_scan"
 require_relative "pundit/analyzer"
 
 module Rigor
@@ -22,6 +23,7 @@ module Rigor
     #         config:
     #           policy_search_paths: ["app/policies"]    # default; optional
     #           policy_base_classes: ["ApplicationPolicy"]  # default; optional
+    #           authorization_call_paths: ["app/controllers"]  # default; optional
     #
     # ## What it checks
     #
@@ -44,12 +46,22 @@ module Rigor
     class Pundit < Rigor::Plugin::Base
       manifest(
         id: "pundit",
-        version: "0.1.0",
+        # Bumped 2026-08-16 — publishes `:reachability_roots` for `rigor unused` (ADR-102 WD3): the policy
+        # classes the project's own `authorize` / `policy` / `policy_scope` calls name by convention.
+        version: "0.2.0",
         description: "Validates Pundit policy / authorize calls.",
         config_schema: {
           "policy_search_paths" => { kind: :array, default: ["app/policies"] },
-          "policy_base_classes" => { kind: :array, default: %w[ApplicationPolicy] }
-        }
+          "policy_base_classes" => { kind: :array, default: %w[ApplicationPolicy] },
+          # `authorization_call_paths` — where {AuthorizationScan} looks for the `authorize` / `policy` /
+          # `policy_scope` calls that ground the reachability roots. Deliberately narrower than the whole
+          # `app/` tree: controllers are where Pundit's entry points overwhelmingly live, the walk is a Prism
+          # parse per file on every run, and a project that also authorizes from `app/graphql` or
+          # `app/services` widens the list itself. Under-supply is the safe direction here — a policy this
+          # never sees stays in the report as a candidate, which is a visible row rather than a silent one.
+          "authorization_call_paths" => { kind: :array, default: ["app/controllers"] }
+        },
+        produces: [:reachability_roots]
       )
 
       producer :policy_index, watch: -> { [[@policy_search_paths, "**/*.rb"]] } do |_params|
@@ -60,9 +72,40 @@ module Rigor
         ).discover
       end
 
+      # Cached separately from `:policy_index` because the two invalidate on different trees: adding a
+      # controller changes which policies are reached without touching `app/policies` at all.
+      producer :authorized_policies, watch: -> { [[@authorization_call_paths, "**/*.rb"]] } do |_params|
+        AuthorizationScan.new(
+          io_boundary: io_boundary,
+          search_paths: @authorization_call_paths
+        ).policy_names
+      end
+
       def init(_services)
         @policy_search_paths = Array(config.fetch("policy_search_paths")).map(&:to_s)
         @policy_base_classes = Array(config.fetch("policy_base_classes")).map(&:to_s)
+        @authorization_call_paths = Array(config.fetch("authorization_call_paths")).map(&:to_s)
+      end
+
+      # ADR-102 WD3 — publishes the policies the project actually authorizes against, for `rigor unused`.
+      #
+      # The intersection is the whole design. {AuthorizationScan} says which policy names the code NAMES;
+      # {PolicyDiscoverer} says which policy classes EXIST. A root is published only where both agree, so
+      # neither an unrecognised call shape nor a mis-camelized record name can root a policy nothing reaches
+      # — the failure mode is a missing root, which shows up in the report as a candidate a human can judge,
+      # rather than a spurious root, which shows up as nothing at all.
+      #
+      # Publishing every class under `policy_search_paths` would have been one line and is exactly what this
+      # refuses to do: it would report a genuinely orphaned policy as reachable forever.
+      def prepare(services)
+        index = producer_value(:policy_index)
+        named = producer_value(:authorized_policies)
+        return if index.nil? || named.nil?
+
+        roots = named.select { |name| index.known?(name) }
+        return if roots.empty?
+
+        services.fact_store.publish(plugin_id: manifest.id, name: :reachability_roots, value: roots)
       end
 
       # File-level only: the load-error emission. The per-call policy validation runs over the engine-owned

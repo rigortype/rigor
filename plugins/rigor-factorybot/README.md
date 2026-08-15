@@ -43,12 +43,21 @@ an `errors_demo.rb` triggering the `unknown-factory` /
 
 | Surface | Used for |
 | --- | --- |
-| `manifest(... config_schema:, consumes:)` | declares the `factory_search_paths` knob (ADR-40 default) + the optional `activerecord#:model_index` dependency for the AR cross-check |
+| `manifest(... config_schema:, consumes:, produces:)` | declares the `factory_search_paths` knob (ADR-40 default), the optional `activerecord#:model_index` dependency for the AR cross-check, and the `:reachability_references` fact |
+| `#prepare(services)` (ADR-9) | publishes the reachability references below |
 | `Plugin::Base#io_boundary` (`read_file`) | reads `spec/factories` content under the trusted scope |
 | `Plugin::Base.producer` + `#cache_for` | caches the per-run factory index (cache invalidates via `producer watch:`) |
 | `node_rule` (ADR-37) | per-call validation over the engine-owned walk |
 | `Plugin::Base.suggest` | did-you-mean for both `unknown-*` rules |
 | `Plugin::Inflector` (ADR-39) | factory-name → model-class fallback (`camelize`) |
+
+## Factory references for `rigor unused`
+
+A factory names its model class by a mechanism the constant scan cannot follow: `factory :user, class: "Admin::User"` is a string, and a bare `factory :user` is FactoryBot's own constantization of the factory name. Neither leaves a constant node anywhere in the project, so without help [`rigor unused`](../../docs/manual/02-cli-reference.md#rigor-unused) reports a factoried model as dead.
+
+The plugin publishes those model classes as the `:reachability_references` fact ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3), each carrying the `:test` role.
+
+**References, not roots — and the distinction is the point.** Factories live in the test tree. Rooting them would make every factoried class *production*-reachable and erase ADR-102 WD8's "reachable only from tests" category for exactly the classes it is most likely to be about: a model kept alive by its factory and its spec and nothing else is the archetype of dead production code with a live test, and that is the most actionable row the report produces. Carrying the role keeps the finding — such a class leaves the candidate list, because something really does reach it, and appears under **Reachable only from test code** instead.
 
 ## License
 

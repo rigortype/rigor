@@ -347,6 +347,29 @@ because an over-claiming root source silently *hides* dead code. A
 framework Rigor has no plugin for supplies no roots, so its
 controllers still read as candidates.
 
+`rigor-pundit` supplies the second kind of root: a policy class is
+reached as `PostPolicy` from `authorize @post`, a name that appears
+nowhere in the source. It publishes the policies your authorization
+calls actually name — not every class under `app/policies`, because a
+file's location is not evidence that anything authorizes against it.
+
+A plugin can also contribute a **reference** rather than a root, and
+`rigor-factorybot` is why the distinction exists. `factory :user,
+class: "Admin::User"` names a class as a string the scan cannot see,
+so it is real evidence of use — but a factory lives in the test tree.
+Supplied as a reference carrying the `test` role, the class leaves
+the candidate list and appears under *Reachable only from test code*;
+supplied as a root it would have been promoted to
+production-reachable, and the more interesting finding would have
+disappeared.
+
+Most bundled plugins deliberately contribute nothing.
+`MyWorker.perform_async`, `MyJob.perform_later`, `MyMailer.welcome`
+and `RSpec.describe User` all write the class name as an ordinary
+constant, which the report already records — and for the spec case,
+records with the `test` role that makes the section above possible.
+Each plugin's page says which choice it made and why.
+
 Three things the report separates rather than merges:
 
 - **Reachable only from test code** gets its own section — a class

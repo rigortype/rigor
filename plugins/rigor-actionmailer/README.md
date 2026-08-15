@@ -70,6 +70,12 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | `node_rule` + `NodeContext` (ADR-37) | Per-call validation over the engine-owned walk; `missing-view` diagnostics surface when the file under analysis is the mailer's source. |
 | `Plugin::Inflector` (ADR-39) | Mailer-name → view-directory `underscore` via the real `ActiveSupport::Inflector`. |
 
+## Why this plugin supplies no `rigor unused` roots
+
+It was considered for the reachability report ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3) and **deliberately contributes nothing**.
+
+`MyMailer.welcome(user).deliver_later` names the mailer class as an ordinary constant, which `rigor unused`'s constant scan already records. The alternative — rooting every class under `app/mailers` — would claim reachability for a mailer nothing sends, on no evidence beyond the file's location, and an over-supplying root source hides real dead code silently (ADR-102 § Consequences).
+
 ## Future direction
 
 - **Cross-plugin handoff**: a future slice could publish

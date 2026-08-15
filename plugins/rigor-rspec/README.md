@@ -73,6 +73,14 @@ architecturally-rich `rigor-activerecord`: same plugin
 contract, much smaller surface — proof that the contract
 scales down.
 
+## Why this plugin supplies no `rigor unused` roots
+
+It was considered for the reachability report ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3) and **deliberately contributes nothing** — the same decision `rigor-rspec-rails` records.
+
+`RSpec.describe User` and `described_class` name the class as an ordinary constant, so `rigor unused`'s scan already sees the reference. What it also does — and must keep doing — is stamp that reference with the `:test` role, because the file it came from is a spec (ADR-102 WD8).
+
+Publishing spec references as **roots** would strip that role and promote every spec-referenced class to production-reachable. That erases the report's `Reachable only from test code` section outright: a class used solely by its own spec is dead production code with a live test, which is the single most actionable row the report produces, and it is precisely the class a spec reference would have promoted. The right handling is the one the ordinary scan already gives it, so there is nothing for this plugin to add.
+
 ## Future direction
 
 The two slices below are the obvious follow-ups; both

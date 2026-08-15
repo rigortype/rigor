@@ -100,6 +100,90 @@ RSpec.describe Rigor::Reflection do
       expect(described_class.resolve_constant_type("FROBINATOR", scope: scope)).to be_nil
     end
 
+    # #354 — Ruby's constant lookup is `Module.nesting`, THEN the ancestors of the innermost
+    # cresting scope, THEN the top level. The ancestor step was missing, which lost the resolution
+    # outright and — worse — handed a shadowed lookup to the top-level fallback.
+    describe "ancestor step (#354)" do
+      # `class Sub < Base`, with `Base` including `Mixin`. `Base` and `Mixin` are registered as
+      # discovered classes because that is what a real run produces — an as-written ancestor name
+      # that names no discovered project namespace is dropped by design, so omitting them here
+      # would test the drop path instead of the walk.
+      def sub_scope(in_source: {})
+        discovered = {
+          "Sub" => Rigor::Type::Combinator.singleton_of("Sub"),
+          "Base" => Rigor::Type::Combinator.singleton_of("Base"),
+          "Mixin" => Rigor::Type::Combinator.singleton_of("Mixin")
+        }
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: in_source,
+          discovered_classes: discovered,
+          discovered_superclasses: { "Sub" => "Base" },
+          discovered_includes: { "Base" => ["Mixin"] }
+        )
+        Rigor::Scope.empty
+                    .with_self_type(Rigor::Type::Combinator.nominal_of("Sub"))
+                    .with_discovery(index)
+      end
+
+      it "resolves a constant owned by the superclass" do
+        pinned = Rigor::Type::Combinator.constant_of(42)
+        scope = sub_scope(in_source: { "Base::INHERITED" => pinned })
+        expect(described_class.resolve_constant_type("INHERITED", scope: scope)).to eq(pinned)
+      end
+
+      it "resolves a constant owned by a module the superclass includes" do
+        pinned = Rigor::Type::Combinator.constant_of(7)
+        scope = sub_scope(in_source: { "Mixin::FROM_MIXIN" => pinned })
+        expect(described_class.resolve_constant_type("FROM_MIXIN", scope: scope)).to eq(pinned)
+      end
+
+      # The regression this issue is really about: both names exist, and Ruby gives the lookup to
+      # the ancestor. Before the fix the bare-name fallback won and the reference typed as the
+      # top-level constant — a wrong type on correct code, not merely a missing one.
+      it "prefers the ancestor's constant over a shadowing top-level constant" do
+        from_ancestor = Rigor::Type::Combinator.constant_of(42)
+        from_toplevel = Rigor::Type::Combinator.constant_of("top-level")
+        scope = sub_scope(in_source: { "Base::KEY" => from_ancestor, "KEY" => from_toplevel })
+        expect(described_class.resolve_constant_type("KEY", scope: scope)).to eq(from_ancestor)
+      end
+
+      # The control that keeps the two preceding examples honest: with no ancestor owning the name,
+      # the top-level fallback must still answer exactly as it did before.
+      it "still falls back to the top level when no ancestor owns the name" do
+        pinned = Rigor::Type::Combinator.constant_of("top-level")
+        scope = sub_scope(in_source: { "ONLY_TOPLEVEL" => pinned })
+        expect(described_class.resolve_constant_type("ONLY_TOPLEVEL", scope: scope)).to eq(pinned)
+      end
+
+      it "terminates on a superclass cycle" do
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: {},
+          discovered_superclasses: { "A" => "B", "B" => "A" },
+          discovered_classes: { "A" => Rigor::Type::Combinator.singleton_of("A"),
+                                "B" => Rigor::Type::Combinator.singleton_of("B") }
+        )
+        scope = Rigor::Scope.empty
+                            .with_self_type(Rigor::Type::Combinator.nominal_of("A"))
+                            .with_discovery(index)
+        expect(described_class.resolve_constant_type("NOPE", scope: scope)).to be_nil
+      end
+
+      # An RBS-known ancestor contributes no name to the walk: `superclass_of` carries the
+      # as-written name and it resolves to no discovered project class, so it is dropped. Recorded
+      # so the boundary is deliberate rather than accidental.
+      it "drops an ancestor that names no discovered project class" do
+        pinned = Rigor::Type::Combinator.constant_of(1)
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: { "ActiveRecord::Base::TABLE" => pinned },
+          discovered_superclasses: { "Model" => "ActiveRecord::Base" }
+        )
+        scope = Rigor::Scope.empty
+                            .with_self_type(Rigor::Type::Combinator.nominal_of("Model"))
+                            .with_discovery(index)
+        expect(described_class.resolve_constant_type("TABLE", scope: scope)).to be_nil
+      end
+    end
+
     describe "RBS-backed lookups under cache_store (v0.0.9 group A slice 4)" do
       let(:tmpdir) { Dir.mktmpdir("rigor-reflection-cache-spec-") }
       let(:store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

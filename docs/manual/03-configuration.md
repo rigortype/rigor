@@ -70,7 +70,7 @@ cache:
 | --- | --- | --- | --- |
 | `libraries` | Array | `[]` | Standard-library / gem names whose bundled RBS to load. |
 | `signature_paths` | Array | `nil` | Extra directories of `.rbs` files. Relative entries resolve against the config file's directory. |
-| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches. |
+| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
 
 ### Config validation warnings

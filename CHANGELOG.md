@@ -23,6 +23,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - The report prints how many roots came from plugins and how many of them named a class your project does not declare, so an over-claiming root source — which would silently hide real dead code — is visible rather than invisible.
 - **[plugins]** A plugin can contribute entry points to `rigor unused` by publishing an array of constant names as the `:reachability_roots` fact from its `prepare` hook ([#349](https://github.com/rigortype/rigor/issues/349)).
   - Framework knowledge stays in plugins; the core only reads the fact. Documented in [`docs/internal-spec/plugin.md`](docs/internal-spec/plugin.md).
+- **[engine]** A file listed in `pre_eval:` now publishes its top-level constants to the rest of the project, so a shared `TIMEOUT = 30` is typed where it is used instead of only where it is written ([#352](https://github.com/rigortype/rigor/issues/352)).
+  - The published type is the widened class — `Integer` for `30`, `String` for `"x"`, `Hash` for a literal hash — not the exact value. A constant carrying its literal shape across files would make a call like `CONFIG.fetch(:missing)` an error in a file whose author never opened the definition, which is a worse trade than the precision is worth. Constants in files you have not listed are unchanged, and a name written in more than one listed file widens rather than becoming a union.
 
 ### Fixed
 

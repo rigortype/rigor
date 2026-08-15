@@ -89,10 +89,13 @@ module Rigor
         # program and types its rvalue under a scope that carries the surrounding qualified prefix as `self_type`, so
         # the rvalue typer sees in-class references resolve correctly. Multiple writes to the same qualified name union
         # via `Type::Combinator.union`.
+        # Issue #352 — the per-file table merges OVER whatever the base scope already published (the
+        # `pre_eval:` constant seed `Runner#project_scope_seed_tables` applies). Same-file declarations are the
+        # most specific authority, exactly as `merged_classes` above resolves the same collision. Without the
+        # merge, the assignment below would silently drop the project seed on every file.
         in_source_constants = build_in_source_constants(root, seeded_scope)
-        seeded_scope = seeded_scope.with_discovery(
-          seeded_scope.discovery.with(in_source_constants: in_source_constants)
-        )
+        merged_constants = merge_seeded_constants(default_scope.in_source_constants, in_source_constants)
+        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(in_source_constants: merged_constants))
         # Issue #345 spike instrumentation. `discovered_classes` and `in_source_constants` here are the
         # PER-FILE tables (before the cross-file project seed merges in), so the declaration source is
         # exactly `default_scope.source_path`. Inert unless RIGOR_UNUSED_PROBE is set.
@@ -1211,6 +1214,15 @@ module Rigor
         accumulator = {}
         walk_constant_writes(root, [], default_scope, accumulator)
         accumulator.freeze
+      end
+
+      # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table. Returns the
+      # per-file table unchanged (same frozen object) when nothing was seeded, so a run without `pre_eval:`
+      # constants allocates and compares exactly what it did before.
+      def merge_seeded_constants(seeded, per_file)
+        return per_file if seeded.nil? || seeded.empty?
+
+        seeded.merge(per_file).freeze
       end
 
       def walk_constant_writes(node, qualified_prefix, default_scope, accumulator)

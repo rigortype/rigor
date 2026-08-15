@@ -3,7 +3,6 @@
 require "rbs"
 
 require_relative "../type"
-require_relative "../unused_probe" # issue #345 spike instrumentation
 require_relative "../inference/rbs_type_translator"
 require_relative "rbs_hierarchy"
 
@@ -294,9 +293,6 @@ module Rigor
             next if parsed.nil? # quarantined (unparseable) or unreadable — skip so the env survives
 
             buffer, directives, decls = parsed
-            # Issue #345 spike instrumentation — project `sig/` type references. Inert unless
-            # RIGOR_UNUSED_PROBE is set.
-            UnusedProbe.record_rbs_decls(decls, file) if UnusedProbe::ACTIVE
             add_parsed_decls(env, buffer, directives, decls)
           end
         end
@@ -629,8 +625,6 @@ module Rigor
 
             buffer = ::RBS::Buffer.new(name: filename.to_s, content: content.to_s)
             _, directives, decls = ::RBS::Parser.parse_signature(buffer)
-            # Issue #345 spike instrumentation — ADR-93 inline / plugin virtual RBS type references.
-            UnusedProbe.record_rbs_decls(decls, filename.to_s) if UnusedProbe::ACTIVE
             add_parsed_decls(env, buffer, directives, decls)
           rescue ::RBS::BaseError
             # WD6 fail-soft: a single broken virtual RBS contribution does not pull the whole env down — for

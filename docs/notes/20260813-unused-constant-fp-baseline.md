@@ -15,6 +15,13 @@ attached to it. A count without that ratio is not a result.
 The funnel is shaped after the source article's `631 → 9 → 3 → 2` decay: start from the naive count,
 then apply successively more expensive root-set knowledge and watch how much each stage buys.
 
+> **The instrument described below no longer exists in the tree.** It was spike scaffolding in four
+> engine files plus `tool/unused_probe/`, kept only until the slices that needed to re-measure against
+> this baseline had landed (#348, #349, #350). With those done and `rigor unused` shipping as the real
+> implementation, it was removed. To reproduce the runs in this note, check out the harness from git
+> history — `3b236b8b` added it and `7a1cfaba` added the stage filter — or, for anything forward-looking,
+> use `rigor unused`, which supersedes it and measures the same population more accurately.
+
 ## Method
 
 The instrumentation is `lib/rigor/unused_probe.rb` (gated on `RIGOR_UNUSED_PROBE`, five hook sites,

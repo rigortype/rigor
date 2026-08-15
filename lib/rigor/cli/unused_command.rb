@@ -8,6 +8,7 @@ require_relative "../analysis/path_expansion"
 require_relative "../analysis/reachability/scan"
 require_relative "../analysis/reachability/graph"
 require_relative "../analysis/reachability/plugin_roots"
+require_relative "../analysis/reachability/signature_scan"
 require_relative "options"
 require_relative "command"
 require_relative "probe_environment"
@@ -132,28 +133,13 @@ module Rigor
       # otherwise never match anything and silently produce a root set of zero.
       # A constant named only from the project's own `sig/` is referenced — the #345 probe reported exactly this
       # as a false candidate until an RBS-side hook was added, because `Reflection.resolve_constant_type` is
-      # source-side only.
-      #
-      # Harvested by scanning each signature for constant-shaped tokens rather than by walking the parsed RBS
-      # AST. That deliberately OVER-approximates (a name inside a comment counts), and over-approximating
-      # references is the false-positive-safe direction for this report: it can only remove candidates, never
-      # invent one. Every such reference is attributed at file level with the `:config` role, so it seeds
-      # production reachability but is not mistaken for test usage.
-      CONSTANT_TOKEN = /\b[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*/
-      private_constant :CONSTANT_TOKEN
-
+      # source-side only. A signature also DECLARES, though, and {Analysis::Reachability::SignatureScan} is
+      # what keeps the two apart (issue #363).
       def signature_references(configuration)
         Array(configuration.signature_paths).flat_map do |dir|
           next [] unless File.directory?(dir)
 
-          Dir.glob(File.join(dir, "**/*.rbs")).flat_map do |file|
-            File.read(file).scan(CONSTANT_TOKEN).map do |name|
-              Analysis::Reachability::Scan::Reference.new(as_written: name, nesting: [].freeze, from: nil,
-                                                          role: :config, path: file, line: 1)
-            end
-          rescue SystemCallError
-            []
-          end
+          Dir.glob(File.join(dir, "**/*.rbs")).flat_map { |file| Analysis::Reachability::SignatureScan.call(file) }
         end
       end
 

@@ -272,23 +272,17 @@ baseline file for this command.
 
 ### If your project ships generated RBS
 
-A class's own generated signature is currently counted as a reference
-to itself, and because signature references are file-level they become
-roots. On one application 48 of 101 roots came from `sig/`, hiding
-seven candidates and ten test-only rows. This is [issue #363][issue-363].
+Signature files both declare and reference, and only the references
+count. `class Talk < ApplicationRecord` in `sig/` references
+`ApplicationRecord`; the `Talk` it declares is not a reference to
+`Talk`. If it were, every class with a generated signature would root
+itself and the report would be empty of exactly the rows you want.
 
-Until it is fixed, compare against a signature-free run. Copy your
-config, empty one key, and pass it explicitly:
-
-```sh
-cp .rigor.yml /tmp/no-sig.yml   # then set: signature_paths: []
-rigor unused --config /tmp/no-sig.yml
-```
-
-This cannot invent false candidates. `rigor unused` performs no type
-inference — `signature_paths:` feeds only the reference harvest — so
-removing signatures removes references and nothing else. Where the two
-runs disagree, the signature-free one is the more honest number.
+That is worth knowing because it was wrong until recently, and the
+symptom was silent: on one application 48 of 101 roots came from `sig/`
+and eleven rows never appeared. If you are on a release before this was
+fixed ([issue #363][issue-363]), compare against a run with
+`signature_paths:` emptied — a large gap between the two is the tell.
 
 ## Automating it
 

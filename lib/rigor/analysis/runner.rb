@@ -20,6 +20,7 @@ require_relative "../unused_probe" # issue #345 spike instrumentation
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
 require_relative "../inference/parameter_inference_collector"
+require_relative "../inference/pre_eval_constants"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/project_patched_scanner"
@@ -190,6 +191,11 @@ module Rigor
         # scope (sequential + fork-worker) through `project_scope_seed_tables`. Empty by default, so the gate-off
         # run carries no table and is byte-identical.
         @project_param_inferred_types = {}.freeze
+        # Issue #352 / ADR-17 — the `pre_eval:` constant publication table, populated by
+        # `seed_pre_eval_constants` in `assemble_run_diagnostics` and seeded onto every per-file scope
+        # (sequential + fork-worker) through `project_scope_seed_tables`. Empty unless the project lists
+        # `pre_eval:` files that declare publishable constants, so a project without one is byte-identical.
+        @project_pre_eval_constants = {}.freeze
         # ADR-84 WD2 — per-run identity token for the user-method return memo's bucket (see
         # Scope::DiscoveryIndex#run_generation). Minted fresh in `run_analysis` so the memo never serves an
         # entry across a run boundary (LSP re-check, ADR-62 warm loop); nil until the first run so
@@ -535,6 +541,11 @@ module Rigor
         # assembles). Gate off → no-op, and `environment` is left untouched so its lazy build timing is
         # unchanged. Returns the resolved environment so the sequential dispatch reuses it (no double build).
         environment = seed_parameter_inference(expansion, environment)
+        # Issue #352 — the `pre_eval:` constant publication pre-pass. Same placement rationale as the line
+        # above: it runs on the parent BEFORE the pool split so every worker sees the same frozen table, and
+        # only on the analysis (miss) path. No `pre_eval:` entry → no-op, and `environment` passes through
+        # untouched so its lazy build timing is unchanged.
+        environment = seed_pre_eval_constants(expansion, environment)
         diagnostics = @diagnostic_aggregator.pre_file_diagnostics(expansion)
         # ADR-46 — record which project files this run actually analyzed (the `analyze_only` subset, or
         # all of them). The incremental orchestrator serves every analyzed-but-not-affected file from the
@@ -578,6 +589,34 @@ module Rigor
         environment
       rescue StandardError
         @project_param_inferred_types = {}.freeze
+        environment
+      end
+
+      # Issue #352 / ADR-17 — the `pre_eval:` CONSTANT publication pre-pass, the twin of the slice-2 patched-
+      # METHOD registry the eager pre-passes already build. Walks each listed file's constant writes with the
+      # per-file pre-pass ({Inference::ScopeIndexer.build_in_source_constants}) under a project-seeded scope,
+      # widens each result to its erased class, and populates `@project_pre_eval_constants` — which
+      # `project_scope_seed_tables` then seeds onto every per-file scope, so `TIMEOUT = 30` in a listed file
+      # reads as `Integer` instead of `Dynamic[top]` in its consumers. The widening + multi-file conflict rules
+      # live in {Inference::PreEvalConstants}.
+      #
+      # Runs here rather than in {ProjectPrePasses#run} because typing a constant's rvalue needs the RBS
+      # environment, which the eager pre-passes feed rather than consume. Fails soft — a collector error must
+      # never break a run, so the table stays empty and the run proceeds exactly as it does today.
+      def seed_pre_eval_constants(expansion, environment)
+        paths = @configuration.pre_eval.select { |path| File.file?(path) }
+        return environment if paths.empty?
+
+        environment ||= @pool_coordinator.resolve_sequential_environment(source_files: expansion.fetch(:files))
+        @project_pre_eval_constants = Inference::PreEvalConstants.collect(
+          paths: paths, target_ruby: @configuration.target_ruby, buffer: @buffer,
+          scope_builder: lambda { |path|
+            seed_project_scope(Scope.empty(environment: environment, source_path: path))
+          }
+        )
+        environment
+      rescue StandardError
+        @project_pre_eval_constants = {}.freeze
         environment
       end
 
@@ -625,7 +664,7 @@ module Rigor
       # file (`rbs_descriptor.files`), and every file each plugin read (complete post-run, so reads made
       # mid-analysis are included). Re-digested on the next run by {Descriptor#fresh?}.
       def run_dependency_descriptor(expansion, rbs_descriptor)
-        entries = analyzed_file_entries(expansion) + rbs_descriptor.files
+        entries = analyzed_file_entries(expansion) + pre_eval_file_entries + rbs_descriptor.files
         @plugin_registry.plugins.each do |plugin|
           # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
           # are frozen after the run, and a plugin that never built a boundary read no files through it,
@@ -641,6 +680,21 @@ module Rigor
           physical = @buffer ? @buffer.resolve(path) : path
           # ADR-87 WD1 — validation-only dependency descriptor, so the stat-then-digest `:stat` comparator
           # applies (the env-cache KEY files stay `:digest`).
+          Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
+        end
+      end
+
+      # Issue #352 — a `pre_eval:` file is a real input to the run's diagnostics: its `def`s populate the
+      # ADR-17 patched-method registry and (since #352) its constants populate the project seed. ADR-17 WD5
+      # permits listing a file under `pre_eval:` and NOT under `paths:`, and such a file never appears in the
+      # expansion — so without this entry, editing one would leave the run-result cache serving diagnostics
+      # computed against the previous version. The common case (a `lib/core_ext/` file that is also under
+      # `paths:`) contributes a duplicate entry, which the descriptor's per-path validation absorbs.
+      def pre_eval_file_entries
+        @configuration.pre_eval.filter_map do |path|
+          physical = @buffer ? @buffer.resolve(path) : path
+          next unless File.file?(physical)
+
           Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
         end
       end
@@ -1121,10 +1175,7 @@ module Rigor
           tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
         end
         tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
-        # ADR-67 WD6a — the call-site parameter-inference table rides the same seed so a pooled `WorkerSession`
-        # scope seeds inferred parameters identically to the sequential path. Empty (and absent) unless the
-        # `parameter_inference:` gate ran the pre-pass.
-        tables[:param_inferred_types] = @project_param_inferred_types unless @project_param_inferred_types.empty?
+        seed_opt_in_pre_pass_tables(tables)
         seed_member_layout_tables(tables)
         # ADR-46 slice 1 — the class-declaration source map is read only by the ancestry accessors during
         # dependency recording, so seed it only when recording is on; a normal run never carries it.
@@ -1139,6 +1190,23 @@ module Rigor
       # from. Extracted so the seed costs {#project_scope_seed_tables} no branch of its complexity budget.
       def discovery_seed_base
         @discovery_seed ? @discovery_seed.dup : {}
+      end
+
+      # Seeds the two OPT-IN pre-pass tables — the ones an ordinary run leaves empty, so they are absent from
+      # the seed entirely unless the project asked for them. Both ride this seed so a pooled `WorkerSession`
+      # scope resolves identically to the sequential path (ADR-15 sequential equivalence).
+      #
+      # - ADR-67 WD6a `param_inferred_types`: the call-site parameter-inference table, populated only when the
+      #   `parameter_inference:` gate ran the pre-pass.
+      # - Issue #352 `in_source_constants`: the `pre_eval:` constant publication, populated only when the
+      #   project lists `pre_eval:` files that declare publishable constants.
+      #
+      # Extracted to keep {#project_scope_seed_tables} under the complexity budget.
+      def seed_opt_in_pre_pass_tables(tables)
+        tables[:param_inferred_types] = @project_param_inferred_types unless @project_param_inferred_types.empty?
+        return if @project_pre_eval_constants.empty?
+
+        tables[:in_source_constants] = @project_pre_eval_constants
       end
 
       # ADR-46 — seed the instance + singleton `"path:line"` def-source tables (each only when non-empty).

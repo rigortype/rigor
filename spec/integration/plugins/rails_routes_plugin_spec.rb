@@ -1618,4 +1618,149 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(table["users_path"]).to include(arity: 0, action: :index)
     end
   end
+
+  # ADR-102 WD3 — the plugin's second fact: the controller classes `config/routes.rb` dispatches to, which
+  # `rigor unused` seeds its reachability sweep with. A controller is reached by NAME at request time, so
+  # without this every routed controller in a Rails app reads as unreferenced.
+  #
+  # The parser is exercised directly here rather than through a full analysis run: these are assertions about
+  # route-DSL interpretation, and a `Runner` round-trip per route shape would add a second of wall time each
+  # while testing the same three lines.
+  describe "ADR-102 controller roots" do
+    def controllers_for(routes_source, acronyms: [])
+      Rigor::Plugin::RailsRoutes::RoutesParser.parse(routes_source, acronyms: acronyms).controllers
+    end
+
+    def drawn(body)
+      "Rails.application.routes.draw do\n#{body}\nend\n"
+    end
+
+    it "names the controller of a plural and a singular resource" do
+      # Rails serves a SINGULAR `resource :profile` from the PLURAL `ProfilesController` — the one point
+      # where the two resourceful shapes disagree, and the one most likely to be got wrong by hand.
+      expect(controllers_for(drawn("resources :users\nresource :profile"))).to \
+        eq(%w[ProfilesController UsersController])
+    end
+
+    it "does not namespace a nested resource under its parent" do
+      expect(controllers_for(drawn("resources :users do\n  resources :posts\nend"))).to \
+        eq(%w[PostsController UsersController])
+    end
+
+    it "composes the module chain from namespace and scope module:" do
+      source = drawn(<<~ROUTES)
+        namespace :admin do
+          resources :widgets
+          scope module: :reports do
+            resources :daily
+          end
+        end
+      ROUTES
+
+      expect(controllers_for(source)).to eq(["Admin::Reports::DailyController", "Admin::WidgetsController"])
+    end
+
+    it "reads the module: option on a resource itself" do
+      expect(controllers_for(drawn("resources :votes, only: :create, module: :polls"))).to \
+        eq(["Polls::VotesController"])
+    end
+
+    it "reads an explicit to:, a bare controller#action string, and a hashrocket target" do
+      source = drawn(<<~ROUTES)
+        root "welcome#index"
+        get "/about", to: "static#about", as: :about
+        get 'help/*path' => 'help#show', as: :help_page
+      ROUTES
+
+      expect(controllers_for(source)).to eq(%w[HelpController StaticController WelcomeController])
+    end
+
+    it "reads the controller: option, including its module-path and absolute forms" do
+      source = drawn(<<~ROUTES)
+        namespace :admin do
+          resources :legacy, controller: "archive/legacy"
+          resources :shared, controller: "/shared"
+        end
+      ROUTES
+
+      expect(controllers_for(source)).to eq(["Admin::Archive::LegacyController", "SharedController"])
+    end
+
+    it "still names the controller when only: / except: narrow the action set" do
+      source = drawn("resources :users, only: [:index]\nresources :posts, except: [:destroy]")
+
+      expect(controllers_for(source)).to eq(%w[PostsController UsersController])
+    end
+
+    # Over-supply is the expensive direction: a root claiming a controller the routes never reach silently
+    # hides real dead code (ADR-102 § Consequences). `only: []` with a nesting-only block routes NOTHING to
+    # its own controller; the same option with an action in the block does.
+    it "omits an `only: []` resource used purely as a nesting wrapper" do
+      source = drawn("resources :groups, only: [] do\n  resources :members\nend")
+
+      expect(controllers_for(source)).to eq(["MembersController"])
+    end
+
+    it "keeps an `only: []` resource whose block declares its own action" do
+      source = drawn("resource :secret, only: [], module: :webhooks do\n  member do\n    post :rotate\n  end\nend")
+
+      expect(controllers_for(source)).to eq(["Webhooks::SecretsController"])
+    end
+
+    # THE capability claim. The source article this work came from read the routes off a BOOTED Rails app
+    # (`Rails.application.routes.routes`), where a route guarded by a false condition is simply absent from
+    # the table — its author had to find that case by reading code. Static interpretation sees both branches
+    # of the conditional, because it never evaluates the condition at all.
+    it "treats a controller routed under a conditional as a root" do
+      source = drawn(<<~ROUTES)
+        get "/beta", to: "beta#index" if ENV["ENABLE_BETA"]
+        if Rails.env.development?
+          resources :dev_tools
+        else
+          resources :prod_tools
+        end
+      ROUTES
+
+      expect(controllers_for(source)).to \
+        eq(%w[BetaController DevToolsController ProdToolsController])
+    end
+
+    it "respells controller names through the project's own inflector acronyms" do
+      source = drawn("scope module: :activitypub do\n  resources :collections, only: [:show]\nend")
+
+      expect(controllers_for(source, acronyms: ["ActivityPub"])).to eq(["ActivityPub::CollectionsController"])
+      expect(controllers_for(source)).to eq(["Activitypub::CollectionsController"])
+    end
+
+    # The other half of "Rigor beats the booted-app approach": no boot. Asserted as a DELTA so the check is
+    # about what this parse loads, not about what the rest of the suite happens to have loaded already.
+    it "loads no Rails runtime on the root-supply path" do
+      before_features = $LOADED_FEATURES.dup
+
+      controllers_for(drawn("resources :users\nget '/x', to: 'x#y'"))
+
+      loaded = $LOADED_FEATURES - before_features
+      expect(loaded.grep(%r{/(rails|railties|action_dispatch|action_controller|action_pack)[/.]})).to be_empty
+      expect(Object.const_defined?(:Rails)).to be(false)
+    end
+
+    it "publishes the controller set as the `:reachability_roots` fact" do
+      captured_store = nil
+      allow(Rigor::Plugin::Services).to receive(:new).and_wrap_original do |original, **kwargs|
+        services = original.call(**kwargs)
+        captured_store = services.fact_store
+        services
+      end
+
+      run_plugin(source: "users_path\n", files: { "config/routes.rb" => DEFAULT_ROUTES_RB })
+
+      roots = captured_store.read(plugin_id: "rails-routes", name: :reachability_roots)
+      expect(roots).to include("UsersController", "Admin::WidgetsController", "StaticController",
+                               "ProfilesController", "HomeController", "PostsController")
+    end
+
+    it "declares the fact in its manifest" do
+      expect(plugin_class.manifest.produces).to include(:reachability_roots)
+    end
+  end
 end

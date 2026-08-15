@@ -203,6 +203,50 @@ override it to walk the project and call
 topological ordering guarantees a producer's `prepare` runs before
 any consumer's. The default is a no-op.
 
+#### Contributing reachability roots — the `:reachability_roots` fact ([ADR-102](../adr/102-unused-code-reachability-report.md) WD3)
+
+`:reachability_roots` is a **reserved fact name**: the core reads it
+from every loaded plugin, so it is the one fact whose consumer is
+Rigor itself rather than another plugin.
+
+A plugin declares `produces: [:reachability_roots]` and publishes an
+`Array<String>` of fully-qualified constant names from `#prepare`:
+
+```ruby
+manifest(id: "rails-routes", version: "0.29.0",
+         produces: %i[helper_table reachability_roots])
+
+def prepare(services)
+  services.fact_store.publish(plugin_id: manifest.id, name: :reachability_roots,
+                              value: ["Admin::UsersController", "HomeController"])
+end
+```
+
+`rigor unused` ([ADR-102](../adr/102-unused-code-reachability-report.md))
+loads the project's plugins, runs every `#prepare`, and seeds its
+mark-and-sweep with the union of these facts. Entries that are not
+shaped like a constant path are dropped; a leading `::` is stripped.
+Publishing nothing (or omitting the fact entirely) is how a plugin
+says it contributes no roots.
+
+Three contract points, in order of how expensive they are to get wrong:
+
+1. **Under-supply beats over-supply.** A root naming a constant the
+   project does not declare is inert. A root claiming one it does not
+   really reach silently hides real dead code, and there is no
+   downstream signal that it happened. When a route target is not
+   statically readable — `to: redirect(...)`, an interpolated
+   controller name — publish nothing rather than a guess.
+2. **The value is data, not objects.** It crosses the same fact store
+   worker sessions rebuild per process; keep it to Strings.
+3. **Roots are for entry points, not for "probably used".** The fact
+   answers "something outside the analysed code calls this by name",
+   which is why route tables, DI wiring and registration DSLs qualify
+   and a heuristic does not.
+
+`rigor unused` reports how many supplied roots matched no declaration
+so a contribution can be corpus-checked on a real project.
+
 #### Extracting argument literals — `Source::Literals` (boilerplate plan § 0a)
 
 `Rigor::Source::Literals` is the shared answer to "is this Prism

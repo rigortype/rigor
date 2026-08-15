@@ -2,6 +2,7 @@
 
 require "rigor/plugin"
 
+require_relative "rails_routes/acronyms"
 require_relative "rails_routes/helper_table"
 require_relative "rails_routes/routes_parser"
 require_relative "rails_routes/helper_discoverer"
@@ -59,7 +60,11 @@ module Rigor
         # shorten `namespace_project_*` → `project_*`. Bumped 2026-07-10 — recognises the open helper
         # namespace `grape-path-helpers` generates (`api_v4_*_path`), grounded in the project's own Grape
         # `prefix` / `version` declarations (see {GrapeApiDiscoverer}).
-        version: "0.28.0",
+        # Bumped 2026-08-15 — the parser now also accumulates the CONTROLLER classes the routes file
+        # dispatches to, published as the `:reachability_roots` fact for `rigor unused` (ADR-102 WD3). The
+        # bump matters mechanically as well as editorially: the manifest version is part of the producer
+        # cache key, so it retires `:helper_table` slots written before the table carried `controllers`.
+        version: "0.29.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => { kind: :string, default: "config/routes.rb" },
@@ -78,7 +83,7 @@ module Rigor
           # API declares no prefixes and nothing changes for it.
           "grape_api_paths" => { kind: :array, default: ["lib/api", "app/api"] }
         },
-        produces: [:helper_table]
+        produces: %i[helper_table reachability_roots]
       )
 
       # Cached producer — reads `config/routes.rb` through the trusted `IoBoundary` and parses through
@@ -100,11 +105,16 @@ module Rigor
         end
         contents = io_boundary.read_file(@routes_file)
         RoutesParser.parse(contents, file_reader: file_reader, custom_helpers: discover_custom_helpers,
-                                     grape_prefixes: discover_grape_prefixes)
+                                     grape_prefixes: discover_grape_prefixes,
+                                     acronyms: discover_acronyms)
       end
 
       def init(_services)
         @routes_file = config.fetch("routes_file")
+        # Derived from `routes_file:` rather than configured separately: both live under the same `config/`
+        # tree in every Rails layout, and a second knob for a file the user never has to think about is a
+        # setting nobody will set correctly.
+        @inflections_file = File.join(File.dirname(@routes_file), "initializers", "inflections.rb")
         @helper_paths = Array(config.fetch("helper_paths")).map(&:to_s)
         @grape_api_paths = Array(config.fetch("grape_api_paths")).map(&:to_s)
         @helper_table = nil
@@ -140,6 +150,15 @@ module Rigor
         GrapeApiDiscoverer.discover(contents_per_path)
       end
 
+      # Reads the project's `config/initializers/inflections.rb` through the trusted `IoBoundary` and returns
+      # the acronyms it declares, for controller-class-name composition ({Acronyms}). The file is *parsed*,
+      # never executed. Absent file → no acronyms → composition behaves exactly as it did before.
+      def discover_acronyms
+        Acronyms.discover(io_boundary.read_file(@inflections_file))
+      rescue Plugin::AccessDeniedError, Errno::ENOENT
+        []
+      end
+
       def each_helper_file(&) = each_ruby_file(@helper_paths, &)
 
       def each_ruby_file(dirs, &)
@@ -153,6 +172,12 @@ module Rigor
 
       # Publishes the parsed table to the cross-plugin fact store; `rigor-actionpack` Phase 4 reads it via
       # `services.fact_store.read`.
+      #
+      # ADR-102 WD3 — also publishes `:reachability_roots`, the controller classes `config/routes.rb`
+      # dispatches to. A controller is an entry point *nothing in the project references*: Rails reaches it
+      # by name at request time, so a reference index sees a live controller exactly as it sees a dead one.
+      # `rigor unused` reads this fact from every loaded plugin and seeds its mark-and-sweep with the union.
+      # Nothing else consumes it, and it never reaches the `rigor check` diagnostic stream (WD1).
       def prepare(services)
         table = helper_table_or_nil
         return if table.nil?
@@ -162,6 +187,7 @@ module Rigor
           name: :helper_table,
           value: table.to_h
         )
+        publish_reachability_roots(services, table)
       end
 
       # File-level only: the once-per-run load-error emission. Per-call helper validation runs over the
@@ -193,6 +219,20 @@ module Rigor
       end
 
       private
+
+      # Publishes nothing when the routes file named no controller — an empty root set is indistinguishable
+      # from "this plugin contributed nothing", and an absent fact says so without a consumer having to
+      # special-case an empty Array.
+      def publish_reachability_roots(services, table)
+        roots = table.controllers
+        return if roots.empty?
+
+        services.fact_store.publish(
+          plugin_id: manifest.id,
+          name: :reachability_roots,
+          value: roots
+        )
+      end
 
       # The load-error path used to emit the same warning on every analyzed file in the project. On large
       # monorepos (Mastodon: 1,302 files; Solidus: ~1,000 files) and on legacy projects without a top-level

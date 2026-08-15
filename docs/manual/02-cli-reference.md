@@ -319,9 +319,33 @@ diagnostic — see
 Reachability is computed from **roots**, not by counting references,
 so a cluster of classes that only reference each other is still
 reported. Roots are the declarations in files matching
-`--entry-point=GLOB` (repeatable), plus anything referenced at file
-level by non-test code. Route- and framework-derived roots are not
-wired yet, so today's output is an upper bound.
+`--entry-point=GLOB` (repeatable), anything referenced at file level
+by non-test code, and anything the project's **plugins** contribute.
+
+Plugin-supplied roots are where framework knowledge enters. A Rails
+controller is reached by name at request time, so nothing in the
+project references it and a reference index cannot tell a live
+controller from a dead one. `rigor-rails-routes` closes that by
+reading `config/routes.rb` statically and naming every controller it
+dispatches to — no Rails boot, and a route written under a
+conditional (`get "/beta", to: "beta#index" if ENV["BETA"]`) is
+visible where a booted app's route table would not show it. On two
+Rails corpus targets this removed 56 % and 84 % of the candidate list.
+
+`rigor unused` loads the same `plugins:` your `rigor check` run uses,
+and prints how many roots came from them:
+
+```
+  roots:                    404 (288 from plugins, 0 matched no declaration)
+```
+
+`matched no declaration` is the number a plugin claimed that this
+project does not declare — normally framework classes such as
+`Rails::HealthController`. A number climbing away from zero means a
+root source has drifted out of step with the code, which matters
+because an over-claiming root source silently *hides* dead code. A
+framework Rigor has no plugin for supplies no roots, so its
+controllers still read as candidates.
 
 Three things the report separates rather than merges:
 

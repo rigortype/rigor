@@ -5,6 +5,7 @@ require "rigor/source/node_children"
 require "prism"
 require "rigor/source/literals"
 
+require_relative "acronyms"
 require_relative "helper_table"
 
 module Rigor
@@ -58,13 +59,13 @@ module Rigor
         #   draw partial from `config/routes/name.rb`. Returns file contents
         #   or nil when the file is absent.
         # @return [HelperTable]
-        def parse(contents, file_reader: nil, custom_helpers: [], grape_prefixes: [])
+        def parse(contents, file_reader: nil, custom_helpers: [], grape_prefixes: [], acronyms: [])
           parse_result = Prism.parse(contents)
           unless parse_result.errors.empty?
             return HelperTable.new([], custom_helpers: custom_helpers, grape_prefixes: grape_prefixes)
           end
 
-          context = Context.new(file_reader: file_reader)
+          context = Context.new(file_reader: file_reader, acronyms: acronyms)
           interpret(parse_result.value, context)
 
           # Apply name-transform alias rules discovered during the walk (the `direct(name.sub(X, Y)) do
@@ -85,7 +86,8 @@ module Rigor
             ]
           end
           HelperTable.new(paired, custom_helpers: custom_helpers, devise_resources: context.devise_resources,
-                                  grape_prefixes: grape_prefixes)
+                                  grape_prefixes: grape_prefixes,
+                                  controllers: context.controller_class_names)
         end
 
         # For every registered alias rule `(from_str, to_str, arity_delta)`, find every existing entry whose
@@ -127,9 +129,10 @@ module Rigor
         class Context
           attr_reader :entries, :file_reader, :devise_resources, :alias_rules
 
-          def initialize(file_reader: nil)
+          def initialize(file_reader: nil, acronyms: [])
             @entries = []
             @file_reader = file_reader
+            @acronyms = acronyms
             # Stack of prefix segments. Each entry is one of:
             # - `{ kind: :namespace, name: "admin" }`
             # - `{ kind: :scope, parent: "user", arity_segments: [":user_id"] }`
@@ -145,6 +148,47 @@ module Rigor
             # patterns. Applied after parsing via `apply_alias_rules` to generate substituted-name aliases
             # for every matching entry — closes GitLab's `namespace_project_*` → `project_*` shorthand idiom.
             @alias_rules = []
+            # ADR-102 WD3 — controller PATHS ("admin/users") in Rails' own `module/controller` spelling,
+            # accumulated as routes are interpreted and camelized to class names once at the end. Stored as
+            # paths rather than class names so the module chain composes by string join, exactly as Rails
+            # composes it, and inflection runs once per unique controller instead of once per route.
+            @controllers = []
+          end
+
+          # ADR-102 WD3 — records the controller a route dispatches to.
+          #
+          # `raw` is the controller as WRITTEN at the route site: a resource name (`users`), an explicit
+          # `controller:` value, or the left half of a `"posts#index"` target. Rails resolves it against the
+          # enclosing module chain (`namespace :admin` / `scope module: :admin`), and a leading `/` opts out
+          # of that chain — both are exactly what this reproduces.
+          def record_controller(raw)
+            name = raw.to_s.strip
+            return if name.empty?
+
+            if name.start_with?("/")
+              @controllers << name.delete_prefix("/")
+              return
+            end
+
+            prefix = controller_module_path
+            @controllers << (prefix.empty? ? name : "#{prefix}/#{name}")
+          end
+
+          # The `module/` chain in force, from `namespace :admin` and `scope module: :admin` frames. A nested
+          # `resources` frame contributes NOTHING here — `resources :users do resources :posts end` serves
+          # `PostsController`, not `Users::PostsController` — which is why the module chain is its own frame
+          # key rather than being read off the helper-prefix segments.
+          def controller_module_path
+            @stack.filter_map { |frame| frame[:module] }.join("/")
+          end
+
+          # The accumulated controller paths as Ruby class names. `admin/users` → `Admin::UsersController`,
+          # via the ADR-39 shared inflector (the authority Rails itself uses) rather than a local camelizer,
+          # then respelled through the project's own declared acronyms ({Acronyms}).
+          def controller_class_names
+            @controllers.uniq.sort.map do |path|
+              Acronyms.apply("#{Rigor::Plugin::Inflector.camelize(path)}Controller", @acronyms)
+            end.uniq.sort
           end
 
           def register_alias_rule(from, to)
@@ -163,11 +207,28 @@ module Rigor
             @concerns[name.to_sym]
           end
 
+          # `namespace :admin` is Rails shorthand for `scope path: 'admin', module: 'admin', as: 'admin'`, so
+          # the frame carries the module segment too — that is what makes `resources :users` inside it read
+          # as `Admin::UsersController`.
           def push_namespace(name)
-            @stack.push(kind: :namespace, name: name.to_s)
+            @stack.push(kind: :namespace, name: name.to_s, module: name.to_s)
             yield
           ensure
             @stack.pop
+          end
+
+          # `scope module: :admin do ... end` — contributes to the CONTROLLER chain only: no helper prefix,
+          # no path segment, no arity. Pushed around whatever other frame `handle_scope` decides on, so a
+          # `scope path: '/x', module: :admin` composes both.
+          def push_module(name)
+            return yield if name.nil? || name.to_s.empty?
+
+            @stack.push(kind: :module_scope, module: name.to_s)
+            begin
+              yield
+            ensure
+              @stack.pop
+            end
           end
 
           def push_resource(parent_name)
@@ -653,6 +714,16 @@ module Rigor
         # When `as:` is absent the block is interpreted without any prefix change — helper names are
         # unaffected by the scope's path, which matches Rails' behaviour for path-only scopes.
         def handle_scope(node, context)
+          options = options_hash(node)
+          context.push_module(options[:module]) do
+            # `scope(path: 'groups/*id', controller: :groups) do get :edit end` — the scope names the serving
+            # controller and the inner routes carry no `to:`, so the root is only visible here.
+            context.record_controller(options[:controller]) if options[:controller]
+            interpret_scope_frame(node, context)
+          end
+        end
+
+        def interpret_scope_frame(node, context)
           as_name = keyword_symbol(node, :as)
           # `scope :path_arg, as: :name` (path as a positional arg) vs `scope(path: ':project_id', as:
           # :project)` (path as a `:path` keyword). GitLab's project routes rely on the latter for the
@@ -695,9 +766,17 @@ module Rigor
 
           register_resourceful_helpers(helper_name, actions, base_arity, context, plural: true)
 
-          context.push_resource(name) do
-            replay_concerns_from_options(options, context)
-            interpret_block_body(node, context)
+          # `resources :actions, only: [:create], module: :reports` — `module:` moves the SERVING CONTROLLER
+          # into a sub-namespace without touching helper names, paths or arity, which is why the frame wraps
+          # only the controller recording and the block. Mastodon uses it 8 times in `config/routes/admin.rb`
+          # alone; without it every one of those controllers reads as unused.
+          context.push_module(options[:module]) do
+            record_resource_controller(context, options, name, plural: true) if routed?(node, actions)
+
+            context.push_resource(name) do
+              replay_concerns_from_options(options, context)
+              interpret_block_body(node, context)
+            end
           end
         end
 
@@ -714,14 +793,117 @@ module Rigor
           # `<name>_path` (singular).
           register_resourceful_helpers(helper_name, actions, base_arity, context, plural: false)
 
-          # Push a `:singular_scope` frame so nested declarations pick up the singular resource's name in
-          # their helper prefix (Mastodon's `resource :instance do; scope module: :instances do; resources
-          # :domain_blocks; end; end` → `instance_domain_blocks_path`). The singular frame adds NO `:id`
-          # segment to arity — singular resources don't carry one.
-          context.push_singular_resource(name) do
-            replay_concerns(node, context)
-            interpret_block_body(node, context)
+          context.push_module(options[:module]) do
+            record_resource_controller(context, options, name, plural: false) if routed?(node, actions)
+
+            # Push a `:singular_scope` frame so nested declarations pick up the singular resource's name in
+            # their helper prefix (Mastodon's `resource :instance do; scope module: :instances do; resources
+            # :domain_blocks; end; end` → `instance_domain_blocks_path`). The singular frame adds NO `:id`
+            # segment to arity — singular resources don't carry one.
+            context.push_singular_resource(name) do
+              replay_concerns(node, context)
+              interpret_block_body(node, context)
+            end
           end
+        end
+
+        # ADR-102 WD3 — the controller a `resources` / `resource` declaration dispatches to.
+        #
+        # `resources :users` serves `UsersController`; a SINGULAR `resource :profile` serves the PLURAL
+        # `ProfilesController` — Rails pluralises the controller even though the routes are singular, and
+        # that is the one point where the two shapes disagree. An explicit `controller:` wins outright,
+        # including its `controller: "admin/users"` module-path and `controller: "/users"` absolute forms.
+        #
+        # Whether a `resources` / `resource` declaration actually routes anything to its own controller.
+        #
+        # `only: []` strips every default action, and the two shapes it appears in mean opposite things:
+        # `resource :secret, only: [] do post :rotate end` still routes (Mastodon's
+        # `Admin::Webhooks::SecretsController`), while `resources :foo, only: [] do resources :bar end` is a
+        # pure nesting wrapper that routes nothing to `FooController`. Distinguishing them is the difference
+        # between a missing root and an over-supplied one, so the test is "does the block declare an action
+        # of its OWN?" — direct HTTP-verb statements plus those inside a direct `member` / `collection`
+        # block — rather than the cheap "does it have a block?".
+        def routed?(node, actions)
+          return true unless actions.empty?
+
+          body = node.block&.body
+          return false if body.nil?
+
+          body.child_nodes.compact.any? { |stmt| own_action?(stmt) }
+        end
+
+        ROUTE_VERBS = %i[get post patch put delete match].freeze
+
+        def own_action?(stmt)
+          return false unless stmt.is_a?(Prism::CallNode) && stmt.receiver.nil?
+          return true if ROUTE_VERBS.include?(stmt.name)
+          return false unless %i[member collection].include?(stmt.name)
+
+          inner = stmt.block&.body
+          return false if inner.nil?
+
+          inner.child_nodes.compact.any? do |s|
+            s.is_a?(Prism::CallNode) && s.receiver.nil? && ROUTE_VERBS.include?(s.name)
+          end
+        end
+
+        # `only: []` (or an `except:` that removes every action) declares no routes at all and so names no
+        # controller; the callers gate on {#routed?} rather than this method re-deriving it.
+        def record_resource_controller(context, options, name, plural:)
+          explicit = options[:controller]
+          return context.record_controller(explicit) if explicit
+
+          context.record_controller(plural ? name.to_s : Rigor::Plugin::Inflector.pluralize(name.to_s))
+        end
+
+        # ADR-102 WD3 — the controller named by an explicit route's target, in the spellings Rails accepts:
+        # `to: "posts#index"`, the hashrocket `get "help/*path" => "help#show"`, a bare positional
+        # `root "welcome#index"`, and a `controller:` option carrying no action. A non-literal target
+        # (`to: redirect("/x")`, `to: Foo.action(:show)`) yields nothing — a target this reading cannot
+        # resolve MUST name no root rather than a guessed one, because an over-supplied root silently hides
+        # real dead code (ADR-102 § Consequences).
+        def record_target_controller(node, context)
+          controller = route_target_controller(node, context)
+          context.record_controller(controller) if controller
+        end
+
+        def route_target_controller(node, context)
+          # `effective_options_for`, not `options_hash`: Mastodon routes its streaming endpoint as
+          # `with_options to: 'streaming#index' do get '/streaming' end`, where the target lives on the
+          # enclosing `with_options` frame and the route call itself carries none.
+          options = effective_options_for(node, context)
+          target = controller_action_string(options[:to]) || hashrocket_target(node) || positional_target(node)
+          return target.split("#", 2).first if target
+
+          options[:controller]&.to_s
+        end
+
+        # The `"controller#action"` shape, or nil for anything else (a Symbol `to: :index`, a non-literal).
+        def controller_action_string(value)
+          value.is_a?(String) && value.include?("#") ? value : nil
+        end
+
+        def positional_target(node)
+          (node.arguments&.arguments || [])
+            .filter_map { |arg| controller_action_string(string_value(arg)) }
+            .first
+        end
+
+        # `get 'help/*path' => 'help#show'` — the target is the VALUE of a String-keyed AssocNode in the
+        # trailing hash (`hashrocket_path_key` reads the key of the same pair).
+        def hashrocket_target(node)
+          args = node.arguments&.arguments || []
+          last = args.last
+          return nil unless last.is_a?(Prism::KeywordHashNode)
+
+          last.elements.each do |element|
+            next unless element.is_a?(Prism::AssocNode)
+            next unless element.key.is_a?(Prism::StringNode)
+
+            target = controller_action_string(string_value(element.value))
+            return target if target
+          end
+          nil
         end
 
         # `concern :account_resources do ... end` registers the body for later replay; we DO NOT interpret
@@ -769,6 +951,7 @@ module Rigor
         end
 
         def handle_root(node, context)
+          record_target_controller(node, context)
           # `root to: "..."` / `root "..."` — single helper `root_path`, arity 0, GET. Real-world Rails
           # apps also use `root :to => 'welcome#index', :as => 'home'` (the canonical Redmine idiom across
           # 230+ call sites), which registers an additional `home_path` / `home_url` alias for the same
@@ -790,6 +973,10 @@ module Rigor
         end
 
         def handle_explicit_route(node, context)
+          # Recorded before every early return below: a `get :preview, to: "previews#show"` inside a
+          # `member do ... end` block leaves through the shorthand branch, and its target is still a root.
+          record_target_controller(node, context)
+
           # Member / collection block shorthand: `post :memorialize` inside `member do ... end` (no path
           # arg, just a SymbolNode). Rails generates a helper based on the action name + the enclosing
           # resource: a member action becomes `<action>_<singular_chain>_path(id)`, a collection action

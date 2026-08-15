@@ -31,10 +31,10 @@ module Rigor
         #   file cannot be read or parsed — a broken signature is the analyzer's business, not this scan's.
         def call(file)
           _, _, decls = ::RBS::Parser.parse_signature(::RBS::Buffer.new(name: file, content: File.read(file)))
-          names = []
-          decls.each { |decl| walk(decl, [], names) }
-          names.uniq.map do |name|
-            Scan::Reference.new(as_written: name, nesting: [].freeze, from: nil, role: :config, path: file,
+          found = []
+          decls.each { |decl| walk(decl, [], found) }
+          found.uniq.map do |name, nesting|
+            Scan::Reference.new(as_written: name, nesting: nesting, from: nil, role: :config, path: file,
                                 line: 1)
           end
         rescue ::RBS::BaseError, SystemCallError, ArgumentError
@@ -103,18 +103,26 @@ module Rigor
           end
         end
 
-        # A name is recorded both as written under its nesting and bare, because the graph resolves an
-        # `as_written` name against a single nesting and an RBS file's names may be absolute (`::Foo::Bar`),
-        # relative to the enclosing module, or top-level. Over-approximating WHICH of those a name is cannot
-        # invent a candidate — it can only fail to remove one — whereas guessing wrong would.
+        # Records the name AS WRITTEN together with the nesting it was written under, and lets
+        # {Graph#resolve} do the lexical walk — the same walk it does for a name read out of Ruby source.
+        #
+        # An earlier version hand-built the qualified form instead (`"#{nesting}::#{bare}"`) on the reasoning
+        # that over-approximating which of absolute / relative / top-level a name is could only fail to remove
+        # a candidate. That was wrong, and it resurrected the very defect #363 fixed. `include Alba::Resource`
+        # inside `class SignageResource` produced `SignageResource::Alba::Resource`; the graph resolves a
+        # reference to a member as a reference to its owner, so it peeled that to `SignageResource::Alba` and
+        # then to `SignageResource` — a declaration. The reference is file-level, so the class rooted ITSELF,
+        # and three genuinely dead classes stayed out of the report on the project where this was found.
+        #
+        # Passing the real nesting cannot do that: the walk tries the qualified candidate, misses, and the peel
+        # then applies to the written name alone.
         def record(type_name, nesting, out)
           return if type_name.nil?
 
           bare = type_name.to_s.delete_prefix("::")
           return if bare.empty?
 
-          out << bare
-          out << "#{nesting.join('::')}::#{bare}" unless nesting.empty?
+          out << [bare, nesting.dup.freeze]
         end
 
         def segments(type_name)

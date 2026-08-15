@@ -3,6 +3,7 @@
 require "spec_helper"
 require "rigor/analysis/reachability/scan"
 require "rigor/analysis/reachability/graph"
+require "rigor/analysis/reachability/signature_scan"
 
 # ADR-102 — the reachability report's reference index and mark-and-sweep.
 #
@@ -247,6 +248,31 @@ RSpec.describe Rigor::Analysis::Reachability do
                            "lib/b.rb" => "Shape = Data.define(:x)\nMade = Class.new(StandardError)\n" },
                          roots: ["Root"])
       expect(found).to include("Shape", "Made")
+    end
+  end
+
+  # Issue #373 — a class must not root itself through its own signature. The scan records a name as written
+  # with its nesting; hand-building the qualified form instead produced `SignageResource::Alba::Resource`,
+  # which `resolve` peels to its owner (a reference to a member is a reference to its owner) and so rooted
+  # `SignageResource`. On the project where this was found it hid three genuinely dead classes.
+  describe "signature references do not root their own declaration" do
+    it "leaves a class declared only in its own signature as a candidate" do
+      source = Rigor::Analysis::Reachability::Scan.call(
+        path: "app/resources/signage_resource.rb",
+        source: "class SignageResource\n  include Alba::Resource\nend\n"
+      )
+      root = Rigor::Analysis::Reachability::Scan.call(path: "lib/root.rb", source: "class Root\nend\n")
+      signature = Rigor::Analysis::Reachability::SignatureScan.call(
+        File.join(__dir__, "..", "..", "fixtures", "signage_resource.rbs")
+      )
+
+      report = Rigor::Analysis::Reachability::Graph.new(
+        declarations: source.declarations + root.declarations,
+        references: source.references + root.references + signature,
+        root_fqns: ["Root"]
+      ).report
+
+      expect(report.candidates.map(&:fqn)).to include("SignageResource")
     end
   end
 end

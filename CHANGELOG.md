@@ -38,6 +38,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** `rigor unused` no longer lets a class root itself through its own RBS signature ([#373](https://github.com/rigortype/rigor/issues/373)).
+  - A mixin argument inside a signature was recorded pre-qualified with the enclosing class name, and the report resolves a reference to a member as a reference to its owner — so `SignageResource::Alba::Resource` peeled back to `SignageResource` and rooted it. On one application this hid three genuinely dead classes on the default run; they were visible only with `signature_paths:` emptied.
 - **[cli]** `rigor unused --entry-point` now matches `**` the way the manual documents it ([#371](https://github.com/rigortype/rigor/issues/371)).
   - `--entry-point='lib/workers/**/*.rb'` matched only files nested a level below `lib/workers/`, never the ones directly in it, so declarations the glob was written to root stayed in the report reading as dead code. The manual's own example was affected.
 - **[cli]** `rigor unused` no longer crashes on a source file with a magic encoding comment, and no longer reads git submodules ([#365](https://github.com/rigortype/rigor/issues/365)).

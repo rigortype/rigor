@@ -40,6 +40,32 @@ RSpec.describe Rigor::Analysis::Reachability::ProjectFiles do
     end
   end
 
+  describe ".entry_point_match?" do
+    # `**` has to mean "zero or more directories". Without `FNM_PATHNAME` it means "one or more", so a glob
+    # written for a whole tree silently skips the top level of that tree — and the declarations it should have
+    # rooted stay in the report reading as dead code.
+    it "matches a file at the top level of a ** glob" do
+      expect(described_class.entry_point_match?("lib/workers/**/*.rb", "lib/workers/a.rb")).to be(true)
+    end
+
+    it "matches a file nested deeper under a ** glob" do
+      expect(described_class.entry_point_match?("lib/workers/**/*.rb", "lib/workers/deep/a.rb")).to be(true)
+    end
+
+    it "matches a plain path" do
+      expect(described_class.entry_point_match?("lib/cli.rb", "lib/cli.rb")).to be(true)
+    end
+
+    # The control: the matcher still discriminates rather than accepting everything.
+    it "does not match an unrelated path" do
+      expect(described_class.entry_point_match?("lib/workers/**/*.rb", "app/models/talk.rb")).to be(false)
+    end
+
+    it "does not let a single star cross a directory boundary" do
+      expect(described_class.entry_point_match?("lib/*.rb", "lib/deep/a.rb")).to be(false)
+    end
+  end
+
   describe ".own" do
     it "drops files inside a submodule" do
       gitmodules("[submodule \"references/ruby\"]\n\tpath = references/ruby\n")

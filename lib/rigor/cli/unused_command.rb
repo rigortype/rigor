@@ -176,10 +176,11 @@ module Rigor
       def root_fqns(declarations, globs)
         return [] if globs.empty?
 
+        matcher = Analysis::Reachability::ProjectFiles.method(:entry_point_match?)
         cwd = "#{File.expand_path(Dir.pwd)}/"
         declarations.filter_map do |d|
           relative = d.path.delete_prefix(cwd)
-          d.fqn if globs.any? { |g| File.fnmatch?(g, d.path) || File.fnmatch?(g, relative) }
+          d.fqn if globs.any? { |g| matcher.call(g, d.path) || matcher.call(g, relative) }
         end
       end
 

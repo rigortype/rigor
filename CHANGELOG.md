@@ -38,6 +38,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** `rigor unused --entry-point` now matches `**` the way the manual documents it ([#371](https://github.com/rigortype/rigor/issues/371)).
+  - `--entry-point='lib/workers/**/*.rb'` matched only files nested a level below `lib/workers/`, never the ones directly in it, so declarations the glob was written to root stayed in the report reading as dead code. The manual's own example was affected.
 - **[cli]** `rigor unused` no longer crashes on a source file with a magic encoding comment, and no longer reads git submodules ([#365](https://github.com/rigortype/rigor/issues/365)).
   - A string literal in a `# encoding: big5` file parses to bytes that are not valid UTF-8; the report took one as a constant name and died on the whole run. A name that is not valid UTF-8 cannot be a constant, so it is dropped. Submodules are separate projects whose files are neither your declarations nor references to them — on a checkout that vendors upstream sources they were 77% of the files read.
 - **[engine]** `rigor unused` no longer treats a class's own RBS signature as a reference to that class, so a project that ships generated signatures stops hiding its own dead code ([#363](https://github.com/rigortype/rigor/issues/363)).

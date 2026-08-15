@@ -50,10 +50,60 @@ plugins:
     config:
       worker_search_paths: ["app/workers", "app/sidekiq"]          # default
       worker_marker_modules: ["Sidekiq::Job", "Sidekiq::Worker"]   # default
+      schedule_paths:                                              # default
+        - "config/schedule.yml"
+        - "config/sidekiq.yml"
 ```
 
 The default `worker_marker_modules` covers both modern Sidekiq
 (`Sidekiq::Job`, since 6.3) and the legacy `Sidekiq::Worker`.
+
+`schedule_paths` are the schedule *files* — not directories — behind
+the reachability roots below. The defaults are where the two schedule
+layouts conventionally live; list your own path if you keep the
+schedule elsewhere.
+
+## Worker roots for `rigor unused`
+
+A cron-scheduled worker is enqueued **by name from YAML**, so
+`NightlyReportWorker` can appear nowhere in your code. Without help,
+[`rigor unused`](../02-cli-reference.md#rigor-unused) reports a job
+that runs every night as possibly dead. This plugin supplies the
+workers your schedule names, so they drop out of the candidate list:
+
+```yaml
+# config/schedule.yml (sidekiq-cron)      config/sidekiq.yml (sidekiq-scheduler)
+nightly_report:                           :scheduler:
+  cron: "0 3 * * *"                         :schedule:
+  class: "NightlyReportWorker"                nightly_report:
+                                                every: "1h"
+                                                class: "NightlyReportWorker"
+```
+
+It reads the `class:` key and nothing else. In particular a **queue
+name is not a class name**: the `:queues:` list in `sidekiq.yml`
+supplies no roots, because inflecting `report_worker` into
+`ReportWorker` would root a worker on a naming coincidence. And a
+`class:` naming a worker the plugin never discovered is dropped rather
+than published, so a typo costs you a root instead of quietly hiding a
+dead worker.
+
+`MyWorker.perform_async` still supplies nothing — it is an ordinary
+constant reference the report already sees. Neither does the mere
+existence of a file under `app/workers`: a worker nothing enqueues
+stays in the report, which is the answer you wanted.
+
+The schedule is read with `YAML.safe_load`; nothing boots.
+A missing, unreadable or malformed file is skipped without affecting
+the rest of the run.
+
+If your workers include a project concern (`include ApplicationWorker`)
+rather than `Sidekiq::Job` directly, add that concern to
+`worker_marker_modules` — otherwise the plugin discovers no workers,
+every scheduled name is dropped, and you get no roots at all. GitLab's
+`config/schedule.yml` names 111 workers, all of them concern-based:
+with the default markers that is 0 roots, and with `ApplicationWorker`
+added it is 100.
 
 ## Limitations
 
@@ -68,14 +118,10 @@ The default `worker_marker_modules` covers both modern Sidekiq
   `perform_at` is consumed as the schedule regardless of its type.
 - **Chained `set(...)`** (`Worker.set(queue: "low").perform_async(...)`)
   is validated as a normal call; `set`'s own options are not checked.
-- **No roots for [`rigor unused`](../02-cli-reference.md#rigor-unused).**
-  `MyWorker.perform_async` is an ordinary constant reference the report
-  already sees, so a root would add nothing; the alternative — rooting
-  every class under `app/workers` — would claim that a file's location
-  proves something enqueues it, and silently hide a genuinely orphaned
-  worker. A worker named as a *string* in `sidekiq.yml` or a cron
-  schedule would qualify, but this plugin does not read those files
-  yet.
+- **Schedule roots are read from `class:` only.** `sidekiq-cron`'s
+  alternative `klass:` spelling, and a schedule built in Ruby with
+  `Sidekiq::Cron::Job.load_from_hash!`, supply no roots — the worker
+  stays a `rigor unused` candidate rather than being guessed at.
 
 ## Plugin internals
 

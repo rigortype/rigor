@@ -84,7 +84,11 @@ RSpec.describe "plugin contributions to `rigor unused`" do
   def report_for(dir, files, contribution)
     declarations = []
     references = []
+    # `.rb` only, matching `PathExpansion::RUBY_GLOB` — a fixture may carry a schedule YAML, and the real
+    # report never hands one to the scan.
     files.each_key do |relative|
+      next unless relative.end_with?(".rb")
+
       result = Rigor::Analysis::Reachability::Scan.call(path: relative,
                                                         source: File.read(File.join(dir, relative)))
       next if result.nil?
@@ -194,20 +198,122 @@ RSpec.describe "plugin contributions to `rigor unused`" do
     end
   end
 
-  # The three declines. Each is a decision, and each is recorded here so that removing it is a visible edit.
-  describe "plugins that deliberately contribute nothing" do
-    # `MyWorker.perform_async` is an ordinary constant reference the scan already records. Rooting every
-    # discovered worker would claim "a file exists under app/workers" as evidence something enqueues it.
-    it "rigor-sidekiq contributes nothing for a worker the scan can already see" do
-      files = {
-        "app/workers/welcome_worker.rb" =>
-          "class WelcomeWorker\n  include Sidekiq::Job\n  def perform(id) = id\nend\n",
+  # #367 — the schedule is the one place Sidekiq names a worker the constant scan cannot see. Everything
+  # else about this plugin is still a decline, and the declines are the load-bearing half: each one below is
+  # a name the plugin could have rooted and deliberately does not.
+  describe "rigor-sidekiq — supplies roots for schedule-named workers only" do
+    let(:workers) do
+      {
+        "app/workers/nightly_report_worker.rb" =>
+          "class NightlyReportWorker\n  include Sidekiq::Job\n  def perform = nil\nend\n",
         "app/workers/orphan_worker.rb" =>
           "class OrphanWorker\n  include Sidekiq::Job\n  def perform(id) = id\nend\n"
       }
+    end
+
+    # `sidekiq-cron`'s layout: the document IS the schedule map. `OrphanWorker` is the control — same
+    # directory, same marker module, named by no schedule — and a plugin that rooted the discovered worker
+    # set would claim it too.
+    let(:cron_schedule) do
+      workers.merge(
+        "config/schedule.yml" => <<~YAML
+          nightly_report:
+            cron: "0 3 * * *"
+            class: "NightlyReportWorker"
+        YAML
+      )
+    end
+
+    it "publishes the `class:` name from config/schedule.yml and nothing else" do
+      collect_in("rigor-sidekiq", cron_schedule) do |contribution, _dir|
+        expect(contribution.roots).to eq(["NightlyReportWorker"])
+        expect(contribution.references).to be_empty
+      end
+    end
+
+    it "takes the scheduled worker out of the candidate list and leaves the orphan in it" do
+      collect_in("rigor-sidekiq", cron_schedule) do |contribution, dir|
+        report = report_for(dir, cron_schedule, contribution)
+
+        expect(report.candidates.map(&:fqn)).to include("OrphanWorker")
+        expect(report.candidates.map(&:fqn)).not_to include("NightlyReportWorker")
+      end
+    end
+
+    # Without the plugin the same project reports the nightly worker as dead — the state this slice exists
+    # to fix, and the proof the example above is not passing for an unrelated reason.
+    it "is what makes the difference: with no contribution the scheduled worker is a candidate" do
+      collect_in("rigor-sidekiq", cron_schedule) do |_contribution, dir|
+        empty = Rigor::Analysis::Reachability::PluginRoots::Contribution.empty
+        expect(report_for(dir, cron_schedule, empty).candidates.map(&:fqn)).to include("NightlyReportWorker")
+      end
+    end
+
+    # `sidekiq-scheduler` nests the same entries under `sidekiq.yml`'s `:scheduler: :schedule:`, with the
+    # Symbol keys that file is conventionally written with.
+    it "reads the `:scheduler: :schedule:` block of config/sidekiq.yml" do
+      files = workers.merge(
+        "config/sidekiq.yml" => <<~YAML
+          :concurrency: 5
+          :scheduler:
+            :schedule:
+              nightly_report:
+                every: "1h"
+                class: "NightlyReportWorker"
+        YAML
+      )
+      collect_in("rigor-sidekiq", files) do |contribution, _dir|
+        expect(contribution.roots).to eq(["NightlyReportWorker"])
+      end
+    end
+
+    # THE decline. A queue name is not a class name: `sidekiq.yml` lists `orphan_worker` as a queue, and
+    # inflecting that into `OrphanWorker` would root a worker on a naming coincidence. The queue list is
+    # exactly the over-supply #350 declined, so it must contribute nothing even when the inflection would
+    # have "worked".
+    it "supplies no root for a queue name, even one that inflects to a discovered worker" do
+      files = workers.merge(
+        "config/sidekiq.yml" => <<~YAML
+          :concurrency: 5
+          :queues:
+            - orphan_worker
+            - nightly_report_worker
+            - default
+        YAML
+      )
       collect_in("rigor-sidekiq", files) { |contribution, _dir| expect(contribution).to be_empty }
     end
 
+    # A `class:` the WorkerIndex does not know is dropped rather than published: a typo costs coverage
+    # instead of manufacturing a root, and `matched no declaration` stays a meaningful number.
+    it "drops a `class:` naming a worker it never discovered" do
+      files = workers.merge(
+        "config/schedule.yml" => "nightly:\n  cron: \"0 3 * * *\"\n  class: \"NightlyReprotWorker\"\n"
+      )
+      collect_in("rigor-sidekiq", files) { |contribution, _dir| expect(contribution).to be_empty }
+    end
+
+    # A project with no schedule at all is the common case, and it is still the #350 decline: every worker
+    # here is named by an ordinary constant reference the scan already records.
+    it "contributes nothing when no schedule file exists" do
+      collect_in("rigor-sidekiq", workers) { |contribution, _dir| expect(contribution).to be_empty }
+    end
+
+    # Fail-soft, paired with a must-still-succeed case — `PluginRoots.collect` swallows every error, so a
+    # decline example alone would pass just as well for a plugin that raised on the first byte of YAML.
+    it "skips a malformed schedule file without losing the roots a valid one supplies" do
+      files = workers.merge(
+        "config/sidekiq.yml" => ":scheduler:\n  :schedule:\n   - broken\n\t: indent\n",
+        "config/schedule.yml" => "nightly:\n  cron: \"0 3 * * *\"\n  class: \"NightlyReportWorker\"\n"
+      )
+      collect_in("rigor-sidekiq", files) do |contribution, _dir|
+        expect(contribution.roots).to eq(["NightlyReportWorker"])
+      end
+    end
+  end
+
+  # The declines. Each is a decision, and each is recorded here so that removing it is a visible edit.
+  describe "plugins that deliberately contribute nothing" do
     # Publishing spec references as roots would promote every spec-referenced class to production-reachable
     # and erase WD8's category outright. The ordinary scan already records them with the `:test` role.
     it "rigor-rspec and rigor-rspec-rails contribute nothing for a described class" do
@@ -227,7 +333,7 @@ RSpec.describe "plugin contributions to `rigor unused`" do
     end
 
     it "declares neither reachability fact in its manifest" do
-      %w[rigor-sidekiq rigor-rspec rigor-rspec-rails rigor-activejob rigor-actionmailer].each do |gem_name|
+      %w[rigor-rspec rigor-rspec-rails rigor-activejob rigor-actionmailer].each do |gem_name|
         produces = Object.const_get(REACHABILITY_PLUGIN_CLASSES.fetch(gem_name)).manifest.produces
         expect(produces).not_to include(:reachability_roots), gem_name
         expect(produces).not_to include(:reachability_references), gem_name
@@ -237,6 +343,8 @@ RSpec.describe "plugin contributions to `rigor unused`" do
 
   it "declares the facts the contributing plugins do publish" do
     expect(Rigor::Plugin::Pundit.manifest.produces).to include(:reachability_roots)
+    expect(Rigor::Plugin::Sidekiq.manifest.produces).to include(:reachability_roots)
+    expect(Rigor::Plugin::Sidekiq.manifest.produces).not_to include(:reachability_references)
     expect(Rigor::Plugin::Factorybot.manifest.produces).to include(:reachability_references)
   end
 end

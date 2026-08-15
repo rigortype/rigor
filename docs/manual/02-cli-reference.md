@@ -353,6 +353,14 @@ nowhere in the source. It publishes the policies your authorization
 calls actually name — not every class under `app/policies`, because a
 file's location is not evidence that anything authorizes against it.
 
+`rigor-sidekiq` shows how narrow a root source has to be to be worth
+having. A worker named as `class: "NightlyReportWorker"` in a cron
+schedule is enqueued from YAML, so its name appears nowhere in the
+code and it reads as dead — that name becomes a root. The queue list
+in the same `sidekiq.yml` does not: a queue name is not a class name,
+and inflecting one into a worker name would root a class on a naming
+coincidence.
+
 A plugin can also contribute a **reference** rather than a root, and
 `rigor-factorybot` is why the distinction exists. `factory :user,
 class: "Admin::User"` names a class as a string the scan cannot see,
@@ -364,7 +372,7 @@ production-reachable, and the more interesting finding would have
 disappeared.
 
 Most bundled plugins deliberately contribute nothing.
-`MyWorker.perform_async`, `MyJob.perform_later`, `MyMailer.welcome`
+`MyJob.perform_later`, `MyMailer.welcome`, `MyWorker.perform_async`
 and `RSpec.describe User` all write the class name as an ordinary
 constant, which the report already records — and for the spec case,
 records with the `test` role that makes the section above possible.

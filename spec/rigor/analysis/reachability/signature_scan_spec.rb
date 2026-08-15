@@ -72,11 +72,24 @@ RSpec.describe Rigor::Analysis::Reachability::SignatureScan do
   end
 
   describe "nesting" do
-    # A name written relative to an enclosing module has to reach the graph in a form its candidate walk can
-    # resolve, or the reference is silently lost and the class becomes a false candidate.
-    it "records a relative reference under its enclosing namespace as well as bare" do
-      names = names_in("module Admin\n  class Report < Base\n  end\nend\n")
-      expect(names).to include("Base", "Admin::Base")
+    # The name is recorded AS WRITTEN with the nesting it was written under, and `Graph#resolve` does the
+    # lexical walk. Hand-building the qualified form here instead is what resurrected #363: `include
+    # Alba::Resource` inside `class SignageResource` produced `SignageResource::Alba::Resource`, the graph
+    # peeled that to its owner `SignageResource`, and the class rooted ITSELF.
+    it "records the name as written, carrying the nesting rather than pre-qualifying it" do
+      refs = described_class.call(write_signature("module Admin\n  class Report < Base\n  end\nend\n"))
+      base = refs.find { |r| r.as_written == "Base" }
+
+      expect(base).not_to be_nil
+      expect(base.nesting).to eq(["Admin"])
+      expect(refs.map(&:as_written)).not_to include("Admin::Base")
+    end
+
+    it "never emits a name prefixed with the declaration that encloses it" do
+      refs = described_class.call(write_signature("class SignageResource\n  include Alba::Resource\nend\n"))
+
+      expect(refs.map(&:as_written)).to contain_exactly("Alba::Resource")
+      expect(refs.map(&:nesting)).to all(eq(["SignageResource"]))
     end
 
     it "strips a leading :: from an absolute name" do
@@ -100,6 +113,7 @@ RSpec.describe Rigor::Analysis::Reachability::SignatureScan do
 
       expect(reference.from).to be_nil
       expect(reference.role).to eq(:config)
+      # A superclass resolves against the scope ENCLOSING the class being declared, not inside it.
       expect(reference.nesting).to eq([])
     end
   end

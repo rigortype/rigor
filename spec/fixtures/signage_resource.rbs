@@ -1,0 +1,3 @@
+class SignageResource
+  include Alba::Resource
+end

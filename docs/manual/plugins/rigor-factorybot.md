@@ -54,6 +54,22 @@ plugins:
       # Minitest projects: ["test/factories"]
 ```
 
+## Factory references for `rigor unused`
+
+`factory :user, class: "Admin::User"` names a class as a string, and
+a bare `factory :user` relies on FactoryBot constantizing the factory
+name. Neither is a constant reference, so
+[`rigor unused`](../02-cli-reference.md#rigor-unused) cannot see them
+and would report a factoried model as dead.
+
+This plugin supplies those model classes — as **test-role
+references**, not as roots. A class reached only through a factory
+therefore leaves the candidate list and appears under **Reachable
+only from test code** instead. That is deliberate: a model kept alive
+by its factory and its spec and nothing else is dead production code
+with a live test, and rooting factories would have hidden exactly
+that finding.
+
 ## Limitations
 
 - **Literal arguments only** — `FactoryBot.create(name)` with a

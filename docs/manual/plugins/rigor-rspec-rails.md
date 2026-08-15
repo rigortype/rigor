@@ -62,6 +62,11 @@ The plugin has no configuration knobs.
   / `have_received` (overlap engine constant / undefined-method rules).
 - **Literal arguments only** — a status passed via a variable or method
   call is not statically checkable, so it's accepted silently.
+- **No roots for [`rigor unused`](../02-cli-reference.md#rigor-unused)**,
+  for the reason [`rigor-rspec`](rigor-rspec.md#limitations) gives: a
+  spec's constant reference is already recorded with the `test` role,
+  and rooting it would delete the report's "reachable only from tests"
+  answer.
 
 ## Plugin internals
 

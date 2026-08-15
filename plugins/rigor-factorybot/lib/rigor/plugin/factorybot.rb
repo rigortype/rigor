@@ -58,7 +58,8 @@ module Rigor
     class Factorybot < Rigor::Plugin::Base
       manifest(
         id: "factorybot",
-        version: "0.2.0",
+        # Bumped 2026-08-16 — publishes `:reachability_references` for `rigor unused` (ADR-102 WD3 / #350).
+        version: "0.3.0",
         description: "Validates FactoryBot.create / build / attributes_for call shapes; " \
                      "publishes per-factory attribute set + inferred model class as the " \
                      ":factory_index ADR-9 fact (Pillar 2 Slice 3).",
@@ -67,7 +68,8 @@ module Rigor
         },
         consumes: [
           { plugin_id: "activerecord", name: :model_index, optional: true }
-        ]
+        ],
+        produces: [:reachability_references]
       )
 
       producer :factory_index, watch: -> { [[@factory_search_paths, "**/*.rb"]] } do |_params|
@@ -79,6 +81,32 @@ module Rigor
 
       def init(_services)
         @factory_search_paths = Array(config.fetch("factory_search_paths")).map(&:to_s)
+      end
+
+      # ADR-102 WD3 / #350 — the model classes the factories build, published as `:reachability_references`
+      # rather than as `:reachability_roots`.
+      #
+      # Both halves of that sentence are load-bearing.
+      #
+      # It is a CONTRIBUTION at all because a factory names its class by a mechanism the constant scan cannot
+      # follow: `factory :user, class: "Admin::User"` is a string, and a bare `factory :user` is FactoryBot's
+      # own constantization of the factory name. Neither leaves a constant node anywhere in the project.
+      #
+      # It is a REFERENCE rather than a root because factories live in the test tree. Rooting them would make
+      # every factoried class production-reachable and erase ADR-102 WD8's "reachable only from tests"
+      # category for exactly the classes it is most likely to be about — a model kept alive by its factory
+      # and its spec and nothing else is the archetype of dead production code with a live test, and that is
+      # the single most actionable row this report produces. Carrying the `:test` role keeps the finding.
+      def prepare(services)
+        index = producer_value(:factory_index)
+        return if index.nil? || index.empty?
+
+        references = index.entries.values.filter_map do |entry|
+          { name: entry.model_class, role: :test } if entry.model_class
+        end.uniq
+        return if references.empty?
+
+        services.fact_store.publish(plugin_id: manifest.id, name: :reachability_references, value: references)
       end
 
       # ADR-37 — per-call factory/attribute validation over the engine-owned walk. Each violation carries

@@ -64,6 +64,11 @@ plugins:
 - A brand-new view file does not invalidate the cached index until
   something the mailer file touches changes (the read-tracking
   trade-off).
+- **No roots for [`rigor unused`](../02-cli-reference.md#rigor-unused).**
+  `MyMailer.welcome(...)` names the mailer as an ordinary constant,
+  which the report already records. Rooting every class under
+  `app/mailers` instead would mark a mailer nothing sends reachable
+  forever on no evidence.
 
 ## Plugin internals
 

@@ -51,6 +51,12 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `job_search_paths` through the trusted scope. |
 | `node_rule` (ADR-37) | Per-call validation of every `Job.perform_*` call over the engine-owned walk. |
 
+## Why this plugin supplies no `rigor unused` roots
+
+It was considered for the reachability report ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3) and **deliberately contributes nothing**.
+
+`MyJob.perform_later(...)` / `MyJob.perform_now(...)` name the job class as an ordinary constant, which `rigor unused`'s constant scan already records. There is no name a job is reached by that the scan cannot see, so a root here would either be redundant or would be the discovered job set — and rooting "every class under `app/jobs`" claims reachability for orphaned jobs on no evidence, hiding real dead code with no downstream signal (ADR-102 § Consequences).
+
 ## Future direction
 
 - **Cross-plugin handoff**: a future slice could publish

@@ -49,13 +49,14 @@ module Rigor
         references.concat(signature_references(configuration))
         dynamic_uses.concat(template_mentions(declarations))
 
-        plugin_roots = Analysis::Reachability::PluginRoots.collect(configuration: configuration)
+        contribution = Analysis::Reachability::PluginRoots.collect(configuration: configuration)
+        references.concat(plugin_references(contribution.references))
         graph = Analysis::Reachability::Graph.new(
           declarations: declarations, references: references, dynamic_uses: dynamic_uses,
-          root_fqns: root_fqns(declarations, options.fetch(:entry_points)) + plugin_roots,
+          root_fqns: root_fqns(declarations, options.fetch(:entry_points)) + contribution.roots,
           foreign: foreign_predicate(configuration)
         )
-        emit(graph.report, options, supply: root_supply(plugin_roots, declarations))
+        emit(graph.report, options, supply: root_supply(contribution.roots, declarations))
         0
       end
 
@@ -153,6 +154,21 @@ module Rigor
           rescue SystemCallError
             []
           end
+        end
+      end
+
+      # #350 — a plugin's `:reachability_references` fact enters the graph exactly where a scanned file-level
+      # reference does: `from: nil` (so it seeds) carrying the role the plugin claimed. That is what keeps a
+      # class named only by a FactoryBot `class:` string in the `reachable only from tests` section instead of
+      # promoting it to production-reachable, which rooting it would have done silently.
+      #
+      # `path` is a synthetic marker rather than a file: the graph never reads a reference's path (rows are
+      # located from the DECLARATION site), and inventing a plausible-looking file path for a fact would be a
+      # worse lie than an obviously synthetic one.
+      def plugin_references(rows)
+        rows.map do |reference|
+          Analysis::Reachability::Scan::Reference.new(as_written: reference.name, nesting: [].freeze, from: nil,
+                                                      role: reference.role, path: "(plugin)", line: 1)
         end
       end
 

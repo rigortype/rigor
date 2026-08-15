@@ -48,6 +48,10 @@ plugins:
 - **Positional arity only.** Required keyword arguments are
   recorded by the discoverer but not yet validated at the call
   site.
+- **No roots for [`rigor unused`](../02-cli-reference.md#rigor-unused).**
+  `MyJob.perform_later` names the job as an ordinary constant, which
+  the report already records. Rooting every class under `app/jobs`
+  instead would mark an orphaned job reachable forever on no evidence.
 
 ## Plugin internals
 

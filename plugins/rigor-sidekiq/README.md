@@ -69,6 +69,14 @@ validation) but differ in three places:
 A user running both ActiveJob and Sidekiq in the same project can
 enable both plugins; their indexes are independent.
 
+## Why this plugin supplies no `rigor unused` roots
+
+It was considered for the reachability report ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3) and **deliberately contributes nothing**.
+
+`MyWorker.perform_async(...)` writes the worker's name as an ordinary constant, so `rigor unused`'s constant scan already records the edge and a plugin root would add nothing. What a root *would* add is the discovered worker set — and "a file exists under `app/workers`" is not evidence that anything enqueues it. Publishing that set would mark every orphaned worker in the project as reachable forever, which is the exact failure mode ADR-102 § Consequences names: an over-supplying root source silently hides real dead code, and nothing downstream can tell you it happened.
+
+The one genuinely Sidekiq-specific root source is a worker named as a **string** in queue or cron configuration (`sidekiq.yml`, `sidekiq-cron` schedules, a `Sidekiq::Cron::Job.load_from_hash!` payload). That name is invisible to the constant scan, so it qualifies — but this plugin does not parse those files today. Tracked as follow-on work rather than approximated by rooting every worker.
+
 ## Future direction
 
 - **Indirect inclusion**: walk `include` chains so custom concerns that

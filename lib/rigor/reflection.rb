@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "type"
-require_relative "unused_probe" # issue #345 spike instrumentation; inert unless RIGOR_UNUSED_PROBE is set
 
 module Rigor
   # Read-side facade over Rigor's three reflection sources:
@@ -153,18 +152,6 @@ module Rigor
       constant_type_at(name, scope)
     end
 
-    # Issue #345 spike instrumentation. `candidate` at the moment {.resolve_constant_type}
-    # returns IS the fully-qualified name the lexical walk resolved to; this is the only place
-    # that local is observable. Returns `type` untouched so every `return` site keeps its value.
-    # A no-op (one frozen-constant read) unless `RIGOR_UNUSED_PROBE` is set.
-    def probe_resolved(candidate, type)
-      UnusedProbe.record_reference(candidate) if UnusedProbe::ACTIVE
-      type
-    end
-    # Private so the ADR-2 public read-side facade surface (and its `public_api_drift_spec`
-    # snapshot) is unchanged by the spike.
-    private_class_method :probe_resolved
-
     # One candidate name, consulted in source-precedence order: the class registry (yielding a
     # `Singleton[C]`), source-discovered classes, in-source value constants, then RBS-side
     # constants. In-source values win over RBS constant decls because the user's source is
@@ -173,16 +160,15 @@ module Rigor
       env = scope.environment
 
       singleton = env.singleton_for_name(candidate)
-      return probe_resolved(candidate, singleton) if singleton
+      return singleton if singleton
 
       in_source_class = scope.discovered_classes[candidate]
-      return probe_resolved(candidate, in_source_class) if in_source_class
+      return in_source_class if in_source_class
 
       in_source_value = scope.in_source_constants[candidate]
-      return probe_resolved(candidate, in_source_value) if in_source_value
+      return in_source_value if in_source_value
 
-      value = env.constant_for_name(candidate)
-      value && probe_resolved(candidate, value)
+      env.constant_for_name(candidate)
     end
     private_class_method :constant_type_at
 

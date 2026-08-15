@@ -1,4 +1,0 @@
-class RbsConsumer
-  def make: () -> RbsOnlyReferenced
-  def build: () -> RbsOnlyReferenced
-end

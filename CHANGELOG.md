@@ -15,6 +15,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 ### Added
 
 - **[cli]** `rigor unused` reports project classes and modules that nothing reachable references — a starting point for dead-code removal ([#347](https://github.com/rigortype/rigor/issues/347), [ADR-102](docs/adr/102-unused-code-reachability-report.md)).
+  - Constants something can name at runtime are demoted to a `cannot decide` section with the reason rather than claimed as unused: `"Foo".constantize` names `Foo` exactly and counts as an ordinary reference, while `"Foo::#{key}".constantize` marks everything under `Foo` undecidable, and a class name appearing as a string in a `.yml` or template file demotes it the same way.
   - Read it as a review queue rather than a defect list: on a hand-adjudicated corpus target only 7% of the rows were genuinely unused, which is why this is its own command and never a `rigor check` diagnostic. Reachability is computed from roots — `--entry-point=GLOB` plus anything referenced at file level — so a cluster of classes that only reference each other is still reported. Classes reachable only from test code get their own section, because a class used solely by its own spec is dead production code with a live test. References are harvested from `.rake` tasks, `config/`, specs and your `sig/` as well as the analysed paths.
 
 ### Fixed

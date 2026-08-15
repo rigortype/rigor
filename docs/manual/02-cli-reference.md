@@ -323,14 +323,25 @@ reported. Roots are the declarations in files matching
 level by non-test code. Route- and framework-derived roots are not
 wired yet, so today's output is an upper bound.
 
-Two things the report separates rather than merges:
+Three things the report separates rather than merges:
 
 - **Reachable only from test code** gets its own section — a class
   used solely by its own spec is dead production code with a live
   test, which is a more actionable finding than either bucket alone.
-- **Constants Rigor cannot decide about** are not claimed as unused.
-  Only class and module constants are reported at all; value
-  constants are omitted because they do not resolve across files.
+- **Constants something can name at runtime** are demoted to a
+  `cannot decide` section with the reason, never claimed as unused.
+  `"Foo".constantize` names `Foo` exactly, so it counts as an ordinary
+  reference; `"Foo::#{key}".constantize` instead marks everything
+  under `Foo` undecidable. A class name appearing as a string in a
+  `.yml`, `.json`, or template file demotes it the same way — that is
+  weaker evidence than a constant reference, so it is neither proof of
+  use nor grounds to call it dead.
+- **Namespace modules** wrapping live code are excluded and counted,
+  because nothing references an intermediate namespace by itself. A
+  namespace whose contents are *all* unreachable is still reported.
+
+Only class and module constants are reported at all; value constants
+are omitted because they do not resolve across files.
 
 References are harvested from a wider file set than the analysed
 paths — `.rake` tasks, `config/`, specs and the project's own `sig/`

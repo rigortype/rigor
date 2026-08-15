@@ -420,6 +420,19 @@ The following carry no mark and MUST keep firing:
 
 `Environment#constant_for_name(name)` MUST consult the attached `RbsLoader` and return `nil` when the loader is absent or the name has no constant decl. `RbsLoader#constant_type(name)` MUST translate `RBS::AST::Declarations::Constant#type` through `Rigor::Inference::RbsTypeTranslator.translate` and return the resulting `Rigor::Type`, or `nil` when translation produces `Type::Bot` (an empty type). The query MUST NOT raise on malformed inputs; the loader stays fail-soft.
 
+### Reachability report tiers (ADR-102)
+
+`rigor unused` reports on a reference graph built by `Analysis::Reachability::Scan` (a standalone Prism walk, NOT the typing path) and swept by `Analysis::Reachability::Graph`. The output tiers are normative:
+
+1. **`candidates`** — project-owned declarations no reachable declaration references. Mark-and-sweep, not reference counting: an edge MUST propagate reachability only when its source is itself reachable, so a cluster of mutually-referencing dead declarations MUST still be reported.
+2. **`undecidable`** — a declaration something can name at runtime. A `constantize` / `safe_constantize` / `const_get` whose subject is a **literal** string or symbol MUST resolve to that exact constant and contribute an ordinary reference; only a non-literal subject demotes. An interpolated subject with a literal head (`"Foo::#{k}"`) MUST taint `Foo` and everything beneath it and nothing else; a subject with no literal head MUST taint **nothing** — poisoning the whole project would empty the report. A declaration whose fully-qualified name appears as a string in a template or data file (`.erb`, `.haml`, `.slim`, `.yml`, `.yaml`, `.json`) MUST demote to this tier rather than count as a reference: a data-file match is weaker evidence than a constant node, and treating it as proof would hide real dead code. Every row MUST carry the reason it was demoted.
+3. **`test_only`** — reachable, but only through edges whose referring file has the `:test` role. Reported separately from both other tiers (ADR-102 WD8).
+4. **`namespaces`** — an unreached declaration under which some *reachable* declaration lives. Excluded from `candidates`, because nothing references an intermediate namespace segment by itself. A namespace whose contents are **all** unreachable MUST remain a candidate.
+
+Ownership: a declaration is project-owned only when it is declared in an analysed file AND the name is unknown to an environment built **without** the project's own `signature_paths`. Reopening a gem or stdlib class MUST NOT make it a candidate.
+
+Constant resolution inside the report MUST follow the same candidate order as `Reflection.resolve_constant_type` (nesting, then ancestors, then bare name), with one addition: when a name resolves to no declaration, the trailing `::segment` MUST be peeled and retried, so a reference to `Foo::BAR` counts as a reference to `Foo`.
+
 ### Declaration-position overrides (Slice A-declarations)
 
 `Rigor::Scope` carries a `declared_types` table — an identity-comparing `Hash[Prism::Node, Rigor::Type]` that overrides `ExpressionTyper#type_of` for specific node identities. Since [ADR-53](../adr/53-scope-discovery-index-separation.md) it is one of the [Discovery Index](#discovery-index-adr-53-track-a) tables (read through the `Scope#declared_types` delegate, seeded through `Scope#with_discovery`); the default value is a frozen empty hash. `Scope#with_local`, `Scope#with_fact`, `Scope#with_self_type`, and the join helpers MUST carry the index — and so the table — through by reference.

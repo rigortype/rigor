@@ -32,17 +32,24 @@ module Rigor
       # combined on a real app, and a reference found inside a vendored gem is not evidence about this project.
       VENDOR_DIRS = %r{\A(vendor|node_modules|tmp|\.git|\.rigor|coverage)/}
 
+      # Templates and data files that carry class names as strings. A name here is NOT counted as a reference —
+      # a YAML value is far weaker evidence than a constant node, and treating it as proof would silently hide
+      # real dead code. It demotes the declaration to `cannot-decide` instead, with the file named, so the
+      # reader judges it (ADR-102 WD4).
+      TEMPLATE_GLOB = "**/*.{erb,haml,slim,yml,yaml,json}"
+
       def run
         options = parse_options
         return CLI::EXIT_USAGE if options == :usage_error
 
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
-        declarations, references = scan(paths, configuration)
+        declarations, references, dynamic_uses = scan(paths, configuration)
         references.concat(signature_references(configuration))
+        dynamic_uses.concat(template_mentions(declarations))
 
         graph = Analysis::Reachability::Graph.new(
-          declarations: declarations, references: references,
+          declarations: declarations, references: references, dynamic_uses: dynamic_uses,
           root_fqns: root_fqns(declarations, options.fetch(:entry_points)),
           foreign: foreign_predicate(configuration)
         )
@@ -87,14 +94,16 @@ module Rigor
         declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns).to_set
         declarations = []
         references = []
+        dynamic_uses = []
         (declaration_files + reference_files(paths, configuration)).sort.each do |file|
           result = read_and_scan(file, configuration)
           next if result.nil?
 
           declarations.concat(result.declarations) if declaration_files.include?(file)
           references.concat(result.references)
+          dynamic_uses.concat(result.dynamic_uses)
         end
-        [declarations, references]
+        [declarations, references, dynamic_uses]
       end
 
       # The reference corpus is the PROJECT, not the analysed paths. A constant declared in `lib/` is commonly
@@ -145,6 +154,24 @@ module Rigor
         end
       end
 
+      def template_mentions(declarations)
+        names = declarations.map(&:fqn)
+        return [] if names.empty?
+
+        Dir.glob(TEMPLATE_GLOB, base: Dir.pwd).grep_v(VENDOR_DIRS).flat_map do |rel|
+          text = File.read(File.expand_path(rel))
+          names.filter_map do |fqn|
+            next unless text.include?(fqn)
+
+            Analysis::Reachability::Scan::DynamicUse.new(name: nil, prefix: fqn, site: nil,
+                                                         reason: "named as a string in #{rel}",
+                                                         path: rel, line: 1)
+          end
+        rescue SystemCallError, ArgumentError
+          []
+        end
+      end
+
       def root_fqns(declarations, globs)
         return [] if globs.empty?
 
@@ -174,7 +201,10 @@ module Rigor
         JSON.pretty_generate(
           declared: report.declared, reachable: report.reachable, roots: report.roots, edges: report.edges,
           namespaces: report.namespaces,
-          candidates: rows_json(report.candidates, options), test_only: rows_json(report.test_only, options)
+          candidates: rows_json(report.candidates, options), test_only: rows_json(report.test_only, options),
+          undecidable: limited(report.undecidable, options).map do |u|
+            { name: u.fqn, path: u.path, line: u.line, reason: u.reason }
+          end
         )
       end
 
@@ -188,15 +218,29 @@ module Rigor
                  "  reachable:                #{report.reachable}",
                  "  candidates:               #{report.candidates.size}",
                  "  reachable only from tests: #{report.test_only.size}",
+                 "  cannot decide:            #{report.undecidable.size}",
                  "  namespace-only (excluded):  #{report.namespaces}"]
         lines.concat(section("Candidates — nothing reachable references these", report.candidates, options))
         lines.concat(section("Reachable only from test code — live test, dead production path",
                              report.test_only, options))
+        lines.concat(undecidable_section(report.undecidable, options))
         lines << ""
         lines << "These are CANDIDATES, not findings. The measured precision of this report on an adjudicated"
         lines << "corpus target is 7% — every row needs a human to confirm it. Route- and plugin-derived roots"
         lines << "are not wired yet (issue #349), so this list is an upper bound."
         lines.join("\n")
+      end
+
+      def undecidable_section(rows, options)
+        return [] if rows.empty?
+
+        out = ["", "Cannot decide — something can name these at runtime (#{rows.size})"]
+        limited(rows, options).each_with_index do |u, i|
+          out << format("  %<n>3d  %<name>-52s %<path>s:%<line>d", n: i + 1, name: u.fqn, path: u.path,
+                                                                   line: u.line)
+          out << "       #{u.reason}"
+        end
+        out
       end
 
       def section(title, rows, options)

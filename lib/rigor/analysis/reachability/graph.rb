@@ -21,7 +21,13 @@ module Rigor
         # a flag there could never be true. "Reachable, but only from test code" is a SEPARATE and more
         # actionable answer — dead production code with a live test — which is exactly what ADR-102 WD8 requires
         # be reported as its own category rather than folded into a bucket boundary.
-        Report = Data.define(:declared, :reachable, :candidates, :test_only, :namespaces, :roots, :edges)
+        Report = Data.define(:declared, :reachable, :candidates, :undecidable, :test_only, :namespaces,
+                             :roots, :edges)
+
+        # A candidate demoted out of `candidates` because something can reach it by a mechanism this reading
+        # cannot follow (ADR-102 WD4). Carries the reason so the reader can judge it rather than take the
+        # bucket on trust.
+        Undecidable = Data.define(:fqn, :path, :line, :reason)
 
         # @param declarations [Array<Scan::Declaration>]
         # @param references [Array<Scan::Reference>]
@@ -29,9 +35,12 @@ module Rigor
         #   them (config-declared globs in this slice; plugin-supplied roots are #349).
         # @param foreign [#call] predicate answering "is this FQN owned by something outside the project?" —
         #   a reopened gem or stdlib class must never be a candidate (WD6). Defaults to "nothing is foreign".
-        def initialize(declarations:, references:, root_fqns: [], foreign: ->(_fqn) { false })
+        # @param dynamic_uses [Array<Scan::DynamicUse>] sites where a constant is reached by name at runtime.
+        #   A literal-argument site contributes a real reference; a dynamic one taints a namespace (WD4).
+        def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], foreign: ->(_fqn) { false })
           @declarations = declarations
-          @references = references
+          @dynamic_uses = dynamic_uses
+          @references = references + literal_dynamic_references(dynamic_uses)
           @root_fqns = root_fqns.to_set
           @foreign = foreign
           @by_fqn = declarations.group_by(&:fqn)
@@ -45,12 +54,47 @@ module Rigor
           reachable = walk(edges, seeds: production_seeds | test_seeds, roles: %i[production task config test])
           unreached = @owned - reachable
           namespaces = namespace_only(unreached, reachable)
+          undecidable = tainted(unreached - namespaces)
           Report.new(declared: @owned.size, reachable: reachable.size,
-                     candidates: rows(unreached - namespaces), test_only: rows(reachable - production),
+                     candidates: rows(unreached - namespaces - undecidable.keys.to_set),
+                     undecidable: undecidable.map { |fqn, reason| undecidable_row(fqn, reason) }.freeze,
+                     test_only: rows(reachable - production),
                      namespaces: namespaces.size, roots: production_seeds.size, edges: edges.size)
         end
 
         private
+
+        # A literal-argument `"Foo::Bar".constantize` names its constant exactly, so it is a REFERENCE, not an
+        # unknown. Keeping this distinct from the taint below is what stops the tier being a blanket namespace
+        # poison — Rigor knows the argument's shape, and a type-free indexer does not.
+        def literal_dynamic_references(dynamic_uses)
+          dynamic_uses.filter_map do |use|
+            next if use.name.nil?
+
+            Scan::Reference.new(as_written: use.name.sub(/\A::/, ""), nesting: [].freeze, from: nil,
+                                role: :production, path: use.path, line: use.line)
+          end
+        end
+
+        # `{fqn => reason}` for every unreached declaration a dynamic site could still be naming. A site with a
+        # literal prefix taints that namespace and everything under it; a site with no prefix at all cannot be
+        # bounded, so it taints nothing rather than everything — poisoning the whole project would empty the
+        # report and teach the reader that the tier means nothing.
+        def tainted(unreached)
+          prefixes = @dynamic_uses.filter_map { |use| [use.prefix, use] if use.name.nil? && use.prefix }
+
+          return {} if prefixes.empty?
+
+          unreached.each_with_object({}) do |fqn, out|
+            _, use = prefixes.find { |prefix, _| fqn == prefix || fqn.start_with?("#{prefix}::") }
+            out[fqn] = use.site.nil? ? use.reason : "#{use.reason} (#{use.site})" if use
+          end
+        end
+
+        def undecidable_row(fqn, reason)
+          site = @by_fqn.fetch(fqn).first
+          Undecidable.new(fqn: fqn, path: site.path, line: site.line, reason: reason)
+        end
 
         # `module A; end` wrapping a live `A::B` is not dead code, but nothing ever references `A` by itself:
         # a reference to `A::B::Leaf` records the leaf only, never the intermediate segments. Reporting these

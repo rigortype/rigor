@@ -16,6 +16,7 @@ require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
 require_relative "../rbs_extended/conformance_checker"
 require_relative "../reflection"
+require_relative "../unused_probe" # issue #345 spike instrumentation
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
 require_relative "../inference/parameter_inference_collector"
@@ -229,6 +230,14 @@ module Rigor
         return Result.new(diagnostics: [target_ruby_error]) if target_ruby_error
 
         expansion = expand_paths(paths)
+        # Issue #345 spike instrumentation. Records the run SHAPE the probe's correctness depends on:
+        # a non-zero worker count means per-file references accumulate in a child process and never
+        # reach this one, and an attached cache store means a HIT file is never re-analyzed and
+        # contributes zero references. The report script refuses both. Inert unless the env var is set.
+        if UnusedProbe::ACTIVE
+          UnusedProbe.record_run_shape(files: expansion.fetch(:files), workers: @workers,
+                                       cache: !@cache_store.nil?)
+        end
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
@@ -711,6 +720,12 @@ module Rigor
         @project_discovered_superclasses = discovery.discovered_superclasses
         @project_discovered_includes = discovery.discovered_includes
         @project_discovered_class_sources = discovery.discovered_class_sources
+        # Issue #345 spike instrumentation — the project-wide class-declaration source map, kept as a
+        # cross-check against the per-file `ScopeIndexer` hook.
+        if UnusedProbe::ACTIVE
+          UnusedProbe.record_project_class_sources(discovery.discovered_class_sources)
+          UnusedProbe.record_structural_edges(discovery.discovered_superclasses, discovery.discovered_includes)
+        end
         @project_discovered_method_visibilities = discovery.discovered_method_visibilities
         @project_discovered_methods = discovery.discovered_methods
         @project_data_member_layouts = discovery.data_member_layouts

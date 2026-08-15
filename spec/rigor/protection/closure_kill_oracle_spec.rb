@@ -181,16 +181,21 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
   it "re-walks the mutated file's discovery bundle from the buffer, not from disk" do
     paths = write_fixture
     bundles = Rigor::Protection::DiscoverySeed.bundles(paths: paths)
-    tmp = Tempfile.new(["mutant", ".rb"])
-    tmp.write(mutant_source)
-    tmp.flush
-    buffer = Rigor::Analysis::BufferBinding.new(logical_path: "lib/account.rb", physical_path: tmp.path)
+    # `Tempfile.create` with a block, not `Tempfile.new`: the latter reclaims only on finalization, so
+    # whether the file is still in the private root when `after(:suite)`'s issue #330 residue check runs
+    # is a GC-timing coin flip. It came up tails on CI (`leaked 1 temp entry … mutant*.rb`) while every
+    # local run and the preceding PRs passed.
+    Tempfile.create(["mutant", ".rb"]) do |tmp|
+      tmp.write(mutant_source)
+      tmp.flush
+      buffer = Rigor::Analysis::BufferBinding.new(logical_path: "lib/account.rb", physical_path: tmp.path)
 
-    tables = Rigor::Protection::DiscoverySeed.tables_for_buffer(paths: paths, bundles: bundles, buffer: buffer)
+      tables = Rigor::Protection::DiscoverySeed.tables_for_buffer(paths: paths, bundles: bundles, buffer: buffer)
 
-    label = tables.fetch(:discovered_singleton_def_nodes).fetch("Account").fetch(:label)
-    expect(label.location.slice).to include("Account.wrap(nil)")
-    expect(File.read("lib/account.rb")).to include('Account.wrap("account")')
+      label = tables.fetch(:discovered_singleton_def_nodes).fetch("Account").fetch(:label)
+      expect(label.location.slice).to include("Account.wrap(nil)")
+      expect(File.read("lib/account.rb")).to include('Account.wrap("account")')
+    end
   end
 
   # The acceptance criterion that proves the CLOSURE is the right set: for every mutation of every measured file,

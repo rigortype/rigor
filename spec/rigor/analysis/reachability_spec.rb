@@ -163,6 +163,56 @@ RSpec.describe Rigor::Analysis::Reachability do
     end
   end
 
+  # ADR-102 WD4 — a constant reachable by a mechanism this reading cannot follow is reported as undecidable,
+  # never folded into "unused" and never silently treated as used.
+  describe "the cannot-decide tier (WD4)" do
+    def report_for(files, roots: [])
+      decls = []
+      refs = []
+      dyn = []
+      files.each do |path, source|
+        result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
+        decls.concat(result.declarations)
+        refs.concat(result.references)
+        dyn.concat(result.dynamic_uses)
+      end
+      Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, dynamic_uses: dyn,
+                                               root_fqns: roots).report
+    end
+
+    # The case that proves the tier is not a blanket namespace poison: Rigor knows the argument's shape, so a
+    # literal names the exact constant and is as good as a written reference.
+    it "resolves a literal-argument constantize to the named constant and marks it reachable" do
+      report = report_for({ "lib/a.rb" => %(class Root\n  def go = "Target".constantize\nend\n),
+                            "lib/b.rb" => "class Target\nend\n" }, roots: ["Root"])
+      expect(report.candidates.map(&:fqn)).not_to include("Target")
+      expect(report.undecidable.map(&:fqn)).not_to include("Target")
+    end
+
+    it "resolves a literal const_get argument the same way" do
+      report = report_for({ "lib/a.rb" => %(class Root\n  def go = Object.const_get("Target")\nend\n),
+                            "lib/b.rb" => "class Target\nend\n" }, roots: ["Root"])
+      expect(report.candidates.map(&:fqn)).to be_empty
+    end
+
+    it "demotes a namespace an interpolated constantize can reach, with a reason" do
+      report = report_for({ "lib/a.rb" => %(class Root\n  def go(k) = "H::\#{k}".constantize\nend\n),
+                            "lib/b.rb" => "module H\n  class Alpha\n  end\nend\n" }, roots: ["Root"])
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.undecidable.map(&:fqn)).to include("H", "H::Alpha")
+      expect(report.undecidable.first.reason).to include("interpolated string")
+    end
+
+    # An unbounded site taints nothing rather than everything: poisoning the whole project would empty the
+    # report and teach the reader the tier means nothing.
+    it "does not let an unbounded dynamic site poison the whole project" do
+      report = report_for({ "lib/a.rb" => "class Root\n  def go(k) = k.constantize\nend\n",
+                            "lib/b.rb" => "class Orphan\nend\n" }, roots: ["Root"])
+      expect(report.candidates.map(&:fqn)).to eq(["Orphan"])
+      expect(report.undecidable).to be_empty
+    end
+  end
+
   describe "meta-new declarations" do
     it "treats a constant assigned Class.new / Data.define as a declaration" do
       found = candidates({ "lib/a.rb" => "class Root\nend\n",

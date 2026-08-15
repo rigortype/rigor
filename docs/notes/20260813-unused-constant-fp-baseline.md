@@ -224,3 +224,41 @@ Not adjudicated exhaustively; recorded because they identify the same artifact c
 7. **The value-constant tier stays out of any shipped report** until the cross-file seed carries
    `in_source_constants`. It is 38 / 89 / 0 candidates across the corpus with, by construction, no
    way to be right.
+
+## Addendum 2026-08-15 — the shipped `rigor unused`, with the cannot-decide tier
+
+The measurements above were taken with the throwaway probe. `rigor unused` (#347) and its
+`cannot-decide` tier (#348) have since shipped, and the same three targets were re-run through the
+real command.
+
+**These numbers are not a continuation of the decay table above, and should not be read as one.**
+The instrument changed in two ways that move the denominator: the reference index is now a dedicated
+constant-node walk rather than a hook on the typing path, and ownership now excludes names known to
+an environment built without the project's own `sig/`. Redmine's project-owned declaration count is
+504 here against the probe's 697 for that reason. What the table shows is the shape of the shipped
+report, not a further stage of the original funnel.
+
+Run with no `--entry-point`, so roots come only from file-level references:
+
+| target | declared | candidates | cannot decide | test-only | namespace-only |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| redmine | 504 | 129 | 99 | 2 | 12 |
+| mastodon | 1,497 | 278 | 118 | 454 | 8 |
+| conference-app | 103 | 2 | 0 | 0 | 0 |
+
+Three things worth recording.
+
+**The cannot-decide tier carries real volume.** 99 rows on redmine and 118 on mastodon are
+declarations that would otherwise have been asserted as unused, each now demoted with the reason
+that demoted it. On redmine that is 43 % of what the report would otherwise have claimed.
+
+**Mastodon's test-only bucket is inflated, and the inflation is diagnostic rather than alarming.**
+454 declarations reachable only from test code is not a finding about mastodon; it is what a Rails
+app looks like when route-derived roots are missing. Controllers and models are reached from routes
+and the framework, neither of which #347 knows about — the specs are the only thing left referencing
+them. The bucket should collapse when #349 lands, and its size is a usable before/after measure for
+that slice.
+
+**conference-app is the clean case**: 2 candidates out of 103 declarations, no undecidable rows. A
+small app with a real `sig/` tree and few dynamic constructions is the shape the report handles best,
+which is worth knowing when setting expectations in the manual.

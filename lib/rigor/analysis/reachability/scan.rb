@@ -31,7 +31,14 @@ module Rigor
         # than a reference count (ADR-102 WD2). `role` is the referring FILE's role (WD8).
         Reference = Data.define(:as_written, :nesting, :from, :role, :path, :line)
 
-        Result = Data.define(:declarations, :references)
+        # ADR-102 WD4 — a site where a constant is reached by a mechanism the static reading cannot follow.
+        # `name` is the exact constant when the argument is a literal (`"Foo".constantize`), in which case this
+        # is as good as a reference. `prefix` is the namespace a dynamic construction can reach into
+        # (`"Foo::#{k}".constantize` → `"Foo"`, and `nil` when even that is unknown), which taints every
+        # declaration at or below it rather than proving any single one used.
+        DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line)
+
+        Result = Data.define(:declarations, :references, :dynamic_uses)
 
         # Roles a referring file can have (ADR-102 WD8). A reference edge carries its referrer's role so
         # "used only by its own test" is a reportable category rather than a bucket boundary.
@@ -60,18 +67,20 @@ module Rigor
 
           walker = Walker.new(path: path, role: role_for(path))
           walker.walk(parsed.value, [])
-          Result.new(declarations: walker.declarations.freeze, references: walker.references.freeze)
+          Result.new(declarations: walker.declarations.freeze, references: walker.references.freeze,
+                     dynamic_uses: walker.dynamic_uses.freeze)
         end
 
         # Single-pass walker. Tracks `nesting` as the stack of enclosing declaration names.
         class Walker
-          attr_reader :declarations, :references
+          attr_reader :declarations, :references, :dynamic_uses
 
           def initialize(path:, role:)
             @path = path
             @role = role
             @declarations = []
             @references = []
+            @dynamic_uses = []
           end
 
           def walk(node, nesting)
@@ -90,6 +99,8 @@ module Rigor
               record_meta_new(node, nesting)
               walk(node.value, nesting)
               return
+            when Prism::CallNode
+              record_dynamic_use(node)
             end
 
             node.rigor_each_child { |child| walk(child, nesting) }
@@ -141,6 +152,55 @@ module Rigor
               arg = stmt.arguments&.arguments&.first
               arg && Source::ConstantPath.qualified_name_or_nil(arg)
             end
+          end
+
+          # Names that turn a String into a constant. `constantize` / `safe_constantize` are ActiveSupport;
+          # `const_get` is core and may carry an explicit receiver (`Object.const_get`, `self.class.const_get`).
+          DYNAMIC_RESOLVERS = %i[constantize safe_constantize const_get].freeze
+          private_constant :DYNAMIC_RESOLVERS
+
+          SUBJECT_SHAPES = {
+            Prism::StringNode => "a literal string",
+            Prism::SymbolNode => "a literal symbol",
+            Prism::InterpolatedStringNode => "an interpolated string"
+          }.freeze
+          private_constant :SUBJECT_SHAPES
+
+          # Rigor knows the argument's shape, which is the whole reason this can be tiered rather than treated
+          # as a blanket namespace poison: a literal argument names the exact constant and is as good as a
+          # written reference, while an interpolated one can only bound the namespace it reaches into.
+          def record_dynamic_use(node)
+            return unless DYNAMIC_RESOLVERS.include?(node.name)
+
+            subject = node.name == :const_get ? node.arguments&.arguments&.first : node.receiver
+            return if subject.nil?
+
+            reason = "#{node.name} on #{SUBJECT_SHAPES.fetch(subject.class, 'a computed value')}"
+            case subject
+            when Prism::StringNode, Prism::SymbolNode
+              @dynamic_uses << DynamicUse.new(name: subject.unescaped, prefix: nil, reason: reason,
+                                              site: site(node), path: @path, line: node.location.start_line)
+            when Prism::InterpolatedStringNode
+              @dynamic_uses << DynamicUse.new(name: nil, prefix: literal_prefix(subject), reason: reason,
+                                              site: site(node), path: @path, line: node.location.start_line)
+            else
+              @dynamic_uses << DynamicUse.new(name: nil, prefix: nil, reason: reason,
+                                              site: site(node), path: @path, line: node.location.start_line)
+            end
+          end
+
+          # The literal head of an interpolated name: `"Foo::Bar::#{k}"` bounds the reach to `Foo::Bar`. Returns
+          # nil when the interpolation starts the string, which bounds nothing.
+          def site(node)
+            "#{@path}:#{node.location.start_line}"
+          end
+
+          def literal_prefix(node)
+            head = node.parts.first
+            return nil unless head.is_a?(Prism::StringNode)
+
+            trimmed = head.unescaped.sub(/::\z/, "")
+            trimmed.empty? ? nil : trimmed
           end
 
           def record_reference(node, nesting)

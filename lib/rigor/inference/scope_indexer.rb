@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../scope"
 require_relative "../type"
+require_relative "../unused_probe" # issue #345 spike instrumentation
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../cache/file_digest"
@@ -92,6 +93,12 @@ module Rigor
         seeded_scope = seeded_scope.with_discovery(
           seeded_scope.discovery.with(in_source_constants: in_source_constants)
         )
+        # Issue #345 spike instrumentation. `discovered_classes` and `in_source_constants` here are the
+        # PER-FILE tables (before the cross-file project seed merges in), so the declaration source is
+        # exactly `default_scope.source_path`. Inert unless RIGOR_UNUSED_PROBE is set.
+        if UnusedProbe::ACTIVE
+          UnusedProbe.record_file_declarations(default_scope.source_path, discovered_classes, in_source_constants)
+        end
 
         # Slice 7 phase 12. In-source method discovery. Walks every class/module body for `Prism::DefNode` and
         # recognised `define_method` calls and records the introduced method names. `rigor check` consults the table to

@@ -1,0 +1,4 @@
+target_ruby: "4.0"
+paths:
+  - lib
+plugins: []

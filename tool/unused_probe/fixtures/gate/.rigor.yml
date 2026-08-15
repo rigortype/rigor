@@ -1,0 +1,6 @@
+target_ruby: "4.0"
+paths:
+  - lib
+signature_paths:
+  - sig
+plugins: []

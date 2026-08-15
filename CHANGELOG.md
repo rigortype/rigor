@@ -12,6 +12,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[engine]** A constant inherited from a superclass or an included module now resolves from the subclass body, and no longer loses to a same-named constant at the top level ([#354](https://github.com/rigortype/rigor/issues/354)).
+  - Ruby looks a constant up through the enclosing lexical scopes, then through the ancestors of the innermost one, and only then at the top level. Rigor skipped the ancestor step, so `KEY` written inside `class Sub < Base` was typed as the top-level `KEY` rather than `Base::KEY` — everything downstream of that read was then reasoning about the wrong type. Constants owned by a class outside your project, such as a gem superclass, are still only found by their full name.
+
 ## [0.3.3] - 2026-08-09
 
 v0.3.3 is a false-positive clearance release: six patterns where Rigor reported an error on Ruby that runs correctly are retired, and most are plain idioms rather than exotic corners. `Class.new do … end` bodies, `Array.new(n) { … }`, `defined?` operands, singleton bodies opened on a constant, a project helper colliding with a DSL matcher, and a nil guard on a literal-hash lookup all stop warning. Inference is also more precise where it was merely vague: a generic method that passes an argument straight through now returns that argument's own type, and `inspect` / `to_s` / `Array#*` fold to exact values. The rest is correctness housekeeping, including a suppression marker that recognised its own documentation.

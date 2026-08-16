@@ -175,10 +175,27 @@ skip most of a list quickly:
 
 - **Framework naming conventions** — a helper module paired to a
   controller by name, a Rails generator, a `ClassMethods` module
-  auto-extended by `ActiveSupport::Concern`, or a custom validator
-  derived from an option key (`validates :start_date, date: true`
-  resolves the name `DateValidator`). Nothing writes the name; the
-  framework derives it.
+  auto-extended by `ActiveSupport::Concern`, a decorator a gem applies
+  to a model by name, a join model reached through
+  `has_many :speakers_talks`, or a custom validator derived from an
+  option key (`validates :start_date, date: true` resolves the name
+  `DateValidator`). Nothing writes the name; the framework derives it.
+  Two of these clear whole clusters at once, so check them before
+  working through rows one at a time: **`include_all_helpers` defaults
+  to true**, so unless the app disables it every `app/helpers/*Helper`
+  is live; and a decorator gem's convention covers `app/decorators`
+  wholesale.
+- **Named as a string in configuration** — a recurring-job schedule
+  (`config/recurring.yml`, `config/schedule.yml`, a `sidekiq.yml`
+  scheduler block), a queue definition, a class name in a settings
+  file. The scheduler resolves it by name, so no Ruby code has to, and
+  a scheduled job commonly has no `perform_later` call anywhere in the
+  repository. Check that the file is actually loaded — a `Procfile` or
+  deploy config passing `--recurring_schedule_file` is the confirming
+  evidence.
+- **Called from a view** — `app/views/**/*.erb` is not Ruby and is not
+  analysed, so a helper used only from templates has no caller the
+  report can see. Grep the view tree before believing any helper row.
 - **Self-registering classes** — a class whose body calls a
   registration DSL (`add "link"`, `register :thing`). The evidence of
   use is inside the class, not outside it.
@@ -219,17 +236,26 @@ A candidate row is the start of a case. Confirm each of these:
    the fully-qualified name — a row would not be in `candidates` if
    the FQN appeared anywhere the report reads. Grep instead for the
    forms it cannot: the snake_cased autoload path
-   (`admin/reports_controller`), the demodulized leaf, and any name
-   assembled by interpolation.
+   (`admin/reports_controller`), the demodulized leaf, any name
+   assembled by interpolation, and the view tree.
 2. **Check it is not reached by convention** — the shapes above.
 3. **Check nothing outside the repository references it.** For a gem,
    a library, or an app with third-party extensions, "unused" means
    "unused by callers I can see", and your public API is exactly what
    you cannot see.
-4. **Read the git history.** A class added recently and never wired up
-   is unfinished work, not dead code.
+4. **Read the git history** — but check it is real first. A class
+   added recently and never wired up is unfinished work rather than
+   dead code. In a shallow clone, or one whose history is all
+   dependency bumps, the "last change" date is an artifact and proves
+   nothing; say so instead of quoting a bot commit as the file's age.
 5. **Delete its tests with it.** A spec that must survive the class it
    tests is testing nothing.
+
+**Empty is not the same as dead.** A module the framework includes
+everywhere but which declares no methods is live by every measure this
+report uses, and still worth deleting — as generator residue, not as
+dead code. Say which of the two you found; they justify different
+amounts of care from a reviewer.
 
 ### Making the case to someone else
 

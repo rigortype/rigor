@@ -37,6 +37,7 @@ module Rigor
       "type-of" => :run_type_of,
       "trace" => :run_trace,
       "type-scan" => :run_type_scan,
+      "effects" => :run_effects,
       "explain" => :run_explain,
       "diff" => :run_diff,
       "sig-gen" => :run_sig_gen,
@@ -221,6 +222,12 @@ module Rigor
       TypeScanCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_effects
+      require_relative "cli/effects_command"
+
+      EffectsCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def run_explain
       require_relative "cli/explain_command"
 
@@ -348,6 +355,7 @@ module Rigor
           type-of    Print the inferred type at FILE:LINE:COL
           trace      Replay how the engine typed FILE as a terminal animation
           type-scan  Report Scope#type_of coverage across PATHs
+          effects    Report each method's effect labels (ADR-103, opt-in)
           explain    Print the description of one or all CheckRules
           diff       Compare current diagnostics to a saved baseline JSON
           sig-gen    Emit RBS skeletons inferred from .rb sources (ADR-14)

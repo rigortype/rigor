@@ -162,6 +162,53 @@ rigor type-scan PATH...
 unrecognized-node ratio exceeds `RATIO`, and `--format=text|json`
 selects the output format.
 
+## `rigor effects`
+
+Report what each method *does* — its effect labels — rather
+than what it returns. Opt-in and observational: it emits no
+diagnostic, never changes `rigor check`'s output, and always
+exits `0` on a successful run.
+
+```sh
+rigor effects [PATH...]
+```
+
+With no paths it analyses the configured `paths:`. It runs with
+effect collection enabled even when your `.rigor.yml` carries
+no `effects:` block, so you can try it before configuring
+anything.
+
+Each line is one method, sorted by key:
+
+```
+Tracer::Reporter#report: [io.output.stdout, nondet.time]
+Tracer::Gateway#fetch: [] …?
+    dynamic-receiver (external_gem_without_rbs)
+```
+
+The labels are the **transitive** footprint — the method's own
+plus every project method it reaches. A ` …?` suffix means the
+list is not exhaustive: some call could not be resolved, so the
+reading is "these effects, and possibly more". The indented
+lines say why. A taint is never a finding.
+
+A method is omitted when it is exhaustive and proves nothing
+beyond `mutate.local` — mutation of objects its own frame
+allocated and never let out, which every effect envelope
+tolerates. `--full` lists every method instead.
+
+`--format=text|json` selects the output format; the JSON
+payload additionally carries each method's *direct* summary
+broken down per origin. `--config=PATH` picks a config file.
+
+What is collected and how it propagates is
+[the effect-summaries internal spec](../internal-spec/effect-summaries.md);
+the label vocabulary is
+[the effect-labels specification](../type-specification/effect-labels.md).
+The committed effect snapshot and its drift gate
+(`rigor effects update` / `check` / `diff`) are not in this
+release.
+
 ## `rigor explain`
 
 Print the catalogue entry for a diagnostic rule, or list every

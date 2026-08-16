@@ -16,7 +16,9 @@ The Ruby-ish answer to the last question is *inference does the work, `%a{pure}`
 ecosystem's existing purity spelling, and envelopes are attached by convention (namespace / path)
 rather than per method*. Mandatory per-method annotation is a stated non-goal. On top of the
 shared registry, a **framework vocabulary** (`rails.*`, § 11.2) names what Rails facilities *mean*
-where their transport is adapter-dependent and statically unknowable.
+where their transport is adapter-dependent and statically unknowable. And the primary way to
+*validate* is not an envelope at all but a committed **effect snapshot** whose diff is reviewed
+and whose drift CI gates (§ 9.4) — `db/schema.rb` for effects.
 
 Sources: Steins' [Why effects?](https://github.com/rigortype/steins/blob/master/docs/why-effects.md),
 [effects.md](https://github.com/rigortype/steins/blob/master/docs/type-specification/effects.md),
@@ -60,8 +62,9 @@ Goals:
 - **Never a false positive from an unknown.** Diagnostics read only *proven* effects; unresolved
   dispatch taints exhaustiveness and produces no finding ([ADR-5](../adr/5-robustness-principle.md),
   AGENTS.md "false positives outrank worst-case static reading").
-- **Pay for itself without annotations** — engine consumers (§ 8) and a review surface (§ 9.3)
-  that need no declaration at all.
+- **Pay for itself without annotations** — engine consumers (§ 8), a review surface (§ 9.3) and
+  a committed, drift-gated effect snapshot (§ 9.4) that need no declaration at all. The snapshot
+  is the primary validation mode; envelopes are the optional second step.
 - **Vocabulary and identifiers aligned with Steins / the PHPStan RFC** unless Ruby genuinely
   differs.
 
@@ -303,9 +306,10 @@ them, in a fixed order of preference from "no declaration" to "per method".
 
 ### 6.1 Nothing — inference is the default
 
-Every method gets a summary. The report (§ 9.3) and the engine consumers (§ 8) need no
-declaration. This is the surface most methods live on, and the design's answer to the non-goal
-"comment every class/method".
+Every method gets a summary. The report (§ 9.3), the committed effect snapshot and its drift
+gate (§ 9.4), and the engine consumers (§ 8) need no declaration. This is the surface most
+methods live on — and with the snapshot it is a *validated* surface, not merely an observed one —
+the design's answer to the non-goal "comment every class/method".
 
 ### 6.2 Convention: envelopes by namespace / path (`.rigor.yml`)
 
@@ -569,14 +573,131 @@ declaration only when label intent is evident, and never changes a bound.
 
 `rigor effects PATH…` — per method: proven labels, declared (`≤`) labels, exhaustive bit, and the
 taint *causes* (dynamic-origin reasons), `--format text|json`; the same three-file
-`*_command` / `*_report` / `*_renderer` shape as `type-scan`. `rigor effects --set-baseline` /
-`--diff` — Steins' `effect-diff`: one line per changed method (`+ io.net.http` on
-`OrdersController#create`), always exit 0, functions present on both sides only, a vanished label
-claimed only when the current summary is exhaustive, declared→proven as a *materialisation* event.
+`*_command` / `*_report` / `*_renderer` shape as `type-scan`. `rigor effects --update` /
+`--check` / `--diff` — the committed **effect snapshot** and its drift gate, Steins'
+`effect-diff` promoted to the primary validation mode; it has its own section, § 9.4.
 `rigor effects --at FILE:LINE:COL` — the `type-of` twin, for editor hover later.
 `rigor effects --follow-enqueues` — the causal closure through deferred jobs and mailers, report
 only (§ 11.2 "Deferred execution"). And `rigor check --no-tolerated-effects` — the audit switch
 of § 4.
+
+### 9.4 Operating without envelopes: the effect snapshot
+
+The owner's ask, stated plainly: run this **without writing anything in code** — write the
+observed effects out to a file, commit it, and keep watching for drift nobody intended. Steins
+ships that as a sidecar report (`effect-diff --set-baseline`, always exit 0). Here it becomes the
+**primary validation mode**, and envelopes become the optional second step a team may never take.
+
+The Ruby precedent that makes it feel native is `db/schema.rb` / `Gemfile.lock` (and, for the
+"list only what is interesting" half, `.rubocop_todo.yml`): a generated artefact you commit; its
+diff in a pull request *is* the review signal; CI checks that it is fresh; and **intent is
+expressed by committing the regenerated file**, not by annotating the code. That social contract
+— the developer regenerates, the reviewer reads the diff, approval acknowledges the change — is
+what "unintended" means operationally: a diff you did not expect to see in your own PR.
+
+**Mechanics.**
+
+- `rigor effects --update` writes `.rigor-effects.yml` (config `effects.snapshot: <path>`; a
+  sibling of `.rigor-baseline.yml` sharing nothing with it but path handling — Steins' rule for its
+  own sidecar).
+- `rigor effects --check` recomputes, compares, prints an *explained* diff and exits non-zero on
+  drift — the `type-scan --threshold` precedent for a report command with a gate flag. It emits
+  **no diagnostic and never enters `rigor check`'s stream** (ADR-102): drift between two
+  observations by the same tool is 100 % precise; whether the drift *matters* is the reviewer's
+  judgment, which is exactly why it is a review artefact and not a finding.
+- `rigor effects --diff [--baseline PATH]` prints without gating — `--baseline <(git show
+  origin/main:.rigor-effects.yml)` in a bot.
+- Cost: summaries live in the per-file cache, so a `--check` after `rigor check` in the same CI
+  job is a cache hit plus the graph-only fixpoint.
+
+**What the file records** — two tables, chosen so that a diff is *attributable*:
+
+```yaml
+# .rigor-effects.yml — generated by `rigor effects --update`. Commit it; review its diff.
+schema: 1
+rigor: 0.3.3
+vocabulary: 1
+config_digest: 3f9a…                     # the effects: block of .rigor.yml
+methods:                                 # DIRECT summaries; exhaustive-∅ entries omitted
+  PaymentGateway#charge:
+    effects: [io.net.http, telemetry]
+  OrderService#place:
+    effects: [io.db.write, rails.activejob.enqueue, job.enqueue]
+    declared: [io.net.http]              # ≤ imported from an envelope at a call site
+  Reports::Nightly#perform:
+    effects: [io.db.read]
+    exhaustive: false
+    unresolved: [send]                   # call names, not lines
+reach:                                   # TRANSITIVE footprint at entry points
+  OrdersController#create:
+    effects: [io.db.read, io.db.write, io.net.http, job.enqueue, nondet.time, telemetry]
+```
+
+- `methods:` is keyed by `Class#method` / `Class.method` (symbol, not path/line — the churn
+  tolerance the diagnostic baseline chose) and holds the **direct** summary: origins in the
+  method's own code, block literals included (§ 5.4), plus labels from catalogued / attributed
+  callees — but not from project callees, which are edges. Direct, not transitive, on purpose: an
+  entry changes only when its own body, the catalogue, or an attribution changed, so **a snapshot
+  diff is attributable to the lines changed in the same PR**. Entries that are exhaustive and ∅ are
+  omitted (`--full` lists them): the file lists the interesting, and a method that *becomes*
+  impure shows up as an added key.
+- `reach:` is the **transitive** footprint at entry points — `effects.snapshot.reach:` globs, with
+  a rigor-rails preset (controller actions, `perform`, mailer methods, channels), the same
+  entry-point notion `rigor unused --entry-point` already has. This is the "operational shape"
+  question of § 1. A leaf change fans out here, and the fan-out *is* the information (blast
+  radius); `--check` renders it as one line per cause, not one per entry.
+- The header carries the Rigor version, the vocabulary version and a digest of the `effects:`
+  config block, so a Rigor upgrade or a `tolerated:` change is a *visible* regeneration event —
+  `schema.rb` after a Rails upgrade. Deterministic output (sorted keys and labels, no timestamps)
+  rides the pooled = sequential merge discipline that already exists.
+
+**Diff categories** — Steins' event vocabulary, made symmetric: `+label` / `-label` (a removal on
+a non-exhaustive current side is rendered hedged: "possibly more" cannot prove an absence);
+`≤+` / `≤-` for the declared lane; **materialisation** (declared → proven, one event, never a
+removal plus an addition); **exhaustiveness transitions** as their own category (someone
+introduced a `send` with a dynamic name — worth a look); `+symbol` / `-symbol` (renames counted
+in a footer, never reported as a lost effect; under `--check` a new symbol with a non-empty summary
+is drift, acknowledged by regenerating). `--explain` prints the shortest edge path behind a reach
+change — `OrdersController#create → OrderService#place → PaymentGateway#charge → Net::HTTP.post`
+— the fixpoint has the graph, this is the review feature that pays for it.
+
+**Symmetric by default, ratchet by option.** `--check` fails on *any* drift, the `schema.rb`
+model: a removal is news too (a job that stopped enqueueing is a bug, not an improvement).
+`effects.snapshot.gate: additions` gives the PHPStan-baseline-style ratchet where only growth
+fails. On the noun: in this repo *baseline* is ADR-22's suppression file — it hides known findings
+so only new ones surface. The snapshot hides nothing and gates drift; the ratchet mode is where
+the two meet. This note says **effect snapshot** and leaves the naming to the owner (§ 13).
+
+**Policy and the snapshot.** The file records the *undischarged* sets (invariant 1 of § 4: the
+catalogue never lies; `--update --no-tolerated-effects` must produce a byte-identical file);
+`--check` / `--diff` consult `tolerated:` at judgment time — a change confined to tolerated labels
+is reported as `tolerated` and does not fail the gate (`--strict-tolerated` makes it fail).
+Because `tolerated:` lives in the same repository, the file is a pure function of (code,
+catalogue, config, Rigor version), and a policy change diffs the config, not the record.
+
+**The workflow, end to end.** Day one: `rigor effects --update`, commit — the team gets its first
+map ("which controllers reach the network, which jobs write, which presenters query"). A pull
+request: the change alters summaries → CI `--check` fails with three explained lines → the
+developer runs `--update` and commits → the reviewer reads `PaymentGateway#charge + io.net.http`
+and `reach OrdersController#create + io.net.http via OrderService#place` in the PR diff — and
+either nods or pushes back. A bundle-update PR: reach changes with no code diff (a plugin's
+attribution moved, or Rigor's catalogue grew) — visible, regeneration commit expected, exactly
+the case Steins names ("whether a refactor added or removed an effect" — a dependency bump is a
+refactor someone else made). Over time, stable observations for an architectural layer can be
+**promoted** into a stated bound — `rigor effects --promote "Presenters::*"` writes an
+`effects.envelopes` stanza (§ 6.2) from the observed sets — so the snapshot is the on-ramp and
+envelopes are where a layer lands *if* the team wants "never" rather than "as before". Most
+projects may reasonably stay on the snapshot.
+
+**What it is not.** Not a suppression file for `effect.*` diagnostics (`.rigor-baseline.yml` does
+that); not a substitute for an envelope's *stated* intent (a snapshot says "as before", an
+envelope says "never"); not an observation of code Rigor did not analyse (non-exhaustive entries
+say so, and their transitions are events). It is also, incidentally, a measurement instrument for
+Rigor itself: snapshots of the survey corpus across Rigor versions show how the proven lane grows.
+
+**Consequence for the plan.** The snapshot needs only summaries, the fixpoint and the report — no
+envelopes, no diagnostics — so it moves into WD1 as the first user-visible validation, ahead of
+`%a{}` (§ 12).
 
 ## 10. Architecture inside Rigor
 
@@ -745,7 +866,7 @@ discharged whole, and a transport label that also arrived through an untolerated
 | Slice | Lands | Gate |
 | --- | --- | --- |
 | **WD0** | `CONTEXT.md` terms; ADR + `docs/type-specification/effect-labels.md` (labels, subsumption, envelope grammar, lanes, unknown-label rule) + internal-spec section; `effect.*` reserved in diagnostic-policy.md | docs gate |
-| **WD1** | label algebra + registry; `data/effects/core.yml` seed (Kernel / IO / File / Dir / Process / Time / Random / ENV / globals / backticks) with per-class default posture; syntactic origin scan; edge collection at dispatch; per-method summaries persisted; post-pool fixpoint; `rigor effects` report (text/json). **No diagnostics.** | corpus measurement: exhaustive ratio and proven-label distribution on mastodon / redmine / gitlab; byte-identical `check` output |
+| **WD1** | label algebra + registry; `data/effects/core.yml` seed (Kernel / IO / File / Dir / Process / Time / Random / ENV / globals / backticks) with per-class default posture; syntactic origin scan; edge collection at dispatch; per-method summaries persisted; post-pool fixpoint; `rigor effects` report (text/json); **the effect snapshot** — `--update` / `--check` / `--diff` / `--explain`, `.rigor-effects.yml` with `methods:` (direct) + `reach:` (entry points), symmetric gate + `gate: additions` (§ 9.4). **No diagnostics.** | corpus measurement: exhaustive ratio and proven-label distribution on mastodon / redmine / gitlab; byte-identical `check` output; snapshot determinism (pooled = sequential, two runs byte-identical) |
 | **WD2** | `%a{rigor:v1:effect}` / `%a{rigor:v1:pure}` (RBS + inline, method + class); `%a{pure}` interop reading behind the opt-in; `FlowContribution#effects` slot; `effect.envelope-exceeded`, `effect.unknown-label`; rule-catalog / severity-table wiring | opt-in only; zero firings with the feature off |
 | **WD3** | declared lane through nominal supertypes at the ADR-57 N5 gate; `effect.liskov-widened` over project subclass overrides | both-sides-authored |
 | **WD4** | `effects.envelopes` (path / namespace conventions), `effects.attribution`, `effects.labels`, `effects.tolerated` + `--no-tolerated-effects`; plugin `effect_attributions:` + framework edges; the Rails vocabulary of § 11.2 in rigor-rails (RBS colouring, `rails.*` root, laziness rows, callback edges) and `%a{pure}` across rigor-activesupport-core-ext | Rails corpus: a `Presenters::*`-pure stanza reports only genuine queries; the `io.db.read` / `io.db.write` / application-meaning roots raised with Steins as shared additions |
@@ -789,6 +910,17 @@ discharged whole, and a transport label that also arrived through an untolerated
 13. **Relation laziness** — builders ∅ / materializers `io.db.read` (recommended, truthful) vs
     builders `io.db.read` (how developers think); and whether `Rails.env` / `Rails.root` reads are
     `global.read` (recommended — mutable process state, tolerate by policy) or ∅.
+14. **Snapshot layout** — `methods:` as *direct* summaries plus `reach:` at entry points
+    (recommended: a diff stays attributable to the PR's own lines, and blast radius shows where it
+    matters) vs transitive summaries for every method; omit exhaustive-∅ entries by default.
+15. **Gate semantics** — symmetric `--check` by default (`schema.rb`: a removal is news too) with
+    `gate: additions` as the ratchet option, or additions-only by default (baseline-like); and
+    exit non-zero on drift, which deviates from Steins' always-0 `effect-diff` on the strength of
+    the `type-scan --threshold` precedent.
+16. **The file's name and record** — `.rigor-effects.yml` called an *effect snapshot* (vs *effect
+    baseline* — in this repo "baseline" means ADR-22 suppression); record undischarged sets and
+    apply `tolerated:` at judgment time (recommended, invariant 1) vs write the policy-projected
+    view.
 
 ## 14. Repo facts this note rests on
 

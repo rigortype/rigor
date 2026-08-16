@@ -1,0 +1,57 @@
+module Envelopes
+  class UserRepository
+    %a{rigor:v1:effect io.db}
+    def find: (Integer id) -> String
+
+    %a{pure}
+    def collect: (String label) -> Integer
+  end
+
+  class Gateway
+    def self.fetch: (Integer id) -> String
+  end
+
+  class Memo
+    %a{pure}
+    def value: () -> Integer
+  end
+
+  %a{rigor:v1:effect io.db}
+  class Console
+    def shout: (String message) -> void
+
+    %a{rigor:v1:effect io.output.stdout}
+    def write: (String message) -> void
+  end
+
+  %a{rigor:v1:effect io.db}
+  module Tools
+    def self.stamp: () -> Time
+
+    class Inner
+      def tick: () -> Time
+    end
+  end
+
+  class Quiet
+    %a{rigor:v1:effect io/db}
+    def malformed: () -> void
+
+    %a{rigor:v1:effect}
+    def empty: () -> void
+
+    %a{rigor:v1:effect io.bd}
+    def unknown: () -> void
+
+    %a{pure}
+    %a{rigor:v1:effect io.output.stdout}
+    def conflicted: () -> void
+  end
+
+  %a{pure}
+  class Bag
+    attr_reader size: Integer
+
+    attr_writer items: Array[untyped]
+  end
+end

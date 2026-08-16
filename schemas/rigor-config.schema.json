@@ -242,12 +242,12 @@
   },
   "$defs": {
     "effectsBlock": {
-      "description": "The body of the `effects:` opt-in. `snapshot:` and `tolerated:` are read (the effect snapshot, #381); the rest are reserved — declared, accepted, and not yet read by this implementation.",
+      "description": "The body of the `effects:` opt-in. `check:`, `snapshot:` and `tolerated:` are read (the envelope check, #383; the effect snapshot, #381); the rest are reserved — declared, accepted, and not yet read by this implementation.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "check": {
-          "description": "Whether authored envelopes (`%a{pure}`, `%a{rigor:v1:effect …}`) are checked against the collected summaries. Default `true`. NOT READ YET — the envelope reader lands with #383.",
+          "description": "Whether authored envelopes (`%a{pure}`, `%a{rigor:v1:effect …}`) are checked against the collected summaries, surfacing `effect.envelope-exceeded`. Default `true` under a present `effects:` block, and never on without one. `false` keeps collection, the report and the snapshot while silencing the diagnostic. READ.",
           "type": "boolean",
           "default": true
         },
@@ -289,7 +289,7 @@
           }
         },
         "envelopes": {
-          "description": "Envelopes by convention rather than by annotation — the ADR-28 path/namespace shape. Each entry bounds the methods it selects. NOT READ YET — lands with #383.",
+          "description": "Envelopes by convention rather than by annotation — the ADR-28 path/namespace shape. Each entry bounds the methods it selects. NOT READ YET — the annotation spelling landed with #383; the configured one lands with #385.",
           "type": "array",
           "items": { "$ref": "#/$defs/effectEnvelopeEntry" }
         },

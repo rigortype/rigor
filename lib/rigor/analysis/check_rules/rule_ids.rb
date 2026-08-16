@@ -44,6 +44,11 @@ module Rigor
       # return, used in value context. Authored `:warning`, resolved `:off` by every profile and promoted to
       # `:warning` only by the `use-of-void-value` bleeding-edge feature.
       RULE_VALUE_USE_VOID = "static.value-use.void"
+      # ADR-103 WD8 / #383 — the first `effect.*` id: a method whose PROVEN effect labels are not
+      # subsumed by the envelope its author declared (`%a{pure}` / `%a{rigor:v1:effect ...}`). Opt-in
+      # twice over — the `effects:` block enables collection, and the envelope is the author's own
+      # directive — so it is never unsolicited.
+      RULE_EFFECT_ENVELOPE_EXCEEDED = "effect.envelope-exceeded"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -72,7 +77,8 @@ module Rigor
         RULE_SUPPRESSION_UNKNOWN_RULE,
         RULE_SUPPRESSION_EMPTY,
         RULE_SUPPRESSION_UNKNOWN_MARKER,
-        RULE_VALUE_USE_VOID
+        RULE_VALUE_USE_VOID,
+        RULE_EFFECT_ENVELOPE_EXCEEDED
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with
@@ -102,7 +108,7 @@ module Rigor
 
       # Family wildcard — a `<family>` token in a suppression comment or `disable:` list disables every rule
       # whose canonical id starts with `<family>.`. Per ADR-8 § "1".
-      RULE_FAMILIES = %w[call flow assert dump def suppression static].freeze
+      RULE_FAMILIES = %w[call flow assert dump def suppression static effect].freeze
 
       # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
       # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,

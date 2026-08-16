@@ -728,6 +728,48 @@ module Rigor
           since: "0.3.0"
         ),
 
+        CheckRules::RULE_EFFECT_ENVELOPE_EXCEEDED => Entry.new(
+          id: CheckRules::RULE_EFFECT_ENVELOPE_EXCEEDED,
+          summary: "A method performs an effect its declared envelope does not admit.",
+          fires_when: [
+            "The project's `.rigor.yml` carries an `effects:` block and `effects.check` is on (it " \
+            "defaults to on when the block is present).",
+            "The method's RBS carries an envelope — `%a{pure}` (the empty bound) or " \
+            "`%a{rigor:v1:effect <labels>}` — written on the method, or on its class / module and " \
+            "distributed to it.",
+            "The method's PROVEN effect labels — its own body plus the transitive closure over the " \
+            "project methods it calls — include a label no member of the bound subsumes."
+          ],
+          does_not_fire_when: [
+            "No `effects:` block is configured, or `effects.check: false` is set — an annotation " \
+            "alone never turns the check on.",
+            "The exceeding label is `mutate.local`: mutating what the frame itself allocated and " \
+            "never let escape is tolerated by every envelope, `%a{pure}` included.",
+            "The label is only suspected rather than proven — an unresolved or dynamic call taints " \
+            "the summary's exhaustiveness bit and contributes nothing to the proven lane, so " \
+            "\"possibly more\" never produces a finding.",
+            "The envelope names a label the effect registry does not recognise (a typo, a retired " \
+            "spelling): the whole tag then reads as unbounded, which suppresses findings rather " \
+            "than inventing them.",
+            "The envelope was written on a supertype rather than on this class — the inherited-bound " \
+            "(Liskov) reading is `effect.liskov-widened`, which is not implemented.",
+            "The envelope was written outside the project's own `signature_paths:` RBS (core, a " \
+            "gem's shipped RBS): only project-authored envelopes are checked."
+          ],
+          suppression: "`# rigor:disable effect.envelope-exceeded` on the Ruby `def` line (the " \
+                       "diagnostic is positioned there, not on the `.rbs` line), or " \
+                       "`disable: [\"effect.envelope-exceeded\"]` in `.rigor.yml`. Widening or " \
+                       "removing the envelope is the real fix.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :error },
+          # FP-safe by two accepted constructions at once: opt-in by author directive (the envelope IS
+          # the directive, so a firing is never unsolicited — the `conforms-to` construction) and
+          # as-strict-as-proven (the proven lane only; taint never fires). What it costs to be wrong is
+          # bounded by the author having asked the question.
+          evidence_tier: :high,
+          since: "0.3.4"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER,
           summary: "A comment uses a suppression marker Rigor does not recognise " \

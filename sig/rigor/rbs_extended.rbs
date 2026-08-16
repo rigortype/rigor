@@ -47,6 +47,12 @@ module Rigor
 
     def self?.parse_conforms_to_annotation: (String? string) -> String?
 
+    # ADR-103 #383 — the effect-envelope reader. `annotations` is any list of RBS annotation nodes
+    # (`RBS::Definition::Method#annotations`, or a declaration / member's own `#annotations`); the result
+    # is a `Rigor::Effects::Envelope`, or nil when the list carries neither purity spelling.
+    def self?.pure_annotation?: (String? string) -> bool
+    def self?.read_effect_envelope: (untyped annotations, owner_key: String, ?source: Symbol, ?registry: untyped, ?reporter: untyped) -> untyped?
+
     class ParamOverride
       attr_reader param_name: Symbol
       attr_reader type: Type::t

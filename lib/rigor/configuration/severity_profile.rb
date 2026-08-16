@@ -63,6 +63,10 @@ module Rigor
           # ADR-100 — a new required diagnostic (ADR-50 WD1), so it is `:off` in every shipped profile and
           # reaches a user only through the `use-of-void-value` bleeding-edge feature, which overrides this
           # to `:warning`.
+          # ADR-103 WD8 / #383 — opt-in twice over (the `effects:` block, then the author's own
+          # envelope directive), so it is never unsolicited noise and needs no bleeding-edge gate:
+          # `:warning` even under lenient, `:error` under strict.
+          "effect.envelope-exceeded" => :warning,
           "static.value-use.void" => :off,
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
@@ -101,6 +105,7 @@ module Rigor
           "suppression.empty" => :warning,
           "suppression.unknown-marker" => :warning,
           "static.value-use.void" => :off,
+          "effect.envelope-exceeded" => :warning,
           "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         strict: {
@@ -135,6 +140,7 @@ module Rigor
           "suppression.unknown-marker" => :warning,
           # `:off` even under strict: the gate is `bleeding_edge:`, not the profile (ADR-50 WD1 / ADR-100).
           "static.value-use.void" => :off,
+          "effect.envelope-exceeded" => :error,
           "rbs_extended.unsatisfied-conformance" => :error
         }.freeze
       }.freeze

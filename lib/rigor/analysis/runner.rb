@@ -44,6 +44,7 @@ require_relative "runner/run_snapshots"
 require_relative "runner/project_pre_passes"
 require_relative "runner/pool_coordinator"
 require_relative "runner/diagnostic_aggregator"
+require_relative "runner/effect_envelope_pass"
 require_relative "runner/buffer_pool_dispatcher"
 
 module Rigor
@@ -308,6 +309,9 @@ module Rigor
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
+        # Per-run reset of the environment the cacheable path resolves, reused by the envelope pass so a
+        # run never builds two.
+        @run_environment = nil
         # ADR-84 WD2 — roll the return-memo bucket: a fresh frozen token per run makes every per-file scope
         # of THIS run share one memo bucket while entries from any earlier run in this process (stale after
         # an edit) become unreachable.
@@ -325,6 +329,11 @@ module Rigor
         ensure_project_discovery(expansion) if force_eager_discovery?
 
         diagnostics = compute_run_diagnostics(expansion)
+        # ADR-103 WD12 / #383 — `effect.envelope-exceeded`, recomputed every run from the (possibly
+        # cached) effect table and never stored. It sits OUTSIDE `compute_run_diagnostics` on purpose:
+        # the `effects:` block is absent from the diagnostics cache identity, so a finding written into
+        # that entry would outlive the configuration that produced it. See {EffectEnvelopePass}.
+        diagnostics += effect_envelope_diagnostics(expansion)
 
         Result.new(
           diagnostics: @diagnostic_aggregator.apply_severity_profile(diagnostics),
@@ -569,6 +578,7 @@ module Rigor
                          else
                            Cache::Descriptor.new
                          end
+        @run_environment = environment
         key_descriptor = run_key_descriptor(expansion, rbs_descriptor)
         return assemble_run_diagnostics(expansion, environment: environment) if key_descriptor.nil?
 
@@ -659,6 +669,41 @@ module Rigor
       end
       private :serve_effect_collections, :effects_key_descriptor,
               :peek_effect_collections, :store_effect_collections
+
+      # ADR-103 WD8 / #383 — the envelope check. Nothing at all without an `effects:` block, and nothing
+      # under `effects.check: false`; with both, one walk of the project's own RBS for `%a{pure}` /
+      # `%a{rigor:v1:effect …}`, and only if that finds an envelope does anything else run (the discovery
+      # tables the `def` positions come from are forced from inside the pass, lazily, for that reason).
+      #
+      # The environment is the one the cacheable path already resolved when there is one, so a warm run
+      # reads the envelopes off the loader it built anyway rather than building a second.
+      def effect_envelope_diagnostics(expansion)
+        return [] unless @record_effects && @configuration.effects_check?
+
+        EffectEnvelopePass.new(
+          configuration: @configuration,
+          rbs_loader: envelope_rbs_loader(expansion),
+          effect_table: effect_table,
+          discovery: -> { envelope_discovery_tables(expansion) },
+          sources: @in_memory_sources
+        ).diagnostics
+      end
+
+      def envelope_rbs_loader(expansion)
+        environment = @run_environment ||
+                      @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
+        environment&.rbs_loader
+      rescue StandardError
+        nil
+      end
+
+      def envelope_discovery_tables(expansion)
+        ensure_project_discovery(expansion)
+        [@project_discovered_def_sources, @project_discovered_singleton_def_sources,
+         @project_discovered_class_sources]
+      end
+
+      private :effect_envelope_diagnostics, :envelope_rbs_loader, :envelope_discovery_tables
 
       # ADR-103 WD13 — fail-soft at the run level too: a propagator that raises leaves the table empty and
       # the run untouched. `Propagator.propagate` already swallows its own failures; this guards the merge.

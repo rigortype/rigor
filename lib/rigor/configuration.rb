@@ -83,11 +83,11 @@ module Rigor
       # in existence. `false` is also the explicit-disable form a `.rigor.yml` uses to override an upstream
       # `.rigor.dist.yml`'s `effects:` block — the same shape `baseline:` uses.
       #
-      # The sub-keys are declared in `schemas/rigor-config.schema.json`. `snapshot.{path,reach,gate}` and
-      # `tolerated` are read (#381, {#coerce_effects_snapshot}); `check`, `labels`, `attribution`,
-      # `envelopes` and `views` land with the slices that implement them (#383 / #386). Reserving their
-      # shape before a reader exists is the same discipline the schema applies to a sibling
-      # implementation's namespace (ADR-99).
+      # The sub-keys are declared in `schemas/rigor-config.schema.json`. `check` (#383,
+      # {#effects_check?}), `snapshot.{path,reach,gate}` and `tolerated` (#381,
+      # {#coerce_effects_snapshot}) are read; `labels`, `attribution`, `envelopes` and `views` land with
+      # the slices that implement them (#385 / #386 / #387). Reserving their shape before a reader exists
+      # is the same discipline the schema applies to a sibling implementation's namespace (ADR-99).
       "effects" => false,
       "cache" => {
         "path" => ".rigor/cache",
@@ -244,6 +244,16 @@ module Rigor
     # plugin, no severity profile — can turn collection on.
     def effects_enabled?
       !@effects.nil?
+    end
+
+    # ADR-103 WD14 / #383 — whether author-declared effect envelopes (`%a{pure}`,
+    # `%a{rigor:v1:effect …}`) are checked against the collected summaries, surfacing
+    # `effect.envelope-exceeded`. Defaults to **true when the `effects:` block is present**: the block is
+    # the opt-in, and a project that asked for effects asked for its own declarations to hold. An explicit
+    # `check: false` disables the diagnostic and leaves collection — and therefore `rigor effects` and the
+    # snapshot — untouched. Always false without the block, so an annotation alone changes nothing.
+    def effects_check?
+      @effects_check
     end
 
     # Loads a configuration file.
@@ -625,6 +635,9 @@ module Rigor
 
       copy = dup
       copy.instance_variable_set(:@effects, {}.freeze)
+      # The implicit block defaults like a written one. `rigor effects` emits no diagnostic either way,
+      # but the two configurations must not differ in a field a later reader could branch on.
+      copy.instance_variable_set(:@effects_check, true)
       copy.freeze
     end
 
@@ -654,12 +667,22 @@ module Rigor
     # A label that is well-formed but unknown to the *registry* is deliberately NOT rejected here — that is
     # `effect.unknown-label`'s job (#384), and it fails open.
     def coerce_effects_snapshot(effects)
+      @effects_check = coerce_effects_check?(effects)
       snapshot = effects&.fetch("snapshot", nil)
       snapshot = {} unless snapshot.is_a?(Hash)
       @effects_snapshot_path = (snapshot.fetch("path", nil) || DEFAULT_EFFECTS_SNAPSHOT_PATH).to_s.freeze
       @effects_snapshot_reach = coerce_effects_reach(snapshot.fetch("reach", nil))
       @effects_snapshot_gate = coerce_effects_gate(snapshot.fetch("gate", nil))
       @effects_tolerated = coerce_effects_tolerated(effects&.fetch("tolerated", nil))
+    end
+
+    # `effects.check:` — true by default under a present block, and never true without one. Only an
+    # explicit `false` turns it off; any other value is normalised to true rather than rejected, because a
+    # switch whose only two readings are "check" and "do not check" has nothing a tier-2 error would add.
+    def coerce_effects_check?(effects)
+      return false if effects.nil?
+
+      effects.fetch("check", true) != false
     end
 
     VALID_EFFECTS_GATES = %i[symmetric additions].freeze

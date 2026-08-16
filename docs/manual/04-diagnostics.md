@@ -58,6 +58,7 @@ carries no `documentation_url`.
 | <a id="rule-def-override-return-widened"></a>`def.override-return-widened` | An override's declared return type widens the inherited return (covariance). | high |
 | <a id="rule-def-override-param-narrowed"></a>`def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). | high |
 | <a id="rule-static-value-use-void"></a>`static.value-use.void` | A value recovered from an author-declared `-> void` return is used in value context (an assignment right-hand side, a call receiver, or a call argument). Off by default; reaches a run only through the `use-of-void-value` bleeding-edge feature (ADR-100). A bare-statement `void` call and a legitimate `top` value both stay silent. | high |
+| <a id="rule-effect-envelope-exceeded"></a>`effect.envelope-exceeded` | A method performs an effect its declared envelope does not admit — its proven effect labels (its own body plus everything it calls) are not covered by the `%a{pure}` or `%a{rigor:v1:effect …}` bound written on it or on its class. Opt-in twice over: it needs an `effects:` block in `.rigor.yml` and an envelope you wrote. Positioned at the Ruby `def`. Unproven ("and possibly more") effects never fire, and `mutate.local` is tolerated by every envelope. | high |
 | <a id="rule-suppression-unknown-rule"></a>`suppression.unknown-rule` | A `# rigor:disable[-file]` comment names a rule that does not exist (typically a typo), so the suppression silently does nothing. `plugin.`-prefixed tokens are never flagged. | high |
 | <a id="rule-suppression-empty"></a>`suppression.empty` | A `# rigor:disable[-file]` comment lists no rules, so it suppresses nothing. | high |
 | <a id="rule-suppression-unknown-marker"></a>`suppression.unknown-marker` | A comment uses a suppression marker Rigor does not recognise — typically the RuboCop reflex `# rigor:disable-next-line <rule>` or `# rigor:enable <rule>`. Rigor's only markers are `# rigor:disable <rules>` (suppresses on its own line) and `# rigor:disable-file <rules>`, so the comment suppresses nothing. | high |
@@ -104,7 +105,7 @@ are:
 
 | Severity | Rules |
 | --- | --- |
-| `warning` | `call.unresolved-toplevel`, `def.ivar-write-mismatch`, `def.return-type-mismatch`, `def.override-visibility-reduced`, `def.override-return-widened`, `def.override-param-narrowed`, `flow.unreachable-branch`, `flow.always-truthy-condition`, `flow.dead-assignment`, `flow.duplicate-hash-key`, `flow.return-in-ensure`, `flow.shadowed-rescue-clause`, `suppression.unknown-rule`, `suppression.empty`, `suppression.unknown-marker` |
+| `warning` | `call.unresolved-toplevel`, `def.ivar-write-mismatch`, `def.return-type-mismatch`, `def.override-visibility-reduced`, `def.override-return-widened`, `def.override-param-narrowed`, `flow.unreachable-branch`, `flow.always-truthy-condition`, `flow.dead-assignment`, `flow.duplicate-hash-key`, `flow.return-in-ensure`, `flow.shadowed-rescue-clause`, `suppression.unknown-rule`, `suppression.empty`, `suppression.unknown-marker`, `effect.envelope-exceeded` |
 | `info` | `flow.unreachable-clause`, `dump.type` |
 | `off` | `call.self-undefined-method`, `static.value-use.void` |
 

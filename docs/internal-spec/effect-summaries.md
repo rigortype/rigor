@@ -230,6 +230,33 @@ Sorted iteration order is what makes a pooled run and a sequential run produce t
 
 The result is a `Rigor::Effects::EffectTable` on the runner (`Runner#effect_table`), with the merged direct collections available separately (`Runner#effect_collection`). **It is not a diagnostic**: it never enters `rigor check`'s stream, and the run's exit code is identical whether or not it was computed ([ADR-102](../adr/102-unused-code-reachability-report.md)'s report-versus-diagnostic line).
 
+## Envelopes: reading and checking
+
+The label language of an envelope, and what the bound means, are normative in [`effect-labels.md`](../type-specification/effect-labels.md) § Effect envelopes. What is analyzer-internal is *where* the envelopes come from and *when* the check runs.
+
+### The reader parses, it does not read the built environment
+
+`RbsExtended::EnvelopeScanner` parses the project's own signature sources directly — every `.rbs` under the configured `signature_paths:` (or the `sig/` default), plus the loader's `virtual_rbs` entries, which is how rbs-inline's `# @rbs %a{…}` comments and a plugin's `source_rbs` synthesis arrive. It does **not** walk `RbsLoader`'s built environment, which is the obvious route and the one `ConformanceChecker` takes.
+
+Two reasons, and both are binding:
+
+- **The env cache destroys locations.** `Cache::RbsEnvironmentMarshalPatch` dumps every `RBS::Location` to a zero-range `<cached>` sentinel, so a warm run cannot say which file a declaration came from, let alone which line. The diagnostic has to name where the bound was written, and a check that silently stopped firing on the second run of the day would be worse than one that never fired.
+- **It enforces the trust rule structurally.** ADR-103 WD6 makes project-authored envelopes the checked stratum. Reading only the project's own sources means a `%a{pure}` in rbs core or in a gem's shipped RBS cannot bound a project method that happens to share its key — no path filter to get wrong.
+
+The cost is one parse of a tree the run already globs, paid only when `effects.check` is on.
+
+The reader is fail-soft at every level: an unparseable signature contributes no envelope (the loader already quarantines it and reports `rbs.coverage.quarantined-signature`), a malformed payload and a `pure`/`effect` contradiction are recorded on a `RbsExtended::Reporter` the scan owns, and an unrecognised label rides out on `Effects::Envelope#unknown_labels`. None of the three surfaces a diagnostic in this slice; `effect.unknown-label` ([#384](https://github.com/rigortype/rigor/issues/384)) is what reads that seam.
+
+### Where the check runs
+
+`Runner::EffectEnvelopePass`, in `#run_analysis`, **outside** `#compute_run_diagnostics` — deliberately, and not beside `conforms_to_diagnostics` where the other project-level streams sit.
+
+The reason is the cache. `assemble_run_diagnostics`' result is what the ADR-45 whole-run diagnostics slot stores, and the `effects:` block is deliberately absent from that slot's identity (§ Caching) — which is what lets a project turn collection on without invalidating its check. An envelope finding written into that entry would therefore outlive the configuration that produced it: flipping `effects.check: false` would not move the key, and the warm entry would keep serving the finding. Running the pass over whatever table the run ended up with — warm or cold — is ADR-103 WD12's "recomputed every run, never stored", and it also means the warm path, which never assembles at all, still emits.
+
+The pass is ordered so a project pays for what it uses: it reads the envelopes first and stops there when there are none, and only a project that declared one forces the cross-file discovery tables (`ensure_project_discovery`) that map a method key to its Ruby `def`. Positions come from `discovered_def_sources` / `discovered_singleton_def_sources`, falling back to `discovered_class_sources` for a synthesized accessor, which has no `def` of its own.
+
+Findings run through `CheckRules.filter_suppressed` per file before they leave the pass, with that file's comments and the project's `disable:` list, so `# rigor:disable effect.envelope-exceeded` on the `def` line behaves exactly as it does for a per-file rule. Everything downstream — severity resolution, the baseline, `--format json` — applies because the diagnostics join the ordinary stream before `apply_severity_profile`.
+
 ## The snapshot document
 
 The committed effect snapshot is the primary validation mode ([ADR-103](../adr/103-effect-labels.md) WD7). Its label language is normative in [`effect-labels.md`](../type-specification/effect-labels.md); its file contract is here.

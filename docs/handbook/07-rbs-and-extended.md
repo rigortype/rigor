@@ -165,6 +165,66 @@ so because you added it. The stacking and diagnostic semantics
 are in
 [manual — `conforms-to`](../manual/16-rbs-extended-annotations.md#conforms-to--a-checked-structural-contract).
 
+## Bounding what a method *does* — effect envelopes
+
+Every directive so far describes what a method returns. One
+describes what it *does*:
+
+```rbs
+class UserRepository
+  %a{rigor:v1:effect io.db}
+  def find: (Integer) -> User
+
+  %a{pure}
+  def slug: (String) -> String
+end
+```
+
+`%a{rigor:v1:effect io.db}` says "this method may touch the
+database, and nothing else the vocabulary names". `%a{pure}`
+says "nothing at all" — it is rbs' own purity annotation, the
+one Steep already reads, so Rigor honours the spelling that
+exists rather than inventing a synonym. Both tolerate mutating
+objects the method itself allocated and never let out, so a
+`%a{pure}` method may still build and fill a local array.
+
+The payload is a comma-separated list of bare labels
+(`%a{rigor:v1:effect io.db, nondet.time}`), from the vocabulary
+in
+[effect-labels.md](../type-specification/effect-labels.md).
+Write the annotation on a `class` or `module` declaration
+instead and it applies to every method of that class —
+reopenings and `attr_writer`-generated methods included, but
+never to subclasses. A method that carries its own envelope
+keeps it; nearest wins.
+
+The bound covers the method's whole *code*, including what it
+calls. A `find` declared `io.db` that reaches an HTTP request
+through a helper exceeds its envelope, and Rigor says so — on
+the Ruby `def`, naming the route it took:
+
+```text
+lib/user_repository.rb:12: warning: Method UserRepository#find
+performs io.net.http (Net::HTTP.get via PaymentGateway#charge),
+but is declared %a{rigor:v1:effect io.db} at sig/repo.rbs:3,
+so io.net.http exceeds the envelope.
+```
+
+Two things it will not do. It never reports an effect it only
+*suspects*: a call Rigor could not resolve makes the summary
+read "and possibly more", and possibly is not a finding. And
+none of this happens unless you asked for it — the check needs
+an `effects:` block in `.rigor.yml`, so an `%a{pure}` already
+sitting in your signatures for Steep's benefit stays inert
+until you opt in. Set `effects.check: false` to keep the
+`rigor effects` report and its snapshot while silencing the
+diagnostic.
+
+The whole feature — the label vocabulary, the committed effect
+snapshot, and `rigor effects` itself — is
+[ADR-103](../adr/103-effect-labels.md); start with
+[`rigor effects`](../manual/02-cli-reference.md#rigor-effects).
+
 ## Worked example: an assertion gate
 
 ```rbs

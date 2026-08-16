@@ -82,7 +82,7 @@ The registry carries a `vocabulary` version, and the rules that govern it follow
 
 ## Effect summaries
 
-> **Partly implemented as of this writing.** The proven lane, the exhaustiveness bit and the taint causes are computed by the collector of [#379](https://github.com/rigortype/rigor/issues/379) whenever the `effects:` block is present, and `rigor effects` prints them; how they are produced is [`effect-summaries.md`](../internal-spec/effect-summaries.md). Their **catalogued** origins come from the hand-audited `data/effects/core.yml` of [#380](https://github.com/rigortype/rigor/issues/380), with per-class default postures and argument-dependent narrowing; the catalogue's contract is analyzer-internal and is specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The catalogue. The **declared lane is always empty** — the envelope reader that fills it lands with [#386](https://github.com/rigortype/rigor/issues/386). The snapshot of [#381](https://github.com/rigortype/rigor/issues/381) commits them to a reviewed file; nothing is cached *between runs* until [#382](https://github.com/rigortype/rigor/issues/382).
+> **Partly implemented as of this writing.** The proven lane, the exhaustiveness bit and the taint causes are computed by the collector of [#379](https://github.com/rigortype/rigor/issues/379) whenever the `effects:` block is present, and `rigor effects` prints them; how they are produced is [`effect-summaries.md`](../internal-spec/effect-summaries.md). Their **catalogued** origins come from the hand-audited `data/effects/core.yml` of [#380](https://github.com/rigortype/rigor/issues/380), with per-class default postures and argument-dependent narrowing; the catalogue's contract is analyzer-internal and is specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The catalogue. The **declared lane is always empty**: envelopes are read and checked at the declaration ([#383](https://github.com/rigortype/rigor/issues/383), § Effect envelopes), but importing a trusted envelope as a `≤` bound at a *call site* whose callee is unknown lands with [#386](https://github.com/rigortype/rigor/issues/386). The snapshot of [#381](https://github.com/rigortype/rigor/issues/381) commits them to a reviewed file; nothing is cached *between runs* until [#382](https://github.com/rigortype/rigor/issues/382).
 
 An **effect summary** describes one method. It carries two lanes and one bit:
 
@@ -117,7 +117,7 @@ The enum is closed. A new cause is a change to this document, not a producer's f
 
 ## Effect envelopes
 
-> **Not implemented as of this writing.** The grammar below binds the reader that lands with [#383](https://github.com/rigortype/rigor/issues/383); no Rigor version reads `%a{rigor:v1:effect …}` or checks `%a{pure}` as an envelope today.
+> **Implemented as of this writing** ([#383](https://github.com/rigortype/rigor/issues/383)): both spellings are read off the project's own RBS — its `signature_paths:` tree and the rbs-inline / plugin-synthesized signatures derived from its `.rb` files — and checked against each method's proven summary as `effect.envelope-exceeded` whenever `effects.check` is on (which it is by default under an `effects:` block). Two neighbouring readings are not: an envelope declared on a *supertype* does not yet bind its overrides (`effect.liskov-widened`, [#386](https://github.com/rigortype/rigor/issues/386)), and an envelope written in `.rigor.yml` by path or namespace ([#385](https://github.com/rigortype/rigor/issues/385)) is accepted by the schema and not read. An envelope in RBS Rigor did not load from the project — rbs core, a gem's shipped signatures — is deliberately never read: the checked stratum is the project's own declarations ([ADR-103](../adr/103-effect-labels.md) WD6).
 
 An **effect envelope** is an author-declared upper bound on a method's effect labels, checked structurally against the method's *code* — dead code and block literals included. The RBS spelling follows the `RBS::Extended` conventions of [rbs-extended.md](rbs-extended.md):
 
@@ -146,6 +146,20 @@ end
 
 An envelope on a supertype's method binds its overrides: an implementation may be purer than the bound it inherits, never less pure.
 
+### What the envelope binds
+
+The bound is checked against the method's **proven** lane, transitively: its own body, the block literals it contains, and every project method it calls. A repository declared `%a{rigor:v1:effect io.db}` whose body calls a helper that calls `Net::HTTP` exceeds its envelope, because the envelope is a contract about what the method *does* and not about which lines spell it.
+
+Three rules keep this from spending false-positive budget:
+
+- **The declared lane and the exhaustiveness bit are not read.** A summary that could not resolve every call reads "these effects, and possibly more"; the *possibly* never produces a finding, and what was proven still does. This is "as strict as proven" ([robustness-principle.md](robustness-principle.md)) applied to the second dimension.
+- **`mutate.local` is tolerated by every envelope**, `%a{pure}` included.
+- **`effects.tolerated:` is not consulted.** That list is a judgment-time policy for the snapshot's diff (§ The effect snapshot); an envelope is a contract, and discharging a contract by policy is a separate decision ([#385](https://github.com/rigortype/rigor/issues/385)).
+
+A proven label the bound does not admit is one `effect.envelope-exceeded` diagnostic per (method, label), **positioned at the Ruby `def`** rather than at the `.rbs` line — that is where the fix goes and where `# rigor:disable` is read. Where the method has no Ruby `def` (a synthesized `attr_*` accessor reached by class-level distribution) the position falls back to the class's own file. The message names the label, the shortest path to the origin that proves it, the author's own spelling of the bound, and where that bound was written; the identifier taxonomy and its severities are [diagnostic-policy.md](diagnostic-policy.md).
+
+The check runs only when the configuration carries an `effects:` block **and** `effects.check` is not `false`; `effects.check` defaults to true under a present block. An `%a{pure}` in a project with no `effects:` block is inert — reading it as a checked contract on the quiet default surface would make a pre-existing annotation start failing ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) WD1).
+
 ### Class-level distribution
 
 A class-level envelope distributes to every method of that Ruby class which discovery knows — reopenings, definitions in other files, and synthesised `attr_*` / `define_method` members included. It does **not** distribute to subclasses. On a module, it distributes to the module's own methods only. A method-level envelope wins over a distributed class-level one; nearest wins, and no `-except` syntax is needed.
@@ -158,7 +172,7 @@ This is fail-open, and it is the only safe reading. A tag whose author meant `io
 
 The same rule applies to a retired spelling and to a label a plugin was expected to register but did not.
 
-> **Not implemented as of this writing.** The paired vocabulary diagnostic `effect.unknown-label` — which surfaces the degradation where label intent is evident, with a nearest-known-label suggestion — lands with [#384](https://github.com/rigortype/rigor/issues/384). Its identifier is reserved jointly with Steins, alongside `effect.envelope-exceeded` and `effect.liskov-widened`; the identifier taxonomy is [diagnostic-policy.md](diagnostic-policy.md).
+The degradation itself is implemented: the envelope reader answers ⊤ for a tag carrying an unrecognised spelling, and for one that violates the label grammar outright, so neither can produce a finding. **Not implemented as of this writing:** the paired vocabulary diagnostic `effect.unknown-label` — which surfaces the degradation where label intent is evident, with a nearest-known-label suggestion — lands with [#384](https://github.com/rigortype/rigor/issues/384). Its identifier is reserved jointly with Steins, alongside `effect.liskov-widened`; the identifier taxonomy is [diagnostic-policy.md](diagnostic-policy.md).
 
 ## The effect snapshot
 

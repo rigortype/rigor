@@ -68,6 +68,39 @@ RSpec.describe "effect collection over the tracer fixture" do
     expect(table["Tracer::Dispatcher#run"].proven.to_a).to eq(["io.output.stdout"])
   end
 
+  # #380 — the hand-audited catalogue end to end: a row whose label the call's own literals decide, an
+  # object constant's two directions, and a per-class default posture.
+  describe "the core catalogue" do
+    {
+      "Tracer::Narrowed#pipe" => ["io.process"],
+      "Tracer::Narrowed#read_path" => ["io.fs.read"],
+      "Tracer::Narrowed#write_file" => ["io.fs.write"],
+      "Tracer::Narrowed#flag" => ["global.read"],
+      "Tracer::Narrowed#set_flag" => ["global.write"],
+      "Tracer::Narrowed#drain" => ["io.output.stdout"]
+    }.each do |key, labels|
+      it "proves #{labels.join(', ')} for #{key}" do
+        expect(table[key].proven.to_a).to eq(labels)
+        expect(table[key]).to be_exhaustive
+      end
+    end
+
+    # Arity-dependent narrowing: `Time.new(2020, 1, 1)` consults no clock, where `Time.now` does — and
+    # the row is still a row, so the call does not read as unresolved.
+    it "leaves an argument-constructed Time and a seeded Random effect-free" do
+      expect(table["Tracer::Narrowed#fixed_time"].proven).to be_empty
+      expect(table["Tracer::Narrowed#fixed_time"]).to be_exhaustive
+      expect(table["Tracer::Narrowed#seeded"].proven).to be_empty
+      expect(table["Tracer::Narrowed#seeded"]).to be_exhaustive
+    end
+
+    it "keys the narrowed origins by the row that matched" do
+      expect(table["Tracer::Narrowed#pipe"].direct.bundles.keys.map(&:to_s)).to eq(["catalogue:Kernel#open"])
+      expect(table["Tracer::Narrowed#flag"].direct.bundles.keys.map(&:to_s)).to eq(["catalogue:ENV#fetch"])
+      expect(table["Tracer::Narrowed#set_flag"].direct.bundles.keys.map(&:to_s)).to eq(["catalogue:ENV#[]="])
+    end
+  end
+
   describe "taint causes" do
     {
       "Tracer::Gateway#fetch" => "dynamic-receiver",

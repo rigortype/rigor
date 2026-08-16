@@ -41,6 +41,17 @@ module Tracer
       Random.new(42)
     end
 
+    # A project method whose name a `Kernel` row also carries. An unqualified call resolves against
+    # self's ancestry FIRST, so the project definition wins at run time and the summary has to be the
+    # union of the two readings — not the row alone, which would cut the callee off.
+    def format
+      Time.now.to_s
+    end
+
+    def render
+      format
+    end
+
     # A method of a world-facing class the catalogue does not row falls back to the class's posture —
     # here `STDOUT`'s, which is `io.output.stdout`.
     def drain

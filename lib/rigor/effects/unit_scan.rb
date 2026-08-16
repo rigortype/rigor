@@ -193,10 +193,24 @@ module Rigor
 
         add(Origin.catalogue(catalogue_key(owner, singleton, node)), entry.labels) unless entry.labels.empty?
         classify_mutation(node.receiver) if mutating_catalogued?(node, entry, owner)
-        # A posture answer is a DEFAULT, not a statement about this selector, so the project edge is
-        # kept: a core class a project reopens still propagates its override's summary.
-        push_edge(record, node.name.to_s, false) if entry.posture?
+        push_edge(record, node.name.to_s, implicit) if keeps_project_edge?(entry, implicit)
         true
+      end
+
+      # Whether a claimed call still contributes its project edge. Two shapes do, and the summary is
+      # then the union of the catalogue's reading and the project definition's:
+      #
+      # - an IMPLICIT-SELF call, because an unqualified name resolves against self's ancestry first and
+      #   a project method of the same name wins at run time. `Kernel#format` is a real row and
+      #   `CustomField#format` is a real method, and only the union reads both correctly. (Redmine's
+      #   `format.cast_value(…)` is the measured case: the row alone silently cut the callee off.)
+      # - a POSTURE answer, which is a class default rather than a statement about this selector, so a
+      #   core class the project reopens still propagates its override's summary.
+      #
+      # An edge that reaches no project definition is dropped by the propagator, so the cost of keeping
+      # one is nothing and the cost of dropping one is a missing callee.
+      def keeps_project_edge?(entry, implicit)
+        entry.posture? || implicit
       end
 
       def mutating_catalogued?(node, entry, owner)

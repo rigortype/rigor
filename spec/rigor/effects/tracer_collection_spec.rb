@@ -94,6 +94,14 @@ RSpec.describe "effect collection over the tracer fixture" do
       expect(table["Tracer::Narrowed#seeded"]).to be_exhaustive
     end
 
+    # An unqualified name resolves against self's ancestry first, so a project method of the same name
+    # wins at run time. The row alone would silently cut the callee off (measured on Redmine's
+    # `CustomField#format`), so a claimed implicit-self call keeps its project edge.
+    it "unions a Kernel row with the project method that shadows it" do
+      expect(table["Tracer::Narrowed#render"].proven.to_a).to eq(["nondet.time"])
+      expect(table["Tracer::Narrowed#render"].edges).to eq(["Tracer::Narrowed#format"])
+    end
+
     it "keys the narrowed origins by the row that matched" do
       expect(table["Tracer::Narrowed#pipe"].direct.bundles.keys.map(&:to_s)).to eq(["catalogue:Kernel#open"])
       expect(table["Tracer::Narrowed#flag"].direct.bundles.keys.map(&:to_s)).to eq(["catalogue:ENV#fetch"])

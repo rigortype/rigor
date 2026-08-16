@@ -117,14 +117,74 @@ Taint never produces a finding. A non-exhaustive summary reads "these effects, a
 
 - `super` is neither an edge nor a taint. Resolving it needs the ancestor *above* the enclosing class, which the propagator could supply; it is left out to keep the tracer thin.
 - An implicit-self call the dispatcher resolves optimistically through the user-class ancestor fallback does **not** taint, even when the project defines no such method. That shape is exactly what `call.self-undefined-method` covers, and it is off by default on false-positive grounds ([ADR-24](../adr/24-self-method-call-resolution.md) slice 4).
-- An uncatalogued call on a *known* receiver contributes nothing and does not taint. The per-class default postures that make the exhaustiveness bit meaningful over Ruby's whole core surface — value classes ∅, world-facing classes `io` — arrive with the hand-audited catalogue in [#380](https://github.com/rigortype/rigor/issues/380).
+- An uncatalogued call on a receiver whose class the catalogue does not list contributes nothing and does not taint. A class the catalogue *does* list answers its posture — see § The catalogue below.
 - Class bodies are not effect units. Their statements run at load time, which is a unit of its own that no slice models yet.
 
 ## The catalogue
 
-`Rigor::Effects::Catalog` is a small in-code table keyed `Owner#method` / `Owner.method`, standing in for the hand-audited `data/effects/core.yml` of [#380](https://github.com/rigortype/rigor/issues/380). A row MAY be the empty label set, which is not the same as having no row: an explicit ∅ says the catalogue knows the call and knows it contributes nothing, which is what stops `Thread.new` from reading as unresolved while its block joins the enclosing method by containment.
+`Rigor::Effects::Catalog` loads `data/effects/core.yml` — a hand-audited table of core and stdlib classes, memoised per process and inherited as-is across the fork pool. A missing or unreadable file degrades to an empty catalogue (fail-open, matching `Registry.load_file`); a file that is present but malformed raises, because that is a packaging bug rather than a choice.
 
-The generated `data/builtins/ruby_core/*.yml` `purity:` facet is **not** an effect source. It answers fold-safety in the C-dispatch sense — `Random#rand` is `leaf`, `Array#push` is `leaf` — and reading it as effect freedom would be wrong in both directions (ADR-103 WD3).
+**Rows are upper bounds.** An argument-blind row on a world-facing class MUST be the parent label: `IO#write` is `io`, not `io.fs.write`, because the channel is a socket as readily as a file. Precision returns only where the call's own arguments prove it.
+
+Every row carries a one-line `why:`, and the loader rejects one that does not. The justification is the audit record: this file is data, and the reasoning that put a label on a row lives beside the row rather than in a commit message.
+
+A row MAY be the empty label set, which is not the same as having no row: an explicit ∅ says the catalogue knows the call and knows it contributes nothing, which is what stops `Thread.new` from reading as unresolved while its block joins the enclosing method by containment.
+
+### Postures
+
+Ruby's core surface is far larger than any catalogue will finish, so a class carries a **posture** — what an uncatalogued method of it contributes — named from the file's own `defaults:` table. Three tiers matter:
+
+| Class | Reading of an uncatalogued method |
+| --- | --- |
+| listed, `posture: value` | ∅ |
+| listed, any world-facing posture (`world` → `io`, and the narrower `fs` / `net` / `http` / `ipc` / `process` / `signal` / `global` / `nondet` / the three standard streams) | that posture's labels |
+| **not listed at all** | nothing, and no taint — the reading for every project and gem class |
+
+The posture set is wider than "value ∅ / world `io`" because `io` is not an upper bound of `nondet.random`: a class whose unlisted methods are non-deterministic gets a `nondet` default rather than a wrong `io` one. A class with a genuinely mixed surface (`Time`, `Pathname`, `Random`, `Logger`) is `value` with its world-facing rows spelt out, because a blanket `io` over its path algebra and accessors would be a wrong label, and a wrong label is worse than a missing one ([ADR-5](../adr/5-robustness-principle.md)).
+
+A posture MUST NOT answer in three places, each of which would swallow a more specific reading the tracer already had:
+
+- an **implicit-self** (or `self.`) call. Every unqualified call in a project body spells `Kernel#name`, so the `world` default would colour the whole world.
+- a **`Dynamic` receiver**. The class the typer projected to is a guess there, and `dynamic-receiver` is the truthful answer.
+- **`send` / `public_send` / `__send__` / `call`**, whose own taints (`dynamic-send`, `opaque-callable`) are the more specific reading of the same site. An explicit ROW still wins, so `Fiddle::Function#call` is `ffi`.
+
+### Rows, postures and the project edge
+
+A **row** is authoritative about what its call does; `mutates: receiver` is how it asks for the ownership judgment (§ Ownership) on top. So `ENV["k"] = v` is `global.write` and deliberately not a receiver mutation, while `Time#localtime` is both. A **posture** states nothing about the selector, so the uncatalogued path's own mutation rule applies to it unchanged.
+
+Two claimed shapes still contribute their **project edge**, and the summary is then the union of the catalogue's reading and the project definition's:
+
+- an implicit-self call, because an unqualified name resolves against self's ancestry first and a project method of the same name wins at run time. `Kernel#format` is a real row and Redmine's `CustomField#format` is a real method; only the union reads both.
+- a posture answer, because a core class the project reopens must still propagate its override's summary.
+
+An edge that reaches no project definition is dropped by the propagator, so keeping one costs nothing and dropping one costs a callee.
+
+### Mutator sets, by reference
+
+A value class names `mutators: array | hash | string` and the loader resolves it to `MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `MutationClassifier::STRING_MUTATORS`. The data file MUST NOT re-spell a selector list; a spec pins the agreement in both directions.
+
+### Argument-dependent narrowing
+
+A row's `narrow:` names a handler in `Rigor::Effects::Narrowing`, which reads **the call's own argument literals and nothing else**. No dataflow: the scan is observational, and a narrowing that consulted inference would make the catalogue's answer a function of analysis quality rather than of the source in front of it. Every handler is total and degrades to the row's own `effects:` — its unnarrowed upper bound — rather than guessing.
+
+| Handler | Reads | Rows |
+| --- | --- | --- |
+| `kernel_open` | a literal leading `\|` is a subprocess; otherwise a path whose mode literal decides the direction | `Kernel#open` |
+| `file_open` | the mode literal at argument 1, or `mode:` | `File.open` |
+| `pathname_open` | the same one argument to the left, the receiver being the path | `Pathname#open` |
+| `time_new` | positional arity: none is `Time.now`, any constructs | `Time.new` |
+| `random_new` | positional arity: a seed makes the generator reproducible | `Random.new` |
+| `uri_open` | the scheme literal: `http(s)://`, `file://` or a bare path | `URI.open`, `OpenURI.open_uri` |
+
+Two readings the handlers fix. An **absent** mode argument is not an unknown one — Ruby's default is `"r"`, so it reads, where a computed mode or an integer flag answers the subsystem parent. And the target tests read the **literal head** of an interpolated string, because `open("|#{cmd}")` writes the part that decides the subsystem even when the rest is computed.
+
+### What is deliberately not a row
+
+`eval` / `instance_eval` / `class_eval` / `module_eval` with a positional argument, and a bare `binding`, taint `opaque-callable`: there is no upper bound to state for code the analyzer will not read. The block forms are containment and do not taint.
+
+### The `purity:` prohibition
+
+The generated `data/builtins/ruby_core/*.yml` `purity:` facet is **not** an effect source, and the loader MUST NOT open `data/builtins` at all. That facet answers fold-safety in the C-dispatch sense — `Random#rand` is `leaf`, `Array#push` is `leaf` — and reading it as effect freedom would be wrong in both directions (ADR-103 WD3). What the existing catalogues DO contribute is evidence, cited per row: the `c_effects: mutate` / `block` markers, the hand-audited `mutating_selectors:` blocklists in `lib/rigor/inference/builtins/*_catalog.rb`, `MethodCatalog::NON_REPRODUCIBLE_SELECTORS`, `MutationWidening`'s mutator sets and `ClosureEscapeAnalyzer`'s escape tables.
 
 ## Per-file shape and merging
 

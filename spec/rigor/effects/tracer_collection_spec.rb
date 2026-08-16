@@ -101,6 +101,16 @@ RSpec.describe "effect collection over the tracer fixture" do
     end
   end
 
+  # #381 — where each unit was written. The merged collection deliberately drops it (a summary is line-
+  # and file-free), but the snapshot's `reach:` table names its entry points by FILE glob, so the key has
+  # to be traceable back to the file.
+  it "reports which file each unit was defined in" do
+    sources = analyze(configuration).first.effect_sources
+
+    expect(sources.fetch("Tracer::Loud#emit").map { |path| File.basename(path) }).to eq(["loud.rb"])
+    expect(sources.fetch("Tracer::Reporter#report").map { |path| File.basename(path) }).to eq(["app.rb"])
+  end
+
   # The active `workers > 0` backend is fork (ADR-15 Amendment); the per-file collections marshal back
   # with the file's diagnostics, so the graph a pooled run closes must be the sequential one.
   it "produces the same table pooled as sequentially" do

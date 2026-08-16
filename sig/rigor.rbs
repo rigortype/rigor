@@ -135,6 +135,9 @@ module Rigor
       # (`spec/rigor/public_api_drift_spec.rb`), and a named reference would raise `RBS::UnknownTypeName`.
       def effect_table: () -> untyped
       def effect_collection: () -> untyped
+      # #381 — `{ "Class#m" => [path] }`, which the snapshot's `reach:` globs match against. Same
+      # `untyped` reasoning as its two siblings above.
+      def effect_sources: () -> untyped
     end
   end
 end

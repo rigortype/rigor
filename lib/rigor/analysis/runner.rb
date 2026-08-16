@@ -85,9 +85,23 @@ module Rigor
       # closure. #381's snapshot records these, because a diff over direct summaries stays attributable to
       # the pull request's own lines.
       def effect_collection
-        pooled = @pool_coordinator.collected_effects
-        collections = @file_effects.merge(pooled).sort_by { |path, _| path.to_s }.map(&:last)
-        collections.reduce(Effects::FileCollection.empty) { |merged, collection| merged.merge(collection) }
+        effect_collections.reduce(Effects::FileCollection.empty) { |merged, collection| merged.merge(collection) }
+      end
+
+      # Which file each effect unit was defined in — `{ "Class#m" => [path, …] }`, sorted, one entry per
+      # file that contributes a `def` to the key (a reopening spans several).
+      #
+      # The merged {#effect_collection} cannot answer this: merging drops the per-file path, deliberately,
+      # because a summary is line- and file-free by design. The snapshot's `reach:` table needs it anyway —
+      # its entry points are named by *file* globs (`effects.snapshot.reach:`, the `unused --entry-point`
+      # syntax), so the key has to be traced back to the file it was written in.
+      def effect_sources
+        effect_collections.each_with_object({}) do |collection, out|
+          path = collection.path
+          next if path.nil?
+
+          collection.summaries.each_key { |key| (out[key] ||= []) << path }
+        end
       end
 
       # @param configuration [Rigor::Configuration]
@@ -898,6 +912,14 @@ module Rigor
       end
 
       private
+
+      # The run's per-file effect collections in sorted path order — the sequential half merged with the
+      # pool's, exactly as {#file_dependencies} reconciles its two halves. Sorted, because the fold below
+      # it must not depend on pool-completion order.
+      def effect_collections
+        pooled = @pool_coordinator.collected_effects
+        @file_effects.merge(pooled).sort_by { |path, _| path.to_s }.map(&:last)
+      end
 
       # Editor mode § "Scope choice — option A". Under `buffer:` non-nil the per-file analysis emits
       # diagnostics ONLY for the buffer's logical path; the rest of `paths:` is consumed by the

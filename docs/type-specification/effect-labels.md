@@ -1,6 +1,8 @@
 # Effect Labels
 
-Effect labels are Rigor's second dimension beside types: what a method *does*, as opposed to what it returns. This document is normative for the label language — the grammar, the subsumption relation, the registry that recognises spellings, the envelope syntax that bounds them, and the shape of an effect summary. Collection, propagation and the effect snapshot are analyzer-internal and are specified in [`docs/internal-spec/`](../internal-spec/README.md); the rationale is [ADR-103](../adr/103-effect-labels.md), and the research behind it is [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md).
+Effect labels are Rigor's second dimension beside types: what a method *does*, as opposed to what it returns. This document is normative for the label language — the grammar, the subsumption relation, the registry that recognises spellings, the envelope syntax that bounds them, and the shape of an effect summary. Collection, propagation and the effect snapshot are analyzer-internal and are specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md); the rationale is [ADR-103](../adr/103-effect-labels.md), and the research behind it is [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md).
+
+The whole feature is **opt-in**: nothing here has any effect on a project whose `.rigor.yml` carries no `effects:` block.
 
 The vocabulary is shared with [Steins](https://github.com/rigortype/steins), the sibling PHP analyzer, so that a policy naming `io.db` reads the same against a PHP service and a Rails application.
 
@@ -80,7 +82,7 @@ The registry carries a `vocabulary` version, and the rules that govern it follow
 
 ## Effect summaries
 
-> **Not implemented as of this writing.** The lanes, the exhaustiveness bit and the taint causes are normative here; the collector that produces them lands with [#379](https://github.com/rigortype/rigor/issues/379), and the persisted snapshot with [#381](https://github.com/rigortype/rigor/issues/381). Nothing in Rigor computes an effect summary today.
+> **Partly implemented as of this writing.** The proven lane, the exhaustiveness bit and the taint causes are computed by the collector of [#379](https://github.com/rigortype/rigor/issues/379) whenever the `effects:` block is present, and `rigor effects` prints them; how they are produced is [`effect-summaries.md`](../internal-spec/effect-summaries.md). The **declared lane is always empty** — the envelope reader that fills it lands with [#386](https://github.com/rigortype/rigor/issues/386) — and nothing is persisted between runs until [#381](https://github.com/rigortype/rigor/issues/381).
 
 An **effect summary** describes one method. It carries two lanes and one bit:
 
@@ -110,6 +112,8 @@ When the exhaustiveness bit is false, the summary records why, from this closed 
 | `budget` | an inference budget cut the walk short |
 
 The enum is closed. A new cause is a change to this document, not a producer's free choice.
+
+> As of this writing `method-missing`, `plugin-attribution`, `template-not-analysed` and `budget` are reserved and unproduced; the other six have producers. Which shapes reach which cause is [`effect-summaries.md`](../internal-spec/effect-summaries.md) § Taints.
 
 ## Effect envelopes
 

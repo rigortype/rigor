@@ -161,6 +161,38 @@ RSpec.describe "Rigor configuration JSON Schema" do
     expect(object_alt["properties"].keys).to contain_exactly("gem", "id", "config", "enabled")
   end
 
+  # ADR-103 #381 — `effects:` is a Boolean in DEFAULTS (presence is the switch), so the nested-key axis
+  # above can never reach its sub-keys. The snapshot keys are the first of them this implementation
+  # reads, and the schema's declaration of them is pinned against the loader here instead.
+  describe "the effect-snapshot keys" do
+    let(:snapshot_schema) { schema.dig("$defs", "effectsBlock", "properties", "snapshot", "properties") }
+
+    it "declares the same default snapshot path the loader resolves to" do
+      expect(snapshot_schema.dig("path", "default"))
+        .to eq(Rigor::Configuration::DEFAULT_EFFECTS_SNAPSHOT_PATH)
+      expect(Rigor::Configuration.new({}).effects_snapshot_path)
+        .to eq(Rigor::Configuration::DEFAULT_EFFECTS_SNAPSHOT_PATH)
+    end
+
+    it "declares exactly the gates the loader accepts, and no others" do
+      gates = snapshot_schema.dig("gate", "enum")
+
+      expect(snapshot_schema.dig("gate", "default")).to eq("symmetric")
+      gates.each do |gate|
+        expect { Rigor::Configuration.new({ "effects" => { "snapshot" => { "gate" => gate } } }) }
+          .not_to raise_error
+      end
+      expect { Rigor::Configuration.new({ "effects" => { "snapshot" => { "gate" => "ratchet" } } }) }
+        .to raise_error(ArgumentError)
+    end
+
+    it "declares tolerated: as the list of label strings the loader validates" do
+      tolerated = schema.dig("$defs", "effectsBlock", "properties", "tolerated")
+
+      expect(tolerated).to include("type" => "array", "items" => { "type" => "string" })
+    end
+  end
+
   it "constrains dependencies.budget_per_gem to the runtime MIN/MAX bounds and default" do
     schema_obj = schema.dig("properties", "dependencies", "properties", "budget_per_gem")
     expect(schema_obj).not_to be_nil

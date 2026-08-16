@@ -41,7 +41,11 @@ design, not an implementation detail** — a key may sit in one tier, or all thr
 | **3. Config audit** | this implementation | check time | A STDERR warning, and a tagged entry under `config_warnings` in the `--format=json` payload. **The exit code is unchanged.** |
 
 Tier 2 is for a value the loader cannot proceed on (a malformed `dependencies.source_inference[]`
-entry, an out-of-range `budget_per_gem`). Tier 3 is for a value that is well-formed but **silently
+entry, an out-of-range `budget_per_gem`, an `effects.snapshot.gate` outside the enum, an
+`effects.snapshot.reach` entry naming no registered entry-point preset, an `effects.tolerated` member
+that is not a well-formed effect label). Tier 2 answers *shape*, not *meaning*: an
+`effects.tolerated` label the effect registry has never heard of loads fine, because an unknown label
+fails open and is `effect.unknown-label`'s business. Tier 3 is for a value that is well-formed but **silently
 resolves to nothing** — a missing signature path, an unknown library name, an inert suppression, an
 unrecognised top-level key; the class of mistake whose only symptom is confusing and downstream.
 Tier 3 warns and never errors, because a partial or forward-looking config is a valid setup, and it

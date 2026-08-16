@@ -242,7 +242,7 @@
   },
   "$defs": {
     "effectsBlock": {
-      "description": "The body of the `effects:` opt-in. Every key here is reserved: declared, accepted, and not yet read by this implementation.",
+      "description": "The body of the `effects:` opt-in. `snapshot:` and `tolerated:` are read (the effect snapshot, #381); the rest are reserved — declared, accepted, and not yet read by this implementation.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -252,7 +252,7 @@
           "default": true
         },
         "snapshot": {
-          "description": "The committed effect snapshot and its drift gate. NOT READ YET — lands with #381.",
+          "description": "The committed effect snapshot and its drift gate — `rigor effects update` / `check` / `diff` / `explain` (ADR-103 WD7). READ.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
@@ -262,7 +262,7 @@
               "default": ".rigor-effects.yml"
             },
             "reach": {
-              "description": "Entry-point globs whose transitive footprint the snapshot records under `reach:`. Shares the `unused --entry-point` glob syntax. Default `[]` — `methods:` only.",
+              "description": "Entry points whose TRANSITIVE footprint the snapshot records under `reach:`. Each entry is either a file glob — anything carrying a path or glob character, matched project-relative with the `unused --entry-point` semantics (`File.fnmatch?` with `FNM_PATHNAME`, so `**` is the only way across a directory boundary) — or the bare name of an entry-point preset a plugin registered. An unknown preset name is a load-time error. Default `[]` — `methods:` only.",
               "type": "array",
               "items": { "type": "string" },
               "default": []
@@ -294,7 +294,7 @@
           "items": { "$ref": "#/$defs/effectEnvelopeEntry" }
         },
         "tolerated": {
-          "description": "Labels a judgment discharges by policy. Discharge is per origin: a bundle is discharged when ANY of its labels is tolerated, because tolerating what an origin was FOR frees the transport it came with (ADR-103 WD14). NOT READ YET.",
+          "description": "Labels a judgment discharges by policy. Read by the snapshot gate: a `rigor effects check` difference confined to tolerated labels is reported under a `tolerated:` heading and does not fail (`--strict-tolerated` makes it fail, `--no-tolerated-effects` judges as if the list were empty). The snapshot RECORD is undischarged either way. Label SHAPE is validated at load; a label the registry does not know is `effect.unknown-label`'s business, not an error. Per-origin discharge — a bundle is discharged when ANY of its labels is tolerated, because tolerating what an origin was FOR frees the transport it came with (ADR-103 WD14) — arrives with the envelope slices.",
           "type": "array",
           "items": { "type": "string" }
         },

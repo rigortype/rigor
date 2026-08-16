@@ -6,6 +6,8 @@ require_relative "bleeding_edge"
 require_relative "ci_detector"
 require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
+require_relative "effects/entry_points"
+require_relative "effects/label"
 
 module Rigor
   class Configuration # rubocop:disable Metrics/ClassLength
@@ -21,6 +23,10 @@ module Rigor
     # Back-compat alias. Keep here so external callers that read `Configuration::DEFAULT_PATH` for help text /
     # fixture paths still work; the discovery list is the canonical source.
     DEFAULT_PATH = DISCOVERY_ORDER.first
+
+    # ADR-103 WD7 — where `rigor effects update` writes when `effects.snapshot.path:` is unset. Public
+    # because the schema pins its own `default` against it.
+    DEFAULT_EFFECTS_SNAPSHOT_PATH = ".rigor-effects.yml"
 
     # Built-in exclusion patterns appended to `exclude:` so vendored dependencies, Bundler artefacts, and
     # JavaScript node_modules are never analysed by accident when a directory glob expands. Users cannot
@@ -77,10 +83,11 @@ module Rigor
       # in existence. `false` is also the explicit-disable form a `.rigor.yml` uses to override an upstream
       # `.rigor.dist.yml`'s `effects:` block — the same shape `baseline:` uses.
       #
-      # The sub-keys are declared in `schemas/rigor-config.schema.json` and none is read yet: `check`,
-      # `snapshot`, `labels`, `attribution`, `envelopes`, `tolerated`, `views` land with the slices that
-      # implement them (#381 / #383 / #386). Reserving their shape before a reader exists is the same
-      # discipline the schema applies to a sibling implementation's namespace (ADR-99).
+      # The sub-keys are declared in `schemas/rigor-config.schema.json`. `snapshot.{path,reach,gate}` and
+      # `tolerated` are read (#381, {#coerce_effects_snapshot}); `check`, `labels`, `attribution`,
+      # `envelopes` and `views` land with the slices that implement them (#383 / #386). Reserving their
+      # shape before a reader exists is the same discipline the schema applies to a sibling
+      # implementation's namespace (ADR-99).
       "effects" => false,
       "cache" => {
         "path" => ".rigor/cache",
@@ -228,7 +235,8 @@ module Rigor
                 :dependencies, :parallel_workers,
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
                 :rbs_collection_lockfile, :rbs_collection_auto_detect,
-                :pre_eval, :baseline_path, :effects
+                :pre_eval, :baseline_path, :effects,
+                :effects_snapshot_path, :effects_snapshot_reach, :effects_snapshot_gate, :effects_tolerated
 
     # ADR-103 WD13 — whether effect collection runs. True exactly when the loaded configuration carried an
     # `effects:` block, whatever its body; `rigor effects` enables it for its own run by loading an
@@ -451,6 +459,7 @@ module Rigor
       # ADR-103 WD13 — presence, not truthiness: `effects:` written with no body parses as nil and still
       # means "on", so the key's presence in the loaded data is what {#effects_enabled?} reads.
       @effects = coerce_effects(data)
+      coerce_effects_snapshot(@effects)
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
@@ -631,6 +640,67 @@ module Rigor
       return nil if value == false
 
       (value.is_a?(Hash) ? value : {}).freeze
+    end
+
+    # ADR-103 WD7 / WD14 — the snapshot keys and the minimal `tolerated:` policy list (#381).
+    #
+    # Every key resolves to its default when `effects:` is absent, so a consumer reads one uniform surface
+    # and never has to ask whether the block was there. The values are read by `rigor effects update` /
+    # `check` / `diff` / `explain` and by nothing on `rigor check`'s path.
+    #
+    # Validation is **tier 2** (`ArgumentError`, the run stops), because each of these is a value the
+    # snapshot commands cannot proceed on: an unknown `gate:` would silently pick a semantics, an unknown
+    # preset name would silently match no file, and a malformed label would silently tolerate nothing.
+    # A label that is well-formed but unknown to the *registry* is deliberately NOT rejected here — that is
+    # `effect.unknown-label`'s job (#384), and it fails open.
+    def coerce_effects_snapshot(effects)
+      snapshot = effects&.fetch("snapshot", nil)
+      snapshot = {} unless snapshot.is_a?(Hash)
+      @effects_snapshot_path = (snapshot.fetch("path", nil) || DEFAULT_EFFECTS_SNAPSHOT_PATH).to_s.freeze
+      @effects_snapshot_reach = coerce_effects_reach(snapshot.fetch("reach", nil))
+      @effects_snapshot_gate = coerce_effects_gate(snapshot.fetch("gate", nil))
+      @effects_tolerated = coerce_effects_tolerated(effects&.fetch("tolerated", nil))
+    end
+
+    VALID_EFFECTS_GATES = %i[symmetric additions].freeze
+    private_constant :VALID_EFFECTS_GATES
+
+    def coerce_effects_gate(value)
+      return :symmetric if value.nil?
+
+      gate = value.to_s.to_sym
+      unless VALID_EFFECTS_GATES.include?(gate)
+        raise ArgumentError,
+              "effects.snapshot.gate must be one of #{VALID_EFFECTS_GATES.inspect}, got #{value.inspect}"
+      end
+
+      gate
+    end
+
+    # Entry-point globs and preset names, kept as written. A preset name is resolved to its globs where the
+    # snapshot is built; what happens here is only the existence check, so a typo is a load-time error
+    # naming the known set rather than a `reach:` table that comes back mysteriously empty.
+    def coerce_effects_reach(value)
+      entries = Array(value).map(&:to_s)
+      entries.each do |entry|
+        next if Effects::EntryPoints.glob?(entry) || Effects::EntryPoints.known?(entry)
+
+        raise ArgumentError,
+              "effects.snapshot.reach names no known entry-point preset: #{entry.inspect} " \
+              "(known presets: #{Effects::EntryPoints.names.inspect}; anything carrying a path or glob " \
+              "character is treated as a file glob instead)"
+      end
+      entries.uniq.freeze
+    end
+
+    # Shape validation only: the label grammar of `docs/type-specification/effect-labels.md`.
+    def coerce_effects_tolerated(value)
+      labels = Array(value).map(&:to_s)
+      labels.each do |label|
+        raise ArgumentError, "effects.tolerated is not a well-formed effect label: #{label.inspect}" unless
+          Effects::Label.valid?(label)
+      end
+      labels.uniq.sort.freeze
     end
 
     # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is accepted as either a literal path (slice 1

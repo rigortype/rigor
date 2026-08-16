@@ -847,4 +847,62 @@ RSpec.describe Rigor::Configuration do
       end
     end
   end
+
+  # ADR-103 WD7 / WD14 (#381) — the snapshot keys and the minimal `tolerated:` policy list. Every one
+  # resolves to its default when `effects:` is absent, so a consumer reads one uniform surface and never
+  # has to ask whether the block was there.
+  describe "the effect-snapshot keys" do
+    def snapshot_config(snapshot)
+      described_class.new({ "effects" => { "snapshot" => snapshot } })
+    end
+
+    it "defaults every key with no effects: block at all" do
+      configuration = described_class.new({})
+
+      expect(configuration.effects_snapshot_path).to eq(".rigor-effects.yml")
+      expect(configuration.effects_snapshot_reach).to eq([])
+      expect(configuration.effects_snapshot_gate).to eq(:symmetric)
+      expect(configuration.effects_tolerated).to eq([])
+    end
+
+    it "reads the configured path, reach globs and gate" do
+      configuration = snapshot_config("path" => "effects.yml", "reach" => ["app/**/*.rb"],
+                                      "gate" => "additions")
+
+      expect(configuration.effects_snapshot_path).to eq("effects.yml")
+      expect(configuration.effects_snapshot_reach).to eq(["app/**/*.rb"])
+      expect(configuration.effects_snapshot_gate).to eq(:additions)
+    end
+
+    # Tier 2 (`ArgumentError`, the run stops): an unknown gate would silently pick a semantics.
+    it "rejects an unknown gate" do
+      expect { snapshot_config("gate" => "ratchet") }
+        .to raise_error(ArgumentError, /effects\.snapshot\.gate must be one of/)
+    end
+
+    it "rejects a reach entry that names no preset and is not a glob" do
+      expect { snapshot_config("reach" => ["controllers"]) }
+        .to raise_error(ArgumentError, /no known entry-point preset/)
+    end
+
+    describe "tolerated:" do
+      it "validates the label SHAPE and sorts the set" do
+        configuration = described_class.new({ "effects" => { "tolerated" => %w[nondet.time io.fs] } })
+
+        expect(configuration.effects_tolerated).to eq(%w[io.fs nondet.time])
+      end
+
+      it "rejects a malformed label" do
+        expect { described_class.new({ "effects" => { "tolerated" => ["IO::Net"] } }) }
+          .to raise_error(ArgumentError, /not a well-formed effect label/)
+      end
+
+      # A well-formed label the REGISTRY does not know is deliberately accepted here: that is
+      # `effect.unknown-label`'s job (#384), and it fails open rather than stopping a run.
+      it "accepts a well-formed label the registry has never heard of" do
+        expect(described_class.new({ "effects" => { "tolerated" => ["acme.widget"] } }).effects_tolerated)
+          .to eq(["acme.widget"])
+      end
+    end
+  end
 end

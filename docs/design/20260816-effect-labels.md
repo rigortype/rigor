@@ -14,7 +14,9 @@ Ruby, and answers: **the model transfers unchanged; what changes is where effect
 dispatch and blocks are handled, and — the interesting part — where a declaration is spelled.**
 The Ruby-ish answer to the last question is *inference does the work, `%a{pure}` is the
 ecosystem's existing purity spelling, and envelopes are attached by convention (namespace / path)
-rather than per method*. Mandatory per-method annotation is a stated non-goal.
+rather than per method*. Mandatory per-method annotation is a stated non-goal. On top of the
+shared registry, a **framework vocabulary** (`rails.*`, § 11.2) names what Rails facilities *mean*
+where their transport is adapter-dependent and statically unknowable.
 
 Sources: Steins' [Why effects?](https://github.com/rigortype/steins/blob/master/docs/why-effects.md),
 [effects.md](https://github.com/rigortype/steins/blob/master/docs/type-specification/effects.md),
@@ -423,12 +425,16 @@ trust (§ 7):
 
 - **A plugin ships RBS annotations** in its `signature_paths:` — a plugin's `.rbs` already loads
   into the same environment and may carry `%a{rigor:v1:…}` (rigor-typescript-utility-types does
-  exactly this for `return:`). rigor-rails colours `ActiveRecord::Base.find` / `save` / `where` …
-  `io.db`, `ActionMailer` `deliver_now` `io.net` + `email.send`, `Rails.logger` `telemetry`,
-  `Time.current` `nondet.time`, `perform_later` `io` + `job.enqueue`. Enters at authority tier 1.
+  exactly this for `return:`). rigor-rails colours `find` `io.db.read`, `save` `io.db.write`,
+  `deliver_now` `io` + `rails.actionmailer.deliver` + `email.send`, `Rails.logger` `io` +
+  `telemetry`, `Time.current` `nondet.time`, `perform_later` `io` + `rails.activejob.enqueue` +
+  `job.enqueue` — the full table is § 11.2. Enters at authority tier 1.
 - **A plugin manifest field `effect_attributions:`** (a `ProtocolContract`-shaped Ruby value:
   receiver, method, labels) or the project's own **`effects.attribution:`** YAML table for gems
   nobody has written a plugin for. Both are unchecked claims about code Rigor did not analyse.
+  Framework plugins also need this channel for methods RBS cannot name per app — association
+  readers, `find_by_*`, callback edges — where the knowledge is derived from the app's own class
+  bodies (§ 11.2 "Framework edges").
 - **Vocabulary registration**: `effects.labels: [email.send, telemetry]` in config; a plugin's
   manifest registers labels under a root it owns (Steins ADR-0068 root ownership: descend from a
   core root, or open a root equal to the plugin id) — the project's own config may open any root
@@ -458,7 +464,8 @@ rather than a new "stratum" concept:
 | project `%a{rigor:v1:effect}` / `%a{rigor:v1:pure}` / `%a{pure}` (RBS or inline), config `envelopes:` — **checked stratum** | declared (`≤`) where the concrete callee is unknown | **yes** — the body is analysed and `effect.envelope-exceeded` holds it to the bound | yes | yes (`effect.liskov-widened`) |
 | gem-shipped RBS or Rigor's bundled overlays (`data/gem_overlay`, `data/vendored_gem_sigs`) carrying `%a{}` — accepted signatures | declared | yes — the same trust already extended to their *types* and to their purity by ADR-1:430 | no body to check | no |
 | plugin `signature_paths:` RBS annotations (first-party plugins live here) | declared | yes (tier 1) | no | no |
-| plugin `effect_attributions:` / project `effects.attribution:` | declared | **no** — nothing checks a claim about un-analysed code (Steins ADR-0068 §1); reads "declared this, and possibly more" | no | no |
+| a **first-party bundled** plugin's `effect_attributions:` / framework edges derived from the app's own class bodies (rigor-rails, § 11.2) | declared / proven edges | yes — audited by the repo's own `make check-plugins` gate, and the knowledge is the project's declarations, not a third party's claim (a decision, § 13) | no | no |
+| third-party plugin `effect_attributions:` / project `effects.attribution:` | declared | **no** — nothing checks a claim about un-analysed code (Steins ADR-0068 §1); reads "declared this, and possibly more" | no | no |
 
 The RFC's dichotomy ("contract with substitutability" vs "hint without proof") lands as: Ruby's
 one project-authored spelling is the checked stratum with substitutability, and everything about
@@ -586,21 +593,118 @@ and has a house pattern:
 | on-demand summaries during typing (§ 8 consumers) | the same recursion-guarded on-demand walk `infer_user_method_return` uses (ADR-55 Kleene iteration, `RECURSION_FIXPOINT_CAP = 3`, `context_tainted?` memo gate): a callee's effect summary is a by-product of the walk that yields its return type; a cycle reads ⊤-with-taint until the post-pool fixpoint refines it |
 
 The vocabulary and the label algebra (`subsumes?`, join, ⊤/∅, registry) are one small pure module
-(`Rigor::Effects::Label`), a `Rigor::Effects::Summary` value (`proven: Set, declared: Set,
-exhaustive: Bool, causes:`), a hand-audited `data/effects/core.yml` catalogue with a loader
-mirroring `Builtins::MethodCatalog`, and the config schema additions of § 6.2 / 6.6.
+(`Rigor::Effects::Label`), a `Rigor::Effects::Summary` value (`bundles: {origin => labels}`,
+`declared: Set`, `exhaustive: Bool`, `causes:` — the flat `proven` set is a projection of the
+bundles, kept per origin so policy discharge can be origin-precise, § 11.2), a hand-audited
+`data/effects/core.yml` catalogue with a loader mirroring `Builtins::MethodCatalog`, and the config
+schema additions of § 6.2 / 6.6.
 
 ## 11. Vocabulary v1
+
+### 11.1 The shared registry
 
 The registry is Steins' v1 set verbatim — `exit ffi global.read global.write io io.db io.fs
 io.fs.read io.fs.write io.input io.ipc io.net io.net.http io.output io.output.buffer
 io.output.header io.output.stdout io.output.stderr io.process io.signal mutate mutate.local nondet
-nondet.random nondet.time` — plus Ruby's proposed leaves `mutate.self mutate.arg mutate.static`,
-plus one Rigor-registered semantic root, `telemetry`, attributed to loggers so the policy example
-in § 4 is real on day one. `io.output.buffer` / `io.output.header` stay registered but unproduced
-(Ruby has no output-buffer layer; the nearest analogue, `$stdout` reassignment, is a future
-masking question). Projects and plugins open their own roots (`email.send`, `acme.cache`,
-`job.enqueue`).
+nondet.random nondet.time` — plus Ruby's proposed leaves `mutate.self mutate.arg mutate.static`.
+`io.output.buffer` / `io.output.header` stay registered but unproduced (Ruby has no output-buffer
+layer; the nearest analogue, `$stdout` reassignment, is a future masking question).
+
+Three layers sit on top of it, following Steins' "transport facts and semantic facts" (`io.net.http`
+records the mechanism, `sendgrid.mail.send` the provider operation, `email.send` the application
+meaning — "these labels coexist"):
+
+- **Core leaves worth proposing to Steins as shared additions**, because both ecosystems can
+  produce them and a policy that names them should transfer: `io.db.read`, `io.db.write`,
+  `io.db.transaction` (a `SELECT` through PDO / ActiveRecord is a read whichever language issued
+  it; a migration or `INSERT` is a write; `BEGIN`/`COMMIT` is neither). Adding leaves is
+  evolution-safe by the § 4 rule — a declared `io.db` admits all three.
+- **Application-meaning roots, small and shared**: `telemetry` (loggers, error reporters,
+  instrumentation), `email.send`, `job.enqueue`, `cache.read` / `cache.write`. These are the
+  labels a policy actually names ("presenters do not enqueue jobs") and the ones the discharge
+  policy grips (`tolerated: [telemetry]`), so they must spell the same in Steins and Rigor. Today
+  Steins treats `email.send` as an example of a *project* label; promoting a handful to the shared
+  registry is a proposal to raise there.
+- **Framework roots, owned by the plugin that models the framework**: `rails.*` for rigor-rails,
+  by the Steins ADR-0068 root-ownership rule adapted to Rigor's plugin ids (a first-party plugin
+  opens the root of the framework it models; a third-party plugin opens a root equal to its
+  plugin id; a project's config may open any root). Projects still open their own (`acme.cache`).
+
+### 11.2 A Rails vocabulary
+
+Rails is the reason the framework layer earns its place: **for most Rails facilities the
+transport is adapter-dependent and therefore statically unknowable, while the framework operation
+is fixed.** `perform_later` is a Redis write under Sidekiq, an in-process thread under `:async`,
+nothing under `:test`; `Rails.cache` is memory, Redis, or the filesystem; `deliver_now` is SMTP or
+a test double; ActiveStorage is disk or S3. The sound transport row for each is bare `io` — true
+and useless for policy. `rails.activejob.enqueue` says what a reviewer means. Both labels are
+attributed; the transport keeps the summary honest, the framework label makes it actionable.
+
+Proposed rows (rigor-rails owns `rails.*`; transport labels ride the shared registry; every row is
+an upper bound):
+
+| Rails facility | Transport | Framework / meaning |
+| --- | --- | --- |
+| AR immediate reads — `find`, `find_by`, `first`, `last`, `take`, `exists?`, `count`, `sum`, `pluck`, `pick`, `find_each`, `load`, `to_a`, `each`, `reload`; `belongs_to` / `has_one` readers; `find_by_sql` | `io.db.read` (+ `mutate.self` for `reload`) | — |
+| AR writes — `save`, `save!`, `create`, `update`, `update!`, `destroy`, `delete`, `touch`, `increment!`, `insert_all`, `upsert_all`, `update_all`, `delete_all`, `update_columns`; `has_many` `<<` / `create` / `destroy` | `io.db.write` | — |
+| `transaction { }`, `with_lock` | `io.db.transaction` + containment | — |
+| `connection.execute(sql)`, `exec_query`, `select_all` | literal SQL verb narrows: `SELECT` → `io.db.read`, `INSERT` / `UPDATE` / `DELETE` / DDL → `io.db.write`; unknown → `io.db` | the argument-dependent narrowing of § 4, for SQL |
+| Migration DSL in `change` / `up` / `down` (`create_table`, `add_column`, …) | `io.db.write` | `rails.schema.write` |
+| Relation **builders** — `where`, `joins`, `includes`, `preload`, `order`, `select`, `limit`, `scope` bodies, `has_many` readers, `association.build` | ∅ — lazy, nothing is issued | see the laziness note below |
+| `Rails.cache.read` / `fetch` / `exist?`; `.write` / `delete` / `increment` / `clear` | `io` | `cache.read` / `cache.write` (+ containment for the `fetch` block) |
+| `perform_later`, `set(wait:).perform_later`, `perform_all_later`, `enqueue` | `io` | `rails.activejob.enqueue`, `job.enqueue` |
+| `perform_now` | an **edge** to the job's `perform` | — |
+| `UserMailer.welcome(u)` → `deliver_now` / `deliver_later` | `io` (+ enqueue for `later`) | `rails.actionmailer.deliver`, `email.send`; the mailer method body is an edge |
+| ActiveStorage `attach`, `upload`, `download`, `purge`, `open` | `io` + `io.db.write` for the attachment records | `rails.activestorage.write` / `.read` |
+| ActionCable `broadcast_to`, `ActionCable.server.broadcast`, Turbo `broadcast_*` | `io` | `rails.actioncable.broadcast` |
+| `Rails.logger.*`, `logger.*`, `Rails.error.report` / `handle`, `ActiveSupport::Notifications.instrument` | `io` (destination unknown) | `telemetry`; `instrument` keeps its taint — subscribers are arbitrary |
+| Controller response — `render`, `render_to_string`, `redirect_to`, `head`, `send_data`, `send_file`, `response.headers[]=` | `mutate.self` (`send_file` also `io.fs.read`); `render` keeps a taint — the template is not analysed | `rails.response.write` |
+| `session[]=`, `reset_session`; `session[]` read | `mutate` / `io` (the store may be a cache or the database) | `rails.session.write` / `.read` |
+| `cookies[]=`, `cookies.encrypted[]=`, `flash[]=`, `flash.now[]=` | `mutate` | `rails.cookie.write`, `rails.flash.write` |
+| `Current.attr` read / write (`ActiveSupport::CurrentAttributes`) | `global.read` / `global.write` (fiber-local storage) | `rails.current.read` / `.write` |
+| `Rails.env`, `Rails.configuration.*`, `Rails.application.config.*`, `Rails.root` | `global.read` (mutable process state — `Rails.env = "test"` is a thing) | `rails.config.read` |
+| `Rails.application.credentials.*`, `secrets` | `io.fs.read` (first access) + `global.read` | `rails.credentials.read` |
+| `I18n.t` / `l`, `I18n.locale=` | `global.read` (locale, lazy backend load) / `global.write` | `rails.i18n.translate` |
+| `Time.current`, `Date.current`, `Time.zone.now`, `n.days.ago` / `from_now`, `Time.zone` | `nondet.time` (+ `global.read` for the zone) | — (an optional `nondet.time.system` leaf for zone-blind `Time.now` / `Date.today` is possible but is a lint, and RuboCop-Rails' `Rails/TimeZone` already owns it) |
+| ActiveSupport core_ext — `blank?`, `present?`, `presence`, `try`, `to_json` / `as_json`, `deep_dup`, `deep_merge`, inflections, `in?`, `squish`, … | ∅ — `%a{pure}` en masse in rigor-activesupport-core-ext's shipped RBS | the single cheapest purity win in a Rails app: these are the predicates narrowing sees most |
+| `establish_connection`, `Rails.application.reload_routes!`, `Rails.autoloaders.main.reload` | `global.write` / `mutate.static` | — |
+| Route helpers (`*_path`, `*_url`, `url_for`) | ∅ (a pure function of the route set; `_url` reads `default_url_options` → `global.read`) | — |
+
+**Laziness.** `where` builds a `Relation` and issues nothing; the query fires at a materializer.
+Two readings are possible: colour builders `io.db.read` because that is how Rails developers
+*think* ("`where` hits the DB"), or colour builders ∅ and the materializers `io.db.read`, which is
+what the code does. Recommendation: the truthful reading — a presenter that builds and returns a
+scope has pure *code*, and the caller that materialises it gets the read; the catalogue never lies
+(§ 4). The Enumerable delegations that materialise (`map`, `each`, `any?`, `empty?`, `size`,
+`present?`, `blank?`, `to_json`) are catalogued as materializers on `Relation` receivers, which
+Rigor already types (ADR-26). A returned `Relation` carrying a *value-provenance* label that
+becomes `io.db.read` wherever it is consumed is Steins' "connection-provenance effects" future
+mechanism, and the right eventual answer to "the query happens in the view".
+
+**Framework edges.** rigor-rails knows things the syntax does not: `save` runs the class body's
+`before_save :normalize` / `validate :check` / `after_commit` callbacks and validators
+(`validates :email, uniqueness: true` is an `io.db.read` inside `valid?` and `save`),
+`perform_now` runs `perform`, `UserMailer.welcome(u)` runs `welcome`. A plugin therefore
+contributes **edges**, not only labels — the same discovery it already performs for typing. What
+it must not do is edge `perform_later` to `perform` (another process; the enqueue is the effect)
+or `render` to a template (not Ruby; taint stays).
+
+**Conventions preset.** rigor-rails can ship an *illustrative* `effects.envelopes` stanza — never
+enforced by default — matching Rails' layer conventions: `app/presenters/**`, `app/serializers/**`,
+`app/decorators/**` → `[mutate.local, rails.config.read, rails.i18n.translate]`; `app/policies/**`
+→ `[io.db.read, rails.config.read]`; `app/models/**` → `[io.db, mutate, nondet, telemetry,
+rails.activejob.enqueue, email.send]` (so a model that starts calling `Net::HTTP` reports);
+`app/jobs/**` → `[io]`; `app/controllers/**` unbounded; `db/migrate/**` → `[io.db]`;
+`spec/**` / `test/**` excluded. Whether a project adopts any of it is the project's call; the
+`tolerated:` set (`[telemetry, rails.config.read]` is the plausible default a project writes) is
+what keeps such stanzas from being honest-and-unactionable.
+
+**Precision the framework layer needs from the engine.** Tolerating `rails.config.read` must
+discharge the `global.read` that *came from* `Rails.env`, not a `global.read` from `$foo` in the
+same body — Steins' "tolerate semantic labels, not transport labels … requires the judgment to
+know how an effect arrived". So a summary keeps **per-origin label bundles** (site → labels), and
+the flat proven set is a projection (§ 10); a bundle whose semantic label is tolerated is
+discharged whole, and a transport label that also arrived through an untolerated origin stays.
 
 ## 12. Slice plan
 
@@ -610,7 +714,7 @@ masking question). Projects and plugins open their own roots (`email.send`, `acm
 | **WD1** | label algebra + registry; `data/effects/core.yml` seed (Kernel / IO / File / Dir / Process / Time / Random / ENV / globals / backticks) with per-class default posture; syntactic origin scan; edge collection at dispatch; per-method summaries persisted; post-pool fixpoint; `rigor effects` report (text/json). **No diagnostics.** | corpus measurement: exhaustive ratio and proven-label distribution on mastodon / redmine / gitlab; byte-identical `check` output |
 | **WD2** | `%a{rigor:v1:effect}` / `%a{rigor:v1:pure}` (RBS + inline, method + class); `%a{pure}` interop reading behind the opt-in; `FlowContribution#effects` slot; `effect.envelope-exceeded`, `effect.unknown-label`; rule-catalog / severity-table wiring | opt-in only; zero firings with the feature off |
 | **WD3** | declared lane through nominal supertypes at the ADR-57 N5 gate; `effect.liskov-widened` over project subclass overrides | both-sides-authored |
-| **WD4** | `effects.envelopes` (path / namespace conventions), `effects.attribution`, `effects.labels`, `effects.tolerated` + `--no-tolerated-effects`; plugin `effect_attributions:`; rigor-rails RBS colouring | Rails corpus: a `Presenters::*`-pure stanza reports only genuine queries |
+| **WD4** | `effects.envelopes` (path / namespace conventions), `effects.attribution`, `effects.labels`, `effects.tolerated` + `--no-tolerated-effects`; plugin `effect_attributions:` + framework edges; the Rails vocabulary of § 11.2 in rigor-rails (RBS colouring, `rails.*` root, laziness rows, callback edges) and `%a{pure}` across rigor-activesupport-core-ext | Rails corpus: a `Presenters::*`-pure stanza reports only genuine queries; the `io.db.read` / `io.db.write` / application-meaning roots raised with Steins as shared additions |
 | **WD5** | engine consumers: B2.2 ivar-reset skip, purity-policy computed purity, `effect.discarded-pure-result` (`:off`) — each cache-identity-aware | corpus FP gates per consumer |
 | **WD6** | `rigor sig-gen` `%a{pure}` / envelope emission from exhaustive summaries; `rigor effects --diff` baseline; `--at` probe | round-trip: emitted tags re-check clean |
 | later | structural-interface carriers, `$stdout`-capture masking, complement bounds, concurrency labels, semantic-label path memory for precise policy, load-time (class-body) units | — |
@@ -642,6 +746,15 @@ masking question). Projects and plugins open their own roots (`email.send`, `acm
    document only.
 10. **Naming** — "effect label / effect summary / effect envelope" as trapped compounds, "flow
     effect" retained for the bundle; or rename the bundle's vocabulary instead.
+11. **Shared additions to raise with Steins** — `io.db.read` / `io.db.write` / `io.db.transaction`
+    as core leaves, and a small application-meaning set (`telemetry`, `email.send`, `job.enqueue`,
+    `cache.read` / `cache.write`) in the shared registry rather than per-project (§ 11.1).
+12. **First-party plugin trust** — do rigor-rails' framework-derived attributions and edges
+    discharge taint (recommended: yes, they are gated by `make check-plugins` and derived from the
+    app's own declarations) or stay in the never-discharging plugin row (Steins-strict)?
+13. **Relation laziness** — builders ∅ / materializers `io.db.read` (recommended, truthful) vs
+    builders `io.db.read` (how developers think); and whether `Rails.env` / `Rails.root` reads are
+    `global.read` (recommended — mutable process state, tolerate by policy) or ∅.
 
 ## 14. Repo facts this note rests on
 

@@ -48,6 +48,22 @@ module Rigor
       # positional argument being present.
       EVAL_SELECTORS = %i[eval instance_eval class_eval module_eval].to_set.freeze
 
+      # The construct origins this scan can produce, spelled once. A construct origin is line-free and
+      # carries no per-site state, so every site that produces one produces the SAME value — allocating a
+      # fresh `Data` per `@ivar` write in a project's every method was pure garbage.
+      DEFINE_METHOD = Origin.construct("define-method")
+      XSTRING = Origin.construct("xstring")
+      GVAR_READ = Origin.construct("gvar-read")
+      GVAR_WRITE = Origin.construct("gvar-write")
+      CVAR_READ = Origin.construct("cvar-read")
+      CVAR_WRITE = Origin.construct("cvar-write")
+      IVAR_WRITE = Origin.construct("ivar-write")
+      ALIAS = Origin.construct("alias")
+      UNDEF = Origin.construct("undef")
+      RECEIVER_MUTATION = Origin.construct("receiver-mutation")
+      private_constant :DEFINE_METHOD, :XSTRING, :GVAR_READ, :GVAR_WRITE, :CVAR_READ, :CVAR_WRITE,
+                       :IVAR_WRITE, :ALIAS, :UNDEF, :RECEIVER_MUTATION
+
       GLOBAL_READ = LabelSet.new(["global.read"])
       GLOBAL_WRITE = LabelSet.new(["global.write"])
       MUTATE_STATIC = LabelSet.new(["mutate.static"])
@@ -133,7 +149,7 @@ module Rigor
           return false unless declared
 
           @nested << declared
-          add(Origin.construct("define-method"), MUTATE_STATIC)
+          add(DEFINE_METHOD, MUTATE_STATIC)
           true
         else
           false
@@ -144,24 +160,24 @@ module Rigor
         case node
         when Prism::CallNode then visit_call(node)
         when Prism::XStringNode, Prism::InterpolatedXStringNode
-          add(Origin.construct("xstring"), IO_PROCESS)
+          add(XSTRING, IO_PROCESS)
         when Prism::GlobalVariableReadNode
-          add(Origin.construct("gvar-read"), GLOBAL_READ) unless FRAME_LOCAL_GLOBALS.include?(node.name.to_s)
+          add(GVAR_READ, GLOBAL_READ) unless FRAME_LOCAL_GLOBALS.include?(node.name.to_s)
         when Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode,
              Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode
-          add(Origin.construct("gvar-write"), GLOBAL_WRITE)
+          add(GVAR_WRITE, GLOBAL_WRITE)
         when Prism::ClassVariableReadNode
-          add(Origin.construct("cvar-read"), GLOBAL_READ)
+          add(CVAR_READ, GLOBAL_READ)
         when Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode,
              Prism::ClassVariableOrWriteNode, Prism::ClassVariableAndWriteNode
-          add(Origin.construct("cvar-write"), MUTATE_STATIC)
+          add(CVAR_WRITE, MUTATE_STATIC)
         when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
              Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode
-          add(Origin.construct("ivar-write"), @singleton ? MUTATE_STATIC : MUTATE_SELF)
+          add(IVAR_WRITE, @singleton ? MUTATE_STATIC : MUTATE_SELF)
         when Prism::AliasMethodNode, Prism::AliasGlobalVariableNode
-          add(Origin.construct("alias"), MUTATE_STATIC)
+          add(ALIAS, MUTATE_STATIC)
         when Prism::UndefNode
-          add(Origin.construct("undef"), MUTATE_STATIC)
+          add(UNDEF, MUTATE_STATIC)
         when Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
              Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode
           classify_mutation(node.receiver)
@@ -312,7 +328,7 @@ module Rigor
         labels = @mutation.label_for(receiver)
         return taint("unknown-ownership") if labels.nil?
 
-        add(Origin.construct("receiver-mutation"), labels)
+        add(RECEIVER_MUTATION, labels)
       end
 
       # An `eval` family call carrying code rather than a block, or a bare `binding`. Both hand the

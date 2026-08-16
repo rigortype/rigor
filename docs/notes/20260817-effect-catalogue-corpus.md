@@ -175,6 +175,10 @@ the propagator's round-robin worklist, which iterates the whole merged method ta
 in sorted key order — superlinear in the table's size, run once after the pool. This is a
 measurement, not a diagnosis; profiling it belongs to whoever takes the budget on.
 
+*(Followed up in [`20260817-effect-collection-perf.md`](20260817-effect-collection-perf.md). The
+suspect above was wrong: the fixpoint was a quarter of a second. The superlinear term was the
+per-file fold of the collections, and it is gone.)*
+
 Read the RSS column with the noise in mind. Three runs of the *same* `rigor check` config on
 redmine spanned 367–401 MB, so a +16% delta on a 372 MB base is close to the floor; gitlab's
 +1% on 7.8 GB is the figure to trust, and it says the per-file collections are cheap — which is

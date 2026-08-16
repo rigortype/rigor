@@ -65,8 +65,10 @@ module Rigor
         end
       end
 
-      # One row of the data file, resolved.
-      Row = Data.define(:labels, :narrow, :mutates_receiver)
+      # One row of the data file, resolved. `entry` is the row's own unnarrowed {Entry}, built at load
+      # time: the lookup sits inside the effect scan's walk, and every un-narrowed row hit in a project
+      # answers the same value.
+      Row = Data.define(:labels, :narrow, :mutates_receiver, :entry)
       private_constant :Row
 
       # One class of the data file, resolved: its two method buckets, its posture's labels, its mutator
@@ -180,8 +182,10 @@ module Rigor
       # A narrowed row's own `effects:` is its **unnarrowed** answer — the upper bound the handler
       # degrades to — so a caller that has no call node still gets a sound reading rather than ∅.
       def row_entry(row, call_node)
-        labels = row.narrow && call_node ? Narrowing.apply(row.narrow, call_node) : row.labels
-        Entry.new(labels: labels, mutates_receiver: row.mutates_receiver, from_posture: false)
+        return row.entry unless row.narrow && call_node
+
+        Entry.new(labels: Narrowing.apply(row.narrow, call_node), mutates_receiver: row.mutates_receiver,
+                  from_posture: false)
       end
 
       def build_postures(defaults)
@@ -224,7 +228,7 @@ module Rigor
 
         rows.to_h do |name, body|
           key = name.to_s
-          [key, build_row("#{class_name}##{key}", body || {}, mutators&.include?(key))]
+          [key, build_row("#{class_name}##{key}", body || {}, mutators&.include?(key) == true)]
         end.freeze
       end
 
@@ -233,10 +237,13 @@ module Rigor
         raise Error, "#{key}: unknown narrowing handler #{narrow.inspect}" if narrow && !Narrowing.known?(narrow)
         raise Error, "#{key}: every catalogue row needs a `why:` justification" if body["why"].to_s.empty?
 
+        labels = LabelSet.new(Array(body["effects"]).map(&:to_s))
+        mutates_receiver = body["mutates"].to_s == "receiver" || in_mutator_set
         Row.new(
-          labels: LabelSet.new(Array(body["effects"]).map(&:to_s)),
+          labels: labels,
           narrow: narrow,
-          mutates_receiver: body["mutates"].to_s == "receiver" || !!in_mutator_set
+          mutates_receiver: mutates_receiver,
+          entry: Entry.new(labels: labels, mutates_receiver: mutates_receiver, from_posture: false)
         )
       end
 

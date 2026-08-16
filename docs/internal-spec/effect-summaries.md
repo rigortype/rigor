@@ -197,6 +197,8 @@ A file contributes a `FileCollection`: its units' direct summaries, the calls it
 
 Merging is **associative and commutative** in every table: summaries join per key, edge lists union, ancestry merges. Folding a run's files in pool-completion order therefore yields exactly the table sequential analysis yields.
 
+A run's collections MUST be folded in **one pass** (`FileCollection.merge_all`), not by a `reduce` over pairwise `#merge`. Each pairwise merge rebuilds and re-freezes the whole accumulated table, so a per-file fold costs O(files × methods) — which is what put collection at +50 % wall on mastodon and +230 % on gitlab before it was measured ([`docs/notes/20260817-effect-collection-perf.md`](../notes/20260817-effect-collection-perf.md)). This is a cost contract, not a semantic one: both spellings produce the same table.
+
 An ancestry name is recorded **as written** (`class Loud < Base` inside `module Tracer` names `Base`), so the collection carries the candidate list Ruby's own lexical lookup would try, most-qualified first, and the propagator picks the one the merged project defines.
 
 ## Propagation
@@ -212,7 +214,9 @@ The subclass index resolves each as-written superclass to a single parent — th
 
 An edge that reaches no project definition is **dropped**, not tainted: most such calls are ordinary inherited ones the catalogue has no row for, and tainting them would make the bit carry no information.
 
-**Fixpoint.** A round-robin worklist in sorted key order, to a true fixpoint:
+Edge resolution is memoised on `(receiver class, kind, selector)`, and the transitive subclass closure on the class name. Both are required, not incidental: one triple is asked for once per call site, and a Rails root class's subclass forest is otherwise re-walked thousands of times.
+
+**Fixpoint.** A worklist in sorted key order, to a true fixpoint:
 
 - `proven(m) = direct(m) ∪ ⋃ proven(callee)`
 - `exhaustive(m) = direct_exhaustive(m) ∧ ⋀ exhaustive(callee)`
@@ -220,7 +224,9 @@ An edge that reaches no project definition is **dropped**, not tainted: most suc
 
 The lattice is finite (label sets over a closed vocabulary × one bit × a closed cause enum) and every step is monotone, so a recursive or mutually recursive cycle converges on its own. **No recursion cap is used or wanted here** — unlike the return-type walk's Kleene iteration, there is no widening to force.
 
-Sorted iteration order is what makes a pooled run and a sequential run produce the same table rather than merely equivalent ones.
+A key's closure moving can only move the closures of the methods that **call** it, so each pass re-visits exactly the callers of what changed in the previous one — never the whole table. Joining a lane along an edge MUST NOT allocate when it adds nothing, which is what makes a pass over a converged region free.
+
+Sorted iteration order is what makes a pooled run and a sequential run produce the same table rather than merely equivalent ones. (The lattice is finite and every step monotone, so the least fixpoint is unique and visit order could not change it; the sorted pass makes the *work* reproducible too.)
 
 The result is a `Rigor::Effects::EffectTable` on the runner (`Runner#effect_table`), with the merged direct collections available separately (`Runner#effect_collection`). **It is not a diagnostic**: it never enters `rigor check`'s stream, and the run's exit code is identical whether or not it was computed ([ADR-102](../adr/102-unused-code-reachability-report.md)'s report-versus-diagnostic line).
 

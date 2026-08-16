@@ -77,12 +77,19 @@ module Rigor
       end
 
       # Union. {TOP} absorbs: a join involving it is {TOP}.
+      #
+      # A join that adds nothing returns `self` **without allocating**. That is the common case wherever
+      # sets are joined in a loop — the propagator's fixpoint re-joins every edge on every visit — and the
+      # sets are single-digit-sized, so the containment scan is cheaper than the construction it avoids.
       def join(other)
         return TOP if @top || other.top?
         return other if @labels.empty?
-        return self if other.to_a.empty?
 
-        self.class.new(@labels + other.to_a)
+        others = other.to_a
+        return self if others.empty?
+        return self if others.all? { |label| @labels.include?(label) }
+
+        self.class.new(@labels + others)
       end
 
       # Whether every member of this set is admitted by `bound_set` — the envelope check, modulo
@@ -95,6 +102,8 @@ module Rigor
       end
 
       def ==(other)
+        return true if equal?(other)
+
         other.is_a?(LabelSet) && other.top? == @top && other.to_a == @labels
       end
       alias eql? ==

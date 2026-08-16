@@ -85,7 +85,7 @@ module Rigor
       # closure. #381's snapshot records these, because a diff over direct summaries stays attributable to
       # the pull request's own lines.
       def effect_collection
-        effect_collections.reduce(Effects::FileCollection.empty) { |merged, collection| merged.merge(collection) }
+        Effects::FileCollection.merge_all(effect_collections)
       end
 
       # Which file each effect unit was defined in — `{ "Class#m" => [path, …] }`, sorted, one entry per

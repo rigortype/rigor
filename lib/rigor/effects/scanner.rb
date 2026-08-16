@@ -46,6 +46,11 @@ module Rigor
       MUTATE_SELF = LabelSet.new(["mutate.self"])
       private_constant :MUTATE_SELF
 
+      # A synthesised writer's summary is the same value at every `attr_accessor` in the project, so it is
+      # built once rather than per accessor.
+      WRITER_SUMMARY = Summary.new(bundles: { Origin.construct("attr-writer") => MUTATE_SELF })
+      private_constant :WRITER_SUMMARY
+
       def self.scan(root:, path:, calls:)
         new(path: path, calls: calls).scan(root)
       end
@@ -151,8 +156,7 @@ module Rigor
           merge_unit("#{class_name}##{name}", Summary.empty, []) unless node.name == :attr_writer
           next if node.name == :attr_reader
 
-          writer = Summary.new(bundles: { Origin.construct("attr-writer") => MUTATE_SELF })
-          merge_unit("#{class_name}##{name}=", writer, [])
+          merge_unit("#{class_name}##{name}=", WRITER_SUMMARY, [])
         end
       end
 

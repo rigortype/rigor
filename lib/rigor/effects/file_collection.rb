@@ -65,18 +65,65 @@ module Rigor
       end
 
       # Folds another collection into this one. Summaries join per key, edge lists union, ancestry merges.
+      #
+      # **Fold a whole run with {merge_all}, not with this in a `reduce`.** Every call here rebuilds and
+      # re-freezes the accumulated tables, so folding a run one file at a time costs O(files × methods) —
+      # it was 5.1 s of mastodon's 6.4 s collection overhead and the whole of gitlab's superlinear one
+      # (`docs/notes/20260817-effect-collection-perf.md`). This stays for a two-collection merge, which is
+      # what its cost model fits.
       def merge(other)
         return self if other.empty? && !other.failed?
 
-        self.class.new(
-          path: nil,
-          summaries: merge_summaries(other.summaries),
-          edges: merge_edges(other.edges),
-          superclasses: @superclasses.merge(other.superclasses),
-          includes: merge_includes(other.includes),
-          failed: @failed || other.failed?
-        )
+        self.class.merge_all([self, other])
       end
+
+      # Folds a run's collections in one linear pass: each key's summaries join once, each table is built
+      # once, and the frozen result is constructed once at the end. Order-independent in every table
+      # except `superclasses`, where a later collection's spelling wins exactly as a chain of {merge}
+      # calls would leave it, so a path-sorted fold is reproducible.
+      #
+      # A collection that is {empty?} and not {failed?} contributes nothing, which is {merge}'s own
+      # short-circuit spelled once: a file with no methods and no calls has no summary to fold, and its
+      # ancestry has no unit to attach to.
+      def self.merge_all(collections)
+        summaries = {}
+        edges = {}
+        superclasses = {}
+        includes = {}
+        failed = false
+
+        collections.each do |collection|
+          failed ||= collection.failed?
+          next if collection.empty?
+
+          fold_summaries(summaries, collection.summaries)
+          fold_lists(edges, collection.edges)
+          superclasses.update(collection.superclasses)
+          fold_lists(includes, collection.includes)
+        end
+
+        includes.each_value(&:uniq!)
+        new(path: nil, summaries: summaries, edges: edges,
+            superclasses: superclasses, includes: includes, failed: failed)
+      end
+
+      def self.fold_summaries(into, table)
+        table.each do |key, summary|
+          existing = into[key]
+          into[key] = existing ? existing.join(summary) : summary
+        end
+      end
+      private_class_method :fold_summaries
+
+      # De-duplication is deferred to the single pass at the end of {merge_all} — `freeze_edges` uniqs
+      # and sorts anyway, and uniqing per file is what made the fold quadratic.
+      def self.fold_lists(into, table)
+        table.each do |key, list|
+          existing = into[key]
+          existing ? existing.concat(list) : into[key] = list.dup
+        end
+      end
+      private_class_method :fold_lists
 
       def ==(other)
         other.is_a?(FileCollection) && other.summaries == @summaries && other.edges == @edges &&
@@ -90,24 +137,6 @@ module Rigor
 
       private
 
-      def merge_summaries(other)
-        return @summaries if other.empty?
-
-        @summaries.merge(other) { |_key, mine, theirs| mine.join(theirs) }
-      end
-
-      def merge_edges(other)
-        return @edges if other.empty?
-
-        @edges.merge(other) { |_key, mine, theirs| (mine + theirs).uniq }
-      end
-
-      def merge_includes(other)
-        return @includes if other.empty?
-
-        @includes.merge(other) { |_key, mine, theirs| (mine + theirs).uniq }
-      end
-
       def freeze_table(table)
         return NO_TABLE if table.empty?
 
@@ -115,12 +144,15 @@ module Rigor
       end
 
       # Edge lists are sorted so a marshalled worker collection and a sequential one are `==` and the
-      # report they feed is byte-identical.
+      # report they feed is byte-identical. The key is TOTAL over the de-duplicated list — `self_call` is
+      # in it because two edges can otherwise agree on every other field, and `sort_by` is not stable.
       def freeze_edges(table)
         return NO_TABLE if table.empty?
 
         table.transform_values do |list|
-          list.uniq.sort_by { |edge| [edge.receiver_class.to_s, edge.kind.to_s, edge.selector] }.freeze
+          sorted = list.uniq
+          sorted.sort_by! { |edge| [edge.receiver_class.to_s, edge.kind.to_s, edge.selector, edge.self_call ? 1 : 0] }
+          sorted.freeze
         end.freeze
       end
     end

@@ -56,6 +56,13 @@ module Rigor
           @calls[node] = call_record unless @calls.key?(node)
         end
 
+        # Whether this node's decision is already pinned. Asked BEFORE the record is built, because the
+        # re-queries below are roughly half of all recording calls on a Rails app and building a record
+        # only to drop it is the whole of that half's cost.
+        def recorded?(node)
+          @calls.key?(node)
+        end
+
         def mark_unresolved(node)
           existing = @calls[node]
           @calls[node] = existing.with(resolved: false) if existing
@@ -102,6 +109,9 @@ module Rigor
       def record_call(node, receiver, scope)
         accumulator = Thread.current[KEY]
         return if accumulator.nil? || accumulator.path != scope.source_path
+        # First write wins, so a re-query has nothing to add — and asking here rather than inside
+        # {Accumulator#record} is what stops it paying for the `Data` and the origin lookup below.
+        return if accumulator.recorded?(node)
 
         dynamic = receiver.is_a?(Type::Dynamic)
         class_name, kind = descriptor_for(receiver)

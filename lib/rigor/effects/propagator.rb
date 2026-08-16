@@ -25,6 +25,9 @@ module Rigor
     # Propagation is graph-only: it reads no source, types nothing, and touches no `Scope`. It is
     # fail-soft as a whole — an exception yields the empty table rather than failing the run.
     module Propagator
+      NO_EDGES = [].freeze
+      private_constant :NO_EDGES
+
       module_function
 
       # @param collection [FileCollection] the run's merged per-file collections
@@ -50,22 +53,53 @@ module Rigor
         end
       end
 
+      # Causes are carried as a Set through the fixpoint and flattened back to a sorted Array in
+      # {build_entries}. A Set is what {absorb} needs: unioning one along an edge must cost the source's
+      # size and allocate NOTHING when it adds nothing, and the array-concat-and-uniq it replaces
+      # allocated twice on every visit of every edge.
       def seed(summaries)
         summaries.transform_values do |summary|
-          { proven: summary.proven, exhaustive: summary.exhaustive?, causes: summary.causes }
+          { proven: summary.proven, exhaustive: summary.exhaustive?, causes: Set.new(summary.causes) }
         end
       end
 
-      # Round-robin to a fixpoint in sorted key order, so the answer does not depend on Hash insertion
-      # order and a pooled run agrees with a sequential one bit for bit.
+      # A worklist to a fixpoint. `state[key]` changing can only change the methods that CALL `key`, so a
+      # pass re-visits exactly those and the round-robin over the whole table is gone — that walk cost
+      # O(passes × edges) and the passes are the graph's depth.
+      #
+      # Each pass still runs in sorted key order, so the answer does not depend on Hash insertion order
+      # and a pooled run agrees with a sequential one bit for bit. (The lattice is finite and every step
+      # monotone, so the least fixpoint is unique and visit order cannot change it; the sorted pass keeps
+      # the *work* reproducible too.)
       def iterate(state, edges)
         order = state.keys.sort
+        callers = reverse_edges(edges)
+        pending = nil
+
         loop do
-          changed = false
+          dirty = nil
           order.each do |key|
-            edges[key]&.each { |callee| changed = true if absorb(state, key, callee) }
+            next if pending && !pending.include?(key)
+
+            list = edges[key]
+            next if list.nil?
+
+            changed = false
+            list.each { |callee| changed = true if absorb(state, key, callee) }
+            next unless changed
+
+            (dirty ||= Set.new).merge(callers[key]) if callers.key?(key)
           end
-          break unless changed
+          break if dirty.nil?
+
+          pending = dirty
+        end
+      end
+
+      # `{callee_key => [caller_key]}` — who has to be re-visited when a key's closure moves.
+      def reverse_edges(edges)
+        edges.each_with_object({}) do |(caller_key, list), out|
+          list.each { |callee| (out[callee] ||= []) << caller_key }
         end
       end
 
@@ -84,11 +118,9 @@ module Rigor
           target[:exhaustive] = false
           changed = true
         end
-        merged = (target[:causes] + source[:causes]).uniq
-        return changed if merged.size == target[:causes].size
-
-        target[:causes] = merged
-        true
+        causes = target[:causes]
+        source[:causes].each { |cause| changed = true if causes.add?(cause) }
+        changed
       end
 
       def build_entries(summaries, edges, state)
@@ -100,12 +132,12 @@ module Rigor
             proven: closed[:proven],
             exhaustive: closed[:exhaustive],
             causes: closed[:causes].sort_by { |cause, detail| [cause, detail.to_s] }.freeze,
-            edges: edges.fetch(key, [].freeze)
+            edges: edges.fetch(key, NO_EDGES)
           )
         end
       end
 
-      private_class_method :resolve_edges, :seed, :iterate, :absorb, :build_entries
+      private_class_method :resolve_edges, :seed, :iterate, :reverse_edges, :absorb, :build_entries
 
       # The class graph a run's collections describe, and the edge resolution over it. Built once per
       # propagation; every lookup is a Hash read.
@@ -116,23 +148,37 @@ module Rigor
           @includes = collection.includes
           @classes = build_classes(collection)
           @descendants = build_descendants(collection.superclasses)
+          @descendant_closures = {}
+          @targets = {}
         end
 
         # Every project method key `edge` may reach: the definition its ancestry resolves to, plus every
         # override of the same selector in a project subclass of the receiver's class.
+        #
+        # Memoised on `(receiver class, kind, selector)` — the answer depends on nothing else, and one
+        # such triple is asked for once per call site in the project. `ApplicationRecord#save` alone is
+        # thousands of sites on a Rails app, each of which used to re-walk the whole subclass forest.
         def targets_for(edge)
-          separator = edge.kind == :singleton ? "." : "#"
-          targets = []
-          owner = resolve_owner(edge.receiver_class, separator, edge.selector)
-          targets << owner if owner
-          descendants_of(edge.receiver_class).each do |subclass|
-            key = "#{subclass}#{separator}#{edge.selector}"
-            targets << key if @summaries.key?(key)
+          @targets[[edge.receiver_class, edge.kind, edge.selector]] ||= begin
+            separator = edge.kind == :singleton ? "." : "#"
+            targets = []
+            owner = resolve_owner(edge.receiver_class, separator, edge.selector)
+            targets << owner if owner
+            descendant_closure(edge.receiver_class).each do |subclass|
+              key = "#{subclass}#{separator}#{edge.selector}"
+              targets << key if @summaries.key?(key)
+            end
+            targets.freeze
           end
-          targets
         end
 
         private
+
+        # The transitive subclass closure, memoised per class. A deep hierarchy's root is asked for it
+        # once, not once per selector reaching it.
+        def descendant_closure(class_name)
+          @descendant_closures[class_name] ||= descendants_of(class_name).freeze
+        end
 
         # Ancestry order mirrors the engine's: the class itself, the modules it includes, then its
         # superclass, recursively. Cycle-guarded, because a project may declare one. Ancestry names

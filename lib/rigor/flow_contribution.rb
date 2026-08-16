@@ -9,7 +9,7 @@ module Rigor
   # [ADR-2 § "Plugin Contribution Merging"](../../docs/adr/2-extension-api.md) rather than letting any one
   # source override another silently.
   #
-  # Eight content slots plus a {Provenance} block. A slot left as `nil` (or, for collection-shaped slots, an
+  # Nine content slots plus a {Provenance} block. A slot left as `nil` (or, for collection-shaped slots, an
   # empty collection) means the contribution does not assert anything in that dimension; the merge policy
   # treats it as absent.
   #
@@ -38,7 +38,14 @@ module Rigor
       invalidations
       exceptional
       role_conformance
+      effects
     ].freeze
+
+    # `effects` is scalar-shaped like `return_type` and `exceptional`: only `nil` means "asserts
+    # nothing". An EMPTY {Rigor::Effects::LabelSet} is the positive claim that the call performs no
+    # effects — the reading of `%a{pure}` — so it must not be mistaken for an unset slot the way an
+    # empty fact Array is.
+    SCALAR_SLOTS = %i[return_type exceptional effects].freeze
 
     attr_reader(*SLOT_NAMES, :provenance)
 
@@ -54,12 +61,17 @@ module Rigor
     #   imply.
     # @param exceptional [Object, nil] non-returning, raising, or unreachable effect.
     # @param role_conformance [Array, nil] capability-role conformance facts the contribution provides.
+    # @param effects [Rigor::Effects::LabelSet, nil] ADR-103 WD5 — the effect labels this call edge
+    #   attributes to its callee, as an upper bound. `nil` means "says nothing about effects", which is
+    #   NOT the same as the empty set (which asserts the call performs none). Merged by union, the
+    #   conservative direction: two sources that each name part of a call's footprint together name
+    #   more of it, and neither can shrink the other's claim.
     # @param provenance [Provenance] source-family, plugin-id, node, and cache-descriptor metadata. Defaults
     #   to `Provenance.builtin`.
     # rubocop:disable Metrics/ParameterLists
     def initialize(return_type: nil, truthy_facts: nil, falsey_facts: nil,
                    post_return_facts: nil, mutations: nil, invalidations: nil,
-                   exceptional: nil, role_conformance: nil,
+                   exceptional: nil, role_conformance: nil, effects: nil,
                    provenance: Provenance.builtin)
       # rubocop:enable Metrics/ParameterLists
       @return_type = return_type
@@ -70,6 +82,7 @@ module Rigor
       @invalidations = freeze_collection(invalidations)
       @exceptional = exceptional
       @role_conformance = freeze_collection(role_conformance)
+      @effects = effects
       @provenance = provenance
       freeze
     end
@@ -77,7 +90,7 @@ module Rigor
     # @return [Boolean] true when every content slot is unset (nil or an empty collection). Provenance does
     #   not count toward emptiness — an empty bundle still carries source attribution.
     def empty?
-      SLOT_NAMES.all? { |slot| slot_empty?(public_send(slot)) }
+      SLOT_NAMES.all? { |slot| slot_empty?(slot, public_send(slot)) }
     end
 
     def to_h
@@ -102,6 +115,7 @@ module Rigor
     # | invalidations       | normal        | invalidation        | (per-fact target)       |
     # | exceptional         | exceptional   | exception           | :raise                  |
     # | role_conformance    | normal        | role                | (per-role target)       |
+    # | effects             | normal        | effects             | :effects                |
     #
     # @return [Array<Element>]
     def to_element_list # rubocop:disable Metrics/AbcSize
@@ -116,6 +130,7 @@ module Rigor
       Array(invalidations).each { |i| elements << element_for(fact_target(i), :normal, :invalidation, i) }
       elements << element_for(:raise, :exceptional, :exception, exceptional) unless exceptional.nil?
       Array(role_conformance).each { |r| elements << element_for(fact_target(r), :normal, :role, r) }
+      elements << element_for(:effects, :normal, :effects, effects) unless effects.nil?
       elements.freeze
     end
 
@@ -149,8 +164,9 @@ module Rigor
       value.dup.freeze
     end
 
-    def slot_empty?(value)
+    def slot_empty?(slot, value)
       return true if value.nil?
+      return false if SCALAR_SLOTS.include?(slot)
       return value.empty? if value.respond_to?(:empty?)
 
       false

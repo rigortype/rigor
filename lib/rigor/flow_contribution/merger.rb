@@ -99,6 +99,7 @@ module Rigor
           fold_effects(state, contribution)
           fold_exceptional(state, contribution, tier)
           fold_role_conformance(state, contribution)
+          fold_effect_labels(state, contribution)
         end
 
         def fold_return_type(state, contribution, tier)
@@ -182,6 +183,18 @@ module Rigor
           accumulate(state.role_conformance, contribution.role_conformance)
         end
 
+        # ADR-103 WD5 — the `effects` slot merges by UNION, unconditionally and across every authority
+        # tier. A label set is an upper bound on what a call does, and two sources that each name part of
+        # a footprint together name more of it; there is no reading under which one source's claim
+        # cancels another's, so there is no conflict to report either. `nil` ("says nothing") stays nil
+        # until some contribution speaks.
+        def fold_effect_labels(state, contribution)
+          incoming = contribution.effects
+          return if incoming.nil?
+
+          state.effects = state.effects.nil? ? incoming : state.effects.join(incoming)
+        end
+
         def accumulate(target, incoming)
           Array(incoming).each do |item|
             target << item unless target.include?(item)
@@ -217,7 +230,7 @@ module Rigor
       # {MergeResult} at the end via {#to_result}.
       class MergeState
         attr_accessor :return_type, :return_type_tier, :return_type_provenance,
-                      :exceptional, :exceptional_tier, :exceptional_provenance
+                      :exceptional, :exceptional_tier, :exceptional_provenance, :effects
         attr_reader :truthy_facts, :falsey_facts, :post_return_facts,
                     :mutations, :invalidations, :role_conformance,
                     :provenances, :conflicts
@@ -235,6 +248,7 @@ module Rigor
           @exceptional_tier = nil
           @exceptional_provenance = nil
           @role_conformance = []
+          @effects = nil
           @provenances = []
           @conflicts = []
         end
@@ -253,6 +267,7 @@ module Rigor
             invalidations: @invalidations,
             exceptional: @exceptional,
             role_conformance: @role_conformance,
+            effects: @effects,
             provenances: @provenances,
             conflicts: @conflicts
           )

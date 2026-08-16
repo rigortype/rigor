@@ -21,6 +21,7 @@ module Rigor
       invalidation
       exception
       role
+      effects
     ].freeze
 
     class Element < Data.define(:target, :edge, :kind, :payload, :provenance)

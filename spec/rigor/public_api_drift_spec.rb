@@ -406,6 +406,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   FLOW_CONTRIBUTION_INSTANCE = %w[
     ==(req:other)
+    effects()
     empty?()
     eql?(req:other)
     exceptional()
@@ -425,6 +426,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   FLOW_CONTRIBUTION_MERGE_RESULT_INSTANCE = %w[
     conflict?()
     conflicts()
+    effects()
     empty?()
     exceptional()
     falsey_facts()

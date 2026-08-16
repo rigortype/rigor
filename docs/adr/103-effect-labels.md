@@ -3,10 +3,11 @@
 Status: **Proposed, 2026-08-16.** Nothing implemented. Records the decisions reached while
 designing the effect system in
 [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md) (the design note;
-its § 13 lists the choices, this ADR fixes them as working decisions). The four items still open
-are named under "Open at Proposed". Implementation is sliced as GitHub issues under the
-umbrella [#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394;
-tracker convention: [ADR-98](98-development-flow-document-roles.md)).
+its § 13 lists the choices, this ADR fixes them as working decisions; WD13, coexistence with
+`rigor check`, was added the same day). The four items still open are named under "Open at
+Proposed". Implementation is sliced as GitHub issues under the umbrella
+[#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394; tracker
+convention: [ADR-98](98-development-flow-document-roles.md)).
 
 Grounding: Steins' implemented model
 ([why-effects](https://github.com/rigortype/steins/blob/master/docs/why-effects.md),
@@ -196,6 +197,25 @@ stored per file. The label language is normative in a new
 `docs/type-specification/effect-labels.md`; collection and propagation in an internal-spec
 section; "effect label", "effect summary", "effect envelope" are registered as trapped compounds
 in `CONTEXT.md`, and "flow effect" keeps naming the existing bundle. (§ 3, § 10.)
+
+### WD13 — Coexistence with `rigor check`: off is free, on is observational, one cache
+
+The switch is `effects:` in `.rigor.yml` (or running `rigor effects`); annotations alone never
+turn collection on and instead earn a `:info` residual. When off, the collector costs one integer
+read on the dispatch hot path — the `DependencyRecorder` activation-count shape — and the origin
+scan rides `ScopeIndexer`'s existing `def` walk behind the same flag; the gate is byte-identical
+`rigor check` and wall-clock within noise on the corpus. When on, collection **records what the
+typer already decided and never asks it to decide more** (no on-demand walks, no extra resolution,
+no `Scope` mutation); the closure is the post-pool fixpoint; working budget ≤ ~5 % wall / RSS on
+mastodon and ≤ 1 s of fixpoint at gitlab scale, measured as the corpus perf notes measure. There
+is one cache with two identities: the diagnostics identity is today's and is valid whichever way
+effects are set, because collection is observational; the effects identity adds the vocabulary and
+catalogue versions and the `effects:` digest, and its summaries are a sidecar slot beside
+`return_summaries` and in the whole-run entry, written when on, ignored when off, a miss for
+effects consumers only when absent. Typing consumers (WD9) fork the identity as
+`BleedingEdge`-style features and never as a side effect of collection. The collector is
+fail-soft: an exception drops that file's summary as non-exhaustive and never fails a check.
+Editor mode does not run effects in v1. (§ 10.1.)
 
 ## Rejected and deferred alternatives
 

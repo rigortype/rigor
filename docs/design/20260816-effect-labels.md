@@ -725,6 +725,81 @@ bundles, kept per origin so policy discharge can be origin-precise, § 11.2), a 
 `data/effects/core.yml` catalogue with a loader mirroring `Builtins::MethodCatalog`, and the config
 schema additions of § 6.2 / 6.6.
 
+### 10.1 Coexistence with `rigor check`: opt-in, cost when off, cost when on, one cache
+
+The owner's constraint: existing type-checker users get this opt-in, and a user who never turns it
+on pays as close to nothing as possible. Four commitments, each with the existing pattern it
+copies.
+
+**1. Off means off — the switch is `effects:` in `.rigor.yml`, and nothing else.** Collection runs
+only when the configuration carries an `effects:` block (any key, `effects: {}` included) or the
+run *is* `rigor effects`. In particular, the mere presence of `%a{rigor:v1:effect}` /
+`%a{pure}` in a project's RBS does **not** switch collection on — an annotation must not create a
+project-wide cost cliff — and instead earns a `:info` residual, in the shape of
+`rbs.coverage.inline-annotations-unsynthesized` ([ADR-93](../adr/93-default-rbs-inline-ingestion.md)
+WD3): "effect annotations found but `effects:` is not enabled; nothing checks them". Editor mode
+(`rigor lsp`) does not run effects in v1 (`effects.lsp: false` reserved).
+
+**2. Cost when off: one integer read.** The collector is a recorder in the shape of
+`Rigor::Analysis::DependencyRecorder` — a module-level activation count so the disabled fast path
+is a plain integer read (the ADR-46 recorder documents exactly this trade: `user_def_for` "is on
+the per-dispatch hot path, so a normal (non-recording) run must pay as little as possible"), a
+per-thread accumulator, activated per `analyze_file` and marshalled back with the file result. The
+syntactic origin scan piggybacks the `def` walk `ScopeIndexer` already performs (its
+`build_method_assign_effects` visits every ivar write today) behind the same flag; no second Prism
+walk when off. Acceptance is a **byte-identical `rigor check` and wall-clock within noise** on
+the survey corpus with the feature code present and off — the gate #379 already carries, made
+explicit for time as well as output.
+
+**3. Cost when on: record what the typer already decided; never ask it to decide more.** In report
+/ snapshot mode the collector observes dispatch decisions the typer makes anyway
+(`call_type_for` → resolved owner or a `DynamicOrigin` cause) and joins catalogue rows; it never
+triggers an on-demand method walk that would not otherwise run, never resolves anything the
+dispatcher declined, and never touches `Scope` (a side-table with the `dynamic_origins` properties
+— node-keyed, excluded from `Scope#==`, not read back into typing). Transitive closure is the
+post-pool graph-only fixpoint. So enabling effects adds: one small record per resolved call site,
+one per-def origin set, a compact per-file summary in the worker→parent marshal, and a fixpoint
+whose cost is O(edges × labels). Working budget, to be measured in #379 / #380 the way the corpus
+perf notes measure (stackprof in a throwaway `GEM_HOME`, `RIGOR_DISABLE_YJIT=1` A/B for RSS,
+`make verify-sequential` for pooled = sequential): collection ≤ ~5 % wall and RSS on mastodon,
+fixpoint ≤ 1 s on gitlab-scale. The typing **consumers** of § 8 are the exception by definition —
+they change what the typer decides — and are separate, identity-forking features (below). Views
+(§ 11.3) add real files to type and are their own opt-in (`effects.views`).
+
+**4. One cache, two identities, one extra slot.** No second cache. Both existing stores digest the
+whole configuration already (`IncrementalSnapshot.fingerprint` hashes `configuration.to_h`; the
+ADR-45 run key reads `configs`), so *adding* `effects:` invalidates once, exactly as any config
+edit does; from then on `rigor check` and `rigor effects` under the same `.rigor.yml` share
+everything. Inside that identity:
+
+- The **diagnostics identity** is today's. Collection is observational (commitment 3), so a per-file
+  diagnostics entry computed with effects on is valid for effects off and vice versa.
+- The **effects identity** = diagnostics identity + vocabulary version + catalogue version + the
+  `effects:` block digest (attribution and tolerated policy change *direct* summaries and
+  judgments). Effect summaries and edges are a sidecar payload — beside `return_summaries` in the
+  incremental snapshot, and an `effect_summaries` section of the whole-run cache entry — written
+  when collection is on and ignored when off. An entry whose effects slot is missing or
+  stale is a miss **for effects consumers only**: that file re-collects, the diagnostics slot is
+  untouched. Consequently `rigor effects --check` after `rigor check` in the same job is a warm hit
+  plus the fixpoint; a Rigor upgrade that bumps the vocabulary invalidates effect slots and not
+  diagnostics (which its version bump invalidates anyway).
+- **Typing consumers fork the identity.** The B2.2 ivar-reset skip, computed purity and the
+  folding gate change `rigor check` output, so each lands as a feature whose id is folded into the
+  analysis-cache identity — the `BleedingEdge` `:behaviour` constraint, stated in
+  `lib/rigor/bleeding_edge.rb` — never as a side effect of collection being on. A project on
+  effects-with-consumers and one on effects-without simply have different identities, as a
+  bleeding-edge project already does.
+- Envelope diagnostics and the snapshot are computed from summaries every run (WD12) and live in
+  the whole-run entry, never per file.
+
+**Failure isolation.** The collector is fail-soft like the fork pool: an exception inside it drops
+that file's summary, marks its methods non-exhaustive with a `collector-error` cause, and never
+alters or fails `rigor check`.
+
+**What an existing user sees on upgrade:** nothing. No new diagnostics (the family is reserved and
+opt-in), no new files, the same cache identity, byte-identical output; `rigor doctor` /
+`rigor next-steps` may *suggest* `rigor effects --update`, which is how ADR-73 surfaces features.
+
 ## 11. Vocabulary v1
 
 ### 11.1 The shared registry

@@ -37,6 +37,17 @@ module Rigor
 
       RUN_DIAGNOSTICS_PRODUCER_ID = "analysis.run-diagnostics"
 
+      # ADR-103 WD13 / issue #382 — the whole-run **effects sidecar**: the run's per-file effect
+      # collections, keyed by {Effects::Identity.descriptor} (this key descriptor plus the vocabulary
+      # version, the catalogue identity and the `effects:` digest) rather than by the descriptor above.
+      #
+      # A separate producer id, not a second section of the diagnostics entry, and that is the whole of
+      # "the diagnostics slot is never invalidated by effects": the two slots cannot share a fate when they
+      # do not share a file. It also keeps the ADR-87 boot-slim probe reading exactly the bytes it reads
+      # today — it peeks `analysis.run-diagnostics` and finds a plain diagnostics array, whatever a
+      # collecting run wrote elsewhere.
+      RUN_EFFECTS_PRODUCER_ID = "analysis.run-effects"
+
       # The run-result producer's declared compaction budget (`Cache::Store#evict!` pass 2). Whole-project,
       # but unlike the `rbs.*` producers several generations can be live at once: the `paths` key slot means
       # one entry per analyzed-path SET, so `rigor check` over the whole project, over `lib`, and over a
@@ -46,6 +57,11 @@ module Rigor
       # path-set generations observed, differing in the `paths` slot alone), with no evidence yet on how
       # often an evicted generation is asked for again — see issue #151.
       GENERATION_CAP = 16
+
+      # The effects sidecar's own compaction budget. One generation per (path set × effects identity), and
+      # only a project that opted in writes any at all, so it is sized as the diagnostics cap's shadow: a
+      # collecting project's path-set churn is the same churn, and over-evicting costs one recompute.
+      EFFECTS_GENERATION_CAP = GENERATION_CAP
 
       # @param rbs_config_entries [Array<Cache::Descriptor::ConfigEntry>] the RBS-derived config slots
       #   (`rbs.libraries` [+ `rbs.virtual_rbs`]). nil on any failure so a malformed key disables the cache.

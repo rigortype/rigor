@@ -27,9 +27,11 @@ module Rigor
     #
     # The command turns collection on for its own run by loading the project's configuration and enabling
     # an implicit `effects: {}` when the file carries no `effects:` block — the ad-hoc mode ADR-103 WD14
-    # describes. Such a run shares no cache with `rigor check`: a collecting run declines the ADR-45
-    # whole-run result cache, because a cache-served run collects nothing. A project that *does* configure
-    # `effects:` gets its own settings instead.
+    # describes. A project that *does* configure `effects:` gets its own settings instead, and then this
+    # run shares the whole cache with `rigor check`: the diagnostics come from the ADR-45 run entry and the
+    # summaries from the effects sidecar keyed beside it (#382), so `rigor effects` after `rigor check` in
+    # the same job is a warm hit plus the fixpoint. The ad-hoc mode digests a different `effects:` block
+    # than the project's, so it shares the diagnostics entry and keys its own effects slot.
     class EffectsCommand < Command
       USAGE = "Usage: rigor effects [options] [paths]"
 
@@ -104,10 +106,10 @@ module Rigor
         CLI::EXIT_USAGE
       end
 
-      # Sequential and cache-backed. The store still serves the RBS-environment and plugin-producer tiers;
-      # the ADR-45 whole-run *result* cache declines on its own for a collecting run, because a
-      # cache-served run collects nothing and the table would come back empty (the persisted sidecar that
-      # lifts this is #382).
+      # Sequential and cache-backed, through the same ADR-45 whole-run result cache `rigor check` uses:
+      # the diagnostics entry serves the run and the #382 effects sidecar serves the collections, leaving
+      # only the fixpoint. Sequential is not a cache decision — the run-result cache declines pool mode —
+      # but a collecting run is pinned to the fork backend anyway, so `workers: 0` costs nothing here.
       def analyze(configuration)
         runner = Analysis::Runner.new(
           configuration: configuration,

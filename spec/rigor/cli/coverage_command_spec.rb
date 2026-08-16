@@ -650,7 +650,8 @@ RSpec.describe Rigor::CLI::CoverageCommand do
           cache: {}, sources: sources, digests: {}, analyzed: sources.keys,
           symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {},
           missing: {}, class_decls: {}, seed_bundles: {}, plugin_fact_digest: nil,
-          return_summaries: {}, param_table: {}
+          return_summaries: {}, param_table: {},
+          effect_collections: {}, effects_identity: nil
         )
       )
     end

@@ -82,6 +82,22 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
     expect(hit_engine).to eq(0) # the baseline filter must not drag the engine onto the hit path
   end
 
+  # ADR-103 WD13 / #382 — the effects sidecar is a SEPARATE producer entry, so `analysis.run-diagnostics`
+  # still holds a plain diagnostics array whatever a collecting run wrote beside it. Had the summaries ridden
+  # inside that entry, this run would have had to load the effects machinery to unpack its own hit.
+  it "serves a warm HIT engine-free for a project that opted into effect collection" do
+    write_project
+    File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\neffects: {}\n")
+
+    miss_status, miss_engine, = check_run
+    expect(miss_status).to eq(0)
+    expect(miss_engine).to be > 0
+
+    hit_status, hit_engine, = check_run
+    expect(hit_status).to eq(0)
+    expect(hit_engine).to eq(0)
+  end
+
   it "declines the probe (loads the engine) for --no-cache" do
     write_project
     check_run # prime

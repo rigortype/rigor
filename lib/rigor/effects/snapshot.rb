@@ -7,6 +7,7 @@ require "yaml"
 require_relative "../version"
 require_relative "effect_table"
 require_relative "entry_points"
+require_relative "identity"
 require_relative "registry"
 
 module Rigor
@@ -116,8 +117,12 @@ module Rigor
         # The `effects:` block of `.rigor.yml`, canonicalised (keys sorted at every depth, rendered as
         # JSON) and hashed. A Rigor upgrade, a vocabulary bump or a `tolerated:` edit is therefore a
         # **visible** regeneration event rather than a silent reinterpretation of the record.
+        #
+        # The implementation lives in {Effects::Identity} because the effects CACHE identity (#382) digests
+        # the same block: a header that agreed with the cache key only by convention would eventually stop
+        # agreeing, and the failure would be a silently reused stale sidecar.
         def config_digest(configuration)
-          Digest::SHA256.hexdigest(JSON.generate(canonicalize(configuration.effects || {})))
+          Identity.config_digest(configuration)
         end
 
         # Resolves `effects.snapshot.reach:` entries to file globs: a preset name becomes the globs it
@@ -240,15 +245,6 @@ module Rigor
           return false if direct.bundles.empty?
 
           direct.bundles.each_key.all? { |origin| SYNTHESISED_ORIGINS.include?(origin.to_s) }
-        end
-
-        def canonicalize(value)
-          case value
-          when Hash then value.map { |key, member| [key.to_s, canonicalize(member)] }.sort_by(&:first).to_h
-          when Array then value.map { |member| canonicalize(member) }
-          when Symbol then value.to_s
-          else value
-          end
         end
       end
 

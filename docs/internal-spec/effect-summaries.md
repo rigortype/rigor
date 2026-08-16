@@ -310,9 +310,30 @@ The collector and the propagator are fail-soft at three levels, and none of them
 
 ## Caching
 
-Collection is not persisted in this slice. Because a cache-served run collects nothing, a run with collection on declines the ADR-45 whole-run **result** cache (`Runner#run_result_cacheable?`) — the same exclusion, for the same reason, that a `record_dependencies` run takes. The store still serves the RBS-environment and plugin-producer tiers.
+One cache, two identities, one extra slot (ADR-103 WD13). There is no second store: both existing stores already digest the whole resolved configuration, so a project that adds `effects:` invalidates nothing — the block is deliberately **absent** from `Configuration#to_h`, and that absence is what makes the two identities independent rather than a redundancy to be tidied away.
 
-The sidecar that lifts this — summaries stored beside `return_summaries`, under an effects cache identity of its own (the diagnostics identity plus the vocabulary version, the catalogue version and the `effects:` digest) — is [#382](https://github.com/rigortype/rigor/issues/382). Until it lands, the `effects:` block is deliberately **absent** from `Configuration#to_h`, so enabling the feature does not invalidate any existing project's caches.
+The **diagnostics identity** is the ordinary one. Collection is observational, so a diagnostics entry computed with collection on is valid for a run with it off and vice versa, and nothing in this section may invalidate, rewrite or reshape that entry.
+
+The **effects identity** is the diagnostics identity plus the three inputs that change what a summary *means* without moving one analyzed byte: the vocabulary version (`Registry#vocabulary_version`), the catalogue identity (`Catalog#identity` — its schema and a content digest of `data/effects/core.yml`), and the digest of the `effects:` block. `Rigor::Effects::Identity` is the one place it is computed, in two spellings of the same three inputs: `.digest` (a hex string, for a store with no descriptor of its own) and `.descriptor` (the run's key descriptor composed with one `configs:` entry carrying that digest). `Snapshot.config_digest` — the snapshot header's `config_digest` — is the same method, so the committed record and the cache key can never disagree about which `effects:` block produced it.
+
+The unit of persistence is the **per-file `FileCollection`**, never the propagated table. A leaf's summary reaches every caller, so a stored table would have to be invalidated by every file in the project; the fixpoint is instead re-run over the merged whole on every run, which is the cheap half and the half that makes per-file reuse sound.
+
+Two slots carry it:
+
+| Store | Slot | Keyed by |
+| --- | --- | --- |
+| ADR-45 whole-run cache | producer `analysis.run-effects`, one entry per run | `Effects::Identity.descriptor` — the `analysis.run-diagnostics` key descriptor plus the effects entry |
+| ADR-46 incremental snapshot | `Payload#effect_collections` + `Payload#effects_identity` (`SCHEMA` 12) | the snapshot's own global fingerprint, then the identity compared on restore |
+
+A run with collection **on** is no longer excluded from the whole-run result cache. It consults the effects slot first, because that is the slot that can force work: a hit adopts the collections and runs the fixpoint, a miss re-analyzes (collection is observational, so the only way to collect is to analyze) and writes the slot. Either way the diagnostics slot decides for itself — an effects miss whose diagnostics entry is warm serves the warm diagnostics, and the effects entry's validation uses the same post-run dependency descriptor, so exactly the file set that invalidates diagnostics invalidates summaries.
+
+An entry whose effects slot is missing, differently identified, or corrupt is a miss **for effects consumers only**. A run with collection **off** never reads or writes the slot: `rigor check` is byte-identical, its cache key is unchanged, and the ADR-87 boot-slim probe still serves it from `analysis.run-diagnostics` without loading the engine.
+
+Consequently `rigor effects` and the snapshot verbs go through the same cache `rigor check` does: after a `rigor check` under a configured `effects:` block, `rigor effects check` in the same job is a warm hit plus the fixpoint, and never re-collects.
+
+An ADR-46 recheck re-collects only the changed closure and serves every other file's collection from the snapshot; the fixpoint runs over the merged whole, so a leaf edit moves the reach of a caller in a file the recheck never opened. A restored snapshot whose `effects_identity` differs from this run's — a vocabulary bump, a re-audited catalogue row, an `effects:` edit, or a snapshot written with collection off — declines reuse and takes a full baseline: a recheck re-collects only the closure, so a partial re-collection could not be closed into a whole-project fixpoint. That is the incremental spelling of "an effects miss recomputes effects", and it is never paid by a run with collection off.
+
+Typing consumers (WD9) fork the identity as `BleedingEdge`-style features with their id in the analysis-cache key. Collection being on must never fork it.
 
 ## Parallelism
 

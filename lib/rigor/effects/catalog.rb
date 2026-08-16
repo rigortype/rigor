@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "yaml"
 
 require_relative "../inference/mutation_widening"
@@ -123,19 +124,39 @@ module Rigor
         raw = {} unless raw.is_a?(Hash)
         new(
           defaults: raw["defaults"] || {}, classes: raw["classes"] || {},
-          universal: raw["universal"] || [], schema: raw.fetch("schema", 0)
+          universal: raw["universal"] || [], schema: raw.fetch("schema", 0),
+          digest: file_digest(path)
         )
       end
 
-      attr_reader :schema
+      # A content digest of the catalogue file, so {#identity} moves when a row's audit decision moves.
+      # `schema:` alone cannot carry that: it is bumped for a shape change, and the whole point of the
+      # data file is that rows are edited without one. An absent file digests as `"absent"`, matching
+      # {load_file}'s fail-open posture for a bare install that opted data out.
+      def self.file_digest(path)
+        File.file?(path) ? Digest::SHA256.file(path).hexdigest : "absent"
+      rescue StandardError
+        "unreadable"
+      end
+      private_class_method :file_digest
 
-      def initialize(defaults:, classes:, universal: [], schema: 0)
+      attr_reader :schema, :digest
+
+      def initialize(defaults:, classes:, universal: [], schema: 0, digest: "unknown")
         @schema = schema
+        @digest = digest.to_s.freeze
         @postures = build_postures(defaults)
         @universal = universal.to_set(&:to_s).freeze
         @classes = build_classes(classes)
         @object_constants = @classes.select { |_, entry| entry.object? }.keys.to_set.freeze
         freeze
+      end
+
+      # What the effects cache identity records this catalogue as (#382, {Effects::Identity}): the schema
+      # AND the content digest, so a re-audited row invalidates persisted summaries the same way a shape
+      # change does.
+      def identity
+        "#{@schema}:#{@digest}"
       end
 
       # Every catalogued class name, sorted — the surface a spec walks.

@@ -51,8 +51,11 @@ module Rigor
       # nil (a clean cold rebuild — no migration). 11: ADR-67 WD6c lift adds `param_table` (the inferred-param
       # seed table the run's diagnostics were computed under, diffed on the next recheck to invalidate a
       # callee whose seeds moved because a caller changed); a pre-11 blob mismatches the SCHEMA gate and
-      # loads as nil (a clean cold rebuild — no migration).
-      SCHEMA = 11
+      # loads as nil (a clean cold rebuild — no migration). 12: ADR-103 WD13 / issue #382 adds the effects
+      # sidecar — `effect_collections` (the per-file {Rigor::Effects::FileCollection}s a collecting run
+      # produced) and the `effects_identity` they were produced under; a pre-12 blob mismatches the SCHEMA
+      # gate and loads as nil (a clean cold rebuild — no migration).
+      SCHEMA = 12
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -87,10 +90,22 @@ module Rigor
       # recomputes the table fresh (the pre-pass is whole-project by design) and diffs it against this copy;
       # a changed entry invalidates the callee's file and its symbol dependents. The types are Marshal-clean
       # by the session's per-entry filter; a dropped entry re-checks its callee, the conservative direction.
+      # ADR-103 WD13 / issue #382 — the effects sidecar, ADR-46's half of "one cache, two identities, one
+      # extra slot":
+      # `effect_collections` maps an analyzed path to the {Rigor::Effects::FileCollection} that file
+      # contributed (`{}` when collection is off), so a recheck re-collects only the changed closure and
+      # serves the rest from here. The propagated table is NEVER stored — it is recomputed from the merged
+      # whole every run, because a leaf's summary reaches every caller and a stored table would have to be
+      # invalidated by all of them.
+      # `effects_identity` is {Rigor::Effects::Identity.digest} at the run that wrote them (nil when
+      # collection was off). It is a SEPARATE gate from the global `fingerprint`: the `effects:` block is
+      # deliberately absent from `Configuration#to_h`, so turning collection on invalidates no diagnostics,
+      # and a vocabulary / catalogue / `effects:` change must invalidate the summaries alone.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
                             :missing, :class_decls, :seed_bundles, :plugin_fact_digest,
-                            :return_summaries, :param_table)
+                            :return_summaries, :param_table,
+                            :effect_collections, :effects_identity)
 
       # The global fingerprint that gates a snapshot load: a digest of the inputs whose change requires a full
       # rebuild — the engine version + schema, the engine's own SOURCE when the version does not pin it, the
@@ -206,7 +221,9 @@ module Rigor
           seed_bundles: data[:seed_bundles] || {},
           plugin_fact_digest: data[:plugin_fact_digest],
           return_summaries: data[:return_summaries] || {},
-          param_table: data[:param_table] || {}
+          param_table: data[:param_table] || {},
+          effect_collections: data[:effect_collections] || {},
+          effects_identity: data[:effects_identity]
         )
       end
       private :payload_from
@@ -227,7 +244,9 @@ module Rigor
           seed_bundles: payload.seed_bundles,
           plugin_fact_digest: payload.plugin_fact_digest,
           return_summaries: payload.return_summaries,
-          param_table: payload.param_table
+          param_table: payload.param_table,
+          effect_collections: payload.effect_collections,
+          effects_identity: payload.effects_identity
         )
         blob = Zlib::Deflate.deflate(raw)
         tmp = "#{@path}.#{Process.pid}.tmp"

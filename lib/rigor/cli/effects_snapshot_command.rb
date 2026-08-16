@@ -175,10 +175,10 @@ module Rigor
 
       # ---- the run ------------------------------------------------
 
-      # Same run the report takes: collection forced on for this invocation, sequential, and declining the
-      # ADR-45 whole-run result cache — a cache-served run collects nothing, so the table would come back
-      # empty (`Runner#run_result_cacheable?`; the persisted sidecar that lifts this is #382). An ad-hoc
-      # run under an implicit `effects: {}` therefore shares no cache with `rigor check`.
+      # Same run the report takes: collection forced on for this invocation, sequential, and going through
+      # the ADR-45 whole-run result cache like `rigor check` — the diagnostics entry plus the #382 effects
+      # sidecar keyed beside it, so `rigor effects check` after `rigor check` under a configured `effects:`
+      # block is a warm hit plus the fixpoint.
       def build_snapshot(configuration, full:)
         runner = Analysis::Runner.new(
           configuration: configuration,

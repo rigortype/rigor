@@ -4,8 +4,9 @@ Status: **Proposed, 2026-08-16.** Nothing implemented. Records the decisions rea
 designing the effect system in
 [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md) (the design note;
 its § 13 lists the choices, this ADR fixes them as working decisions). The four items still open
-are named under "Open at Proposed". Implementation is sliced as GitHub issues under an
-effect-labels umbrella issue (tracker convention: [ADR-98](98-development-flow-document-roles.md)).
+are named under "Open at Proposed". Implementation is sliced as GitHub issues under the
+umbrella [#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394;
+tracker convention: [ADR-98](98-development-flow-document-roles.md)).
 
 Grounding: Steins' implemented model
 ([why-effects](https://github.com/rigortype/steins/blob/master/docs/why-effects.md),

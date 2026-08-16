@@ -1,7 +1,8 @@
 # Effect labels — an opt-in effect system for Rigor
 
 **Status:** Draft (design under consideration, 2026-08-16). Nothing implemented. Its decisions are
-fixed as working decisions by [ADR-103](../adr/103-effect-labels.md) (Proposed). If ratified it
+fixed as working decisions by [ADR-103](../adr/103-effect-labels.md) (Proposed) and sliced under
+[#376](https://github.com/rigortype/rigor/issues/376). If ratified it
 graduates into an ADR (rationale), a normative `docs/type-specification/effect-labels.md` (labels,
 subsumption, envelopes, lanes) and an internal-spec section (summary collection, propagation,
 diagnostics), plus a `CONTEXT.md` glossary entry. Until then nothing here binds.

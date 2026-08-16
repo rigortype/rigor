@@ -808,4 +808,43 @@ RSpec.describe Rigor::Configuration do
       end
     end
   end
+
+  # ADR-103 WD13 — the effect-labels opt-in. PRESENCE is the switch, not truthiness: an annotation in a
+  # project's RBS must never create a project-wide cost cliff, so `effects:` in the config file is the
+  # only thing (besides running `rigor effects`) that turns collection on.
+  describe "#effects_enabled?" do
+    it "is false with no effects: key" do
+      expect(described_class.new({}).effects_enabled?).to be(false)
+      expect(described_class.new({}).effects).to be_nil
+    end
+
+    it "is true for an empty block, and for the bare key YAML parses as nil" do
+      expect(described_class.new({ "effects" => {} }).effects_enabled?).to be(true)
+      expect(described_class.new({ "effects" => nil }).effects_enabled?).to be(true)
+    end
+
+    it "keeps the block's body for the slices that read its sub-keys" do
+      configuration = described_class.new({ "effects" => { "check" => false } })
+
+      expect(configuration.effects).to eq({ "check" => false })
+      expect(configuration.effects).to be_frozen
+    end
+
+    # The ad-hoc opt-in `rigor effects` uses when the project configures nothing.
+    describe "#with_effects_enabled" do
+      it "returns a frozen sibling with an implicit empty block" do
+        enabled = described_class.new({ "paths" => ["app"] }).with_effects_enabled
+
+        expect(enabled.effects_enabled?).to be(true)
+        expect(enabled.paths).to eq(["app"])
+        expect(enabled).to be_frozen
+      end
+
+      it "leaves a configuration that already enables effects untouched" do
+        configured = described_class.new({ "effects" => { "views" => true } })
+
+        expect(configured.with_effects_enabled).to equal(configured)
+      end
+    end
+  end
 end

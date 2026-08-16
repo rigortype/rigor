@@ -174,6 +174,12 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 | `plugins_io.allowed_paths` | Array | `[]` | Filesystem paths plugins may read. |
 | `plugins_io.allowed_url_hosts` | Array | `[]` | URL hosts plugins may fetch from when `network: allowlist`. |
 
+### Effect labels
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `effects` | Hash | absent | **Opt-in to effect labels ([ADR-103](../adr/103-effect-labels.md)).** The *presence* of this block is the switch — `effects: {}` enables collection with every sub-key at its default, and leaving it out keeps `rigor check` byte-identical and free. Nothing else turns collection on: an `%a{pure}` or `%a{rigor:v1:effect …}` annotation in your RBS does not, because an annotation must not silently make every run more expensive. `rigor effects` runs under an implicit empty block when the key is absent, so you can try the report before configuring anything. Enabling it disables the whole-run result cache for now — the persisted summaries that lift that are a later release. The sub-keys `check`, `snapshot`, `labels`, `attribution`, `envelopes`, `tolerated` and `views` are declared in the schema and reserved: they are accepted and **not yet read**. See [`rigor effects`](02-cli-reference.md#rigor-effects). |
+
 ### Reserved for other implementations
 
 | Key | Type | Default | Meaning |

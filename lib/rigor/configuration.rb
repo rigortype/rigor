@@ -65,6 +65,23 @@ module Rigor
       # lifted): the incremental session recomputes the table each run and diffs it against its snapshot,
       # re-checking any callee whose seeds moved.
       "parameter_inference" => false,
+      # ADR-103 WD13 — the effect-labels opt-in, and the ONLY thing that turns effect collection on
+      # besides running `rigor effects`. **Presence is the switch**: `effects: {}` — or the bare key, which
+      # YAML parses as nil — enables collection with every sub-key at its default, because an annotation in
+      # a project's RBS must never create a project-wide cost cliff (that case earns a `:info` residual
+      # instead, #384).
+      #
+      # The default is `false` rather than `nil` precisely because presence is the switch and
+      # `Configuration.load` merges these DEFAULTS UNDER the loaded file: a `nil` default would be
+      # indistinguishable from a user's bare `effects:` key and would turn collection on for every project
+      # in existence. `false` is also the explicit-disable form a `.rigor.yml` uses to override an upstream
+      # `.rigor.dist.yml`'s `effects:` block — the same shape `baseline:` uses.
+      #
+      # The sub-keys are declared in `schemas/rigor-config.schema.json` and none is read yet: `check`,
+      # `snapshot`, `labels`, `attribution`, `envelopes`, `tolerated`, `views` land with the slices that
+      # implement them (#381 / #383 / #386). Reserving their shape before a reader exists is the same
+      # discipline the schema applies to a sibling implementation's namespace (ADR-99).
+      "effects" => false,
       "cache" => {
         "path" => ".rigor/cache",
         # LRU eviction cap in bytes (ADR-54 WD3). The least-recently-used entries are removed at the end of a
@@ -211,7 +228,15 @@ module Rigor
                 :dependencies, :parallel_workers,
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
                 :rbs_collection_lockfile, :rbs_collection_auto_detect,
-                :pre_eval, :baseline_path
+                :pre_eval, :baseline_path, :effects
+
+    # ADR-103 WD13 — whether effect collection runs. True exactly when the loaded configuration carried an
+    # `effects:` block, whatever its body; `rigor effects` enables it for its own run by loading an
+    # implicit `effects: {}` instead of by consulting anything else. Nothing else — no annotation, no
+    # plugin, no severity profile — can turn collection on.
+    def effects_enabled?
+      !@effects.nil?
+    end
 
     # Loads a configuration file.
     #
@@ -423,6 +448,9 @@ module Rigor
       # ADR-67 WD6a — resolve to a strict Boolean so a truthy non-`true` value (e.g. a stray String) does not
       # silently enable the gate; only the literal `true` activates the check-walk collector pre-pass.
       @parameter_inference = data.fetch("parameter_inference", DEFAULTS.fetch("parameter_inference")) == true
+      # ADR-103 WD13 — presence, not truthiness: `effects:` written with no body parses as nil and still
+      # means "on", so the key's presence in the loaded data is what {#effects_enabled?} reads.
+      @effects = coerce_effects(data)
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
@@ -576,7 +604,34 @@ module Rigor
       copy.freeze
     end
 
+    # ADR-103 WD14 — the ad-hoc opt-in `rigor effects` uses when the project's configuration carries no
+    # `effects:` block: a sibling Configuration with an implicit empty block, every other field shared.
+    # A configuration that already enables effects is returned unchanged, so a project's own settings
+    # always win over the implicit ones.
+    #
+    # Same `dup` + re-`freeze` shape as {#with_bleeding_edge}: every other ivar is the receiver's deeply
+    # frozen value, safe to share read-only, and the result stays `Ractor.shareable?` for the worker path.
+    def with_effects_enabled
+      return self if effects_enabled?
+
+      copy = dup
+      copy.instance_variable_set(:@effects, {}.freeze)
+      copy.freeze
+    end
+
     private
+
+    # ADR-103 WD13 — the `effects:` block, or nil when the key is absent or explicitly `false`. A
+    # present-but-empty key (`effects:` alone, which YAML parses as nil) and `effects: {}` are the same
+    # thing: collection on, every sub-key defaulted. A non-Hash body is normalised to `{}` rather than
+    # rejected — the sub-keys have no reader yet, so there is nothing a malformed body could break, and
+    # tier 1 (the schema) is where its shape is answered.
+    def coerce_effects(data)
+      value = data.fetch("effects", false)
+      return nil if value == false
+
+      (value.is_a?(Hash) ? value : {}).freeze
+    end
 
     # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is accepted as either a literal path (slice 1
     # contract) OR a `File.fnmatch?`-shaped glob pattern (`lib/core_ext/**/*.rb`). Glob meta characters (`*`,

@@ -73,16 +73,23 @@ module Rigor
       # set, and the two memoised posture {Entry}s (allocated once rather than per call — the lookup
       # sits inside the effect scan's walk).
       class ClassEntry
-        attr_reader :instance_methods, :singleton_methods, :posture_labels, :mutators, :object
+        attr_reader :instance_methods, :singleton_methods, :posture_labels, :singleton_posture_labels,
+                    :mutators, :object
 
-        def initialize(instance_methods:, singleton_methods:, posture_labels:, mutators:, object:)
+        def initialize(instance_methods:, singleton_methods:, posture_labels:, singleton_posture_labels:,
+                       mutators:, object:)
           @instance_methods = instance_methods
           @singleton_methods = singleton_methods
           @posture_labels = posture_labels
+          @singleton_posture_labels = singleton_posture_labels
           @mutators = mutators
           @object = object
-          @posture_entry = Entry.new(labels: posture_labels, mutates_receiver: false, from_posture: true)
-          @mutating_posture_entry = Entry.new(labels: posture_labels, mutates_receiver: true, from_posture: true)
+          @entries = {
+            [false, false] => Entry.new(labels: posture_labels, mutates_receiver: false, from_posture: true),
+            [false, true] => Entry.new(labels: posture_labels, mutates_receiver: true, from_posture: true),
+            [true, false] => Entry.new(labels: singleton_posture_labels, mutates_receiver: false,
+                                       from_posture: true)
+          }.freeze
           freeze
         end
 
@@ -90,8 +97,10 @@ module Rigor
           @object
         end
 
-        def posture_entry(mutating)
-          mutating ? @mutating_posture_entry : @posture_entry
+        # Memoised rather than built per call — the lookup sits inside the effect scan's walk. Only the
+        # instance side can be a receiver mutation, so the singleton side needs one entry.
+        def posture_entry(singleton, mutating)
+          @entries[[singleton, !singleton && mutating]]
         end
       end
 
@@ -110,14 +119,18 @@ module Rigor
       def self.load_file(path)
         raw = File.exist?(path) ? YAML.safe_load_file(path) : nil
         raw = {} unless raw.is_a?(Hash)
-        new(defaults: raw["defaults"] || {}, classes: raw["classes"] || {}, schema: raw.fetch("schema", 0))
+        new(
+          defaults: raw["defaults"] || {}, classes: raw["classes"] || {},
+          universal: raw["universal"] || [], schema: raw.fetch("schema", 0)
+        )
       end
 
       attr_reader :schema
 
-      def initialize(defaults:, classes:, schema: 0)
+      def initialize(defaults:, classes:, universal: [], schema: 0)
         @schema = schema
         @postures = build_postures(defaults)
+        @universal = universal.to_set(&:to_s).freeze
         @classes = build_classes(classes)
         @object_constants = @classes.select { |_, entry| entry.object? }.keys.to_set.freeze
         freeze
@@ -152,10 +165,15 @@ module Rigor
         bucket = singleton ? entry.singleton_methods : entry.instance_methods
         row = bucket[name]
         return row_entry(row, call_node) if row
+        return UNIVERSAL if @universal.include?(name)
         return nil unless posture
 
-        entry.posture_entry(!singleton && entry.mutators.include?(name))
+        entry.posture_entry(singleton, entry.mutators.include?(name))
       end
+
+      # An `Object`-level selector that exists on every receiver and touches nothing. Answered as a row
+      # rather than a posture, because it IS a statement about the selector.
+      UNIVERSAL = Entry.new(labels: LabelSet::EMPTY, mutates_receiver: false, from_posture: false)
 
       private
 
@@ -180,6 +198,7 @@ module Rigor
           instance_methods: build_rows(name, body["methods"], mutators),
           singleton_methods: build_rows(name, body["singleton_methods"], nil),
           posture_labels: resolve_posture(name, body["posture"]),
+          singleton_posture_labels: resolve_posture(name, body["singleton_posture"] || body["posture"]),
           mutators: mutators,
           object: body["kind"] == "object"
         )

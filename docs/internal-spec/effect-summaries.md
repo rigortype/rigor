@@ -142,6 +142,11 @@ Ruby's core surface is far larger than any catalogue will finish, so a class car
 
 The posture set is wider than "value ∅ / world `io`" because `io` is not an upper bound of `nondet.random`: a class whose unlisted methods are non-deterministic gets a `nondet` default rather than a wrong `io` one. A class with a genuinely mixed surface (`Time`, `Pathname`, `Random`, `Logger`) is `value` with its world-facing rows spelt out, because a blanket `io` over its path algebra and accessors would be a wrong label, and a wrong label is worse than a missing one ([ADR-5](../adr/5-robustness-principle.md)).
 
+Two refinements keep a posture from putting a **wrong** label on an ordinary call:
+
+- a **universal selector list** — the `Object`-level names that exist on every receiver and touch nothing (`class`, `respond_to?`, `frozen?`, `inspect`, `to_s`, `hash`, `tap`, …) — is consulted after a class's own rows and before its posture, so `socket.class` is ∅ rather than `io.net`. A class's own row still wins over the list.
+- a class MAY carry `singleton_posture:` when its two sides differ. `Kernel` is the case: its instance side is the process boundary, but `Kernel.x` is the `module_function` copy and what is actually called that way is the pure conversion family (`Kernel.Float`), so its singleton side is `value`.
+
 A posture MUST NOT answer in three places, each of which would swallow a more specific reading the tracer already had:
 
 - an **implicit-self** (or `self.`) call. Every unqualified call in a project body spells `Kernel#name`, so the `world` default would colour the whole world.

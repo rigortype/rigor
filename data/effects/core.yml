@@ -61,6 +61,47 @@ defaults:
   stderr: [io.output.stderr]
   stdin: [io.input]
 
+# Selectors present on EVERY receiver — `Object` / `BasicObject` / `Kernel`'s instance side — that
+# touch nothing. Consulted after a class's own rows and BEFORE its posture, so a world-facing
+# default does not colour `socket.class`, `io.respond_to?` or `handle.frozen?`. Without this the
+# posture would put a wrong label on the most-called methods in Ruby, and a wrong label is worse
+# than a missing one (ADR-5). A class's own row still wins over this list.
+universal:
+  - class
+  - singleton_class
+  - is_a?
+  - kind_of?
+  - instance_of?
+  - nil?
+  - respond_to?
+  - respond_to_missing?
+  - frozen?
+  - freeze
+  - dup
+  - clone
+  - itself
+  - tap
+  - then
+  - yield_self
+  - inspect
+  - to_s
+  - hash
+  - object_id
+  - __id__
+  - "=="
+  - "!="
+  - "==="
+  - "=~"
+  - "!"
+  - equal?
+  - eql?
+  - instance_variable_get
+  - instance_variable_defined?
+  - instance_variables
+  - methods
+  - public_methods
+  - method
+
 classes:
   # ---------------------------------------------------------------------------------------------
   # Kernel — the implicit-self surface.
@@ -72,6 +113,11 @@ classes:
   # ---------------------------------------------------------------------------------------------
   Kernel:
     posture: world
+    # `Kernel.x` is the `module_function` copy, and what actually gets called that way is the
+    # conversion family (`Kernel.Float`, `Kernel.Integer`, `Kernel.Array`), which is pure. Measured:
+    # the `world` default on this side put `io` on `Kernel.Float` in Redmine. The instance-side rows
+    # are where Kernel's world-facing surface is spelt out, and they are not reached through `Kernel.`.
+    singleton_posture: value
     why: "Kernel's own surface is the process boundary; a method of it that is not rowed touches the world"
     methods:
       puts: { effects: [io.output.stdout], why: "writes $stdout" }

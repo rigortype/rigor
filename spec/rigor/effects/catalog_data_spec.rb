@@ -112,6 +112,29 @@ RSpec.describe "the shipped core effect catalogue" do
       expect(catalog.lookup("String", "some_uncatalogued")).to be_posture
     end
 
+    # `Object`-level selectors exist on every receiver, so a world-facing posture would put a wrong
+    # label on the most-called methods in Ruby. They are answered ∅ before the posture is consulted.
+    it "answers the universal Object selectors as nothing on a world-facing class" do
+      %w[class respond_to? frozen? inspect to_s is_a? tap].each do |selector|
+        expect(catalog.lookup("IO", selector).labels).to be_empty, "#{selector} read as a world call"
+        expect(catalog.lookup("Socket", selector).labels).to be_empty, "#{selector} read as a world call"
+      end
+    end
+
+    it "lets a class's own row win over the universal list" do
+      # `freeze` and `dup` are on the universal list AND rowed on Kernel; `print` is rowed only. The
+      # row is consulted first, so a world-facing row is never swallowed by the ∅ fallback.
+      expect(catalog.lookup("Kernel", "print").labels.to_a).to eq(["io.output.stdout"])
+      expect(catalog.lookup("Kernel", "freeze").labels).to be_empty
+    end
+
+    # Measured on Redmine: `Kernel.Float(x)` read as `io` under the instance side's `world` posture.
+    # `Kernel.x` is the module_function copy, and what is actually called that way is pure conversion.
+    it "reads Kernel's singleton side as a value class" do
+      expect(catalog.lookup("Kernel", "Float", singleton: true).labels).to be_empty
+      expect(catalog.lookup("Kernel", "puts").labels.to_a).to eq(["io.output.stdout"])
+    end
+
     it "contributes nothing at all for a class the catalogue does not list" do
       expect(catalog.lookup("Tracer::Reporter", "report")).to be_nil
     end

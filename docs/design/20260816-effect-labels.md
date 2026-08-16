@@ -293,7 +293,8 @@ reserves the "RBS-Extended call-timing effect" seat for the day the catalogue mo
 
 - Class-body statements (`has_many :posts`, `validates …`, `require` at file top) execute at load
   time; v1 summarises `def` / `define_method` bodies only. Load-time effects are a later, separate
-  unit ("file-level code" in Steins' terms).
+  unit ("file-level code" in Steins' terms). View templates are *not* in that bucket: they compile
+  to methods and become units of their own in § 11.3.
 - Exceptions are not labels (§ 2). Where the throw set matters — the discard rule (§ 8.4) — the
   catalogue's `raises` facet is the stand-in.
 - Concurrency primitives carry no label in v1; blocks join by containment. A `concurrent` root
@@ -781,7 +782,7 @@ an upper bound):
 | ActiveStorage `attach`, `upload`, `download`, `purge`, `open` | `io` + `io.db.write` for the attachment records | `rails.activestorage.write` / `.read` |
 | ActionCable `broadcast_to`, `ActionCable.server.broadcast`, Turbo `broadcast_*` | `io` | `rails.actioncable.broadcast` |
 | `Rails.logger.*`, `logger.*`, `Rails.error.report` / `handle`, `ActiveSupport::Notifications.instrument` | `io` (destination unknown) | `telemetry`; `instrument` keeps its taint — subscribers are arbitrary |
-| Controller response — `render`, `render_to_string`, `redirect_to`, `head`, `send_data`, `send_file`, `response.headers[]=` | `mutate.self` (`send_file` also `io.fs.read`); `render` keeps a taint — the template is not analysed | `rails.response.write` |
+| Controller response — `render`, `render_to_string`, `redirect_to`, `head`, `send_data`, `send_file`, `response.headers[]=` | `mutate.self` (`send_file` also `io.fs.read`); `render` keeps a taint while the template is not analysed — an edge to the template unit once § 11.3 lands | `rails.response.write` |
 | `session[]=`, `reset_session`; `session[]` read | `mutate` / `io` (the store may be a cache or the database) | `rails.session.write` / `.read` |
 | `cookies[]=`, `cookies.encrypted[]=`, `flash[]=`, `flash.now[]=` | `mutate` | `rails.cookie.write`, `rails.flash.write` |
 | `Current.attr` read / write (`ActiveSupport::CurrentAttributes`) | `global.read` / `global.write` (fiber-local storage) | `rails.current.read` / `.write` |
@@ -809,8 +810,9 @@ mechanism, and the right eventual answer to "the query happens in the view".
 (`validates :email, uniqueness: true` is an `io.db.read` inside `valid?` and `save`),
 `perform_now` runs `perform`, `UserMailer.welcome(u)` runs `welcome`. A plugin therefore
 contributes **edges**, not only labels — the same discovery it already performs for typing. What
-it must not do is edge `perform_later` to `perform` (another process; the enqueue is the effect)
-or `render` to a template (not Ruby; taint stays).
+it must not do is edge `perform_later` to `perform` (another process; the enqueue is the effect).
+`render` → template is a *real* edge — synchronous, in-process — the moment templates are units
+(§ 11.3); until then it taints.
 
 **Deferred execution.** ActiveJob's `set(wait: 1.hour)` / `set(wait_until:)`, ActionMailer's
 `deliver_later`, `perform_all_later`, `enqueue_after_transaction_commit` (on by default from
@@ -861,6 +863,92 @@ know how an effect arrived". So a summary keeps **per-origin label bundles** (si
 the flat proven set is a projection (§ 10); a bundle whose semantic label is tolerated is
 discharged whole, and a transport label that also arrived through an untolerated origin stays.
 
+### 11.3 Views — templates as effect units (the next step)
+
+Rigor does not analyse ERB today. It should, and effects are the reason to start: the review
+question "what does this request do" currently ends at `render` with a taint, and the view layer
+is where Rails accumulates the side effects nobody meant — the N+1 (a lazy relation materialised
+inside a loop), a write from a helper (`@user.update(last_seen: …)` in a partial), an HTTP call
+behind a currency helper, a `Time.now`, a `File.read` for an inline SVG, a leftover `puts` /
+`binding.pry`, a `session[]=` in a layout, a mailer triggered from a view. Making templates
+effect units also drags Rigor's ordinary type checks into templates (`@user.nmae` in
+`show.html.erb`) — a larger prize than effects, out of this note's scope, but the seam is shared.
+
+**Templates are already Ruby methods.** Rails compiles every template into a method on the view
+class (`_app_views_users_show_html_erb___…`), with locals as parameters, the controller's assigns
+as ivars, and helpers mixed in; Erubi keeps line numbers aligned with the template, which is why
+a Rails backtrace can point at `show.html.erb:12`. So a template can be analysed **without
+inventing template semantics**: compile it the way Rails does, keep the line map, and analyse the
+result as a synthesised method under a declared `self`. Rigor already reserved that seam once —
+[ADR-16](../adr/16-macro-expansion.md) Tier D, `external_files:` ("files evaluated as if their
+body were pasted at a declared call site, with `self` typed as a declared class" plus
+`bound_ivars:`), removed by [ADR-60](../adr/60-pre-freeze-plugin-contract-consolidation.md) WD1
+for lack of a consumer and "returned demand-gated". This is the demand. The revived seam needs
+one thing Tier D lacked: a **source transform with a line map** ahead of parsing.
+
+**The unit.** `TemplateUnit(logical_name: "users/show.html", path:, ruby_source:, line_map:,
+self_type:, locals:, ivar_seeds:)`, produced by a plugin (rigor-rails, or a `rigor-actionview`
+split), analysed by the pool like a file, its positions mapped back through `line_map` for the
+report, the snapshot and any diagnostic. Its pieces, and where each already lives:
+
+| Piece | Source |
+| --- | --- |
+| compile ERB → Ruby | Erubi when it resolves (every Rails app has it) — the rbs-inline auto-wire posture of [ADR-93](../adr/93-default-rbs-inline-ingestion.md): never bundled ([ADR-0](../adr/0-concept.md) zero-dep), used when present; stdlib `ERB` as the fallback compiler. Either output is ordinary Ruby: `<%= %>` and `<% %>` become expressions and statements, text becomes buffer appends |
+| `self` type | a per-controller view class synthesised by the plugin: `ActionView::Base` + `ApplicationHelper` + `UsersHelper` (Rails' `helper :all` default) + route helpers + rigor-rails' RBS for the ActionView helper surface (`render`, `link_to`, `form_with`, `t`, `l`, `cache`, `content_for`, `image_tag`, `turbo_*`, …) |
+| locals | `render partial:, locals:` / `collection:` at the render site (rigor-actionpack already resolves render targets — `render :symbol`, `"string/path"`, `partial:` — to template paths); the Rails 7.1+ **strict locals** magic comment `<%# locals: (user:, size: :md) %>` is a parameter list Rails itself already reads, and the natural place for an rbs-inline-style type note later |
+| ivar seeds | the controller actions that render the template — implicit render (`UsersController#show` → `users/show`) plus rigor-actionpack's explicit-render resolution — read through `ScopeIndexer`'s per-method definite-assignment table (`build_method_assign_effects`) for the action and its `before_action` chain (rigor-actionpack knows the filter DSL); fallback, the controller class's ivar union (the ADR-58 seed); unknown → `Dynamic`, honestly tainting |
+| edges | `render partial: / layout:` → the partial / layout unit; `yield` / `content_for` → layout ↔ template (the layout is the caller); helpers → project methods (they are methods); the controller action → its template(s) — a **real** edge, synchronous and in-process, which is what discharges the `render` taint of § 11.2 |
+| positions & keys | line map to `app/views/users/show.html.erb:12` (Erubi preserves lines, not columns); snapshot key `view:users/show.html` — Rails' logical name plus format, handler dropped so an ERB → Haml rewrite is not a rename; partials `view:users/_card.html`; unit digest = template bytes + compiler id + synthesis version |
+
+**Effect origins in a view.** The template's own output-buffer appends are its purpose, not an
+origin (they are `mutate.self` on the view context, and would be omnipresent noise; if a label is
+wanted for the causal report, `rails.view.render` tolerated by construction). Everything else
+follows the ordinary rules: `cache do … end` → `cache.read` + `cache.write` + containment;
+`t` → `rails.i18n.translate`; `image_tag` / `asset_path` → `global.read` (the manifest);
+`current_user` → whatever the project's or Devise's method does (typically `io.db.read` +
+`rails.session.read`); association readers and materializers → `io.db.read` (§ 11.2 laziness);
+`form_with` / `link_to` → ∅ plus containment.
+
+**What "unintended" means for a view** is a preset envelope, in two flavours, offered by
+rigor-rails and adopted (or not) by the project through `effects.envelopes`:
+
+- `views: lenient` — `[mutate.local, io.db.read, cache.read, cache.write, rails.config.read,
+  rails.i18n.translate, rails.session.read, telemetry]`: reads are allowed (lazy loading is the
+  Rails default), everything else is a finding.
+- `views: strict` — the same minus `io.db.read`: every datum is loaded in the controller, the
+  static twin of `strict_loading` / `config.active_record.strict_loading_by_default`.
+
+Under either, `io.db.write`, `io.net`, `job.enqueue`, `email.send`, `mutate` on a model
+(`@post.title = …`, `@user.update`), `rails.session.write` / `rails.cookie.write` /
+`rails.flash.write`, `io.output.stdout` (a leftover `puts` / `pp`), `io.input` (`binding.pry`,
+`debugger` — the debugging leftover that reaches production), `io.fs` (the inline-SVG
+`File.read`, legitimate but worth seeing), `io.process`, `exit`, `global.write`, `mutate.static`,
+`nondet.time` (`Time.now` in a template is a caching and time-zone bug waiting) are what the
+envelope objects to — and, opted in or not, every view unit appears in the snapshot's `methods:`
+as `view:…`, so a template that starts writing shows up in the PR diff regardless.
+
+**N+1 as an effect shape.** An `io.db.read` origin inside a block passed to an iteration method
+over a collection — `<% @users.each do |u| %> <%= u.posts.count %> <% end %>` — is a *query in a
+loop*. The shape is syntactic (the iteration catalogue `ClosureEscapeAnalyzer` already carries)
+and the origin is the association-reader / materializer row of § 11.2. It ships as a **report**
+category first (`rigor effects` view section: `query-in-loop`, with the path), and becomes a
+diagnostic only when the preloading facet lands — a `Relation` / collection value carrying
+`includes(:posts)` provenance from the controller discharges the loop read — because until then
+its precision is bounded by knowledge the analyzer could have but does not (ADR-102's line, on
+the diagnostic-eligible side).
+
+**Other engines.** Jbuilder is Ruby (a `json` local; the unit is the file body under a
+`JbuilderTemplate` receiver) — nearly free. Phlex, and ViewComponent components written in Ruby,
+are ordinary classes — analysed today. A ViewComponent sidecar `.html.erb` compiles to the
+component's `#call`, whose ivars Rigor already types — the best-behaved template unit there is.
+Haml and Slim compile to Ruby through their own (Temple-based) compilers with line-preserving
+options — the same seam, gated on the gem resolving. Mailer views (`app/views/user_mailer/*.text.erb`,
+which rigor-actionmailer already discovers) join the mailer method's summary through the render
+edge, so `email.send` reach includes what the mail template does.
+
+**Not in scope, deliberately:** HTML / escaping / XSS (`raw`, `html_safe` are a security lens,
+not effects), rendering correctness, i18n key existence (rigor-rails-i18n does that), JavaScript.
+
 ## 12. Slice plan
 
 | Slice | Lands | Gate |
@@ -872,7 +960,10 @@ discharged whole, and a transport label that also arrived through an untolerated
 | **WD4** | `effects.envelopes` (path / namespace conventions), `effects.attribution`, `effects.labels`, `effects.tolerated` + `--no-tolerated-effects`; plugin `effect_attributions:` + framework edges; the Rails vocabulary of § 11.2 in rigor-rails (RBS colouring, `rails.*` root, laziness rows, callback edges) and `%a{pure}` across rigor-activesupport-core-ext | Rails corpus: a `Presenters::*`-pure stanza reports only genuine queries; the `io.db.read` / `io.db.write` / application-meaning roots raised with Steins as shared additions |
 | **WD5** | engine consumers: B2.2 ivar-reset skip, purity-policy computed purity, `effect.discarded-pure-result` (`:off`) — each cache-identity-aware | corpus FP gates per consumer |
 | **WD6** | `rigor sig-gen` `%a{pure}` / envelope emission from exhaustive summaries; `rigor effects --diff` baseline; `--at` probe | round-trip: emitted tags re-check clean |
-| later | structural-interface carriers, `$stdout`-capture masking, complement bounds, concurrency labels, semantic-label path memory for precise policy, load-time (class-body) units | — |
+| **WD-V1** (views, § 11.3; after WD1 + WD4) | the revived ADR-16 Tier-D seam with a source transform + line map (core); ERB → Ruby via Erubi-when-resolvable / stdlib fallback; per-controller view `self` + ActionView helper RBS; locals from render sites and strict-locals comments; ivar seeds from rendering actions; render / partial / layout edges (discharging the `render` taint); `view:*` snapshot entries; `views: lenient \| strict` preset | Rails corpus: template units type without new FPs; snapshot determinism holds with views in |
+| **WD-V2** | `query-in-loop` view report; layouts / `content_for`; mailer views through the render edge | corpus adjudication of the report's precision |
+| **WD-V3** | Jbuilder, ViewComponent sidecars, Haml / Slim (gated on the gems) | — |
+| later | structural-interface carriers, `$stdout`-capture masking, complement bounds, concurrency labels, semantic-label path memory for precise policy, load-time (class-body) units, the preloading facet that turns `query-in-loop` into a diagnostic, type diagnostics in templates (its own ADR) | — |
 
 ## 13. Decisions for the owner
 
@@ -921,6 +1012,17 @@ discharged whole, and a transport label that also arrived through an untolerated
     baseline* — in this repo "baseline" means ADR-22 suppression); record undischarged sets and
     apply `tolerated:` at judgment time (recommended, invariant 1) vs write the policy-projected
     view.
+17. **Template compiler dependency** — Erubi when it resolves with stdlib `ERB` as fallback
+    (recommended; never bundled, ADR-93 posture) vs stdlib only (one compiler, but not Rails'
+    output shape) vs requiring Erubi.
+18. **View preset default** — `views: lenient` (reads allowed) or `views: strict` (the
+    `strict_loading` posture) when a project enables the preset; whether `nondet.time` in a
+    template is tolerated by default.
+19. **Views in the snapshot** — always in `methods:` as `view:*` (recommended); in `reach:` only by
+    opt-in (controllers are already the entries; a partial rendered from many places would
+    otherwise duplicate).
+20. **`query-in-loop`** — report first, diagnostic after the preloading facet (recommended) vs an
+    advisory `:info` diagnostic from the start.
 
 ## 14. Repo facts this note rests on
 
@@ -959,3 +1061,9 @@ Gathered 2026-08-16 against master `03dcc73b`; verify before acting.
 - Corpus prior art: no mention of Steins / Flix; Koka named as the surface prior art
   (handbook appendix); the 2026-07-15 PHPStan-rules re-survey's purity verdicts (§ 8);
   ADR-30 names "an engine-side effect analysis" as the future home for FFI resource tracking.
+- Views: no ERB compilation anywhere in `lib/` or `plugins/`. rigor-actionpack resolves explicit
+  `render` targets to template paths (`plugins/rigor-actionpack/lib/rigor/plugin/actionpack/analyzer.rb`,
+  `RENDER_TEMPLATE_EXTENSIONS`, `render_violations_for`); rigor-rails-i18n scans templates by regex
+  for lazy `t('.key')`; rigor-actionmailer discovers mailer views. ADR-16 Tier D
+  (`external_files:` — a file evaluated under a declared `self` with bound ivars) was removed by
+  ADR-60 WD1 with no engine consumer, "returns demand-gated together with its scanner".

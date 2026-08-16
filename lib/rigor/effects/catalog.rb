@@ -1,143 +1,228 @@
 # frozen_string_literal: true
 
+require "yaml"
+
+require_relative "../inference/mutation_widening"
 require_relative "label_set"
+require_relative "mutation_classifier"
+require_relative "narrowing"
 
 module Rigor
   module Effects
     # The built-in effect catalogue — which core-library methods colour a summary, and with what
-    # (ADR-103 WD3; the seed table is § 5.1 of `docs/design/20260816-effect-labels.md`).
+    # (ADR-103 WD3 / WD14; the data is `data/effects/core.yml`, the contract is
+    # `docs/internal-spec/effect-summaries.md` § The catalogue).
     #
-    # **This is a tracer-bullet catalogue, in Ruby, deliberately small.** The hand-audited artefact it
-    # stands in for is `data/effects/core.yml`, which lands with #380 along with the per-class default
-    # postures (value classes ∅, world-facing classes `io`) that make the exhaustiveness bit meaningful
-    # over Ruby's whole core surface. Until then an uncatalogued call on a *known* receiver contributes
-    # nothing and does not taint: a small proven lane is the honest state, and inventing `io` for every
-    # unlisted `String` method would be worse than silence.
+    # **The loader is deliberately dumb.** Every audit decision lives in the data file's `why:` lines;
+    # nothing here decides what a method does. What this class adds over `YAML.safe_load` is three
+    # things the data cannot express on its own:
     #
-    # What this catalogue is **not** is a re-reading of `data/builtins/ruby_core/*.yml`'s `purity:` facet.
-    # That facet answers fold-safety in the C-dispatch sense — `Random#rand` is `leaf`, `Array#push` is
-    # `leaf` — and reading it as effect freedom would be wrong in both directions (ADR-103 WD3).
+    # 1. **Per-class default postures.** A class the catalogue lists answers its posture's labels for a
+    #    method it does not row, so the reading of Ruby's enormous core surface does not depend on the
+    #    catalogue being complete. A class the catalogue does NOT list answers nil — contribute nothing,
+    #    do not taint — which stays the reading for project and gem classes.
+    # 2. **Argument-dependent narrowing.** A row's `narrow:` names a {Narrowing} handler, which reads
+    #    the call's own argument literals.
+    # 3. **Mutator sets by reference.** A value class names `mutators: array | hash | string` and the
+    #    loader resolves it to the set the widening rules and the mutation classifier already maintain,
+    #    so the two can never drift. The YAML never re-spells a mutator list.
     #
-    # Keys are `Owner#method` for an instance-side row and `Owner.method` for a singleton-side one, which
-    # is the spelling {FileCollection}'s method keys already use. `Kernel#…` rows match an implicit-self
-    # call (and an explicit `self.` one); every other row matches its receiver by name.
-    module Catalog
-      # Constants that name an *object*, not a class, so their rows spell with `#` rather than `.`. `ENV`
-      # is the one this slice catalogues; `ARGF` / `STDIN` / `STDOUT` / `STDERR` join it in #380.
-      OBJECT_CONSTANTS = %w[ENV ARGF STDIN STDOUT STDERR].to_set.freeze
+    # What this is **not** is a re-reading of `data/builtins/ruby_core/*.yml`'s `purity:` facet. That
+    # facet answers fold-safety in the C-dispatch sense — `Random#rand` is `leaf`, `Array#push` is
+    # `leaf` — and reading it as effect freedom would be wrong in both directions (ADR-103 WD3). This
+    # loader never opens `data/builtins`, and a spec asserts it.
+    class Catalog
+      class Error < StandardError
+      end
 
-      # An explicit ∅ row. Distinct from "no row": a ∅ row says the catalogue *knows* this call and knows
-      # it contributes nothing, which is what stops `Thread.new` from reading as an unresolved call while
-      # its block joins the enclosing method by containment (WD4, WD14).
-      NONE = LabelSet::EMPTY
+      DATA_PATH = File.expand_path("../../../data/effects/core.yml", __dir__)
 
-      IO_STDOUT = LabelSet.new(["io.output.stdout"])
-      private_constant :IO_STDOUT
-      IO_STDERR = LabelSet.new(["io.output.stderr"])
-      private_constant :IO_STDERR
-      IO_INPUT = LabelSet.new(["io.input"])
-      private_constant :IO_INPUT
-      IO_PROCESS = LabelSet.new(["io.process"])
-      private_constant :IO_PROCESS
-      IO_ANY = LabelSet.new(["io"])
-      private_constant :IO_ANY
-      FS_READ = LabelSet.new(["io.fs.read"])
-      private_constant :FS_READ
-      FS_WRITE = LabelSet.new(["io.fs.write"])
-      private_constant :FS_WRITE
-      EXIT = LabelSet.new(["exit"])
-      private_constant :EXIT
-      RANDOM = LabelSet.new(["nondet.random"])
-      private_constant :RANDOM
-      TIME = LabelSet.new(["nondet.time"])
-      private_constant :TIME
-      GLOBAL_READ = LabelSet.new(["global.read"])
-      private_constant :GLOBAL_READ
-      GLOBAL_WRITE = LabelSet.new(["global.write"])
-      private_constant :GLOBAL_WRITE
-      # `require` and friends read the filesystem AND install constants and methods; WD14 fixes both.
-      REQUIRE = LabelSet.new(["io.fs.read", "mutate.static"])
-      private_constant :REQUIRE
-      # `srand` re-seeds the process-wide generator as well as consuming entropy.
-      SRAND = LabelSet.new(["global.write", "nondet.random"])
-      private_constant :SRAND
-
-      ROWS = {
-        "Kernel#puts" => IO_STDOUT,
-        "Kernel#print" => IO_STDOUT,
-        "Kernel#p" => IO_STDOUT,
-        "Kernel#pp" => IO_STDOUT,
-        "Kernel#printf" => IO_STDOUT,
-        "Kernel#putc" => IO_STDOUT,
-        "Kernel#warn" => IO_STDERR,
-        "Kernel#gets" => IO_INPUT,
-        "Kernel#readline" => IO_INPUT,
-        "Kernel#exit" => EXIT,
-        "Kernel#exit!" => EXIT,
-        "Kernel#abort" => EXIT,
-        "Kernel#system" => IO_PROCESS,
-        "Kernel#spawn" => IO_PROCESS,
-        "Kernel#exec" => IO_PROCESS,
-        "Kernel#fork" => IO_PROCESS,
-        "Kernel#`" => IO_PROCESS,
-        "Kernel#require" => REQUIRE,
-        "Kernel#require_relative" => REQUIRE,
-        "Kernel#load" => REQUIRE,
-        # WD14 — `sleep` is `io`: it is a syscall whose duration the world decides, and no narrower label
-        # in the shared vocabulary fits. `Queue#pop` / `ConditionVariable#wait` join it when they arrive.
-        "Kernel#sleep" => IO_ANY,
-        "Kernel#rand" => RANDOM,
-        "Kernel#srand" => SRAND,
-        "Random.rand" => RANDOM,
-        "Random.new_seed" => RANDOM,
-        "File.read" => FS_READ,
-        "File.exist?" => FS_READ,
-        "File.write" => FS_WRITE,
-        "ENV#[]" => GLOBAL_READ,
-        "ENV#fetch" => GLOBAL_READ,
-        "ENV#[]=" => GLOBAL_WRITE,
-        # WD14 — concurrency primitives carry no label; the block literal joins the enclosing method by
-        # containment, which is where the work actually is.
-        "Thread.new" => NONE,
-        "Fiber.new" => NONE,
-        "Ractor.new" => NONE,
-        "Mutex#synchronize" => NONE
+      # The mutator sets a value class may name, by reference. Adding a name here is the only way a
+      # class gets one — the data file may not spell a selector list of its own.
+      MUTATOR_SETS = {
+        "array" => Inference::MutationWidening::ARRAY_MUTATORS,
+        "hash" => Inference::MutationWidening::HASH_MUTATORS,
+        "string" => MutationClassifier::STRING_MUTATORS
       }.freeze
 
-      # Rows whose label depends on the call's arity rather than on its name alone. `Time.now` is always
-      # `nondet.time`; `Time.new` is `nondet.time` only with no arguments, because `Time.new(2020, 1, 1)`
-      # consults nothing (design note § 5.1).
-      ZERO_ARITY_ROWS = {
-        "Time.new" => TIME
-      }.freeze
+      NO_MUTATORS = Set[].freeze
+      private_constant :NO_MUTATORS
 
-      ALWAYS_ROWS = {
-        "Time.now" => TIME
-      }.freeze
-
-      module_function
-
-      # The labels `key` contributes, or `nil` when the catalogue has no row for it. `argument_count` is
-      # the call's positional arity, consulted only by the arity-dependent rows.
+      # What the catalogue answers for one call.
       #
-      # A `nil` answer is not a taint: it means "no row", and the caller decides what an unrecognised call
-      # on a known receiver means (today: nothing).
-      def lookup(key, argument_count: 0)
-        row = ROWS[key] || ALWAYS_ROWS[key]
-        return row if row
+      # `labels` may be empty two ways, and the difference matters: a ∅ **row** says the catalogue knows
+      # this call and knows it contributes nothing (which is what stops `Thread.new` from reading as an
+      # unresolved call while its block joins the enclosing method by containment), while a ∅ **posture**
+      # says only that the class is a value class. Both stop the caller treating the call as unresolved;
+      # only the posture keeps a project edge, because a project may reopen a core class.
+      class Entry < Data.define(:labels, :mutates_receiver, :from_posture)
+        def posture?
+          from_posture
+        end
 
-        arity_row = ZERO_ARITY_ROWS[key]
-        return arity_row if arity_row && argument_count.zero?
-
-        nil
+        def mutates_receiver?
+          mutates_receiver
+        end
       end
 
-      # Whether the catalogue would answer for `key` under any arity — the question "is this call known to
-      # the catalogue at all", which is what keeps an arity-narrowed row (`Time.new(2020)`) from reading as
-      # an unresolved call.
-      def known?(key)
-        ROWS.key?(key) || ALWAYS_ROWS.key?(key) || ZERO_ARITY_ROWS.key?(key)
+      # One row of the data file, resolved.
+      Row = Data.define(:labels, :narrow, :mutates_receiver)
+      private_constant :Row
+
+      # One class of the data file, resolved: its two method buckets, its posture's labels, its mutator
+      # set, and the two memoised posture {Entry}s (allocated once rather than per call — the lookup
+      # sits inside the effect scan's walk).
+      class ClassEntry
+        attr_reader :instance_methods, :singleton_methods, :posture_labels, :mutators, :object
+
+        def initialize(instance_methods:, singleton_methods:, posture_labels:, mutators:, object:)
+          @instance_methods = instance_methods
+          @singleton_methods = singleton_methods
+          @posture_labels = posture_labels
+          @mutators = mutators
+          @object = object
+          @posture_entry = Entry.new(labels: posture_labels, mutates_receiver: false, from_posture: true)
+          @mutating_posture_entry = Entry.new(labels: posture_labels, mutates_receiver: true, from_posture: true)
+          freeze
+        end
+
+        def object?
+          @object
+        end
+
+        def posture_entry(mutating)
+          mutating ? @mutating_posture_entry : @posture_entry
+        end
       end
+
+      # The shipped catalogue. Memoised: the YAML parse is a once-per-process cost, paid on the first
+      # collecting run rather than at `require "rigor"`, and inherited as-is across the fork pool
+      # (workers fork after load, and nothing here ever crosses a Marshal boundary — a `FileCollection`
+      # carries `LabelSet`s and Strings, never a catalogue reference).
+      def self.default
+        @default ||= load_file(DATA_PATH)
+      end
+
+      # Build a catalogue from a catalogue-shaped YAML file. A missing or unreadable file degrades to an
+      # empty catalogue rather than raising, matching {Registry.load_file} and the built-in catalogues'
+      # posture for a bare install that opted data out: every call then reads as uncatalogued, which is
+      # fail-open. A file that IS present but malformed raises — that is a packaging bug, not a choice.
+      def self.load_file(path)
+        raw = File.exist?(path) ? YAML.safe_load_file(path) : nil
+        raw = {} unless raw.is_a?(Hash)
+        new(defaults: raw["defaults"] || {}, classes: raw["classes"] || {}, schema: raw.fetch("schema", 0))
+      end
+
+      attr_reader :schema
+
+      def initialize(defaults:, classes:, schema: 0)
+        @schema = schema
+        @postures = build_postures(defaults)
+        @classes = build_classes(classes)
+        @object_constants = @classes.select { |_, entry| entry.object? }.keys.to_set.freeze
+        freeze
+      end
+
+      # Every catalogued class name, sorted — the surface a spec walks.
+      def class_names
+        @classes.keys.sort
+      end
+
+      def class_entry(owner)
+        @classes[owner]
+      end
+
+      # Whether `name` is a constant that names an OBJECT rather than a class, so a call on it spells
+      # `ENV#[]` and not `ENV.[]`.
+      def object_constant?(name)
+        @object_constants.include?(name)
+      end
+
+      # What `owner#name` (or `owner.name`, with `singleton:`) contributes, or nil when the catalogue
+      # has nothing to say — which is not a taint, and leaves the caller to treat the call as ordinary.
+      #
+      # `call_node` is the Prism call, consulted only by a row that carries a `narrow:` handler.
+      # `posture:` false asks for a ROW ONLY, which is how the collector suppresses the class default
+      # where it would be wrong: an implicit-self call spells `Kernel#name`, and defaulting every
+      # unqualified call in a project body to `io` would colour the world.
+      def lookup(owner, name, singleton: false, call_node: nil, posture: true)
+        entry = @classes[owner]
+        return nil if entry.nil?
+
+        bucket = singleton ? entry.singleton_methods : entry.instance_methods
+        row = bucket[name]
+        return row_entry(row, call_node) if row
+        return nil unless posture
+
+        entry.posture_entry(!singleton && entry.mutators.include?(name))
+      end
+
+      private
+
+      # A narrowed row's own `effects:` is its **unnarrowed** answer — the upper bound the handler
+      # degrades to — so a caller that has no call node still gets a sound reading rather than ∅.
+      def row_entry(row, call_node)
+        labels = row.narrow && call_node ? Narrowing.apply(row.narrow, call_node) : row.labels
+        Entry.new(labels: labels, mutates_receiver: row.mutates_receiver, from_posture: false)
+      end
+
+      def build_postures(defaults)
+        defaults.to_h { |name, labels| [name.to_s, LabelSet.new(Array(labels).map(&:to_s))] }.freeze
+      end
+
+      def build_classes(classes)
+        classes.to_h { |name, body| [name.to_s, build_class(name.to_s, body || {})] }.freeze
+      end
+
+      def build_class(name, body)
+        mutators = resolve_mutators(name, body["mutators"])
+        ClassEntry.new(
+          instance_methods: build_rows(name, body["methods"], mutators),
+          singleton_methods: build_rows(name, body["singleton_methods"], nil),
+          posture_labels: resolve_posture(name, body["posture"]),
+          mutators: mutators,
+          object: body["kind"] == "object"
+        )
+      end
+
+      def resolve_posture(class_name, posture)
+        return LabelSet::EMPTY if posture.nil?
+
+        @postures[posture.to_s] ||
+          raise(Error, "#{class_name}: unknown posture #{posture.inspect}; add it to the catalogue's defaults:")
+      end
+
+      def resolve_mutators(class_name, named)
+        return NO_MUTATORS if named.nil?
+
+        set = MUTATOR_SETS[named.to_s] ||
+              raise(Error, "#{class_name}: unknown mutator set #{named.inspect}")
+        set.to_set(&:to_s).freeze
+      end
+
+      def build_rows(class_name, rows, mutators)
+        return EMPTY_ROWS if rows.nil?
+
+        rows.to_h do |name, body|
+          key = name.to_s
+          [key, build_row("#{class_name}##{key}", body || {}, mutators&.include?(key))]
+        end.freeze
+      end
+
+      def build_row(key, body, in_mutator_set)
+        narrow = body["narrow"]&.to_s
+        raise Error, "#{key}: unknown narrowing handler #{narrow.inspect}" if narrow && !Narrowing.known?(narrow)
+        raise Error, "#{key}: every catalogue row needs a `why:` justification" if body["why"].to_s.empty?
+
+        Row.new(
+          labels: LabelSet.new(Array(body["effects"]).map(&:to_s)),
+          narrow: narrow,
+          mutates_receiver: body["mutates"].to_s == "receiver" || !!in_mutator_set
+        )
+      end
+
+      EMPTY_ROWS = {}.freeze
+      private_constant :EMPTY_ROWS
     end
   end
 end

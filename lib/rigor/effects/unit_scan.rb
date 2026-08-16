@@ -35,6 +35,19 @@ module Rigor
 
       REFLECTIVE_SEND = %i[send public_send __send__].to_set.freeze
 
+      # Selectors a per-class POSTURE default must never answer for, because a more specific reading of
+      # the same site exists and would be swallowed: `send` and friends are the `dynamic-send` taint, and
+      # `call` is the `opaque-callable` one. An explicit ROW still wins (`Fiddle::Function#call` is
+      # `ffi`) — it is only the class default that steps aside.
+      DEFERRED_SELECTORS = %i[send public_send __send__ call].to_set.freeze
+
+      # `eval` and its family with a *string* argument, and `binding`, hand the analyzer code it cannot
+      # read. The design note § 5.1 puts them outside the catalogue for exactly that reason: there is no
+      # upper bound to give, only the honest "and possibly more". The BLOCK forms
+      # (`instance_eval { … }`) are containment and must not taint, so the taint is conditioned on a
+      # positional argument being present.
+      EVAL_SELECTORS = %i[eval instance_eval class_eval module_eval].to_set.freeze
+
       GLOBAL_READ = LabelSet.new(["global.read"])
       GLOBAL_WRITE = LabelSet.new(["global.write"])
       MUTATE_STATIC = LabelSet.new(["mutate.static"])
@@ -157,18 +170,58 @@ module Rigor
 
       def visit_call(node)
         record = @calls[node]
-        key = catalog_key(node, record)
-        labels = key && Catalog.lookup(key, argument_count: positional_arity(node))
-        if labels
-          add(Origin.catalogue(key), labels)
-        else
-          visit_uncatalogued(node, record)
-        end
+        visit_uncatalogued(node, record) unless claimed_by_catalogue?(node, record)
         visit_block_argument(node)
+      end
+
+      # The catalogued path. Answers whether the catalogue claimed this call — a claim suppresses the
+      # uncatalogued reading, which is what an explicit ∅ row is for.
+      #
+      # A **row** is authoritative: it states everything that call does, and `mutates: receiver` is how it
+      # asks for the ownership judgment on top (`ENV["k"] = v` is `global.write` and deliberately not a
+      # receiver mutation; `Time#localtime` is both). A **posture** states nothing about this selector,
+      # so the uncatalogued path's own mutation rule applies to it unchanged.
+      def claimed_by_catalogue?(node, record)
+        owner, singleton, implicit = catalog_target(node, record)
+        return false if owner.nil?
+
+        entry = Catalog.default.lookup(
+          owner, node.name.to_s, singleton: singleton, call_node: node,
+                                 posture: posture_allowed?(node, record, implicit)
+        )
+        return false if entry.nil?
+
+        add(Origin.catalogue(catalogue_key(owner, singleton, node)), entry.labels) unless entry.labels.empty?
+        classify_mutation(node.receiver) if mutating_catalogued?(node, entry, owner)
+        # A posture answer is a DEFAULT, not a statement about this selector, so the project edge is
+        # kept: a core class a project reopens still propagates its override's summary.
+        push_edge(record, node.name.to_s, false) if entry.posture?
+        true
+      end
+
+      def mutating_catalogued?(node, entry, owner)
+        entry.mutates_receiver? || (entry.posture? && @mutation.mutating?(node, owner))
+      end
+
+      def catalogue_key(owner, singleton, node)
+        "#{owner}#{singleton ? '.' : '#'}#{node.name}"
+      end
+
+      # Whether the class's default posture may answer here. Three shapes where it may not:
+      #
+      # - an implicit-self (or `self.`) call, which spells `Kernel#name` and would otherwise colour
+      #   every unqualified call in a project body `io`;
+      # - a `Dynamic` receiver, where the class the typer projected to is a guess and a default read off
+      #   it would be a proven label with nothing proving it (the `dynamic-receiver` taint is the right
+      #   answer, and the uncatalogued path records it);
+      # - `send` / `call`, whose own taints are the more specific reading ({DEFERRED_SELECTORS}).
+      def posture_allowed?(node, record, implicit)
+        !implicit && !record&.dynamic && !DEFERRED_SELECTORS.include?(node.name)
       end
 
       def visit_uncatalogued(node, record)
         return visit_reflective_send(node, record) if REFLECTIVE_SEND.include?(node.name)
+        return taint("opaque-callable") if opaque_eval?(node)
 
         # A write is a write whatever the receiver's type turns out to be, so ownership is classified
         # first and independently of the taints below: `params[:x] = 1` on an untyped `params` is a proven
@@ -248,19 +301,32 @@ module Rigor
         add(Origin.construct("receiver-mutation"), labels)
       end
 
-      # The catalogue key a call would match, spelled from the syntax where the syntax settles it and from
-      # the typer's receiver otherwise. Nil when neither does.
-      def catalog_key(node, record)
-        name = node.name
+      # An `eval` family call carrying code rather than a block, or a bare `binding`. Both hand the
+      # analyzer source it will not read; the design note § 5.1 makes them a taint rather than a
+      # catalogue row, because there is no upper bound to state.
+      def opaque_eval?(node)
+        return node.receiver.nil? && node.arguments.nil? if node.name == :binding
+        return false unless EVAL_SELECTORS.include?(node.name)
+
+        positional_arity(node).positive?
+      end
+
+      # The class the catalogue would look this call up under, as `[owner, singleton, implicit_self]`.
+      # Spelled from the syntax where the syntax settles it and from the typer's receiver otherwise;
+      # `[nil, …]` when neither does.
+      def catalog_target(node, record)
         receiver = node.receiver
-        return "Kernel##{name}" if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+        return ["Kernel", false, true] if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
         constant = Source::ConstantPath.qualified_name(receiver)
-        return "#{constant}#{Catalog::OBJECT_CONSTANTS.include?(constant) ? '#' : '.'}#{name}" if constant
-        return nil if record.nil? || record.receiver_class.nil?
+        return [constant, !Catalog.default.object_constant?(constant), false] if constant
+        return NO_TARGET if record.nil? || record.receiver_class.nil?
 
-        "#{record.receiver_class}#{record.kind == :singleton ? '.' : '#'}#{name}"
+        [record.receiver_class, record.kind == :singleton, false]
       end
+
+      NO_TARGET = [nil, false, false].freeze
+      private_constant :NO_TARGET
 
       def positional_arity(node)
         node.arguments&.arguments&.count { |argument| !argument.is_a?(Prism::KeywordHashNode) } || 0

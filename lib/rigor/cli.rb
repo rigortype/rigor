@@ -355,7 +355,8 @@ module Rigor
           type-of    Print the inferred type at FILE:LINE:COL
           trace      Replay how the engine typed FILE as a terminal animation
           type-scan  Report Scope#type_of coverage across PATHs
-          effects    Report each method's effect labels (ADR-103, opt-in)
+          effects    Report each method's effect labels, and the committed effect snapshot
+                     (ADR-103, opt-in; effects update/check/diff/explain)
           explain    Print the description of one or all CheckRules
           diff       Compare current diagnostics to a saved baseline JSON
           sig-gen    Emit RBS skeletons inferred from .rb sources (ADR-14)

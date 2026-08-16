@@ -1,0 +1,314 @@
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require "stringio"
+require "tmpdir"
+
+require "rigor/cli"
+require "rigor/cli/effects_command"
+
+# ADR-103 #381 — the snapshot verbs end to end, over a copy of the tracer fixture that examples are free
+# to edit. The document's own properties are `spec/rigor/effects/snapshot_spec.rb` and the event
+# vocabulary is `spec/rigor/effects/snapshot_diff_spec.rb`; this file pins the wiring: what each verb
+# writes, reads and exits with, and the pull-request workflow the whole feature is for.
+RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
+  def fixture
+    File.expand_path("../../integration/fixtures/effects/tracer", __dir__)
+  end
+
+  # A reach glob over the project's top-level files, so `reach:` carries the callers of the leaf an
+  # example changes. `*` does not cross a directory boundary under `File::FNM_PATHNAME`, which is the
+  # `unused --entry-point` semantics this shares.
+  def write_config(reach: ['"*.rb"'], extra: "")
+    File.write(".rigor.yml", <<~YAML)
+      paths:
+        - "."
+      effects:
+      #{extra}  snapshot:
+          reach: [#{reach.join(', ')}]
+    YAML
+  end
+
+  def run(*argv)
+    out = StringIO.new
+    err = StringIO.new
+    status = Rigor::CLI::EffectsCommand.new(argv: argv, out: out, err: err).run
+    [status, out.string, err.string]
+  end
+
+  def snapshot_text
+    File.read(".rigor-effects.yml")
+  end
+
+  # The leaf change a pull request would make: `Tracer::Loud#emit` starts reading the filesystem. It is
+  # defined in `loud.rb`, and `Tracer::Dispatcher#run` (in `overrides.rb`) reaches it through the
+  # closed-world override join — so the change shows up as one `methods:` line and two `reach:` ones.
+  def add_filesystem_read_to_the_leaf
+    File.write("loud.rb", File.read("loud.rb").sub('puts("loud")', 'puts(File.read("loud.txt"))'))
+  end
+
+  # An implicit-self call the project defines nowhere: the summary stops being exhaustive.
+  def add_unresolved_call_to_the_leaf
+    File.write("loud.rb", File.read("loud.rb").sub('puts("loud")', "no_such_helper"))
+  end
+
+  around do |example|
+    Dir.mktmpdir do |dir|
+      FileUtils.cp(Dir.glob(File.join(fixture, "*.rb")), dir)
+      Dir.chdir(dir) do
+        write_config
+        example.run
+      end
+    end
+  end
+
+  describe "update" do
+    it "writes the snapshot and reports what it recorded" do
+      status, _out, err = run("update")
+
+      expect(status).to eq(0)
+      expect(err).to include("wrote .rigor-effects.yml")
+      expect(snapshot_text).to include('"Tracer::Reporter#report":', 'effects: ["io.output.stdout", "nondet.time"]')
+    end
+
+    # `db/schema.rb`'s property: the file is a function of the code, so regenerating it twice is a no-op
+    # and a diff in a pull request is always a real change.
+    it "is byte-identical run twice" do
+      run("update")
+      first = snapshot_text
+      run("update")
+
+      expect(snapshot_text).to eq(first)
+    end
+
+    # The record is UNDISCHARGED: policy applies at judgment time, never while writing. A flag that
+    # changed the record would make a policy change indistinguishable from a code change.
+    it "writes the same bytes with --no-tolerated-effects" do
+      write_config(extra: "  tolerated: [\"nondet.time\"]\n")
+      run("update")
+      plain = snapshot_text
+      run("update", "--no-tolerated-effects")
+
+      expect(snapshot_text).to eq(plain)
+    end
+
+    it "lists the omitted trivial methods under --full" do
+      run("update")
+      default = snapshot_text
+      run("update", "--full")
+
+      expect(default).not_to include('"Tracer::Reporter#collect"')
+      expect(snapshot_text).to include('"Tracer::Reporter#collect":')
+    end
+  end
+
+  describe "check" do
+    it "is fresh right after an update" do
+      run("update")
+      status, out, = run("check")
+
+      expect(status).to eq(0)
+      expect(out).to include("No effect drift against .rigor-effects.yml")
+    end
+
+    # The workflow, end to end: the change alters a summary, CI fails with explained lines, the developer
+    # regenerates and commits, the reviewer reads the diff.
+    it "fails with the added label on the leaf and the reach lines behind it" do
+      run("update")
+      add_filesystem_read_to_the_leaf
+      status, out, = run("check")
+
+      expect(status).to eq(1)
+      expect(out).to include("methods:\n  Tracer::Loud#emit  + io.fs.read\n")
+      expect(out).to include("reach:\n  Tracer::Dispatcher#run  + io.fs.read\n")
+      expect(out).to end_with("Run `rigor effects update` and commit the result if this change is intended.\n")
+    end
+
+    it "goes fresh again once the developer regenerates" do
+      run("update")
+      add_filesystem_read_to_the_leaf
+      run("update")
+
+      expect(run("check").first).to eq(0)
+    end
+
+    # A removal is news too — a job that stopped enqueueing is a bug, not an improvement — unless the
+    # project asked for the ratchet.
+    it "fails on a removal under the default symmetric gate" do
+      add_filesystem_read_to_the_leaf
+      run("update")
+      File.write("loud.rb", File.read("loud.rb").sub('puts(File.read("loud.txt"))', 'puts("loud")'))
+      status, out, = run("check")
+
+      expect(status).to eq(1)
+      expect(out).to include("Tracer::Loud#emit  - io.fs.read")
+    end
+
+    it "passes the same removal under gate: additions" do
+      File.write(".rigor.yml", <<~YAML)
+        paths:
+          - "."
+        effects:
+          snapshot:
+            gate: additions
+            reach: ["*.rb"]
+      YAML
+      add_filesystem_read_to_the_leaf
+      run("update")
+      File.write("loud.rb", File.read("loud.rb").sub('puts(File.read("loud.txt"))', 'puts("loud")'))
+      status, out, = run("check")
+
+      expect(status).to eq(0)
+      expect(out).to include("Tracer::Loud#emit  - io.fs.read")
+    end
+
+    it "reports an exhaustiveness transition as its own event" do
+      run("update")
+      add_unresolved_call_to_the_leaf
+      status, out, = run("check")
+
+      expect(status).to eq(1)
+      expect(out).to include("Tracer::Loud#emit  exhaustive → not")
+    end
+
+    # A record written under a different Rigor, vocabulary or `effects:` block is not comparable; the
+    # regeneration event says so instead of reporting the incomparability as effect churn.
+    it "reports a header mismatch as a regeneration event" do
+      run("update")
+      File.write(".rigor-effects.yml", snapshot_text.sub("vocabulary: 1", "vocabulary: 99"))
+      status, out, = run("check")
+
+      expect(status).to eq(1)
+      expect(out).to include("regeneration:\n  vocabulary: 99 → 1")
+    end
+
+    it "treats a missing snapshot as routed drift" do
+      status, out, = run("check")
+
+      expect(status).to eq(1)
+      expect(out).to include("no snapshot; run `rigor effects update`")
+    end
+
+    it "compares against --baseline instead of the configured path" do
+      run("update")
+      FileUtils.mv(".rigor-effects.yml", "committed.yml")
+
+      expect(run("check", "--baseline", "committed.yml").first).to eq(0)
+      expect(run("check").first).to eq(1)
+    end
+
+    describe "tolerated at judgment time" do
+      before do
+        write_config(extra: "  tolerated: [\"io.fs\"]\n")
+        run("update")
+        add_filesystem_read_to_the_leaf
+      end
+
+      it "reports the change under its own heading and does not fail the gate" do
+        status, out, = run("check")
+
+        expect(status).to eq(0)
+        expect(out).to include("tolerated:\n  Tracer::Loud#emit  + io.fs.read  (methods)")
+      end
+
+      it "fails on it under --strict-tolerated" do
+        expect(run("check", "--strict-tolerated").first).to eq(1)
+      end
+
+      it "judges as if the set were empty under --no-tolerated-effects" do
+        status, out, = run("check", "--no-tolerated-effects")
+
+        expect(status).to eq(1)
+        expect(out).to include("methods:\n  Tracer::Loud#emit  + io.fs.read")
+      end
+    end
+
+    it "carries the events, the footer and both headers under --format json" do
+      run("update")
+      add_filesystem_read_to_the_leaf
+      status, out, = run("check", "--format", "json")
+      payload = JSON.parse(out)
+
+      expect(status).to eq(1)
+      expect(payload.fetch("fresh")).to be(false)
+      expect(payload.fetch("events")).to include(
+        "category" => "label-added", "symbol" => "Tracer::Loud#emit", "table" => "methods",
+        "tolerated" => false, "label" => "io.fs.read"
+      )
+      expect(payload.fetch("footer")).to eq("added_symbols" => 0, "removed_symbols" => 0)
+      expect(payload.dig("header", "current", "rigor")).to eq(Rigor::VERSION)
+    end
+  end
+
+  # Same comparison, never gating — `--baseline <(git show origin/main:.rigor-effects.yml)` in a bot.
+  describe "diff" do
+    it "prints the drift and still exits 0" do
+      run("update")
+      add_filesystem_read_to_the_leaf
+      status, out, = run("diff")
+
+      expect(status).to eq(0)
+      expect(out).to include("Tracer::Loud#emit  + io.fs.read")
+    end
+  end
+
+  describe "explain" do
+    it "prints the shortest edge path behind a reach change and the origin behind a methods one" do
+      run("update")
+      add_filesystem_read_to_the_leaf
+      status, out, = run("explain")
+
+      expect(status).to eq(0)
+      expect(out).to include("Tracer::Dispatcher#run → Tracer::Loud#emit → File.read [io.fs.read]")
+      expect(out).to include("Tracer::Loud#emit [io.fs.read] ← catalogue:File.read")
+    end
+
+    it "explains one unit on demand, changed or not" do
+      run("update")
+      _status, out, = run("explain", "--symbol", "Tracer::Dispatcher#run")
+
+      expect(out).to include("Tracer::Dispatcher#run → Tracer::Loud#emit → Kernel#puts [io.output.stdout]")
+    end
+
+    it "carries the paths under --format json" do
+      run("update")
+      add_filesystem_read_to_the_leaf
+      _status, out, = run("explain", "--format", "json")
+
+      expect(JSON.parse(out).fetch("paths")).to include(
+        "table" => "reach", "symbol" => "Tracer::Dispatcher#run", "label" => "io.fs.read",
+        "path" => ["Tracer::Dispatcher#run", "Tracer::Loud#emit", "File.read"], "origin" => "File.read"
+      )
+    end
+  end
+
+  describe "usage" do
+    it "rejects paths, because a snapshot records the whole project" do
+      status, _out, err = run("update", "loud.rb")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("takes no paths")
+    end
+
+    it "rejects an unsupported format and an unknown flag" do
+      expect(run("check", "--format=xml").first).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(run("check", "--nope").first).to eq(Rigor::CLI::EXIT_USAGE)
+    end
+
+    it "rejects a snapshot file that does not parse" do
+      File.write(".rigor-effects.yml", "- not a snapshot\n")
+      status, _out, err = run("check")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("effect snapshot load failed")
+    end
+
+    it "lists the subcommands under help, and leaves the bare command as the report" do
+      status, out, = run("help")
+
+      expect(status).to eq(0)
+      expect(out).to include("update", "check", "diff", "explain")
+    end
+  end
+end

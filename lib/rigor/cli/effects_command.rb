@@ -8,25 +8,70 @@ require_relative "../cache/store"
 require_relative "command"
 require_relative "effects_renderer"
 require_relative "effects_report"
+require_relative "effects_snapshot_command"
 require_relative "options"
 
 module Rigor
   class CLI
     # ADR-103 — executes `rigor effects`.
     #
-    # Runs the same analysis `rigor check` runs, with effect collection on, and prints the resulting
-    # summaries instead of the diagnostic stream. It is a **report**: it emits no diagnostic, never enters
-    # `rigor check`'s stream, and always exits 0 on a successful run. The snapshot verbs (`update`,
-    # `check`, `diff`, `explain`) and their drift gate land with #381; this slice is the bare report.
+    # Two surfaces behind one command, the shape `rigor baseline` already has:
+    #
+    # - `rigor effects [PATH…]` — the **report**. Runs the same analysis `rigor check` runs, with effect
+    #   collection on, and prints the resulting summaries instead of the diagnostic stream.
+    # - `rigor effects {update,check,diff,explain}` — the committed **effect snapshot** and its drift
+    #   gate, in {EffectsSnapshotCommand}.
+    #
+    # Neither emits a diagnostic nor enters `rigor check`'s stream; the report always exits 0, and only
+    # `check` ever exits non-zero (1 on drift, 64 on a usage error).
     #
     # The command turns collection on for its own run by loading the project's configuration and enabling
     # an implicit `effects: {}` when the file carries no `effects:` block — the ad-hoc mode ADR-103 WD14
-    # describes. A project that *does* configure `effects:` gets its own settings instead.
+    # describes. Such a run shares no cache with `rigor check`: a collecting run declines the ADR-45
+    # whole-run result cache, because a cache-served run collects nothing. A project that *does* configure
+    # `effects:` gets its own settings instead.
     class EffectsCommand < Command
       USAGE = "Usage: rigor effects [options] [paths]"
 
-      # @return [Integer] CLI exit status: 0 on success, 64 on a usage error.
+      # @return [Integer] CLI exit status: 0 on success, 1 on `check` drift, 64 on a usage error.
       def run
+        verb = @argv.first
+        return run_verb(verb) if EffectsSnapshotCommand::VERBS.include?(verb)
+        return print_help if %w[help --help -h].include?(verb)
+
+        run_report
+      end
+
+      private
+
+      def run_verb(verb)
+        @argv.shift
+        EffectsSnapshotCommand.new(argv: @argv, verb: verb, out: @out, err: @err).run
+      end
+
+      def print_help
+        @out.puts(help)
+        0
+      end
+
+      def help
+        <<~HELP
+          #{USAGE}
+
+          With no subcommand, prints one line per method: its proven effect labels and whether that
+          list is exhaustive.
+
+          Subcommands (the committed effect snapshot, ADR-103 WD7):
+            update      Write the snapshot to effects.snapshot.path. Commit it; review its diff.
+            check       Recompute and compare; exits 1 on drift, 0 when fresh.
+            diff        The same comparison, never gating.
+            explain     The shortest edge path behind a reach change (--symbol KEY for one unit).
+
+          Run `rigor effects <subcommand> --help` for subcommand options.
+        HELP
+      end
+
+      def run_report
         options = parse_options
         return usage_error("unsupported format: #{options.fetch(:format)}") unless FORMATS.include?(options[:format])
 
@@ -36,8 +81,6 @@ module Rigor
         EffectsRenderer.new(out: @out).render(report, format: options.fetch(:format))
         0
       end
-
-      private
 
       FORMATS = %w[text json].freeze
       private_constant :FORMATS

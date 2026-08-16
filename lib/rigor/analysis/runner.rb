@@ -45,6 +45,7 @@ require_relative "runner/project_pre_passes"
 require_relative "runner/pool_coordinator"
 require_relative "runner/diagnostic_aggregator"
 require_relative "runner/effect_envelope_pass"
+require_relative "runner/effect_annotation_residual_pass"
 require_relative "runner/buffer_pool_dispatcher"
 
 module Rigor
@@ -334,6 +335,11 @@ module Rigor
         # the `effects:` block is absent from the diagnostics cache identity, so a finding written into
         # that entry would outlive the configuration that produced it. See {EffectEnvelopePass}.
         diagnostics += effect_envelope_diagnostics(expansion)
+        # ADR-103 WD13 commitment 1 / #384 — the mirror image: a project that wrote effect annotations
+        # and NO `effects:` block. Same placement rationale (the block is absent from the diagnostics
+        # cache identity, so a residual stored there would outlive the edit that answers it), and the
+        # opposite gate, so exactly one of the two ever runs.
+        diagnostics += effect_annotation_residual_diagnostics
 
         Result.new(
           diagnostics: @diagnostic_aggregator.apply_severity_profile(diagnostics),
@@ -689,6 +695,16 @@ module Rigor
         ).diagnostics
       end
 
+      # The residual takes the loader the run ALREADY resolved — never `envelope_rbs_loader`, which
+      # builds one on demand. This runs on the effects-off path, where an environment build is a cost
+      # the project did not ask for; the `signature_paths:` `.rbs` stratum is always read, and the
+      # rbs-inline stratum rides whatever the run happened to have.
+      def effect_annotation_residual_diagnostics
+        EffectAnnotationResidualPass.new(
+          configuration: @configuration, rbs_loader: @run_environment&.rbs_loader
+        ).diagnostics
+      end
+
       def envelope_rbs_loader(expansion)
         environment = @run_environment ||
                       @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
@@ -703,7 +719,8 @@ module Rigor
          @project_discovered_class_sources]
       end
 
-      private :effect_envelope_diagnostics, :envelope_rbs_loader, :envelope_discovery_tables
+      private :effect_envelope_diagnostics, :effect_annotation_residual_diagnostics,
+              :envelope_rbs_loader, :envelope_discovery_tables
 
       # ADR-103 WD13 — fail-soft at the run level too: a propagator that raises leaves the table empty and
       # the run untouched. `Propagator.propagate` already swallows its own failures; this guards the merge.

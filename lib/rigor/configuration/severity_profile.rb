@@ -67,6 +67,12 @@ module Rigor
           # envelope directive), so it is never unsolicited noise and needs no bleeding-edge gate:
           # `:warning` even under lenient, `:error` under strict.
           "effect.envelope-exceeded" => :warning,
+          # ADR-103 WD14 — `unknown-label` info / info / warning. It reports that a bound stopped
+          # bounding, never that code is wrong, so even `strict` stops at `:warning`.
+          "effect.unknown-label" => :info,
+          # The residual is advisory in every profile: it says a declaration is inert, and the fix is
+          # a config edit the author may deliberately not want.
+          "effect.annotations-unchecked" => :info,
           "static.value-use.void" => :off,
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
@@ -106,6 +112,8 @@ module Rigor
           "suppression.unknown-marker" => :warning,
           "static.value-use.void" => :off,
           "effect.envelope-exceeded" => :warning,
+          "effect.unknown-label" => :info,
+          "effect.annotations-unchecked" => :info,
           "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         strict: {
@@ -141,6 +149,10 @@ module Rigor
           # `:off` even under strict: the gate is `bleeding_edge:`, not the profile (ADR-50 WD1 / ADR-100).
           "static.value-use.void" => :off,
           "effect.envelope-exceeded" => :error,
+          "effect.unknown-label" => :warning,
+          # `:info` even under strict: a residual that failed a build would punish the project for
+          # carrying an annotation it has not opted into checking, which is the opposite of the point.
+          "effect.annotations-unchecked" => :info,
           "rbs_extended.unsatisfied-conformance" => :error
         }.freeze
       }.freeze

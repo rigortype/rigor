@@ -245,7 +245,26 @@ Two reasons, and both are binding:
 
 The cost is one parse of a tree the run already globs, paid only when `effects.check` is on.
 
-The reader is fail-soft at every level: an unparseable signature contributes no envelope (the loader already quarantines it and reports `rbs.coverage.quarantined-signature`), a malformed payload and a `pure`/`effect` contradiction are recorded on a `RbsExtended::Reporter` the scan owns, and an unrecognised label rides out on `Effects::Envelope#unknown_labels`. None of the three surfaces a diagnostic in this slice; `effect.unknown-label` ([#384](https://github.com/rigortype/rigor/issues/384)) is what reads that seam.
+The reader is fail-soft at every level: an unparseable signature contributes no envelope (the loader already quarantines it and reports `rbs.coverage.quarantined-signature`), a malformed payload and a `pure`/`effect` contradiction are recorded on a `RbsExtended::Reporter` the scan owns, and an unrecognised label rides out on `Effects::Envelope#unknown_labels` — with the tag's full token list beside it on `#declared_labels`, which is what lets the diagnostic ask whether the list as a whole was written in this vocabulary. A malformed payload and an unrecognised label are different conditions with different handling and must not be merged: the first violated the grammar, the second obeyed it.
+
+### Unknown labels and the residual
+
+Two `:info` diagnostics read the seams the envelope reader leaves. Both are computed where they are because of the same cache rule as the envelope check, and each is gated to the run the OTHER one cannot happen in.
+
+**`effect.unknown-label`** rides the envelope pass, its `effects.check` gate and its single walk of the project's signatures. Grouping it with enforcement is the point: it reports that a declaration STOPPED enforcing, so the switch that turns enforcement on is the right switch for the diagnostic that keeps enforcement honest.
+
+- `Effects::LabelIntent.evident?` is the FP gate — the four signals of [`effect-labels.md`](../type-specification/effect-labels.md) § Unknown labels. It is a pure predicate over `(token, registry, siblings)`, so the config-side and declaration-side producers cannot drift apart.
+- `Effects::UnknownLabelReport` renders; `Effects::UnknownLabelCheck` walks. The check answers value objects, never diagnostics and never the filesystem, and takes the `subject` / `consequence` phrasing from its caller — which is the seam [#385](https://github.com/rigortype/rigor/issues/385)'s `envelopes[].effect` and `attribution:` values point at without touching either class.
+- Findings are deduplicated by **where they were written** (`[location, spelling, token]`), not by the method key they bound: a `def self?.x` member declares two keys off one annotation, and there is one typo to fix.
+- Positioning is the declaration. A `.rbs` location is used verbatim. A location in a `.rb` file can only have come from a `virtual:` buffer, and rbs-inline's writer re-emits the author's comment block above each generated member — so the synthesized line drifts from the source line by the length of every body above it, and the pass re-anchors by finding the annotation's own `%a{…}` text in the Ruby file. A config value has no location at all and lands at `.rigor.yml:1:1`, the `rbs.coverage.quarantined-signature` precedent.
+- Suppression comments are read only out of `.rb` files. Parsing an `.rbs` or a `.rigor.yml` as Ruby to look for a `# rigor:disable` would be a lie dressed as a feature; those positions are suppressible through `disable:` and the baseline.
+
+**`effect.annotations-unchecked`** is `Runner::EffectAnnotationResidualPass`, and its gate is the exact complement — no `effects:` block at all — so exactly one of the two passes can ever produce anything. It runs on the surface that must stay free, which fixes its budget:
+
+- It reuses `Effects::SignatureSources`, the same stratum rule the envelope check uses, so the residual can never disagree with the check about what counts as the project's own signatures.
+- Detection is `SignatureSources::ANNOTATION_HINT` line by line — a routing regex over the `.rbs` text, no RBS parse and no analysis. A project with no signature tree costs a `Dir.glob` that matches nothing.
+- It takes the loader the run **already** resolved and never builds one. An environment build on the effects-off path is a cost the project did not ask for, so an annotation written only as an rbs-inline comment is detected when a loader happens to be at hand and not otherwise. Under-reporting an advisory `:info` is the fail-quiet direction, and nothing else depends on this pass.
+- It is positioned at the first annotation, not at `.rigor.yml`: the fix is a config edit, but the inert thing is what the author wrote.
 
 ### Where the check runs
 

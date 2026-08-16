@@ -49,6 +49,18 @@ module Rigor
       # twice over — the `effects:` block enables collection, and the envelope is the author's own
       # directive — so it is never unsolicited.
       RULE_EFFECT_ENVELOPE_EXCEEDED = "effect.envelope-exceeded"
+      # ADR-103 WD1 / #384 — the paired vocabulary diagnostic. An unknown label degrades the whole tag
+      # to ⊤, which is silent by construction; this is what keeps that fail-open reading honest. It
+      # fires only where label intent is evident (`Effects::LabelIntent`'s four signals), so a project
+      # opening its own vocabulary is never nagged, and it is gated by the same `effects.check` switch
+      # as its sibling: opting into envelope enforcement is exactly what turns on the diagnostic that
+      # says an envelope stopped enforcing.
+      RULE_EFFECT_UNKNOWN_LABEL = "effect.unknown-label"
+      # ADR-103 WD13 commitment 1 / #384 — the residual. A project whose RBS carries `%a{pure}` /
+      # `%a{rigor:v1:effect …}` but no `effects:` block gets ONE `:info` per run saying so. An
+      # annotation must never turn collection on by itself (that would be a project-wide cost cliff
+      # nobody asked for), and it must equally never be silently inert.
+      RULE_EFFECT_ANNOTATIONS_UNCHECKED = "effect.annotations-unchecked"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -78,7 +90,9 @@ module Rigor
         RULE_SUPPRESSION_EMPTY,
         RULE_SUPPRESSION_UNKNOWN_MARKER,
         RULE_VALUE_USE_VOID,
-        RULE_EFFECT_ENVELOPE_EXCEEDED
+        RULE_EFFECT_ENVELOPE_EXCEEDED,
+        RULE_EFFECT_UNKNOWN_LABEL,
+        RULE_EFFECT_ANNOTATIONS_UNCHECKED
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with

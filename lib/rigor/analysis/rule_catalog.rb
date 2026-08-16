@@ -770,6 +770,78 @@ module Rigor
           since: "0.3.4"
         ),
 
+        CheckRules::RULE_EFFECT_UNKNOWN_LABEL => Entry.new(
+          id: CheckRules::RULE_EFFECT_UNKNOWN_LABEL,
+          summary: "An effect declaration names a label the registry does not recognise, so it " \
+                   "bounds nothing.",
+          fires_when: [
+            "The project's `.rigor.yml` carries an `effects:` block and `effects.check` is on — the " \
+            "same gate as `effect.envelope-exceeded`, because opting into envelope enforcement is " \
+            "what turns on the diagnostic that says an envelope stopped enforcing.",
+            "A `%a{rigor:v1:effect <labels>}` envelope — in `.rbs`, or written as an rbs-inline " \
+            "`# @rbs %a{…}` comment — names a token the effect registry does not know after plugin " \
+            "load, which makes the WHOLE tag read as unbounded (⊤), or an `effects.tolerated:` " \
+            "entry names one, which then tolerates nothing.",
+            "Label intent is evident from one of four signals: the spelling is within two edits of " \
+            "a known label, another member of the same list is known, the token carries two or " \
+            "more dot-separated segments, or the registry's retired table names it."
+          ],
+          does_not_fire_when: [
+            "No `effects:` block is configured, or `effects.check: false` is set.",
+            "The unrecognised token is a lone far-off word (`database`): a vocabulary is open by " \
+            "design, so a bare word nothing resembles is as likely to be a label this project has " \
+            "not registered as it is a typo. The tag still reads ⊤ — silence here is about the " \
+            "diagnostic, never about the reading.",
+            "The tag is malformed rather than unrecognised (`io/db`, an empty list): a grammar " \
+            "violation is a different condition, reported through the `RBS::Extended` conflict " \
+            "channel.",
+            "The label is registered — by the shared registry, by `effects.labels:`, or by a " \
+            "plugin that owns its root."
+          ],
+          suppression: "`disable: [\"effect.unknown-label\"]` in `.rigor.yml`, or a baseline entry. " \
+                       "A `# rigor:disable` comment works only where the diagnostic lands in a " \
+                       "`.rb` file (an rbs-inline annotation); Rigor does not read suppression " \
+                       "comments out of `.rbs` or `.rigor.yml`. Fixing the spelling is the real fix.",
+          severity_authored: :info,
+          severity_by_profile: { lenient: :info, balanced: :info, strict: :warning },
+          # Syntactic and author-directed at once: the token is provably outside the vocabulary, and
+          # the author wrote the declaration that names it. The intent gate is what keeps an open
+          # vocabulary from turning into noise.
+          evidence_tier: :high,
+          since: "0.3.4"
+        ),
+
+        CheckRules::RULE_EFFECT_ANNOTATIONS_UNCHECKED => Entry.new(
+          id: CheckRules::RULE_EFFECT_ANNOTATIONS_UNCHECKED,
+          summary: "Effect annotations are present, but no `effects:` block enables anything that " \
+                   "reads them.",
+          fires_when: [
+            "The project's own `signature_paths:` RBS carries a `%a{pure}` or " \
+            "`%a{rigor:v1:effect …}` annotation.",
+            "`.rigor.yml` carries no `effects:` block, so effect collection never runs and nothing " \
+            "checks those annotations. One diagnostic per run, positioned at the first such " \
+            "annotation."
+          ],
+          does_not_fire_when: [
+            "An `effects:` block is present — including `effects: {}` and `effects: {check: false}`, " \
+            "both of which are deliberate answers to the question this asks.",
+            "No project-authored effect annotation exists.",
+            "The annotation is written only as an rbs-inline `# @rbs %a{…}` comment and this run " \
+            "did not already have an RBS environment at hand: detecting it would mean building one " \
+            "on a surface that must stay free, so the residual stays quiet rather than paying for " \
+            "an `:info`."
+          ],
+          suppression: "Add an `effects:` block (`effects: {}` enables collection), or " \
+                       "`disable: [\"effect.annotations-unchecked\"]` in `.rigor.yml` to keep the " \
+                       "annotations documentary.",
+          severity_authored: :info,
+          severity_by_profile: { lenient: :info, balanced: :info, strict: :info },
+          # Purely a presence report about the project's own files — nothing is inferred, so there is
+          # no proof to be wrong about.
+          evidence_tier: nil,
+          since: "0.3.4"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER,
           summary: "A comment uses a suppression marker Rigor does not recognise " \

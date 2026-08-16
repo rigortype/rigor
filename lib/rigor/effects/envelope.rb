@@ -20,19 +20,27 @@ module Rigor
     #   downstream is that the bound was distributed rather than written on the method).
     # - {#location} — `path:line` of the annotation, so the diagnostic can name where the bound was
     #   written; {#spelling} is the author's own text, quoted back verbatim.
-    # - {#unknown_labels} — the seam for [#384](https://github.com/rigortype/rigor/issues/384): the
-    #   well-formed-but-unrecognised spellings that made this envelope read ⊤. Empty otherwise.
+    # - {#unknown_labels} — the well-formed-but-unrecognised spellings that made this envelope read
+    #   ⊤ ([#384](https://github.com/rigortype/rigor/issues/384)'s `effect.unknown-label` reads it).
+    #   Empty otherwise.
+    # - {#declared_labels} — every token the tag listed, in source order, recognised or not (empty
+    #   for `%a{pure}`, whose bound is written by its spelling rather than by a list). It is what
+    #   answers "was some OTHER member of this list known?", one of the four signals
+    #   {LabelIntent} reads intent off.
     #
     # `mutate.local` is tolerated by **every** envelope, `%a{pure}` included: a method may freely
     # mutate what its own frame allocated and never let escape.
-    class Envelope < Data.define(:owner_key, :bound, :source, :location, :spelling, :unknown_labels)
+    class Envelope < Data.define(:owner_key, :bound, :source, :location, :spelling, :unknown_labels,
+                                 :declared_labels)
       NO_LABELS = [].freeze
       private_constant :NO_LABELS
 
-      def self.build(owner_key:, bound:, source:, location: nil, spelling: nil, unknown_labels: NO_LABELS)
+      def self.build(owner_key:, bound:, source:, location: nil, spelling: nil, unknown_labels: NO_LABELS,
+                     declared_labels: NO_LABELS)
         new(
           owner_key: owner_key, bound: bound, source: source, location: location,
-          spelling: spelling, unknown_labels: unknown_labels.uniq.sort.freeze
+          spelling: spelling, unknown_labels: unknown_labels.uniq.sort.freeze,
+          declared_labels: declared_labels.dup.freeze
         )
       end
 

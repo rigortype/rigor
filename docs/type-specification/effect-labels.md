@@ -166,13 +166,21 @@ A class-level envelope distributes to every method of that Ruby class which disc
 
 ## Unknown labels
 
+> **Implemented as of this writing** ([#384](https://github.com/rigortype/rigor/issues/384)): the ⊤ degradation, the intent-gated `effect.unknown-label` at the declaration (RBS, rbs-inline and `effects.tolerated:`), and the `effect.annotations-unchecked` residual. The remaining `.rigor.yml` label surfaces — `effects.envelopes[].effect`, `effects.attribution:` and `effects.labels:` — are accepted by the schema and not yet read, so nothing judges their members either ([#385](https://github.com/rigortype/rigor/issues/385)).
+
 A well-formed label the registry does not recognise MUST make **the whole tag read as ⊤** — never the recognised subset of it.
 
 This is fail-open, and it is the only safe reading. A tag whose author meant `io.db` but wrote `io.bd` describes a method the analyzer cannot bound; narrowing the bound to the labels it happened to recognise would turn a typo into findings on correct code. Widening to ⊤ suppresses findings instead, which is the direction false positives are budgeted in ([ADR-5](../adr/5-robustness-principle.md)).
 
 The same rule applies to a retired spelling and to a label a plugin was expected to register but did not.
 
-The degradation itself is implemented: the envelope reader answers ⊤ for a tag carrying an unrecognised spelling, and for one that violates the label grammar outright, so neither can produce a finding. **Not implemented as of this writing:** the paired vocabulary diagnostic `effect.unknown-label` — which surfaces the degradation where label intent is evident, with a nearest-known-label suggestion — lands with [#384](https://github.com/rigortype/rigor/issues/384). Its identifier is reserved jointly with Steins, alongside `effect.liskov-widened`; the identifier taxonomy is [diagnostic-policy.md](diagnostic-policy.md).
+The degradation is paired with a diagnostic, because a bound that silently stopped bounding is exactly the kind of thing a fail-open rule must not be allowed to hide. `effect.unknown-label` reports it **at the declaration** — the `.rbs` line, the `.rb` line for an rbs-inline annotation, or `.rigor.yml` for a label written in configuration — naming the nearest recognised spelling where there is one, and saying that the declaration now bounds nothing. It never changes a bound, and it rides the same `effects.check` switch as `effect.envelope-exceeded`: opting into envelope enforcement is what turns on the diagnostic that says enforcement stopped.
+
+It fires only where **label intent is evident**, from any one of four signals: the spelling is within a small edit distance of a recognised label; another member of the same list is recognised; the token carries two or more dot-separated segments; or the registry's retired table names it (in which case the replacement is named instead of a guess). A lone far-off word (`%a{rigor:v1:effect database}`) matches none of them and stays silent everywhere — a vocabulary is open by construction (`effects.labels:`, a plugin's own root), so a bare word nothing resembles is as likely to be a label this project has not registered as it is a misspelling, and reporting both would put findings on correct-by-intent code. The silence is about the diagnostic only: the tag reads ⊤ either way.
+
+The identifier is shared with Steins, alongside `effect.liskov-widened`; the identifier taxonomy and the severities are [diagnostic-policy.md](diagnostic-policy.md).
+
+**Annotations without an `effects:` block.** An effect annotation never turns collection on — that would let one line in one signature file make every run of the project more expensive. It is equally never silently inert: a project whose own signatures carry `%a{pure}` / `%a{rigor:v1:effect …}` while `.rigor.yml` carries no `effects:` block receives one `effect.annotations-unchecked` `:info` per run, positioned at the first such annotation. `effects: {}` and `effects: {check: false}` are both deliberate answers and silence it.
 
 ## The effect snapshot
 

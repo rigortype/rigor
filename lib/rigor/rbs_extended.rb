@@ -6,6 +6,7 @@ require_relative "flow_contribution"
 require_relative "effects/envelope"
 require_relative "effects/label"
 require_relative "effects/label_set"
+require_relative "effects/signature_sources"
 require_relative "rbs_extended/reporter"
 require_relative "rbs_extended/hkt_directives"
 
@@ -648,12 +649,16 @@ module Rigor
     # `bound` is the declared {Rigor::Effects::LabelSet}, or {Effects::LabelSet::TOP} when the tag
     # could not be given a meaning. `malformed` says the grammar was violated (an empty list, a token
     # that is not a label); `unknown_labels` says the grammar held but the registry does not
-    # recognise a spelling — a different condition with different handling, and the seam #384's
-    # `effect.unknown-label` reads.
-    EffectAnnotation = Data.define(:bound, :unknown_labels, :malformed) do
+    # recognise a spelling — a different condition with different handling, and what #384's
+    # `effect.unknown-label` reads. `labels` is the list exactly as written, recognised or not, which
+    # is what lets the diagnostic ask whether some OTHER member of the list was known.
+    EffectAnnotation = Data.define(:bound, :labels, :unknown_labels, :malformed) do
       def malformed? = malformed
       def top? = bound.top?
     end
+
+    NO_EFFECT_LABELS = [].freeze
+    private_constant :NO_EFFECT_LABELS
 
     # Whether `string` is the bare `%a{pure}` annotation.
     def pure_annotation?(string)
@@ -680,15 +685,16 @@ module Rigor
       tokens = match[:labels].to_s.split(",", -1).map(&:strip)
       if tokens.empty? || tokens.any? { |token| !Effects::Label.valid?(token) }
         record_unresolved(reporter, string, source_location)
-        return EffectAnnotation.new(bound: Effects::LabelSet::TOP, unknown_labels: [].freeze, malformed: true)
+        return EffectAnnotation.new(
+          bound: Effects::LabelSet::TOP, labels: NO_EFFECT_LABELS, unknown_labels: NO_EFFECT_LABELS, malformed: true
+        )
       end
 
+      tokens = tokens.freeze
       unknown = registry.nil? ? [] : tokens.reject { |token| registry.known?(token) }
-      return EffectAnnotation.new(bound: Effects::LabelSet.new(tokens), unknown_labels: [].freeze, malformed: false) if
-        unknown.empty?
-
       EffectAnnotation.new(
-        bound: Effects::LabelSet::TOP, unknown_labels: unknown.uniq.sort.freeze, malformed: false
+        bound: unknown.empty? ? Effects::LabelSet.new(tokens) : Effects::LabelSet::TOP,
+        labels: tokens, unknown_labels: unknown.uniq.sort.freeze, malformed: false
       )
     end
 
@@ -752,7 +758,8 @@ module Rigor
         source: source,
         location: render_annotation_location(annotation),
         spelling: "%a{#{annotation.string}}",
-        unknown_labels: parsed.unknown_labels
+        unknown_labels: parsed.unknown_labels,
+        declared_labels: parsed.labels
       )
     end
 
@@ -776,16 +783,10 @@ module Rigor
       nil
     end
 
-    # A `virtual:<plugin-id>:<source path>` buffer is rbs-inline's (or a plugin's) synthesized RBS for a
-    # Ruby file the author actually wrote in; naming that file is what a reader can act on, so the
-    # synthetic prefix is dropped before the path is made project-relative.
-    VIRTUAL_BUFFER_PATTERN = /\Avirtual:[^:]*:/
-    private_constant :VIRTUAL_BUFFER_PATTERN
-
+    # The buffer-name → readable-path rule lives with the walk that produces the buffers
+    # ({Effects::SignatureSources}), so a `virtual:` name is stripped identically wherever it surfaces.
     def relative_annotation_path(name)
-      stripped = name.sub(VIRTUAL_BUFFER_PATTERN, "")
-      root = "#{Dir.pwd}#{File::SEPARATOR}"
-      stripped.start_with?(root) ? stripped[root.length..] : stripped
+      Effects::SignatureSources.source_path(name)
     end
 
     # ADR-13 slice 3b — guards every reporter call so the in-RbsExtended-module call sites can record events

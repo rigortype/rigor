@@ -573,8 +573,10 @@ taint *causes* (dynamic-origin reasons), `--format text|json`; the same three-fi
 `--diff` — Steins' `effect-diff`: one line per changed method (`+ io.net.http` on
 `OrdersController#create`), always exit 0, functions present on both sides only, a vanished label
 claimed only when the current summary is exhaustive, declared→proven as a *materialisation* event.
-`rigor effects --at FILE:LINE:COL` — the `type-of` twin, for editor hover later. And
-`rigor check --no-tolerated-effects` — the audit switch of § 4.
+`rigor effects --at FILE:LINE:COL` — the `type-of` twin, for editor hover later.
+`rigor effects --follow-enqueues` — the causal closure through deferred jobs and mailers, report
+only (§ 11.2 "Deferred execution"). And `rigor check --no-tolerated-effects` — the audit switch
+of § 4.
 
 ## 10. Architecture inside Rigor
 
@@ -688,6 +690,38 @@ mechanism, and the right eventual answer to "the query happens in the view".
 contributes **edges**, not only labels — the same discovery it already performs for typing. What
 it must not do is edge `perform_later` to `perform` (another process; the enqueue is the effect)
 or `render` to a template (not Ruby; taint stays).
+
+**Deferred execution.** ActiveJob's `set(wait: 1.hour)` / `set(wait_until:)`, ActionMailer's
+`deliver_later`, `perform_all_later`, `enqueue_after_transaction_commit` (on by default from
+`load_defaults "8.2"`), `after_commit`, delayed_job's / the `delayed` gem's `object.delay.method`
+proxy and `handle_asynchronously`, Sidekiq's `perform_async` / `perform_in`, and in-process
+deferral (`Thread.new`, `Concurrent::Future`, `Async { }`) are one family, and one rule covers it:
+**attribution follows the code, not the clock.** Four consequences —
+
+- *Builders are pure, the enqueue is the effect.* `set(…)` returns a `ConfiguredJob`,
+  `UserMailer.welcome(u)` a lazy `MessageDelivery`, `x.delay` a `DelayProxy`: ∅, exactly like a
+  Relation builder. The `.perform_later` / `.deliver_later` / proxied method call on them is the
+  `job.enqueue` (+ `rails.activejob.enqueue`) origin. Deferring the enqueue itself to after commit
+  changes *when*, not *whose code* — the caller's summary is unchanged.
+- *No edge into the deferred body.* `perform`, the mailer method under `deliver_later`, the
+  proxied method under `.delay` run in another process on another stack; the caller's code does
+  not contain them. `perform_now` / `deliver_now` / `foo_without_delay` are ordinary edges.
+- *In-process deferral is containment.* A `Thread.new { }` or `Concurrent::Future.execute { }`
+  block is this method's code (§ 5.4); its origins join as proven, whenever the thread runs.
+- *The transport is a project fact, and it can narrow.* Argument-blind, `perform_later` is `io`
+  (§ 11.2). But the queue adapter is declared once in the app (`config.active_job.queue_adapter`),
+  and rigor-rails can read it — the configuration-level twin of argument-dependent narrowing:
+  Solid Queue (Rails 8's default) → **`io.db.write`** (an `INSERT` into `solid_queue_jobs`; a
+  "no database on this path" envelope is right to object), Sidekiq / Resque → `io.net`
+  (Redis), `:async` → ∅ transport, `:inline` → an edge to `perform` after all. Unread or
+  per-environment adapters keep the `io` row. The `delayed_job` gem is database-backed
+  (`io.db.write`) whichever way it is reached.
+
+The question reviewers also ask — "what happens *because of* this request, jobs included?" — is a
+different relation, a **causal closure**, and belongs in the report, never in the envelope
+check: `rigor effects --follow-enqueues` adds `perform_later → perform` and `deliver_later →
+mailer` edges for the footprint only, so a controller action can be read as "eventually sends an
+email" while its envelope still describes only its own code.
 
 **Conventions preset.** rigor-rails can ship an *illustrative* `effects.envelopes` stanza — never
 enforced by default — matching Rails' layer conventions: `app/presenters/**`, `app/serializers/**`,

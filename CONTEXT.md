@@ -58,3 +58,23 @@ define *behaviour*.
   **false-positive discipline**: "the program works" outranks worst-case static reading.
 - **evaluation line** — the `0.2.x`/`0.3.x` releases: gather feedback, complete the feature set,
   freeze the contract at v1.0.0 (ADR-50).
+- **effect label** — a dot-path side-effect classification (`io.db.read`, `nondet.time`,
+  `rails.activejob.enqueue`) checked by segment-aware prefix subsumption; the *second dimension*
+  beside a type (ADR-103). Always the compound — bare "effect" already names the engine-internal
+  **effect model** and the **flow effect** bundle (`Rigor::FlowContribution`), which are about
+  narrowing / mutation / escape facts, not I/O.
+- **effect summary** — a method's inferred effect labels: a *proven* lane, a *declared* (`≤`)
+  lane, and an exhaustiveness bit; non-exhaustive reads "these, and possibly more" and never
+  produces a finding.
+- **effect envelope** — an author-declared upper bound on a method's effect labels (`%a{pure}`,
+  `%a{rigor:v1:effect …}`, or a `.rigor.yml` convention stanza), checked against the proven lane
+  only. Always the compound — bare "envelope" is already `Dynamic[T]`'s "believed within envelope
+  `T`" and ADR-100's "FP envelope".
+- **origin** — where an effect label came from: `(callee-or-construct, colouring-source)`,
+  line-free; policy tolerance discharges a whole origin at once.
+- **effect snapshot** — `.rigor-effects.yml`, the committed record of every method's *direct*
+  summary plus the transitive **reach** at declared entry points; `rigor effects check` gates its
+  drift. Not a **baseline**: a baseline hides known findings so only new ones surface, the snapshot
+  hides nothing and records observed state.
+- **reach** — the transitive effect footprint of an entry point (a controller action, a job's
+  `perform`), as opposed to a method's *direct* summary (its own code plus catalogued callees).

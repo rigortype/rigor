@@ -4,10 +4,10 @@ Status: **Proposed, 2026-08-16.** Nothing implemented. Records the decisions rea
 designing the effect system in
 [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md) (the design note;
 its § 13 lists the choices, this ADR fixes them as working decisions; WD13, coexistence with
-`rigor check`, was added the same day). The four items still open are named under "Open at
-Proposed". Implementation is sliced as GitHub issues under the umbrella
-[#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394; tracker
-convention: [ADR-98](98-development-flow-document-roles.md)).
+`rigor check`, was added the same day; WD14, the pre-implementation decisions, on 2026-08-17). Two
+items remain open, both deferrable to the view slices. Implementation is sliced as GitHub issues
+under the umbrella [#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices,
+#377–#394; tracker convention: [ADR-98](98-development-flow-document-roles.md)).
 
 Grounding: Steins' implemented model
 ([why-effects](https://github.com/rigortype/steins/blob/master/docs/why-effects.md),
@@ -217,6 +217,63 @@ effects consumers only when absent. Typing consumers (WD9) fork the identity as
 fail-soft: an exception drops that file's summary as non-exhaustive and never fails a check.
 Editor mode does not run effects in v1. (§ 10.1.)
 
+### WD14 — Pre-implementation decisions (grilling session, 2026-08-17)
+
+Settled before the first slice, because the first slices bake them in; each is a decision the
+design note left to the owner and now closes.
+
+- **Vocabulary.** The `mutate` leaves are Steins ADR-0055's: `mutate.self` (self's state),
+  `mutate.instance` (a receiver that is neither self nor frame-owned — an argument, another
+  object, a call result), `mutate.static`; `mutate.arg` is dropped; bare `mutate` only for an
+  unclassifiable receiver. **Unknown ownership taints** (cause `unknown-ownership`) rather than
+  producing a proven `mutate` — Ruby's ownership is a dataflow question, and a proven parent on a
+  fresh-but-unproven receiver would put findings on correct code. Vocabulary version bumps only on
+  rename / removal (with a retired-spelling table), never on leaf addition.
+- **Purity spelling.** `%a{pure}` is the only purity annotation; `rigor:v1:pure` is not
+  implemented and the purity-policy text is amended to name `%a{pure}`. It is checked whenever
+  `effects.check` is on — the `effects:` block is the opt-in, so no separate interop gate.
+- **Grammar.** `%a{rigor:v1:effect io.db, nondet.time}` — space-separated head (the
+  `assert` / `conforms-to` family), comma-separated bare tokens, no parenthesised comment (RBS has
+  real comments; the corpus rule is bare tokens). An empty list is malformed. A class-level
+  annotation distributes to every method of the Ruby class discovery knows (reopenings, other
+  files, synthesised `attr_*` / `define_method` included), never to subclasses; on a module, to the
+  module's own methods only; per-method wins.
+- **Identity.** Keys follow the existing symbol tables: `Class#m` / `Class.m`, top-level defs as
+  `<toplevel>#m` (`ScopeIndexer::TOP_LEVEL_DEF_KEY`), reopenings union, `define_method(:lit)`
+  under `Class#lit` (its block becomes the body — a discovery extension, since def-node tables skip
+  it today), `attr_*` / `Struct` / `Data` accessors synthesised (reader ∅, writer `mutate.self`).
+- **Origin** = `(callee-or-construct, colouring-source)`, line-free; sites are kept per run for the
+  report only. Policy discharge is per origin: a bundle is discharged when **any** of its labels is
+  tolerated (tolerating what the origin was *for* frees its transport). Taint causes are a closed
+  enum in the type spec: `dynamic-receiver` (sub-caused by `DynamicOrigin` names), `dynamic-send`,
+  `method-missing`, `unresolved-self-call`, `opaque-callable`, `unknown-ownership`,
+  `plugin-attribution`, `template-not-analysed`, `collector-error`, `budget`.
+- **Snapshot and CLI.** `.rigor-effects.yml`, YAML in a JSON-compatible subset; `methods:` shows
+  the flat projected label list (origins are `explain`'s job); synthesised default summaries and
+  exhaustive-∅ methods are omitted (`--full` lists all). Verbs, mirroring `rigor baseline`:
+  `rigor effects [PATH]` (report), `rigor effects update` (always writes), `check` (text /
+  `--format json`, `--baseline PATH`; exit `0` fresh, `1` drift, `64` usage — the documented
+  convention), `diff`, `explain` (shortest edge path per reach change). `reach:` defaults to
+  empty; presets are named by plugins (`effect_entry_points:`) and adopted by config; the
+  `unused --entry-point` glob syntax is shared.
+- **Config.** `effects:` present ⇒ collection on; `check: true` by default; `views: false`;
+  keys `snapshot.{path,reach,gate}`, `labels`, `attribution`, `envelopes[]{match|namespace,
+  effect}`, `tolerated`. Label *shape* is validated at load (tier 2); a label unknown to the
+  registry after plugin load makes that envelope ⊤ and surfaces as `effect.unknown-label`
+  positioned at `.rigor.yml` (the `rbs.coverage.quarantined-signature` precedent) — the config
+  audit is not extended to nested values. `rigor effects` without an `effects:` block runs ad hoc
+  under an implicit `effects: {}` and shares no cache with `rigor check`.
+- **Diagnostics.** `effect.envelope-exceeded` is positioned at the Ruby `def` (where the fix goes
+  and where `# rigor:disable` works — the `.rbs`-positioned `unsatisfied-conformance` precedent
+  is deliberately not followed), naming the envelope's source in the message. Severities:
+  `envelope-exceeded` / `liskov-widened` warning / warning / error across lenient / balanced /
+  strict; `unknown-label` info / info / warning; `discarded-pure-result` off everywhere.
+- **Ruby deltas.** `require` / `require_relative` / `load` / `autoload` = `io.fs.read` +
+  `mutate.static`; `sleep`, `Queue#pop`, `ConditionVariable#wait` = `io`; `Thread.new`,
+  `Fiber.new`, `Ractor.new`, `Mutex#synchronize` = ∅ + containment.
+- **Spec status.** `docs/type-specification/effect-labels.md` is normative from #377 with
+  per-section "as of this writing" markers naming the slice that implements each (ADR-92).
+
 ## Rejected and deferred alternatives
 
 | Alternative | Why not |
@@ -235,13 +292,13 @@ Editor mode does not run effects in v1. (§ 10.1.)
 
 ## Open at Proposed
 
-1. Reconcile the Ruby `mutate.self / arg / static` leaves with Steins ADR-0055's reserved
-   `mutate.self / instance / static` before either ships.
-2. Whether `require` colours `mutate.static` in addition to `io.fs.read`; `sleep`, `Queue#pop`
-   and the concurrency primitives.
-3. Whether the view preset defaults to `lenient` or `strict`, and whether `nondet.time` in a
-   template is tolerated by default.
-4. Whether views enter `reach:` by default (recommended: `methods:` always, `reach:` opt-in).
+Items 1 and 2 of the original list (the `mutate` leaf names; `require` and the concurrency
+primitives) were closed by WD14 on 2026-08-17. Two remain, both deferrable to the view slices:
+
+1. Whether the view preset defaults to `lenient` or `strict`, and whether `nondet.time` in a
+   template is tolerated by default (provisional: `lenient`, including `nondet.time` —
+   `time_ago_in_words` is a view's daily vocabulary; `strict` excludes it).
+2. Whether views enter `reach:` by default (provisional: `methods:` always, `reach:` opt-in).
 
 ## Consequences
 

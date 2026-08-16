@@ -1044,6 +1044,18 @@ not effects), rendering correctness, i18n key existence (rigor-rails-i18n does t
 
 ## 13. Decisions for the owner
 
+> **Resolved.** Items 1–13 are fixed by [ADR-103](../adr/103-effect-labels.md) WD1–WD12, and the
+> pre-implementation set by ADR-103 WD14 (2026-08-17), which **supersedes this note where they
+> differ**: the `mutate` leaves are `mutate.self / instance / static` (no `mutate.arg`; unknown
+> ownership taints instead of a proven `mutate`); `%a{pure}` is the only purity spelling and
+> `rigor:v1:pure` is not implemented (no separate interop gate); the effect grammar takes no
+> parenthesised comment; the CLI uses verbs (`rigor effects update | check | diff | explain`) with
+> exit codes 0 / 1 / 64; top-level defs key as `<toplevel>#m`; snapshot `methods:` shows flat label
+> lists and omits synthesised default summaries; a tolerated label discharges its whole origin;
+> `effect.envelope-exceeded` is positioned at the Ruby `def`; unknown labels in config surface as
+> `effect.unknown-label` at `.rigor.yml`. Only the two view items (18, 19) remain open, provisional.
+
+
 1. **Vocabulary alignment** — adopt Steins' 25 verbatim as the shared registry; reconcile the
    Ruby leaves `mutate.self / arg / static` with Steins ADR-0055's reserved
    `mutate.self / instance / static` before either ships.

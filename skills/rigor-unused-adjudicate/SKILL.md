@@ -1,151 +1,90 @@
 ---
 name: rigor-unused-adjudicate
 description: |
-  Run `rigor unused` on a project and adjudicate every row before proposing any deletion — classify each candidate against the measured false-positive shapes, gather evidence for the survivors, and report what is genuinely dead. Use this whenever someone asks to find or remove dead code, unused classes, unused constants, or "code nobody calls" in a Ruby project, whenever they ask what a `rigor unused` report means or what to do with it, and whenever a dead-code cleanup, codebase inventory, or legacy audit comes up — even if they never say "rigor". The report is roughly 7% precise, so acting on it directly produces mostly wrong deletions; this skill is what turns it into a defensible list. NOT for removing a specific class you already know is dead, and NOT for `rigor check` diagnostics (those are ordinary type errors).
+  Find dead code in a Ruby project with `rigor unused` — establish what the report can see on THIS project first, then adjudicate every row before proposing any deletion. Use this whenever someone asks to find or remove dead code, unused classes, unused constants, or "code nobody calls", whenever they ask what a `rigor unused` report means or which rows are safe to delete, and whenever a dead-code cleanup, codebase inventory, or legacy audit comes up — even if they never say "rigor". The report is a review queue and not a defect list; on an adjudicated corpus target only 4 of 57 rows were genuinely dead, so acting on it directly produces mostly wrong deletions. NOT for deleting a specific class you already know is dead, and NOT for `rigor check` diagnostics (those are ordinary type errors).
 license: MPL-2.0
 metadata:
-  version: 0.1.0
+  version: 0.2.0
   homepage: https://github.com/rigortype/rigor
 ---
 
 # Adjudicating `rigor unused`
 
-`rigor unused` answers one question exactly — *which project classes and
-modules does no reachable code name?* — and that is not the question anyone
-asked. The question they asked is *what can I delete*, and the gap between the
-two is wide enough to be the whole job.
-
-On a mid-sized Rails application where every surviving row was hand-checked
-against the whole repository, **4 of 57 were genuinely dead**. The other 53
-were live code reached by means the analysis cannot see.
-
-So the failure mode to avoid is obvious and tempting: read the report, hand
-back its rows as "dead code", be wrong fifty-three times. Nobody reads your
-second report. Your job is to spend the adjudication effort so the person you
-are reporting to does not have to.
-
-## Step 1 — decide whether the report is worth reading
-
-Run it and read the summary before any row:
+`rigor unused` answers *which project classes and modules does no reachable
+code name?* — not *what can I delete*. Closing that gap is the work, and the
+manual chapter has the method:
 
 ```sh
-rigor unused
+rigor docs 18-removing-dead-code
 ```
 
-```
-Reachability
-  declared (project-owned): 1497
-  roots:                    428 (312 from plugins, 3 matched no declaration)
-  reachable:                1417
-  candidates:               45
-  reachable only from tests: 164
-  cannot decide:            25
-  namespace-only (excluded): 10
-```
+Read it before adjudicating anything. It carries the false-positive shapes with
+their measured frequencies, the pre-deletion checklist, and how to report the
+result. This skill exists for the part the chapter cannot do for you: **work out
+what the report can and cannot see on this particular project, before you trust
+a single row.**
 
-**Read `roots` first.** Reachability is computed *from* roots, so a thin root
-set inflates everything below it. The pathological case is a framework
-application with `0 from plugins`: nothing in Ruby source names a controller,
-so every controller in the project appears dead. If you see that, stop — the
-fix is enabling the framework's Rigor plugin, not adjudicating 300 rows.
-Report that finding instead.
+Do that first, because every check below changes how the output should be read —
+and skipping one is how a live class ends up on a deletion list.
 
-`reachable only from tests` is a **subset of** `reachable`, not a fifth
-bucket. Do not add the numbers.
+## Establish the ground first
 
-## Step 2 — classify every row against the known shapes
+Run the report and answer these against the project in front of you.
 
-Most rows are one of a small number of recurring shapes. Recognising them is
-what lets you clear a long list quickly. These counts are from the
-hand-adjudicated run — the first shape alone was 28 of the 53 false positives:
+**Are framework roots actually supplied?** The summary prints
+`roots: N (M from plugins, …)`. On a framework application `0 from plugins`
+means nothing is naming your controllers, jobs or policies, so most of the
+report is noise. Stop and fix the plugin configuration — `rigor docs
+07-plugins` — rather than adjudicating hundreds of rows.
 
-| Shape | How to spot it | Why it is live |
-| --- | --- | --- |
-| **Framework naming convention** | `FooHelper` beside `FooController`; a generator under `lib/generators`; `ClassMethods` inside an `ActiveSupport::Concern`; a validator named by an option key (`validates :d, date: true` → `DateValidator`) | Nothing writes the name — the framework derives it |
-| **Configuration-driven** | The class name appears as a **string** in `config/*.yml` — a Solid Queue `config/recurring.yml`, a sidekiq-cron schedule, a queue or job definition | The scheduler names it; no Ruby code has to |
-| **Self-registering** | The class body calls a registration DSL (`add "link"`, `register :thing`) | The evidence of use is inside the class, not outside |
-| **Published extension point** | A base class subclassed only from outside the repository | Dead from within, load-bearing without — deleting it breaks people you cannot see |
-| **Unused-feature scaffolding** | `ApplicationCable::Channel`, `ApplicationMailer` with no subclasses | Generated by `rails new`. Framework-reached, so not dead in the report's sense — but if the directory holds nothing else, the honest finding is that the *feature* is unused. Say that, and let the owner decide |
-| **Reopened foreign class** | `module RBS; class Location` in an initializer | Not the project's class at all |
-
-Two framework defaults produce whole clusters of false rows, so check them
-before working through helper or job rows one at a time:
-
-- **`include_all_helpers` defaults to true.** Unless the application disables
-  it, *every* `app/helpers/*Helper` is included in every view and all of them
-  are live. One config check clears the entire cluster.
-- **A recurring-job schedule is configuration.** `config/recurring.yml`,
-  `config/schedule.yml` and the scheduler block of `sidekiq.yml` name job
-  classes as strings. A scheduled job often has no `perform_later` call
-  anywhere in the repository.
-
-Watch for **cascades**. A class used only by a wrongly-classified class
-follows it into the report. When a row turns out to be live, re-check
-everything it references before treating those rows as independent findings.
-
-## Step 3 — gather evidence for the survivors
-
-For each row that survived Step 2, run:
+**Does the project ship signatures?** If `signature_paths:` is configured, also
+run with it emptied and compare:
 
 ```sh
-scripts/evidence.sh <ConstantName>
+rigor unused                            # normal
+rigor unused --config /tmp/no-sig.yml   # a copy of your config with signature_paths: []
 ```
 
-It searches the forms the report itself cannot match — the snake_cased
-autoload path, the demodulized leaf, interpolated construction, and mentions
-in data and template files — and prints the declaration site and the file's
-last substantive change.
+Adjudicate the union. On one application the signature-free run surfaced three
+genuinely dead classes that the default run never showed. Rows that appear only
+without signatures are still worth checking — signatures reference classes, and
+a reference the report counts is not always one a human would.
 
-Re-grepping the fully-qualified name is wasted work: a row would not be a
-candidate if the FQN appeared anywhere the report reads. The value is in the
-spellings it cannot see.
+**What do `paths:` actually cover?** Only Ruby under those paths is analysed.
+Views are the common gap: a helper called from `app/views/**/*.erb` has no Ruby
+caller at all, and will land in the report looking unused. Before believing any
+helper or presenter row, grep the view tree for it.
 
-A row is only a finding when you can say, concretely:
+**Is the git history usable?** The chapter's checklist uses "when did this file
+last change" as evidence. In a shallow clone, or one whose history is all
+dependency bumps, that signal is empty — notice it and say so rather than
+reporting a bot commit as the file's age.
 
-- the declaration is the only occurrence in the repository, tests included; **and**
-- it matches none of the shapes above; **and**
-- nothing outside the repository can reach it — for a library, a gem, or an
-  app with third-party extensions, "unused" means "unused by callers I can
-  see", and the public API is exactly what you cannot see.
+## Then hand off to the chapter
 
-The four genuine findings in the adjudicated run all looked like this: two
-`Class.new(StandardError)` subclasses never raised or rescued anywhere, one
-error class mentioned once in a prose comment, and an empty helper module
-whose conventional partner controller had a different name — so the convention
-that would have reached it never fired.
+With that established, follow the chapter. Two things worth holding onto as you
+go, because they are what the report's own design is built around:
 
-## Step 4 — report
+**Framework conventions and configuration reach code without naming it.** The
+chapter lists the shapes; the ones that recur hardest are a class named as a
+*string* in `config/*.yml` (a recurring-job schedule, a queue definition), a
+convention that derives one name from another (`FooHelper` from
+`FooController`, a decorator from a model, a join model from
+`has_many :speakers_talks`), and a registration DSL called inside the class
+body. None of these appear as a constant anywhere.
 
-Lead with the ratio, not the count. "Nine rows, three worth acting on" earns
-more trust than "nine dead classes", and it is what actually happened.
+**Wrong rows cascade.** A class used only by a wrongly-classified class follows
+it into the report. When a row turns out to be live, re-check what it
+references before treating those rows as independent findings.
 
-For each finding give the declaration site, the evidence from Step 3 in one
-sentence, and the shape you ruled out if it was a near miss. For everything
-you rejected, a one-line grouping is enough — "four helper modules, live via
-`include_all_helpers`" — so the reader can check your reasoning without
-re-doing it.
+## Two habits that keep the answer honest
 
-State two limits plainly, because a reader who is not told will assume
-otherwise:
+**A search that finds nothing proves nothing until it has found something.**
+Before concluding a name appears nowhere, run the same search against a name you
+know is used. Silence from a broken command and silence from dead code look
+identical.
 
-- **The report under-reports.** An over-claiming root source removes rows
-  silently, so this is a lower bound on dead code, not an inventory.
-- **Nothing here is about methods.** A class whose constant is named once and
-  whose every method is dead counts as fully reachable. If the actual problem
-  is 5,000-line models, this tool does not address it.
-
-Do not propose deleting from the **cannot decide** section. Those rows were
-demoted because something can name the class at runtime; the reason is printed
-on each row, and the honest response is to read it, not to overrule it.
-
-## Two habits that keep this honest
-
-**A number you cannot make move is not evidence.** If your search returns
-nothing, confirm the search *can* return something — run it against a name you
-know is used. Silence from a broken command looks exactly like silence from
-genuinely dead code, and the two are worth very different amounts.
-
-**Over-claiming hides dead code; under-claiming does not.** If you are unsure
-whether something is reached, leave the row in the report and say you are
-unsure. A row left on the list is visible to a human; a row you removed on a
-hunch is invisible to everyone.
+**Over-claiming hides dead code; under-claiming does not.** If you cannot settle
+a row, leave it in the report and say you could not settle it. A row left on the
+list is visible to a human; a row you dismissed on a hunch is invisible to
+everyone.

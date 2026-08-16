@@ -16,3 +16,6 @@
 # `make bench` writes the suggested baseline here (ADR-50 WD4); the
 # committed, calibrated baseline is bench/baseline.json.
 /bench/baseline.updated.json
+
+# Skill-creator eval workspaces (transient; results belong in the session, not the tree)
+/*-workspace/

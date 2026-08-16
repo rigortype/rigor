@@ -55,6 +55,7 @@ your installed version rather than being frozen into a SKILL file — see
 | [`rigor-rbs-setup`](rigor-rbs-setup/SKILL.md) | Install community RBS for the project's gems (`rbs collection install`) so Rigor stops typing RBS-less dependencies as `Dynamic`. |
 | [`rigor-ci-setup`](rigor-ci-setup/SKILL.md) | Wire Rigor into CI and surface diagnostics inline on the PR / MR (SARIF, GitHub Actions, GitLab Code Quality, reviewdog, …). |
 | [`rigor-baseline-reduce`](rigor-baseline-reduce/SKILL.md) | Work an existing `.rigor-baseline.yml` down rule by rule — classify, fix or suppress, regenerate. |
+| [`rigor-unused-adjudicate`](rigor-unused-adjudicate/SKILL.md) | Find dead code with `rigor unused` — establish what the report can see on this project, then adjudicate every row before proposing a deletion. |
 | [`rigor-monkeypatch-resolve`](rigor-monkeypatch-resolve/SKILL.md) | Resolve `undefined-method` clusters from the project's own monkey-patches by wiring the defining files into `pre_eval:`. |
 | [`rigor-editor-setup`](rigor-editor-setup/SKILL.md) | Wire `rigor lsp` into the editor (Neovim, VS Code, Helix, Emacs) for live diagnostics, hover types, and completion. |
 | [`rigor-mcp-setup`](rigor-mcp-setup/SKILL.md) | Wire `rigor mcp` into an AI agent (Claude Code, Cursor, Cline, …) so it can call Rigor's read-only analysis tools. |

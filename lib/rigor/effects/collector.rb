@@ -1,0 +1,153 @@
+# frozen_string_literal: true
+
+require_relative "../type"
+require_relative "../inference/origin_lookup"
+require_relative "file_collection"
+require_relative "scanner"
+
+module Rigor
+  module Effects
+    # Records what the typer already decided about each call site, and turns one file's decisions into a
+    # {FileCollection} (ADR-103 WD13; the contract is `docs/internal-spec/effect-summaries.md`).
+    #
+    # Modelled on {Rigor::Analysis::DependencyRecorder}, for the same reason: the recording site sits on
+    # the per-dispatch hot path, so **the disabled fast path must be a plain integer read**. A
+    # module-level activation count answers {active?} without a `Thread.current` lookup; the per-thread
+    # accumulator isolates the actual recording, so a non-recording thread that sees `active?` true (a
+    # sibling thread is recording) pays one extra nil-check and nothing else.
+    #
+    # The recorder is **observational**. It never triggers inference, never resolves what the dispatcher
+    # declined, and never touches `Scope` — it reads the receiver type the typer computed anyway and the
+    # `dynamic_origins` cause the typer already recorded. With no `effects:` block nothing calls
+    # {collect_for}, `@active_count` stays zero, and `rigor check` is byte-identical.
+    module Collector
+      KEY = :__rigor_effects_collector__
+      private_constant :KEY
+
+      # What one call site decided, as the typer saw it.
+      #
+      # `receiver_class` / `kind` are the class the receiver's type projects to (`Nominal[Foo]` →
+      # `["Foo", :instance]`, `Singleton[Time]` → `["Time", :singleton]`), nil when it projects to none.
+      # `dynamic` marks a `Dynamic` receiver and `cause` carries the {Inference::DynamicOrigin} name
+      # behind it, which is the detail the `dynamic-receiver` taint reports. `resolved` is false only when
+      # every dispatch tier declined — the typer's own "nothing here resolved" verdict, which is what
+      # separates an unresolvable implicit-self call from an ordinary one.
+      CallRecord = Data.define(:receiver_class, :kind, :dynamic, :cause, :resolved)
+
+      # Per-file, per-thread accumulator. Not frozen and never shared: it lives for one `analyze_file`.
+      class Accumulator
+        attr_reader :path, :calls
+        attr_accessor :root
+
+        def initialize(path)
+          @path = path
+          # Node identity, not equality: two structurally identical call nodes in one file are different
+          # sites, and `Prism::Node#hash` is structural.
+          @calls = {}.compare_by_identity
+          @root = nil
+        end
+
+        # First write wins. The main typing pass records a site before any re-query does (`CheckRules`
+        # re-runs `type_of` over the same nodes, and a call-site-driven body re-type may visit a node a
+        # second time with a different receiver), so pinning the first decision keeps a file's record
+        # independent of how many times the node is visited — which is what makes pooled and sequential
+        # runs agree.
+        def record(node, call_record)
+          @calls[node] = call_record unless @calls.key?(node)
+        end
+
+        def mark_unresolved(node)
+          existing = @calls[node]
+          @calls[node] = existing.with(resolved: false) if existing
+        end
+      end
+
+      # Module-level activation count so {active?} is a plain integer read (GVL-atomic) rather than a
+      # `Thread.current` hash lookup.
+      @active_count = 0
+      @mutex = Mutex.new
+
+      module_function
+
+      # Runs `block` with collection active for `path` and returns the resulting {FileCollection}. Nests
+      # safely and restores the previous accumulator on exit.
+      def collect_for(path)
+        previous = Thread.current[KEY]
+        accumulator = Accumulator.new(path.to_s)
+        Thread.current[KEY] = accumulator
+        @mutex.synchronize { @active_count += 1 }
+        yield
+        build(accumulator)
+      ensure
+        Thread.current[KEY] = previous
+        @mutex.synchronize { @active_count -= 1 }
+      end
+
+      def active?
+        @active_count.positive?
+      end
+
+      # The parsed root of the file being analyzed. Recorded by the analysis body once the parse is known
+      # to have succeeded, so the scan runs over exactly what the typer saw.
+      def record_root(root)
+        accumulator = Thread.current[KEY]
+        accumulator.root = root if accumulator && accumulator.root.nil?
+      end
+
+      # One call site's dispatch decision. `receiver` is the type the typer computed for the receiver and
+      # `scope` the scope it computed it in; nothing here asks either for more.
+      #
+      # The `scope.source_path` guard matters: inter-procedural inference re-types a *callee's* body while
+      # the caller's file is being analyzed, and those nodes belong to the callee's own file collection.
+      def record_call(node, receiver, scope)
+        accumulator = Thread.current[KEY]
+        return if accumulator.nil? || accumulator.path != scope.source_path
+
+        dynamic = receiver.is_a?(Type::Dynamic)
+        class_name, kind = descriptor_for(receiver)
+        accumulator.record(
+          node,
+          CallRecord.new(
+            receiver_class: class_name, kind: kind, dynamic: dynamic,
+            cause: dynamic ? Inference::OriginLookup.origin_for(scope, node.receiver)&.to_s : nil,
+            resolved: true
+          )
+        )
+      end
+
+      # The typer's fallback verdict: no tier resolved this call.
+      def record_unresolved(node, source_path)
+        accumulator = Thread.current[KEY]
+        return if accumulator.nil? || accumulator.path != source_path
+
+        accumulator.mark_unresolved(node)
+      end
+
+      # The class a receiver type projects to, as `[class_name, kind]`. A deliberately small mirror of the
+      # dispatcher's own receiver descriptor: enough shapes that a fresh `[]` reads as `Array` and a
+      # constant receiver as its singleton, and nothing more. An unmapped type simply has no class name,
+      # which costs an edge rather than producing a wrong one.
+      def descriptor_for(receiver)
+        case receiver
+        when Type::Nominal then [receiver.class_name, :instance]
+        when Type::Singleton then [receiver.class_name, :singleton]
+        when Type::Tuple then ["Array", :instance]
+        when Type::HashShape then ["Hash", :instance]
+        when Type::Constant then [receiver.value.class.name, :instance]
+        when Type::Dynamic then descriptor_for(receiver.static_facet)
+        end
+      end
+
+      # Fail-soft (WD13): the scan raising drops this file's summaries and never reaches `rigor check`.
+      def build(accumulator)
+        return FileCollection.empty(accumulator.path) if accumulator.root.nil?
+
+        Scanner.scan(root: accumulator.root, path: accumulator.path, calls: accumulator.calls)
+      rescue StandardError
+        FileCollection.new(path: accumulator.path, failed: true)
+      end
+
+      private_class_method :build, :descriptor_for
+    end
+  end
+end

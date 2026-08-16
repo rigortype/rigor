@@ -13,6 +13,7 @@ require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "dynamic_origin"
 require_relative "origin_lookup"
+require_relative "../effects/collector"
 require_relative "fallback"
 require_relative "flow_tracer"
 require_relative "indexed_narrowing"
@@ -1134,6 +1135,11 @@ module Rigor
         arg_types = call_arg_types(node)
         block_type = block_return_type_for(node, receiver, arg_types)
 
+        # ADR-103 WD13 — the effect collector's one hot-path site. Purely observational: it reads the
+        # receiver type the typer has just computed and the `dynamic_origins` cause already recorded, and
+        # asks nothing further of dispatch. Off (the default) this is one integer read.
+        Effects::Collector.record_call(node, receiver, scope) if Effects::Collector.active?
+
         local_def_result = try_local_def_dispatch(node, receiver, arg_types)
         return local_def_result if local_def_result
 
@@ -1181,11 +1187,19 @@ module Rigor
         # semantic outcome, not a fail-soft compromise, so it MUST NOT record a tracer event.
         return inherit_receiver_origin(node) if receiver.is_a?(Type::Dynamic)
 
-        # ADR-24 slice 4a — this is the engine choke-point where an implicit-self call has exhausted every
-        # resolution tier (RBS dispatch + user-class ancestor walk) and falls through to `Dynamic[top]`. When
-        # the slice-4 recorder is active, capture the miss so a later slice's closed-class gate can flag it.
-        # Off by default: `active?` is a plain integer read.
+        unresolved_call_result(node, receiver)
+      end
+
+      # The engine choke-point where a call has exhausted every resolution tier (RBS dispatch + user-class
+      # ancestor walk) and falls through to `Dynamic[top]`. Two observational recorders read it, both a
+      # plain integer read when inactive, and neither changes the answer:
+      #
+      # - ADR-24 slice 4a captures an implicit-self miss so a later slice's closed-class gate can flag it;
+      # - ADR-103 WD13 retracts the effect collector's optimistic `resolved: true`, which is what separates
+      #   an implicit-self call the closed world has no definition for from an ordinary inherited one.
+      def unresolved_call_result(node, receiver)
         record_unresolved_self_call(node, receiver) if Analysis::SelfCallResolutionRecorder.active?
+        Effects::Collector.record_unresolved(node, scope.source_path) if Effects::Collector.active?
 
         fallback_for(node, family: :prism)
       end

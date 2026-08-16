@@ -18,6 +18,8 @@ require_relative "../rbs_extended/conformance_checker"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
+require_relative "../effects/collector"
+require_relative "../effects/propagator"
 require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/pre_eval_constants"
 require_relative "../inference/scope_indexer"
@@ -67,6 +69,25 @@ module Rigor
       def file_dependencies
         pooled = @pool_coordinator.collected_dependencies
         pooled.empty? ? @file_dependencies : @file_dependencies.merge(pooled)
+      end
+
+      # ADR-103 — the run's propagated effect graph, or {Effects::EffectTable.empty} when collection did
+      # not run. Reconciled from the sequential and pooled halves exactly as {#file_dependencies} is, then
+      # closed by the post-pool fixpoint in {#assemble_run_diagnostics}.
+      #
+      # This is a **report surface, not a diagnostic one**: nothing here enters the diagnostic stream, and
+      # `rigor check`'s output is identical whether or not it was computed (ADR-102's line).
+      def effect_table
+        @effect_table || Effects::EffectTable.empty
+      end
+
+      # The merged per-file collections behind {#effect_table} — the *direct* summaries, before the graph
+      # closure. #381's snapshot records these, because a diff over direct summaries stays attributable to
+      # the pull request's own lines.
+      def effect_collection
+        pooled = @pool_coordinator.collected_effects
+        collections = @file_effects.merge(pooled).sort_by { |path, _| path.to_s }.map(&:last)
+        collections.reduce(Effects::FileCollection.empty) { |merged, collection| merged.merge(collection) }
       end
 
       # @param configuration [Rigor::Configuration]
@@ -129,6 +150,12 @@ module Rigor
         # diagnostics are byte-identical.
         @record_self_calls = record_self_calls
         @unresolved_self_calls = {}
+        # ADR-103 WD13 — effect collection. Derived from the configuration, never from a flag: the
+        # `effects:` block (or an implicit one, which is how `rigor effects` opts in) is the ONLY switch.
+        # Observational — diagnostics are byte-identical whichever way it resolves.
+        @record_effects = configuration.effects_enabled?
+        @file_effects = {}
+        @effect_table = nil
         # Memoised activation decision for the `call.self-undefined-method` rule (nil = not yet computed).
         # See `self_undefined_rule_active?`.
         @self_undefined_rule_active = nil
@@ -520,6 +547,16 @@ module Rigor
         assemble_run_diagnostics(expansion)
       end
 
+      # ADR-103 WD13 — fail-soft at the run level too: a propagator that raises leaves the table empty and
+      # the run untouched. `Propagator.propagate` already swallows its own failures; this guards the merge.
+      def close_effect_graph
+        return unless @record_effects
+
+        @effect_table = Effects::Propagator.propagate(effect_collection)
+      rescue StandardError
+        @effect_table = Effects::EffectTable.empty
+      end
+
       def assemble_run_diagnostics(expansion, environment: nil)
         # Force the deferred cross-file discovery pre-pass on the analysis (miss) path. Memoised, so the
         # eager force in `#run` (recording / subset modes) makes this a no-op. A warm cache HIT never calls
@@ -544,6 +581,11 @@ module Rigor
         targets = target_files(expansion)
         @analyzed_files = targets
         diagnostics += @pool_coordinator.analyze_files(targets, environment: environment)
+        # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
+        # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
+        # contributes NO diagnostics and its result leaves through `#effect_table`, never through the
+        # stream. Skipped entirely when collection did not run.
+        close_effect_graph
         diagnostics += @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_environment_build_failed_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_synthesized_namespace_diagnostics
@@ -631,10 +673,15 @@ module Rigor
       # share the full run's result key (`run_key_descriptor` keys on the whole expansion, not the
       # subset), so serving one as the other would manufacture a wrong result. Both instead use the
       # store for the RBS-env + plugin-producer tiers, where the incremental win actually lives.
+      # ADR-103 WD13 — an effects run is excluded for the same reason a `record_dependencies` one is: a
+      # cache-served run collects nothing, so `#effect_table` would come back empty from a warm hit. The
+      # sidecar slot that lets the two coexist (summaries beside `return_summaries`, an effects identity
+      # of its own) is #382; until it lands, collection on means the whole-run result cache is off, and
+      # the store still serves the RBS-env and plugin-producer tiers.
       def run_result_cacheable?
         !@cache_store.nil? && !@cache_store.read_only? &&
           @buffer.nil? && @prebuilt.nil? && !pool_mode? &&
-          !@record_dependencies && @analyze_only.nil?
+          !@record_dependencies && !@record_effects && @analyze_only.nil?
       end
 
       # Stable cache key inputs — known before the run: a digest of the resolved configuration, the engine
@@ -1219,13 +1266,28 @@ module Rigor
       # `DependencyRecorder.active? == false`. Recording is observational, so diagnostics are byte-identical
       # either way.
       def analyze_file(path, environment)
-        return analyze_file_body(path, environment) unless @record_dependencies
+        return analyze_with_effects(path, environment) unless @record_dependencies
 
         diagnostics = nil
         record = DependencyRecorder.record_for(path) do
-          diagnostics = analyze_file_body(path, environment)
+          diagnostics = analyze_with_effects(path, environment)
         end
         @file_dependencies[path] = record
+        diagnostics
+      end
+
+      # ADR-103 WD13 — the effect-collection window, in the same shape as the dependency one and nested
+      # inside it so a recording incremental run collects both. Off by default: `effects_enabled?` false
+      # calls the body directly, {Effects::Collector.active?} stays false, and the recorder's sites on the
+      # dispatch path short-circuit on one integer read.
+      def analyze_with_effects(path, environment)
+        return analyze_file_body(path, environment) unless @record_effects
+
+        diagnostics = nil
+        collection = Effects::Collector.collect_for(path) do
+          diagnostics = analyze_file_body(path, environment)
+        end
+        @file_effects[path] = collection
         diagnostics
       end
 
@@ -1237,6 +1299,11 @@ module Rigor
           return parse_diagnostics(path, parse_result)
         end
 
+        # ADR-103 WD13 — hand the effect collector the root the typer is about to walk, so its per-def
+        # scan runs over exactly what was typed. Guarded inside the recorder rather than by `active?`: this
+        # is a per-FILE site, so one `Thread.current` read is already nothing. The per-dispatch site in
+        # `ExpressionTyper#call_type_for` is the one that pays for the integer fast path.
+        Effects::Collector.record_root(parse_result.value)
         scope = seed_project_scope(Scope.empty(environment: environment, source_path: path))
         # ADR-24 slice 4a/4 — record unresolved implicit-self calls during the typing pass ONLY (not
         # CheckRules, whose own `type_of` queries would otherwise re-trigger the choke-point).

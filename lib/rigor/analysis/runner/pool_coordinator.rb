@@ -61,6 +61,11 @@ module Rigor
           # slice's cross-file reads, marshalled back into `#collected_dependencies` for the runner's graph.
           @record_dependencies = record_dependencies
           @collected_dependencies = {}
+          # ADR-103 WD13 — effect collection, derived from the configuration exactly as `Runner` and
+          # `WorkerSession` derive it. A worker's per-file collections marshal back into
+          # `#collected_effects`, so a pooled run's effect graph is the sequential run's graph.
+          @record_effects = configuration.effects_enabled?
+          @collected_effects = {}
           @collect_stats = collect_stats
           @buffer = buffer
           @environment_override = environment_override
@@ -80,6 +85,11 @@ module Rigor
         # `record_dependencies:` and a pool run occurred). The runner folds these into its `file_dependencies`
         # so the incremental session's dependency graph is refreshed whether analysis ran sequential or pooled.
         attr_reader :collected_dependencies
+
+        # ADR-103 WD12 — the per-file {Effects::FileCollection}s the fork pool captured this run (empty
+        # unless the configuration carries an `effects:` block and a pool run occurred). The runner merges
+        # these with its own sequential records before the post-pool fixpoint.
+        attr_reader :collected_effects
 
         # ADR-15 Phase 4b — pool mode is enabled when `@workers > 0`. Editor mode (`buffer:` non-nil)
         # silently overrides pool mode to sequential: per design § "Ractor pool mode", the pool's warm-up
@@ -179,8 +189,12 @@ module Rigor
         # per-worker dependency records back, and the Ractor path additionally lacks the cross-file
         # `project_scope_seed` its worker would need to record complete edges. Without `fork` (Windows) a
         # recording run degrades to sequential, which records correctly through `@analyze_file`.
+        #
+        # An effects run (ADR-103 WD13) is pinned for exactly the same reason — the Ractor messages carry
+        # no side-table channel — and degrades the same way. The degrade is sound rather than merely safe:
+        # the sequential fallback still collects, so the effect graph is complete either way.
         def dispatch_pool(files)
-          if @record_dependencies
+          if @record_dependencies || @record_effects
             return analyze_files_in_fork_pool(files) if Process.respond_to?(:fork)
 
             return analyze_files_sequentially_fallback(
@@ -378,6 +392,7 @@ module Rigor
             # The degraded slice was re-analysed on the parent session, so its dependency records live there,
             # not in a child payload — fold them in alongside the successful children's.
             @collected_dependencies.merge!(session.drain_dependencies) if @record_dependencies
+            @collected_effects.merge!(session.drain_effects) if @record_effects
           end
 
           diagnostics = Array(session.prepare_diagnostics) +
@@ -399,6 +414,9 @@ module Rigor
           results = slice.to_h { |path| [path, session.analyze(path)] }
           payload = { results: results, reporters: session.drain_reporters,
                       dependencies: session.drain_dependencies }
+          # ADR-103 WD13 — the effects slot exists only on a collecting run, so a normal `--workers N` run
+          # marshals exactly the payload it marshalled before the feature existed.
+          payload[:effects] = session.drain_effects if @record_effects
           File.binwrite(out_path, Marshal.dump(payload))
           exit!(0)
         rescue StandardError
@@ -430,6 +448,7 @@ module Rigor
               results_by_path.merge!(payload.fetch(:results))
               merge_worker_reporters(payload.fetch(:reporters))
               @collected_dependencies.merge!(payload.fetch(:dependencies, {})) if @record_dependencies
+              @collected_effects.merge!(payload.fetch(:effects, {})) if @record_effects
             else
               degraded.concat(child[:slice])
             end

@@ -1,0 +1,67 @@
+# Effect-label registry — the shared vocabulary of ADR-103 WD2, normative in
+# `docs/type-specification/effect-labels.md`.
+#
+# Hand-written, NOT generated: every row is a deliberate vocabulary decision. The generated
+# `data/builtins/ruby_core/*.yml` `purity:` facet answers fold-safety, not effects, and is never
+# read as a label source (ADR-103 WD3).
+#
+# `vocabulary` bumps only on a rename or a removal, never on a leaf addition — adding a leaf can
+# never change what a recognised bound admits, because subsumption is a segment-aware prefix test.
+# A renamed or removed spelling is recorded in `retired:` so a snapshot written by an older Rigor
+# still reads.
+vocabulary: 1
+
+labels:
+  # Steins v1, verbatim (rigortype/steins `docs/type-specification/effects.md`). Shared vocabulary:
+  # a policy naming these labels must read the same against a PHP service and a Rails app.
+  - exit
+  - ffi
+  - global.read
+  - global.write
+  - io
+  - io.db
+  - io.fs
+  - io.fs.read
+  - io.fs.write
+  - io.input
+  - io.ipc
+  - io.net
+  - io.net.http
+  - io.output
+  - io.output.buffer
+  - io.output.header
+  - io.output.stdout
+  - io.output.stderr
+  - io.process
+  - io.signal
+  - mutate
+  - mutate.local
+  - nondet
+  - nondet.random
+  - nondet.time
+
+  # Ruby leaves under `mutate` (Steins ADR-0055's names; ADR-103 WD14). `mutate.self` is self's
+  # state, `mutate.instance` a receiver that is neither self nor frame-owned, `mutate.static`
+  # class-level state. Unknown ownership taints rather than producing a bare `mutate`.
+  - mutate.self
+  - mutate.instance
+  - mutate.static
+
+  # Proposed shared core leaves, to raise with Steins: a `SELECT` is a read whichever language
+  # issued it, an `INSERT` a write, `BEGIN`/`COMMIT` neither.
+  - io.db.read
+  - io.db.write
+  - io.db.transaction
+
+  # Application-meaning roots, small and shared. These are the labels a policy actually names
+  # ("presenters do not enqueue jobs") and the ones `tolerated:` grips, so they must spell the same
+  # in Steins and Rigor.
+  - telemetry
+  - email.send
+  - job.enqueue
+  - cache.read
+  - cache.write
+
+# Retired spellings: `old.label: [replacement, ...]`. Empty at vocabulary 1 — nothing has been
+# renamed or removed yet.
+retired: {}

@@ -116,6 +116,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (direct slice shipped; WD4 transitive design added 2026-07-19, slice queued; budget ids deferred) |
 | ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions) |
 | ADR-102 | [The unused-code reachability report is a report, not a diagnostic](102-unused-code-reachability-report.md) | Proposed (decisions for the `rigor unused` slices; all eight working decisions settled) |
+| ADR-103 | [Effect labels: an opt-in, snapshot-first effect system](103-effect-labels.md) | Proposed (design note landed 2026-08-16; nothing implemented; four items open at Proposed) |
 
 ## Adding a New ADR
 

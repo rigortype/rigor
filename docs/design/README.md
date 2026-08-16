@@ -32,7 +32,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-05-22 | [VSCode extension — first-party marketplace client for `rigor lsp`](20260522-vscode-extension.md) | Draft |
 | 2026-06-01 | [Plugin mechanism — pre-1.0 review (過不足 / ペインポイント / ボイラープレート)](20260601-plugin-mechanism-pre-1.0-review.md) | Research (pre-1.0 optimization; would inform an [ADR-2](../adr/2-extension-api.md) revision) |
 | 2026-06-02 | [Plugin boilerplate reduction — phased plan](20260602-plugin-boilerplate-reduction-plan.md) | Plan (implements review §1; tied to [ADR-37](../adr/37-plugin-interface-segregation.md)) |
-| 2026-08-16 | [Effect labels — an opt-in effect system for Rigor](20260816-effect-labels.md) | Draft (Steins / PHPStan-RFC model transposed to Ruby; would graduate into an ADR + `docs/type-specification/effect-labels.md`) |
+| 2026-08-16 | [Effect labels — an opt-in effect system for Rigor](20260816-effect-labels.md) | Draft (decisions fixed by [ADR-103](../adr/103-effect-labels.md); would graduate into `docs/type-specification/effect-labels.md`) |
 
 ## Adding a design note
 

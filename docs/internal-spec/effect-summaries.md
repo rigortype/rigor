@@ -220,16 +220,23 @@ Edge resolution is memoised on `(receiver class, kind, selector)`, and the trans
 
 - `proven(m) = direct(m) ∪ ⋃ proven(callee)`
 - `undischarged(m) = undischarged_direct(m) ∪ ⋃ undischarged(callee)`
+- `declared(m) = declared_direct(m) ∪ ⋃ declared(callee)`
 - `exhaustive(m) = direct_exhaustive(m) ∧ ⋀ exhaustive(callee)`
 - `causes(m) = direct_causes(m) ∪ ⋃ causes(callee)`
 
 `undischarged_direct(m)` is the join of the direct summary's origin bundles that `effects.tolerated:` does **not** discharge (§ Discharge by policy). Carrying it as a second lane of the same fixpoint is what makes per-origin discharge cost nothing structurally: an origin belongs to exactly one unit's direct summary, so the transitive union of surviving bundles is the closure of the seeded ones, and no method ever has to materialise a set of transitive origins. With no `tolerated:` list the two lanes are seeded identically and the second costs one allocation-free join per edge visit.
+
+The **declared lane is a lane of this fixpoint, not a per-method fact** ([`effect-labels.md`](../type-specification/effect-labels.md) § Effect summaries): it travels edges exactly as the proven one does, so a controller two hops above an attributed gem call reads the claim rather than only the taint that call left behind. It is joined into itself and never into `proven` — that separation is why a claim can never produce a finding, and it is a property of the fixpoint rather than of any consumer's care.
+
+Every lane is a `LabelSet` join, which returns the receiver untouched when the source adds nothing, so a converged region costs a comparison per lane and no allocation.
 
 The lattice is finite (label sets over a closed vocabulary × one bit × a closed cause enum) and every step is monotone, so a recursive or mutually recursive cycle converges on its own. **No recursion cap is used or wanted here** — unlike the return-type walk's Kleene iteration, there is no widening to force.
 
 A key's closure moving can only move the closures of the methods that **call** it, so each pass re-visits exactly the callers of what changed in the previous one — never the whole table. Joining a lane along an edge MUST NOT allocate when it adds nothing, which is what makes a pass over a converged region free.
 
 Sorted iteration order is what makes a pooled run and a sequential run produce the same table rather than merely equivalent ones. (The lattice is finite and every step monotone, so the least fixpoint is unique and visit order could not change it; the sorted pass makes the *work* reproducible too.)
+
+The lanes on the table are **raw**. The rendering rule — a declared label the same row's proven set already admits is dropped, because the proven lane says strictly more — is applied where output is produced (`EffectTable::Entry#rendered_declared`, `Snapshot.entry_for`) and never to the table, since a further join has to see what was actually declared.
 
 The result is a `Rigor::Effects::EffectTable` on the runner (`Runner#effect_table`), with the merged direct collections available separately (`Runner#effect_collection`). **It is not a diagnostic**: it never enters `rigor check`'s stream, and the run's exit code is identical whether or not it was computed ([ADR-102](../adr/102-unused-code-reachability-report.md)'s report-versus-diagnostic line).
 
@@ -293,7 +300,7 @@ The record on disk stays undischarged in both directions, and the collector attr
 
 `effects.attribution:` is consulted in `Effects::UnitScan`, on the same `(owner, selector)` the catalogue is looked up under — the owner the syntax names for a constant-path receiver, and the class the typer projected the receiver to otherwise. It runs **beside** the catalogue rather than instead of it and never claims the call: a catalogued row states what Ruby's own surface proves, an attribution states what the project claims about a body Rigor never read, and a call that is both honestly reads as both.
 
-What it produces is a bundle in `Summary#declared_bundles` under an `Origin` of source `:attribution`, plus a `plugin-attribution` taint at the site. Never a proven label, never a discharged taint (ADR-103 WD6). Two consequences fall out and both are load-bearing: an envelope can never fire because of an attribution, and a method whose only colour is attributed reads "∅, and possibly more" rather than "clean".
+What it produces is a bundle in `Summary#declared_bundles` under an `Origin` of source `:attribution`, plus a `plugin-attribution` taint at the site. Never a proven label, never a discharged taint (ADR-103 WD6). Two consequences fall out and both are load-bearing: an envelope can never fire because of an attribution, and a method whose only colour is attributed reads "∅, and possibly more" rather than "clean". The claim then propagates, because `declared` is a lane of the fixpoint above: every caller that reaches the attributed call carries it.
 
 The table is built once per run from the configuration and carried on the collection window (`Collector.collect_for(path, attribution:)`), so a fork-pool worker scans under exactly the claims the parent does. It participates in the effects cache identity through the `effects:` digest, so editing the table re-collects rather than reusing summaries coloured under the old one.
 
@@ -333,7 +340,7 @@ reach:
     effects: ["io.db.read", "io.net.http", "job.enqueue"]
 ```
 
-Per row: `effects:` is the proven lane, `declared:` the `≤` lane (always empty until [#386](https://github.com/rigortype/rigor/issues/386)), `exhaustive:` the bit, and `unresolved:` why it is false. A field the reader can default is omitted — `declared:` when empty, `exhaustive:` when true, `unresolved:` when there is nothing to say.
+Per row: `effects:` is the proven lane, `declared:` the `≤` lane, `exhaustive:` the bit, and `unresolved:` why it is false. Both label lanes are read at **that table's** reading — `methods:` records the direct declared set, `reach:` the transitive one — and the rendering rule drops a declared label the row's own `effects:` already admits. A field the reader can default is omitted — `declared:` when empty, `exhaustive:` when true, `unresolved:` when there is nothing to say.
 
 `unresolved:` carries the **taint causes**, rendered `cause` or `cause(detail)`, not call names: the collector keeps causes, and for the causes that have a detail the detail already is the call name (`unresolved-self-call(save!)`).
 
@@ -342,7 +349,7 @@ Per row: `effects:` is the proven lane, `declared:` the `≤` lane (always empty
 | Table | Summary | Membership |
 | --- | --- | --- |
 | `methods:` | **direct** — the unit's own body, block literals and catalogued / attributed callees; never a project callee, which is an edge | every unit the run collected |
-| `reach:` | **transitive** — the closure the propagator computed | every unit defined in a file matching `effects.snapshot.reach:` |
+| `reach:` | **transitive** — the closure the propagator computed, in both label lanes | every unit defined in a file matching `effects.snapshot.reach:` |
 
 Direct is what keeps a diff attributable: an entry moves only when its own lines, the catalogue or an attribution moved. Reach is where a leaf change is *supposed* to fan out, and the fan-out is the information.
 

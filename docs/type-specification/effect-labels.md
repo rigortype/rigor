@@ -94,6 +94,10 @@ An **effect summary** describes one method. It carries two lanes and one bit:
 
 **Diagnostics read the proven lane only.** A non-exhaustive summary renders as "these effects, and possibly more" and MUST NOT produce a finding on its own. This is the robustness principle applied to effects ([robustness-principle.md](robustness-principle.md)): as strict as proven, never as strict as feared.
 
+**Declared labels travel call edges exactly as proven ones do**, monotone to the same fixpoint: a method's declared lane is what its own body claims joined with the declared lanes of everything it calls. A controller two hops above an attributed `Net::HTTP.get` therefore reads `≤ io.net.http` rather than only "and possibly more" — a claim that stopped at the method that made the call would answer no question anyone asks. The two lanes never mix: a declared label MUST NOT enter the proven lane at any distance, which is what keeps a claim from ever producing a finding.
+
+**Rendering rule.** Where a summary is *printed* — the report, the snapshot, a diff — a declared label the same summary's proven lane already admits is dropped: the proven lane says strictly more, and `[io.net] ≤ [io.net.http]` reads as two facts where there is one. The rule applies to output only; the lanes themselves are kept as computed, because a further join has to see what was declared.
+
 Every label in a summary carries an **origin** — the pair of the callee-or-construct it came from and the source that coloured it. Origins are line-free and are what policy discharge operates on; the flat label set is a projection of them.
 
 ### Taint causes
@@ -209,6 +213,7 @@ Three properties follow, and they are the whole point of the channel:
 
 - **Attributed labels never enter the proven lane.** Diagnostics read the proven lane only, so no envelope can fire because of an attribution, whatever it claims.
 - **Attribution never discharges the taint.** It is an unchecked claim about code the analyzer did not read, so the summary reads "declared this, and possibly more" ([ADR-103](../adr/103-effect-labels.md) WD6). A first-party plugin's framework-derived attribution is a different, higher tier and does discharge; a project's YAML table does not.
+- **The claim propagates.** The declared lane travels call edges (§ Effect summaries), so every caller that reaches the attributed call reads the same `≤` bound — in the report and in the snapshot's `reach:` table, where `methods:` keeps each method's own claim so its diff stays attributable.
 - **A label the registry does not know is reported, not rejected.** The attribution stands as written — the taint already says the reading is incomplete — and `effect.unknown-label` says the vocabulary cannot explain it.
 
 ## Discharge by policy

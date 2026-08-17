@@ -23,9 +23,23 @@ module Rigor
       # discharges removed at their source (#385; {Discharge}) — what a *judgment* reads, where `proven`
       # is what the record holds. The two are the same set for a project that tolerates nothing, and
       # `--no-tolerated-effects` is the switch that makes a judgment read `proven` anyway.
-      class Entry < Data.define(:key, :direct, :proven, :undischarged, :exhaustive, :causes, :edges)
-        def initialize(undischarged: nil, **rest)
-          super(undischarged: undischarged || rest.fetch(:proven), **rest)
+      #
+      # `declared` is the transitive `≤` lane: it travels the same edges as `proven` (ADR-103 WD1), so a
+      # caller two hops above an attributed gem call reads the claim rather than only the taint it left.
+      # The lanes are kept **raw** here — a declared label a proven one already subsumes is dropped where
+      # output is rendered ({LabelSet#excluding_subsumed_by}), never in the table, because a further join
+      # has to see what was actually declared.
+      class Entry < Data.define(:key, :direct, :proven, :undischarged, :declared, :exhaustive, :causes,
+                                :edges)
+        def initialize(undischarged: nil, declared: nil, **rest)
+          super(undischarged: undischarged || rest.fetch(:proven), declared: declared || LabelSet::EMPTY,
+                **rest)
+        end
+
+        # The declared labels worth printing beside `proven` — the rendering rule, in one place so the
+        # report and the snapshot cannot disagree about it.
+        def rendered_declared
+          declared.excluding_subsumed_by(proven)
         end
 
         def exhaustive?

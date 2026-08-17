@@ -4,6 +4,7 @@ require "stringio"
 
 require "rigor"
 require "rigor/analysis/runner"
+require "rigor/effects/snapshot"
 require "rigor/cli/effects_renderer"
 require "rigor/cli/effects_report"
 
@@ -178,6 +179,70 @@ RSpec.describe "the effects policy configuration" do
       end
 
       expect(text).to include("Gateways::Client#fetch: [] ≤ [io.net.http] …?\n")
+    end
+  end
+
+  # ADR-103 WD1: "declared labels travel call edges exactly as proven ones do, monotone to the same
+  # fixpoint". `Controllers::Orders#create` → `Gateways::Service#place` → `Gateways::Client#fetch` →
+  # the attributed `Acme::Http.get`, so the claim has to arrive two hops up.
+  describe "the declared lane along call edges" do
+    def snapshot_for(effects, reach: ["app/controllers/**/*.rb"])
+      merged = effects.merge("snapshot" => { "reach" => reach })
+      Dir.chdir(fixture) do
+        runner = Rigor::Analysis::Runner.new(configuration: configuration(merged), cache_store: nil)
+        runner.run(["app"])
+        Rigor::Effects::Snapshot.build(table: runner.effect_table, configuration: configuration(merged),
+                                       sources: runner.effect_sources)
+      end
+    end
+
+    def report_rows(effects)
+      run(effects) { |_diagnostics, runner| Rigor::CLI::EffectsReport.build(runner.effect_table).rows }
+    end
+
+    it "carries an attributed claim to a caller two hops above it" do
+      row = report_rows(policy).find { |candidate| candidate.key == "Controllers::Orders#create" }
+
+      expect(row.declared).to eq(["io.net.http"])
+      expect(row.effects).to eq([])
+      expect(row).not_to be_exhaustive
+    end
+
+    # `methods:` is the DIRECT summary and `reach:` the transitive one, and the declared lane follows
+    # each table's own reading — otherwise a `methods:` diff would stop being attributable to the lines
+    # that changed.
+    it "records the direct claim under methods: and the transitive one under reach:" do
+      snapshot = snapshot_for(policy)
+
+      # The controller's own body claims nothing, so its direct summary is empty and `methods:` leaves it
+      # out entirely; the method that made the attributed call is where the claim is attributable.
+      expect(snapshot.methods).not_to have_key("Controllers::Orders#create")
+      expect(snapshot.methods["Gateways::Client#fetch"].declared).to eq(["io.net.http"])
+      expect(snapshot.reach["Controllers::Orders#create"].declared).to eq(["io.net.http"])
+      expect(snapshot.reach["Controllers::Orders#create"].effects).to eq([])
+    end
+
+    # However far it travels, a claim is still a claim: an envelope on the middle hop reads the proven
+    # lane and finds nothing there.
+    it "never enters the proven lane on the way, so the io.db envelope on the middle hop stays silent" do
+      expect(exceeded(policy).map(&:first)).not_to include("Gateways::Service#place")
+    end
+
+    # The rendering rule: attributing what the catalogue already proves adds no information, and
+    # `[io.fs.read] ≤ [io.fs.read]` reads as two facts where there is one.
+    it "drops a declared label the proven lane already admits" do
+      redundant = policy("attribution" => policy["attribution"].merge("File.read" => ["io.fs.read"]))
+      row = report_rows(redundant).find { |candidate| candidate.key == "Presenters::User#render" }
+
+      expect(row.effects).to eq(["io.fs.read"])
+      expect(row.declared).to eq([])
+      expect(snapshot_for(redundant).methods["Presenters::User#render"].declared).to eq([])
+    end
+
+    it "keeps a declared label no proven label subsumes" do
+      row = report_rows(policy).find { |candidate| candidate.key == "Gateways::Client#fetch" }
+
+      expect(row.declared).to eq(["io.net.http"])
     end
   end
 

@@ -204,7 +204,8 @@ module Rigor
           table.each_with_object({}) do |entry, out|
             next if !full && omit?(entry.direct.trivial?, entry.direct)
 
-            out[entry.key] = entry_for(entry.key, entry.direct.proven, entry.direct)
+            out[entry.key] = entry_for(entry.key, entry.direct.proven, entry.direct,
+                                       declared: entry.direct.declared)
           end
         end
 
@@ -219,7 +220,8 @@ module Rigor
             next unless entry_point?(entry.key, globs, sources, project_root)
             next if !full && omit?(entry.trivial?, entry.direct)
 
-            out[entry.key] = entry_for(entry.key, entry.proven, entry.direct, exhaustive: entry.exhaustive?,
+            out[entry.key] = entry_for(entry.key, entry.proven, entry.direct, declared: entry.declared,
+                                                                              exhaustive: entry.exhaustive?,
                                                                               causes: entry.causes)
           end
         end
@@ -237,15 +239,19 @@ module Rigor
           absolute.start_with?(root) ? absolute[root.length..] : absolute
         end
 
-        # The declared lane comes off the direct summary in both tables: it is an upper bound on the
-        # method's own code — what `effects.attribution:` claims about the callees it names (#385) — so
-        # there is nothing transitive to close it over. What travels up the graph from an attributed call
-        # is its taint, and that is carried by `exhaustive:` already.
-        def entry_for(key, proven, direct, exhaustive: direct.exhaustive?, causes: direct.causes)
+        # Each table takes the lanes at ITS own reading: `methods:` records the direct summary, so its
+        # `declared:` is what this method's own body claims, and `reach:` records the transitive one, so
+        # its `declared:` is the fixpoint's — a controller reaching an attributed gem call through two
+        # services carries the claim, exactly as it carries the proven labels.
+        #
+        # The rendering rule applies here and only here: a declared label the row's own proven set already
+        # admits says nothing more, so it is dropped rather than printed as a second fact. The table keeps
+        # both lanes raw.
+        def entry_for(key, proven, direct, declared:, exhaustive: direct.exhaustive?, causes: direct.causes)
           Entry.new(
             key: key,
             effects: proven.to_a,
-            declared: direct.declared.to_a,
+            declared: declared.excluding_subsumed_by(proven).to_a,
             exhaustive: exhaustive,
             unresolved: exhaustive ? [].freeze : render_causes(causes)
           )

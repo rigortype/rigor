@@ -15,12 +15,11 @@ module Rigor
       # `direct` is what this method's own body contributed, per origin, which is the attributable half a
       # snapshot records (#381).
       #
-      # `declared` is the `≤` lane: what a source Rigor trusts but did not verify *claims* about calls in
-      # this method's own body — today the project's `effects.attribution:` table (#385). It is printed
-      # apart from `effects` and never folded into it, because the two answer different questions: one is
-      # proven, the other is asserted. It stays direct rather than transitive for the same reason the
-      # snapshot's is (`Snapshot.entry_for`): an upper bound is a statement about the code that made the
-      # call, and the taint it leaves behind is what carries "and possibly more" up the graph.
+      # `declared` is the `≤` lane, transitive like `effects`: what a source Rigor trusts but did not
+      # verify *claims* this method reaches — today the project's `effects.attribution:` table (#385). It
+      # is printed apart from `effects` and never folded into it, because the two answer different
+      # questions: one is proven, the other is asserted. A declared label the proven lane already admits
+      # is dropped here, where output is rendered; the table keeps both lanes raw.
       class Row < Data.define(:key, :effects, :declared, :exhaustive, :causes, :direct)
         def exhaustive?
           exhaustive
@@ -38,7 +37,7 @@ module Rigor
         Row.new(
           key: entry.key,
           effects: entry.proven.to_a,
-          declared: entry.direct.declared.to_a,
+          declared: entry.rendered_declared.to_a,
           exhaustive: entry.exhaustive?,
           causes: entry.causes,
           direct: entry.direct.bundles.to_h { |origin, labels| [origin.to_s, labels.to_a] }.freeze

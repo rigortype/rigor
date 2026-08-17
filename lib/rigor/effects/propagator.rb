@@ -26,13 +26,19 @@ module Rigor
     # Propagation is graph-only: it reads no source, types nothing, and touches no `Scope`. It is
     # fail-soft as a whole — an exception yields the empty table rather than failing the run.
     #
-    # **Two proven lanes, one fixpoint** (#385). Beside `proven` the fixpoint carries `undischarged` — the
-    # same closure computed from each unit's *undischarged* direct bundles, i.e. with every origin bundle
-    # `effects.tolerated:` discharges dropped at the seed ({Discharge}). Per-origin discharge needs
-    # nothing more than that: an origin belongs to exactly one unit's direct summary, so the transitive
-    # union of surviving bundles IS the closure of the seeded ones, and the judgment never has to
-    # materialise a per-method set of transitive origins. With no `tolerated:` list the policy is inert,
-    # the seed is identical, and the second lane costs one extra `equal?`-true join per visit.
+    # **Three label lanes, one fixpoint** (#385), each monotone and each joined along the same edges:
+    #
+    # - `proven` — what the analyzer established.
+    # - `undischarged` — the same closure computed from each unit's *undischarged* direct bundles, i.e.
+    #   with every origin bundle `effects.tolerated:` discharges dropped at the seed ({Discharge}).
+    #   Per-origin discharge needs nothing more than that: an origin belongs to exactly one unit's direct
+    #   summary, so the transitive union of surviving bundles IS the closure of the seeded ones, and the
+    #   judgment never has to materialise a per-method set of transitive origins. With no `tolerated:`
+    #   list the policy is inert, the seed is identical, and the lane costs one `equal?`-true join.
+    # - `declared` — the `≤` lane. It travels call edges **exactly as the proven lane does** (ADR-103
+    #   WD1): a controller two hops above an attributed `Net::HTTP.get` reads `≤ io.net.http`, not merely
+    #   "and possibly more". It is joined into itself and never into `proven`, which is the whole
+    #   separation — a claim stays a claim however far it propagates.
     module Propagator
       NO_EDGES = [].freeze
       private_constant :NO_EDGES
@@ -73,6 +79,7 @@ module Rigor
           {
             proven: summary.proven,
             undischarged: discharge.inert? ? summary.proven : discharge.undischarged(summary.bundles),
+            declared: summary.declared,
             exhaustive: summary.exhaustive?, causes: Set.new(summary.causes)
           }
         end
@@ -123,19 +130,11 @@ module Rigor
         source = state[callee]
         return false if source.nil? || target.equal?(source)
 
-        # The two label lanes are unrolled rather than looped: this runs once per edge per visit, and a
-        # literal array of lane names would allocate one per call for nothing.
-        changed = false
-        proven = target[:proven].join(source[:proven])
-        unless proven == target[:proven]
-          target[:proven] = proven
-          changed = true
-        end
-        undischarged = target[:undischarged].join(source[:undischarged])
-        unless undischarged == target[:undischarged]
-          target[:undischarged] = undischarged
-          changed = true
-        end
+        # Each lane is named literally rather than looped over an array: this runs once per edge per
+        # visit, and a literal array of lane names would allocate one per call for nothing.
+        changed = join_lane(target, source, :proven)
+        changed = true if join_lane(target, source, :undischarged)
+        changed = true if join_lane(target, source, :declared)
         if target[:exhaustive] && !source[:exhaustive]
           target[:exhaustive] = false
           changed = true
@@ -143,6 +142,16 @@ module Rigor
         causes = target[:causes]
         source[:causes].each { |cause| changed = true if causes.add?(cause) }
         changed
+      end
+
+      # Joins one label lane in place along an edge, answering whether it moved. {LabelSet#join} returns
+      # the receiver untouched when the source adds nothing, so a converged region costs a comparison and
+      # no allocation at all.
+      def join_lane(target, source, lane)
+        joined = target[lane].join(source[lane])
+        moved = joined != target[lane]
+        target[lane] = joined if moved
+        moved
       end
 
       def build_entries(summaries, edges, state)
@@ -153,6 +162,7 @@ module Rigor
             direct: summary,
             proven: closed[:proven],
             undischarged: closed[:undischarged],
+            declared: closed[:declared],
             exhaustive: closed[:exhaustive],
             causes: closed[:causes].sort_by { |cause, detail| [cause, detail.to_s] }.freeze,
             edges: edges.fetch(key, NO_EDGES)
@@ -160,7 +170,8 @@ module Rigor
         end
       end
 
-      private_class_method :resolve_edges, :seed, :iterate, :reverse_edges, :absorb, :build_entries
+      private_class_method :resolve_edges, :seed, :iterate, :reverse_edges, :absorb, :join_lane,
+                           :build_entries
 
       # The class graph a run's collections describe, and the edge resolution over it. Built once per
       # propagation; every lookup is a Hash read.

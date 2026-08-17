@@ -92,6 +92,20 @@ module Rigor
         self.class.new(@labels + others)
       end
 
+      # The members `other` does not already admit — the **declared lane's rendering rule**. A declared
+      # `io.net.http` beside a proven `io.net` says nothing the proven lane did not already say more
+      # strongly, so a renderer drops it rather than printing `[io.net] ≤ [io.net.http]`, which reads as
+      # two facts where there is one. Applied where output is produced, never to the table: the lanes
+      # themselves stay raw, because a later join has to see what was actually declared.
+      def excluding_subsumed_by(other)
+        return self if @top || other.empty?
+
+        kept = @labels.reject { |label| other.admits?(label) }
+        return self if kept.length == @labels.length
+
+        kept.empty? ? EMPTY : self.class.new(kept)
+      end
+
       # Whether every member of this set is admitted by `bound_set` — the envelope check, modulo
       # the policy discharge that happens at judgment time. {TOP} is bounded only by {TOP}.
       def subsumed_by?(bound_set)

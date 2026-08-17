@@ -202,7 +202,11 @@ what a source Rigor trusts but did not verify *claims* the
 method does, today the `effects.attribution:` table you wrote
 for gem methods it cannot see. It is printed apart from the
 proven labels and never folded in among them, because the two
-answer different questions.
+answer different questions. It follows call edges exactly as
+the proven labels do, so a controller two hops above an
+attributed gem call carries the claim rather than only a
+"possibly more"; a declared label the proven list already
+covers is not printed twice.
 
 ```
 Gateways::Client#fetch: [] ≤ [io.net.http] …?
@@ -283,6 +287,10 @@ accessor's; `--full` records everything. The header carries
 the Rigor and vocabulary versions and a digest of your
 `effects:` block, so an upgrade or a policy edit shows up as a
 *regeneration event* rather than as silent reinterpretation.
+
+Under `methods:` the declared lane is what that method's own
+body claims; under `reach:` it is the transitive claim, like
+the proven labels beside it.
 
 `check` prints one line per difference: `+ label` / `- label`
 for the proven lane, `≤+` / `≤-` for the declared one,

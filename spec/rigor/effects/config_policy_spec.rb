@@ -200,10 +200,13 @@ RSpec.describe "the effects policy configuration" do
       run(effects) { |_diagnostics, runner| Rigor::CLI::EffectsReport.build(runner.effect_table).rows }
     end
 
+    # `io.db` rides beside it since #386: the controller's own call site imports the `Gateways::*`
+    # convention bound from `Gateways::Service#place`, and the attributed `io.net.http` travels the same
+    # lane from two hops down. Both are claims, and neither is proven.
     it "carries an attributed claim to a caller two hops above it" do
       row = report_rows(policy).find { |candidate| candidate.key == "Controllers::Orders#create" }
 
-      expect(row.declared).to eq(["io.net.http"])
+      expect(row.declared).to eq(["io.db", "io.net.http"])
       expect(row.effects).to eq([])
       expect(row).not_to be_exhaustive
     end
@@ -216,9 +219,12 @@ RSpec.describe "the effects policy configuration" do
 
       # The controller's own body claims nothing, so its direct summary is empty and `methods:` leaves it
       # out entirely; the method that made the attributed call is where the claim is attributable.
-      expect(snapshot.methods).not_to have_key("Controllers::Orders#create")
+      # The controller's own body claims `io.db` directly — the call-site import of #386 is a fact about
+      # the line it is written on — but the transitive `io.net.http` two hops down is not, which is the
+      # direct-versus-reach split this example fixes.
+      expect(snapshot.methods["Controllers::Orders#create"].declared).to eq(["io.db"])
       expect(snapshot.methods["Gateways::Client#fetch"].declared).to eq(["io.net.http"])
-      expect(snapshot.reach["Controllers::Orders#create"].declared).to eq(["io.net.http"])
+      expect(snapshot.reach["Controllers::Orders#create"].declared).to eq(["io.db", "io.net.http"])
       expect(snapshot.reach["Controllers::Orders#create"].effects).to eq([])
     end
 

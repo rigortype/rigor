@@ -46,10 +46,11 @@ module Rigor
           exhaustive
         end
 
-        # Whether the report omits this row by default: exhaustive, and proving nothing beyond frame-local
-        # mutation. `--full` lists it anyway.
+        # Whether the report omits this row by default: exhaustive, proving nothing beyond frame-local
+        # mutation, and claiming nothing the proven lane does not already admit ({Summary#trivial?} for
+        # the reasoning behind the declared half). `--full` lists it anyway.
         def trivial?
-          exhaustive && proven.subsumed_by?(Summary::TRIVIAL_BOUND)
+          exhaustive && proven.subsumed_by?(Summary::TRIVIAL_BOUND) && rendered_declared.empty?
         end
       end
 

@@ -25,7 +25,8 @@ RSpec.describe "the `effect.*` diagnostic taxonomy" do
 
   it "implements exactly the ids the taxonomy calls implemented" do
     expect(implemented.sort).to eq(
-      ["effect.annotations-unchecked", "effect.envelope-exceeded", "effect.unknown-label"]
+      ["effect.annotations-unchecked", "effect.envelope-exceeded", "effect.liskov-widened",
+       "effect.unknown-label"]
     )
   end
 

@@ -20,6 +20,7 @@ require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
 require_relative "../effects/attribution"
 require_relative "../effects/collector"
+require_relative "../effects/envelope_index"
 require_relative "../effects/identity"
 require_relative "../effects/propagator"
 require_relative "../inference/parameter_inference_collector"
@@ -204,6 +205,10 @@ module Rigor
         # ADR-103 WD6 / #385 — the project's `effects.attribution:` table, built once and carried on the
         # collection window so a fork-pool worker scans under the same claims the parent does.
         @effect_attribution = Effects::Attribution.build(configuration.effects_attribution)
+        # ADR-103 WD6 / #386 — the call-site envelope index, built lazily off the run's environment
+        # (`#effect_envelope_index`) because the strata it reads include the built RBS one.
+        @effect_envelope_index = nil
+        @effect_envelope_index_env = nil
         # ADR-103 WD1 invariant 3 / #385 — `--no-tolerated-effects`, the audit switch. It changes the
         # JUDGMENT only: collection, the propagated table and the cache identity are all untouched, so an
         # audit run and an ordinary one share a cache entry and differ solely in which lane the envelope
@@ -705,6 +710,10 @@ module Rigor
           discovery: -> { envelope_discovery_tables(expansion) },
           sources: @in_memory_sources,
           unit_sources: effect_sources,
+          # ADR-103 WD1 / #386 — the nominal relation `effect.liskov-widened` reads, from the collector's
+          # own as-written superclass table, so the Liskov check and the closed-world proven lane resolve
+          # the same ancestry. Lazy: only a project that declared an envelope pays the merge.
+          ancestry: -> { effect_collection.superclasses },
           apply_tolerated: !@no_tolerated_effects
         ).diagnostics
       end
@@ -1496,12 +1505,32 @@ module Rigor
         return analyze_file_body(path, environment) unless @record_effects
 
         diagnostics = nil
-        collection = Effects::Collector.collect_for(path, attribution: @effect_attribution) do
+        collection = Effects::Collector.collect_for(
+          path, attribution: @effect_attribution, envelopes: effect_envelope_index(environment)
+        ) do
           diagnostics = analyze_file_body(path, environment)
         end
         @file_effects[path] = collection
         diagnostics
       end
+
+      # ADR-103 WD6 / #386 — the envelopes a call site may import as a `≤` bound, built once per process
+      # over the first environment the analysis resolves and reused for every later file. A worker builds
+      # its own from the same configuration and the same signature content ({WorkerSession}), so the two
+      # agree without a channel to keep in sync.
+      #
+      # Memoised on the environment's identity rather than unconditionally: a run that resolves its
+      # environment lazily hands `nil` to the first files, and an index built from `nil` would silently
+      # pin the whole run to the strata a loader-less build can read.
+      def effect_envelope_index(environment)
+        return @effect_envelope_index if @effect_envelope_index && @effect_envelope_index_env.equal?(environment)
+
+        @effect_envelope_index_env = environment
+        @effect_envelope_index = Effects::EnvelopeIndex.build(
+          configuration: @configuration, environment: environment
+        )
+      end
+      private :effect_envelope_index
 
       def analyze_file_body(path, environment) # rubocop:disable Metrics/MethodLength
         parse_result = parse_source(path)

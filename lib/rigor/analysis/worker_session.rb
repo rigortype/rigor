@@ -12,6 +12,7 @@ require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
 require_relative "../effects/attribution"
 require_relative "../effects/collector"
+require_relative "../effects/envelope_index"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
@@ -167,13 +168,25 @@ module Rigor
         return analyze_body(path) unless @record_effects
 
         diagnostics = nil
-        collection = Effects::Collector.collect_for(path, attribution: @effect_attribution) do
+        collection = Effects::Collector.collect_for(
+          path, attribution: @effect_attribution, envelopes: effect_envelope_index
+        ) do
           diagnostics = analyze_body(path)
         end
         @file_effects[path] = collection
         diagnostics
       end
       private :analyze_with_effects
+
+      # ADR-103 WD6 / #386 — the worker-side mirror of `Runner#effect_envelope_index`. Derived from the
+      # same configuration and the session's own environment, so a worker's `≤` lane is the one the
+      # parent would have computed for the same file.
+      def effect_envelope_index
+        @effect_envelope_index ||= Effects::EnvelopeIndex.build(
+          configuration: @configuration, environment: @environment
+        )
+      end
+      private :effect_envelope_index
 
       def analyze_body(path)
         parse_result = parse_source(path)

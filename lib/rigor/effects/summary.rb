@@ -70,11 +70,17 @@ module Rigor
       end
 
       # Whether this summary is worth showing at all: an exhaustive method whose whole proven footprint is
-      # frame-local mutation. `mutate.local` is tolerated by every envelope (`%a{pure}` included), so a
-      # method that only mutates what its own frame allocated reads as pure for reporting purposes. The
-      # report omits these unless `--full` is given; the snapshot of #381 omits them from `methods:`.
+      # frame-local mutation and which claims nothing. `mutate.local` is tolerated by every envelope
+      # (`%a{pure}` included), so a method that only mutates what its own frame allocated reads as pure
+      # for reporting purposes. The report omits these unless `--full` is given; the snapshot of #381
+      # omits them from `methods:`.
+      #
+      # A surviving DECLARED label makes the row non-trivial (#386): `≤ io.db` is exactly the kind of
+      # thing a reviewer reads a report or a snapshot diff for, and dropping the row would say "clean"
+      # about a method that claims otherwise. "Surviving" is the rendering rule — a declared label the
+      # proven lane already admits says nothing new and cannot rescue a row on its own.
       def trivial?
-        @exhaustive && @proven.subsumed_by?(TRIVIAL_BOUND)
+        @exhaustive && @proven.subsumed_by?(TRIVIAL_BOUND) && @declared.excluding_subsumed_by(@proven).empty?
       end
 
       # Union in every lane: bundles join per origin, the declared lane joins, the exhaustiveness bit ANDs,

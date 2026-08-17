@@ -84,7 +84,7 @@ The registry carries a `vocabulary` version, and the rules that govern it follow
 
 ## Effect summaries
 
-> **Partly implemented as of this writing.** The proven lane, the exhaustiveness bit and the taint causes are computed by the collector of [#379](https://github.com/rigortype/rigor/issues/379) whenever the `effects:` block is present, and `rigor effects` prints them; how they are produced is [`effect-summaries.md`](../internal-spec/effect-summaries.md). Their **catalogued** origins come from the hand-audited `data/effects/core.yml` of [#380](https://github.com/rigortype/rigor/issues/380), with per-class default postures and argument-dependent narrowing; the catalogue's contract is analyzer-internal and is specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The catalogue. The **declared lane** has one producer: the project's `effects.attribution:` table ([#385](https://github.com/rigortype/rigor/issues/385), § Attribution), which colours calls into code Rigor never analysed. Importing a *nominal supertype's* envelope as a `≤` bound lands with [#386](https://github.com/rigortype/rigor/issues/386). The snapshot of [#381](https://github.com/rigortype/rigor/issues/381) commits them to a reviewed file; nothing is cached *between runs* until [#382](https://github.com/rigortype/rigor/issues/382).
+> **Partly implemented as of this writing.** The proven lane, the exhaustiveness bit and the taint causes are computed by the collector of [#379](https://github.com/rigortype/rigor/issues/379) whenever the `effects:` block is present, and `rigor effects` prints them; how they are produced is [`effect-summaries.md`](../internal-spec/effect-summaries.md). Their **catalogued** origins come from the hand-audited `data/effects/core.yml` of [#380](https://github.com/rigortype/rigor/issues/380), with per-class default postures and argument-dependent narrowing; the catalogue's contract is analyzer-internal and is specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The catalogue. The **declared lane** has two producers: the project's `effects.attribution:` table ([#385](https://github.com/rigortype/rigor/issues/385), § Attribution), which colours calls into code Rigor never analysed, and the call-site envelope import of [#386](https://github.com/rigortype/rigor/issues/386) (§ The declared lane at call sites). The snapshot of [#381](https://github.com/rigortype/rigor/issues/381) commits them to a reviewed file; nothing is cached *between runs* until [#382](https://github.com/rigortype/rigor/issues/382).
 
 An **effect summary** describes one method. It carries two lanes and one bit:
 
@@ -123,7 +123,7 @@ The enum is closed. A new cause is a change to this document, not a producer's f
 
 ## Effect envelopes
 
-> **Implemented as of this writing** ([#383](https://github.com/rigortype/rigor/issues/383), [#385](https://github.com/rigortype/rigor/issues/385)): both annotation spellings are read off the project's own RBS — its `signature_paths:` tree and the rbs-inline / plugin-synthesized signatures derived from its `.rb` files — the `.rigor.yml` convention spelling is read from `effects.envelopes:`, and all three are checked against each method's proven summary as `effect.envelope-exceeded` whenever `effects.check` is on (which it is by default under an `effects:` block). One neighbouring reading is not: an envelope declared on a *supertype* does not yet bind its overrides (`effect.liskov-widened`, [#386](https://github.com/rigortype/rigor/issues/386)). An envelope in RBS Rigor did not load from the project — rbs core, a gem's shipped signatures — is deliberately never read: the checked stratum is the project's own declarations ([ADR-103](../adr/103-effect-labels.md) WD6).
+> **Implemented as of this writing** ([#383](https://github.com/rigortype/rigor/issues/383), [#385](https://github.com/rigortype/rigor/issues/385), [#386](https://github.com/rigortype/rigor/issues/386)): both annotation spellings are read off the project's own RBS — its `signature_paths:` tree and the rbs-inline / plugin-synthesized signatures derived from its `.rb` files — the `.rigor.yml` convention spelling is read from `effects.envelopes:`, and all three are checked against each method's proven summary as `effect.envelope-exceeded`, and against each override's, as `effect.liskov-widened`, whenever `effects.check` is on (which it is by default under an `effects:` block). An envelope in RBS Rigor did not load from the project — rbs core, a gem's shipped signatures — is still never *checked*: the checked stratum is the project's own declarations ([ADR-103](../adr/103-effect-labels.md) WD6). It is read for one other purpose, which produces no finding: importing a `≤` bound at a call site (§ The declared lane at call sites).
 
 An **effect envelope** is an author-declared upper bound on a method's effect labels, checked structurally against the method's *code* — dead code and block literals included. The RBS spelling follows the `RBS::Extended` conventions of [rbs-extended.md](rbs-extended.md):
 
@@ -150,7 +150,7 @@ end
 
 `%a{pure}` and `%a{rigor:v1:effect …}` on one declaration are contradictory; `pure` wins, and the conflict is reported through the existing `RBS::Extended` conflict channel.
 
-An envelope on a supertype's method binds its overrides: an implementation may be purer than the bound it inherits, never less pure.
+An envelope on a supertype's method binds its overrides: an implementation may be purer than the bound it inherits, never less pure (§ Liskov inclusion).
 
 ### What the envelope binds
 
@@ -195,6 +195,40 @@ A selected class receives the entry's bound **exactly as a class-level annotatio
 Among configuration entries, the **first** one that selects a class binds it; a list is read top to bottom, and a later entry never silently overrides one written above it. A method therefore has at most one envelope, from exactly one source, and there is no merging of bounds. The diagnostic names that source as `.rigor.yml effects.envelopes[N]` and stays positioned at the Ruby `def`.
 
 An unrecognised label in an entry's `effect:` degrades the whole entry to ⊤ and surfaces as `effect.unknown-label` positioned at `.rigor.yml`, exactly as it does for an annotation (§ Unknown labels).
+
+### Liskov inclusion
+
+An envelope is a contract about a method, and `class PgRepo < Repo` says a `PgRepo` is usable wherever a `Repo` is. A bound written on `Repo#find` therefore binds `PgRepo#find` too:
+
+> An override MUST NOT escape the envelope written on the method it overrides. Implementations may be purer than the bound they inherit; they may never be less pure.
+
+The envelope an override inherits is the one resolved for the **nearest ancestor whose own method key carries one**, by the same three strata and the same nearest-wins precedence a method's own envelope is resolved by. A bound written closer to the override is the more specific statement about it, and a grandparent's bound already binds the parent between them.
+
+A violation is one `effect.liskov-widened` per (override, exceeding label), **positioned at the override's Ruby `def`**, and it arises in exactly one of two ways — never both, so one label never produces two diagnostics on one line:
+
+- **The override declares no envelope of its own.** What it *does* is then what the inherited bound must admit, judged against the same lane `effect.envelope-exceeded` reads: the proven closure, discharged per policy, `mutate.local` tolerated, taint ignored.
+- **The override declares its own envelope.** The comparison is then between the two authored bounds and is **proven-independent**: a declared bound wider than the inherited one is a Liskov violation in the declaration, whatever the body turns out to do. What the body does is already `effect.envelope-exceeded`'s question, asked against the override's own bound.
+
+Two restrictions keep this inside the accepted construction:
+
+- **Both sides are authored.** Nothing fires unless someone wrote an envelope on the overridden method; an override alone can never produce a finding. This is the same both-sides-authored construction the `def.override-*` family uses ([ADR-35](../adr/35-override-signature-compatibility.md)).
+- **Nominal subclassing only.** A method of an included module is not overridden by the includer's own `def`: Ruby's ancestry puts the includer's method *ahead* of the module's rather than under it, and the substitutability argument that licenses the rule is the subclass one. Prepending, `extend`, and refinements are likewise out.
+
+### The declared lane at call sites
+
+A call whose concrete callee is unknown may still be bounded, because the thing it is called *on* declared what it does. Where that holds, the callee's bound joins the caller's **declared** lane as `≤` and never its proven one, under an origin naming the callee (§ Effect summaries).
+
+**The carrier is nominal.** The lookup is by the receiver's *static* class as the analyzer projected it — for an implicit-self call, by the class the calling method is defined on — and it does not walk ancestors: a receiver typed `PgRepo` does not import `Repo#find`'s bound, because `PgRepo#find` is the definition that call reaches. Structural interfaces are not a carrier: RBS interface types erase to `Dynamic[top]` and have nothing to attach a bound to, so a call through an interface-typed receiver imports nothing ([structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md); the reading arrives with the structural carrier). The strata are the envelope strata plus one, nearest-first:
+
+> per-method annotation **>** class-level annotation **>** `effects.envelopes:` entry **>** accepted signature
+
+An **accepted signature** is an envelope carried by RBS the project did not write — a gem's shipped signatures, Rigor's bundled overlays — read from the built RBS environment rather than from the project's sources. It is never checked, because there is no body to check it against; what it does is state what a call into un-analysed code promises, which is the same trust already extended to that file's *types*.
+
+An `effects.envelopes:` entry participates when it selects by `namespace:`. A `match:` entry does not: a path glob is a fact about where a class is *defined*, which the per-file collection window cannot answer. It still bounds the methods of the classes it selects, for the envelope check and for Liskov inclusion.
+
+**Discharge.** A call site bounded this way is **exhaustive by envelope**: it contributes no taint, and it keeps its edges into the project definitions the closed world knows. That is [ADR-103](../adr/103-effect-labels.md) WD6's trust ladder — a project-authored envelope is contract-checked and Liskov-checked, and an accepted signature's types are already trusted — so a receiver the analyzer could only type as `Dynamic` is not "callee unknown" when the class it names has declared its bound. Two strata do **not** discharge, and neither imports here: `effects.attribution:` (§ Attribution) and a third-party plugin's manifest table, both of which are claims about code nothing has checked, and both of which keep their `plugin-attribution` taint.
+
+An envelope that reads ⊤ imports nothing and discharges nothing. A tag that stopped bounding must not silently buy a call site its exhaustiveness back.
 
 ## Attribution
 

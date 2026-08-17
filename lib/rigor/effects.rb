@@ -12,7 +12,9 @@ require_relative "effects/discharge"
 require_relative "effects/effect_table"
 require_relative "effects/envelope"
 require_relative "effects/envelope_check"
+require_relative "effects/envelope_index"
 require_relative "effects/file_collection"
+require_relative "effects/liskov_check"
 require_relative "effects/method_key"
 require_relative "effects/origin"
 require_relative "effects/propagator"
@@ -29,8 +31,11 @@ module Rigor
   # values it produces, the built-in {Catalog}, and the {Propagator} that closes them into an
   # {EffectTable}. On top of both sits the one thing here that DOES judge: an {Envelope} — an
   # author-declared upper bound read off the project's RBS or written by convention in `.rigor.yml`
-  # ({ConfigEnvelopes}) — and the {EnvelopeCheck} that compares it against what the run proved, which is
-  # where `effect.envelope-exceeded` is decided (#383 / #385). Beside them sit the project's policy
+  # ({ConfigEnvelopes}) — and the two checks that judge one: {EnvelopeCheck} compares a method against
+  # its own bound (`effect.envelope-exceeded`, #383 / #385) and {LiskovCheck} an override against the
+  # bound it inherits (`effect.liskov-widened`, #386). The same declarations are read a third way, which
+  # judges nothing: {EnvelopeIndex} resolves them per CALL SITE, so a caller reads what its callee
+  # promised as a `≤` bound. Beside them sit the project's policy
   # surfaces: {Attribution} colours code Rigor never analysed, into the declared lane, and {Discharge}
   # applies `effects.tolerated:` per origin at judgment time. The effect snapshot (#381) and the
   # vocabulary diagnostic (#384) are their own slices.

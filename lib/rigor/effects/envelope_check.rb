@@ -52,6 +52,35 @@ module Rigor
           new(def_sources: def_sources || NONE, singleton_def_sources: singleton_def_sources || NONE,
               class_sources: class_sources || NONE)
         end
+
+        # Where a finding about `key` goes: the Ruby `def`, from the discovery tables (ADR-103 WD14 chose
+        # the `def` over the `.rbs` line deliberately — `# rigor:disable` reads only Ruby comments). A
+        # method with no `def` at all is a synthesized accessor, and the class's own source is the closest
+        # thing to a position it has.
+        #
+        # It lives on the value rather than in {EnvelopeCheck} because {LiskovCheck} positions its
+        # findings identically, and two spellings of "where the fix goes" would eventually disagree.
+        #
+        # @return [Array(String, Integer)] `[path, line]`; `[nil, 1]` for a key with no owner.
+        def for(key)
+          class_name, separator, selector = MethodKey.split(key)
+          return [nil, 1] if class_name.nil?
+
+          table = separator == "." ? singleton_def_sources : def_sources
+          site = table.dig(class_name, selector.to_sym)
+          return split_site(site) if site
+
+          [Array(class_sources[class_name]).first, 1]
+        end
+
+        private
+
+        def split_site(site)
+          path, _, line = site.to_s.rpartition(":")
+          return [site.to_s, 1] if path.empty?
+
+          [path, line.to_i.positive? ? line.to_i : 1]
+        end
       end
 
       NO_FINDINGS = [].freeze
@@ -88,6 +117,10 @@ module Rigor
       # every method key of THAT Ruby class, so a subclass's keys never match and a module distributes to
       # its own methods only — and are applied in that order, so a written annotation always wins over a
       # convention. Which config entry a class matched was already decided by {ConfigEnvelopes.for_classes}.
+      #
+      # Public because {LiskovCheck} resolves the *ancestor's* envelope by exactly these rules: an
+      # inherited bound has to be the same bound the ancestor is itself held to, or the two checks would
+      # disagree about what the author wrote.
       def distribute(table, method_envelopes, class_envelopes, config_envelopes)
         resolved = {}
         unless class_envelopes.empty? && config_envelopes.empty?
@@ -123,7 +156,7 @@ module Rigor
         exceeding = envelope.exceeded_by(apply_tolerated ? entry.undischarged : entry.proven)
         return if exceeding.empty?
 
-        path, line = position(key, positions)
+        path, line = positions.for(key)
         exceeding.each do |label|
           trail = PathFinder.shortest(table, symbol: key, label: label)
           findings << Finding.new(
@@ -133,29 +166,7 @@ module Rigor
         end
       end
 
-      # Where the fix goes: the Ruby `def`, from the discovery tables (ADR-103 WD14 chose the `def`
-      # over the `.rbs` line deliberately — `# rigor:disable` reads only Ruby comments). A method with
-      # no `def` is a synthesized accessor, and the class's own source is the closest thing to a
-      # position it has.
-      def position(key, positions)
-        class_name, separator, selector = MethodKey.split(key)
-        return [nil, 1] if class_name.nil?
-
-        table = separator == "." ? positions.singleton_def_sources : positions.def_sources
-        site = table.dig(class_name, selector.to_sym)
-        return split_site(site) if site
-
-        [Array(positions.class_sources[class_name]).first, 1]
-      end
-
-      def split_site(site)
-        path, _, line = site.to_s.rpartition(":")
-        return [site.to_s, 1] if path.empty?
-
-        [path, line.to_i.positive? ? line.to_i : 1]
-      end
-
-      private_class_method :distribute, :keys_by_class, :collect, :position, :split_site
+      private_class_method :keys_by_class, :collect
     end
   end
 end

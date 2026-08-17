@@ -56,6 +56,11 @@ module Rigor
       # as its sibling: opting into envelope enforcement is exactly what turns on the diagnostic that
       # says an envelope stopped enforcing.
       RULE_EFFECT_UNKNOWN_LABEL = "effect.unknown-label"
+      # ADR-103 WD1 / WD14 / #386 — the inherited-bound reading. An override performs, or itself
+      # declares, an effect the envelope written on the method it overrides does not admit. Implementations
+      # may be purer than the bound they inherit, never less pure; both-sides-authored in the ADR-35 sense,
+      # so nothing fires unless someone wrote an envelope on the ancestor.
+      RULE_EFFECT_LISKOV_WIDENED = "effect.liskov-widened"
       # ADR-103 WD13 commitment 1 / #384 — the residual. A project whose RBS carries `%a{pure}` /
       # `%a{rigor:v1:effect …}` but no `effects:` block gets ONE `:info` per run saying so. An
       # annotation must never turn collection on by itself (that would be a project-wide cost cliff
@@ -91,6 +96,7 @@ module Rigor
         RULE_SUPPRESSION_UNKNOWN_MARKER,
         RULE_VALUE_USE_VOID,
         RULE_EFFECT_ENVELOPE_EXCEEDED,
+        RULE_EFFECT_LISKOV_WIDENED,
         RULE_EFFECT_UNKNOWN_LABEL,
         RULE_EFFECT_ANNOTATIONS_UNCHECKED
       ].freeze

@@ -67,6 +67,9 @@ module Rigor
           # envelope directive), so it is never unsolicited noise and needs no bleeding-edge gate:
           # `:warning` even under lenient, `:error` under strict.
           "effect.envelope-exceeded" => :warning,
+          # ADR-103 WD14 / #386 — the inherited-bound reading rides its sibling's severities exactly:
+          # both-sides-authored (someone wrote the ancestor's envelope), and as strict as proven.
+          "effect.liskov-widened" => :warning,
           # ADR-103 WD14 — `unknown-label` info / info / warning. It reports that a bound stopped
           # bounding, never that code is wrong, so even `strict` stops at `:warning`.
           "effect.unknown-label" => :info,
@@ -112,6 +115,7 @@ module Rigor
           "suppression.unknown-marker" => :warning,
           "static.value-use.void" => :off,
           "effect.envelope-exceeded" => :warning,
+          "effect.liskov-widened" => :warning,
           "effect.unknown-label" => :info,
           "effect.annotations-unchecked" => :info,
           "rbs_extended.unsatisfied-conformance" => :warning
@@ -149,6 +153,7 @@ module Rigor
           # `:off` even under strict: the gate is `bleeding_edge:`, not the profile (ADR-50 WD1 / ADR-100).
           "static.value-use.void" => :off,
           "effect.envelope-exceeded" => :error,
+          "effect.liskov-widened" => :error,
           "effect.unknown-label" => :warning,
           # `:info` even under strict: a residual that failed a build would punish the project for
           # carrying an annotation it has not opted into checking, which is the opposite of the point.

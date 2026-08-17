@@ -6,6 +6,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "attribution"
 require_relative "catalog"
+require_relative "envelope_index"
 require_relative "file_collection"
 require_relative "label_set"
 require_relative "mutation_classifier"
@@ -98,12 +99,17 @@ module Rigor
       #   forwarding, not an opaque callable
       # @param calls [Hash] node-identity table of {Collector::CallRecord}s
       # @param attribution [Attribution] the project's `effects.attribution:` table
-      def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:,
-                     attribution: Attribution.empty)
+      # @param envelopes [EnvelopeIndex] the envelopes a call site may import as a `≤` bound (#386)
+      # @param owner_class [String, nil] the class this unit is defined on — the carrier an
+      #   implicit-self call's envelope is looked up under, since the syntax spells `Kernel#name`
+      def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
+                     attribution: Attribution.empty, envelopes: EnvelopeIndex.empty, owner_class: nil)
         @singleton = singleton
         @block_parameter = block_parameter
         @calls = calls
         @attribution = attribution
+        @envelopes = envelopes
+        @owner_class = owner_class
         @mutation = MutationClassifier.new(
           singleton: singleton, parameters: parameters, owned_locals: owned_locals
         )
@@ -204,8 +210,46 @@ module Rigor
       def visit_call(node)
         record = @calls[node]
         attribute(node, record)
-        visit_uncatalogued(node, record) unless claimed_by_catalogue?(node, record)
+        envelope = import_envelope(node, record)
+        visit_uncatalogued(node, record, envelope) unless claimed_by_catalogue?(node, record)
         visit_block_argument(node)
+      end
+
+      # The **declared lane at a call site** (#386; ADR-103 WD6). If the callee's own declaration carries
+      # an envelope, the bound joins the caller's `≤` lane under an `envelope:` origin, and the returned
+      # value is what tells the uncatalogued path the site is bounded rather than unknown.
+      #
+      # The carrier is nominal and *static*: the class the syntax names for a constant-path receiver, the
+      # class the typer projected the receiver to otherwise, and this unit's own class for an
+      # implicit-self call — which is the only reason `owner_class` is passed in at all, since
+      # {#catalog_target} spells a receiver-less call `Kernel#name`.
+      #
+      # It runs BESIDE the catalogue, like {#attribute}: a catalogued row states what Ruby's surface
+      # proves, an envelope states what the callee promises, and a call that is both reads as both (the
+      # rendering rule drops a declared label the proven lane already admits, so the pair never prints
+      # twice).
+      def import_envelope(node, record)
+        return nil if @envelopes.empty?
+
+        owner, singleton = envelope_target(node, record)
+        return nil if owner.nil?
+
+        envelope = @envelopes[owner, singleton, node.name.to_s]
+        return nil if envelope.nil?
+
+        add_declared(Origin.envelope("#{owner}#{singleton ? '.' : '#'}#{node.name}"), envelope.bound)
+        envelope
+      end
+
+      # `[owner, singleton]` for the envelope lookup, or `[nil, false]`. Differs from {#catalog_target}
+      # in exactly one place, and that place is the point of the method: a receiver-less call resolves
+      # against self's ancestry first, so the carrier is the enclosing unit's class rather than the
+      # `Kernel` the catalogue reads it as.
+      def envelope_target(node, record)
+        owner, singleton, implicit = catalog_target(node, record)
+        return [@owner_class, @singleton] if implicit
+
+        [owner, singleton]
       end
 
       # The project's own `effects.attribution:` table, consulted on the same `(owner, selector)` the
@@ -289,7 +333,7 @@ module Rigor
         !implicit && !record&.dynamic && !DEFERRED_SELECTORS.include?(node.name)
       end
 
-      def visit_uncatalogued(node, record)
+      def visit_uncatalogued(node, record, envelope = nil)
         return visit_reflective_send(node, record) if REFLECTIVE_SEND.include?(node.name)
         return taint("opaque-callable") if opaque_eval?(node)
 
@@ -302,9 +346,16 @@ module Rigor
         # the same site: a `.call` the analyzer cannot follow to a body says *what* was unfollowable, where
         # a bare Dynamic receiver says only that the receiver's class was unknown.
         return taint("opaque-callable") if opaque_callable?(node, record)
+        # **Exhaustive by envelope** (#386). A `Dynamic` receiver whose static facet still names a class
+        # whose method carries an envelope is not "callee unknown": whatever object arrives, the bound its
+        # declaration states is the upper bound of what this call can do, and that declaration is a
+        # discharging stratum (ADR-103 WD6 — the project's own, contract- and Liskov-checked; or an
+        # accepted signature, whose types are already trusted). So the site keeps its edges into the
+        # project definitions the closed world knows and contributes no taint.
+        return record_edge(node, record, envelope) if record&.dynamic && envelope
         return taint("dynamic-receiver", record.cause) if record&.dynamic
 
-        record_edge(node, record)
+        record_edge(node, record, envelope)
       end
 
       # `send` / `public_send` / `__send__`: a literal selector is an ordinary edge, a computed one is the
@@ -337,10 +388,14 @@ module Rigor
       # own verdict. The two are not exclusive: a call the typer could not resolve still names a receiver
       # class, and an edge that resolves to nothing is silently dropped rather than tainting, because most
       # such calls are ordinary inherited ones the catalogue simply has no row for.
-      def record_edge(node, record)
+      def record_edge(node, record, envelope = nil)
         self_call = node.receiver.nil?
         push_edge(record, node.name.to_s, self_call)
         return unless self_call && (record.nil? || !record.resolved)
+        # An envelope on this unit's own class for the very selector the dispatcher declined is the
+        # project declaring the method and stating its bound. There is nothing left to be unsure about
+        # that the bound does not already answer.
+        return if envelope
 
         taint("unresolved-self-call", node.name.to_s)
       end

@@ -6,11 +6,14 @@ require_relative "../diagnostic"
 require_relative "../check_rules"
 require_relative "../../effects/config_envelopes"
 require_relative "../../effects/envelope_check"
+require_relative "../../effects/liskov_check"
 require_relative "../../effects/method_key"
 require_relative "../../effects/registry"
 require_relative "../../effects/signature_sources"
 require_relative "../../effects/unknown_label_check"
 require_relative "../../rbs_extended/envelope_scanner"
+require_relative "declaration_position"
+require_relative "envelope_messages"
 
 module Rigor
   module Analysis
@@ -44,6 +47,7 @@ module Rigor
         private_constant :NO_DIAGNOSTICS
 
         RULE = CheckRules::RULE_EFFECT_ENVELOPE_EXCEEDED
+        LISKOV_RULE = CheckRules::RULE_EFFECT_LISKOV_WIDENED
         UNKNOWN_LABEL_RULE = CheckRules::RULE_EFFECT_UNKNOWN_LABEL
 
         # Where a diagnostic about a configuration value is positioned when the loader cannot say
@@ -82,16 +86,21 @@ module Rigor
         #   unit is defined, which is what an `effects.envelopes[].match:` path glob selects on. Its paths
         #   are relativised against the working directory, which is the project root for every run that
         #   reaches here (the same assumption `Snapshot.build` makes about `reach:`).
+        # @param ancestry [#call, nil] returns the run's as-written superclass table
+        #   (`FileCollection#superclasses`) — the nominal relation `effect.liskov-widened` reads. A
+        #   lambda, and called only once an envelope exists, because merging the run's collections is
+        #   not free.
         # @param apply_tolerated [Boolean] false runs the judgment with an empty tolerated set
         #   (`--no-tolerated-effects`).
-        def initialize(configuration:, rbs_loader:, effect_table:, discovery:, sources: nil,
-                       unit_sources: nil, apply_tolerated: true)
+        def initialize(configuration:, rbs_loader:, effect_table:, discovery:, # rubocop:disable Metrics/ParameterLists
+                       sources: nil, unit_sources: nil, ancestry: nil, apply_tolerated: true)
           @configuration = configuration
           @rbs_loader = rbs_loader
           @effect_table = effect_table
           @discovery = discovery
           @sources = sources || {}
           @unit_sources = unit_sources || {}
+          @ancestry_source = ancestry
           @apply_tolerated = apply_tolerated
         end
 
@@ -135,10 +144,15 @@ module Rigor
         # The envelope contract itself. Needs the propagated graph and the discovery tables the `def`
         # positions come from, so it is skipped when collection produced nothing — an unrecognised
         # label is still reported in that case, because it is a fact about the declaration alone.
+        #
+        # The two contracts ride one resolution of the strata and one force of the discovery tables:
+        # `effect.envelope-exceeded` asks whether a method honours its OWN bound, `effect.liskov-widened`
+        # whether an override honours the one it inherits, and both read the same distributed table.
         def exceeded_diagnostics(scan)
           return NO_DIAGNOSTICS if @effect_table.empty?
 
-          judge(scan).map { |finding| build_diagnostic(finding) }
+          judge(scan).map { |finding| build_diagnostic(finding) } +
+            judge_liskov(scan).map { |finding| build_liskov_diagnostic(finding) }
         end
 
         def unknown_label_diagnostics(scan)
@@ -203,35 +217,8 @@ module Rigor
           )
         end
 
-        # The declaration, not the method: this is a fact about what the author wrote, and the fix is
-        # on that line. A `.rbs` position is the right answer here even though its sibling deliberately
-        # avoids one (the `rbs_extended.unsatisfied-conformance` precedent) — there is no Ruby `def`
-        # that could carry the typo.
         def position_of(finding)
-          location = finding.location
-          return [CONFIG_PATH, 1] if location.nil?
-
-          path, _, raw_line = location.rpartition(":")
-          return [CONFIG_PATH, 1] if path.empty?
-
-          line = raw_line.to_i
-          line = 1 unless line.positive?
-          path.end_with?(RUBY_EXTENSION) ? [path, inline_line(path, finding.spelling) || line] : [path, line]
-        end
-
-        # rbs-inline's writer re-emits the author's own comment block ABOVE the annotation it
-        # generates, so a line number read out of the synthesized buffer drifts from the `.rb` line the
-        # author actually wrote — by the length of every method body above it. The annotation's own
-        # text is unique enough to find again, so the Ruby file is what answers. One read, and only
-        # when a finding already exists.
-        def inline_line(path, spelling)
-          return nil if spelling.nil?
-
-          source = @sources[path] || File.read(path)
-          source.each_line.with_index(1) { |line, number| return number if line.include?(spelling) }
-          nil
-        rescue StandardError
-          nil
+          DeclarationPosition.of(finding, sources: @sources)
         end
 
         # The vocabulary an unknown label is judged against: the shipped registry plus whatever
@@ -263,17 +250,38 @@ module Rigor
         end
 
         def judge(scan)
-          def_sources, singleton_def_sources, class_sources = @discovery.call
           Effects::EnvelopeCheck.run(
             table: @effect_table,
             method_envelopes: scan&.method_envelopes || {}, class_envelopes: scan&.class_envelopes || {},
             config_envelopes: config_envelopes,
-            positions: Effects::EnvelopeCheck::Positions.build(
-              def_sources: def_sources, singleton_def_sources: singleton_def_sources,
-              class_sources: class_sources
-            ),
+            positions: positions,
             apply_tolerated: @apply_tolerated
           )
+        end
+
+        def judge_liskov(scan)
+          Effects::LiskovCheck.run(
+            table: @effect_table, superclasses: ancestry,
+            method_envelopes: scan&.method_envelopes || {}, class_envelopes: scan&.class_envelopes || {},
+            config_envelopes: config_envelopes,
+            positions: positions,
+            apply_tolerated: @apply_tolerated
+          )
+        end
+
+        # The discovery tables both judgments position their findings from, forced once.
+        def positions
+          @positions ||= begin
+            def_sources, singleton_def_sources, class_sources = @discovery.call
+            Effects::EnvelopeCheck::Positions.build(
+              def_sources: def_sources, singleton_def_sources: singleton_def_sources,
+              class_sources: class_sources
+            )
+          end
+        end
+
+        def ancestry
+          @ancestry ||= @ancestry_source&.call || {}
         end
 
         # Everything an envelope may be written in — {Effects::SignatureSources} owns the stratum rule.
@@ -296,28 +304,21 @@ module Rigor
           )
         end
 
-        # The shape a reviewer can act on without re-running anything: what the method does, the shortest
-        # route to whatever proves it, the author's own spelling of the bound quoted back, and where that
-        # bound was written.
         def message_for(finding)
-          "Method #{finding.key} performs #{finding.label}#{explanation(finding)}, but is declared " \
-            "#{finding.envelope.spelling}#{declared_at(finding.envelope)}, so #{finding.label} exceeds " \
-            "the envelope."
+          EnvelopeMessages.exceeded(finding)
         end
 
-        def explanation(finding)
-          hops = Array(finding.chain)[1..] || []
-          parts = [finding.origin, ("via #{hops.join(' → ')}" unless hops.empty?)].compact
-          parts.empty? ? "" : " (#{parts.join(' ')})"
-        end
-
-        # A distributed annotation names the class it came from; a configured envelope does not, because
-        # its `location` already names the stanza (`.rigor.yml effects.envelopes[2]`) and the method key
-        # at the head of the message already names the class.
-        def declared_at(envelope)
-          owner = envelope.source == :class_annotation ? " on #{envelope.owner_key.split(/[#.]/).first}" : ""
-          where = envelope.location ? " at #{envelope.location}" : ""
-          "#{owner}#{where}"
+        def build_liskov_diagnostic(finding)
+          Diagnostic.new(
+            path: finding.path || CONFIG_PATH,
+            line: finding.line,
+            column: 1,
+            message: EnvelopeMessages.liskov(finding),
+            severity: :warning,
+            rule: LISKOV_RULE,
+            source_family: :builtin,
+            method_name: method_name_of(finding.key)
+          )
         end
 
         def method_name_of(key)

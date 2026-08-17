@@ -21,6 +21,12 @@ module Rigor
       # analyse. Its labels land in the summary's DECLARED lane and never in the proven one, and the site
       # keeps its `plugin-attribution` taint (ADR-103 WD6: "declared this, and possibly more").
       ATTRIBUTION = :attribution
+      # An {Envelope} the callee's own declaration carries — a project annotation, an
+      # `effects.envelopes:` convention, or an accepted signature's `%a{…}` (#386). Its labels land in
+      # the DECLARED lane, like an attribution's, but unlike an attribution the bound is *checked* (or
+      # trusted at the type tier), so the site is exhaustive rather than tainted: ADR-103 WD6's
+      # discharging strata. `name` is the callee key the bound was resolved for.
+      ENVELOPE = :envelope
 
       def self.construct(name)
         new(name: name.to_s, source: CONSTRUCT)
@@ -32,6 +38,10 @@ module Rigor
 
       def self.attribution(name)
         new(name: name.to_s, source: ATTRIBUTION)
+      end
+
+      def self.envelope(name)
+        new(name: name.to_s, source: ENVELOPE)
       end
 
       # The rendering the report and the JSON payload key on. Sorted lexicographically, so `catalogue:`

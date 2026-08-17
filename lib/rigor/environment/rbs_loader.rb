@@ -1256,6 +1256,40 @@ module Rigor
         end
       end
 
+      # ADR-103 WD6 / #386 — yields `[class name, RBS::AST::Members::MethodDefinition]` for every method
+      # member in the built environment that carries at least one annotation.
+      #
+      # The one reason this walk lives here rather than in its caller: `#env` is private, and it stays
+      # private. The effect-envelope reader needs the *annotations* a gem's shipped signatures and
+      # Rigor's bundled overlays declare — the accepted stratum of ADR-103 WD6, which discharges a call
+      # site's taint because the same trust is already extended to those files' types — and nothing more
+      # of the environment. Handing out the environment to get at them would trade a several-MB mutable
+      # object for a read the loader can perform itself.
+      #
+      # Nested declarations are not descended into: `RBS::Environment` already flattens a nested
+      # `class Foo::Bar` into its own `class_decls` entry, so a descent would key one member twice.
+      #
+      # Fail-soft, like every other query here: no environment (a build failure) yields nothing.
+      def each_annotated_method_member
+        environment = env
+        return if environment.nil?
+
+        environment.class_decls.each do |type_name, entry|
+          class_name = type_name.to_s.sub(/\A::/, "")
+          self.class.entry_declarations(entry).each do |decl|
+            members = decl.respond_to?(:members) ? decl.members : nil
+            next if members.nil?
+
+            members.each do |member|
+              next unless member.is_a?(::RBS::AST::Members::MethodDefinition)
+              next if member.annotations.nil? || member.annotations.empty?
+
+              yield class_name, member
+            end
+          end
+        end
+      end
+
       private
 
       # The `::`-stripped names of every class/module entry whose declarations ALL originated from the given

@@ -103,6 +103,10 @@ module Rigor
         end
       end
 
+      # The {Envelope} an entry puts on one class. Public because {EnvelopeIndex} resolves the same
+      # entries per *call site* rather than per project class ({.for_classes}'s shape), and the two
+      # must build the identical value: a bound that read differently at a call site and at the `def`
+      # would make the `≤` lane disagree with the check that enforces it.
       def envelope_for(entry, class_name)
         Envelope.build(
           owner_key: class_name, bound: entry.bound, source: Envelope::CONFIG_SOURCE,
@@ -175,8 +179,7 @@ module Rigor
         absolute.start_with?(root) ? absolute[root.length..] : path.to_s
       end
 
-      private_class_method :envelope_for, :selects?, :match_segments?, :match_deep?, :files_by_class,
-                           :relativize
+      private_class_method :selects?, :match_segments?, :match_deep?, :files_by_class, :relativize
     end
   end
 end

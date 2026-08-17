@@ -752,9 +752,10 @@ module Rigor
             "spelling): the whole tag then reads as unbounded, which suppresses findings rather " \
             "than inventing them.",
             "The envelope was written on a supertype rather than on this class — the inherited-bound " \
-            "(Liskov) reading is `effect.liskov-widened`, which is not implemented.",
+            "(Liskov) reading is `effect.liskov-widened`.",
             "The envelope was written outside the project's own `signature_paths:` RBS (core, a " \
-            "gem's shipped RBS): only project-authored envelopes are checked."
+            "gem's shipped RBS): only project-authored envelopes are checked. Such an envelope is " \
+            "still imported as a `≤` bound at calls INTO it, which produces no finding."
           ],
           suppression: "`# rigor:disable effect.envelope-exceeded` on the Ruby `def` line (the " \
                        "diagnostic is positioned there, not on the `.rbs` line), or " \
@@ -766,6 +767,49 @@ module Rigor
           # the directive, so a firing is never unsolicited — the `conforms-to` construction) and
           # as-strict-as-proven (the proven lane only; taint never fires). What it costs to be wrong is
           # bounded by the author having asked the question.
+          evidence_tier: :high,
+          since: "0.3.4"
+        ),
+
+        CheckRules::RULE_EFFECT_LISKOV_WIDENED => Entry.new(
+          id: CheckRules::RULE_EFFECT_LISKOV_WIDENED,
+          summary: "An override performs or declares an effect the envelope it inherits does not admit.",
+          fires_when: [
+            "The project's `.rigor.yml` carries an `effects:` block and `effects.check` is on (it " \
+            "defaults to on when the block is present).",
+            "A method the project defines redefines a method of a SUPERCLASS, and that ancestor's " \
+            "definition carries an envelope — written on it, distributed from its class, or put " \
+            "there by an `effects.envelopes:` convention. The nearest enveloped ancestor wins.",
+            "The override declares NO envelope of its own and its PROVEN effect labels — its body " \
+            "plus the transitive closure over the project methods it calls — include a label the " \
+            "inherited bound does not admit.",
+            "Or the override declares its OWN envelope and that bound is wider than the inherited " \
+            "one. This half is proven-independent: two authored bounds, compared by subsumption."
+          ],
+          does_not_fire_when: [
+            "No `effects:` block is configured, or `effects.check: false` is set.",
+            "Nobody wrote an envelope on the overridden method. The check is both-sides-authored: " \
+            "an override alone can never produce it.",
+            "The override is purer than the bound it inherits — that is the whole point of an upper " \
+            "bound, and a narrower envelope on an override is correct by construction.",
+            "The relation is a module include rather than a subclass. An includer's own `def` sits " \
+            "AHEAD of the module's in Ruby's ancestry rather than under it, so the substitutability " \
+            "argument that licenses this check does not apply.",
+            "The exceeding label is `mutate.local`, or the label is only suspected rather than " \
+            "proven: an unresolved or dynamic call taints exhaustiveness and contributes nothing to " \
+            "the proven lane.",
+            "The ancestor's envelope names a label the registry does not recognise: the whole tag " \
+            "reads as unbounded, which suppresses findings rather than inventing them."
+          ],
+          suppression: "`# rigor:disable effect.liskov-widened` on the override's Ruby `def` line, or " \
+                       "`disable: [\"effect.liskov-widened\"]` in `.rigor.yml`. Widening the " \
+                       "ancestor's envelope — or moving the effect out of the override — is the real " \
+                       "fix.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :error },
+          # Both-sides-authored in the ADR-35 sense — an envelope on the ancestor is the directive, and
+          # the override is a `def` the project wrote — and as strict as proven on the half that reads a
+          # body at all. The other half compares two authored bounds and reads nothing inferred.
           evidence_tier: :high,
           since: "0.3.4"
         ),

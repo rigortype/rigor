@@ -60,7 +60,7 @@ The scan walks one method body. Two rules shape it:
 
 ### Origins
 
-Each bundle of labels is keyed by an **origin**: the pair of what coloured it and which source did the colouring, `:catalogue` or `:construct`. Origins are **line-free**, so a summary is stable under a line move and a snapshot diff shows a change of behaviour rather than of formatting. Call sites are kept per run for the report only, never in the summary.
+Each bundle of labels is keyed by an **origin**: the pair of what coloured it and which source did the colouring — `:catalogue` or `:construct` in the proven lane, `:attribution` or `:envelope` in the declared one. Origins are **line-free**, so a summary is stable under a line move and a snapshot diff shows a change of behaviour rather than of formatting. Call sites are kept per run for the report only, never in the summary.
 
 Language constructs, by origin name:
 
@@ -102,10 +102,10 @@ An unprovable ownership MUST taint rather than produce a proven bare `mutate`.
 
 | Cause | When the tracer records it |
 | --- | --- |
-| `dynamic-receiver` | the typer's receiver type was `Dynamic`; the detail is the `DynamicOrigin` cause name, when one was recorded |
+| `dynamic-receiver` | the typer's receiver type was `Dynamic`, and no envelope bounds the class its static facet named (§ The declared lane at call sites); the detail is the `DynamicOrigin` cause name, when one was recorded |
 | `dynamic-send` | `send` / `public_send` / `__send__` with a non-literal selector (a literal one is an ordinary edge) |
 | `opaque-callable` | `.call` on a receiver that is neither a lambda literal nor the unit's own block parameter and whose class is unknown or `Proc` / `Method`; or a `&expr` block argument that is neither a symbol nor the unit's block parameter |
-| `unresolved-self-call` | an implicit-self call for which **every** dispatch tier declined; the detail is the selector |
+| `unresolved-self-call` | an implicit-self call for which **every** dispatch tier declined, and whose selector the unit's own class carries no envelope for; the detail is the selector |
 | `unknown-ownership` | a mutating call whose receiver ownership is not classifiable |
 | `collector-error` | the scan of that unit raised |
 
@@ -296,7 +296,38 @@ The configured stratum does **not** depend on the RBS walk. A project with no si
 
 The record on disk stays undischarged in both directions, and the collector attributes undischarged labels: policy is a lens over facts, never a filter on them.
 
-### Attribution: the declared lane's first producer
+### The declared lane at call sites: `EnvelopeIndex`
+
+`Effects::EnvelopeIndex` answers the other question about an envelope. `EnvelopeScanner` and `EnvelopeCheck` ask "what bounds THIS method's body?", and answer it from the project's own sources alone, because that is the stratum a contract can be checked against. The index asks "what does the thing I am calling promise?" ([`effect-labels.md`](../type-specification/effect-labels.md) § The declared lane at call sites), and so reads one stratum more.
+
+**Where the import happens.** In `Effects::UnitScan#import_envelope`, beside `#attribute` and on the same `(owner, selector)` the catalogue is looked up under — with one difference, which is the whole reason the method exists: a receiver-less call is spelled `Kernel#name` for the catalogue, and the envelope carrier for it is the enclosing unit's own class, so the scan is handed `owner_class:`. What it produces is a bundle in `Summary#declared_bundles` under an `Origin` of source `:envelope` named for the callee key. It runs beside the catalogue rather than instead of it and never claims the call.
+
+**Exhaustive by envelope.** The returned envelope is also what tells the uncatalogued path the site is bounded rather than unknown, and that is the discharge of [ADR-103](../adr/103-effect-labels.md) WD6:
+
+- a `Dynamic` receiver whose static facet still names a class contributes **no** `dynamic-receiver` taint when that class's method carries an envelope, and does contribute its project edge — so the closed world's proven lane still travels through the overrides the project defines, and only the unknowable remainder is answered by the bound;
+- an implicit-self call every dispatch tier declined contributes no `unresolved-self-call` taint when the unit's own class carries an envelope for that selector, because the project has declared both the method and its bound.
+
+A ⊤ envelope is not an envelope: `EnvelopeIndex#[]` returns nil for one, so a tag degraded by an unknown label can neither import nor discharge.
+
+**The second envelope source, and why it is read-only.** The accepted stratum comes from `Environment::RbsLoader#each_annotated_method_member` — a walk of the **built** `RBS::Environment` yielding every method member that carries an annotation — through `RbsExtended::EnvelopeScanner.from_loader`. Three properties make it safe to read RBS the project did not write:
+
+- It cannot reach a contract check. `EnvelopeCheck` and `LiskovCheck` are handed `EnvelopeScanner.scan`'s project-source tables and never this one, so the exclusion is structural rather than a filter to get wrong.
+- It carries no `location`, because the ADR-54 env cache dumps every `RBS::Location` to a `<cached>` sentinel. A diagnostic could not name where such a bound was written even if one wanted to — which is the same fact that made the project-side reader parse rather than walk the env, read from the other end.
+- There is no body to check. A gem method is un-analysed by definition; WD6 trusts its declaration for the same reason ADR-1 already trusts its types.
+
+The project's own signatures are in the built environment too, so they appear in the accepted table as well. That is harmless: the project strata are consulted first, and both discharge. Class-level annotations are deliberately not read from the environment — distribution needs "every method of the class discovery knows", which is a project fact.
+
+The index is built **per process**, once, off the first environment the analysis resolves (`Runner#effect_envelope_index`, `WorkerSession#effect_envelope_index`), and carried on the collection window exactly as the attribution table is (`Collector.collect_for(path, attribution:, envelopes:)`). A worker derives it from the same configuration and the same signature content as the parent, so the two agree without a channel to keep in sync. It participates in the effects cache identity through the `effects:` digest and, for the RBS strata, through the signature files the diagnostics identity already covers.
+
+### Liskov inclusion: `LiskovCheck`
+
+`Effects::LiskovCheck` decides `effect.liskov-widened`, and it rides `EffectEnvelopePass`'s single resolution of the strata and single force of the discovery tables — the two contracts differ in *which* bound they hold a method to, not in where bounds come from or where a finding is positioned.
+
+- The envelopes it resolves are `EnvelopeCheck.distribute`'s, over a base of the raw per-method annotations. The base matters for one shape: a base class whose method exists only in `.rbs` — an abstract `def find: (Integer) -> User` with no Ruby body — has no key in the effect table and therefore no distributed entry, and its bound is exactly the one an override inherits.
+- The ancestry is `FileCollection#superclasses`, the collector's own as-written candidate lists, resolved here the way `Propagator::Index#build_descendants` resolves them: the most-qualified candidate the project defines wins, so `A::Base` and `B::Base` cannot share the bare spelling `Base`. Reading the same table as the closed-world override join is what stops the Liskov relation and the proven lane from disagreeing about who inherits from whom.
+- Positions come from `EnvelopeCheck::Positions#for`, which is where "the Ruby `def`, falling back to the class's file" is spelled once for both rules.
+
+### Attribution: the declared lane's second producer
 
 `effects.attribution:` is consulted in `Effects::UnitScan`, on the same `(owner, selector)` the catalogue is looked up under — the owner the syntax names for a constant-path receiver, and the class the typer projected the receiver to otherwise. It runs **beside** the catalogue rather than instead of it and never claims the call: a catalogued row states what Ruby's own surface proves, an attribution states what the project claims about a body Rigor never read, and a call that is both honestly reads as both.
 
@@ -310,7 +341,7 @@ The table is built once per run from the configuration and carried on the collec
 
 The reason is the cache. `assemble_run_diagnostics`' result is what the ADR-45 whole-run diagnostics slot stores, and the `effects:` block is deliberately absent from that slot's identity (§ Caching) — which is what lets a project turn collection on without invalidating its check. An envelope finding written into that entry would therefore outlive the configuration that produced it: flipping `effects.check: false` would not move the key, and the warm entry would keep serving the finding. Running the pass over whatever table the run ended up with — warm or cold — is ADR-103 WD12's "recomputed every run, never stored", and it also means the warm path, which never assembles at all, still emits.
 
-The pass is ordered so a project pays for what it uses: it reads the envelopes first and stops there when there are none, and only a project that declared one forces the cross-file discovery tables (`ensure_project_discovery`) that map a method key to its Ruby `def`. Positions come from `discovered_def_sources` / `discovered_singleton_def_sources`, falling back to `discovered_class_sources` for a synthesized accessor, which has no `def` of its own.
+The pass is ordered so a project pays for what it uses: it reads the envelopes first and stops there when there are none, and only a project that declared one forces the cross-file discovery tables (`ensure_project_discovery`) that map a method key to its Ruby `def`, or merges the run's collections for the superclass table `effect.liskov-widened` reads. Positions come from `discovered_def_sources` / `discovered_singleton_def_sources`, falling back to `discovered_class_sources` for a synthesized accessor, which has no `def` of its own. Both contracts — a method against its own bound, and an override against the one it inherits — ride that single resolution.
 
 Findings run through `CheckRules.filter_suppressed` per file before they leave the pass, with that file's comments and the project's `disable:` list, so `# rigor:disable effect.envelope-exceeded` on the `def` line behaves exactly as it does for a per-file rule. Everything downstream — severity resolution, the baseline, `--format json` — applies because the diagnostics join the ordinary stream before `apply_severity_profile`.
 
@@ -359,7 +390,7 @@ A `reach:` entry is either a file glob — anything carrying a path or glob char
 
 `--full` records everything. Otherwise a row is omitted when
 
-- its summary is exhaustive and proven ⊆ `{mutate.local}` (`Summary#trivial?` for `methods:`, `EffectTable::Entry#trivial?` for `reach:`) — the reading of `%a{pure}`, which every envelope tolerates; or
+- its summary is exhaustive, proven ⊆ `{mutate.local}` — the reading of `%a{pure}`, which every envelope tolerates — and its declared lane survives the rendering rule empty (`Summary#trivial?` for `methods:`, `EffectTable::Entry#trivial?` for `reach:`). A surviving `≤` bound makes the row non-trivial: `≤ io.db` is what a reviewer reads a diff for, and omitting the row would say "clean" about a method that claims otherwise; or
 - its direct summary is a **synthesised default**: every origin is a synthesised accessor construct (`construct:attr-writer` today; the `Struct` / `Data` accessors join it when discovery synthesises them). Such a row restates the `attr_accessor` line. A hand-written `def name=` keeps its row, because its origins are not the synthesised construct.
 
 The file lists the interesting, so a method that *becomes* impure arrives as an added key.

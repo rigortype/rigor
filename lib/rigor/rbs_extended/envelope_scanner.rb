@@ -67,6 +67,45 @@ module Rigor
         EMPTY
       end
 
+      # The **accepted-signature** reader: every per-method envelope declared anywhere in a BUILT
+      # `RBS::Environment` — a gem's shipped signatures, Rigor's bundled overlays, core RBS
+      # (ADR-103 WD6; #386).
+      #
+      # It exists for one purpose and is usable for exactly one: importing a `≤` bound at a call site
+      # that resolves into un-analysed code ({Rigor::Effects::EnvelopeIndex}). It MUST NOT feed a
+      # contract check. Two facts make that a structural guarantee rather than a convention —
+      # {.scan}, which the check reads, never opens this door, and the values here carry no
+      # `location` at all (the ADR-54 env cache dumps every `RBS::Location` to a `<cached>` sentinel,
+      # so a warm run could not name where the bound was written even if a diagnostic wanted to).
+      # There is also no body to check: a gem method is un-analysed by definition, which is why WD6
+      # trusts the declaration instead, exactly as it already trusts the gem's *types*.
+      #
+      # Class-level annotations are deliberately not read. Distribution needs "every method of the
+      # class discovery knows", which is a project fact; a gem's class-level tag would have to
+      # distribute over a definition set this reader does not have.
+      #
+      # @param loader [Rigor::Environment::RbsLoader] the run's loader; it owns the env walk
+      #   ({Rigor::Environment::RbsLoader#each_annotated_method_member}), so the environment itself never
+      #   leaves it.
+      # @param registry [Rigor::Effects::Registry]
+      # @return [Hash{String => Rigor::Effects::Envelope}] keyed `Class#m` / `Class.m`
+      def from_loader(loader:, registry:)
+        out = {}
+        loader.each_annotated_method_member do |class_name, member|
+          keys_for(class_name, member).each do |key|
+            next if out.key?(key)
+
+            envelope = RbsExtended.read_effect_envelope(
+              member.annotations, owner_key: key, source: :effect_annotation, registry: registry
+            )
+            out[key] = envelope if envelope
+          end
+        end
+        out.freeze
+      rescue StandardError
+        {}.freeze
+      end
+
       # Fail-soft per file: an unparseable `.rbs` is already quarantined by the loader and reported as
       # `rbs.coverage.quarantined-signature`; contributing no envelope is the consistent answer here.
       def declarations(name, content)

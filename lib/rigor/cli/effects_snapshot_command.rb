@@ -5,6 +5,7 @@ require "optionparser"
 require_relative "../analysis/runner"
 require_relative "../cache/store"
 require_relative "../configuration"
+require_relative "../effects/discharge"
 require_relative "../effects/path_finder"
 require_relative "../effects/snapshot"
 require_relative "../effects/snapshot_diff"
@@ -90,16 +91,24 @@ module Rigor
         recorded = load_recorded(path)
         return CLI::EXIT_USAGE if recorded == :error
 
+        discharge = options.fetch(:no_tolerated) ? Effects::Discharge.none : effect_discharge(configuration)
         diff = Effects::SnapshotDiff.compare(
           recorded: recorded, current: current,
           tolerated: options.fetch(:no_tolerated) ? [] : configuration.effects_tolerated,
           gate: configuration.effects_snapshot_gate,
-          strict_tolerated: options.fetch(:strict_tolerated)
+          strict_tolerated: options.fetch(:strict_tolerated),
+          undischarged: Effects::Snapshot.undischarged_index(
+            snapshot: current, table: @table, discharge: discharge
+          )
         )
         return explain(diff, options) if @verb == "explain"
 
         EffectsDiffRenderer.new(out: @out, path: path).render(diff, format: options.fetch(:format))
         @verb == "check" && diff.drift? ? 1 : 0
+      end
+
+      def effect_discharge(configuration)
+        Effects::Discharge.new(configuration.effects_tolerated)
       end
 
       # A missing snapshot is drift with a routed message, not an error: it is the state every project is
@@ -189,7 +198,8 @@ module Rigor
         runner.run(configuration.paths)
         @table = runner.effect_table
         Effects::Snapshot.build(table: @table, configuration: configuration,
-                                sources: runner.effect_sources, full: full)
+                                sources: runner.effect_sources, full: full,
+                                registry: Effects::Registry.for_configuration(configuration))
       end
 
       # ---- options ------------------------------------------------

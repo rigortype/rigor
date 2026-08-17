@@ -10,6 +10,7 @@ require_relative "../rbs_extended/reporter"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
+require_relative "../effects/attribution"
 require_relative "../effects/collector"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
@@ -98,6 +99,9 @@ module Rigor
         # so a worker and the parent agree without a flag to keep in sync. Records marshal back through
         # {#drain_effects}.
         @record_effects = configuration.effects_enabled?
+        # ADR-103 WD6 / #385 — same table, derived the same way, for the same reason as `@record_effects`
+        # above: a worker and the parent agree without a flag to keep in sync.
+        @effect_attribution = Effects::Attribution.build(configuration.effects_attribution)
         @file_effects = {}
         # ADR-32 WD4 — full project file list (frozen Array<String>) for env-build-time invocation of any
         # loaded plugin's `source_rbs_synthesizer` callable.
@@ -163,7 +167,9 @@ module Rigor
         return analyze_body(path) unless @record_effects
 
         diagnostics = nil
-        collection = Effects::Collector.collect_for(path) { diagnostics = analyze_body(path) }
+        collection = Effects::Collector.collect_for(path, attribution: @effect_attribution) do
+          diagnostics = analyze_body(path)
+        end
         @file_effects[path] = collection
         diagnostics
       end

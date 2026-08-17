@@ -2,6 +2,7 @@
 
 require_relative "envelope"
 require_relative "effect_table"
+require_relative "method_key"
 require_relative "path_finder"
 
 module Rigor
@@ -22,15 +23,36 @@ module Rigor
     #   callees — not against the unit's own direct summary.
     # - **`mutate.local` is tolerated by every envelope**, `%a{pure}` included ({Envelope#tolerates?}).
     #
-    # `effects.tolerated:` is deliberately NOT consulted here. That list is a *judgment*-time policy
-    # for the snapshot's diff (ADR-103 WD7: the record is undischarged), and wiring it into the
-    # envelope check is #385's business, not this slice's.
+    # **`effects.tolerated:` discharges, per origin** (#385). The comparison reads
+    # {EffectTable::Entry#undischarged} rather than `proven`: the propagator has already dropped every
+    # origin bundle the policy discharges and closed the rest over the graph, so a `pure`-declared method
+    # that logs is silent under `tolerated: [telemetry]` while the `File.read` two lines down still fires.
+    # `apply_tolerated: false` — `--no-tolerated-effects` — judges against `proven` instead, which is the
+    # audit switch that makes the policy inspectable rather than invisible.
     module EnvelopeCheck
       # One (method, exceeding label) pair. `chain` is the shortest project-method path from the
       # method to whatever proves the label and `origin` is the callee key or construct at its end —
       # the same explanation `rigor effects explain` prints, so the diagnostic tells a reader where to
       # look rather than only that something is wrong.
       Finding = Data.define(:key, :label, :envelope, :path, :line, :chain, :origin)
+
+      # The discovery tables a finding's POSITION is read from, as one value — `discovered_def_sources`
+      # (`{class => {method_sym => "path:line"}}`), its `def self.x` mirror, and `discovered_class_sources`
+      # (`{class => Set[path]}`), the fallback for a method with no Ruby `def` at all. Kept together so the
+      # check's own signature stays about the judgment rather than about where a `def` lives.
+      class Positions < Data.define(:def_sources, :singleton_def_sources, :class_sources)
+        NONE = {}.freeze
+        private_constant :NONE
+
+        def self.empty
+          @empty ||= build
+        end
+
+        def self.build(def_sources: nil, singleton_def_sources: nil, class_sources: nil)
+          new(def_sources: def_sources || NONE, singleton_def_sources: singleton_def_sources || NONE,
+              class_sources: class_sources || NONE)
+        end
+      end
 
       NO_FINDINGS = [].freeze
       private_constant :NO_FINDINGS
@@ -40,31 +62,37 @@ module Rigor
       # @param table [EffectTable] the run's propagated graph.
       # @param method_envelopes [Hash{String => Envelope}] per-method envelopes, as written.
       # @param class_envelopes [Hash{String => Envelope}] class- / module-level envelopes, to distribute.
-      # @param def_sources [Hash] `discovered_def_sources` — `{class => {method_sym => "path:line"}}`.
-      # @param singleton_def_sources [Hash] its `def self.x` mirror.
-      # @param class_sources [Hash] `discovered_class_sources` — `{class => Set[path]}`, the fallback
-      #   position for a method with no Ruby `def` (a synthesized `attr_*` accessor).
+      # @param config_envelopes [Hash{String => Envelope}] `effects.envelopes:` entries already resolved
+      #   to the classes they select ({ConfigEnvelopes.for_classes}), to distribute at the lowest precedence.
+      # @param positions [Positions] the discovery tables a finding's `def` position is read from.
+      # @param apply_tolerated [Boolean] false judges against the undischarged-by-policy `proven` lane —
+      #   the `--no-tolerated-effects` audit switch.
       # @return [Array<Finding>] sorted by position then key then label, so a run explains identically twice.
-      def run(table:, method_envelopes:, class_envelopes:,
-              def_sources: {}, singleton_def_sources: {}, class_sources: {})
-        envelopes = distribute(table, method_envelopes, class_envelopes)
+      def run(table:, method_envelopes:, class_envelopes:, config_envelopes: {},
+              positions: Positions.empty, apply_tolerated: true)
+        envelopes = distribute(table, method_envelopes, class_envelopes, config_envelopes)
         return NO_FINDINGS if envelopes.empty?
 
         findings = []
         envelopes.each do |key, envelope|
-          collect(findings, table, key, envelope, def_sources, singleton_def_sources, class_sources)
+          collect(findings, table, key, envelope, positions, apply_tolerated)
         end
         findings.sort_by { |f| [f.path.to_s, f.line, f.key, f.label] }.freeze
       end
 
-      # Resolves the per-method envelope for every unit the table knows. A class-level envelope reaches
-      # every method of THAT Ruby class — its key is the class name, so a subclass's keys never match
-      # and a module distributes to its own methods only — and a per-method envelope wins over it.
-      def distribute(table, method_envelopes, class_envelopes)
+      # Resolves the per-method envelope for every unit the table knows, **nearest wins**:
+      #
+      #     per-method annotation  >  class-level annotation  >  `effects.envelopes:` entry
+      #
+      # The two class-shaped strata distribute identically — an envelope keyed by a class name reaches
+      # every method key of THAT Ruby class, so a subclass's keys never match and a module distributes to
+      # its own methods only — and are applied in that order, so a written annotation always wins over a
+      # convention. Which config entry a class matched was already decided by {ConfigEnvelopes.for_classes}.
+      def distribute(table, method_envelopes, class_envelopes, config_envelopes)
         resolved = {}
-        unless class_envelopes.empty?
+        unless class_envelopes.empty? && config_envelopes.empty?
           keys_by_class(table).each do |class_name, keys|
-            envelope = class_envelopes[class_name]
+            envelope = class_envelopes[class_name] || config_envelopes[class_name]
             next if envelope.nil?
 
             keys.each { |key| resolved[key] = envelope.rebind(key) }
@@ -79,23 +107,23 @@ module Rigor
       # synthesized `attr_*` / `define_method` members the effects scanner adds.
       def keys_by_class(table)
         table.keys.each_with_object({}) do |key, out|
-          index = key.index("#") || key.index(".")
-          next if index.nil?
+          owner = MethodKey.owner(key)
+          next if owner.nil?
 
-          (out[key[0, index]] ||= []) << key
+          (out[owner] ||= []) << key
         end
       end
 
-      def collect(findings, table, key, envelope, def_sources, singleton_def_sources, class_sources)
+      def collect(findings, table, key, envelope, positions, apply_tolerated)
         return if envelope.top?
 
         entry = table[key]
         return if entry.nil?
 
-        exceeding = envelope.exceeded_by(entry.proven)
+        exceeding = envelope.exceeded_by(apply_tolerated ? entry.undischarged : entry.proven)
         return if exceeding.empty?
 
-        path, line = position(key, def_sources, singleton_def_sources, class_sources)
+        path, line = position(key, positions)
         exceeding.each do |label|
           trail = PathFinder.shortest(table, symbol: key, label: label)
           findings << Finding.new(
@@ -109,17 +137,15 @@ module Rigor
       # over the `.rbs` line deliberately — `# rigor:disable` reads only Ruby comments). A method with
       # no `def` is a synthesized accessor, and the class's own source is the closest thing to a
       # position it has.
-      def position(key, def_sources, singleton_def_sources, class_sources)
-        index = key.index("#") || key.index(".")
-        return [nil, 1] if index.nil?
+      def position(key, positions)
+        class_name, separator, selector = MethodKey.split(key)
+        return [nil, 1] if class_name.nil?
 
-        class_name = key[0, index]
-        method_name = key[(index + 1)..].to_s.to_sym
-        table = key[index] == "." ? singleton_def_sources : def_sources
-        site = table.dig(class_name, method_name)
+        table = separator == "." ? positions.singleton_def_sources : positions.def_sources
+        site = table.dig(class_name, selector.to_sym)
         return split_site(site) if site
 
-        [Array(class_sources[class_name]).first, 1]
+        [Array(positions.class_sources[class_name]).first, 1]
       end
 
       def split_site(site)

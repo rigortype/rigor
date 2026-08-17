@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "discharge"
 require_relative "effect_table"
 require_relative "file_collection"
 
@@ -24,6 +25,14 @@ module Rigor
     #
     # Propagation is graph-only: it reads no source, types nothing, and touches no `Scope`. It is
     # fail-soft as a whole — an exception yields the empty table rather than failing the run.
+    #
+    # **Two proven lanes, one fixpoint** (#385). Beside `proven` the fixpoint carries `undischarged` — the
+    # same closure computed from each unit's *undischarged* direct bundles, i.e. with every origin bundle
+    # `effects.tolerated:` discharges dropped at the seed ({Discharge}). Per-origin discharge needs
+    # nothing more than that: an origin belongs to exactly one unit's direct summary, so the transitive
+    # union of surviving bundles IS the closure of the seeded ones, and the judgment never has to
+    # materialise a per-method set of transitive origins. With no `tolerated:` list the policy is inert,
+    # the seed is identical, and the second lane costs one extra `equal?`-true join per visit.
     module Propagator
       NO_EDGES = [].freeze
       private_constant :NO_EDGES
@@ -31,13 +40,15 @@ module Rigor
       module_function
 
       # @param collection [FileCollection] the run's merged per-file collections
+      # @param discharge [Discharge] the `effects.tolerated:` policy the undischarged lane is computed
+      #   under; {Discharge.none} makes the two lanes equal.
       # @return [EffectTable]
-      def propagate(collection)
+      def propagate(collection, discharge: Discharge.none)
         return EffectTable.empty if collection.summaries.empty?
 
         summaries = collection.summaries
         edges = resolve_edges(collection)
-        state = seed(summaries)
+        state = seed(summaries, discharge)
         iterate(state, edges)
         EffectTable.new(build_entries(summaries, edges, state))
       rescue StandardError
@@ -57,9 +68,13 @@ module Rigor
       # {build_entries}. A Set is what {absorb} needs: unioning one along an edge must cost the source's
       # size and allocate NOTHING when it adds nothing, and the array-concat-and-uniq it replaces
       # allocated twice on every visit of every edge.
-      def seed(summaries)
+      def seed(summaries, discharge)
         summaries.transform_values do |summary|
-          { proven: summary.proven, exhaustive: summary.exhaustive?, causes: Set.new(summary.causes) }
+          {
+            proven: summary.proven,
+            undischarged: discharge.inert? ? summary.proven : discharge.undischarged(summary.bundles),
+            exhaustive: summary.exhaustive?, causes: Set.new(summary.causes)
+          }
         end
       end
 
@@ -108,10 +123,17 @@ module Rigor
         source = state[callee]
         return false if source.nil? || target.equal?(source)
 
+        # The two label lanes are unrolled rather than looped: this runs once per edge per visit, and a
+        # literal array of lane names would allocate one per call for nothing.
         changed = false
-        joined = target[:proven].join(source[:proven])
-        unless joined == target[:proven]
-          target[:proven] = joined
+        proven = target[:proven].join(source[:proven])
+        unless proven == target[:proven]
+          target[:proven] = proven
+          changed = true
+        end
+        undischarged = target[:undischarged].join(source[:undischarged])
+        unless undischarged == target[:undischarged]
+          target[:undischarged] = undischarged
           changed = true
         end
         if target[:exhaustive] && !source[:exhaustive]
@@ -130,6 +152,7 @@ module Rigor
             key: key,
             direct: summary,
             proven: closed[:proven],
+            undischarged: closed[:undischarged],
             exhaustive: closed[:exhaustive],
             causes: closed[:causes].sort_by { |cause, detail| [cause, detail.to_s] }.freeze,
             edges: edges.fetch(key, NO_EDGES)

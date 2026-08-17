@@ -1,0 +1,10 @@
+module Presenters
+  class User
+    def name: () -> String
+
+    def render: () -> String
+
+    %a{rigor:v1:effect io.fs.read}
+    def annotated: () -> String
+  end
+end

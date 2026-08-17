@@ -42,7 +42,10 @@ RSpec.describe Rigor::Effects::EnvelopeCheck do
   end
 
   def run(table, methods: {}, classes: {}, **tables)
-    described_class.run(table: table, method_envelopes: methods, class_envelopes: classes, **tables)
+    described_class.run(
+      table: table, method_envelopes: methods, class_envelopes: classes,
+      positions: described_class::Positions.build(**tables)
+    )
   end
 
   describe "the comparison" do

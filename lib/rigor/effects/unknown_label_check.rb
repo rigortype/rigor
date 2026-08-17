@@ -15,9 +15,9 @@ module Rigor
     #   `.rbs` or through rbs-inline. One finding per (declaration, unrecognised token); a
     #   `def self?.x` member declares two keys off ONE annotation, so findings are deduplicated by
     #   where they were written rather than by which method they bind.
-    # - {.for_config} — a `.rigor.yml` label list (`effects.tolerated:` today; `envelopes[].effect`
-    #   and `attribution:` when [#385](https://github.com/rigortype/rigor/issues/385) lands, which is
-    #   why the key path is a parameter rather than a literal).
+    # - {.for_config} — a `.rigor.yml` label list: `effects.tolerated:`, `effects.labels:`, each
+    #   `envelopes[].effect` and each `attribution:` value. The key path is a parameter rather than a
+    #   literal precisely because there are four of them and each names a different place to edit.
     module UnknownLabelCheck
       # `location` is the `path:line` the declaration was written at, or nil for a config value —
       # the caller resolves both. `spelling` is the author's own annotation text, which is also how a

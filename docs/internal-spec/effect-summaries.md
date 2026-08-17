@@ -219,8 +219,11 @@ Edge resolution is memoised on `(receiver class, kind, selector)`, and the trans
 **Fixpoint.** A worklist in sorted key order, to a true fixpoint:
 
 - `proven(m) = direct(m) ∪ ⋃ proven(callee)`
+- `undischarged(m) = undischarged_direct(m) ∪ ⋃ undischarged(callee)`
 - `exhaustive(m) = direct_exhaustive(m) ∧ ⋀ exhaustive(callee)`
 - `causes(m) = direct_causes(m) ∪ ⋃ causes(callee)`
+
+`undischarged_direct(m)` is the join of the direct summary's origin bundles that `effects.tolerated:` does **not** discharge (§ Discharge by policy). Carrying it as a second lane of the same fixpoint is what makes per-origin discharge cost nothing structurally: an origin belongs to exactly one unit's direct summary, so the transitive union of surviving bundles is the closure of the seeded ones, and no method ever has to materialise a set of transitive origins. With no `tolerated:` list the two lanes are seeded identically and the second costs one allocation-free join per edge visit.
 
 The lattice is finite (label sets over a closed vocabulary × one bit × a closed cause enum) and every step is monotone, so a recursive or mutually recursive cycle converges on its own. **No recursion cap is used or wanted here** — unlike the return-type walk's Kleene iteration, there is no widening to force.
 
@@ -254,7 +257,7 @@ Two `:info` diagnostics read the seams the envelope reader leaves. Both are comp
 **`effect.unknown-label`** rides the envelope pass, its `effects.check` gate and its single walk of the project's signatures. Grouping it with enforcement is the point: it reports that a declaration STOPPED enforcing, so the switch that turns enforcement on is the right switch for the diagnostic that keeps enforcement honest.
 
 - `Effects::LabelIntent.evident?` is the FP gate — the four signals of [`effect-labels.md`](../type-specification/effect-labels.md) § Unknown labels. It is a pure predicate over `(token, registry, siblings)`, so the config-side and declaration-side producers cannot drift apart.
-- `Effects::UnknownLabelReport` renders; `Effects::UnknownLabelCheck` walks. The check answers value objects, never diagnostics and never the filesystem, and takes the `subject` / `consequence` phrasing from its caller — which is the seam [#385](https://github.com/rigortype/rigor/issues/385)'s `envelopes[].effect` and `attribution:` values point at without touching either class.
+- `Effects::UnknownLabelReport` renders; `Effects::UnknownLabelCheck` walks. The check answers value objects, never diagnostics and never the filesystem, and takes the `subject` / `consequence` phrasing from its caller — which is what lets the four `.rigor.yml` label surfaces (`tolerated:`, `labels:`, `envelopes[].effect`, `attribution:` values) each name the place a reader has to edit, through one walker.
 - Findings are deduplicated by **where they were written** (`[location, spelling, token]`), not by the method key they bound: a `def self?.x` member declares two keys off one annotation, and there is one typo to fix.
 - Positioning is the declaration. A `.rbs` location is used verbatim. A location in a `.rb` file can only have come from a `virtual:` buffer, and rbs-inline's writer re-emits the author's comment block above each generated member — so the synthesized line drifts from the source line by the length of every body above it, and the pass re-anchors by finding the annotation's own `%a{…}` text in the Ruby file. A config value has no location at all and lands at `.rigor.yml:1:1`, the `rbs.coverage.quarantined-signature` precedent.
 - Suppression comments are read only out of `.rb` files. Parsing an `.rbs` or a `.rigor.yml` as Ruby to look for a `# rigor:disable` would be a lie dressed as a feature; those positions are suppressible through `disable:` and the baseline.
@@ -265,6 +268,34 @@ Two `:info` diagnostics read the seams the envelope reader leaves. Both are comp
 - Detection is `SignatureSources::ANNOTATION_HINT` line by line — a routing regex over the `.rbs` text, no RBS parse and no analysis. A project with no signature tree costs a `Dir.glob` that matches nothing.
 - It takes the loader the run **already** resolved and never builds one. An environment build on the effects-off path is a cost the project did not ask for, so an annotation written only as an rbs-inline comment is detected when a loader happens to be at hand and not otherwise. Under-reporting an advisory `:info` is the fail-quiet direction, and nothing else depends on this pass.
 - It is positioned at the first annotation, not at `.rigor.yml`: the fix is a config edit, but the inert thing is what the author wrote.
+
+### Envelopes written in `.rigor.yml`
+
+`effects.envelopes:` is the second envelope stratum — the same `Effects::Envelope` value, reached without an annotation ([`effect-labels.md`](../type-specification/effect-labels.md) § Envelopes by convention). `Effects::ConfigEnvelopes` owns it, in two steps that are kept apart on purpose:
+
+- **`.build`** resolves each entry's `effect:` list against the run's registry once, producing the entry's bound — `LabelSet::TOP` when any member is unrecognised, which is the same fail-open degradation an annotation takes — and the `unknown_labels` the `effect.unknown-label` producer reads.
+- **`.for_classes`** decides which classes each entry selects, over the class names the effect table actually carries. A `namespace:` glob matches the fully-qualified name segment by segment; a `match:` glob matches any file that defines one of the class's methods, from `Runner#effect_sources`, relativised against the project root and compared with `File.fnmatch?` + `FNM_PATHNAME` — the `unused --entry-point` and `effects.snapshot.reach:` semantics, spelled once. The **first** entry that selects a class wins.
+
+The result is a class-keyed envelope map, and `Effects::EnvelopeCheck.distribute` applies the three strata in one place: a per-method annotation wins over a class-level annotation, which wins over a configured entry. A configured envelope is the only one whose `#rebind` keeps its own `source`, because distribution is what it *is* — the fact worth naming in the message is the stanza (`.rigor.yml effects.envelopes[2]`), not the class it was distributed to.
+
+The configured stratum does **not** depend on the RBS walk. A project with no signature tree gets its conventions judged: the annotation scan is skipped when there is no loader or it finds nothing, and the pass proceeds on the config entries alone. That is the surface's whole point — one stanza checks an architectural layer on day one, before any RBS exists.
+
+### Discharge by policy
+
+`effects.tolerated:` is applied by `Effects::Discharge`, at judgment time and nowhere else. The rule is per origin: **a bundle is discharged when any of its labels is tolerated**, because an origin is one callee or one construct and tolerating what it was *for* frees the transport it came with. Two consumers, one policy object:
+
+- the **envelope check**, through the propagator's `undischarged` lane above. `EnvelopeCheck.run(apply_tolerated: false)` reads `proven` instead, which is `--no-tolerated-effects`.
+- the **snapshot diff**, through `Snapshot.undischarged_index` — `{table => {symbol => [label]}}` for the current side, built beside the snapshot and never stored in it. An *added* label is then tolerated exactly when every origin introducing it is discharged; a *removal* has no current-side origin left to consult and stays judged by label. Without the index (a caller with no table) both fall back to the label reading.
+
+The record on disk stays undischarged in both directions, and the collector attributes undischarged labels: policy is a lens over facts, never a filter on them.
+
+### Attribution: the declared lane's first producer
+
+`effects.attribution:` is consulted in `Effects::UnitScan`, on the same `(owner, selector)` the catalogue is looked up under — the owner the syntax names for a constant-path receiver, and the class the typer projected the receiver to otherwise. It runs **beside** the catalogue rather than instead of it and never claims the call: a catalogued row states what Ruby's own surface proves, an attribution states what the project claims about a body Rigor never read, and a call that is both honestly reads as both.
+
+What it produces is a bundle in `Summary#declared_bundles` under an `Origin` of source `:attribution`, plus a `plugin-attribution` taint at the site. Never a proven label, never a discharged taint (ADR-103 WD6). Two consequences fall out and both are load-bearing: an envelope can never fire because of an attribution, and a method whose only colour is attributed reads "∅, and possibly more" rather than "clean".
+
+The table is built once per run from the configuration and carried on the collection window (`Collector.collect_for(path, attribution:)`), so a fork-pool worker scans under exactly the claims the parent does. It participates in the effects cache identity through the `effects:` digest, so editing the table re-collects rather than reusing summaries coloured under the old one.
 
 ### Where the check runs
 
@@ -338,7 +369,7 @@ The record is **undischarged**. `effects.tolerated:` and the gate apply in `Effe
 
 Event categories, per symbol and table: `label-added` / `label-removed`, `declared-added` / `declared-removed`, `materialised` (a declared label became proven — one event, never a removal plus an addition), `exhaustive-lost` / `exhaustive-gained`, `symbol-added` / `symbol-removed`, plus `regeneration` and `missing-snapshot`. A removal whose current side is non-exhaustive is **hedged**: "possibly more" cannot prove an absence. A symbol carrying nothing produces no event (it exists only under `--full`) but is still counted in the footer, so a rename balances as one addition and one removal.
 
-The gate reads those categories. `symmetric` (default) fails on any event; `additions` fails only on `symbol-added`, `label-added`, `declared-added`, `exhaustive-lost`, `regeneration` and `missing-snapshot` — the last two under both gates, because an incomparable record is not something to ratchet against. An event is **tolerated** when `effects.tolerated:` admits every label it carries (a symbol event carries the symbol's whole set); a tolerated event is reported under its own heading and does not gate unless `--strict-tolerated`. `--no-tolerated-effects` judges as if the list were empty. An event carrying no label — an exhaustiveness transition, a regeneration — can never be tolerated.
+The gate reads those categories. `symmetric` (default) fails on any event; `additions` fails only on `symbol-added`, `label-added`, `declared-added`, `exhaustive-lost`, `regeneration` and `missing-snapshot` — the last two under both gates, because an incomparable record is not something to ratchet against. An event is **tolerated** when the policy discharges every label it carries (a symbol event carries the symbol's whole set); a tolerated event is reported under its own heading and does not gate unless `--strict-tolerated`. `--no-tolerated-effects` judges as if the list were empty. An event carrying no label — an exhaustiveness transition, a regeneration — can never be tolerated. Additions are judged per origin when the caller supplies the current side's undischarged index (§ Discharge by policy); everything else is judged by label.
 
 `rigor effects explain` answers the reach half from the same graph: a breadth-first walk over `EffectTable::Entry#edges` to the first method whose *direct* summary proves the label, ending at that method's origin (`Rigor::Effects::PathFinder`). Shortest, so a reviewer gets the tightest explanation available. A `methods:` change has no path — the label came from the unit's own body — so what explains it is the origin itself.
 

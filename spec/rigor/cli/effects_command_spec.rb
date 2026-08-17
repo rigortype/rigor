@@ -64,6 +64,7 @@ RSpec.describe Rigor::CLI::EffectsCommand do
     expect(status).to eq(0)
     expect(payload.dig("methods", "Tracer::Reporter#report")).to eq(
       "effects" => %w[io.output.stdout nondet.time],
+      "declared" => [],
       "exhaustive" => true,
       "causes" => [],
       "direct" => { "catalogue:Kernel#puts" => ["io.output.stdout"], "catalogue:Time.now" => ["nondet.time"] }

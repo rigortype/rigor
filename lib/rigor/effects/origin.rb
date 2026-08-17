@@ -17,6 +17,10 @@ module Rigor
       CONSTRUCT = :construct
       # A row of the built-in effect catalogue ({Catalog}; `data/effects/core.yml` from #380).
       CATALOGUE = :catalogue
+      # A row of the project's own `effects.attribution:` table — a claim about code Rigor did not
+      # analyse. Its labels land in the summary's DECLARED lane and never in the proven one, and the site
+      # keeps its `plugin-attribution` taint (ADR-103 WD6: "declared this, and possibly more").
+      ATTRIBUTION = :attribution
 
       def self.construct(name)
         new(name: name.to_s, source: CONSTRUCT)
@@ -24,6 +28,10 @@ module Rigor
 
       def self.catalogue(name)
         new(name: name.to_s, source: CATALOGUE)
+      end
+
+      def self.attribution(name)
+        new(name: name.to_s, source: ATTRIBUTION)
       end
 
       # The rendering the report and the JSON payload key on. Sorted lexicographically, so `catalogue:`

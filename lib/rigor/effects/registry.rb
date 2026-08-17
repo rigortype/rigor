@@ -41,6 +41,24 @@ module Rigor
         @default ||= load_file(DATA_PATH)
       end
 
+      # The vocabulary one run works in: the shipped registry plus whatever `effects.labels:` opened
+      # (ADR-103 WD2 / #385). The project is the one extender that may open ANY root — listing a label in
+      # its own configuration is the vouching act — so this can only fail on a spelling `Configuration`
+      # already rejected at load, and a failure degrades to the shipped vocabulary rather than taking the
+      # run down.
+      #
+      # Memoised on the label list, because the answer is a frozen value object and every effects surface
+      # in a run asks for the same one: the envelope pass, the unknown-label check, the snapshot header.
+      # Plugin-registered roots join here in #387.
+      def self.for_configuration(configuration)
+        labels = configuration.effects_labels
+        return default if labels.nil? || labels.empty?
+
+        (@extended ||= {})[labels] ||= default.with(labels: labels, owner: nil)
+      rescue Error
+        default
+      end
+
       # Build a registry from a registry-shaped YAML file. Missing or unreadable data degrades to
       # an empty vocabulary rather than raising, matching the built-in catalogues' posture for a
       # bare install that opted data out; every label then reads as unknown, which is fail-open.

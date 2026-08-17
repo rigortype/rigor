@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "attribution"
 require_relative "catalog"
 require_relative "file_collection"
 require_relative "label_set"
@@ -28,7 +29,9 @@ module Rigor
     #
     # What it cannot prove it taints, and a taint is never a finding — the summary reads "these effects,
     # and possibly more".
-    class UnitScan
+    # Long by construction: the walk carries one `when` per Ruby construct that originates an effect, and
+    # splitting that table across classes would put the vocabulary in one file and the reasons in another.
+    class UnitScan # rubocop:disable Metrics/ClassLength
       # `$~` and friends are frame-local, not global state: a read of one is not `global.read`. (Prism
       # gives `$1` and `$&` node types of their own, so only the named specials need listing.)
       FRAME_LOCAL_GLOBALS = %w[$~ $_ $& $` $' $+ $!].to_set.freeze
@@ -94,14 +97,18 @@ module Rigor
       # @param block_parameter [String, nil] the unit's `&blk` parameter name, if any; a call on it is
       #   forwarding, not an opaque callable
       # @param calls [Hash] node-identity table of {Collector::CallRecord}s
-      def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:)
+      # @param attribution [Attribution] the project's `effects.attribution:` table
+      def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:,
+                     attribution: Attribution.empty)
         @singleton = singleton
         @block_parameter = block_parameter
         @calls = calls
+        @attribution = attribution
         @mutation = MutationClassifier.new(
           singleton: singleton, parameters: parameters, owned_locals: owned_locals
         )
         @bundles = {}
+        @declared_bundles = {}
         @causes = []
         @edges = []
         @nested = []
@@ -114,7 +121,11 @@ module Rigor
       # Walks `body` and returns `[Summary, edges]`.
       def run(body)
         walk(body)
-        [Summary.new(bundles: @bundles, exhaustive: @causes.empty?, causes: @causes), @edges]
+        summary = Summary.new(
+          bundles: @bundles, declared_bundles: @declared_bundles,
+          exhaustive: @causes.empty?, causes: @causes
+        )
+        [summary, @edges]
       end
 
       private
@@ -123,6 +134,12 @@ module Rigor
         return if labels.empty?
 
         @bundles[origin] = @bundles.key?(origin) ? @bundles[origin].join(labels) : labels
+      end
+
+      def add_declared(origin, labels)
+        return if labels.empty?
+
+        @declared_bundles[origin] = @declared_bundles.key?(origin) ? @declared_bundles[origin].join(labels) : labels
       end
 
       def taint(cause, detail = nil)
@@ -186,8 +203,31 @@ module Rigor
 
       def visit_call(node)
         record = @calls[node]
+        attribute(node, record)
         visit_uncatalogued(node, record) unless claimed_by_catalogue?(node, record)
         visit_block_argument(node)
+      end
+
+      # The project's own `effects.attribution:` table, consulted on the same `(owner, selector)` the
+      # catalogue is looked up under ({Attribution}).
+      #
+      # It runs BESIDE the catalogue rather than instead of it, and it never claims the call: attribution
+      # answers a different question in a different lane. A catalogued row says what Ruby's own surface
+      # proves; an attribution says what the project *claims* about a body Rigor never read, so its labels
+      # go to the declared lane and the site keeps a `plugin-attribution` taint — "declared this, and
+      # possibly more" (ADR-103 WD6). A call that is both catalogued and attributed honestly reads as both.
+      def attribute(node, record)
+        return if @attribution.empty?
+
+        owner, singleton, = catalog_target(node, record)
+        return if owner.nil?
+
+        key = catalogue_key(owner, singleton, node)
+        labels = @attribution[key]
+        return if labels.nil?
+
+        add_declared(Origin.attribution(key), labels)
+        taint("plugin-attribution", key)
       end
 
       # The catalogued path. Answers whether the catalogue claimed this call — a claim suppresses the

@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "../inference/origin_lookup"
+require_relative "attribution"
 require_relative "file_collection"
 require_relative "scanner"
 
@@ -36,11 +37,12 @@ module Rigor
 
       # Per-file, per-thread accumulator. Not frozen and never shared: it lives for one `analyze_file`.
       class Accumulator
-        attr_reader :path, :calls
+        attr_reader :path, :calls, :attribution
         attr_accessor :root
 
-        def initialize(path)
+        def initialize(path, attribution: Attribution.empty)
           @path = path
+          @attribution = attribution
           # Node identity, not equality: two structurally identical call nodes in one file are different
           # sites, and `Prism::Node#hash` is structural.
           @calls = {}.compare_by_identity
@@ -78,9 +80,13 @@ module Rigor
 
       # Runs `block` with collection active for `path` and returns the resulting {FileCollection}. Nests
       # safely and restores the previous accumulator on exit.
-      def collect_for(path)
+      #
+      # `attribution` is the project's `effects.attribution:` table (#385), carried on the window rather
+      # than read from a global: a worker process and the parent must scan under the same table, and the
+      # only thing that knows it is the configuration the run was built from.
+      def collect_for(path, attribution: Attribution.empty)
         previous = Thread.current[KEY]
-        accumulator = Accumulator.new(path.to_s)
+        accumulator = Accumulator.new(path.to_s, attribution: attribution)
         Thread.current[KEY] = accumulator
         @mutex.synchronize { @active_count += 1 }
         yield
@@ -152,7 +158,10 @@ module Rigor
       def build(accumulator)
         return FileCollection.empty(accumulator.path) if accumulator.root.nil?
 
-        Scanner.scan(root: accumulator.root, path: accumulator.path, calls: accumulator.calls)
+        Scanner.scan(
+          root: accumulator.root, path: accumulator.path, calls: accumulator.calls,
+          attribution: accumulator.attribution
+        )
       rescue StandardError
         FileCollection.new(path: accumulator.path, failed: true)
       end

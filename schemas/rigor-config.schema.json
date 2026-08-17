@@ -71,7 +71,7 @@
       "type": "boolean"
     },
     "effects": {
-      "description": "ADR-103 — effect labels. The PRESENCE of this block is the opt-in: `effects: {}` (or the bare key, which YAML parses as null) turns effect collection on with every sub-key at its default, and its absence keeps `rigor check` byte-identical and free. `false` is the explicit-disable form, useful in `.rigor.yml` to override an upstream `.rigor.dist.yml`'s block — the same shape `baseline:` uses. Nothing else enables collection: an `%a{rigor:v1:effect …}` or `%a{pure}` annotation in a project's RBS does not, because an annotation must not create a project-wide cost cliff. `rigor effects` runs under an implicit `effects: {}` when the key is absent. The sub-keys are DECLARED but not yet read — they land with their slices (#381 snapshot, #383 envelopes, #386 the declared lane), and reserving their shape first is the same discipline ADR-99 applies to a sibling implementation's namespace.",
+      "description": "ADR-103 — effect labels. The PRESENCE of this block is the opt-in: `effects: {}` (or the bare key, which YAML parses as null) turns effect collection on with every sub-key at its default, and its absence keeps `rigor check` byte-identical and free. `false` is the explicit-disable form, useful in `.rigor.yml` to override an upstream `.rigor.dist.yml`'s block — the same shape `baseline:` uses. Nothing else enables collection: an `%a{rigor:v1:effect …}` or `%a{pure}` annotation in a project's RBS does not, because an annotation must not create a project-wide cost cliff. `rigor effects` runs under an implicit `effects: {}` when the key is absent. Every sub-key but `views:` is read; `views:` stays declared-and-unread until its slice, which is the same discipline ADR-99 applies to a sibling implementation's namespace.",
       "oneOf": [
         { "$ref": "#/$defs/effectsBlock" },
         { "type": "null" },
@@ -242,7 +242,7 @@
   },
   "$defs": {
     "effectsBlock": {
-      "description": "The body of the `effects:` opt-in. `check:`, `snapshot:` and `tolerated:` are read (the envelope check, #383; the effect snapshot, #381); the rest are reserved — declared, accepted, and not yet read by this implementation.",
+      "description": "The body of the `effects:` opt-in. Every key but `views:` is read: `check:` and `envelopes:` decide the envelope contract (#383 / #385), `snapshot:` and `tolerated:` the committed record and its gate (#381), `labels:` the project's vocabulary and `attribution:` its claims about code Rigor does not analyse (#385). `views:` is reserved — declared, accepted, and not yet read by this implementation.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -276,12 +276,12 @@
           }
         },
         "labels": {
-          "description": "Project-owned vocabulary extensions, layered over `data/effects/registry.yml`. A project may open any root. NOT READ YET.",
+          "description": "Project-owned vocabulary extensions, layered over `data/effects/registry.yml`. A project may open any root — listing a label in its own configuration IS the vouching act, where a plugin may open only the root it owns. Registered labels become known everywhere a label is judged: `effect.unknown-label`, envelope bounds, attribution values, `tolerated:`. Label SHAPE is validated at load (tier 2). READ.",
           "type": "array",
           "items": { "type": "string" }
         },
         "attribution": {
-          "description": "Per-gem effect attribution: `{ gem-or-method-key: [labels] }` for third-party code Rigor cannot see. Attributed labels never discharge a taint — they read as \"declared this, and possibly more\" (ADR-103 WD6). NOT READ YET.",
+          "description": "Per-method effect attribution for third-party code Rigor cannot see: `{ \"Net::HTTP.get\": [io.net.http], \"Logger#info\": [telemetry] }`. A key is a method key exactly as the symbol tables spell one — `Owner#instance_method` or `Owner.singleton_method` — and a malformed key is a load-time error (tier 2). A call resolving to that owner and selector contributes the labels to the caller's DECLARED (`\u2264`) lane and leaves a `plugin-attribution` taint: attributed labels never enter the proven lane and never discharge a taint, because they read as \"declared this, and possibly more\" (ADR-103 WD6). An unrecognised label is `effect.unknown-label`, not an error. READ.",
           "type": "object",
           "additionalProperties": {
             "type": "array",
@@ -289,7 +289,7 @@
           }
         },
         "envelopes": {
-          "description": "Envelopes by convention rather than by annotation — the ADR-28 path/namespace shape. Each entry bounds the methods it selects. NOT READ YET — the annotation spelling landed with #383; the configured one lands with #385.",
+          "description": "Envelopes by convention rather than by annotation — the ADR-28 path/namespace shape. Each entry bounds every method of every class it selects, distributing exactly as a class-level annotation does. Precedence is nearest-wins: a per-method annotation beats a class-level one, which beats a config entry; among config entries the FIRST match in list order wins. `effect.envelope-exceeded` names the stanza (`.rigor.yml effects.envelopes[2]`). READ.",
           "type": "array",
           "items": { "$ref": "#/$defs/effectEnvelopeEntry" }
         },
@@ -311,15 +311,15 @@
       "additionalProperties": false,
       "properties": {
         "match": {
-          "description": "Path glob the envelope applies to.",
+          "description": "Path glob selecting the classes the envelope applies to, by the file any of their definitions is written in. `File.fnmatch?` with `FNM_PATHNAME`, project-relative — the `unused --entry-point` and `effects.snapshot.reach:` semantics, so `**` is the only way across a directory boundary. Exactly one of `match:` / `namespace:` per entry; naming both or neither is a load-time error.",
           "type": "string"
         },
         "namespace": {
-          "description": "Constant namespace the envelope applies to.",
+          "description": "Constant-path glob selecting the classes the envelope applies to, matched segment by segment over the fully-qualified name. `*` matches exactly one segment (`Presenters::*` selects `Presenters::User`, not `Presenters::Admin::User` and not bare `Presenters`); `**` matches one or more (`Presenters::**` selects both). A `*` inside a segment matches within it (`Api::V*`). Exactly one of `match:` / `namespace:` per entry.",
           "type": "string"
         },
         "effect": {
-          "description": "The bound: a list of labels, or the empty list for `pure`.",
+          "description": "The bound: a list of labels, or the empty list for the empty envelope (`pure`, which still tolerates `mutate.local`). Required — an entry with no `effect:` is a load-time error. Label SHAPE is validated at load (tier 2); a label the registry does not know makes the whole entry read as \u22a4 (bounding nothing) and surfaces as `effect.unknown-label` positioned at `.rigor.yml`.",
           "type": "array",
           "items": { "type": "string" }
         }

@@ -114,6 +114,33 @@ module Rigor
           )
         end
 
+        # The per-origin discharge judgment's input, for the side of a comparison that HAS origins
+        # (#385). `{table => {symbol => [label]}}`: for each row this snapshot carries, the labels that
+        # survive `effects.tolerated:` applied bundle by bundle — direct bundles under `methods:`, the
+        # transitive lane under `reach:`, matching what each table records.
+        #
+        # It is built beside the snapshot and never inside it: the file stays flat and undischarged, and
+        # this index exists only for the duration of one comparison ({SnapshotDiff}).
+        #
+        # @param snapshot [Snapshot] the current side, already built
+        # @param table [EffectTable] the run that produced it
+        # @param discharge [Discharge] the policy
+        # @return [Hash, nil] nil when the policy discharges nothing, which is the common case
+        def undischarged_index(snapshot:, table:, discharge:)
+          return nil if discharge.inert?
+
+          {
+            "methods" => snapshot.methods.keys.filter_map do |key|
+              entry = table[key]
+              [key, discharge.undischarged(entry.direct.bundles).to_a] if entry
+            end.to_h,
+            "reach" => snapshot.reach.keys.filter_map do |key|
+              entry = table[key]
+              [key, entry.undischarged.to_a] if entry
+            end.to_h
+          }.freeze
+        end
+
         # The `effects:` block of `.rigor.yml`, canonicalised (keys sorted at every depth, rendered as
         # JSON) and hashed. A Rigor upgrade, a vocabulary bump or a `tolerated:` edit is therefore a
         # **visible** regeneration event rather than a silent reinterpretation of the record.
@@ -210,9 +237,10 @@ module Rigor
           absolute.start_with?(root) ? absolute[root.length..] : absolute
         end
 
-        # The declared lane comes off the direct summary in both tables: it is an authored upper bound on
-        # the method's own code, so there is nothing transitive to close it over. It is always empty until
-        # the envelope reader of #386 lands.
+        # The declared lane comes off the direct summary in both tables: it is an upper bound on the
+        # method's own code — what `effects.attribution:` claims about the callees it names (#385) — so
+        # there is nothing transitive to close it over. What travels up the graph from an attributed call
+        # is its taint, and that is carried by `exhaustive:` already.
         def entry_for(key, proven, direct, exhaustive: direct.exhaustive?, causes: direct.causes)
           Entry.new(
             key: key,

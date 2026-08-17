@@ -12,11 +12,13 @@ module Rigor
     #
     # Three carriers and one projection:
     #
-    # - {#bundles} — `{Origin => LabelSet}`, the labels kept **per origin** so a later slice can discharge
-    #   policy per origin (tolerating what an origin was *for* frees its transport, WD14).
-    # - {#declared} — the `≤` lane imported from a trusted envelope. **Always {LabelSet::EMPTY} in this
-    #   slice**; the envelope reader that fills it lands with #386. The lane exists now so consumers are
-    #   written against the final shape.
+    # - {#bundles} — `{Origin => LabelSet}`, the labels kept **per origin** so the judgment can discharge
+    #   policy per origin (tolerating what an origin was *for* frees its transport, WD14; {Discharge}).
+    # - {#declared_bundles} — the same shape for the `≤` lane, and {#declared} its flat projection. Its one
+    #   producer today is the project's `effects.attribution:` table (#385), whose origins carry
+    #   {Origin::ATTRIBUTION}; a *nominal supertype's* envelope joins it with #386. The lane is kept apart
+    #   from {#bundles} because nothing declared is ever proven: diagnostics read {#proven} only, so an
+    #   attributed label can never manufacture an `effect.envelope-exceeded`.
     # - {#exhaustive} — false when some call this method makes could not be resolved.
     # - {#causes} — why, from {TaintCause}'s closed enum, as `[cause, detail]` pairs. Empty when exhaustive.
     #
@@ -49,14 +51,15 @@ module Rigor
         new(exhaustive: false, causes: [[cause, detail]])
       end
 
-      attr_reader :bundles, :declared, :causes, :proven
+      attr_reader :bundles, :declared_bundles, :declared, :causes, :proven
 
-      def initialize(bundles: NO_BUNDLES, declared: LabelSet::EMPTY, exhaustive: true, causes: NO_CAUSES)
+      def initialize(bundles: NO_BUNDLES, declared_bundles: NO_BUNDLES, exhaustive: true, causes: NO_CAUSES)
         @bundles = normalize_bundles(bundles)
-        @declared = declared
+        @declared_bundles = normalize_bundles(declared_bundles)
         @exhaustive = exhaustive ? true : false
         @causes = normalize_causes(causes)
-        @proven = @bundles.each_value.reduce(LabelSet::EMPTY) { |acc, set| acc.join(set) }
+        @proven = flatten(@bundles)
+        @declared = flatten(@declared_bundles)
         freeze
       end
 
@@ -80,24 +83,22 @@ module Rigor
       def join(other)
         return self if other.equal?(self)
 
-        merged = @bundles.dup
-        other.bundles.each { |origin, set| merged[origin] = merged.key?(origin) ? merged[origin].join(set) : set }
         self.class.new(
-          bundles: merged,
-          declared: @declared.join(other.declared),
+          bundles: merge_bundles(@bundles, other.bundles),
+          declared_bundles: merge_bundles(@declared_bundles, other.declared_bundles),
           exhaustive: @exhaustive && other.exhaustive?,
           causes: @causes + other.causes
         )
       end
 
       def ==(other)
-        other.is_a?(Summary) && other.bundles == @bundles && other.declared == @declared &&
+        other.is_a?(Summary) && other.bundles == @bundles && other.declared_bundles == @declared_bundles &&
           other.exhaustive? == @exhaustive && other.causes == @causes
       end
       alias eql? ==
 
       def hash
-        [self.class, @bundles, @declared, @exhaustive, @causes].hash
+        [self.class, @bundles, @declared_bundles, @exhaustive, @causes].hash
       end
 
       def inspect
@@ -105,6 +106,19 @@ module Rigor
       end
 
       private
+
+      def merge_bundles(mine, theirs)
+        return mine if theirs.empty?
+        return theirs if mine.empty?
+
+        merged = mine.dup
+        theirs.each { |origin, set| merged[origin] = merged.key?(origin) ? merged[origin].join(set) : set }
+        merged
+      end
+
+      def flatten(bundles)
+        bundles.each_value.reduce(LabelSet::EMPTY) { |acc, set| acc.join(set) }
+      end
 
       # Origins are sorted by their rendering so two summaries built from the same facts in different
       # orders are `==` and render identically. A repeated origin joins rather than clobbers.

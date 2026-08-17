@@ -131,7 +131,9 @@ module Rigor
       # closure is never partially reused, only its per-file *inputs* are, so a leaf edit whose new label
       # reaches a caller in an unchanged file still shows up in that caller's `reach`.
       def effect_table
-        Effects::Propagator.propagate(effect_collection)
+        Effects::Propagator.propagate(
+          effect_collection, discharge: Effects::Discharge.new(@configuration.effects_tolerated)
+        )
       end
 
       # The merged direct summaries the table above closes over.

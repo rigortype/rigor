@@ -18,7 +18,16 @@ module Rigor
       # records, because a diff over direct summaries stays attributable to the pull request's own lines.
       # `proven` / `exhaustive` / `causes` are the transitive readings: this method's own labels joined
       # with every project method it reaches, and the exhaustiveness bit ANDed along the same edges.
-      class Entry < Data.define(:key, :direct, :proven, :exhaustive, :causes, :edges)
+      #
+      # `undischarged` is the same transitive reading with the origin bundles `effects.tolerated:`
+      # discharges removed at their source (#385; {Discharge}) — what a *judgment* reads, where `proven`
+      # is what the record holds. The two are the same set for a project that tolerates nothing, and
+      # `--no-tolerated-effects` is the switch that makes a judgment read `proven` anyway.
+      class Entry < Data.define(:key, :direct, :proven, :undischarged, :exhaustive, :causes, :edges)
+        def initialize(undischarged: nil, **rest)
+          super(undischarged: undischarged || rest.fetch(:proven), **rest)
+        end
+
         def exhaustive?
           exhaustive
         end

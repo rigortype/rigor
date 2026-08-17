@@ -48,6 +48,7 @@ the `paths:` list from the configuration file.
 | `--treat-all-as-inline-rbs` | Force-load `rigor-rbs-inline` with `require_magic_comment: false`, so every analysed file is treated as inline-RBS without the `# rbs_inline: enabled` comment (ADR-32). |
 | `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
 | `--no-bleeding-edge` | Ignore any configured `bleeding_edge:` selection for this run (adopt none). |
+| `--no-tolerated-effects` | Check effect envelopes as if [`effects.tolerated:`](03-configuration.md) were empty — the audit switch for your discharge policy (ADR-103). Judgment only: the run, what it collects and its cache entry are identical either way, so this never costs a re-analysis. |
 | `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. Alone, only the buffer's own file produces diagnostics; add `--incremental` for whole-project scope (see below). |
 
 Exit `0` when no error-severity diagnostics remain, `1` when
@@ -196,6 +197,18 @@ list is not exhaustive: some call could not be resolved, so the
 reading is "these effects, and possibly more". The indented
 lines say why. A taint is never a finding.
 
+A ` ≤ [...]` clause after the labels is the **declared** lane:
+what a source Rigor trusts but did not verify *claims* the
+method does, today the `effects.attribution:` table you wrote
+for gem methods it cannot see. It is printed apart from the
+proven labels and never folded in among them, because the two
+answer different questions.
+
+```
+Gateways::Client#fetch: [] ≤ [io.net.http] …?
+    plugin-attribution (Acme::Http.get)
+```
+
 A method is omitted when it is exhaustive and proves nothing
 beyond `mutate.local` — mutation of objects its own frame
 allocated and never let out, which every effect envelope
@@ -204,6 +217,9 @@ tolerates. `--full` lists every method instead.
 `--format=text|json` selects the output format; the JSON
 payload additionally carries each method's *direct* summary
 broken down per origin. `--config=PATH` picks a config file.
+`--no-tolerated-effects` is accepted for symmetry with the
+subcommands and does nothing here: the report is an
+observation, and observations are undischarged.
 
 What is collected and how it propagates is
 [the effect-summaries internal spec](../internal-spec/effect-summaries.md);
@@ -286,6 +302,13 @@ under a `tolerated:` heading and does not fail the gate unless
 you pass `--strict-tolerated`. `--no-tolerated-effects` judges
 as if the list were empty; on `update` it changes nothing,
 because the record itself is undischarged.
+
+Discharge works **per origin**, not per label. `Logger#info`
+carries `io` and `telemetry` together, so `tolerated:
+[telemetry]` frees the `io` that came with the logging — and
+leaves an `io.fs.read` from a `File.read` two lines down
+exactly where it was. An added label is discharged only when
+every origin that introduces it is discharged.
 
 ### Reviewing effect drift
 

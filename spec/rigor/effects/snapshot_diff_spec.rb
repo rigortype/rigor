@@ -184,6 +184,48 @@ RSpec.describe Rigor::Effects::SnapshotDiff do
     end
   end
 
+  # ADR-103 WD14 / #385 — discharge is per ORIGIN, and the current side of a comparison still has its
+  # origins even though the file does not. When the caller hands them over, an ADDED label is judged
+  # exactly: tolerated iff every origin introducing it is discharged.
+  describe "per-origin judgment of additions" do
+    let(:before_side) { snapshot(methods: { "A#m" => entry("A#m") }) }
+    let(:after_side) { snapshot(methods: { "A#m" => entry("A#m", effects: %w[io telemetry]) }) }
+
+    # `io` arrived with the tolerated `telemetry`, in one bundle, so nothing survives and the whole
+    # addition is discharged — where the label reading would have failed the gate on the bare `io`.
+    it "discharges a label whose every origin is discharged" do
+      diff = compare(before_side, after_side, tolerated: ["telemetry"],
+                                              undischarged: { "methods" => { "A#m" => [] } })
+
+      expect(diff.tolerated_events.map(&:label)).to eq(%w[io telemetry])
+      expect(diff).not_to be_drift
+    end
+
+    it "keeps a label that also arrived through an undischarged origin" do
+      diff = compare(before_side, after_side, tolerated: ["telemetry"],
+                                              undischarged: { "methods" => { "A#m" => ["io"] } })
+
+      expect(diff.events_for("methods").map(&:label)).to eq(["io"])
+      expect(diff).to be_drift
+    end
+
+    # A removal has no current-side origin to consult — the thing that produced it is gone — so it is
+    # judged by label, exactly as before.
+    it "judges a removal by label even with an index present" do
+      diff = compare(snapshot(methods: { "A#m" => entry("A#m", effects: ["nondet.time"]) }),
+                     snapshot(methods: { "A#m" => entry("A#m") }),
+                     tolerated: ["nondet"], undischarged: { "methods" => { "A#m" => [] } })
+
+      expect(diff.tolerated_events.map(&:category)).to eq([described_class::LABEL_REMOVED])
+    end
+
+    it "falls back to the label reading for a symbol the index does not carry" do
+      diff = compare(before_side, after_side, tolerated: %w[io telemetry], undischarged: { "methods" => {} })
+
+      expect(diff.tolerated_events.map(&:label)).to eq(%w[io telemetry])
+    end
+  end
+
   it "compares the reach table alongside the methods table" do
     diff = compare(snapshot(reach: { "A#action" => entry("A#action") }),
                    snapshot(reach: { "A#action" => entry("A#action", effects: ["io"]) }))

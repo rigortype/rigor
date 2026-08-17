@@ -18,6 +18,7 @@ require_relative "../rbs_extended/conformance_checker"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
+require_relative "../effects/attribution"
 require_relative "../effects/collector"
 require_relative "../effects/identity"
 require_relative "../effects/propagator"
@@ -167,13 +168,16 @@ module Rigor
       #   discovery tables": {Protection::DiagnosticOracle} threads the table set Tier 2's site filter already
       #   judges anchors against, so a site admitted because a sibling-file class resolved is also a site the
       #   oracle can kill at. nil (the default) leaves the prebuilt/LSP contract byte-identical.
+      # @param no_tolerated_effects [Boolean] ADR-103 WD1 / #385 — `rigor check --no-tolerated-effects`.
+      #   Judges effect envelopes as if `effects.tolerated:` were empty. A judgment-time switch only: the
+      #   run, its collection and its cache identity are unchanged.
       def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
-                     discovery_seed: nil)
+                     discovery_seed: nil, no_tolerated_effects: false)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -197,6 +201,14 @@ module Rigor
         # `effects:` block (or an implicit one, which is how `rigor effects` opts in) is the ONLY switch.
         # Observational — diagnostics are byte-identical whichever way it resolves.
         @record_effects = configuration.effects_enabled?
+        # ADR-103 WD6 / #385 — the project's `effects.attribution:` table, built once and carried on the
+        # collection window so a fork-pool worker scans under the same claims the parent does.
+        @effect_attribution = Effects::Attribution.build(configuration.effects_attribution)
+        # ADR-103 WD1 invariant 3 / #385 — `--no-tolerated-effects`, the audit switch. It changes the
+        # JUDGMENT only: collection, the propagated table and the cache identity are all untouched, so an
+        # audit run and an ordinary one share a cache entry and differ solely in which lane the envelope
+        # check reads.
+        @no_tolerated_effects = no_tolerated_effects
         @file_effects = {}
         @effect_table = nil
         @effects_served_from_cache = false
@@ -691,7 +703,9 @@ module Rigor
           rbs_loader: envelope_rbs_loader(expansion),
           effect_table: effect_table,
           discovery: -> { envelope_discovery_tables(expansion) },
-          sources: @in_memory_sources
+          sources: @in_memory_sources,
+          unit_sources: effect_sources,
+          apply_tolerated: !@no_tolerated_effects
         ).diagnostics
       end
 
@@ -727,9 +741,17 @@ module Rigor
       def close_effect_graph
         return unless @record_effects
 
-        @effect_table = Effects::Propagator.propagate(effect_collection)
+        @effect_table = Effects::Propagator.propagate(effect_collection, discharge: effect_discharge)
       rescue StandardError
         @effect_table = Effects::EffectTable.empty
+      end
+
+      # ADR-103 WD14 / #385 — the `effects.tolerated:` policy the propagator's second (undischarged) lane
+      # is computed under. Built from the configuration and never from the audit flag: BOTH lanes are in
+      # the table, and `--no-tolerated-effects` picks the other one at judgment time, so one fixpoint
+      # serves an audit run and an ordinary one alike.
+      def effect_discharge
+        @effect_discharge ||= Effects::Discharge.new(@configuration.effects_tolerated)
       end
 
       def assemble_run_diagnostics(expansion, environment: nil)
@@ -1474,7 +1496,7 @@ module Rigor
         return analyze_file_body(path, environment) unless @record_effects
 
         diagnostics = nil
-        collection = Effects::Collector.collect_for(path) do
+        collection = Effects::Collector.collect_for(path, attribution: @effect_attribution) do
           diagnostics = analyze_file_body(path, environment)
         end
         @file_effects[path] = collection

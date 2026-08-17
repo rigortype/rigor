@@ -15,11 +15,15 @@ module Rigor
     # - {#bound} — the {LabelSet} the method's proven labels must be subsumed by. {LabelSet::TOP}
     #   means "no envelope": the fail-open reading a tag carrying an unknown label degrades to.
     # - {#source} — which spelling produced it: `:pure_annotation` (`%a{pure}`),
-    #   `:effect_annotation` (`%a{rigor:v1:effect …}` on the method) or `:class_annotation` (either
+    #   `:effect_annotation` (`%a{rigor:v1:effect …}` on the method), `:class_annotation` (either
     #   spelling on the class / module declaration, which is also what {#rebind} stamps — what matters
-    #   downstream is that the bound was distributed rather than written on the method).
-    # - {#location} — `path:line` of the annotation, so the diagnostic can name where the bound was
-    #   written; {#spelling} is the author's own text, quoted back verbatim.
+    #   downstream is that the bound was distributed rather than written on the method) or
+    #   `:config_envelope` (an `effects.envelopes:` entry, {ConfigEnvelopes}). The last one survives
+    #   {#rebind}: a configured envelope is distributed by construction, so "distributed" is not the
+    #   fact worth stamping — where it was written is.
+    # - {#location} — `path:line` of the annotation, or `.rigor.yml effects.envelopes[N]` for a
+    #   configured one, so the diagnostic can name where the bound was written; {#spelling} is the
+    #   author's own text, quoted back verbatim.
     # - {#unknown_labels} — the well-formed-but-unrecognised spellings that made this envelope read
     #   ⊤ ([#384](https://github.com/rigortype/rigor/issues/384)'s `effect.unknown-label` reads it).
     #   Empty otherwise.
@@ -34,6 +38,9 @@ module Rigor
                                  :declared_labels)
       NO_LABELS = [].freeze
       private_constant :NO_LABELS
+
+      # {#source} for a bound written in `.rigor.yml` rather than on a declaration.
+      CONFIG_SOURCE = :config_envelope
 
       def self.build(owner_key:, bound:, source:, location: nil, spelling: nil, unknown_labels: NO_LABELS,
                      declared_labels: NO_LABELS)
@@ -62,11 +69,17 @@ module Rigor
         label_set.to_a.reject { |label| tolerates?(label) }
       end
 
+      # Whether the bound was written in `.rigor.yml` rather than on a declaration.
+      def config?
+        source == CONFIG_SOURCE
+      end
+
       # The same bound, attached to another method key — how a class-level envelope reaches each
       # method of its class. The source becomes `:class_annotation`, because the distribution is the
-      # fact the diagnostic has to explain.
+      # fact the diagnostic has to explain; a configured envelope keeps its own source, because for it
+      # distribution is the only mode there is and `.rigor.yml` is the fact worth naming.
       def rebind(key)
-        with(owner_key: key, source: :class_annotation)
+        config? ? with(owner_key: key) : with(owner_key: key, source: :class_annotation)
       end
     end
   end

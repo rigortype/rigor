@@ -18,6 +18,15 @@ module Rigor
     # - the **tolerated set**. An event whose labels are all admitted by `effects.tolerated:` is reported
     #   under its own heading and does not fail the gate unless `strict_tolerated:` is set.
     #
+    # **Additions are judged per origin; removals by label.** The file is flat — origins are `explain`'s
+    # job and a record keyed by them would churn on every refactor — but the *current* side of a
+    # comparison is a live effect table, so the caller can hand over `undischarged:`, the labels that
+    # survive per-origin discharge for each current symbol (#385). An added label is then tolerated
+    # exactly when every origin that introduces it is discharged, which is the same answer the envelope
+    # check gives, rather than the coarser "the label is on the list". A **removal** has no current-side
+    # origins to consult — the thing that produced it is gone — so it stays judged by label. Without the
+    # index (a caller that has no table, and every parse-only spec) both fall back to the label reading.
+    #
     # A header mismatch is neither: it is a **regeneration event** — the record was written by a different
     # Rigor, a different vocabulary or a different `effects:` block, so the two sides are not comparable
     # in the first place. It fails under both gates, because there is nothing to ratchet against.
@@ -68,21 +77,34 @@ module Rigor
         end
       end
 
+      # The categories the per-origin judgment is exact for: both are additions in the PROVEN lane, so the
+      # current side's undischarged labels answer them directly. The declared lane's additions are not
+      # here — nothing declared has a proven origin to discharge.
+      ORIGIN_JUDGED_CATEGORIES = [SYMBOL_ADDED, LABEL_ADDED].freeze
+      private_constant :ORIGIN_JUDGED_CATEGORIES
+
       # Compares `current` against `recorded`. `recorded` may be nil — no snapshot on disk at all, which
       # is drift with a routed message rather than an error.
-      def self.compare(recorded:, current:, tolerated: [], gate: :symmetric, strict_tolerated: false)
+      #
+      # @param undischarged [Hash] `{table name => {symbol => [label]}}` — the current side's labels that
+      #   survive per-origin discharge ({Snapshot.undischarged_index}). Optional; omitting it judges every
+      #   event by label.
+      def self.compare(recorded:, current:, tolerated: [], gate: :symmetric, strict_tolerated: false,
+                       undischarged: nil)
         new(recorded: recorded, current: current, tolerated: tolerated, gate: gate,
-            strict_tolerated: strict_tolerated)
+            strict_tolerated: strict_tolerated, undischarged: undischarged)
       end
 
       attr_reader :events, :recorded, :current, :gate
 
-      def initialize(recorded:, current:, tolerated: [], gate: :symmetric, strict_tolerated: false)
+      def initialize(recorded:, current:, tolerated: [], gate: :symmetric, strict_tolerated: false,
+                     undischarged: nil)
         @recorded = recorded
         @current = current
         @gate = gate
         @strict_tolerated = strict_tolerated
         @tolerated = LabelSet.new(tolerated)
+        @undischarged = undischarged
         @added_symbols = 0
         @removed_symbols = 0
         @events = build_events.freeze
@@ -212,19 +234,31 @@ module Rigor
         "[#{entry.effects.join(', ')}]#{' …?' unless entry.exhaustive?}"
       end
 
-      # Policy discharge, at judgment time. A single-label event is tolerated when the set admits that
-      # label; a symbol event when the set admits every label the symbol carries — and never when it
+      # Policy discharge, at judgment time. A single-label event is tolerated when the policy discharges
+      # that label; a symbol event when it discharges every label the symbol carries — and never when it
       # carries none, because an empty set is discharged by nothing.
       def event(category, symbol:, table:, label: nil, labels: nil, detail: nil, hedged: false)
         Event.new(category: category, symbol: symbol, label: label, table: table, detail: detail,
-                  hedged: hedged, tolerated: tolerated?(label, labels))
+                  hedged: hedged, tolerated: tolerated?(category, symbol, table, label, labels))
       end
 
-      def tolerated?(label, labels)
+      def tolerated?(category, symbol, table, label, labels)
         members = labels || (label ? [label] : nil)
-        return false if members.nil? || members.empty?
+        return false if members.nil? || members.empty? || @tolerated.empty?
+
+        surviving = surviving_labels(category, symbol, table)
+        return members.none? { |member| surviving.include?(member) } if surviving
 
         members.all? { |member| @tolerated.admits?(member) }
+      end
+
+      # The current side's undischarged labels for one symbol, or nil when this event is not one the
+      # per-origin judgment answers — no index, a removal, or a lane with no proven origins.
+      def surviving_labels(category, symbol, table)
+        return nil if @undischarged.nil? || symbol.nil?
+        return nil unless ORIGIN_JUDGED_CATEGORIES.include?(category)
+
+        @undischarged.dig(table, symbol)
       end
     end
   end

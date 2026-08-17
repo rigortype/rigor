@@ -8,6 +8,7 @@ require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
 require_relative "effects/entry_points"
 require_relative "effects/label"
+require_relative "effects/method_key"
 
 module Rigor
   class Configuration # rubocop:disable Metrics/ClassLength
@@ -84,10 +85,10 @@ module Rigor
       # `.rigor.dist.yml`'s `effects:` block — the same shape `baseline:` uses.
       #
       # The sub-keys are declared in `schemas/rigor-config.schema.json`. `check` (#383,
-      # {#effects_check?}), `snapshot.{path,reach,gate}` and `tolerated` (#381,
-      # {#coerce_effects_snapshot}) are read; `labels`, `attribution`, `envelopes` and `views` land with
-      # the slices that implement them (#385 / #386 / #387). Reserving their shape before a reader exists
-      # is the same discipline the schema applies to a sibling implementation's namespace (ADR-99).
+      # {#effects_check?}), `snapshot.{path,reach,gate}`, `tolerated` (#381) and the policy trio
+      # `labels` / `attribution` / `envelopes` (#385, {#coerce_effects_policy}) are read; `views` lands
+      # with the slice that implements it (#390). Reserving a sub-key's shape before a reader exists is
+      # the same discipline the schema applies to a sibling implementation's namespace (ADR-99).
       "effects" => false,
       "cache" => {
         "path" => ".rigor/cache",
@@ -236,7 +237,8 @@ module Rigor
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
                 :rbs_collection_lockfile, :rbs_collection_auto_detect,
                 :pre_eval, :baseline_path, :effects,
-                :effects_snapshot_path, :effects_snapshot_reach, :effects_snapshot_gate, :effects_tolerated
+                :effects_snapshot_path, :effects_snapshot_reach, :effects_snapshot_gate, :effects_tolerated,
+                :effects_labels, :effects_attribution, :effects_envelopes
 
     # ADR-103 WD13 — whether effect collection runs. True exactly when the loaded configuration carried an
     # `effects:` block, whatever its body; `rigor effects` enables it for its own run by loading an
@@ -470,6 +472,7 @@ module Rigor
       # means "on", so the key's presence in the loaded data is what {#effects_enabled?} reads.
       @effects = coerce_effects(data)
       coerce_effects_snapshot(@effects)
+      coerce_effects_policy(@effects)
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
@@ -724,6 +727,92 @@ module Rigor
           Effects::Label.valid?(label)
       end
       labels.uniq.sort.freeze
+    end
+
+    # ADR-103 WD5 / WD6 / #385 — the three policy keys: the project's own vocabulary (`labels:`), its
+    # attribution table for code Rigor does not analyse (`attribution:`), and its envelopes by convention
+    # (`envelopes:`).
+    #
+    # Validation is **tier 2** for shape and tier 2 only. A label whose SPELLING is malformed, an entry
+    # naming neither `match:` nor `namespace:` (or both), and an attribution key that is not a method key
+    # each stop the run, because none of them has a reading the loader could pick. A label that is
+    # well-formed but unknown to the *registry* is deliberately fine here: it fails open (⊤ for an
+    # envelope, an unregistered meaning for an attribution) and surfaces as `effect.unknown-label`.
+    def coerce_effects_policy(effects)
+      @effects_labels = coerce_effects_labels(effects&.fetch("labels", nil))
+      @effects_attribution = coerce_effects_attribution(effects&.fetch("attribution", nil))
+      @effects_envelopes = coerce_effects_envelopes(effects&.fetch("envelopes", nil))
+    end
+
+    NO_ATTRIBUTION = {}.freeze
+    private_constant :NO_ATTRIBUTION
+
+    def coerce_effects_labels(value)
+      labels = Array(value).map(&:to_s)
+      labels.each do |label|
+        raise ArgumentError, "effects.labels is not a well-formed effect label: #{label.inspect}" unless
+          Effects::Label.valid?(label)
+      end
+      labels.uniq.sort.freeze
+    end
+
+    # `{ "Net::HTTP.get" => ["io.net.http"] }` — a method key exactly as the symbol tables spell one
+    # (`Owner#instance`, `Owner.singleton`), mapped to the labels a call to it contributes.
+    def coerce_effects_attribution(value)
+      return NO_ATTRIBUTION unless value.is_a?(Hash)
+
+      value.each_with_object({}) do |(key, labels), out|
+        name = key.to_s
+        unless Effects::MethodKey.valid?(name)
+          raise ArgumentError,
+                "effects.attribution key is not a method key (`Owner#method` / `Owner.method`): #{name.inspect}"
+        end
+
+        out[name] = coerce_effect_label_list(Array(labels), "effects.attribution[#{name.inspect}]")
+      end.freeze
+    end
+
+    # `[{ match: | namespace:, effect: [...] }]`. Exactly one selector per entry: an entry naming both
+    # would need a precedence rule between two selectors of the same entry, and one naming neither selects
+    # every class in the project, which is never what an author meant to write.
+    def coerce_effects_envelopes(value)
+      Array(value).each_with_index.map { |entry, index| coerce_effects_envelope(entry, index) }.freeze
+    end
+
+    def coerce_effects_envelope(entry, index)
+      where = "effects.envelopes[#{index}]"
+      raise ArgumentError, "#{where} is not a mapping: #{entry.inspect}" unless entry.is_a?(Hash)
+
+      match = coerce_effects_envelope_selector(entry["match"], "#{where}.match")
+      namespace = coerce_effects_envelope_selector(entry["namespace"], "#{where}.namespace")
+      if match.nil? == namespace.nil?
+        raise ArgumentError, "#{where} must name exactly one of `match:` (a path glob) or `namespace:` " \
+                             "(a constant glob), got #{match.nil? ? 'neither' : 'both'}"
+      end
+      unless entry.key?("effect")
+        raise ArgumentError, "#{where} has no `effect:` bound (write `effect: []` for the empty envelope)"
+      end
+
+      {
+        "match" => match, "namespace" => namespace,
+        "effect" => coerce_effect_label_list(Array(entry["effect"]), "#{where}.effect")
+      }.freeze
+    end
+
+    def coerce_effects_envelope_selector(value, where)
+      return nil if value.nil?
+
+      selector = value.to_s
+      raise ArgumentError, "#{where} is empty" if selector.strip.empty?
+
+      selector.freeze
+    end
+
+    def coerce_effect_label_list(labels, where)
+      labels.map(&:to_s).each do |label|
+        raise ArgumentError, "#{where} is not a well-formed effect label: #{label.inspect}" unless
+          Effects::Label.valid?(label)
+      end.uniq.sort.freeze
     end
 
     # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is accepted as either a literal path (slice 1

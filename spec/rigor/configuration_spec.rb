@@ -905,4 +905,103 @@ RSpec.describe Rigor::Configuration do
       end
     end
   end
+
+  # ADR-103 WD5 / WD6 (#385) — the policy keys. Tier 2 answers SHAPE and only shape: a value the loader
+  # cannot pick a reading for stops the run, and a value that is merely unknown to the vocabulary loads
+  # fine because it fails open (`effect.unknown-label`).
+  describe "the effect-policy keys" do
+    def policy_config(effects)
+      described_class.new({ "effects" => effects })
+    end
+
+    it "defaults every key with no effects: block at all" do
+      configuration = described_class.new({})
+
+      expect(configuration.effects_labels).to eq([])
+      expect(configuration.effects_attribution).to eq({})
+      expect(configuration.effects_envelopes).to eq([])
+    end
+
+    describe "labels:" do
+      it "validates the label shape and sorts the vocabulary" do
+        expect(policy_config("labels" => %w[acme.cache acme.bus]).effects_labels)
+          .to eq(%w[acme.bus acme.cache])
+      end
+
+      it "rejects a malformed label" do
+        expect { policy_config("labels" => ["Acme::Cache"]) }
+          .to raise_error(ArgumentError, /effects\.labels is not a well-formed effect label/)
+      end
+    end
+
+    describe "attribution:" do
+      it "reads a method-keyed table of label lists" do
+        table = policy_config("attribution" => { "Net::HTTP.get" => ["io.net.http"] }).effects_attribution
+
+        expect(table).to eq({ "Net::HTTP.get" => ["io.net.http"] })
+        expect(table).to be_frozen
+      end
+
+      # The key is a method key exactly as the symbol tables spell one. A key the scanner would never
+      # produce is a table that silently colours nothing, which is the failure tier 2 exists to prevent.
+      it "rejects a key that is not a method key" do
+        expect { policy_config("attribution" => { "Net::HTTP" => ["io"] }) }
+          .to raise_error(ArgumentError, /effects\.attribution key is not a method key/)
+      end
+
+      it "rejects a malformed label" do
+        expect { policy_config("attribution" => { "Net::HTTP.get" => ["IO"] }) }
+          .to raise_error(ArgumentError, /effects\.attribution\["Net::HTTP.get"\] is not a well-formed/)
+      end
+
+      it "accepts a well-formed label the registry has never heard of" do
+        expect(policy_config("attribution" => { "Acme::Cache.fetch" => ["acme.cache"] }).effects_attribution)
+          .to eq({ "Acme::Cache.fetch" => ["acme.cache"] })
+      end
+    end
+
+    describe "envelopes:" do
+      it "reads each entry's selector and bound, keeping list order" do
+        entries = policy_config(
+          "envelopes" => [
+            { "match" => "app/presenters/**/*.rb", "effect" => [] },
+            { "namespace" => "Policies::*", "effect" => ["mutate.local"] }
+          ]
+        ).effects_envelopes
+
+        expect(entries).to eq(
+          [
+            { "match" => "app/presenters/**/*.rb", "namespace" => nil, "effect" => [] },
+            { "match" => nil, "namespace" => "Policies::*", "effect" => ["mutate.local"] }
+          ]
+        )
+      end
+
+      # Exactly one selector: naming both would need a precedence rule inside one entry, and naming
+      # neither selects the whole project, which is never what an author meant to write.
+      it "rejects an entry naming both selectors" do
+        expect { policy_config("envelopes" => [{ "match" => "app/**", "namespace" => "A::*", "effect" => [] }]) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[0\] must name exactly one of.*got both/m)
+      end
+
+      it "rejects an entry naming neither selector" do
+        expect { policy_config("envelopes" => [{ "effect" => [] }]) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[0\] must name exactly one of.*got neither/m)
+      end
+
+      # `effect: []` is a bound (the empty envelope); a MISSING `effect:` is an entry that bounds
+      # nothing, and the two must not be spelled the same way.
+      it "rejects an entry with no effect: bound" do
+        expect { policy_config("envelopes" => [{ "namespace" => "A::*" }]) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[0\] has no `effect:` bound/)
+      end
+
+      it "rejects a malformed label, naming the entry index" do
+        entries = [{ "namespace" => "A", "effect" => [] }, { "match" => "a/**", "effect" => ["Io"] }]
+
+        expect { policy_config("envelopes" => entries) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[1\]\.effect is not a well-formed/)
+      end
+    end
+  end
 end

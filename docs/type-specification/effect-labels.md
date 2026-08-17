@@ -71,6 +71,8 @@ A registry extension names an **owner**: a plugin id, the framework root a first
 
 An added label that satisfies none of these is an error at extension time, not a diagnostic: an extender that cannot own the root it is opening has no honest way to proceed. An added label MUST also satisfy the label grammar.
 
+A project extends the vocabulary with `effects.labels:` in `.rigor.yml`. Listing a label there is the vouching act — which is why the project alone may open any root — and it makes the spelling known everywhere a label is judged: `effect.unknown-label`, envelope bounds, attribution values and `tolerated:` alike. Its SHAPE is validated when the configuration loads; nothing else about it is.
+
 ### Vocabulary evolution
 
 The registry carries a `vocabulary` version, and the rules that govern it follow from subsumption:
@@ -82,7 +84,7 @@ The registry carries a `vocabulary` version, and the rules that govern it follow
 
 ## Effect summaries
 
-> **Partly implemented as of this writing.** The proven lane, the exhaustiveness bit and the taint causes are computed by the collector of [#379](https://github.com/rigortype/rigor/issues/379) whenever the `effects:` block is present, and `rigor effects` prints them; how they are produced is [`effect-summaries.md`](../internal-spec/effect-summaries.md). Their **catalogued** origins come from the hand-audited `data/effects/core.yml` of [#380](https://github.com/rigortype/rigor/issues/380), with per-class default postures and argument-dependent narrowing; the catalogue's contract is analyzer-internal and is specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The catalogue. The **declared lane is always empty**: envelopes are read and checked at the declaration ([#383](https://github.com/rigortype/rigor/issues/383), § Effect envelopes), but importing a trusted envelope as a `≤` bound at a *call site* whose callee is unknown lands with [#386](https://github.com/rigortype/rigor/issues/386). The snapshot of [#381](https://github.com/rigortype/rigor/issues/381) commits them to a reviewed file; nothing is cached *between runs* until [#382](https://github.com/rigortype/rigor/issues/382).
+> **Partly implemented as of this writing.** The proven lane, the exhaustiveness bit and the taint causes are computed by the collector of [#379](https://github.com/rigortype/rigor/issues/379) whenever the `effects:` block is present, and `rigor effects` prints them; how they are produced is [`effect-summaries.md`](../internal-spec/effect-summaries.md). Their **catalogued** origins come from the hand-audited `data/effects/core.yml` of [#380](https://github.com/rigortype/rigor/issues/380), with per-class default postures and argument-dependent narrowing; the catalogue's contract is analyzer-internal and is specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The catalogue. The **declared lane** has one producer: the project's `effects.attribution:` table ([#385](https://github.com/rigortype/rigor/issues/385), § Attribution), which colours calls into code Rigor never analysed. Importing a *nominal supertype's* envelope as a `≤` bound lands with [#386](https://github.com/rigortype/rigor/issues/386). The snapshot of [#381](https://github.com/rigortype/rigor/issues/381) commits them to a reviewed file; nothing is cached *between runs* until [#382](https://github.com/rigortype/rigor/issues/382).
 
 An **effect summary** describes one method. It carries two lanes and one bit:
 
@@ -113,11 +115,11 @@ When the exhaustiveness bit is false, the summary records why, from this closed 
 
 The enum is closed. A new cause is a change to this document, not a producer's free choice.
 
-> As of this writing `method-missing`, `plugin-attribution`, `template-not-analysed` and `budget` are reserved and unproduced; the other six have producers. Which shapes reach which cause is [`effect-summaries.md`](../internal-spec/effect-summaries.md) § Taints.
+> As of this writing `method-missing`, `template-not-analysed` and `budget` are reserved and unproduced; the other seven have producers (`plugin-attribution` since [#385](https://github.com/rigortype/rigor/issues/385), from the configured attribution table). Which shapes reach which cause is [`effect-summaries.md`](../internal-spec/effect-summaries.md) § Taints.
 
 ## Effect envelopes
 
-> **Implemented as of this writing** ([#383](https://github.com/rigortype/rigor/issues/383)): both spellings are read off the project's own RBS — its `signature_paths:` tree and the rbs-inline / plugin-synthesized signatures derived from its `.rb` files — and checked against each method's proven summary as `effect.envelope-exceeded` whenever `effects.check` is on (which it is by default under an `effects:` block). Two neighbouring readings are not: an envelope declared on a *supertype* does not yet bind its overrides (`effect.liskov-widened`, [#386](https://github.com/rigortype/rigor/issues/386)), and an envelope written in `.rigor.yml` by path or namespace ([#385](https://github.com/rigortype/rigor/issues/385)) is accepted by the schema and not read. An envelope in RBS Rigor did not load from the project — rbs core, a gem's shipped signatures — is deliberately never read: the checked stratum is the project's own declarations ([ADR-103](../adr/103-effect-labels.md) WD6).
+> **Implemented as of this writing** ([#383](https://github.com/rigortype/rigor/issues/383), [#385](https://github.com/rigortype/rigor/issues/385)): both annotation spellings are read off the project's own RBS — its `signature_paths:` tree and the rbs-inline / plugin-synthesized signatures derived from its `.rb` files — the `.rigor.yml` convention spelling is read from `effects.envelopes:`, and all three are checked against each method's proven summary as `effect.envelope-exceeded` whenever `effects.check` is on (which it is by default under an `effects:` block). One neighbouring reading is not: an envelope declared on a *supertype* does not yet bind its overrides (`effect.liskov-widened`, [#386](https://github.com/rigortype/rigor/issues/386)). An envelope in RBS Rigor did not load from the project — rbs core, a gem's shipped signatures — is deliberately never read: the checked stratum is the project's own declarations ([ADR-103](../adr/103-effect-labels.md) WD6).
 
 An **effect envelope** is an author-declared upper bound on a method's effect labels, checked structurally against the method's *code* — dead code and block literals included. The RBS spelling follows the `RBS::Extended` conventions of [rbs-extended.md](rbs-extended.md):
 
@@ -154,7 +156,7 @@ Three rules keep this from spending false-positive budget:
 
 - **The declared lane and the exhaustiveness bit are not read.** A summary that could not resolve every call reads "these effects, and possibly more"; the *possibly* never produces a finding, and what was proven still does. This is "as strict as proven" ([robustness-principle.md](robustness-principle.md)) applied to the second dimension.
 - **`mutate.local` is tolerated by every envelope**, `%a{pure}` included.
-- **`effects.tolerated:` is not consulted.** That list is a judgment-time policy for the snapshot's diff (§ The effect snapshot); an envelope is a contract, and discharging a contract by policy is a separate decision ([#385](https://github.com/rigortype/rigor/issues/385)).
+- **`effects.tolerated:` discharges per origin, not per label** (§ Discharge by policy). What the check compares against is the proven lane *minus every origin bundle the policy discharges*, so a policy silences a whole origin and never a label wherever it came from.
 
 A proven label the bound does not admit is one `effect.envelope-exceeded` diagnostic per (method, label), **positioned at the Ruby `def`** rather than at the `.rbs` line — that is where the fix goes and where `# rigor:disable` is read. Where the method has no Ruby `def` (a synthesized `attr_*` accessor reached by class-level distribution) the position falls back to the class's own file. The message names the label, the shortest path to the origin that proves it, the author's own spelling of the bound, and where that bound was written; the identifier taxonomy and its severities are [diagnostic-policy.md](diagnostic-policy.md).
 
@@ -164,9 +166,71 @@ The check runs only when the configuration carries an `effects:` block **and** `
 
 A class-level envelope distributes to every method of that Ruby class which discovery knows — reopenings, definitions in other files, and synthesised `attr_*` / `define_method` members included. It does **not** distribute to subclasses. On a module, it distributes to the module's own methods only. A method-level envelope wins over a distributed class-level one; nearest wins, and no `-except` syntax is needed.
 
+### Envelopes by convention
+
+An envelope may also be written in `.rigor.yml`, selecting classes by path or by namespace rather than naming one method:
+
+```yaml
+effects:
+  envelopes:
+    - match: "app/presenters/**/*.rb"     # presenters do not query
+      effect: []
+    - namespace: "Policies::*"
+      effect: [mutate.local]
+```
+
+An entry MUST name **exactly one** of `match:` or `namespace:`, and MUST carry an `effect:` list — `effect: []` is the empty envelope, and a missing `effect:` is an error at load time, as is a malformed selector or label.
+
+- `match:` selects a class when **any** file that defines one of its methods matches the glob. `File.fnmatch?` with `FNM_PATHNAME`, project-relative, so `**` is the only way across a directory boundary.
+- `namespace:` selects a class by its fully-qualified name, matched segment by segment: `*` matches exactly one segment (`Presenters::*` selects `Presenters::User` and neither `Presenters::Admin::User` nor bare `Presenters`), `**` matches one or more (`Presenters::**` selects both), and a `*` inside a segment matches within it (`Api::V*`).
+
+A selected class receives the entry's bound **exactly as a class-level annotation distributes it** — every method discovery knows, never a subclass unless it is selected on its own account. Precedence is nearest-wins, and configuration is the furthest thing from the method:
+
+> per-method annotation **>** class-level annotation **>** configuration entry
+
+Among configuration entries, the **first** one that selects a class binds it; a list is read top to bottom, and a later entry never silently overrides one written above it. A method therefore has at most one envelope, from exactly one source, and there is no merging of bounds. The diagnostic names that source as `.rigor.yml effects.envelopes[N]` and stays positioned at the Ruby `def`.
+
+An unrecognised label in an entry's `effect:` degrades the whole entry to ⊤ and surfaces as `effect.unknown-label` positioned at `.rigor.yml`, exactly as it does for an annotation (§ Unknown labels).
+
+## Attribution
+
+Gem methods have no bodies Rigor analyses, so someone must colour them. `effects.attribution:` is the project's own channel for that:
+
+```yaml
+effects:
+  attribution:
+    "Net::HTTP.get": [io.net.http]
+    "Logger#info": [telemetry]
+```
+
+A key is a method key exactly as the symbol tables spell one — `Owner#instance_method` or `Owner.singleton_method` — and a key of any other shape is an error at load time. A call whose owner and selector match contributes the entry's labels to **the caller's declared lane**, under an origin of that key, and leaves a `plugin-attribution` taint at the site.
+
+Three properties follow, and they are the whole point of the channel:
+
+- **Attributed labels never enter the proven lane.** Diagnostics read the proven lane only, so no envelope can fire because of an attribution, whatever it claims.
+- **Attribution never discharges the taint.** It is an unchecked claim about code the analyzer did not read, so the summary reads "declared this, and possibly more" ([ADR-103](../adr/103-effect-labels.md) WD6). A first-party plugin's framework-derived attribution is a different, higher tier and does discharge; a project's YAML table does not.
+- **A label the registry does not know is reported, not rejected.** The attribution stands as written — the taint already says the reading is incomplete — and `effect.unknown-label` says the vocabulary cannot explain it.
+
+## Discharge by policy
+
+`effects.tolerated:` lists the labels a project has decided not to act on. It is applied when a difference or a bound is **judged**, never when a fact is recorded, and it operates **per origin**:
+
+> A bundle is discharged when **any** of its labels is tolerated.
+
+An origin is one callee or one construct, and its labels are what that one thing does — so tolerating what an origin was *for* frees the transport it came with. `Logger#info` is `io` + `telemetry` in one bundle: `tolerated: [telemetry]` discharges it whole, because the `io` in that bundle *is* the logging. A `File.read` in the same body is a different origin with a different bundle, and its `io.fs.read` still counts. A label that arrives through both a discharged and an undischarged origin survives, because the undischarged one proves it on its own.
+
+Four invariants govern the policy, and each is a separate commitment:
+
+1. **The record is undischarged.** The effect snapshot holds what the analyzer proved; `rigor effects update` writes the same bytes whatever the policy says.
+2. **The policy is in one place.** `effects.tolerated:` in `.rigor.yml`, not scattered across per-site suppressions.
+3. **The audit switch exists.** `--no-tolerated-effects`, on `rigor check` and on the snapshot verbs, runs the same judgment with an empty tolerated set, so what the policy hides can always be seen. It changes the judgment and nothing else — not collection, not the record, not the cache identity.
+4. **Emission uses undischarged sets.** A summary written out as an annotation (`sig-gen`) must state what the code does, never what the project has agreed to ignore.
+
+For the envelope check the discharge applies transitively: what a bound is compared against is the proven closure minus every discharged origin bundle, computed at the origin's own method and propagated along call edges like the proven lane itself. For a snapshot difference, an **added** label is tolerated exactly when every origin introducing it is discharged; a **removal** is judged by label, because the origin that produced it no longer exists to consult.
+
 ## Unknown labels
 
-> **Implemented as of this writing** ([#384](https://github.com/rigortype/rigor/issues/384)): the ⊤ degradation, the intent-gated `effect.unknown-label` at the declaration (RBS, rbs-inline and `effects.tolerated:`), and the `effect.annotations-unchecked` residual. The remaining `.rigor.yml` label surfaces — `effects.envelopes[].effect`, `effects.attribution:` and `effects.labels:` — are accepted by the schema and not yet read, so nothing judges their members either ([#385](https://github.com/rigortype/rigor/issues/385)).
+> **Implemented as of this writing** ([#384](https://github.com/rigortype/rigor/issues/384), [#385](https://github.com/rigortype/rigor/issues/385)): the ⊤ degradation, the intent-gated `effect.unknown-label` at the declaration (RBS and rbs-inline) and at every `.rigor.yml` label surface — `effects.tolerated:`, `effects.envelopes[].effect`, `effects.attribution:` values and `effects.labels:` — and the `effect.annotations-unchecked` residual.
 
 A well-formed label the registry does not recognise MUST make **the whole tag read as ⊤** — never the recognised subset of it.
 
@@ -188,4 +252,4 @@ The identifier is shared with Steins, alongside `effect.liskov-widened`; the ide
 
 The primary way an effect footprint is validated is not an envelope but a committed record: `.rigor-effects.yml`, holding each method's *direct* summary and the transitive reach at declared entry points, whose diff is reviewed and whose drift a CI gate reports. Its header carries the vocabulary version defined above, so a vocabulary bump expires the record rather than reinterpreting it. The snapshot emits no diagnostic and never enters `rigor check`'s stream.
 
-The record is **undischarged**: it holds the sets the analyzer proved, and `effects.tolerated:` applies when a difference is *judged*, never when the record is written. Writing the file with the policy applied would make it a function of policy, and a policy change indistinguishable from a change in what the code does.
+The record is **undischarged**: it holds the sets the analyzer proved, and `effects.tolerated:` applies when a difference is *judged* (§ Discharge by policy), never when the record is written. Writing the file with the policy applied would make it a function of policy, and a policy change indistinguishable from a change in what the code does.

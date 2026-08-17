@@ -4,7 +4,9 @@ require "prism"
 
 require_relative "../diagnostic"
 require_relative "../check_rules"
+require_relative "../../effects/config_envelopes"
 require_relative "../../effects/envelope_check"
+require_relative "../../effects/method_key"
 require_relative "../../effects/registry"
 require_relative "../../effects/signature_sources"
 require_relative "../../effects/unknown_label_check"
@@ -56,18 +58,41 @@ module Rigor
         TOLERATED_CONSEQUENCE = "the entry discharges nothing"
         private_constant :TOLERATED_CONSEQUENCE
 
+        # An `envelopes[].effect` list degrades exactly as an annotation does: the whole tag reads ⊤.
+        ENVELOPE_CONSEQUENCE = "the entry now bounds nothing"
+        private_constant :ENVELOPE_CONSEQUENCE
+
+        # An attribution's labels are a *claim*, so an unrecognised member costs meaning rather than a
+        # bound: the labels are still attributed, and nothing in the vocabulary explains them.
+        ATTRIBUTION_CONSEQUENCE = "the attributed label means nothing to the vocabulary"
+        private_constant :ATTRIBUTION_CONSEQUENCE
+
+        # `effects.labels:` is the one list whose whole point is to introduce a spelling, so a member of
+        # it can only be unrecognised by being unregisterable — a root the loader dropped.
+        LABELS_CONSEQUENCE = "the label is not registered"
+        private_constant :LABELS_CONSEQUENCE
+
         # @param configuration [Rigor::Configuration]
         # @param rbs_loader [Rigor::Environment::RbsLoader, nil] the run's loader; nil disables the pass.
         # @param effect_table [Rigor::Effects::EffectTable] the propagated graph.
         # @param discovery [#call] forces and returns the cross-file discovery tables as
         #   `[def_sources, singleton_def_sources, class_sources]`. Called only when an envelope exists.
         # @param sources [Hash{String => String}] in-memory sources, for the buffer-backed run path.
-        def initialize(configuration:, rbs_loader:, effect_table:, discovery:, sources: nil)
+        # @param unit_sources [Hash{String => Array<String>}] `Runner#effect_sources` — where each effect
+        #   unit is defined, which is what an `effects.envelopes[].match:` path glob selects on. Its paths
+        #   are relativised against the working directory, which is the project root for every run that
+        #   reaches here (the same assumption `Snapshot.build` makes about `reach:`).
+        # @param apply_tolerated [Boolean] false runs the judgment with an empty tolerated set
+        #   (`--no-tolerated-effects`).
+        def initialize(configuration:, rbs_loader:, effect_table:, discovery:, sources: nil,
+                       unit_sources: nil, apply_tolerated: true)
           @configuration = configuration
           @rbs_loader = rbs_loader
           @effect_table = effect_table
           @discovery = discovery
           @sources = sources || {}
+          @unit_sources = unit_sources || {}
+          @apply_tolerated = apply_tolerated
         end
 
         # @return [Array<Diagnostic>] one per (method, exceeding label) plus one per unrecognised
@@ -75,7 +100,7 @@ module Rigor
         def diagnostics
           return NO_DIAGNOSTICS unless @configuration.effects_check?
 
-          produced = config_label_diagnostics + declaration_diagnostics
+          produced = config_label_diagnostics + config_envelope_diagnostics + declaration_diagnostics
           return NO_DIAGNOSTICS if produced.empty?
 
           suppress(produced)
@@ -87,17 +112,24 @@ module Rigor
 
         private
 
-        # The `.rbs` / rbs-inline half. One walk of the project's own signatures serves both rules; a
-        # project with `effects:` but no annotation at all pays that walk and stops here.
+        # The envelopes, from both strata, and the judgment over them.
+        #
+        # The `.rbs` / rbs-inline walk is the expensive half and stays lazy: a project with `effects:` and
+        # no annotation pays it and stops. It is also **skipped entirely** when there is no loader — a
+        # project that writes no RBS at all still gets the configured envelopes judged, which is the whole
+        # point of the convention surface (design note § 6.2, "value on day one").
         def declaration_diagnostics
-          return NO_DIAGNOSTICS if @rbs_loader.nil?
-
-          scan = RbsExtended::EnvelopeScanner.scan(
-            sources: signature_sources, registry: registry
-          )
-          return NO_DIAGNOSTICS if scan.empty?
+          scan = scan_declarations
+          return NO_DIAGNOSTICS if scan.nil? && config_envelopes.empty?
 
           unknown_label_diagnostics(scan) + exceeded_diagnostics(scan)
+        end
+
+        def scan_declarations
+          return nil if @rbs_loader.nil?
+
+          scan = RbsExtended::EnvelopeScanner.scan(sources: signature_sources, registry: registry)
+          scan.empty? ? nil : scan
         end
 
         # The envelope contract itself. Needs the propagated graph and the discovery tables the `def`
@@ -110,6 +142,8 @@ module Rigor
         end
 
         def unknown_label_diagnostics(scan)
+          return NO_DIAGNOSTICS if scan.nil?
+
           findings = Effects::UnknownLabelCheck.for_envelopes(
             method_envelopes: scan.method_envelopes, class_envelopes: scan.class_envelopes,
             registry: registry
@@ -117,15 +151,42 @@ module Rigor
           build_unknown_label_diagnostics(findings)
         end
 
-        # `effects.tolerated:` — the one config-side label list a reader exists for today. Its SHAPE is
-        # already a tier-2 load error; this is the other half, a member the registry does not know
-        # after plugin load, which tolerates nothing and would otherwise fail silently. #385 points
-        # `envelopes[].effect` and `attribution:` at the same {Effects::UnknownLabelCheck.for_config}.
+        # The `.rigor.yml` label lists. Their SHAPE is already a tier-2 load error; this is the other
+        # half, a member the registry does not know after plugin load, which would otherwise fail
+        # silently — a `tolerated:` entry that discharges nothing, an envelope that reads ⊤, an
+        # attribution nothing can interpret.
         def config_label_diagnostics
-          findings = Effects::UnknownLabelCheck.for_config(
-            labels: @configuration.effects_tolerated, key_path: "effects.tolerated",
-            consequence: TOLERATED_CONSEQUENCE, registry: registry
+          findings = config_label_findings("effects.tolerated", @configuration.effects_tolerated,
+                                           TOLERATED_CONSEQUENCE) +
+                     config_label_findings("effects.labels", @configuration.effects_labels,
+                                           LABELS_CONSEQUENCE) +
+                     attribution_findings
+          build_unknown_label_diagnostics(findings)
+        end
+
+        def config_label_findings(key_path, labels, consequence)
+          return [] if labels.empty?
+
+          Effects::UnknownLabelCheck.for_config(
+            labels: labels, key_path: key_path, consequence: consequence, registry: registry
           )
+        end
+
+        def attribution_findings
+          @configuration.effects_attribution.flat_map do |key, labels|
+            config_label_findings("effects.attribution.#{key}", labels, ATTRIBUTION_CONSEQUENCE)
+          end
+        end
+
+        # `envelopes[].effect` — reported per entry, so the message names the stanza a reader has to edit
+        # rather than the label list it happens to share with another entry.
+        def config_envelope_diagnostics
+          findings = config_envelopes_entries.flat_map do |entry|
+            next [] if entry.unknown_labels.empty?
+
+            config_label_findings("effects.envelopes[#{entry.index}].effect", entry.labels,
+                                  ENVELOPE_CONSEQUENCE)
+          end
           build_unknown_label_diagnostics(findings)
         end
 
@@ -173,19 +234,45 @@ module Rigor
           nil
         end
 
-        # The vocabulary an unknown label is judged against. `Registry.default` today; `effects.labels:`
-        # and plugin-registered roots extend it in #385 / #387, and this is the one place that changes.
+        # The vocabulary an unknown label is judged against: the shipped registry plus whatever
+        # `effects.labels:` opened. A project may open any root — the listing IS the vouching act — so
+        # nothing here can raise on ownership; plugin-registered roots join in #387, and this stays the
+        # one place that changes.
         def registry
-          @registry ||= Effects::Registry.default
+          @registry ||= Effects::Registry.for_configuration(@configuration)
+        end
+
+        # `effects.envelopes:`, resolved against the vocabulary once per run.
+        def config_envelopes_entries
+          @config_envelopes_entries ||= Effects::ConfigEnvelopes.build(
+            entries: @configuration.effects_envelopes, registry: registry
+          )
+        end
+
+        # The classes those entries select, as class-keyed envelopes. Keyed off the effect table's own
+        # class names, so an entry naming a namespace or a path with no analysed unit behind it simply
+        # selects nothing.
+        def config_envelopes
+          @config_envelopes ||= Effects::ConfigEnvelopes.for_classes(
+            entries: config_envelopes_entries, class_names: table_class_names, sources: @unit_sources
+          )
+        end
+
+        def table_class_names
+          @effect_table.keys.filter_map { |key| Effects::MethodKey.owner(key) }.uniq
         end
 
         def judge(scan)
           def_sources, singleton_def_sources, class_sources = @discovery.call
           Effects::EnvelopeCheck.run(
             table: @effect_table,
-            method_envelopes: scan.method_envelopes, class_envelopes: scan.class_envelopes,
-            def_sources: def_sources || {}, singleton_def_sources: singleton_def_sources || {},
-            class_sources: class_sources || {}
+            method_envelopes: scan&.method_envelopes || {}, class_envelopes: scan&.class_envelopes || {},
+            config_envelopes: config_envelopes,
+            positions: Effects::EnvelopeCheck::Positions.build(
+              def_sources: def_sources, singleton_def_sources: singleton_def_sources,
+              class_sources: class_sources
+            ),
+            apply_tolerated: @apply_tolerated
           )
         end
 
@@ -224,6 +311,9 @@ module Rigor
           parts.empty? ? "" : " (#{parts.join(' ')})"
         end
 
+        # A distributed annotation names the class it came from; a configured envelope does not, because
+        # its `location` already names the stanza (`.rigor.yml effects.envelopes[2]`) and the method key
+        # at the head of the message already names the class.
         def declared_at(envelope)
           owner = envelope.source == :class_annotation ? " on #{envelope.owner_key.split(/[#.]/).first}" : ""
           where = envelope.location ? " at #{envelope.location}" : ""

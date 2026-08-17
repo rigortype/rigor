@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "attribution"
 require_relative "file_collection"
 require_relative "local_ownership"
 require_relative "origin"
@@ -51,13 +52,14 @@ module Rigor
       WRITER_SUMMARY = Summary.new(bundles: { Origin.construct("attr-writer") => MUTATE_SELF })
       private_constant :WRITER_SUMMARY
 
-      def self.scan(root:, path:, calls:)
-        new(path: path, calls: calls).scan(root)
+      def self.scan(root:, path:, calls:, attribution: Attribution.empty)
+        new(path: path, calls: calls, attribution: attribution).scan(root)
       end
 
-      def initialize(path:, calls:)
+      def initialize(path:, calls:, attribution: Attribution.empty)
         @path = path
         @calls = calls
+        @attribution = attribution
         @summaries = {}
         @edges = {}
         @superclasses = {}
@@ -116,7 +118,8 @@ module Rigor
         scan = UnitScan.new(
           singleton: singleton, parameters: names,
           block_parameter: block_parameter_name(parameters),
-          owned_locals: LocalOwnership.owned(body, names), calls: @calls
+          owned_locals: LocalOwnership.owned(body, names), calls: @calls,
+          attribution: @attribution
         )
         summary, edges = scan.run(body)
         merge_unit(key, summary, edges)

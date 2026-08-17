@@ -459,6 +459,11 @@ module Rigor
           # key. `:unset` means "no flag — use the configured selection"; `true` adopts the whole overlay, `false`
           # adopts none, and an Array of ids adopts only those (see `apply_bleeding_edge_override`).
           bleeding_edge: :unset,
+          # ADR-103 WD1 / #385 — the effect-policy audit switch. Judges `effect.envelope-exceeded` as if
+          # `effects.tolerated:` were empty, so a project can see what its discharge policy is hiding
+          # without editing the policy. Judgment-time only: the run, its collection and its cache identity
+          # are identical either way.
+          no_tolerated_effects: false,
           # Type-precision coverage block. Off by default — it is a second precision pass over the analyzed files (the
           # same scan `rigor coverage` runs), so it is opt-in to keep the default check path's cost unchanged. When set,
           # `--format json` gains a `coverage` object (scan_files + precision tiers) and the text output prints a
@@ -527,6 +532,10 @@ module Rigor
           opts.on("--no-bleeding-edge",
                   "ADR-50: ignore any configured bleeding_edge: selection for this run") do
             options[:bleeding_edge] = false
+          end
+          opts.on("--no-tolerated-effects",
+                  "ADR-103: check effect envelopes as if effects.tolerated: were empty") do
+            options[:no_tolerated_effects] = true
           end
         end
         parser.parse!(@argv)

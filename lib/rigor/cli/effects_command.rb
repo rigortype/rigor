@@ -88,13 +88,19 @@ module Rigor
       private_constant :FORMATS
 
       def parse_options
-        options = { config: nil, format: "text", full: false }
+        options = { config: nil, format: "text", full: false, no_tolerated: false }
         OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_config(opts, options)
           opts.on("--format=FORMAT", "Output format: text (default) or json") { |value| options[:format] = value }
           opts.on("--full", "List every method, including exhaustive ones with no effects beyond mutate.local") do
             options[:full] = true
+          end
+          # Accepted here and deliberately inert, exactly as it is on `update`: the report is an
+          # observation, and observations are undischarged. Only a JUDGMENT reads `effects.tolerated:` —
+          # `rigor effects check` / `diff`, and `rigor check`'s envelope contract.
+          opts.on("--no-tolerated-effects", "Judge as if effects.tolerated: were empty (inert on the report)") do
+            options[:no_tolerated] = true
           end
         end.parse!(@argv)
         options

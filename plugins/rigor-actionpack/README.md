@@ -71,3 +71,46 @@ an errors controller exercising the `unknown-helper` /
 | `node_rule` + `NodeContext` (ADR-37) | per-call checks run over the engine-owned walk; the enclosing controller is read from the node's lexical ancestors (the nested-module qualification render/filter resolution needs) |
 | `Plugin::Inflector` (ADR-39) | model / table name resolution via the real `ActiveSupport::Inflector` |
 | `Plugin::Base.suggest` | did-you-mean suggestions for the `unknown-*` diagnostics |
+
+## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10 / WD14)
+
+Inert unless the project has an `effects:` block.
+
+| Call | Labels |
+| --- | --- |
+| `redirect_to`, `redirect_back`, `head`, `send_data` | `mutate.self` + `rails.response.write` |
+| `render`, `render_to_string`, `render_to_body` | the same, **plus a `template-not-analysed` taint** |
+| `send_file` | the same, plus `io.fs.read` |
+| `session[]=`, `session.delete`, `reset_session` | `mutate` + `rails.session.write` |
+| `session[]` | `io` + `rails.session.read` |
+| `cookies[]=` and the `signed` / `encrypted` / `permanent` jars | `mutate` + `rails.cookie.write` |
+| `flash[]=`, `flash.now[]=`, `flash.alert=`, `flash.notice=` | `mutate` + `rails.flash.write` |
+
+### `mutate.self`, not `io`
+
+`render` and `redirect_to` do not write to a socket. They set the
+response body and status on the controller instance; Rack writes it
+later, outside any project method. So an envelope forbidding `io` in a
+service object is not violated by a helper that calls
+`render_to_string`, and that is the right answer.
+
+### Why `render` keeps a taint
+
+The template is not an effect unit yet
+([ADR-103](../../docs/adr/103-effect-labels.md) WD11). What the
+controller does is fully stated; what the view does is genuinely
+unknown, and a summary that stopped at the `render` line and read
+*exhaustive* would be the one misleading row in the whole Rails layer.
+The taint is how it says so.
+
+### `session[:user_id] = id`
+
+That is `[]=` on the result of a receiver-less `session`, and nothing
+types that result. The row matches the receiver **expression** as
+written, scoped to classes whose project ancestry reaches
+`ActionController::Base` — so a `session` method on an unrelated class
+is not mistaken for this one.
+
+### Entry-point preset
+
+`rails-controllers` → `app/controllers/**/*.rb`.

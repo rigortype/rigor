@@ -2,10 +2,12 @@
 
 require "rigor/configuration"
 require "rigor/effects/entry_points"
+require "rigor/effects/snapshot"
 
-# ADR-103 WD14 — the named entry-point presets `effects.snapshot.reach:` may adopt. This slice ships none;
-# what it ships is the shape, so a name that resolves to nothing is a load-time error rather than a
-# `reach:` table that comes back mysteriously empty.
+# ADR-103 WD14 — the named entry-point presets `effects.snapshot.reach:` may adopt. Presets are supplied
+# by the plugin that models a framework (#387), so `Configuration` checks a `reach:` entry's SHAPE and
+# `Snapshot.expand_reach` checks its EXISTENCE — the first moment the registered set is complete, because
+# plugins load from the very configuration being validated.
 RSpec.describe Rigor::Effects::EntryPoints do
   around do |example|
     described_class.reset!

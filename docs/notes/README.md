@@ -73,6 +73,7 @@ comparison) appears nowhere else in this index.
 | 2026-08-13 | [Unused-constant false-positive baseline — three-project corpus measurement (issue #345)](20260813-unused-constant-fp-baseline.md) |
 | 2026-08-17 | [Effect catalogue — corpus measurement, before and after (issue #380)](20260817-effect-catalogue-corpus.md) |
 | 2026-08-17 | [Effect collection — where the WD13 budget went, and what got it back (issue #382)](20260817-effect-collection-perf.md) |
+| 2026-08-17 | [Rails effect layer — corpus measurement, before and after (issue #387)](20260817-effect-rails-layer-corpus.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

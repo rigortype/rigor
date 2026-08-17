@@ -91,3 +91,36 @@ It was considered for the reachability report ([ADR-102](../../docs/adr/102-unus
 ## License
 
 MPL-2.0, matching the parent Rigor project.
+
+## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10)
+
+Inert unless the project has an `effects:` block. ActionMailer is the
+clearest lazy-builder-then-transport shape in Rails, and the labels
+read straight off the syntax:
+
+```ruby
+UserMailer.welcome(user).deliver_now
+#   └──── an edge ────┘└─ the send ─┘
+```
+
+| Call | Labels |
+| --- | --- |
+| `UserMailer.welcome(u)` | an **edge** into `UserMailer#welcome`; no transport — nothing has been sent |
+| `.deliver_now` / `deliver_now!` | `io` + `email.send` + `rails.actionmailer.deliver` |
+| `.deliver_later` / `deliver_later!` | the same, plus `rails.activejob.enqueue` + `job.enqueue` |
+
+`email.send` rides `deliver_later` too: the mail *will* go out, and a
+policy forbidding mail from a presenter means both spellings.
+
+The transport is bare `io` because the delivery method is configured
+per environment — SMTP, an HTTP API, a test double — and no static
+reading can settle it. `rails.actionmailer.deliver` is what a reviewer
+actually names.
+
+The `deliver_now` row matches on the **result** of a call to the mailer
+class, because that is how the idiom is written and the
+`MessageDelivery` in the middle has no type the project declares.
+
+### Entry-point preset
+
+`rails-mailers` → `app/mailers/**/*.rb`.

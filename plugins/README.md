@@ -70,11 +70,17 @@ Larger surfaces — typically need a Rails app shape to make sense.
 | [`rigor-pundit`](rigor-pundit/) | 3B | Policy class + predicate method validation for `authorize(record, :action)`; receiver-type lookup via `Scope#type_of` | Ruby | ✅ |
 | [`rigor-sidekiq`](rigor-sidekiq/) | 3C | Sidekiq worker `perform_async` / `perform_in` / `perform_at` argument shape; schedule-aware arity model | Ruby | ✅ |
 
+### Rails ecosystem (framework core)
+
+| Plugin | What it does |
+| --- | --- |
+| [`rigor-railties`](rigor-railties/) | **Effects only** — no diagnostic, no typing, no producer. Carries the `Rails.` namespace as an effect vocabulary ([ADR-103](../docs/adr/103-effect-labels.md) WD10): `Rails.cache` → `cache.read` / `cache.write`, `Rails.logger` / `Rails.error` → `telemetry`, `Rails.env` and the configuration → `global.read` + `rails.config.read`, credentials → `io.fs.read` + `rails.credentials.read`. Also declares the `rails` entry-point preset that `effects.snapshot.reach:` adopts by name, which spans four directories owned by four different plugins and therefore needs one declarer. |
+
 ### Rails ecosystem (meta-gem)
 
 | Plugin | Bundles |
 | --- | --- |
-| [`rigor-rails`](rigor-rails/) | Tier 1+2 Rails set (rails-routes / rails-i18n / actionmailer / activejob / activerecord / actionpack / factorybot). **Unwired** — `plugins: [rigor-rails]` is rejected by the loader, and the `Gemfile` convenience it was designed for ([ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1) is superseded by the bundled-gem model. Enumerate the members individually; [ADR-96](../docs/adr/96-plugin-target-gems.md) WD3 proposes a supported umbrella. |
+| [`rigor-rails`](rigor-rails/) | Tier 1+2 Rails set (railties / rails-routes / rails-i18n / actionmailer / activejob / activerecord / actionpack / factorybot). **Unwired** — `plugins: [rigor-rails]` is rejected by the loader, and the `Gemfile` convenience it was designed for ([ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1) is superseded by the bundled-gem model. Enumerate the members individually; [ADR-96](../docs/adr/96-plugin-target-gems.md) WD3 proposes a supported umbrella. |
 
 ### Testing & matchers (Pillar 2 "Your specs are types")
 

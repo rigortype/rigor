@@ -12,10 +12,11 @@ It runs no analysis of its own.
 > This README covers what the grouping is under the bundled
 > distribution model.
 
-The seven plugins it groups:
+The plugins it groups:
 
 | Tier | Plugin | Scope |
 |---|---|---|
+| — | [`rigor-railties`](../rigor-railties/) | The `Rails.` namespace as an effect vocabulary ([ADR-103](../../docs/adr/103-effect-labels.md) WD10); no diagnostics |
 | 1A | [`rigor-rails-routes`](../rigor-rails-routes/) | `config/routes.rb` → `*_path` / `*_url` validation |
 | 1B | [`rigor-rails-i18n`](../rigor-rails-i18n/) | `config/locales/*.yml` → `t('key.path')` validation |
 | 1C | [`rigor-actionmailer`](../rigor-actionmailer/) | Mailer methods + view template existence |

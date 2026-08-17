@@ -185,10 +185,17 @@ RSpec.describe "the plugin effect contract" do
       facts_for(*manifests).digest
     end
 
+    # Two manifests built from the same declaration, independently: the digest must not pick up object
+    # identity, insertion order or anything else that would make a warm cache miss for no reason.
     it "is stable for an unchanged plugin table" do
-      row = Rigor::Plugin::EffectAttribution.new(receiver: "A", method: :b, labels: ["io"], why: "x")
-      expect(digest_for(manifest(id: "acme", effect_attributions: [row])))
-        .to eq(digest_for(manifest(id: "acme", effect_attributions: [row])))
+      def acme_manifest
+        row = Rigor::Plugin::EffectAttribution.new(receiver: "A", method: :b, labels: ["io"], why: "x")
+        manifest(id: "acme", effect_attributions: [row], effect_labels: ["acme.a"])
+      end
+
+      first = digest_for(acme_manifest)
+
+      expect(digest_for(acme_manifest)).to eq(first)
     end
 
     # A plugin upgrade that re-colours a row must invalidate the effects cache slot the same way a

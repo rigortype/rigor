@@ -181,13 +181,39 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 | `effects` | Hash | absent | **Opt-in to effect labels ([ADR-103](../adr/103-effect-labels.md)).** The *presence* of this block is the switch — `effects: {}` enables collection with every sub-key at its default, and leaving it out keeps `rigor check` byte-identical and free. Nothing else turns collection on: an `%a{pure}` or `%a{rigor:v1:effect …}` annotation in your RBS does not, because an annotation must not silently make every run more expensive — such a project gets one `effect.annotations-unchecked` `:info` per run instead, saying the annotations are inert. `rigor effects` runs under an implicit empty block when the key is absent, so you can try the report before configuring anything. Effect summaries are cached under their own identity (Rigor's effect vocabulary, its built-in catalogue and this block), so `rigor effects` after `rigor check` in the same job is a cache hit plus the propagation, and turning this block on or off does not invalidate your diagnostics cache. The sub-keys are below. `views` is declared in the schema and reserved: accepted and **not yet read**. See [`rigor effects`](02-cli-reference.md#rigor-effects). |
 | `effects.check` | Boolean | `true` | Whether the envelopes you declared — `%a{pure}` and `%a{rigor:v1:effect …}` in RBS, and the `effects.envelopes:` stanzas below — are checked against what Rigor proved, surfacing `effect.envelope-exceeded` and, for a label the vocabulary does not recognise, `effect.unknown-label`. Set it to `false` to keep the report and the snapshot while silencing both. Never on without an `effects:` block. |
 | `effects.snapshot.path` | String | `.rigor-effects.yml` | Where `rigor effects update` writes the committed record. |
-| `effects.snapshot.reach` | Array | `[]` | Entry points whose **transitive** footprint the snapshot records under `reach:`. Each entry is a project-relative file glob (the `unused --entry-point` semantics — `**` is the only way across a directory boundary) or the name of an entry-point preset a plugin registered. An unknown preset name is a load error. |
+| `effects.snapshot.reach` | Array | `[]` | Entry points whose **transitive** footprint the snapshot records under `reach:`. Each entry is a project-relative file glob (the `unused --entry-point` semantics — `**` is the only way across a directory boundary) or the name of an entry-point **preset** a plugin registered. On a Rails app, `reach: [rails]` is the one you want — see below. A name nothing registered is an error when the snapshot is built (not when the configuration loads, because the plugins that name presets load *from* that configuration). |
 | `effects.snapshot.gate` | String | `symmetric` | What `rigor effects check` treats as drift. `symmetric` fails on any difference — a job that *stopped* enqueueing is news too; `additions` is the growth-only ratchet. |
 | `effects.labels` | Array | `[]` | Effect labels **your project** registers, layered over Rigor's shipped vocabulary. A project may open any root (`acme.cache`) — listing the label here is the vouching act. Once registered, a label is usable in every other key below and stops being reported as unknown. Malformed spellings are a load error. |
 | `effects.attribution` | Hash | `{}` | What a call into code Rigor cannot see *does*, keyed by method: `{"Net::HTTP.get": [io.net.http], "Logger#info": [telemetry]}`. Keys are method keys — `Owner#instance_method` or `Owner.singleton_method` — and anything else is a load error. The labels land in the caller's **declared** lane and never in the proven one, so an attribution can never make a diagnostic fire; the call still counts as unresolved, because you told Rigor what that code does and Rigor did not read it. Use it for gems nobody has written a plugin for. |
 | `effects.envelopes` | Array | `[]` | Effect envelopes by **convention**, so a whole architectural layer is bounded by one stanza instead of a per-method annotation. Each entry names exactly one of `match:` (a project-relative path glob over the files a class is defined in) or `namespace:` (a constant glob: `*` is one segment, `**` is one or more), plus `effect:` — the labels the selected classes may perform, or `[]` for pure. Nearest wins: a per-method annotation beats a class-level one, which beats a stanza; among stanzas the **first** match wins. See the example below. |
 | `effects.tolerated` | Array | `[]` | Labels your project has decided not to act on. Applied when a bound or a difference is **judged**, never when a record is written, and **per origin**: `Logger#info` carries `io` and `telemetry` together, so `tolerated: [telemetry]` frees the `io` that came with the logging and leaves an `io.fs.read` from a `File.read` in the same method exactly where it was. `rigor check --no-tolerated-effects` (and the same flag on `rigor effects check`) re-judges as if the list were empty — the audit switch for the policy. |
 
+
+#### Entry-point presets
+
+`reach:` asks "whose footprint should the record cover", and on a framework the honest answer is a fact
+about the framework rather than about your code. So the plugin that models it names the set, and you
+adopt it:
+
+```yaml
+plugins:
+  - rigor-railties
+  - rigor-activerecord
+  - rigor-actionpack
+
+effects:
+  snapshot:
+    reach: [rails]
+```
+
+`rails` — registered by [`rigor-railties`](plugins/rigor-rails.md) — stands for `app/controllers/**`,
+`app/jobs/**`, `app/mailers/**` and `app/channels/**`: every way the outside world enters the
+application. The component plugins also register the narrower `rails-controllers`, `rails-jobs`,
+`rails-mailers` and `rails-channels` if you want one layer's footprint rather than all four. A preset is
+just a name for globs; mixing the two in one list is fine.
+
+Listing the plugin is what registers its preset, so `reach: [rails]` without `rigor-railties` in
+`plugins:` is an error saying so.
 
 #### Envelopes by convention
 

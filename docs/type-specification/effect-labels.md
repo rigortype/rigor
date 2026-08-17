@@ -73,6 +73,10 @@ An added label that satisfies none of these is an error at extension time, not a
 
 A project extends the vocabulary with `effects.labels:` in `.rigor.yml`. Listing a label there is the vouching act — which is why the project alone may open any root — and it makes the spelling known everywhere a label is judged: `effect.unknown-label`, envelope bounds, attribution values and `tolerated:` alike. Its SHAPE is validated when the configuration loads; nothing else about it is.
 
+A plugin extends it with `effect_labels:` in its manifest, under the owner its `effect_root:` names. The plugin layer is folded in **before** the project's, so a project may name a plugin-opened label in an envelope or in `tolerated:` without re-declaring the framework's vocabulary. A refusal drops only the refusing plugin's labels and surfaces as a warning on the effects report — one plugin overreaching MUST NOT un-name another's.
+
+> **Implemented as of this writing** ([#387](https://github.com/rigortype/rigor/issues/387)): the plugin stratum. Whether a plugin may open the root it names is decided by `Rigor::Plugin::FirstParty` — is this a plugin the engine itself bundles — and a plugin that may not keeps the root named after its own id, with a warning. The manifest fields are specified in [`plugin.md`](../internal-spec/plugin.md) § Effect contributions.
+
 ### Vocabulary evolution
 
 The registry carries a `vocabulary` version, and the rules that govern it follow from subsumption:
@@ -250,6 +254,23 @@ Three properties follow, and they are the whole point of the channel:
 - **The claim propagates.** The declared lane travels call edges (§ Effect summaries), so every caller that reaches the attributed call reads the same `≤` bound — in the report and in the snapshot's `reach:` table, where `methods:` keeps each method's own claim so its diff stays attributable.
 - **A label the registry does not know is reported, not rejected.** The attribution stands as written — the taint already says the reading is incomplete — and `effect.unknown-label` says the vocabulary cannot explain it.
 
+### The plugin stratum
+
+> **Implemented as of this writing** ([#387](https://github.com/rigortype/rigor/issues/387)): plugin attribution and plugin framework edges, with the whole Rails vocabulary of [ADR-103](../adr/103-effect-labels.md) WD10 built on them. The manifest surface is [`plugin.md`](../internal-spec/plugin.md) § Effect contributions; how the tables are compiled and consulted is [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The plugin stratum.
+
+A plugin that models a framework attributes calls into it, through `effect_attributions:` in its manifest or through a `%a{…}` annotation in the RBS it ships. Both land in the **declared** lane, exactly as `effects.attribution:` does. What differs is the taint, and it follows [ADR-103](../adr/103-effect-labels.md) WD6's ladder rather than the channel:
+
+| Contributor | Taint at the site | Reading |
+| --- | --- | --- |
+| a **first-party bundled** plugin's `discharge: true` row, or an annotation in its shipped RBS | none | "this is what it does" — the accepted-signature tier |
+| any other plugin, and the project's own YAML table | `plugin-attribution` | "declared this, and possibly more" |
+
+A discharging row also **bounds the site**: `dynamic-receiver`, `unresolved-self-call` and the ownership judgment on a receiver mutation are all already answered by a trusted statement of what the call does, and a taint beside it would be one no annotation could ever clear. A row MAY nonetheless carry an explicit taint of `template-not-analysed` or `opaque-callable` — the two things a framework model can honestly not see.
+
+A plugin also contributes **edges**: calls the framework makes that the syntax at the call site does not contain. `save` runs the class body's callbacks and validators, `Job.perform_now` runs `Job#perform`, `UserMailer.welcome(u)` runs `UserMailer#welcome`. What a plugin MUST NOT contribute is an edge from `perform_later` to `perform` (§ Effect summaries, deferred execution): the body runs in another process on another stack, so the caller's code does not contain it. The available strategies are a closed enum with no spelling for it.
+
+A plugin's **transport** row MAY be narrowed by a project fact it reads: an ActiveJob enqueue is bare `io` argument-blind, an `io.db.write` under a declared Solid Queue adapter and an `io.net` under Sidekiq. This is the configuration-level twin of argument-dependent narrowing, and an unread or per-environment declaration keeps the honest upper bound.
+
 ## Discharge by policy
 
 `effects.tolerated:` lists the labels a project has decided not to act on. It is applied when a difference or a bound is **judged**, never when a fact is recorded, and it operates **per origin**:
@@ -287,7 +308,7 @@ The identifier is shared with Steins, alongside `effect.liskov-widened`; the ide
 
 ## The effect snapshot
 
-> **Implemented as of this writing** ([#381](https://github.com/rigortype/rigor/issues/381)): `rigor effects update` / `check` / `diff` / `explain`, `effects.snapshot.{path,reach,gate}` and a minimal `effects.tolerated:`. The file's layout, its omission rule, the diff categories and the gate semantics are analyzer-internal and are specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The snapshot document. Entry-point **presets** are named here but none ships: the plugin manifest field that registers them lands with the Rails slice.
+> **Implemented as of this writing** ([#381](https://github.com/rigortype/rigor/issues/381)): `rigor effects update` / `check` / `diff` / `explain`, `effects.snapshot.{path,reach,gate}` and a minimal `effects.tolerated:`. The file's layout, its omission rule, the diff categories and the gate semantics are analyzer-internal and are specified in [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The snapshot document. Entry-point **presets** are named by the plugin that models a framework, through the `effect_entry_points:` manifest field ([#387](https://github.com/rigortype/rigor/issues/387)), and adopted by name in `effects.snapshot.reach:`. rigor-railties ships `rails` (controller actions, job `perform`, mailer actions, channel callbacks) and each Rails component plugin ships its own slice. Because a plugin loads *from* the configuration being validated, a `reach:` name is checked for SHAPE at configuration load and for EXISTENCE when the snapshot is built, which is the first point at which the registered set is complete.
 
 The primary way an effect footprint is validated is not an envelope but a committed record: `.rigor-effects.yml`, holding each method's *direct* summary and the transitive reach at declared entry points, whose diff is reviewed and whose drift a CI gate reports. Its header carries the vocabulary version defined above, so a vocabulary bump expires the record rather than reinterpreting it. The snapshot emits no diagnostic and never enters `rigor check`'s stream.
 

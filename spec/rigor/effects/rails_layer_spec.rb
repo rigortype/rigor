@@ -44,13 +44,11 @@ end.freeze
 # RBS reaching an ordinary Rails idiom through the project's own `class … <` lines; the fixture is what a
 # Rails app looks like, not what one looks like after adopting Rigor.
 RSpec.describe "the Rails effect layer" do
-  RAILS_PLUGINS = RAILS_PLUGIN_ENTRIES
-
   def fixture
     File.expand_path("../../integration/fixtures/effects/rails", __dir__)
   end
 
-  def configuration(plugins: RAILS_PLUGINS)
+  def configuration(plugins: RAILS_PLUGIN_ENTRIES)
     Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge(
         "paths" => ["app"], "effects" => {}, "plugins" => plugins
@@ -67,7 +65,7 @@ RSpec.describe "the Rails effect layer" do
         runner = Rigor::Analysis::Runner.new(
           configuration: Rigor::Configuration.new(
             Rigor::Configuration::DEFAULTS.merge(
-              "paths" => ["app"], "effects" => {}, "plugins" => RAILS_PLUGINS
+              "paths" => ["app"], "effects" => {}, "plugins" => RAILS_PLUGIN_ENTRIES
             )
           ),
           cache_store: nil, plugin_requirer: RAILS_PLUGIN_REQUIRER
@@ -222,6 +220,27 @@ RSpec.describe "the Rails effect layer" do
 
     it "accepts every bundled Rails plugin's contribution without a warning" do
       expect(facts.warnings).to be_empty
+    end
+  end
+
+  # The measured regression this guards: on the sequential path the cross-file discovery pre-pass fills the
+  # superclass table AFTER the first file has already asked for the compiled plugin tables, so an
+  # unconditional memo pinned the run to an empty ancestry and `Issue.find` on a
+  # `Issue < ApplicationRecord < ActiveRecord::Base` found no row. A pooled run hid it: its workers are
+  # seeded with the finished table before they fork.
+  describe "on the sequential path" do
+    it "still reaches a model finder through the inheritance chain" do
+      table = nil
+      Dir.chdir(fixture) do
+        runner = Rigor::Analysis::Runner.new(
+          configuration: configuration, cache_store: nil, workers: 0,
+          plugin_requirer: RAILS_PLUGIN_REQUIRER
+        )
+        runner.run(["app"])
+        table = runner.effect_table
+      end
+
+      expect(table["UsersController#show"].declared.to_a).to include("io.db.read")
     end
   end
 

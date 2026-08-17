@@ -14,6 +14,7 @@
 # whose `target_gems:` are actually in the project's `Gemfile.lock`. If that is rejected, ADR-60 WD1's
 # never-wired-surface criterion applies and this directory goes.
 
+require "rigor-railties"
 require "rigor-rails-routes"
 require "rigor-rails-i18n"
 require "rigor-actionmailer"

@@ -880,9 +880,16 @@ RSpec.describe Rigor::Configuration do
         .to raise_error(ArgumentError, /effects\.snapshot\.gate must be one of/)
     end
 
-    it "rejects a reach entry that names no preset and is not a glob" do
-      expect { snapshot_config("reach" => ["controllers"]) }
-        .to raise_error(ArgumentError, /no known entry-point preset/)
+    # #387 — presets are named by PLUGINS, and plugins load from the configuration being validated, so at
+    # this point none is registered. Only the SHAPE is checked here; `Snapshot.expand_reach` runs the
+    # existence check, which is the first moment the registered set is complete.
+    it "accepts a well-formed preset name no plugin has registered yet" do
+      expect(snapshot_config("reach" => ["controllers"]).effects_snapshot_reach).to eq(["controllers"])
+    end
+
+    it "rejects a reach entry that is neither a glob nor a well-formed preset name" do
+      expect { snapshot_config("reach" => ["Controller Actions"]) }
+        .to raise_error(ArgumentError, /neither a file glob nor a well-formed entry-point preset name/)
     end
 
     describe "tolerated:" do

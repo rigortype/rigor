@@ -90,16 +90,25 @@ module Rigor
       # process. Memoised on first use rather than built in the constructor for two reasons: the plugin
       # registry is adopted after construction (`apply_prebuilt` / the plugin-load pre-pass), and the
       # project's as-written superclass table — which is what makes an `ActiveRecord::Base` row reach
-      # `User.find` — exists only once the cross-file discovery pre-pass has run, which it has by the time
-      # any file is analyzed.
+      # `User.find` — is filled by the cross-file discovery pre-pass, which on the sequential path runs
+      # AFTER the first file has already asked for these facts.
+      #
+      # So the memo is keyed on the ancestry table's identity rather than being unconditional, exactly as
+      # {#effect_envelope_index}'s is keyed on the environment's. An unconditional `||=` pinned the whole
+      # run to the empty table the first file saw, and the measured symptom was the Rails layer's central
+      # claim silently failing: `Issue.find` on a `Issue < ApplicationRecord < ActiveRecord::Base` found no
+      # row on a sequential run, while a pooled one (whose workers are seeded with the finished table
+      # before they fork) worked.
       #
       # Public and declared here beside the other effect surfaces: `rigor effects` builds its snapshot off
       # the run's own vocabulary and has to read the same compiled tables the collection window scanned
       # under.
       def effect_plugin_facts
-        @effect_plugin_facts ||= Effects::PluginFacts.build(
-          @plugin_registry, superclasses: @project_discovered_superclasses
-        )
+        table = @project_discovered_superclasses
+        return @effect_plugin_facts if @effect_plugin_facts && @effect_plugin_facts_ancestry.equal?(table)
+
+        @effect_plugin_facts_ancestry = table
+        @effect_plugin_facts = Effects::PluginFacts.build(@plugin_registry, superclasses: table)
       end
 
       # The merged per-file collections behind {#effect_table} — the *direct* summaries, before the graph
@@ -225,6 +234,10 @@ module Rigor
         # (`#effect_envelope_index`) because the strata it reads include the built RBS one.
         @effect_envelope_index = nil
         @effect_envelope_index_env = nil
+        # #387 — the compiled plugin effect tables, memoised on the ancestry table they were built from
+        # (see `#effect_plugin_facts`).
+        @effect_plugin_facts = nil
+        @effect_plugin_facts_ancestry = nil
         # ADR-103 WD1 invariant 3 / #385 — `--no-tolerated-effects`, the audit switch. It changes the
         # JUDGMENT only: collection, the propagated table and the cache identity are all untouched, so an
         # audit run and an ordinary one share a cache entry and differ solely in which lane the envelope

@@ -131,7 +131,21 @@ result may never be remembered.
 at run time and the analyzer cannot see them: the summary reads "this
 much, and possibly more", which is the truth.
 
-The `%a{pure}` sweep over `blank?` / `present?` / `try` / `deep_dup`
-and the rest of the core_ext predicate surface — the cheapest purity
-win in a Rails app — is a separate change and lands in this plugin's
-shipped RBS.
+### Purity: `%a{pure}` on the pure half (#388)
+
+`sig/active_support/core_ext.rbs` also carries `%a{pure}` on the
+predicates and transforms genuinely free of side effects — `blank?` /
+`present?` / `presence`, `deep_dup` / `deep_merge`, the inflections
+(`camelize`, `underscore`, `pluralize`, `titleize`, …), `squish` /
+`truncate` / `remove`, `with_indifferent_access`, the Duration and
+Bytes multipliers, and more — audited one by one against the vendored
+ActiveSupport source rather than assumed from the method name. Each
+skipped candidate carries a one-line reason in the RBS file itself:
+`try` / `try!` / `as_json` dispatch to a method named at the call site
+and cannot be judged in isolation; `constantize` may autoload;
+`parameterize` reads `I18n.locale`; every bang method mutates in
+place; and `Date#ago` / `#beginning_of_day` / friends turn out to read
+`Time.zone` where the same-named `Time` methods do not — verified
+against ActiveSupport's source, not inferred from the name. The file's
+own header comment is the audit record; read it before assuming a
+method not listed there is safe to treat as pure elsewhere.

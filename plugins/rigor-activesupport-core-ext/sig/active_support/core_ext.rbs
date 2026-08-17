@@ -18,6 +18,57 @@
 # Not exhaustive. ActiveSupport ships many more extensions across
 # Hash / Array / String / Object / Date / Time / Integer / Module
 # than this file covers; PRs welcome to extend.
+#
+# ---------------------------------------------------------------
+# Purity (ADR-103 WD10; docs/type-specification/effect-labels.md; issue #388)
+# ---------------------------------------------------------------
+#
+# `%a{pure}` below is audited one by one against the vendored ActiveSupport
+# source (8.1.3.1), not assumed from the method name. Two recurring
+# judgment calls, decided once here rather than repeated per method:
+#
+# - **Inflection rules are treated as pure.** `camelize` / `underscore` /
+#   `pluralize` / `singularize` / `humanize` / `titleize` / `tableize` /
+#   `classify` / `dasherize` / `demodulize` / `deconstantize` /
+#   `foreign_key` / `upcase_first` all read `ActiveSupport::Inflector`'s
+#   per-locale rule table (`inflections(locale)`) — process-global, but
+#   configured once at boot and never touched by request-handling code.
+#   Rigor's own ADR-90 (the standalone inflector) already treats
+#   inflections as pure functions of the rule set; this file inherits
+#   that assumption rather than re-litigating it. `parameterize` is the
+#   one exception in this family: it calls `I18n.transliterate`, which
+#   reads `I18n.locale` when no explicit `locale:` is given — a stronger,
+#   request-scoped global read the ADR-90 assumption does not cover, so
+#   it is skipped below.
+# - **A method that dispatches to a name on its OWN receiver's declared
+#   type is fine; a method that dispatches to a name looked up on an
+#   ARGUMENT or ELEMENT of unknown type is not**, because the override is
+#   invisible to this audit (the `try` problem). `in?` / `presence_in`
+#   are the one deliberate exception: they call `#include?` / `#cover?`
+#   on the argument, which is near-universally a pure predicate, and the
+#   design note calls them out by name. `to_param` / `to_query` (Hash) and
+#   `to_fs(:db)` (Array, which calls `#id` on each element) are the
+#   converse case and are left unannotated.
+#
+# The clock, `Time.zone`, `ActiveSupport::Notifications` and
+# `ActiveSupport::CurrentAttributes` are covered by this plugin's
+# `effect_attributions:` manifest (`lib/rigor/plugin/activesupport_core_ext/effects.rb`,
+# issue #387) rather than by an RBS annotation here — see that file for
+# the impure half of this bundle. `DateTime#in_time_zone` was a gap in
+# that sweep (it reads `Time.zone` via its default argument) and is
+# closed there in this same change.
+#
+# Five `Date` singleton methods this file declares — `self.end_of_week`,
+# `self.beginning_of_month`, `self.end_of_month`, `self.beginning_of_year`,
+# `self.end_of_year` — do not exist in ActiveSupport 8.1
+# (`Date.beginning_of_month` etc. are never defined; only the instance
+# methods are). A sixth, `self.beginning_of_week`, DOES exist but with the
+# wrong return type here (real `Date.beginning_of_week` is the week-start
+# config getter, returning a `Symbol`, not a `Date`) — and reads
+# fiber-local execution state either way. None of the six can be soundly
+# annotated `%a{pure}`, so they are left exactly as they were; this
+# paragraph is the flag for whoever fixes the six next (out of scope for
+# the #388 purity sweep).
 
 # ---------------------------------------------------------------
 # Object — universal predicates and helpers
@@ -25,12 +76,15 @@
 
 class Object
   # @return [bool]
+  %a{pure}
   def blank?: () -> bool
 
   # @return [bool]
+  %a{pure}
   def present?: () -> bool
 
   # @return [self?]
+  %a{pure}
   def presence: () -> self?
 
   # `active_support/core_ext/object/json` monkey-patches
@@ -46,44 +100,72 @@ class Object
   # `options` is the standard `only:` / `except:` / `methods:`
   # / `include:` hash — left as untyped because the surface
   # is large and per-call-site precision is rarely useful.
+  #
+  # NOT `%a{pure}`: `respond_to?(:to_hash) ? to_hash.as_json(options) :
+  # instance_values.as_json(options)` dispatches to `to_hash` on the
+  # receiver's own (unknown-at-this-declaration) class, exactly the way
+  # `try` dispatches to an argument-named method — a subclass override is
+  # invisible to this audit, and `Object` is as broad a receiver as RBS has.
   def as_json: (?untyped options) -> untyped
 
   # `try` swallows NoMethodError; declared return is `untyped`
   # because the called method's signature is not known to RBS
   # at this call site.
+  #
+  # NOT `%a{pure}`: `try` is pure only when the method it dispatches to is,
+  # and that is a fact about the *call site*, not about `try` itself.
   def try: (Symbol | String) -> untyped
          | (Symbol | String, *untyped) -> untyped
          | (Symbol | String, *untyped) { (?) -> untyped } -> untyped
 
+  # NOT `%a{pure}`, same reasoning as `try`.
   def try!: (Symbol | String) -> untyped
           | (Symbol | String, *untyped) -> untyped
           | (Symbol | String, *untyped) { (?) -> untyped } -> untyped
 
   # `acts_like?(:string)` / `acts_like?(:date)` / `acts_like?(:time)`
-  # is ActiveSupport's "duck-typing helper" predicate.
+  # is ActiveSupport's "duck-typing helper" predicate: `respond_to?
+  # :"acts_like_#{duck}?"`. Deterministic given the receiver's class.
+  %a{pure}
   def acts_like?: (Symbol | String) -> bool
 
-  # `core_ext/object/inclusion` — `x.in?([a, b])` / `x.in?(1..10)`.
+  # `core_ext/object/inclusion` — `x.in?([a, b])` / `x.in?(1..10)`. Dispatches
+  # to `#include?` / `Range#cover?` on the ARGUMENT, the one deliberate
+  # exception to the try-shaped-dispatch rule above (design note § 11.2).
+  %a{pure}
   def in?: (untyped) -> bool
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
 # call sites the survey turned up.
 class NilClass
+  %a{pure}
   def blank?: () -> true
+  %a{pure}
   def present?: () -> false
+  %a{pure}
   def presence: () -> nil
+
+  # Unlike `Object#try`, `NilClass#try` is a hardcoded override that
+  # returns `nil` unconditionally — it never sends the message, so
+  # unlike `Object#try` above it never dispatches at all.
+  %a{pure}
   def try: (*untyped) -> nil
+  %a{pure}
   def try!: (*untyped) -> nil
 end
 
 class TrueClass
+  %a{pure}
   def blank?: () -> false
+  %a{pure}
   def present?: () -> true
 end
 
 class FalseClass
+  %a{pure}
   def blank?: () -> true
+  %a{pure}
   def present?: () -> false
 end
 
@@ -92,73 +174,119 @@ end
 # ---------------------------------------------------------------
 
 class String
-  # `core_ext/string/inflections`
+  # `core_ext/string/inflections` — the ADR-90 inflection-rule-table
+  # assumption at the top of this file applies to the whole group below.
+  %a{pure}
   def underscore: () -> String
+  %a{pure}
   def camelize: (?Symbol upper_case_first) -> String
+  %a{pure}
   def camelcase: (?Symbol upper_case_first) -> String
+  %a{pure}
   def classify: () -> String
-  def constantize: () -> untyped
-  def safe_constantize: () -> untyped
+  def constantize: () -> untyped # NOT %a{pure}: resolves a constant, may trigger autoload.
+  def safe_constantize: () -> untyped # NOT %a{pure}: same as constantize.
+  %a{pure}
   def demodulize: () -> String
+  %a{pure}
   def deconstantize: () -> String
+  %a{pure}
   def titleize: () -> String
+  %a{pure}
   def titlecase: () -> String
+  %a{pure}
   def dasherize: () -> String
+  %a{pure}
   def upcase_first: () -> String
+  # NOT %a{pure}: transliterates through `I18n.transliterate`, which reads
+  # `I18n.locale` when `locale:` is left at its `nil` default — a request-
+  # scoped global read the inflection-table assumption does not cover.
   def parameterize: (?separator: String, ?preserve_case: bool, ?locale: Symbol?) -> String
+  %a{pure}
   def tableize: () -> String
+  %a{pure}
   def foreign_key: (?bool separate_class_name_and_id_with_underscore) -> String
+  %a{pure}
   def pluralize: (?Integer count, ?Symbol locale) -> String
+  %a{pure}
   def singularize: (?Symbol locale) -> String
+  %a{pure}
   def humanize: (?capitalize: bool, ?keep_id_suffix: bool) -> String
 
   # `core_ext/string/filters`
+  %a{pure}
   def squish: () -> String
-  def squish!: () -> String
+  def squish!: () -> String # NOT %a{pure}: bang, mutates the receiver in place.
+  %a{pure}
   def truncate: (Integer truncate_at, ?omission: String, ?separator: String | Regexp | nil) -> String
+  %a{pure}
   def truncate_bytes: (Integer truncate_at, ?omission: String) -> String
+  %a{pure}
   def truncate_words: (Integer words_count, ?omission: String, ?separator: String | Regexp | nil) -> String
   # `remove` / `remove!` delete every occurrence of the given patterns.
+  %a{pure}
   def remove: (*Regexp | String patterns) -> String
-  def remove!: (*Regexp | String patterns) -> String
+  def remove!: (*Regexp | String patterns) -> String # NOT %a{pure}: bang, mutates in place.
 
   # `core_ext/string/output_safety` — `html_safe` returns an
   # `ActiveSupport::SafeBuffer` (a String subclass). The closest
   # RBS-canonical carrier is plain `String`; precision lost is the
-  # `html_safe?` predicate value.
+  # `html_safe?` predicate value. Neither mutates the receiver; `html_safe?`
+  # on a plain `String` receiver is a hardcoded `false`.
+  %a{pure}
   def html_safe: () -> String
+  %a{pure}
   def html_safe?: () -> bool
 
   # `core_ext/string/indent`
+  %a{pure}
   def indent: (Integer amount, ?String indent_string, ?bool indent_empty_lines) -> String
-  def indent!: (Integer amount, ?String indent_string, ?bool indent_empty_lines) -> String?
+  def indent!: (Integer amount, ?String indent_string, ?bool indent_empty_lines) -> String? # NOT %a{pure}: bang, mutates in place.
 
   # `core_ext/string/starts_ends_with` — also covered by core
   # `start_with?` / `end_with?`; these are the ActiveSupport aliases.
+  %a{pure}
   def starts_with?: (*String prefixes) -> bool
+  %a{pure}
   def ends_with?: (*String suffixes) -> bool
 
   # `core_ext/string/conversions` — `to_time` / `to_date` /
-  # `to_datetime` return Time / Date / DateTime.
+  # `to_datetime` return Time / Date / DateTime. NONE are `%a{pure}`:
+  # all three default missing date/time components from `Time.now` /
+  # the current date when the string under-specifies them (verified
+  # against `activesupport/lib/active_support/core_ext/string/conversions.rb`)
+  # — `nondet.time`, not a pure function of the string alone.
   def to_time: (?Symbol form) -> Time?
   def to_date: () -> Date?
   def to_datetime: () -> DateTime
+  # `to_hours` does not exist in vendored ActiveSupport 8.1.3.1 — no
+  # `String#to_hours` anywhere in `core_ext/string/`. Left unannotated
+  # because there is no implementation here to audit; flagged for a
+  # follow-up to confirm and either implement or remove the declaration.
   def to_hours: () -> Float
 
   # `core_ext/string/access`
+  %a{pure}
   def at: (Integer | Range[Integer] | Regexp position) -> String?
+  %a{pure}
   def from: (Integer position) -> String
+  %a{pure}
   def to: (Integer position) -> String
+  %a{pure}
   def first: (?Integer limit) -> String
+  %a{pure}
   def last: (?Integer limit) -> String
 
   # `core_ext/string/strip` — leading-blank strip with shared margin.
+  %a{pure}
   def strip_heredoc: () -> String
 
   # `core_ext/string/multibyte`
+  %a{pure}
   def mb_chars: () -> untyped
 
   # `core_ext/string/inquiry`
+  %a{pure}
   def inquiry: () -> untyped # ActiveSupport::StringInquirer
 end
 
@@ -167,45 +295,83 @@ end
 # ---------------------------------------------------------------
 
 class Integer
-  # `core_ext/numeric/time` — Duration multipliers.
+  # `core_ext/numeric/time` — Duration multipliers. Each just wraps `self`
+  # in an `ActiveSupport::Duration` value object (`Duration.seconds(self)`,
+  # …); the clock is read only later, by calling `.ago` / `.since` / etc.
+  # on the resulting Duration — attributed on `ActiveSupport::Duration` in
+  # `lib/rigor/plugin/activesupport_core_ext/effects.rb`, not here.
+  %a{pure}
   def second: () -> untyped # ActiveSupport::Duration
+  %a{pure}
   def seconds: () -> untyped
+  %a{pure}
   def minute: () -> untyped
+  %a{pure}
   def minutes: () -> untyped
+  %a{pure}
   def hour: () -> untyped
+  %a{pure}
   def hours: () -> untyped
+  %a{pure}
   def day: () -> untyped
+  %a{pure}
   def days: () -> untyped
+  %a{pure}
   def week: () -> untyped
+  %a{pure}
   def weeks: () -> untyped
+  %a{pure}
   def fortnight: () -> untyped
+  %a{pure}
   def fortnights: () -> untyped
+  %a{pure}
   def month: () -> untyped
+  %a{pure}
   def months: () -> untyped
+  %a{pure}
   def year: () -> untyped
+  %a{pure}
   def years: () -> untyped
 
-  # `core_ext/numeric/bytes`
+  # `core_ext/numeric/bytes` — plain arithmetic on `self`.
+  %a{pure}
   def byte: () -> Integer
+  %a{pure}
   def bytes: () -> Integer
+  %a{pure}
   def kilobyte: () -> Integer
+  %a{pure}
   def kilobytes: () -> Integer
+  %a{pure}
   def megabyte: () -> Integer
+  %a{pure}
   def megabytes: () -> Integer
+  %a{pure}
   def gigabyte: () -> Integer
+  %a{pure}
   def gigabytes: () -> Integer
+  %a{pure}
   def terabyte: () -> Integer
+  %a{pure}
   def terabytes: () -> Integer
+  %a{pure}
   def petabyte: () -> Integer
+  %a{pure}
   def petabytes: () -> Integer
+  %a{pure}
   def exabyte: () -> Integer
+  %a{pure}
   def exabytes: () -> Integer
 
   # `core_ext/integer/multiple`
+  %a{pure}
   def multiple_of?: (Integer) -> bool
 
-  # `core_ext/integer/inflections`
+  # `core_ext/integer/inflections` — `ActiveSupport::Inflector.ordinal(ize)`,
+  # the same inflection-rule-table assumption as the String group above.
+  %a{pure}
   def ordinal: () -> String
+  %a{pure}
   def ordinalize: () -> String
 end
 
@@ -214,28 +380,52 @@ end
 # ---------------------------------------------------------------
 
 class Float
+  # Same reasoning as the `Integer` block above: value-object construction
+  # and arithmetic only.
+  %a{pure}
   def second: () -> untyped
+  %a{pure}
   def seconds: () -> untyped
+  %a{pure}
   def minute: () -> untyped
+  %a{pure}
   def minutes: () -> untyped
+  %a{pure}
   def hour: () -> untyped
+  %a{pure}
   def hours: () -> untyped
+  %a{pure}
   def day: () -> untyped
+  %a{pure}
   def days: () -> untyped
+  %a{pure}
   def week: () -> untyped
+  %a{pure}
   def weeks: () -> untyped
+  %a{pure}
   def month: () -> untyped
+  %a{pure}
   def months: () -> untyped
+  %a{pure}
   def year: () -> untyped
+  %a{pure}
   def years: () -> untyped
 
+  %a{pure}
   def byte: () -> Float
+  %a{pure}
   def bytes: () -> Float
+  %a{pure}
   def kilobyte: () -> Float
+  %a{pure}
   def kilobytes: () -> Float
+  %a{pure}
   def megabyte: () -> Float
+  %a{pure}
   def megabytes: () -> Float
+  %a{pure}
   def gigabyte: () -> Float
+  %a{pure}
   def gigabytes: () -> Float
 end
 
@@ -244,6 +434,9 @@ end
 # ---------------------------------------------------------------
 
 class Time
+  # NOT %a{pure}: already attributed nondet.time/global.read/global.write
+  # by `lib/rigor/plugin/activesupport_core_ext/effects.rb` (issue #387).
+  # Duplicating an RBS envelope here risks the two disagreeing.
   def self.current: () -> Time
   def self.zone: () -> untyped # ActiveSupport::TimeZone | nil
   def self.zone=: (String | Symbol | untyped) -> untyped
@@ -253,38 +446,80 @@ class Time
   # Declaring them here raised `RBS::DuplicatedMethodDefinitionError` and collapsed the whole `Time`
   # definition to `Dynamic[top]`.
 
-  # `core_ext/time/calculations`
+  # `core_ext/time/calculations` — every method below is computed from the
+  # RECEIVER's own fields (`change` / `advance` / `+ seconds`), verified
+  # against `activesupport/lib/active_support/core_ext/time/calculations.rb`.
+  # None of them consult `Time.zone`; that is what distinguishes an
+  # instance method here from the `self.*` singletons above.
+  %a{pure}
   def yesterday: () -> Time
+  %a{pure}
   def tomorrow: () -> Time
+  %a{pure}
   def beginning_of_day: () -> Time
+  %a{pure}
   def end_of_day: () -> Time
+  %a{pure}
   def beginning_of_hour: () -> Time
+  %a{pure}
   def end_of_hour: () -> Time
+  %a{pure}
   def beginning_of_minute: () -> Time
+  %a{pure}
   def end_of_minute: () -> Time
+  # NOT %a{pure}: `start_day` defaults to `Date.beginning_of_week`, a
+  # fiber-local config getter (`ActiveSupport::IsolatedExecutionState[:beginning_of_week]`)
+  # — a global read when the argument is omitted.
   def beginning_of_week: (?Symbol start_day) -> Time
   def end_of_week: (?Symbol start_day) -> Time
+  %a{pure}
   def beginning_of_month: () -> Time
+  %a{pure}
   def end_of_month: () -> Time
+  %a{pure}
   def beginning_of_year: () -> Time
+  %a{pure}
   def end_of_year: () -> Time
+  # `Time#ago` / `#since` / `#in` (receiver a `Time`, not a `Duration`):
+  # `since(seconds) = self + seconds`, purely computed from the receiver.
+  # Distinct from `ActiveSupport::Duration#ago` (receiver a Duration,
+  # reads the clock), attributed separately in `effects.rb`.
+  %a{pure}
   def ago: (Numeric seconds) -> Time
+  %a{pure}
   def since: (Numeric seconds) -> Time
+  %a{pure}
   def in: (Numeric seconds) -> Time
+  %a{pure}
   def change: (**untyped) -> Time
+  %a{pure}
   def at_beginning_of_day: () -> Time
+  %a{pure}
   def at_end_of_day: () -> Time
+  # NOT %a{pure}: same `Date.beginning_of_week` default-argument read as
+  # `beginning_of_week` / `end_of_week` above.
   def at_beginning_of_week: () -> Time
   def at_end_of_week: () -> Time
+  %a{pure}
   def at_midnight: () -> Time
+  %a{pure}
   def at_noon: () -> Time
+  %a{pure}
   def midday: () -> Time
+  %a{pure}
   def midnight: () -> Time
+  %a{pure}
   def noon: () -> Time
   # NOTE: `Time#utc?` is NOT declared here — it is Ruby core, already typed by rbs's `core/time.rbs`.
+  %a{pure}
   def acts_like_time?: () -> true
   # `advance(days: 1, months: -2)` and `all_day` (a `beginning_of_day..end_of_day` Range).
+  # Both computed from the receiver only (`advance` goes through `to_date.gregorian.advance` +
+  # `change`, never `Time.zone`; `all_day` composes the two pure `beginning_of_day` / `end_of_day`
+  # above) — unlike the same-named methods on `Date` below.
+  %a{pure}
   def advance: (untyped options) -> Time
+  %a{pure}
   def all_day: () -> Range[Time]
 end
 
@@ -293,6 +528,11 @@ end
 # ---------------------------------------------------------------
 
 class Date
+  # NOT %a{pure}: `self.current` / `self.yesterday` / `self.tomorrow` are
+  # already attributed nondet.time/global.read by `effects.rb` (#387).
+  # The other five singletons declared here — `self.beginning_of_week`
+  # through `self.end_of_year` — do not soundly exist; see the file-header
+  # note. None get an annotation.
   def self.current: () -> Date
   def self.yesterday: () -> Date
   def self.tomorrow: () -> Date
@@ -303,16 +543,31 @@ class Date
   def self.beginning_of_year: () -> Date
   def self.end_of_year: () -> Date
 
+  # `advance(days: -1)` / `advance(days: 1)` — pure y/m/d arithmetic on the
+  # receiver (`core_ext/date_and_time/calculations.rb`), unlike the
+  # `self.yesterday` / `self.tomorrow` singletons above.
+  %a{pure}
   def yesterday: () -> Date
+  %a{pure}
   def tomorrow: () -> Date
+  # NOT %a{pure}: `start_day` defaults to `Date.beginning_of_week`, a
+  # fiber-local config read — same reasoning as `Time#beginning_of_week`.
   def beginning_of_week: (?Symbol start_day) -> Date
   def end_of_week: (?Symbol start_day) -> Date
+  %a{pure}
   def beginning_of_month: () -> Date
+  %a{pure}
   def end_of_month: () -> Date
+  %a{pure}
   def beginning_of_year: () -> Date
+  %a{pure}
   def end_of_year: () -> Date
+  # NOT %a{pure}: `Date#ago` / `#since` route through `in_time_zone`
+  # (`in_time_zone.since(...)`), which reads `Time.zone` by default —
+  # unlike `Time#ago` / `#since` above, which never leave the receiver.
   def ago: (Numeric seconds) -> Time
   def since: (Numeric seconds) -> Time
+  %a{pure}
   def acts_like_date?: () -> true
 
   # `core_ext/date/calculations` — `Date#midnight` /
@@ -320,16 +575,30 @@ class Date
   # Rails' `beginning_of_day` on Date returns a Time at
   # midnight of that day (not a Date). Mastodon's
   # `Date.current.at_midnight` shape relies on this.
+  #
+  # NONE of the six below are `%a{pure}`: every one is `in_time_zone.xxx`
+  # (`core_ext/date/zones.rb`, `DateAndTime::Zones#in_time_zone`), and
+  # `in_time_zone(zone = ::Time.zone)` reads `Time.zone` when no explicit
+  # zone is given. This is the one place `Date` and `Time` diverge on the
+  # exact same method names — verify against source before trusting the
+  # name alone.
   def beginning_of_day: () -> Time
   def midnight: () -> Time
   def at_midnight: () -> Time
   def at_beginning_of_day: () -> Time
   def end_of_day: () -> Time
   def at_end_of_day: () -> Time
-  # `advance(days: 1)`, `all_day` (a Time Range), and `to_time(form)` — the
-  # `:local` / `:utc` form arg core RBS' `Date#to_time` (arity 0) omits.
+  # `advance(days: 1)` is pure y/m/d arithmetic on the receiver, same as
+  # `yesterday` / `tomorrow` above. `all_day` is NOT %a{pure}: it composes
+  # `beginning_of_day..end_of_day`, and both of those read `Time.zone` on
+  # `Date` (unlike on `Time`, where `all_day` is pure). `to_time(form)` is
+  # `Time.public_send(form, year, month, day)` — pure, all three components
+  # come from the receiver and none default from the clock (contrast
+  # `String#to_time` above, which does).
+  %a{pure}
   def advance: (untyped options) -> Date
   def all_day: () -> Range[Time]
+  %a{pure}
   def to_time: (?Symbol form) -> Time
 end
 
@@ -340,41 +609,61 @@ end
 class Array[unchecked out Elem]
   # `Array.wrap(x)` is the dominant Rails idiom: `nil → []`,
   # `Array x → x`, `else → [x]`.
+  %a{pure}
   def self.wrap: (untyped) -> Array[untyped]
 
   # `core_ext/array/access`
+  %a{pure}
   def from: (Integer position) -> Array[Elem]
+  %a{pure}
   def to: (Integer position) -> Array[Elem]
+  %a{pure}
   def second: () -> Elem?
+  %a{pure}
   def third: () -> Elem?
+  %a{pure}
   def fourth: () -> Elem?
+  %a{pure}
   def fifth: () -> Elem?
+  %a{pure}
   def forty_two: () -> Elem?
 
   # `core_ext/array/grouping`
+  %a{pure}
   def in_groups_of: (Integer number, ?untyped fill_with) -> Array[Array[Elem]]
                   | (Integer number, ?untyped fill_with) { (Array[Elem]) -> void } -> Array[Elem]
+  %a{pure}
   def in_groups: (Integer number, ?untyped fill_with) -> Array[Array[Elem]]
                | (Integer number, ?untyped fill_with) { (Array[Elem]) -> void } -> Array[Elem]
+  %a{pure}
   def split: (?untyped value) -> Array[Array[Elem]]
            | () { (Elem) -> bool } -> Array[Array[Elem]]
 
-  # `core_ext/array/conversions`
+  # `core_ext/array/conversions`. NEITHER `to_sentence` nor `to_fs` /
+  # `to_formatted_s` is `%a{pure}`: `to_sentence` calls `I18n.translate`
+  # for its connector words unless `locale: false` is passed explicitly
+  # (a request-scoped global read); `to_fs(:db)` calls `#id` on every
+  # element, a dispatch to an unknown-at-this-declaration method the same
+  # way `Object#try` does. `to_xml` takes a caller-supplied `:builder` and
+  # an optional block, both opaque callables — skipped for the same reason.
   def to_sentence: (?two_words_connector: String, ?last_word_connector: String, ?words_connector: String, ?locale: Symbol?) -> String
   def to_formatted_s: (?Symbol format) -> String
   def to_fs: (?Symbol format) -> String
   def to_xml: (**untyped) -> String
 
   # `core_ext/array/inquiry`
+  %a{pure}
   def inquiry: () -> untyped # ActiveSupport::ArrayInquirer
 
   # `core_ext/array/extract`
-  def extract!: () { (Elem) -> bool } -> Array[Elem]
+  def extract!: () { (Elem) -> bool } -> Array[Elem] # NOT %a{pure}: bang, mutates in place.
 
   # `core_ext/object/blank` / `core_ext/enumerable` — both
   # ActiveSupport additions, shipped on Array specifically.
+  %a{pure}
   def compact_blank: () -> Array[Elem]
-  def compact_blank!: () -> self
+  def compact_blank!: () -> self # NOT %a{pure}: bang (`delete_if`), mutates in place.
+  %a{pure}
   def exclude?: (Elem) -> bool
 end
 
@@ -383,20 +672,35 @@ end
 # ---------------------------------------------------------------
 
 module Enumerable[unchecked out Elem]
+  %a{pure}
   def index_by: () { (Elem) -> untyped } -> Hash[untyped, Elem]
+  %a{pure}
   def index_with: (?untyped default) { (Elem) -> untyped } -> Hash[Elem, untyped]
                 | (untyped default) -> Hash[Elem, untyped]
+  %a{pure}
   def exclude?: (Elem) -> bool
+  %a{pure}
   def including: (*Elem) -> Array[Elem]
+  %a{pure}
   def excluding: (*Elem) -> Array[Elem]
+  %a{pure}
   def without: (*Elem) -> Array[Elem]
+  %a{pure}
   def pluck: (Symbol | String) -> Array[untyped]
            | (*Symbol | String) -> Array[Array[untyped]]
+  %a{pure}
   def pick: (Symbol | String) -> untyped
           | (*Symbol | String) -> Array[untyped]?
+  %a{pure}
   def maximum: (Symbol | String) -> untyped
+  %a{pure}
   def minimum: (Symbol | String) -> untyped
+  # Raises `SoleItemExpectedError` rather than returning on 0-or-2+ items;
+  # raising is not an effect label (AGENTS.md / design note), so this is
+  # still pure.
+  %a{pure}
   def sole: () -> Elem
+  %a{pure}
   def compact_blank: () -> Array[Elem]
 end
 
@@ -405,25 +709,39 @@ end
 # ---------------------------------------------------------------
 
 class Hash[unchecked out K, unchecked out V]
-  # `core_ext/hash/keys`
+  # `core_ext/hash/keys` — bang variants mutate in place, so only the
+  # non-bang half is `%a{pure}`. `assert_valid_keys` raises rather than
+  # mutating (raising is not an effect label).
+  %a{pure}
   def symbolize_keys: () -> Hash[Symbol, V]
   def symbolize_keys!: () -> self
+  %a{pure}
   def deep_symbolize_keys: () -> Hash[untyped, untyped]
   def deep_symbolize_keys!: () -> self
+  %a{pure}
   def stringify_keys: () -> Hash[String, V]
   def stringify_keys!: () -> self
+  %a{pure}
   def deep_stringify_keys: () -> Hash[untyped, untyped]
   def deep_stringify_keys!: () -> self
+  %a{pure}
   def assert_valid_keys: (*K | Array[K]) -> self
+  %a{pure}
   def deep_transform_keys: () { (K) -> K } -> Hash[K, untyped]
   def deep_transform_keys!: () { (K) -> K } -> self
+  %a{pure}
   def deep_transform_values: () { (V) -> untyped } -> Hash[K, untyped]
   def deep_transform_values!: () { (V) -> untyped } -> self
 
-  # `core_ext/hash/deep_dup`
+  # `core_ext/hash/deep_dup` — allocates a deep copy, never touches the
+  # receiver.
+  %a{pure}
   def deep_dup: () -> Hash[K, V]
 
-  # `core_ext/hash/deep_merge`
+  # `core_ext/hash/deep_merge` — the block receives `(key, this_val,
+  # other_val)` and returns the merged value; neither `deep_merge` nor its
+  # block mutates either hash (containment covers the block itself).
+  %a{pure}
   def deep_merge: (Hash[K, V]) -> Hash[K, V]
                 | (Hash[K, V]) { (K, V, V) -> V } -> Hash[K, V]
   def deep_merge!: (Hash[K, V]) -> self
@@ -433,15 +751,24 @@ class Hash[unchecked out K, unchecked out V]
   # Ruby 3.0+; `except!` is ActiveSupport-only. ActiveSupport
   # also aliases `Hash#without` to `Hash#except`, used by
   # `Mastodon`-shaped `options.without('type').merge(...)` chains.
-  def except!: (*K) -> self
+  def except!: (*K) -> self # NOT %a{pure}: bang, mutates via `delete`.
+  %a{pure}
   def without: (*K) -> Hash[K, V]
 
-  # `core_ext/hash/conversions`
+  # `core_ext/hash/conversions` — NOT `%a{pure}`: `to_query` / `to_param`
+  # recurse into `value.to_query` / `value.to_param` on every value, an
+  # unknown-at-this-declaration dispatch the same way `Object#try` and
+  # `Array#to_fs(:db)` are (a value's own `to_param` override is invisible
+  # here); `to_xml` takes a caller-supplied `:builder` and an optional
+  # block, both opaque callables.
   def to_query: (?String namespace) -> String
   def to_param: (?String namespace) -> String
   def to_xml: (**untyped) -> String
 
-  # `core_ext/hash/indifferent_access`
+  # `core_ext/hash/indifferent_access` — wraps `self` in a new
+  # `HashWithIndifferentAccess`; the design note § 11.2 names this row
+  # `%a{pure}` explicitly.
+  %a{pure}
   def with_indifferent_access: () -> untyped
 
   # `core_ext/hash/conversions`
@@ -449,17 +776,19 @@ class Hash[unchecked out K, unchecked out V]
   def self.from_trusted_xml: (String) -> Hash[String, untyped]
 
   # `core_ext/object/blank` / `core_ext/hash`
+  %a{pure}
   def compact_blank: () -> Hash[K, V]
-  def compact_blank!: () -> self
+  def compact_blank!: () -> self # NOT %a{pure}: bang (`delete_if`), mutates in place.
 
   # `core_ext/hash/reverse_merge`
+  %a{pure}
   def reverse_merge: (Hash[K, V]) -> Hash[K, V]
-  def reverse_merge!: (Hash[K, V]) -> self
+  def reverse_merge!: (Hash[K, V]) -> self # NOT %a{pure}: bang (`replace`), mutates in place.
 
   # `core_ext/hash/slice` — `Hash#except` is in core RBS (Ruby 3.0+);
   # `Hash#slice` is in core RBS (Ruby 2.5+); the bang variants are
   # ActiveSupport-only.
-  def slice!: (*K) -> Hash[K, V]
+  def slice!: (*K) -> Hash[K, V] # NOT %a{pure}: bang (`replace`), mutates in place.
 end
 
 # ---------------------------------------------------------------
@@ -467,19 +796,43 @@ end
 # ---------------------------------------------------------------
 
 class DateTime
+  # `utc` is pure Rational arithmetic on the receiver's own offset
+  # (`core_ext/date_time/calculations.rb`), no zone lookup.
+  %a{pure}
   def utc: () -> Time
   # NOTE: `DateTime#to_time` is NOT declared here — stdlib `date` already types it.
+  # NOT %a{pure}: `in_time_zone(zone = ::Time.zone)` reads `Time.zone`
+  # when no explicit zone is passed (`core_ext/date_and_time/zones.rb`).
+  # Not previously covered by #387's `effect_attributions:`; the plugin
+  # manifest gains this row in the same change (`global.read`).
   def in_time_zone: (?String | Symbol zone) -> untyped
+  # `yesterday` / `tomorrow` are inherited from `DateAndTime::Calculations`
+  # via `Date` (`DateTime < Date`), resolved against `DateTime`'s own
+  # `advance` — pure, same reasoning as `Date#yesterday` / `#tomorrow`
+  # above and unlike `Date.self.yesterday` / `.tomorrow`.
+  %a{pure}
   def yesterday: () -> DateTime
+  %a{pure}
   def tomorrow: () -> DateTime
+  # `ago` / `since` are `self + Rational(seconds, 86400)` — pure, and
+  # (unlike `Date#ago` / `#since`) never route through `in_time_zone`.
+  %a{pure}
   def ago: (Numeric seconds) -> DateTime
+  %a{pure}
   def since: (Numeric seconds) -> DateTime
+  %a{pure}
   def beginning_of_day: () -> DateTime
+  %a{pure}
   def end_of_day: () -> DateTime
+  %a{pure}
   def beginning_of_hour: () -> DateTime
+  %a{pure}
   def end_of_hour: () -> DateTime
+  %a{pure}
   def beginning_of_minute: () -> DateTime
+  %a{pure}
   def end_of_minute: () -> DateTime
+  %a{pure}
   def acts_like_time?: () -> true
 end
 
@@ -491,6 +844,7 @@ end
 # main String block above because it's a less-common method whose
 # coverage was added after a second-round survey.)
 class String
+  %a{pure}
   def exclude?: (String) -> bool
 end
 
@@ -505,6 +859,9 @@ class ERB
   module Util
     # `ERB::Util.html_escape_once(s)` escapes HTML without double-escaping
     # an already-escaped entity. ActionView adds it on top of stdlib ERB.
+    # A deterministic regex-substitution transform of the argument; no
+    # receiver, no global reads.
+    %a{pure}
     def self.html_escape_once: (untyped) -> String
   end
 end

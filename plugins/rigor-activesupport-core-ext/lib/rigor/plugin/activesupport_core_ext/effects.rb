@@ -8,9 +8,12 @@ module Rigor
       # rigor-activesupport-core-ext's effect contract (ADR-103 WD10; design note § 11.2; issue #387).
       #
       # **Scope note.** This is the *impure* half of ActiveSupport only: the clock, the notification bus and
-      # `CurrentAttributes`. The `%a{pure}` sweep over `blank?` / `present?` / `try` / `deep_dup` and the
-      # rest of the core_ext predicate surface — the single cheapest purity win in a Rails app, per WD10 —
-      # is issue #388 and lands in this plugin's shipped RBS, not here.
+      # `CurrentAttributes`. The `%a{pure}` sweep over `blank?` / `present?` / `deep_dup` and the rest of
+      # the core_ext predicate surface — the single cheapest purity win in a Rails app, per WD10 — is issue
+      # #388 and lands in this plugin's shipped RBS, not here (`try` was audited and skipped: it dispatches
+      # to whatever method the caller names, so its purity is a fact about the call site, not about `try`).
+      # One row below (`in_time_zone_row`) is #388's own addition: `DateTime#in_time_zone` reads `Time.zone`
+      # through a default argument, a gap the RBS sweep found but can only fix here.
       #
       # ## The clock
       #
@@ -50,7 +53,7 @@ module Rigor
         module_function
 
         def attributions
-          clock_rows + zone_rows + current_rows + notification_rows
+          clock_rows + zone_rows + current_rows + notification_rows + [in_time_zone_row]
         end
 
         def clock_rows
@@ -89,6 +92,17 @@ module Rigor
             row(TIME, :use_zone, ["global.write"], singleton: true,
                                                    why: "swaps the zone around a block; the block's own origins join by containment")
           ]
+        end
+
+        # `DateTime#in_time_zone` — a gap the #388 `%a{pure}` sweep over `sig/active_support/core_ext.rbs`
+        # surfaced: `in_time_zone(zone = ::Time.zone)` reads `Time.zone` through its own default argument
+        # whenever the caller doesn't pass one explicitly, so it cannot be annotated `%a{pure}` there. It
+        # belongs here rather than in the RBS because the label is `global.read` alone (not the
+        # `nondet.time` + `global.read` pair `CLOCK` carries) — `in_time_zone` converts an already-fixed
+        # instant into a zone, it does not read the clock itself.
+        def in_time_zone_row
+          row("DateTime", :in_time_zone, ZONE_READ,
+              why: "the default argument reads `Time.zone` when the caller doesn't name one explicitly")
         end
 
         def current_rows

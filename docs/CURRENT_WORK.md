@@ -18,100 +18,63 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.3.2 is released** (2026-08-08). No version bump is due — releases wait for an explicit ask.
-  `make verify` is green on master at `5bad165c`, verified on the INTEGRATED tree after each of this
-  arc's parallel batches (a collision that only that check could catch is under *learned*, below).
-- **Landed this arc**: #303 (PR #304, argument-position `[T]` binding) · #121's final fold slice
-  (PR #305, and #121 is now CLOSED — six passes, zero queued work) · #307 (mutation-harness `SpecMap`
-  directory convention) · #306 (PR #314) · #313 (PR #327) · #324 (PR #328) · #329 (PR #331, the
-  ADR-58 provenance mark is normative now) · #332 (PR #333) · #308 (PR #312) and its repair
-  (PR #315) · the #135 checkbox-1 specs, waves 1 and 2 (PRs #309/#310/#311/#314/#325/#326 —
-  136 examples, 54 survivors closed).
-- **Two code comments about the ADR-58 mark were wrong, and both were found by writing the spec, not
-  by reading the code.** PR #328's guard comment said a copy joined out of a conditional loses the
-  mark — false for the *symmetric* join, where both arms stamp the local and `join_declaration_sourced`
-  intersects. And `Scope#with_inferred_param_mark` cited a `drop_local_declaration_marks` that never
-  existed, contradicting its own sibling twelve lines below. Both corrected. The underlying hazard is
-  now stated once, normatively: `:local` and `:inferred_param` share one `Set` and behave **oppositely
-  on both axes** — dropped/intersected versus sticky/unioned.
-- **`check_rules.rb` had never been type-checked**, and that is the arc's largest finding. Its own doc
-  comment quotes `` `# rigor:disable-file all` `` in backticks, and the suppression patterns matched
-  anywhere inside a comment, so the documentation file-suppressed the 3,063-line file that defines
-  the rules. Found by an impossible measurement — the mutation recon's `DiagnosticOracle` killed
-  **0 of 914** there against 24/24 on a control. Fixed by anchoring every marker pattern to the start
-  of the comment (#306); the file is now provably live (poisoning a `Diagnostic.from_name_loc` call
-  surfaces six errors). **A structurally impossible measurement is a finding, never a zero to report.**
-- **#313 closed (PR #327), and its diagnosis overturned all three of the issue's premises** — worth
-  knowing because the issue was mine and each premise sounded right. The single-operand form was
-  never protected by the exclusion at all (it is silent only through a *syntactic* `.nil?` skip in
-  the collector, so `if UNIFORM[key]` on a uniform-valued table fired with no composition involved);
-  the branch elision was laundered too and that is the damaging half (`x.nil? ? "missing" : "found"`
-  typed `"found"`, deleting the arm a miss takes); and a `Constant`-only gate is not the protection
-  the spec assumed, because a uniform-valued table reads as a lone `Constant` — `[UNIFORM[k] || 9]`
-  typed `[1]`. **That last one lives only on the `ExpressionTyper` path**; the statement path keeps
-  the union, which is why a first probe reads clean. #152 was not the regression point: it landed no
-  code. `OptimisticOrigin.resolve` now owns the judgment for all three consumers.
+- **The effect-labels stack merged into master at `86226e62` (2026-08-17)** — thirteen PRs
+  #395 → #408 in one `gh stack merge`, then `make verify` re-run on the INTEGRATED master (9,845
+  examples, `check` + `check-plugins` clean). Design: [ADR-103](adr/103-effect-labels.md) (WD1–WD15)
+  and `docs/design/20260816-effect-labels.md`; umbrella issue #376. Slices #377, #379–#388 are
+  closed. v0.3.3 remains the released version — no bump is due; the CHANGELOG `[Unreleased]` carries
+  the `**[effects]**` / `**[plugins]**` entries.
+- **What shipped, in one line each**: the label vocabulary + registry (`data/effects/registry.yml`,
+  Steins' 25 verbatim + `mutate.self/instance/static` + shared roots); the collector (observational,
+  `DependencyRecorder`-shaped, one integer read when off) + post-pool fixpoint + `rigor effects`
+  report; the committed effect snapshot (`rigor effects update|check|diff|explain`,
+  `.rigor-effects.yml`, symmetric gate + `additions`); the hand-audited catalogue
+  (`data/effects/core.yml`, 80 classes / 420 rows, six narrowing handlers); the WD13 perf fix
+  (superlinear `FileCollection#merge` fold — mastodon +50 % → +3.9 %); persistence (one cache, two
+  identities, effects sidecar); RBS envelopes `%a{pure}` / `%a{rigor:v1:effect …}` +
+  `effect.envelope-exceeded`; `effect.unknown-label` + `effect.annotations-unchecked` + the `.rb`
+  rbs-inline path (handbook corrected); `.rigor.yml` `effects.{envelopes,attribution,labels,
+  tolerated}` with per-origin discharge and `--no-tolerated-effects`; the declared lane through
+  nominal carriers + `effect.liskov-widened`; the Rails layer (five manifest fields, new
+  `plugins/rigor-railties`, ~400 rows, callback / mailer / `perform_now` edges, queue-adapter
+  narrowing, `reach: [rails]`); `%a{pure}` across ActiveSupport core_ext; the
+  `effects-on-by-default` bleeding-edge preview.
+- **Owner ruling: effects become default-on at v0.4.0** (`effects: false` opts out) — ADR-103 WD15.
+  Preconditions are tracked in **#409** (with #410 non-fork pool backends carrying the side-table,
+  #411 the snapshot's taint-only rows, #378 Steins vocabulary alignment).
+- **Measured at the stack top** (redmine `app`+`lib`, sequential, cold): `rigor check` off 9.99 s /
+  375 MB → on 10.37 s / 396 MB; warm ~0.7 s either way; `rigor effects check` after a warm `check`
+  ≈ 1.1 s; diagnostics byte-identical off vs on. Corpus notes: `docs/notes/20260817-effect-*.md`.
 
 ## Next session
 
-- **`check_rules.rb` is DONE: 100 % fused protection, zero survivors** — the re-measure landed
-  (`docs/notes/20260809-check-rules-mutation-remeasure.md`). The recon's 70 de-noised survivors split
-  56 killed by the now-live type axis and 18 by waves 1–2's examples, with **none surviving both**, so
-  **no wave 3**. Note the number is not the interesting part: 100 % is also the shape a broken harness
-  takes, which is why the note carries negative controls (an identity mutant and an env-gated poison
-  both correctly report SURVIVED) and an independent second-seed run. Every earlier funnel figure on
-  #135 is superseded. `--site all` (~914 sites ≈ 6.1 h of rspec) stays unmeasured — ~745 sites, with
-  the per-family inventory in the note, since it was in no issue comment.
-- **#135's remaining work is the OTHER giant files** the issue body lists that PRs #282/#287/#289 did
-  not sweep, plus its four untouched checkboxes. `check_rules.rb` needs nothing further.
-- **`ready-for-agent`**: #330 (in flight — the `Dir.mktmpdir` leak below), #147 (**demand-gated** —
-  its three items really are unimplemented, verified, but the issue waits on a concrete
-  editor-extension author), #135's remainder.
-- **#330 — the spec suite leaks `Dir.mktmpdir` directories** into `/tmp/nix-shell.*`
-  (`rigor-spec-{cache,workspace,sig}-*`, `rigor-scanner-spec-*`, `rigor-plugin-spec-cache-*`,
-  `rigor-mutant-*`). One `make test` leaves ~25 entries / ~86 MB; a fused mutation census ~1 GB;
-  1,482 stale dirs had accumulated and produced a real `Errno::ENOSPC`. **The failure mode is worse
-  than the disk cost**: under `ENOSPC` the errors land on unrelated specs and read as contention
-  flake, and inside a mutation census an errored spec looks like a *non-kill*, so the leak can
-  fabricate survivors. Until it lands, sweep stale `/tmp/nix-shell.*` dirs whose entries are all
-  `rigor-`-prefixed.
-- **Tooling traps hit for real this arc**: `Style/ArrayJoin` autocorrects a literal-array
-  `[1, 2] * "-"` into `.join`, defeating a `*`-with-String assertion (use a variable receiver);
-  parallel `make verify` runs in two worktrees flake each other; and **poisoning `check_rules.rb`
-  to prove it is checked must break something STATIC** — renaming a method the analyzer itself calls
-  yields an internal-analyzer-error, not a diagnostic. Rename a *called* method on a sig-known class
-  (`Diagnostic.from_name_loc`).
-- **#158 was re-audited: do not build it yet.** Both preconditions (Layer-1 doc hygiene, the
-  "exhaustion-as-explanation" observability its acceptance shape lists) are already satisfied, so it
-  is purely demand-gated. Non-obvious: `BudgetTrace` counters do not cross `fork`, so a trace must
-  run `--workers 0` or a real cliff reads as clean.
-- **The rbs-inline upstream report stays ON HOLD by user decision** (2026-08-01; do not file without
-  a fresh ask). Evidence: ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764` → rescue at
-  `617-621` → `annotations.rb:527-536`; plus a pending one-line ADR-32 correction (its "upstream
-  docs" citation points at rbs-core's `RBS::InlineParser` doc, not rbs-inline's).
+- **A second stack** for the remaining slices, in this order: #389 (B2.2 ivar-reset skip — the
+  first *typing* consumer; must land as a `BleedingEdge` `:behaviour` feature folded into the
+  analysis-cache identity, off by default, corpus-adjudicated), #390 (`effect.discarded-pure-result`,
+  `:off` pending a corpus gate), #391 (`rigor sig-gen` write-back of `%a{pure}` / envelopes), then
+  views #392 → #393 → #394. #378 needs the owner (a Steins issue).
+- **The dominant taint on a Rails app is `unresolved-self-call`** (the Rails layer barely moved the
+  exhaustive ratio: redmine 16.1 → 16.6 %); `render`'s `template-not-analysed` fires 249/329 on the
+  corpus — #392's debt, now countable. Improving self-call resolution is the highest-leverage engine
+  work for the effect system's signal.
+- Two `sig/*.rbs` one-liners were hand-added where `rigor sig-gen --print` declined to emit
+  (`Configuration#initialize` arity, `read_effect_envelope`, `filter_suppressed`) — the ADR-14 gap
+  signal, reported in the PR bodies, not yet filed as a sig-gen issue.
 
 ## What this arc learned that is not in a commit
 
-- **The delegation brief that works**: fixed design ("do not relitigate") + repo contract verbatim +
-  gates by exit code + parent re-runs the gates independently + **"report contradictions, do not
-  silently redesign"** + **"never use run_in_background or Monitor; run gates in the FOREGROUND with
-  an explicit timeout, and never end a turn while anything is pending"**. The contradiction hatch
-  overturned a premise on seven separate tasks — it is the highest-value sentence in the brief. For
-  an engine FP add: *diagnose and report the root cause even if you also fix it; retreat rather than
-  land a half-understood fix.*
-- **A structurally impossible measurement is a finding, never a zero to report.** `DiagnosticOracle`
-  killing 0 of 914 mutants against 24/24 on a control is not a protection figure — it is the tell
-  that the subject was not being checked at all (#306). The same instinct inverts: **100 % is also
-  the shape a broken harness takes**, so the re-measure that reported it had to carry negative
-  controls (an identity mutant and an env-gated poison, both correctly SURVIVED) before the number
-  meant anything. Neither extreme is evidence until the instrument can produce the opposite answer.
-- **A spec that deliberately pins known-wrong behaviour is a dependency on that behaviour staying
-  wrong.** It MUST carry an in-place "flip this when #N is fixed" comment. PR #310's did, #308 was
-  fixed independently, the two collided on merge and turned master red, and the comment made the
-  repair one line. Before briefing parallel agents, check the open issues for anything that would
-  invalidate a premise one of them is about to encode.
-- **Ask the provenance question in ONE place.** #324 was two rules spelling the same ADR-58 lookup
-  differently and drifting apart. The fix's value is the shared predicate, not the widening — and
-  #329 exists because the contract it encodes is still stated normatively nowhere.
-- **The gate's exit code, not the pipeline's.** `make docs-check | tail -2` reports `tail`'s status;
-  I pushed a handoff that failed its own line-cap gate that way. Check gates unpiped.
+- **The delegation brief that works** (unchanged from the last arc, confirmed on 13 slices): fixed
+  design + repo contract verbatim + gates by exit code + parent re-runs the gates + "report
+  contradictions, do not silently redesign" + **run gates in the FOREGROUND with an explicit
+  timeout**. One Sonnet slice (#388) stalled on a background `make verify` and had to be finished
+  by the parent — the foreground rule is not optional.
+- **Audit the design, not just the gates.** Two subagent decisions contradicted the ADR while every
+  gate was green: the declared lane was made direct-only (Steins/WD1: it travels edges) and the
+  catalogue slice's census exposed a superlinear fold the tracer's small fixture never showed. A
+  corpus measurement per slice is what caught both; keep it in every brief that changes hot code.
+- **`gh stack` non-interactive discipline held**: `submit --auto`, `view --json`, `merge --yes
+  --merge`; an empty top branch is removed with `unstack --local` + `init` over the existing names.
+- **Survey-project measurement traps**: `paths:` in a scratch config resolve relative to the config
+  file (use absolute paths); the `effects` verbs take no `--no-ci-detect`; a scratch config's
+  `cache.path` keeps the survey checkout clean, but `effects update` writes `.rigor-effects.yml`
+  into the cwd — delete it.

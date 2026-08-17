@@ -848,6 +848,88 @@ RSpec.describe Rigor::Configuration do
     end
   end
 
+  # ADR-103 WD15 — the "effects-on-by-default" bleeding-edge preview of the v0.4.0 default. The shipped
+  # feature id is used directly (not stubbed): these examples pin the coercion-path wiring, not the
+  # registry's shape, which `spec/rigor/bleeding_edge_spec.rb` already covers. Every example constructs a
+  # raw, non-`DEFAULTS`-merged hash so an absent `"effects"` key genuinely means "the file never wrote
+  # `effects:`" — merging `DEFAULTS` first would make the key present (with value `false`) and could never
+  # exercise the forcing branch.
+  describe "effects-on-by-default (ADR-103 WD15)" do
+    it "turns effects on with every sub-key defaulted when adopted and the file writes no effects: key" do
+      configuration = described_class.new({ "bleeding_edge" => ["effects-on-by-default"] })
+
+      expect(configuration.effects_enabled?).to be(true)
+      expect(configuration.effects).to eq({})
+      expect(configuration.effects_check?).to be(true)
+      expect(configuration.effects_snapshot_path).to eq(Rigor::Configuration::DEFAULT_EFFECTS_SNAPSHOT_PATH)
+    end
+
+    it "keeps effects off when the file writes effects: false explicitly, whatever the feature says" do
+      configuration = described_class.new({ "bleeding_edge" => ["effects-on-by-default"], "effects" => false })
+
+      expect(configuration.effects_enabled?).to be(false)
+      expect(configuration.effects).to be_nil
+    end
+
+    it "leaves a written effects: block exactly as written — the block always wins" do
+      configuration = described_class.new(
+        { "bleeding_edge" => ["effects-on-by-default"], "effects" => { "check" => false } }
+      )
+
+      expect(configuration.effects_enabled?).to be(true)
+      expect(configuration.effects).to eq({ "check" => false })
+      expect(configuration.effects_check?).to be(false)
+    end
+
+    it "changes nothing when the feature is not adopted" do
+      configuration = described_class.new({})
+
+      expect(configuration.effects_enabled?).to be(false)
+      expect(configuration.effects).to be_nil
+    end
+
+    it "is also turned on by bleeding_edge: true (adopting the whole overlay)" do
+      configuration = described_class.new({ "bleeding_edge" => true })
+
+      expect(configuration.effects_enabled?).to be(true)
+      expect(configuration.effects).to eq({})
+    end
+
+    it "does not turn effects on for an unrelated adopted feature" do
+      configuration = described_class.new({ "bleeding_edge" => ["reject-unparseable-signatures"] })
+
+      expect(configuration.effects_enabled?).to be(false)
+    end
+
+    # ADR-103 WD15 — `Configuration.load`'s own capture of `effects_key_present`, from the file BEFORE the
+    # `DEFAULTS.merge` that would otherwise make "no `effects:` key" indistinguishable from "`effects:
+    # false`".
+    it "reads the same distinction through Configuration.load" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "bleeding_edge:\n  - effects-on-by-default\n")
+        expect(described_class.load(path).effects_enabled?).to be(true)
+
+        File.write(path, "bleeding_edge:\n  - effects-on-by-default\neffects: false\n")
+        expect(described_class.load(path).effects_enabled?).to be(false)
+      end
+    end
+
+    # A spec elsewhere in this file stubs `BleedingEdge::FEATURES` down to a single unrelated feature to
+    # isolate the selector plumbing (e.g. the `#bleeding_edge_active?` examples above). Constructing a
+    # Configuration under that stub, with no `effects:` key, must not raise merely because
+    # "effects-on-by-default" is not the id under test.
+    it "does not raise when FEATURES is stubbed to a registry that does not carry this id" do
+      stub_const(
+        "Rigor::BleedingEdge::FEATURES",
+        [Rigor::BleedingEdge::Feature.new(id: "feat-b", summary: "s", kind: :behaviour)].freeze
+      )
+
+      expect { described_class.new({ "bleeding_edge" => true }) }.not_to raise_error
+      expect(described_class.new({ "bleeding_edge" => true }).effects_enabled?).to be(false)
+    end
+  end
+
   # ADR-103 WD7 / WD14 (#381) — the snapshot keys and the minimal `tolerated:` policy list. Every one
   # resolves to its default when `effects:` is absent, so a consumer reads one uniform surface and never
   # has to ask whether the block was there.

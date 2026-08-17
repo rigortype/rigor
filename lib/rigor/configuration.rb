@@ -29,6 +29,11 @@ module Rigor
     # because the schema pins its own `default` against it.
     DEFAULT_EFFECTS_SNAPSHOT_PATH = ".rigor-effects.yml"
 
+    # ADR-103 WD15 — the {BleedingEdge::FEATURES} id that, when adopted, makes a loaded file with no
+    # `effects:` key behave as `effects: {}`. See {#coerce_effects}.
+    EFFECTS_ON_BY_DEFAULT_FEATURE_ID = "effects-on-by-default"
+    private_constant :EFFECTS_ON_BY_DEFAULT_FEATURE_ID
+
     # Built-in exclusion patterns appended to `exclude:` so vendored dependencies, Bundler artefacts, and
     # JavaScript node_modules are never analysed by accident when a directory glob expands. Users cannot
     # disable these defaults; the trade-off is that analysing any of these paths is essentially never what
@@ -271,13 +276,19 @@ module Rigor
     # [PHPStan](https://phpstan.org/config-reference#paths).
     def self.load(path = nil)
       resolved = path || discover
-      data =
-        if resolved.nil? || !File.exist?(resolved)
-          DEFAULTS
-        else
-          DEFAULTS.merge(load_with_includes(resolved))
-        end
-      new(autowire_default_plugins(data))
+      if resolved.nil? || !File.exist?(resolved)
+        data = DEFAULTS
+        effects_key_present = false
+      else
+        # ADR-103 WD15 — captured from the RAW, pre-`DEFAULTS.merge` file (+ its `includes:` chain) because
+        # `DEFAULTS` itself carries an `"effects" => false` entry: once merged, "the file never wrote
+        # `effects:`" and "the file wrote `effects: false`" collapse to the same value and become
+        # indistinguishable to {#initialize}. This is the only place that distinction still exists.
+        raw = load_with_includes(resolved)
+        effects_key_present = raw.key?("effects")
+        data = DEFAULTS.merge(raw)
+      end
+      new(autowire_default_plugins(data), effects_key_present)
     end
 
     # ADR-93 WD2 — the one bundled plugin default-wired without a `plugins:` entry. `rigor-rbs-inline` is the
@@ -439,7 +450,17 @@ module Rigor
                          :merge_value, :merge_dependencies_hash
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-    def initialize(data = DEFAULTS)
+    #
+    # @param effects_key_present [Boolean] ADR-103 WD15 — whether the file this `data` came from carried an
+    #   `effects:` key at all, independent of its value. Defaults to `data.key?("effects")`, which is the
+    #   right answer for a caller that passes a raw (non-`DEFAULTS`-merged) hash directly — the common shape
+    #   in specs — but is always `true` once `data` has been through `DEFAULTS.merge`, because `DEFAULTS`
+    #   itself carries the key; {.load} therefore computes this from the pre-merge file and passes it
+    #   explicitly. See {#coerce_effects}. **Positional, deliberately not a keyword**: a bare (unbraced)
+    #   `"key" => value` hash literal — this class's usual call shape, all over the spec suite — is coerced
+    #   into keyword arguments by Ruby whenever the method declares ANY keyword parameter, which would break
+    #   every `Configuration.new("some_key" => value)` call site with an "unknown keyword" `ArgumentError`.
+    def initialize(data = DEFAULTS, effects_key_present = data.key?("effects"))
       # Record before the per-key fetches below discard the evidence. Top level only, deliberately —
       # see {ConfigAudit.unknown_key_warnings} for why a nested check cannot key on DEFAULTS.
       @unknown_keys = (data.keys.map(&:to_s) - KNOWN_KEYS).sort.freeze
@@ -468,9 +489,16 @@ module Rigor
       # ADR-67 WD6a — resolve to a strict Boolean so a truthy non-`true` value (e.g. a stray String) does not
       # silently enable the gate; only the literal `true` activates the check-walk collector pre-pass.
       @parameter_inference = data.fetch("parameter_inference", DEFAULTS.fetch("parameter_inference")) == true
+      # Resolved before `@effects` — ADR-103 WD15's "effects-on-by-default" reads {#bleeding_edge_active?},
+      # which reads `@bleeding_edge_active_ids`.
+      @bleeding_edge = coerce_bleeding_edge(
+        data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge"))
+      )
+      @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
+      @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
       # ADR-103 WD13 — presence, not truthiness: `effects:` written with no body parses as nil and still
       # means "on", so the key's presence in the loaded data is what {#effects_enabled?} reads.
-      @effects = coerce_effects(data)
+      @effects = coerce_effects(data, effects_key_present: effects_key_present)
       coerce_effects_snapshot(@effects)
       coerce_effects_policy(@effects)
       @cache_path = cache.fetch("path").to_s
@@ -486,11 +514,6 @@ module Rigor
       @severity_overrides = coerce_severity_overrides(
         data.fetch("severity_overrides", DEFAULTS.fetch("severity_overrides"))
       )
-      @bleeding_edge = coerce_bleeding_edge(
-        data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge"))
-      )
-      @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
-      @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
       @dependencies = Dependencies.from_h(
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
@@ -651,11 +674,29 @@ module Rigor
     # thing: collection on, every sub-key defaulted. A non-Hash body is normalised to `{}` rather than
     # rejected — the sub-keys have no reader yet, so there is nothing a malformed body could break, and
     # tier 1 (the schema) is where its shape is answered.
-    def coerce_effects(data)
+    #
+    # ADR-103 WD15 — a loaded file that carries no `effects:` key AT ALL (`effects_key_present == false`,
+    # so `value` can only be the `false` DEFAULTS fallback here, never a user's own explicit `false`) behaves
+    # as `effects: {}` when the "effects-on-by-default" bleeding-edge feature is adopted. An explicit
+    # `effects: false` — `effects_key_present == true` — always stays off regardless of the feature, and a
+    # written block always wins outright: the feature can only fill an *absence*.
+    def coerce_effects(data, effects_key_present:)
       value = data.fetch("effects", false)
+      return {}.freeze if value == false && !effects_key_present && effects_forced_on_by_bleeding_edge?
       return nil if value == false
 
       (value.is_a?(Hash) ? value : {}).freeze
+    end
+
+    # ADR-103 WD15 — guarded by {BleedingEdge.known_id?} rather than calling {#bleeding_edge_active?}
+    # directly: that predicate RAISES for an id neither queued nor graduated, which is correct for a
+    # contributor's typo against the registry in this same checkout, but a spec that stubs
+    # `BleedingEdge::FEATURES` down to an unrelated single feature (a common pattern for isolating the
+    # selector plumbing — see `spec/rigor/configuration_spec.rb`) must not have Configuration construction
+    # explode merely because the id this internal default-application reads is not the one under test.
+    def effects_forced_on_by_bleeding_edge?
+      BleedingEdge.known_id?(EFFECTS_ON_BY_DEFAULT_FEATURE_ID) &&
+        bleeding_edge_active?(EFFECTS_ON_BY_DEFAULT_FEATURE_ID)
     end
 
     # ADR-103 WD7 / WD14 — the snapshot keys and the minimal `tolerated:` policy list (#381).

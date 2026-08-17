@@ -188,6 +188,15 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 | `effects.envelopes` | Array | `[]` | Effect envelopes by **convention**, so a whole architectural layer is bounded by one stanza instead of a per-method annotation. Each entry names exactly one of `match:` (a project-relative path glob over the files a class is defined in) or `namespace:` (a constant glob: `*` is one segment, `**` is one or more), plus `effect:` — the labels the selected classes may perform, or `[]` for pure. Nearest wins: a per-method annotation beats a class-level one, which beats a stanza; among stanzas the **first** match wins. See the example below. |
 | `effects.tolerated` | Array | `[]` | Labels your project has decided not to act on. Applied when a bound or a difference is **judged**, never when a record is written, and **per origin**: `Logger#info` carries `io` and `telemetry` together, so `tolerated: [telemetry]` frees the `io` that came with the logging and leaves an `io.fs.read` from a `File.read` in the same method exactly where it was. `rigor check --no-tolerated-effects` (and the same flag on `rigor effects check`) re-judges as if the list were empty — the audit switch for the policy. |
 
+Want the block on without writing it? The
+[`effects-on-by-default`](02-cli-reference.md#rigor-show-bleedingedge)
+bleeding-edge feature (`bleeding_edge: [effects-on-by-default]`) makes a
+config with no `effects:` key at all behave as `effects: {}` — collection,
+`effects.check`, and everything else on this page all turn on at their
+defaults. It only fills an *absence*: write `effects: false` and you stay
+opted out regardless, and any `effects:` block you do write is left exactly
+as written. It previews what becomes the default at **v0.4.0**
+([ADR-103](../adr/103-effect-labels.md) § WD15).
 
 #### Entry-point presets
 

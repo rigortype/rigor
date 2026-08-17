@@ -1,13 +1,14 @@
 # ADR-103 — Effect labels: an opt-in, snapshot-first effect system
 
-Status: **Proposed, 2026-08-16.** Nothing implemented. Records the decisions reached while
-designing the effect system in
+Status: **Proposed, 2026-08-16.** Records the decisions reached while designing the effect system in
 [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md) (the design note;
 its § 13 lists the choices, this ADR fixes them as working decisions; WD13, coexistence with
-`rigor check`, was added the same day; WD14, the pre-implementation decisions, on 2026-08-17). Two
-items remain open, both deferrable to the view slices. Implementation is sliced as GitHub issues
-under the umbrella [#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices,
-#377–#394; tracker convention: [ADR-98](98-development-flow-document-roles.md)).
+`rigor check`, was added the same day; WD14, the pre-implementation decisions, and WD15, the
+v0.4.0 default-on ruling and its preconditions, both on 2026-08-17 — WD15's own preconditions are
+unmet, so nothing about the default changes yet). Two items remain open, both deferrable to the
+view slices. Implementation is sliced as GitHub issues under the umbrella
+[#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394; tracker
+convention: [ADR-98](98-development-flow-document-roles.md)).
 
 Grounding: Steins' implemented model
 ([why-effects](https://github.com/rigortype/steins/blob/master/docs/why-effects.md),
@@ -273,6 +274,37 @@ design note left to the owner and now closes.
   `Fiber.new`, `Ractor.new`, `Mutex#synchronize` = ∅ + containment.
 - **Spec status.** `docs/type-specification/effect-labels.md` is normative from #377 with
   per-section "as of this writing" markers naming the slice that implements each (ADR-92).
+
+### WD15 — Default-on at v0.4.0 (owner ruling, 2026-08-17)
+
+Collection and `effects.check` become **default-on at v0.4.0**: a `.rigor.yml` with no `effects:` key
+behaves as `effects: {}`, and `effects: false` opts out. `effects-on-by-default` — a `:behaviour`
+[bleeding-edge feature](50-release-engineering-and-stability-strategy.md) — is the preview: adopting it
+today reaches the same default early. WD7's "graduates at a major" is read, for this feature and for the
+0.x evaluation line specifically, as **"at v0.4.0"** rather than waiting for v1.0.0 — the same pre-1.0
+rehearsal WD7 already describes for the general case (a `v0.2.x → v0.3.0` graduation), pinned to a
+specific version by owner ruling rather than left to "whenever the next minor lands".
+
+The flip is gated on clearing six preconditions first, none of which is closed as of this writing:
+
+1. **Pooled backends carry the effect side-table.** Collecting runs are pinned to the fork pool today;
+   without `fork` (Windows) a run degrades to sequential. The Ractor and thread backends must carry the
+   effect side-table across the worker boundary before default-on, or Windows silently loses collection
+   under default-on the day it flips.
+2. **Vocabulary and `effect.*` diagnostic ids stabilise.** #378 (alignment with Steins' vocabulary) settles
+   first — a default that ships and then renames its own ids is a worse migration than waiting.
+3. **The WD13 cost budget is re-verified on the corpus at the release** — the ≤5% wall/RSS and ≤1s
+   fixpoint figures were measured pre-default-on, when only opted-in projects paid the cost; universality
+   changes the population the budget has to hold for.
+4. **`effects.lsp` semantics are defined** for editor mode — WD13 deliberately left effects out of editor
+   mode in v1, and a default-on flip should not silently leave that seat empty forever.
+5. **A release-notes migration note** exists for a project already carrying `%a{pure}` or relying on
+   `effect.annotations-unchecked` (WD14's interop gate) — both go from inert-by-default to load-bearing the
+   moment collection turns on under them.
+6. **The snapshot's taint-only rows are decided.** An open observation on redmine: 2,052 of 3,581
+   `methods:` rows in the snapshot carry no proven label, only `unresolved:` — before `rigor init`
+   recommends `effects update` to every project, whether that ratio is acceptable (and what, if anything,
+   a project should be told about it) needs an answer.
 
 ## Rejected and deferred alternatives
 

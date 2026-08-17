@@ -9,6 +9,8 @@ require_relative "envelope_index"
 require_relative "file_collection"
 require_relative "local_ownership"
 require_relative "origin"
+require_relative "framework_units"
+require_relative "plugin_facts"
 require_relative "summary"
 require_relative "unit_scan"
 
@@ -53,23 +55,31 @@ module Rigor
       WRITER_SUMMARY = Summary.new(bundles: { Origin.construct("attr-writer") => MUTATE_SELF })
       private_constant :WRITER_SUMMARY
 
-      def self.scan(root:, path:, calls:, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty)
-        new(path: path, calls: calls, attribution: attribution, envelopes: envelopes).scan(root)
+      def self.scan(root:, path:, calls:, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
+                    plugin_facts: PluginFacts.empty)
+        new(path: path, calls: calls, attribution: attribution, envelopes: envelopes,
+            plugin_facts: plugin_facts).scan(root)
       end
 
-      def initialize(path:, calls:, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty)
+      def initialize(path:, calls:, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
+                     plugin_facts: PluginFacts.empty)
         @path = path
         @calls = calls
         @attribution = attribution
         @envelopes = envelopes
+        @plugin_facts = plugin_facts
         @summaries = {}
         @edges = {}
         @superclasses = {}
         @includes = {}
+        # ADR-103 WD10 / #387 — the class-body facts the framework-edge strategies read, harvested only
+        # when a loaded plugin declared one. A run with no `effect_edges:` never allocates them.
+        @harvest = plugin_facts.edges? ? {} : nil
       end
 
       def scan(root)
         walk(root, [], false)
+        synthesize_framework_units
         FileCollection.new(
           path: @path, summaries: @summaries, edges: @edges,
           superclasses: @superclasses, includes: @includes
@@ -89,6 +99,7 @@ module Rigor
         when Prism::DefNode
           return enter_def(node, prefix, singleton)
         when Prism::CallNode
+          harvest_class_body_macro(node, prefix)
           return record_declaration(node, prefix) if declaration?(node)
         end
 
@@ -105,10 +116,61 @@ module Rigor
       end
 
       def enter_def(node, prefix, singleton)
+        instance_method = !singleton && node.receiver.nil?
+        harvest_for(prefix)[:defs] << node.name.to_s if @harvest && instance_method && !prefix.empty?
         add_unit(
           class_name_for(prefix), node.name.to_s, singleton || !node.receiver.nil?,
           node.body, node.parameters
         )
+      end
+
+      # ADR-103 WD10 — a receiver-less call in a class body, recorded as `macro => [literal symbol
+      # arguments]`. That is all the framework-edge strategies need: `before_save :normalize` names a
+      # method on the same class, and a computed callback (`before_save -> { … }`, a method object) names
+      # none the strategy could resolve, so it contributes nothing rather than a guess. The block form is
+      # already contained in the class body, which v1 does not model as a unit at all.
+      def harvest_class_body_macro(node, prefix)
+        return if @harvest.nil? || prefix.empty? || !node.receiver.nil?
+
+        entry = harvest_for(prefix)
+        name = node.name.to_s
+        if FrameworkUnits::CALLBACK_MACROS.include?(name)
+          (entry[:macros][name] ||= []).concat(symbol_arguments(node))
+        elsif uniqueness_validator?(node, name)
+          entry[:uniqueness] = true
+        end
+      end
+
+      # `validates :email, uniqueness: true` and `validates_uniqueness_of :email` — the validation whose
+      # implementation is a `SELECT`.
+      def uniqueness_validator?(node, name)
+        return true if name == FrameworkUnits::UNIQUENESS_MACRO
+        return false unless name == FrameworkUnits::VALIDATES_MACRO
+
+        node.arguments&.arguments&.any? do |argument|
+          argument.is_a?(Prism::KeywordHashNode) && argument.elements.any? do |element|
+            element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+              element.key.unescaped == FrameworkUnits::UNIQUENESS_OPTION
+          end
+        end || false
+      end
+
+      def harvest_for(prefix)
+        @harvest[class_name_for(prefix)] ||= { defs: [], macros: {}, uniqueness: false }
+      end
+
+      # Files the units the framework contributes for each class this file declares. Runs after the walk,
+      # because a callback macro may be written below the `def` it names and a mailer action may be
+      # declared anywhere in the body.
+      def synthesize_framework_units
+        return if @harvest.nil?
+
+        @harvest.each do |class_name, entry|
+          FrameworkUnits.synthesize(
+            class_name: class_name, instance_methods: entry[:defs], macros: entry[:macros],
+            uniqueness: entry[:uniqueness], plugin_facts: @plugin_facts
+          ).each { |key, summary, edges| merge_unit(key, summary, edges) }
+        end
       end
 
       # Scans one unit and files its summary, then recurses into the units its body declared. Fail-soft
@@ -121,7 +183,8 @@ module Rigor
           singleton: singleton, parameters: names,
           block_parameter: block_parameter_name(parameters),
           owned_locals: LocalOwnership.owned(body, names), calls: @calls,
-          attribution: @attribution, envelopes: @envelopes, owner_class: class_name
+          attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
+          owner_class: class_name
         )
         summary, edges = scan.run(body)
         merge_unit(key, summary, edges)

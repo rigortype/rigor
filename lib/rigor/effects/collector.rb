@@ -5,6 +5,7 @@ require_relative "../inference/origin_lookup"
 require_relative "attribution"
 require_relative "envelope_index"
 require_relative "file_collection"
+require_relative "plugin_facts"
 require_relative "scanner"
 
 module Rigor
@@ -38,13 +39,15 @@ module Rigor
 
       # Per-file, per-thread accumulator. Not frozen and never shared: it lives for one `analyze_file`.
       class Accumulator
-        attr_reader :path, :calls, :attribution, :envelopes
+        attr_reader :path, :calls, :attribution, :envelopes, :plugin_facts
         attr_accessor :root
 
-        def initialize(path, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty)
+        def initialize(path, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
+                       plugin_facts: PluginFacts.empty)
           @path = path
           @attribution = attribution
           @envelopes = envelopes
+          @plugin_facts = plugin_facts
           # Node identity, not equality: two structurally identical call nodes in one file are different
           # sites, and `Prism::Node#hash` is structural.
           @calls = {}.compare_by_identity
@@ -88,9 +91,11 @@ module Rigor
       # only thing that knows it is the configuration the run was built from. `envelopes` is the
       # {EnvelopeIndex} of #386, carried the same way and for the same reason — the declared lane a call
       # site imports must not depend on which process typed the file.
-      def collect_for(path, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty)
+      def collect_for(path, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
+                      plugin_facts: PluginFacts.empty)
         previous = Thread.current[KEY]
-        accumulator = Accumulator.new(path.to_s, attribution: attribution, envelopes: envelopes)
+        accumulator = Accumulator.new(path.to_s, attribution: attribution, envelopes: envelopes,
+                                                 plugin_facts: plugin_facts)
         Thread.current[KEY] = accumulator
         @mutex.synchronize { @active_count += 1 }
         yield
@@ -164,7 +169,8 @@ module Rigor
 
         Scanner.scan(
           root: accumulator.root, path: accumulator.path, calls: accumulator.calls,
-          attribution: accumulator.attribution, envelopes: accumulator.envelopes
+          attribution: accumulator.attribution, envelopes: accumulator.envelopes,
+          plugin_facts: accumulator.plugin_facts
         )
       rescue StandardError
         FileCollection.new(path: accumulator.path, failed: true)

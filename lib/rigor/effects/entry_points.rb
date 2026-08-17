@@ -11,10 +11,12 @@ module Rigor
     #   (`File.fnmatch?` with `File::FNM_PATHNAME`, so `**` is the only way across a directory boundary);
     # - a **preset name** — a bare `[a-z0-9_-]+` token — resolved here to the globs the preset stands for.
     #
-    # **This slice ships no presets.** They are named by the plugin that models a framework (rigor-rails'
-    # controller actions, `perform`, mailer methods, channels) through a manifest field, which lands with
-    # the Rails slice; the registry exists now so the config key has its final meaning and an unknown name
-    # is a visible load-time error rather than a glob that silently matches nothing.
+    # Presets are named by the plugin that models a framework — rigor-actionpack's controller actions,
+    # rigor-activejob's `perform`, rigor-actionmailer's mailer methods, rigor-actioncable's channels —
+    # through the `effect_entry_points:` manifest field (#387), and registered here through
+    # {.register_all} once the plugin set is loaded. `Configuration` checks only that a `reach:` entry is
+    # SHAPED like a preset name; the existence check runs where the snapshot expands it, which is the
+    # first point at which the registered set is complete.
     #
     # Registration is process-global and happens before a snapshot is built, in the parent process — the
     # same shape the other CLI-time registries take. Nothing here crosses a fork or a Ractor boundary.
@@ -56,6 +58,19 @@ module Rigor
 
         def known?(name)
           @presets.key?(name.to_s)
+        end
+
+        # Whether `entry` is spelled like a preset name at all — the shape check `Configuration` runs at
+        # load, before any plugin has had the chance to register one.
+        def name?(entry)
+          NAME_PATTERN.match?(entry)
+        end
+
+        # Registers every `effect_entry_points:` preset the loaded plugins declare. Idempotent per name +
+        # glob set, so two runs in one process (the spec suite, the LSP) do not collide; two plugins
+        # claiming one name with different globs is a genuine conflict and raises.
+        def register_all(presets)
+          Array(presets).each { |preset| register(preset.name, preset.globs) }
         end
 
         # Every registered preset name, sorted. Empty in this slice.

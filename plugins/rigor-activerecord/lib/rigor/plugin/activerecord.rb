@@ -8,6 +8,7 @@ require_relative "activerecord/structure_sql_parser"
 require_relative "activerecord/model_index"
 require_relative "activerecord/model_discoverer"
 require_relative "activerecord/analyzer"
+require_relative "activerecord/effects"
 
 module Rigor
   module Plugin
@@ -72,7 +73,17 @@ module Rigor
         # ADR-26 — `ActiveRecord::Relation` is an "open" receiver: it delegates an unbounded set of
         # user-defined scopes / class methods to its model, so `call.undefined-method` must not fire for
         # it. `CheckRules` reads this manifest field and skips the rule for the class.
-        open_receivers: ["ActiveRecord::Relation"]
+        open_receivers: ["ActiveRecord::Relation"],
+        # ADR-103 WD2 / WD10 (#387) — the effect layer. rigor-activerecord models ActiveRecord, which is
+        # part of Rails, so it opens the framework's own `rails.*` root rather than one named after the
+        # plugin; `effect_root:` is granted only because the engine bundles this plugin
+        # ({Rigor::Plugin::FirstParty}). Every row's justification is in {Effects}, and the
+        # `ActiveRecord::Relation` half is in the bundled `sig/active_record/relation.rbs` instead —
+        # tier 1, because the plugin already ships that signature.
+        effect_root: "rails",
+        effect_labels: ["rails.schema.write"],
+        effect_attributions: Effects.attributions,
+        effect_edges: Effects.edges
       )
 
       # The class the bundled `sig/active_record/relation.rbs` describes; `dynamic_return` contributes

@@ -703,18 +703,22 @@ module Rigor
       gate
     end
 
-    # Entry-point globs and preset names, kept as written. A preset name is resolved to its globs where the
-    # snapshot is built; what happens here is only the existence check, so a typo is a load-time error
-    # naming the known set rather than a `reach:` table that comes back mysteriously empty.
+    # Entry-point globs and preset names, kept as written.
+    #
+    # **Shape only.** A preset is *named by a plugin* (#387; ADR-103 WD14) and plugins load from this very
+    # configuration, so at this point no preset is registered yet and asking `EntryPoints.known?` would
+    # reject `reach: [rails]` for every project that uses one. The existence check therefore lives where
+    # the snapshot expands `reach:` ({Effects::Snapshot.expand_reach}), which runs after plugin load and
+    # raises there — the same error, at the first moment it can be right.
     def coerce_effects_reach(value)
       entries = Array(value).map(&:to_s)
       entries.each do |entry|
-        next if Effects::EntryPoints.glob?(entry) || Effects::EntryPoints.known?(entry)
+        next if Effects::EntryPoints.glob?(entry) || Effects::EntryPoints.name?(entry)
 
         raise ArgumentError,
-              "effects.snapshot.reach names no known entry-point preset: #{entry.inspect} " \
-              "(known presets: #{Effects::EntryPoints.names.inspect}; anything carrying a path or glob " \
-              "character is treated as a file glob instead)"
+              "effects.snapshot.reach entry is neither a file glob nor a well-formed entry-point preset " \
+              "name: #{entry.inspect} (a preset name is #{Effects::EntryPoints::NAME_PATTERN.inspect}; " \
+              "anything carrying a path or glob character is treated as a file glob instead)"
       end
       entries.uniq.freeze
     end

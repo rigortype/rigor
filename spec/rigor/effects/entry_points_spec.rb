@@ -63,9 +63,24 @@ RSpec.describe Rigor::Effects::EntryPoints do
         .to eq(["actions", "lib/**/*.rb"])
     end
 
-    it "rejects an unknown preset name, naming the known set" do
-      expect { configuration(["rails"]) }
-        .to raise_error(ArgumentError, /no known entry-point preset: "rails".*known presets: \[\]/m)
+    # #387 — presets are named by plugins, and plugins load FROM the configuration being validated, so at
+    # load time nothing is registered yet. The shape check stays here; the existence check moved to
+    # `Snapshot.expand_reach`, which runs once the plugin set is complete.
+    it "accepts a well-formed preset name no plugin has registered yet" do
+      expect(configuration(["rails"]).effects_snapshot_reach).to eq(["rails"])
+    end
+
+    it "rejects a name that is neither a glob nor a well-formed preset name" do
+      expect { configuration(["Rails Actions"]) }
+        .to raise_error(ArgumentError, /neither a file glob nor a well-formed entry-point preset name/)
+    end
+
+    it "is the snapshot that rejects a preset nothing registered" do
+      expect do
+        Rigor::Effects::Snapshot.build(table: Rigor::Effects::EffectTable.empty, sources: {},
+                                       configuration: configuration(["rails"]))
+      end
+        .to raise_error(described_class::Error, /no registered entry-point preset: "rails"/)
     end
   end
 end

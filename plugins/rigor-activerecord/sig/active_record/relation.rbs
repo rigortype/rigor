@@ -26,6 +26,26 @@
 # `rbs collection`), that definition conflicts with this one and
 # the conflict degrades through Rigor's plugin-RBS failure memo
 # (ADR-25 WD4) — the richer upstream definition simply wins.
+#
+# ## Effect annotations (ADR-103 WD10, issue #387)
+#
+# Every method carries an effect annotation, and the split down
+# the middle of this file is the whole point of the Rails effect
+# layer: a **builder** is `%a{pure}` because it issues nothing —
+# `where` composes an Arel tree and returns a relation — while a
+# **materializer** is `%a{rigor:v1:effect io.db.read}` because it
+# is the call that finally runs the query. A presenter that builds
+# and returns a scope has pure code; the caller that materialises
+# it gets the read. That is the truthful reading of what the code
+# does, not of how Rails developers narrate it.
+#
+# This is the plugin's tier-1 channel: these are *accepted
+# signatures*, so a call site importing one of these bounds is
+# exhaustive rather than tainted (ADR-103 WD6). The methods this
+# file does not declare — `map`, `filter_map` and the rest of the
+# `Enumerable` surface, which materialise by delegating to `each`
+# — are covered by the plugin's `effect_attributions:` instead,
+# because declaring them here would change how they TYPE.
 
 module ActiveRecord
   class Relation[Elem]
@@ -34,149 +54,274 @@ module ActiveRecord
     # `Enumerable` only *requires* `each` (the includer supplies
     # it); it is declared here so `relation.each { |m| ... }`
     # resolves and the block parameter carries the element type.
+    %a{rigor:v1:effect io.db.read}
     def each: () { (Elem) -> void } -> self
             | () -> Enumerator[Elem, self]
 
     # --- query builders (return another relation) ---
+    %a{pure}
     def where: (*untyped) ?{ () -> untyped } -> self
+    %a{pure}
     def rewhere: (*untyped) -> self
+    %a{pure}
     def not: (*untyped) -> self
+    %a{pure}
     def or: (untyped) -> self
+    %a{pure}
     def and: (untyped) -> self
+    %a{pure}
     def order: (*untyped) -> self
+    %a{pure}
     def reorder: (*untyped) -> self
+    %a{pure}
     def in_order_of: (*untyped) -> self
+    %a{pure}
     def limit: (untyped) -> self
+    %a{pure}
     def offset: (untyped) -> self
+    %a{pure}
     def distinct: (?untyped) -> self
+    %a{pure}
     def group: (*untyped) -> self
+    %a{pure}
     def regroup: (*untyped) -> self
+    %a{pure}
     def having: (*untyped) -> self
+    %a{pure}
     def includes: (*untyped) -> self
+    %a{pure}
     def preload: (*untyped) -> self
+    %a{pure}
     def eager_load: (*untyped) -> self
+    %a{pure}
     def joins: (*untyped) -> self
+    %a{pure}
     def left_joins: (*untyped) -> self
+    %a{pure}
     def left_outer_joins: (*untyped) -> self
+    %a{pure}
     def references: (*untyped) -> self
+    %a{pure}
     def select: (*untyped) -> self
+    %a{pure}
     def reselect: (*untyped) -> self
+    %a{pure}
     def unscope: (*untyped) -> self
+    %a{pure}
     def merge: (untyped) -> self
+    %a{pure}
     def except: (*untyped) -> self
+    %a{pure}
     def only: (*untyped) -> self
+    %a{pure}
     def extending: (*untyped) -> self
+    %a{pure}
     def from: (untyped, ?untyped) -> self
+    %a{pure}
     def lock: (?untyped) -> self
+    %a{pure}
     def readonly: (?untyped) -> self
+    %a{pure}
     def strict_loading: (?untyped) -> self
+    %a{pure}
     def create_with: (untyped) -> self
+    %a{pure}
     def none: () -> self
+    %a{pure}
     def all: () -> self
+    %a{pure}
     def unscoped: () -> self
+    %a{pure}
     def default_scoped: () -> self
+    %a{pure}
     def annotate: (*untyped) -> self
+    %a{pure}
     def optimizer_hints: (*untyped) -> self
+    %a{pure}
     def excluding: (*untyped) -> self
+    %a{pure}
     def without: (*untyped) -> self
+    %a{pure}
     def with: (*untyped) -> self
     def scoping: () { () -> untyped } -> untyped
 
     # --- finders (return an element) ---
+    %a{rigor:v1:effect io.db.read}
     def find: (*untyped) -> Elem
+    %a{rigor:v1:effect io.db.read}
     def find_by: (*untyped) -> Elem?
+    %a{rigor:v1:effect io.db.read}
     def find_by!: (*untyped) -> Elem
+    %a{rigor:v1:effect io.db.read}
     def find_sole_by: (*untyped) -> Elem
+    %a{rigor:v1:effect io.db.read}
     def sole: () -> Elem
+    %a{rigor:v1:effect io.db.read}
     def first: () -> Elem?
             | (Integer limit) -> Array[Elem]
+    %a{rigor:v1:effect io.db.read}
     def first!: () -> Elem
+    %a{rigor:v1:effect io.db.read}
     def last: () -> Elem?
            | (Integer limit) -> Array[Elem]
+    %a{rigor:v1:effect io.db.read}
     def last!: () -> Elem
+    %a{rigor:v1:effect io.db.read}
     def take: () -> Elem?
            | (Integer limit) -> Array[Elem]
+    %a{rigor:v1:effect io.db.read}
     def take!: () -> Elem
+    %a{rigor:v1:effect io.db.read}
     def second: () -> Elem?
+    %a{rigor:v1:effect io.db.read}
     def third: () -> Elem?
+    %a{rigor:v1:effect io.db.read}
     def fourth: () -> Elem?
+    %a{rigor:v1:effect io.db.read}
     def fifth: () -> Elem?
+    %a{rigor:v1:effect io.db.read}
     def forty_two: () -> Elem?
+    %a{rigor:v1:effect io.db.read}
     def second_to_last: () -> Elem?
+    %a{rigor:v1:effect io.db.read}
     def third_to_last: () -> Elem?
 
     # --- batched enumeration ---
+    %a{rigor:v1:effect io.db.read}
     def find_each: (**untyped) ?{ (Elem) -> void } -> untyped
+    %a{rigor:v1:effect io.db.read}
     def find_in_batches: (**untyped) ?{ (Array[Elem]) -> void } -> untyped
+    %a{rigor:v1:effect io.db.read}
     def in_batches: (**untyped) ?{ (ActiveRecord::Relation[Elem]) -> void } -> untyped
 
     # --- scalars / aggregates ---
+    %a{rigor:v1:effect io.db.read}
     def count: (*untyped) ?{ (Elem) -> untyped } -> untyped
+    %a{rigor:v1:effect io.db.read}
     def sum: (*untyped) ?{ (Elem) -> untyped } -> untyped
+    %a{rigor:v1:effect io.db.read}
     def average: (untyped) -> untyped
+    %a{rigor:v1:effect io.db.read}
     def minimum: (untyped) -> untyped
+    %a{rigor:v1:effect io.db.read}
     def maximum: (untyped) -> untyped
+    %a{rigor:v1:effect io.db.read}
     def calculate: (*untyped) -> untyped
+    %a{rigor:v1:effect io.db.read}
     def pluck: (*untyped) -> Array[untyped]
+    %a{rigor:v1:effect io.db.read}
     def pick: (*untyped) -> untyped
+    %a{rigor:v1:effect io.db.read}
     def ids: () -> Array[untyped]
+    %a{rigor:v1:effect io.db.read}
     def size: () -> Integer
+    %a{rigor:v1:effect io.db.read}
     def length: () -> Integer
+    %a{rigor:v1:effect io.db.read}
     def empty?: () -> bool
+    %a{rigor:v1:effect io.db.read}
     def any?: (*untyped) ?{ (Elem) -> boolish } -> bool
+    %a{rigor:v1:effect io.db.read}
     def none?: (*untyped) ?{ (Elem) -> boolish } -> bool
+    %a{rigor:v1:effect io.db.read}
     def one?: (*untyped) ?{ (Elem) -> boolish } -> bool
+    %a{rigor:v1:effect io.db.read}
     def many?: () ?{ (Elem) -> boolish } -> bool
+    %a{rigor:v1:effect io.db.read}
     def exists?: (*untyped) -> bool
+    %a{rigor:v1:effect io.db.read}
     def include?: (untyped) -> bool
+    %a{rigor:v1:effect io.db.read}
     def member?: (untyped) -> bool
 
     # --- conversion / state ---
+    %a{rigor:v1:effect io.db.read}
     def to_a: () -> Array[Elem]
+    %a{rigor:v1:effect io.db.read}
     def to_ary: () -> Array[Elem]
+    %a{rigor:v1:effect io.db.read}
     def entries: () -> Array[Elem]
+    %a{rigor:v1:effect io.db.read}
     def load: (?untyped) -> self
+    %a{rigor:v1:effect io.db.read}
     def reload: () -> self
+    %a{pure}
     def reset: () -> self
+    %a{pure}
     def loaded?: () -> bool
+    %a{pure}
     def to_sql: () -> String
+    %a{rigor:v1:effect io.db.read}
     def explain: (*untyped) -> String
+    %a{rigor:v1:effect io.db.read}
     def cache_key: (?untyped) -> String
+    %a{rigor:v1:effect io.db.read}
     def cache_version: (?untyped) -> untyped
+    %a{rigor:v1:effect io.db.read}
     def to_json: (*untyped) -> String
+    %a{rigor:v1:effect io.db.read}
     def as_json: (?untyped) -> untyped
+    %a{rigor:v1:effect io.db.read}
     def blank?: () -> bool
+    %a{rigor:v1:effect io.db.read}
     def present?: () -> bool
+    %a{pure}
     def klass: () -> untyped
+    %a{pure}
     def model: () -> untyped
+    %a{pure}
     def table: () -> untyped
+    %a{pure}
     def arel: () -> untyped
 
     # --- whole-relation persistence ---
+    %a{rigor:v1:effect io.db.write}
     def update_all: (untyped) -> Integer
+    %a{rigor:v1:effect io.db.write}
     def delete_all: () -> Integer
+    %a{rigor:v1:effect io.db.write}
     def destroy_all: () -> Array[Elem]
+    %a{rigor:v1:effect io.db.write}
     def update: (*untyped) -> untyped
+    %a{rigor:v1:effect io.db.write}
     def update!: (*untyped) -> untyped
+    %a{rigor:v1:effect io.db.write}
     def delete_by: (*untyped) -> Integer
+    %a{rigor:v1:effect io.db.write}
     def destroy_by: (*untyped) -> Array[Elem]
+    %a{rigor:v1:effect io.db.write}
     def touch_all: (*untyped) -> Integer
+    %a{rigor:v1:effect io.db.write}
     def insert_all: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write}
     def insert_all!: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write}
     def upsert_all: (untyped, **untyped) -> untyped
 
     # --- instantiating builders (return an element) ---
+    %a{pure}
     def new: (*untyped) ?{ (Elem) -> void } -> Elem
+    %a{pure}
     def build: (*untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def create: (*untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def create!: (*untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def find_or_create_by: (untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def find_or_create_by!: (untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.read}
     def find_or_initialize_by: (untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def create_or_find_by: (untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def create_or_find_by!: (untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def first_or_create: (?untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.write}
     def first_or_create!: (?untyped) ?{ (Elem) -> void } -> Elem
+    %a{rigor:v1:effect io.db.read}
     def first_or_initialize: (?untyped) ?{ (Elem) -> void } -> Elem
   end
 end

@@ -93,8 +93,10 @@ module Rigor
         # @param apply_tolerated [Boolean] false runs the judgment with an empty tolerated set
         #   (`--no-tolerated-effects`).
         def initialize(configuration:, rbs_loader:, effect_table:, discovery:, # rubocop:disable Metrics/ParameterLists
-                       sources: nil, unit_sources: nil, ancestry: nil, apply_tolerated: true)
+                       sources: nil, unit_sources: nil, ancestry: nil, apply_tolerated: true,
+                       plugin_facts: nil)
           @configuration = configuration
+          @plugin_facts = plugin_facts
           @rbs_loader = rbs_loader
           @effect_table = effect_table
           @discovery = discovery
@@ -222,11 +224,12 @@ module Rigor
         end
 
         # The vocabulary an unknown label is judged against: the shipped registry plus whatever
-        # `effects.labels:` opened. A project may open any root — the listing IS the vouching act — so
-        # nothing here can raise on ownership; plugin-registered roots join in #387, and this stays the
-        # one place that changes.
+        # `effects.labels:` opened, plus every loaded plugin's `effect_labels:` (#387). A project may open
+        # any root — the listing IS the vouching act — so nothing the project writes can raise on
+        # ownership; a plugin overreaching its root is refused inside {Effects::PluginFacts}, whose warning
+        # rides the report rather than this diagnostic stream.
         def registry
-          @registry ||= Effects::Registry.for_configuration(@configuration)
+          @registry ||= Effects::Registry.for_configuration(@configuration, plugin_facts: @plugin_facts)
         end
 
         # `effects.envelopes:`, resolved against the vocabulary once per run.

@@ -86,6 +86,22 @@ module Rigor
         @effect_table || Effects::EffectTable.empty
       end
 
+      # ADR-103 WD2 / WD6 / WD10 / #387 — the loaded plugins' effect contributions, compiled once per
+      # process. Memoised on first use rather than built in the constructor for two reasons: the plugin
+      # registry is adopted after construction (`apply_prebuilt` / the plugin-load pre-pass), and the
+      # project's as-written superclass table — which is what makes an `ActiveRecord::Base` row reach
+      # `User.find` — exists only once the cross-file discovery pre-pass has run, which it has by the time
+      # any file is analyzed.
+      #
+      # Public and declared here beside the other effect surfaces: `rigor effects` builds its snapshot off
+      # the run's own vocabulary and has to read the same compiled tables the collection window scanned
+      # under.
+      def effect_plugin_facts
+        @effect_plugin_facts ||= Effects::PluginFacts.build(
+          @plugin_registry, superclasses: @project_discovered_superclasses
+        )
+      end
+
       # The merged per-file collections behind {#effect_table} — the *direct* summaries, before the graph
       # closure. #381's snapshot records these, because a diff over direct summaries stays attributable to
       # the pull request's own lines.
@@ -656,7 +672,8 @@ module Rigor
       end
 
       def effects_key_descriptor(key_descriptor)
-        Effects::Identity.descriptor(base: key_descriptor, configuration: @configuration)
+        Effects::Identity.descriptor(base: key_descriptor, configuration: @configuration,
+                                     plugin_facts: effect_plugin_facts)
       rescue StandardError
         nil
       end
@@ -714,7 +731,10 @@ module Rigor
           # own as-written superclass table, so the Liskov check and the closed-world proven lane resolve
           # the same ancestry. Lazy: only a project that declared an envelope pays the merge.
           ancestry: -> { effect_collection.superclasses },
-          apply_tolerated: !@no_tolerated_effects
+          apply_tolerated: !@no_tolerated_effects,
+          # #387 — the same compiled plugin tables the collection window scanned under, so an envelope may
+          # name a label a plugin opened and the unknown-label check agrees with the scan.
+          plugin_facts: effect_plugin_facts
         ).diagnostics
       end
 
@@ -1506,7 +1526,8 @@ module Rigor
 
         diagnostics = nil
         collection = Effects::Collector.collect_for(
-          path, attribution: @effect_attribution, envelopes: effect_envelope_index(environment)
+          path, attribution: @effect_attribution, envelopes: effect_envelope_index(environment),
+                plugin_facts: effect_plugin_facts
         ) do
           diagnostics = analyze_file_body(path, environment)
         end
@@ -1527,7 +1548,7 @@ module Rigor
 
         @effect_envelope_index_env = environment
         @effect_envelope_index = Effects::EnvelopeIndex.build(
-          configuration: @configuration, environment: environment
+          configuration: @configuration, environment: environment, plugin_facts: effect_plugin_facts
         )
       end
       private :effect_envelope_index

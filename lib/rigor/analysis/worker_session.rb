@@ -169,7 +169,8 @@ module Rigor
 
         diagnostics = nil
         collection = Effects::Collector.collect_for(
-          path, attribution: @effect_attribution, envelopes: effect_envelope_index
+          path, attribution: @effect_attribution, envelopes: effect_envelope_index,
+                plugin_facts: effect_plugin_facts
         ) do
           diagnostics = analyze_body(path)
         end
@@ -181,9 +182,19 @@ module Rigor
       # ADR-103 WD6 / #386 — the worker-side mirror of `Runner#effect_envelope_index`. Derived from the
       # same configuration and the session's own environment, so a worker's `≤` lane is the one the
       # parent would have computed for the same file.
+      # ADR-103 WD10 / #387 — the worker-side mirror of `Runner#effect_plugin_facts`. The superclass table
+      # arrives with the coordinator's scope seed, so a worker resolves an `ActiveRecord::Base` row through
+      # the same project ancestry the parent would have walked.
+      def effect_plugin_facts
+        @effect_plugin_facts ||= Effects::PluginFacts.build(
+          @plugin_registry, superclasses: @project_scope_seed[:discovered_superclasses] || {}
+        )
+      end
+      private :effect_plugin_facts
+
       def effect_envelope_index
         @effect_envelope_index ||= Effects::EnvelopeIndex.build(
-          configuration: @configuration, environment: @environment
+          configuration: @configuration, environment: @environment, plugin_facts: effect_plugin_facts
         )
       end
       private :effect_envelope_index

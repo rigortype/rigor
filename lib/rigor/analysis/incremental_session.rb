@@ -613,6 +613,14 @@ module Rigor
       # The effects identity for THIS run, memoised: it digests a YAML catalogue and the `effects:` block,
       # and a recheck asks for it on both the restore and the absorb side. nil when collection is off, so a
       # non-collecting run never loads the catalogue at all.
+      #
+      # **Deliberately plugin-blind**, unlike the ADR-45 whole-run effects slot, whose descriptor carries
+      # {Effects::PluginFacts#digest} (#387). The two sides of this comparison sit on opposite sides of the
+      # run: the restore asks before any plugin is loaded and the save asks after, so folding the plugin
+      # facts in here would compare a blind digest against a sighted one and miss every single time. The
+      # bound it leaves — a plugin upgrade that moves a row does not invalidate an `--incremental`
+      # snapshot's effect collections — is recorded in `docs/internal-spec/effect-summaries.md`; the
+      # primary (whole-run) path has no such hole, and `--incremental` is opt-in.
       def current_effects_identity
         return nil unless @configuration.effects_enabled?
 

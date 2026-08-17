@@ -57,17 +57,20 @@ module Rigor
       # Reads every stratum this index serves, once per process.
       #
       # @param configuration [Rigor::Configuration]
+      # @param plugin_facts [Rigor::Effects::PluginFacts, nil] the loaded plugins' effect contributions
+      #   (#387); their `effect_labels:` join the vocabulary an annotation is read against, so a gem's
+      #   `%a{rigor:v1:effect rails.activejob.enqueue}` resolves rather than reading as unknown.
       # @param environment [Rigor::Environment, nil] the run's environment. Its loader supplies the
       #   rbs-inline / plugin `virtual_rbs` buffers and the built RBS environment the accepted stratum is
       #   read from; without one, both are simply absent (the fail-quiet direction — a missing `≤` bound
       #   costs precision, never a finding).
       # @return [EnvelopeIndex]
-      def self.build(configuration:, environment: nil)
+      def self.build(configuration:, environment: nil, plugin_facts: nil)
         # Required here rather than at the top of the file: the reader pulls in the whole
         # `RbsExtended` surface, and this build runs only under an `effects:` block.
         require_relative "../rbs_extended/envelope_scanner"
 
-        registry = Registry.for_configuration(configuration)
+        registry = Registry.for_configuration(configuration, plugin_facts: plugin_facts)
         loader = environment&.rbs_loader
         scan = RbsExtended::EnvelopeScanner.scan(
           sources: SignatureSources.collect(

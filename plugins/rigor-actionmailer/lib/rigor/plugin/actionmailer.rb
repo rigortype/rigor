@@ -5,6 +5,7 @@ require "rigor/plugin"
 require_relative "actionmailer/mailer_index"
 require_relative "actionmailer/mailer_discoverer"
 require_relative "actionmailer/analyzer"
+require_relative "actionmailer/effects"
 
 module Rigor
   module Plugin
@@ -52,7 +53,13 @@ module Rigor
           "mailer_search_paths" => { kind: :array, default: ["app/mailers"] },
           "mailer_base_classes" => { kind: :array, default: %w[ApplicationMailer ActionMailer::Base] },
           "views_root" => { kind: :string, default: "app/views" }
-        }
+        },
+        # ADR-103 WD10 (#387) — see {Effects} for what each row is and why.
+        effect_root: "rails",
+        effect_labels: ["rails.actionmailer.deliver"],
+        effect_attributions: Effects.attributions,
+        effect_edges: Effects.edges,
+        effect_entry_points: Effects.entry_points
       )
 
       # `watch:` covers every mailer class under `mailer_search_paths` AND every view template under

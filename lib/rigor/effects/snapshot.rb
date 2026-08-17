@@ -153,12 +153,22 @@ module Rigor
         end
 
         # Resolves `effects.snapshot.reach:` entries to file globs: a preset name becomes the globs it
-        # stands for, a glob stays itself. An unknown preset name never reaches here — `Configuration`
-        # rejects it at load — so a `nil` from the registry means a plugin registered after the
-        # configuration loaded and is dropped rather than guessed at.
+        # stands for, a glob stays itself.
+        #
+        # This is where an unknown preset name is caught (#387). `Configuration` cannot: presets are named
+        # by plugins, and plugins load from the configuration being validated. By the time a snapshot is
+        # built the registered set is complete, so a name nothing registered is a real error — most often
+        # `reach: [rails]` in a project that never listed the Rails plugins — and saying so beats a `reach:`
+        # table that comes back mysteriously empty.
         def expand_reach(entries)
           entries.flat_map do |entry|
-            EntryPoints.glob?(entry) ? [entry] : (EntryPoints.globs_for(entry) || [])
+            next [entry] if EntryPoints.glob?(entry)
+
+            EntryPoints.globs_for(entry) ||
+              raise(EntryPoints::Error,
+                    "effects.snapshot.reach names no registered entry-point preset: #{entry.inspect} " \
+                    "(registered: #{EntryPoints.names.inspect}; a preset is named by the plugin that " \
+                    "models the framework, so listing that plugin is what registers it)")
           end.uniq.sort.freeze
         end
 

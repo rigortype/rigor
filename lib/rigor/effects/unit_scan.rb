@@ -10,7 +10,9 @@ require_relative "envelope_index"
 require_relative "file_collection"
 require_relative "label_set"
 require_relative "mutation_classifier"
+require_relative "narrowing"
 require_relative "origin"
+require_relative "plugin_facts"
 require_relative "summary"
 
 module Rigor
@@ -68,6 +70,11 @@ module Rigor
       private_constant :DEFINE_METHOD, :XSTRING, :GVAR_READ, :GVAR_WRITE, :CVAR_READ, :CVAR_WRITE,
                        :IVAR_WRITE, :ALIAS, :UNDEF, :RECEIVER_MUTATION
 
+      # What a receiver rooted at implicit self spells as the head of a receiver path. Must agree with
+      # `Rigor::Plugin::EffectAttribution::SELF_HEAD`, which is what a plugin writes; spelled again rather
+      # than required so the effects namespace does not pull the plugin contract in, and pinned by spec.
+      SELF_PATH_HEAD = "self"
+
       GLOBAL_READ = LabelSet.new(["global.read"])
       GLOBAL_WRITE = LabelSet.new(["global.write"])
       MUTATE_STATIC = LabelSet.new(["mutate.static"])
@@ -100,15 +107,18 @@ module Rigor
       # @param calls [Hash] node-identity table of {Collector::CallRecord}s
       # @param attribution [Attribution] the project's `effects.attribution:` table
       # @param envelopes [EnvelopeIndex] the envelopes a call site may import as a `≤` bound (#386)
+      # @param plugin_facts [PluginFacts] the loaded plugins' `effect_attributions:` (#387)
       # @param owner_class [String, nil] the class this unit is defined on — the carrier an
       #   implicit-self call's envelope is looked up under, since the syntax spells `Kernel#name`
       def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
-                     attribution: Attribution.empty, envelopes: EnvelopeIndex.empty, owner_class: nil)
+                     attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
+                     plugin_facts: PluginFacts.empty, owner_class: nil)
         @singleton = singleton
         @block_parameter = block_parameter
         @calls = calls
         @attribution = attribution
         @envelopes = envelopes
+        @plugin_facts = plugin_facts
         @owner_class = owner_class
         @mutation = MutationClassifier.new(
           singleton: singleton, parameters: parameters, owned_locals: owned_locals
@@ -210,9 +220,96 @@ module Rigor
       def visit_call(node)
         record = @calls[node]
         attribute(node, record)
+        plugin = attribute_plugin(node, record)
         envelope = import_envelope(node, record)
-        visit_uncatalogued(node, record, envelope) unless claimed_by_catalogue?(node, record)
+        # A DISCHARGING plugin row bounds the site exactly as an imported envelope does (ADR-103 WD6): a
+        # first-party bundled plugin's framework-derived attribution is a trusted claim about a callee the
+        # analyzer will never read, so "the receiver was Dynamic" and "no project definition answered" are
+        # both already accounted for. `Rails.env` on an app with no Rails RBS is the measured case — the
+        # row says what it does, and a `dynamic-receiver` taint beside it would be noise that never clears.
+        bound = envelope || (plugin&.discharge? ? plugin : nil)
+        visit_uncatalogued(node, record, bound) unless claimed_by_catalogue?(node, record)
         visit_block_argument(node)
+      end
+
+      # The **plugin stratum** (#387; ADR-103 WD6 / WD10): what the plugin that models a framework says
+      # this call does.
+      #
+      # It runs beside the catalogue and beside the project's own `effects.attribution:`, for the reason
+      # both of those do: three different authorities can each have something true to say about one call,
+      # and a summary that reported only the nearest would be less honest, not simpler. What separates it
+      # from {#attribute} is the *taint*: a first-party bundled plugin's row is a discharging stratum, so
+      # the site stays exhaustive; a third-party plugin's is a claim and taints exactly like the project's
+      # own table.
+      #
+      # Three receiver shapes, tried nearest-syntax first — a written receiver path (`Rails.cache.read`),
+      # a receiver rooted at implicit self inside a framework class (`session[:x] = 1`), and the receiver's
+      # class through the project's inheritance chain (`user.save`).
+      # @return [PluginFacts::Row, nil] the row that claimed this call, for {#visit_call} to read as a bound
+      def attribute_plugin(node, record)
+        return nil unless @plugin_facts.attributions?
+
+        row = plugin_row(node, record)
+        return nil if row.nil?
+
+        labels = row.narrow ? Narrowing.apply(row.narrow, node) : row.labels
+        return row if labels.nil? || labels.empty?
+
+        add_declared(Origin.plugin(row.key), labels)
+        # A row may discharge AND still taint: `render` states exactly what the CONTROLLER does and says
+        # nothing about the template, which is not an effect unit yet (ADR-103 WD11).
+        taint(row.taint, row.key) if row.taint
+        taint("plugin-attribution", row.key) unless row.discharge?
+        row
+      end
+
+      def plugin_row(node, record)
+        receiver = node.receiver
+        selector = node.name.to_s
+        path = receiver_path(receiver)
+        # Nearest-syntax first, and every shape is TRIED rather than selected: `Rails.cache.read` is a
+        # receiver path and nothing else, but `ActiveRecord::Base.connection.execute` is both a receiver
+        # path (which no plugin rows) and a call on the result of `ActiveRecord::Base.connection` (which
+        # rigor-activerecord does row). Returning on the first shape that *applied* rather than the first
+        # that *matched* silently lost the second.
+        (path && @plugin_facts.path_row(path, selector)) ||
+          (path && @plugin_facts.self_path_row(path, selector, @owner_class)) ||
+          class_row_for(node, record, selector) ||
+          @plugin_facts.result_row(producer_class(receiver), selector)
+      end
+
+      def class_row_for(node, record, selector)
+        owner, singleton = envelope_target(node, record)
+        @plugin_facts.class_row(owner, singleton, selector)
+      end
+
+      # The class whose call produced this receiver, for an `on_result:` row: the constant in
+      # `UserMailer.welcome(u).deliver_now`, the receiver class the typer had otherwise. Nil unless the
+      # receiver is itself a call with a receiver — a bare local variable says nothing about what made it.
+      def producer_class(receiver)
+        return nil unless receiver.is_a?(Prism::CallNode)
+
+        inner = receiver.receiver
+        return nil if inner.nil?
+
+        Source::ConstantPath.qualified_name(inner) || @calls[receiver]&.receiver_class
+      end
+
+      # The receiver expression as the syntax spells it — `"Rails.cache"`, `"self.flash.now"` — or nil when
+      # the receiver is not a chain of argument-less sends off a constant or off implicit self. Arguments
+      # and blocks disqualify a link: `Rails.cache(x).read` is not the `Rails.cache` a row names, and
+      # pretending otherwise would put a proven-looking label on a call nobody wrote.
+      def receiver_path(node)
+        return nil unless node.is_a?(Prism::CallNode)
+        return nil unless node.arguments.nil? && node.block.nil?
+
+        inner = node.receiver
+        head =
+          if inner.nil? || inner.is_a?(Prism::SelfNode) then SELF_PATH_HEAD
+          else
+            Source::ConstantPath.qualified_name(inner) || receiver_path(inner)
+          end
+        head && "#{head}.#{node.name}"
       end
 
       # The **declared lane at a call site** (#386; ADR-103 WD6). If the callee's own declaration carries
@@ -333,14 +430,19 @@ module Rigor
         !implicit && !record&.dynamic && !DEFERRED_SELECTORS.include?(node.name)
       end
 
-      def visit_uncatalogued(node, record, envelope = nil)
+      def visit_uncatalogued(node, record, bound = nil)
         return visit_reflective_send(node, record) if REFLECTIVE_SEND.include?(node.name)
         return taint("opaque-callable") if opaque_eval?(node)
 
         # A write is a write whatever the receiver's type turns out to be, so ownership is classified
         # first and independently of the taints below: `params[:x] = 1` on an untyped `params` is a proven
         # `mutate.instance` *and* a `dynamic-receiver` taint — "this much, and possibly more".
-        classify_mutation(node.receiver) if @mutation.mutating?(node, record&.receiver_class)
+        #
+        # Unless a discharging plugin row already stated it. `session[:user_id] = id` is an index write on
+        # an object no Rails app declares a type for, so the ownership judgment can only answer "unknown"
+        # and taint; the row answers `mutate` + `rails.session.write`, which is both more precise and
+        # already trusted.
+        classify_mutation(node.receiver) if !plugin_bound?(bound) && @mutation.mutating?(node, record&.receiver_class)
 
         # `opaque-callable` is checked before `dynamic-receiver` because it is the more specific reading of
         # the same site: a `.call` the analyzer cannot follow to a body says *what* was unfollowable, where
@@ -352,10 +454,17 @@ module Rigor
         # discharging stratum (ADR-103 WD6 — the project's own, contract- and Liskov-checked; or an
         # accepted signature, whose types are already trusted). So the site keeps its edges into the
         # project definitions the closed world knows and contributes no taint.
-        return record_edge(node, record, envelope) if record&.dynamic && envelope
+        return record_edge(node, record, bound) if record&.dynamic && bound
         return taint("dynamic-receiver", record.cause) if record&.dynamic
 
-        record_edge(node, record, envelope)
+        record_edge(node, record, bound)
+      end
+
+      # Whether `bound` is a plugin row rather than an imported envelope. Only the mutation judgment cares
+      # about the difference: an envelope bounds what a CALLEE does and says nothing about whether this
+      # call mutates its receiver, while a plugin row is written about the call itself.
+      def plugin_bound?(bound)
+        bound.is_a?(PluginFacts::Row)
       end
 
       # `send` / `public_send` / `__send__`: a literal selector is an ordinary edge, a computed one is the
@@ -388,14 +497,16 @@ module Rigor
       # own verdict. The two are not exclusive: a call the typer could not resolve still names a receiver
       # class, and an edge that resolves to nothing is silently dropped rather than tainting, because most
       # such calls are ordinary inherited ones the catalogue simply has no row for.
-      def record_edge(node, record, envelope = nil)
+      def record_edge(node, record, bound = nil)
         self_call = node.receiver.nil?
         push_edge(record, node.name.to_s, self_call)
         return unless self_call && (record.nil? || !record.resolved)
         # An envelope on this unit's own class for the very selector the dispatcher declined is the
-        # project declaring the method and stating its bound. There is nothing left to be unsure about
-        # that the bound does not already answer.
-        return if envelope
+        # project declaring the method and stating its bound; a discharging plugin row on the framework
+        # base class is the plugin doing the same for a method the framework supplies. `render` inside a
+        # controller is the case — the dispatcher rightly declines, because the definition is in Action
+        # Pack. There is nothing left to be unsure about that the bound does not already answer.
+        return if bound
 
         taint("unresolved-self-call", node.name.to_s)
       end

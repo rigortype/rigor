@@ -710,6 +710,30 @@ module Rigor
         manifest.protocol_contracts
       end
 
+      # ADR-103 WD6 / WD10 (#387) — the plugin's effect contributions. Each defaults to the manifest field
+      # and each MAY be overridden to fold in per-project facts, exactly as {#protocol_contracts} may.
+      #
+      # {#effect_attributions} is the one that needs it: a Rails app's ActiveJob transport is whatever
+      # `config.active_job.queue_adapter` names, so rigor-activejob answers `io.db.write` for Solid Queue
+      # and `io.net` for Sidekiq by reading the project's own configuration. That read is a plugin-side I/O
+      # boundary read and must not happen on a run with effects off — {Registry#effect_contributions} is
+      # lazy for exactly that reason, and nothing asks unless the project has an `effects:` block.
+      def effect_attributions
+        manifest.effect_attributions
+      end
+
+      def effect_edges
+        manifest.effect_edges
+      end
+
+      def effect_labels
+        manifest.effect_labels
+      end
+
+      def effect_entry_points
+        manifest.effect_entry_points
+      end
+
       # ADR-7 § "Slice 6-A/6-B" — per-plugin {IoBoundary}. Memoised so the boundary's accumulated `FileEntry`
       # rows persist across producer invocations within the same plugin instance and feed cache invalidation
       # via `cache_for`.

@@ -3,6 +3,10 @@
 require_relative "../inference/hkt_registry"
 require_relative "protocol_contract"
 require_relative "additional_initializer"
+require_relative "effect_attribution"
+require_relative "effect_edge"
+require_relative "effect_entry_points"
+require_relative "first_party"
 
 module Rigor
   module Plugin
@@ -33,11 +37,16 @@ module Rigor
         end
       end
 
+      # ADR-103 WD2 — what a plugin's `effect_root:` may be spelled as: one label segment, the shape
+      # {Rigor::Effects::Label} accepts as a root.
+      VALID_EFFECT_ROOT = /\A[a-z][a-z0-9_]*\z/
+
       attr_reader :id, :version, :description, :config_schema, :config_defaults, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
                   :heredoc_templates, :nested_class_templates, :trait_registries,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
-                  :source_rbs_synthesizer, :additional_initializers
+                  :source_rbs_synthesizer, :additional_initializers,
+                  :effect_root, :effect_labels, :effect_attributions, :effect_edges, :effect_entry_points
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
@@ -46,7 +55,9 @@ module Rigor
         block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
         trait_registries: [],
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
-        source_rbs_synthesizer: nil, additional_initializers: []
+        source_rbs_synthesizer: nil, additional_initializers: [],
+        effect_root: nil, effect_labels: [], effect_attributions: [], effect_edges: [],
+        effect_entry_points: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -65,6 +76,11 @@ module Rigor
         validate_protocol_contracts!(protocol_contracts)
         validate_source_rbs_synthesizer!(source_rbs_synthesizer)
         validate_additional_initializers!(additional_initializers)
+        validate_effect_root!(effect_root)
+        validate_effect_labels!(effect_labels)
+        validate_effect_attributions!(effect_attributions)
+        validate_effect_edges!(effect_edges)
+        validate_effect_entry_points!(effect_entry_points)
 
         assign_fields(id, version, description, config_schema, produces, consumes, owns_receivers,
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
@@ -72,6 +88,7 @@ module Rigor
                       source_rbs_synthesizer)
         assign_nested_class_templates(nested_class_templates)
         assign_additional_initializers(additional_initializers)
+        assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges, effect_entry_points)
         freeze
       end
 
@@ -115,6 +132,17 @@ module Rigor
         @additional_initializers = additional_initializers.dup.freeze
       end
       private :assign_additional_initializers
+
+      # ADR-103 WD2 / WD6 / WD10 / WD14 — the effect contract's five fields, assigned together and outside
+      # `assign_fields` (which already carries the maximum positional arity).
+      def assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges, effect_entry_points)
+        @effect_root = effect_root.nil? ? nil : effect_root.to_s.dup.freeze
+        @effect_labels = effect_labels.map { |label| label.to_s.dup.freeze }.uniq.sort.freeze
+        @effect_attributions = effect_attributions.dup.freeze
+        @effect_edges = effect_edges.dup.freeze
+        @effect_entry_points = effect_entry_points.dup.freeze
+      end
+      private :assign_effect_fields
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
       public
@@ -161,8 +189,36 @@ module Rigor
           "signature_paths" => signature_paths,
           "protocol_contracts" => protocol_contracts.map(&:to_h),
           "source_rbs_synthesizer" => source_rbs_synthesizer&.class&.name,
-          "additional_initializers" => additional_initializers.map(&:to_h)
+          "additional_initializers" => additional_initializers.map(&:to_h),
+          "effect_root" => effect_root,
+          "effect_labels" => effect_labels,
+          "effect_attributions" => effect_attributions.map(&:to_h),
+          "effect_edges" => effect_edges.map(&:to_h),
+          "effect_entry_points" => effect_entry_points.map(&:to_h)
         }
+      end
+
+      # ADR-103 WD2 — the identity opening a root when this plugin's labels join the run's vocabulary: the
+      # framework root it models for a first-party bundled plugin that declares one, and the plugin id
+      # otherwise. A third-party plugin's `effect_root:` is ignored here (and warned about by the registry),
+      # so it opens only the root named after itself.
+      def effect_owner
+        return id if effect_root.nil?
+        return id unless FirstParty.bundled?(id)
+
+        effect_root
+      end
+
+      # Whether this plugin's `effect_attributions:` may carry `discharge: true` (ADR-103 WD6).
+      def effect_discharge_allowed?
+        FirstParty.bundled?(id)
+      end
+
+      # Whether the plugin contributes anything to the effect surfaces at all. The compiled per-run tables
+      # skip a plugin that answers false, so a project whose plugins predate this contract pays nothing.
+      def effects?
+        !effect_labels.empty? || !effect_attributions.empty? || !effect_edges.empty? ||
+          !effect_entry_points.empty?
       end
 
       def ==(other)
@@ -412,6 +468,50 @@ module Rigor
         raise ArgumentError,
               "plugin manifest source_rbs_synthesizer must respond to :call, " \
               "got #{synthesizer.inspect}"
+      end
+
+      # ADR-103 WD2 — `effect_root:` names the effect-label root this plugin opens when it is one the
+      # engine bundles: rigor-activejob models ActiveJob and therefore opens `rails.*`, not `activejob.*`.
+      # Declaring one is only ever a *request*; {#effect_owner} grants it to a first-party plugin and
+      # ignores it otherwise, so the field is safe to accept from anyone.
+      def validate_effect_root!(root)
+        return if root.nil?
+        return if root.is_a?(String) && root.match?(VALID_EFFECT_ROOT)
+
+        raise ArgumentError,
+              "plugin manifest effect_root must match #{VALID_EFFECT_ROOT.inspect}, got #{root.inspect}"
+      end
+
+      # ADR-103 WD2 — `effect_labels:` lists the vocabulary this plugin registers. The engine folds them
+      # into the run's {Rigor::Effects::Registry} through `#with(labels:, owner: manifest.effect_owner)`,
+      # which is where root ownership is enforced; a label outside the plugin's root is a load-time plugin
+      # error, reported like any other. Only the spelling is checked here.
+      def validate_effect_labels!(labels)
+        validate_array_of!("effect_labels", labels, "non-empty String") { |l| l.is_a?(String) && !l.empty? }
+      end
+
+      # ADR-103 WD6 / WD10 — `effect_attributions:` colours calls into the framework this plugin models.
+      # Each entry MUST be a {Rigor::Plugin::EffectAttribution}.
+      def validate_effect_attributions!(entries)
+        validate_array_of!("effect_attributions", entries, "Rigor::Plugin::EffectAttribution instances") do |e|
+          e.is_a?(EffectAttribution)
+        end
+      end
+
+      # ADR-103 WD10 — `effect_edges:` declares the framework edges the syntax lacks. Each entry MUST be a
+      # {Rigor::Plugin::EffectEdge}, whose `target:` is one of a fixed engine-side strategy enum.
+      def validate_effect_edges!(entries)
+        validate_array_of!("effect_edges", entries, "Rigor::Plugin::EffectEdge instances") do |e|
+          e.is_a?(EffectEdge)
+        end
+      end
+
+      # ADR-103 WD14 — `effect_entry_points:` names the `effects.snapshot.reach:` presets this plugin
+      # supplies. Each entry MUST be a {Rigor::Plugin::EffectEntryPoints}.
+      def validate_effect_entry_points!(entries)
+        validate_array_of!("effect_entry_points", entries, "Rigor::Plugin::EffectEntryPoints instances") do |e|
+          e.is_a?(EffectEntryPoints)
+        end
       end
 
       def coerce_consumes(consumes)

@@ -23,7 +23,11 @@ module Rigor
     # - the **catalogue identity** ({Catalog#identity}, schema + a digest of `data/effects/core.yml`) — an
     #   audited row moving from `io` to `io.fs.write` re-colours summaries the analyzed source never moved;
     # - the **`effects:` block digest** — the same value the snapshot header carries, so a `tolerated:` or
-    #   `reach:` edit is one visible regeneration event rather than two silently disagreeing digests.
+    #   `reach:` edit is one visible regeneration event rather than two silently disagreeing digests;
+    # - the **plugin fact digest** ({PluginFacts#digest}, #387) — the loaded plugins' labels, attributions,
+    #   edges and presets. A plugin upgrade that moves `perform_later` from `io` to `io.db.write` re-colours
+    #   summaries the analyzed source never moved, exactly as a re-audited catalogue row does, and the
+    #   plugin set is otherwise invisible to a key derived from configuration alone.
     #
     # This module is the ONE place that answers it. {.digest} is the string form (what the ADR-46 snapshot
     # payload carries beside `return_summaries`) and {.descriptor} is the {Cache::Descriptor} form (what the
@@ -45,12 +49,13 @@ module Rigor
       # @param registry [Registry] the vocabulary whose version participates
       # @param catalog [Catalog] the catalogue whose identity participates
       # @return [String] hex SHA-256
-      def digest(configuration:, registry: Registry.default, catalog: Catalog.default)
+      def digest(configuration:, registry: Registry.default, catalog: Catalog.default, plugin_facts: nil)
         Digest::SHA256.hexdigest(
           [
             "vocabulary:#{registry.vocabulary_version}",
             "catalog:#{catalog.identity}",
-            "effects:#{config_digest(configuration)}"
+            "effects:#{config_digest(configuration)}",
+            "plugins:#{plugin_facts&.digest || 'none'}"
           ].join("\x00")
         )
       end
@@ -63,14 +68,16 @@ module Rigor
       #
       # @param base [Cache::Descriptor] the run's diagnostics key descriptor
       # @return [Cache::Descriptor]
-      def descriptor(base:, configuration:, registry: Registry.default, catalog: Catalog.default)
+      def descriptor(base:, configuration:, registry: Registry.default, catalog: Catalog.default,
+                     plugin_facts: nil)
         Cache::Descriptor.compose(
           base,
           Cache::Descriptor.new(
             configs: [
               Cache::Descriptor::ConfigEntry.new(
                 key: CONFIG_KEY,
-                value_hash: digest(configuration: configuration, registry: registry, catalog: catalog)
+                value_hash: digest(configuration: configuration, registry: registry, catalog: catalog,
+                                   plugin_facts: plugin_facts)
               )
             ]
           )

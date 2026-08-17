@@ -518,10 +518,155 @@ a plugin declaring none of them is a plain per-file analyzer:
 | `nested_class_templates` | `Array<Plugin::Macro::NestedClassTemplate>` | Nested-subclass emission from an enum-shaped block DSL (`variant <Const>, <Type>`); the macro-substrate tier that mints classes, not just methods (ADR-36). Spec'd in [`macro-substrate.md`](macro-substrate.md). |
 | `hkt_registrations`, `hkt_definitions` | `Array` | Lightweight-HKT type-function registrations (ADR-20). |
 | `additional_initializers` | `Array<AdditionalInitializer>` | `{ receiver_constraint:, methods:, block_methods: }` entries declaring which non-`initialize` methods on a class (and its subclasses) also establish ivar state — `methods:` for `def`-form (`def setup`), `block_methods:` for call-with-block form (`before { … }`, `let(:x) { … }`); at least one must be non-empty. Feeds `ScopeIndexer`'s read-before-write nil soundness gate (ADR-38). |
+| `effect_root` | `String?` matching `/\A[a-z][a-z0-9_]*\z/` | The effect-label root this plugin asks to open ([ADR-103](../adr/103-effect-labels.md) WD2). Granted only to a first-party bundled plugin; see _Effect contributions_ below. |
+| `effect_labels` | `Array<String>` | Effect labels this plugin registers into the run's vocabulary (ADR-103 WD2). |
+| `effect_attributions` | `Array<EffectAttribution>` | What a call into the framework this plugin models does (ADR-103 WD6 / WD10). |
+| `effect_edges` | `Array<EffectEdge>` | Framework call-graph edges the syntax does not contain — callbacks, `perform_now`, mailer bodies (ADR-103 WD10). |
+| `effect_entry_points` | `Array<EffectEntryPoints>` | Named `effects.snapshot.reach:` presets (ADR-103 WD14). |
 
 `#validate_config(config)` returns an array of error strings; the
 loader converts a non-empty result into a `LoadError`. Each extension
 field carries its own validation in `Manifest#initialize`.
+
+#### Effect contributions — `effect_root` / `effect_labels` / `effect_attributions` / `effect_edges` / `effect_entry_points` ([ADR-103](../adr/103-effect-labels.md), issue #387)
+
+**Status: normative as of #387.** A plugin that models a framework knows things about effects that no
+amount of reading the application's source can recover: that `save` runs the class body's callbacks,
+that `perform_later` is a Redis write under Sidekiq and a database write under Solid Queue, that
+`Rails.env` is mutable process state. These five fields are how it says so.
+
+Everything a plugin declares here is **declarative and frozen**: value objects over Strings and Symbols,
+Marshal-clean, compiled once per process into `Rigor::Effects::PluginFacts`. No plugin code runs inside
+the effect scan — ADR-103 WD13 forbids anything there that resolves, walks or types, and a callback
+would not survive the fork-pool boundary the collection window crosses either.
+
+##### Cost when effects are off
+
+Zero beyond the manifest allocation. `Plugin::Registry#effect_contributions` is **lazy** — the one
+aggregate that is, because a plugin MAY compute its rows from project facts (rigor-activejob reads
+`config.active_job.queue_adapter`, which is an `IoBoundary` read) — and nothing calls it unless the
+project has an `effects:` block. `rigor check` without one is byte-identical and opens no extra file.
+
+##### Which channel a row belongs in
+
+A plugin has two ways to colour a framework method, and the choice is not a matter of taste:
+
+| The plugin… | Channel | Why |
+| --- | --- | --- |
+| already ships an RBS signature for the method | `%a{rigor:v1:effect …}` / `%a{pure}` in `signature_paths:` | Tier 1. The annotation rides the **accepted signature** stratum, which ADR-103 WD6 already trusts for types; the bound is imported at the call site by `Effects::EnvelopeIndex` and discharges. rigor-activerecord's `sig/active_record/relation.rbs` is the worked example — the builder / materializer split lives there because the file already draws it. |
+| does not, or cannot name the method per app | `effect_attributions:` | Association readers, `find_by_*`, scopes and the `Enumerable` delegations on a Relation are either per-project or would change how the method **types** if declared. So is any class the plugin ships no signature for at all. |
+
+A row must never be in both: two channels on one method produce two origins for one fact, which reads as
+duplication in `rigor effects explain`.
+
+##### `EffectAttribution`
+
+`Rigor::Plugin::EffectAttribution.new(receiver:, method:, labels:, why:, singleton: false, narrow: nil,
+discharge: false, within: nil, on_result: false, taint: nil)`.
+
+`why:` is **required and non-empty**, exactly as every row of `data/effects/core.yml` requires one: a
+label with no stated reason is a claim nobody can review.
+
+`receiver:` is spelled one of three ways, and the spelling picks the matching rule:
+
+| Spelling | Example | Matches |
+| --- | --- | --- |
+| class name | `"ActiveRecord::Base"` | The class the receiver projects to, **through the project's own `class … <` lines**. One row reaches every model in the app. |
+| receiver path | `"Rails.cache"` | The receiver *expression* as written. `Rails.cache` returns whatever `config.cache_store` names, so there is no class to key on. |
+| self path | `"self.session"` | The same, rooted at implicit self. MUST carry `within:` — a receiver-less `session` in an unrelated project class is a different `session`. |
+
+`on_result: true` shifts a class-name row one link outwards: it matches a call on **what a call to that
+class returned**. `UserMailer.welcome(u).deliver_now` and `WelcomeJob.set(wait: 1.hour).perform_later`
+are the two idioms that need it — the object in the middle is a lazy `MessageDelivery` / `ConfiguredJob`
+that nothing declares a type for, while the class that produced it is written right there.
+
+The inheritance walk reads the cross-file discovery pre-pass's `discovered_superclasses` — the project's
+own declarations, and deliberately **not** the RBS ancestor chain. Reading RBS would make a row's reach a
+function of whether the project happens to run `rbs prototype`, so a contribution would appear and
+disappear with an unrelated tool. A project whose models are declared only in RBS gets no plugin
+attribution and no taint, which is the fail-quiet direction.
+
+`narrow:` names a `Rigor::Effects::Narrowing` handler, so the call's own argument literals can settle a
+question the row cannot: `connection.execute("UPDATE …")` is a write and `execute(sql)` keeps `io.db`.
+
+`taint:` lets a row state a bound AND say the bound is not the whole story. It is restricted to
+`template-not-analysed` and `opaque-callable` — the only two things a framework model can honestly not
+see. `render` is the case: what the controller does is fully stated, and what the template does is
+unknown until views are effect units.
+
+##### Discharge and first-party standing
+
+ADR-103 WD6 grants two things to a **first-party bundled** plugin and to nothing else:
+
+- it may open the effect-label root of the framework it models (`rails.*`, not `activerecord.*`);
+- its attributions may carry `discharge: true`, which makes the call site **exhaustive** rather than
+  tainted — the same standing an accepted signature's `%a{…}` has, and for the same reason: the
+  contribution is versioned with the engine, reviewed in this repository, and gated by
+  `make check-plugins`.
+
+"First-party" is **derived, never listed**: `Rigor::Plugin::FirstParty.bundled?(id)` asks whether the
+engine bundles `rigor-<id>`, which is the same question `Loader.bundled_plugin_path` already answers when
+it decides how to require a plugin. A list would be a second source of truth to keep in sync with
+`plugins/`, and the first drift would silently demote a plugin's rows.
+
+A third-party plugin's overreach is **accepted in part, never fatal**: its `effect_root:` is ignored and
+its labels open the root named after its plugin id; its `discharge: true` is ignored and its rows behave
+like the project's own `effects.attribution:` table — declared, carrying a `plugin-attribution` taint.
+Both demotions are recorded on `PluginFacts#warnings` and surfaced by `rigor effects`. They are **not**
+diagnostics: a plugin the user chose is not the project's mistake to be flagged for. A label whose root
+neither exists nor belongs to the extender is refused outright (`Registry::OwnershipError`), and only
+that plugin's labels drop — one plugin overreaching must not un-name another's vocabulary.
+
+Either way the labels land in the **declared** lane, never the proven one. A discharging row is a trusted
+claim, not a proof: "this is what it does", not "the analyzer read the body and saw this".
+
+##### `EffectEdge`
+
+`Rigor::Plugin::EffectEdge.new(receiver:, target:, why:, method: nil, singleton: false)`. `target:` is a
+**closed enum** the engine implements; the plugin supplies parameters only.
+
+| `target:` | What the engine does |
+| --- | --- |
+| `:activerecord_callbacks` | On every project class whose ancestry reaches `receiver:`, reads the class body's callback and validation macros (`before_save :sym`, `validate :sym`, `after_commit :sym`, …) and synthesises the persistence selectors (`save`, `create!`, `destroy`, `valid?`, …) as effect units edged to those methods. `validates … uniqueness: true` additionally contributes an `io.db.read` origin. |
+| `:perform_now` | `Job.perform_now(…)` on a project subclass of `receiver:` reaches `Job#perform`. `method:` names the synthesised selector, defaulting to `perform_now`. |
+| `:mailer_body` | `UserMailer.welcome(u)` on a project subclass of `receiver:` reaches `UserMailer#welcome`. |
+
+The edges materialise as **synthetic effect units on the framework class itself** (`Rigor::Effects::
+FrameworkUnits`), not as edges at the call site: the call site is in another file, and the callbacks are
+in the model's. The propagator then resolves an ordinary `(User, :instance, "save")` edge to the
+synthetic unit exactly as it resolves any other, ancestry and closed-world override join included.
+
+The enum has **no spelling for `perform_later` → `perform`**, and that absence is the enforcement of
+ADR-103 WD4: the deferred body runs in another process on another stack, so the caller's code does not
+contain it. The one exception is licensed by the project rather than by the plugin — under a declared
+`queue_adapter = :inline` Rails really does run the job on the caller's stack, and rigor-activejob emits
+`target: :perform_now, method: :perform_later` only after reading that declaration.
+
+##### `EffectEntryPoints`
+
+`Rigor::Plugin::EffectEntryPoints.new(name:, globs:, why: "")`. Registered into
+`Rigor::Effects::EntryPoints` when `PluginFacts` is compiled, and adopted by name in
+`effects.snapshot.reach:`.
+
+Because a preset is named by a plugin and plugins load **from** the configuration being validated,
+`Configuration` checks only that a `reach:` entry is *shaped* like a preset name; the existence check
+runs in `Effects::Snapshot.expand_reach`, which is the first point at which the registered set is
+complete. A name registered twice with different globs is a genuine conflict and raises; the same name
+with the same globs is a no-op, so two runs in one process do not collide.
+
+##### Cache identity
+
+`PluginFacts#digest` — a content digest of every compiled label, attribution, edge and preset, each with
+the plugin that contributed it — joins `Effects::Identity`. A plugin upgrade that moves a row therefore
+invalidates the effects cache slot exactly as a re-audited `data/effects/core.yml` row does. The digest
+is deliberately independent of the project's superclass table, which is a project input the diagnostics
+identity already covers.
+
+The `--incremental` snapshot's own effects identity is deliberately plugin-**blind**: its two sides sit
+on opposite sides of the run (the restore asks before any plugin is loaded, the save after), so folding
+the plugin facts in would compare a blind digest against a sighted one and miss every time. The bound
+that leaves — a plugin upgrade does not invalidate an `--incremental` snapshot's effect collections — is
+recorded in [`effect-summaries.md`](effect-summaries.md); the primary whole-run path has no such hole.
 
 #### Declared config defaults — `config_schema` `{ kind:, default: }` (ADR-40)
 

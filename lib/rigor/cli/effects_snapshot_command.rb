@@ -197,9 +197,11 @@ module Rigor
         )
         runner.run(configuration.paths)
         @table = runner.effect_table
-        Effects::Snapshot.build(table: @table, configuration: configuration,
-                                sources: runner.effect_sources, full: full,
-                                registry: Effects::Registry.for_configuration(configuration))
+        Effects::Snapshot.build(
+          table: @table, configuration: configuration, sources: runner.effect_sources, full: full,
+          registry: Effects::Registry.for_configuration(configuration,
+                                                        plugin_facts: runner.effect_plugin_facts)
+        )
       end
 
       # ---- options ------------------------------------------------

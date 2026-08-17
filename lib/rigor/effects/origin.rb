@@ -27,6 +27,14 @@ module Rigor
       # trusted at the type tier), so the site is exhaustive rather than tainted: ADR-103 WD6's
       # discharging strata. `name` is the callee key the bound was resolved for.
       ENVELOPE = :envelope
+      # A row of a loaded plugin's `effect_attributions:` — what the plugin that models a framework says a
+      # call into it does (#387; ADR-103 WD6 / WD10). Its labels land in the DECLARED lane, like an
+      # attribution's and an envelope's, and which of those two it behaves like is decided by the plugin's
+      # standing: a **first-party bundled** plugin's row discharges, so the site is exhaustive, exactly as
+      # an accepted signature's `%a{…}` is; a third-party plugin's does not, and the site keeps its
+      # `plugin-attribution` taint. One origin source for both, because the label came from the same place
+      # either way and `explain` should say so.
+      PLUGIN = :plugin
 
       def self.construct(name)
         new(name: name.to_s, source: CONSTRUCT)
@@ -42,6 +50,10 @@ module Rigor
 
       def self.envelope(name)
         new(name: name.to_s, source: ENVELOPE)
+      end
+
+      def self.plugin(name)
+        new(name: name.to_s, source: PLUGIN)
       end
 
       # The rendering the report and the JSON payload key on. Sorted lexicographically, so `catalogue:`

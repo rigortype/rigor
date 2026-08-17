@@ -3,6 +3,7 @@
 require "rigor/plugin"
 
 require_relative "actionpack/analyzer"
+require_relative "actionpack/effects"
 require_relative "actionpack/controller_discoverer"
 require_relative "actionpack/controller_index"
 
@@ -69,7 +70,14 @@ module Rigor
         consumes: [
           { plugin_id: "rails-routes", name: :helper_table, optional: true },
           { plugin_id: "activerecord", name: :model_index, optional: true }
-        ]
+        ],
+        # ADR-103 WD10 / WD14 (#387) — see {Effects} for what each row is and why.
+        effect_root: "rails",
+        effect_labels: %w[
+          rails.response.write rails.session.read rails.session.write rails.cookie.write rails.flash.write
+        ],
+        effect_attributions: Effects.attributions,
+        effect_entry_points: Effects.entry_points
       )
 
       # Phase 2 cached producer — the controller index built from `controller_search_paths`. `watch:`

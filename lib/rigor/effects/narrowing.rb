@@ -30,6 +30,10 @@ module Rigor
       PROCESS = LabelSet.new(["io.process"]).freeze
       HTTP = LabelSet.new(["io.net.http"]).freeze
       TIME = LabelSet.new(["nondet.time"]).freeze
+      DB = LabelSet.new(["io.db"]).freeze
+      DB_READ = LabelSet.new(["io.db.read"]).freeze
+      DB_WRITE = LabelSet.new(["io.db.write"]).freeze
+      DB_TRANSACTION = LabelSet.new(["io.db.transaction"]).freeze
       RANDOM = LabelSet.new(["nondet.random"]).freeze
       NONE = LabelSet::EMPTY
 
@@ -38,7 +42,17 @@ module Rigor
       WRITE_MODES = %w[w a w+ a+ r+].freeze
       private_constant :WRITE_MODES
 
-      HANDLERS = %w[kernel_open file_open pathname_open time_new random_new uri_open].freeze
+      # SQL verbs, by what they do to the database. `WITH` heads a CTE whose tail may be either, so it
+      # deliberately does not narrow. Everything not listed answers `io.db`.
+      SQL_READ_VERBS = %w[SELECT SHOW EXPLAIN DESCRIBE DESC PRAGMA].freeze
+      SQL_WRITE_VERBS = %w[
+        INSERT UPDATE DELETE REPLACE UPSERT MERGE TRUNCATE
+        CREATE ALTER DROP RENAME COMMENT GRANT REVOKE REINDEX VACUUM ANALYZE COPY
+      ].freeze
+      SQL_TRANSACTION_VERBS = %w[BEGIN START COMMIT ROLLBACK SAVEPOINT RELEASE SET LOCK].freeze
+      private_constant :SQL_READ_VERBS, :SQL_WRITE_VERBS, :SQL_TRANSACTION_VERBS
+
+      HANDLERS = %w[kernel_open file_open pathname_open time_new random_new uri_open sql_verb].freeze
 
       module_function
 
@@ -56,7 +70,30 @@ module Rigor
         when "time_new" then time_new(node)
         when "random_new" then random_new(node)
         when "uri_open" then uri_open(node)
+        when "sql_verb" then sql_verb(node)
         end
+      end
+
+      # `connection.execute(sql)` / `exec_query` / `select_all` — the SQL string's leading verb settles the
+      # direction, which is the argument-dependent narrowing of the design note § 4 applied to SQL. It is
+      # the one place a raw-SQL escape hatch can still be read precisely, and the shape that matters most —
+      # `execute("UPDATE …")` inside a method whose envelope says `io.db.read` — is exactly the one a
+      # literal answers.
+      #
+      # Interpolation is fine as long as the VERB is written out: `execute("SELECT * FROM #{table}")`
+      # narrows, because {literal_prefix} keeps the leading literal run. A fully computed string does not,
+      # and answers the parent `io.db`.
+      def sql_verb(node)
+        head = literal_prefix(argument(node, 0))
+        return DB if head.nil?
+
+        verb = head[/[A-Za-z]+/]&.upcase
+        return DB if verb.nil?
+        return DB_READ if SQL_READ_VERBS.include?(verb)
+        return DB_WRITE if SQL_WRITE_VERBS.include?(verb)
+        return DB_TRANSACTION if SQL_TRANSACTION_VERBS.include?(verb)
+
+        DB
       end
 
       # `Kernel#open` — a path, a `|command` pipe, or (with open-uri loaded) a URI. A literal leading
@@ -158,7 +195,7 @@ module Rigor
         head.is_a?(Prism::StringNode) ? head.unescaped : nil
       end
 
-      private_class_method :mode_labels, :argument, :positional_count, :positional,
+      private_class_method :sql_verb, :mode_labels, :argument, :positional_count, :positional,
                            :keyword_argument, :string_literal, :literal_prefix
     end
   end

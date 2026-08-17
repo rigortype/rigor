@@ -49,12 +49,18 @@ module Rigor
       #
       # Memoised on the label list, because the answer is a frozen value object and every effects surface
       # in a run asks for the same one: the envelope pass, the unknown-label check, the snapshot header.
-      # Plugin-registered roots join here in #387.
-      def self.for_configuration(configuration)
+      #
+      # `plugin_facts` (#387) folds in every loaded plugin's `effect_labels:` FIRST, each under its own
+      # owner, so that a project's `effects.labels:` can then name a plugin-opened root and an envelope may
+      # bound `rails.activejob.enqueue` without the project having to re-declare the framework's vocabulary.
+      # The plugin layer is not memoised on its own — {PluginFacts} is already per-process — and the
+      # project layer keeps its memo keyed on the pair.
+      def self.for_configuration(configuration, plugin_facts: nil)
+        base = plugin_facts.nil? || plugin_facts.empty? ? default : plugin_facts.extend_registry(default)
         labels = configuration.effects_labels
-        return default if labels.nil? || labels.empty?
+        return base if labels.nil? || labels.empty?
 
-        (@extended ||= {})[labels] ||= default.with(labels: labels, owner: nil)
+        (@extended ||= {})[[labels, base.labels]] ||= base.with(labels: labels, owner: nil)
       rescue Error
         default
       end

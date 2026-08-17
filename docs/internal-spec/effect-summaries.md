@@ -180,6 +180,7 @@ A row's `narrow:` names a handler in `Rigor::Effects::Narrowing`, which reads **
 | `time_new` | positional arity: none is `Time.now`, any constructs | `Time.new` |
 | `random_new` | positional arity: a seed makes the generator reproducible | `Random.new` |
 | `uri_open` | the scheme literal: `http(s)://`, `file://` or a bare path | `URI.open`, `OpenURI.open_uri` |
+| `sql_verb` | the SQL statement's leading verb literal: `SELECT` reads, `INSERT` / `UPDATE` / DDL writes, `BEGIN` / `COMMIT` is a transaction | plugin rows for `connection.execute` / `exec_query` / `select_all` (#387) |
 
 Two readings the handlers fix. An **absent** mode argument is not an unknown one — Ruby's default is `"r"`, so it reads, where a computed mode or an integer flag answers the subsystem parent. And the target tests read the **literal head** of an interpolated string, because `open("|#{cmd}")` writes the part that decides the subsystem even when the rest is computed.
 
@@ -327,6 +328,43 @@ The index is built **per process**, once, off the first environment the analysis
 - The ancestry is `FileCollection#superclasses`, the collector's own as-written candidate lists, resolved here the way `Propagator::Index#build_descendants` resolves them: the most-qualified candidate the project defines wins, so `A::Base` and `B::Base` cannot share the bare spelling `Base`. Reading the same table as the closed-world override join is what stops the Liskov relation and the proven lane from disagreeing about who inherits from whom.
 - Positions come from `EnvelopeCheck::Positions#for`, which is where "the Ruby `def`, falling back to the class's file" is spelled once for both rules.
 
+### The plugin stratum: framework attribution and framework edges
+
+**Status: normative as of #387.** A plugin that models a framework contributes three things the project's own source cannot supply, all through frozen manifest fields (`docs/internal-spec/plugin.md` § Effect contributions): **labels** (`effect_labels:`), which join the run's vocabulary through `Registry.for_configuration(configuration, plugin_facts:)`; **attributions** (`effect_attributions:`), which colour calls into the framework; and **edges** (`effect_edges:`), which are the calls the framework makes that no syntax at the call site contains.
+
+The compiled form is `Effects::PluginFacts`, built once per process behind `configuration.effects_enabled?` and carried on the collection window (`Collector.collect_for(path, plugin_facts:)`) exactly as the attribution table and the envelope index are, and for the same reason: a fork-pool worker MUST scan under the same tables the parent does. `Plugin::Registry#effect_contributions` is lazy, because a plugin MAY derive its rows from project facts — rigor-activejob reads `config.active_job.queue_adapter` through its `IoBoundary` — and a run with collection off must not pay that read.
+
+#### Attribution
+
+Consulted in `UnitScan#attribute_plugin`, beside the catalogue and beside `effects.attribution:`, on the same call. Three receiver shapes are tried, nearest-syntax first, and **every** shape is tried rather than the first that applies: a class name matched through the project's own superclass chain (`ActiveRecord::Base#save` reaching `user.save` on a `User < ApplicationRecord < ActiveRecord::Base`), a receiver path matched as written (`Rails.cache` + `read`), a self path scoped by `within:` (`self.session` + `[]=` inside a controller), and a `on_result:` row matched on the class that produced the receiver (`UserMailer.welcome(u).deliver_now`). The ancestry walked is the cross-file pre-pass's `discovered_superclasses`, capped and cycle-guarded; the RBS ancestor chain is deliberately not consulted.
+
+The labels land in `Summary#declared_bundles` under an `Origin` of source `:plugin`. Whether the site is **tainted** is what separates the two authorities:
+
+| Contributor | Taint | Reading |
+| --- | --- | --- |
+| first-party bundled plugin, `discharge: true` | none | "this is what it does" — the accepted-signature standing of ADR-103 WD6 |
+| anyone else | `plugin-attribution` | "declared this, and possibly more" — identical to `effects.attribution:` |
+
+A discharging row additionally **bounds the site**, exactly as an imported envelope does: it suppresses the `dynamic-receiver` taint (a Rails app with no Rails RBS types `Rails` as `Dynamic`, and a taint no annotation could ever clear is noise), the `unresolved-self-call` taint (an implicit-self `render` rightly does not resolve — the definition is in Action Pack), and the ownership judgment on a receiver mutation (`session[:user_id] = id` writes an object nothing types, and the row's `mutate` is both more precise than `unknown-ownership` and already trusted). A row MAY still carry an explicit `taint:` of `template-not-analysed` or `opaque-callable`, which states the one thing the framework model genuinely cannot see.
+
+#### Edges
+
+`effect_edges:` names a **closed engine-side strategy enum**; the plugin supplies only the base class. The strategies materialise as **synthetic effect units on the framework class itself** (`Effects::FrameworkUnits`), harvested by the scanner from the class body during the same walk:
+
+| Strategy | Synthesised on a project class whose ancestry reaches the base |
+| --- | --- |
+| `:activerecord_callbacks` | `Klass#save` / `#save!` / `#update` / `#touch` / `.create` / `.create!` edged to the class body's `before_save :sym`, `validate :sym`, `after_commit :sym`, …; `Klass#destroy` to the destroy callbacks; `Klass#valid?` to the validation ones. `validates … uniqueness: true` adds an `io.db.read` bundle to the same units. A trigger with no callbacks and no uniqueness validator is not synthesised. |
+| `:perform_now` | `Klass.perform_now` edged to `Klass#perform`. |
+| `:mailer_body` | `Klass.<action>` edged to `Klass#<action>`, one per instance method the class defines. |
+
+Synthesising on the class rather than at the call site is what makes this work at all: the call site is in another file, and a per-file collection window sees one file. The propagator then resolves an ordinary `(User, :instance, "save")` edge to the synthetic unit through the same ancestry and closed-world override join every other edge takes, so a subclass picks up its own callbacks for free and a project that defines `User#save` itself joins with the synthetic unit.
+
+The enum has **no `perform_later` → `perform`**, which is the mechanical enforcement of ADR-103 WD4's "attribution follows the code, not the clock". The one edge that looks like it — `target: :perform_now, method: :perform_later` — is emitted only by a plugin that has read the project's own `queue_adapter = :inline`, where Rails genuinely runs the job on the caller's stack.
+
+#### Entry-point presets
+
+`effect_entry_points:` names `effects.snapshot.reach:` presets, registered into `Effects::EntryPoints` when `PluginFacts` is compiled. Because presets are named by plugins and plugins load *from* the configuration being validated, `Configuration` validates only the SHAPE of a `reach:` entry; `Snapshot.expand_reach` performs the existence check and raises there.
+
 ### Attribution: the declared lane's second producer
 
 `effects.attribution:` is consulted in `Effects::UnitScan`, on the same `(owner, selector)` the catalogue is looked up under — the owner the syntax names for a constant-path receiver, and the class the typer projected the receiver to otherwise. It runs **beside** the catalogue rather than instead of it and never claims the call: a catalogued row states what Ruby's own surface proves, an attribution states what the project claims about a body Rigor never read, and a call that is both honestly reads as both.
@@ -429,7 +467,7 @@ One cache, two identities, one extra slot (ADR-103 WD13). There is no second sto
 
 The **diagnostics identity** is the ordinary one. Collection is observational, so a diagnostics entry computed with collection on is valid for a run with it off and vice versa, and nothing in this section may invalidate, rewrite or reshape that entry.
 
-The **effects identity** is the diagnostics identity plus the three inputs that change what a summary *means* without moving one analyzed byte: the vocabulary version (`Registry#vocabulary_version`), the catalogue identity (`Catalog#identity` — its schema and a content digest of `data/effects/core.yml`), and the digest of the `effects:` block. `Rigor::Effects::Identity` is the one place it is computed, in two spellings of the same three inputs: `.digest` (a hex string, for a store with no descriptor of its own) and `.descriptor` (the run's key descriptor composed with one `configs:` entry carrying that digest). `Snapshot.config_digest` — the snapshot header's `config_digest` — is the same method, so the committed record and the cache key can never disagree about which `effects:` block produced it.
+The **effects identity** is the diagnostics identity plus the four inputs that change what a summary *means* without moving one analyzed byte: the vocabulary version (`Registry#vocabulary_version`), the catalogue identity (`Catalog#identity` — its schema and a content digest of `data/effects/core.yml`), the digest of the `effects:` block, and the **plugin fact digest** (`PluginFacts#digest` — every compiled label, attribution, edge and preset with the plugin that contributed it, #387; a plugin upgrade that re-colours `perform_later` re-colours summaries the source never moved). `Rigor::Effects::Identity` is the one place it is computed, in two spellings of the same three inputs: `.digest` (a hex string, for a store with no descriptor of its own) and `.descriptor` (the run's key descriptor composed with one `configs:` entry carrying that digest). `Snapshot.config_digest` — the snapshot header's `config_digest` — is the same method, so the committed record and the cache key can never disagree about which `effects:` block produced it.
 
 The unit of persistence is the **per-file `FileCollection`**, never the propagated table. A leaf's summary reaches every caller, so a stored table would have to be invalidated by every file in the project; the fixpoint is instead re-run over the merged whole on every run, which is the cheap half and the half that makes per-file reuse sound.
 
@@ -445,6 +483,8 @@ A run with collection **on** is no longer excluded from the whole-run result cac
 An entry whose effects slot is missing, differently identified, or corrupt is a miss **for effects consumers only**. A run with collection **off** never reads or writes the slot: `rigor check` is byte-identical, its cache key is unchanged, and the ADR-87 boot-slim probe still serves it from `analysis.run-diagnostics` without loading the engine.
 
 Consequently `rigor effects` and the snapshot verbs go through the same cache `rigor check` does: after a `rigor check` under a configured `effects:` block, `rigor effects check` in the same job is a warm hit plus the fixpoint, and never re-collects.
+
+The `--incremental` snapshot's identity is deliberately **plugin-blind** (`IncrementalSession#current_effects_identity` omits `plugin_facts:`), because its two sides sit on opposite sides of the run: the restore asks before any plugin is loaded and the save after, so a sighted digest would never match a blind one and the reuse would be dead. The bound is that a plugin upgrade does not invalidate an `--incremental` snapshot's effect collections; the whole-run slot, which is the primary path, has no such hole, and `--incremental` is opt-in.
 
 An ADR-46 recheck re-collects only the changed closure and serves every other file's collection from the snapshot; the fixpoint runs over the merged whole, so a leaf edit moves the reach of a caller in a file the recheck never opened. A restored snapshot whose `effects_identity` differs from this run's — a vocabulary bump, a re-audited catalogue row, an `effects:` edit, or a snapshot written with collection off — declines reuse and takes a full baseline: a recheck re-collects only the closure, so a partial re-collection could not be closed into a whole-project fixpoint. That is the incremental spelling of "an effects miss recomputes effects", and it is never paid by a run with collection off.
 

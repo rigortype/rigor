@@ -103,3 +103,49 @@ per project — this one contributing signatures rather than diagnostics.
   project-side monkey-patches; see the survey notes.
 - **Coverage is "top ~40 selectors", not exhaustive.** ActiveSupport
   has hundreds of extension methods. PRs welcome.
+
+## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10)
+
+Inert unless the project has an `effects:` block. This plugin carries
+the **impure** half of ActiveSupport — the clock, the notification bus
+and `CurrentAttributes`.
+
+| Call | Labels |
+| --- | --- |
+| `Time.current`, `Date.current`, `Date.yesterday` / `tomorrow`, `DateTime.current` | `nondet.time` + `global.read` |
+| `Time.zone.now` / `today`, `ActiveSupport::TimeZone#now` | `nondet.time` |
+| `n.days.ago`, `n.hours.from_now`, `.until`, `.since` | `nondet.time` + `global.read` |
+| `Time.zone` | `global.read`; `Time.zone=` / `use_zone` | `global.write` |
+| `Current.set` / `reset` / `attributes` (`ActiveSupport::CurrentAttributes`) | `global.read` / `global.write` + `rails.current.read` / `.write` |
+| `ActiveSupport::Notifications.instrument` / `publish` | `io` + `telemetry`, plus an `opaque-callable` taint |
+| `ActiveSupport::Notifications.subscribe` | `mutate.static` |
+
+The `global.read` beside `nondet.time` is the **zone**: `Time.zone` is
+process state that `Time.use_zone` and a per-request `around_action`
+both rewrite. The `nondet.time` half is what stops a duration
+comparison folding to a constant, and what the purity policy
+([ADR-103](../../docs/adr/103-effect-labels.md) WD9) reads to decide a
+result may never be remembered.
+
+`instrument` keeps its taint because the **subscribers** are registered
+at run time and the analyzer cannot see them: the summary reads "this
+much, and possibly more", which is the truth.
+
+### Purity: `%a{pure}` on the pure half (#388)
+
+`sig/active_support/core_ext.rbs` also carries `%a{pure}` on the
+predicates and transforms genuinely free of side effects — `blank?` /
+`present?` / `presence`, `deep_dup` / `deep_merge`, the inflections
+(`camelize`, `underscore`, `pluralize`, `titleize`, …), `squish` /
+`truncate` / `remove`, `with_indifferent_access`, the Duration and
+Bytes multipliers, and more — audited one by one against the vendored
+ActiveSupport source rather than assumed from the method name. Each
+skipped candidate carries a one-line reason in the RBS file itself:
+`try` / `try!` / `as_json` dispatch to a method named at the call site
+and cannot be judged in isolation; `constantize` may autoload;
+`parameterize` reads `I18n.locale`; every bang method mutates in
+place; and `Date#ago` / `#beginning_of_day` / friends turn out to read
+`Time.zone` where the same-named `Time` methods do not — verified
+against ActiveSupport's source, not inferred from the name. The file's
+own header comment is the audit record; read it before assuming a
+method not listed there is safe to treat as pure elsewhere.

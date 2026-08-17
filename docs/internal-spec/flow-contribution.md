@@ -32,6 +32,7 @@ contribution = Rigor::FlowContribution.new(
   invalidations: [...],
   exceptional: nil,
   role_conformance: [...],
+  effects: Rigor::Effects::LabelSet.new(["io.db"]),
   provenance: Rigor::FlowContribution::Provenance.new(
     source_family: "plugin.my-gem",
     plugin_id: "my-gem",
@@ -49,7 +50,7 @@ cannot mutate them after the fact.
 
 ## Slot definitions
 
-The eight content slots match
+The nine content slots match
 [ADR-2 § "Flow Contribution Bundle"](../adr/2-extension-api.md):
 
 | Slot | Type | Meaning |
@@ -62,6 +63,7 @@ The eight content slots match
 | `invalidations` | `Array` or `nil` | Targeted fact invalidations beyond what `mutations` already implies. |
 | `exceptional` | effect tag or `nil` | Non-returning, raising, or unreachable effect. |
 | `role_conformance` | `Array` or `nil` | Capability-role conformance facts the contribution provides. |
+| `effects` | `Rigor::Effects::LabelSet` or `nil` | Effect labels attributed to the call's callee, as an upper bound ([ADR-103](../adr/103-effect-labels.md) WD5). Scalar-shaped like `return_type`: only `nil` means "asserts nothing", and an EMPTY label set is the positive claim that the call performs no effects — the reading of `%a{pure}` — so `#empty?` does not treat it as unset. Merged by **union**, unconditionally and across every authority tier: two sources that each name part of a footprint together name more of it, so there is no reading under which one cancels another and no conflict to report. |
 
 The shape of the values inside the collection slots was
 intentionally not pinned in v0.0.9. The v0.1.0 merger defines the
@@ -172,3 +174,20 @@ public read shape. Adding a new slot is a public-API expansion
 that should be accompanied by an ADR-2 amendment plus a
 schema-version note in this document. Renaming or removing a
 slot is a breaking change that requires a major-version bump.
+
+### Slot additions
+
+- **`effects`** — added for [ADR-103](../adr/103-effect-labels.md)
+  WD5 ([#383](https://github.com/rigortype/rigor/issues/383)). It is
+  the carrier through which an annotation or a plugin attributes
+  effect labels at a call edge. The slot, its union merge and its
+  element-list tag (`kind: :effects`) exist and are specified above;
+  its **producers do not** — the configured `effects.attribution:`
+  table ([#385](https://github.com/rigortype/rigor/issues/385)) and
+  plugin-contributed attributions
+  ([#387](https://github.com/rigortype/rigor/issues/387)) are the
+  slices that fill it, and until one does, nothing in the engine
+  reads a value out of it. Envelopes themselves do not ride this
+  slot: an envelope binds a *declaration*, not a call edge, and is
+  read by `RbsExtended::EnvelopeScanner`
+  ([effect-summaries.md](effect-summaries.md) § Envelopes).

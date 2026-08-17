@@ -2,6 +2,8 @@
 
 require "rigor/plugin"
 
+require_relative "activesupport_core_ext/effects"
+
 module Rigor
   module Plugin
     # ADR-25 — a pure RBS-bundle plugin. It ships NO analyzer code: no `diagnostics_for_file`, no
@@ -24,7 +26,13 @@ module Rigor
         # aliases that return Time, not Date).
         version: "0.2.0",
         description: "RBS bundle for the most-frequently-flagged ActiveSupport core_ext extensions.",
-        signature_paths: ["sig"]
+        signature_paths: ["sig"],
+        # ADR-103 WD10 (#387) — the IMPURE half of ActiveSupport: the clock, the notification bus and
+        # `CurrentAttributes`. The `%a{pure}` sweep over the predicate surface is issue #388 and lands in
+        # `sig/`, not here. See {Effects}.
+        effect_root: "rails",
+        effect_labels: %w[rails.current.read rails.current.write],
+        effect_attributions: Effects.attributions
       )
     end
 

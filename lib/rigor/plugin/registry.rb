@@ -244,6 +244,30 @@ module Rigor
       # ADR-52 WD4 — the per-run node-rule walk (see {NodeRuleWalk}).
       attr_reader :node_rule_walk
 
+      # ADR-103 WD2 / WD6 / WD10 / WD14 (#387) — every loaded plugin's effect contribution, in
+      # registration order, as {Contribution} rows.
+      #
+      # **Lazy, unlike the other aggregates.** A plugin MAY compute its `effect_attributions:` from project
+      # facts — rigor-activejob reads `config.active_job.queue_adapter` to decide whether an enqueue is a
+      # database write or a Redis one — and that is an I/O-boundary read a `rigor check` with no `effects:`
+      # block must never pay. Nothing asks for this until {Rigor::Effects::PluginFacts.build} does, and
+      # nothing calls that unless collection is on. Memoised into the frozen registry the same way
+      # `contracts_for_path` memoises, and for the same reason: the answer is fixed for the run.
+      def effect_contributions
+        @effect_memo[:contributions] ||= compile_effect_contributions
+      end
+
+      # One plugin's effect contribution, flattened off whichever surface answered it (the manifest, or the
+      # plugin's own override). Carries the two authority answers with it — `owner`, the label root this
+      # plugin may open, and `discharge_allowed`, whether its attributions may discharge — so nothing
+      # downstream has to re-derive who is first-party.
+      Contribution = Data.define(:id, :owner, :requested_root, :discharge_allowed, :labels, :attributions,
+                                 :edges, :entry_points) do
+        def empty?
+          labels.empty? && attributions.empty? && edges.empty? && entry_points.empty?
+        end
+      end
+
       # ADR-15 Phase 3 — build a fresh Registry from the supplied blueprint set by replaying
       # {Blueprint#materialize} per entry against `services`. The returned registry carries NEW plugin
       # instances (mutable per-Ractor accumulators included) and the same blueprint set, so a worker can hand
@@ -379,6 +403,30 @@ module Rigor
         @open_receivers_set = @open_receivers.to_set.freeze
         @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
         @contracts_by_path = {}
+        @effect_memo = {}
+      end
+
+      # Fail-soft per plugin: a plugin whose `effect_attributions:` override raises (a missing
+      # `config/application.rb`, an unreadable path) contributes nothing rather than taking the run down.
+      # An effect contribution is an enrichment; ADR-2 isolates plugin failures at the analyzer boundary
+      # and this is that boundary.
+      def compile_effect_contributions
+        @plugins.filter_map { |plugin| effect_contribution_for(plugin) }.freeze
+      end
+
+      def effect_contribution_for(plugin)
+        manifest = safe_manifest(plugin)
+        return nil if manifest.nil?
+
+        contribution = Contribution.new(
+          id: manifest.id, owner: manifest.effect_owner, requested_root: manifest.effect_root,
+          discharge_allowed: manifest.effect_discharge_allowed?,
+          labels: plugin.effect_labels, attributions: plugin.effect_attributions,
+          edges: plugin.effect_edges, entry_points: plugin.effect_entry_points
+        )
+        contribution.empty? ? nil : contribution
+      rescue StandardError
+        nil
       end
 
       def path_matches_glob?(glob, path)

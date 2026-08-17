@@ -121,3 +121,44 @@ config, inferred types — is in the
 ## License
 
 MPL-2.0, matching the parent Rigor project.
+
+## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10)
+
+Inert unless the project has an `effects:` block. What this plugin
+colours, and through which of the two channels:
+
+| Channel | Rows |
+| --- | --- |
+| **Shipped RBS** — `sig/active_record/relation.rbs`, tier 1, discharging | every `ActiveRecord::Relation` method the file declares. The builder / materializer line is drawn there: `%a{pure}` on `where` / `joins` / `order` / `select` / `limit`, `%a{rigor:v1:effect io.db.read}` on `find` / `first` / `count` / `pluck` / `each` / `to_a`, `io.db.write` on `update_all` / `insert_all` / `create`. |
+| **`effect_attributions:`** — the manifest, first-party discharging | `ActiveRecord::Base`'s own surface (finders → `io.db.read`, persistence → `io.db.write`, `transaction` / `with_lock` → `io.db.transaction`); the `Enumerable` delegations on a Relation, which materialise by calling `each`; `connection.execute` / `exec_query` / `select_all`, narrowed by the statement's leading SQL verb; the migration DSL → `io.db.write` + `rails.schema.write`. |
+
+An `ActiveRecord::Base` row reaches `User.find` through the project's
+own `User < ApplicationRecord < ActiveRecord::Base` lines, so one row
+covers every model in the app.
+
+### Builders are pure, materializers read
+
+`where` composes an Arel tree and issues nothing; the query fires at
+`first`, `each`, `count`. Two readings were possible — colour builders
+`io.db.read` because that is how Rails developers *talk*, or colour
+them ∅ because that is what the code *does* — and the truthful one
+wins: a presenter that builds and returns a scope has pure code, and
+the caller that materialises it gets the read.
+
+### Framework edges
+
+`save` runs the class body's callbacks and validators, and none of that
+is visible at the call site. The `:activerecord_callbacks` strategy
+reads `before_save :sym` / `validate :sym` / `after_commit :sym` off
+each model and synthesises the persistence selectors as effect units
+edged to those methods; `validates … uniqueness: true` additionally
+contributes an `io.db.read`, because the uniqueness check IS a query.
+
+### Not covered
+
+`map` / `filter_map` and the rest of `Enumerable` are attributions
+rather than RBS annotations, because declaring them in the bundled
+signature would change how they **type**. Association readers created
+by `has_many` are not rowed at all: they return a Relation, so they are
+already ∅ by the builder rule, and the read appears where the caller
+materialises.

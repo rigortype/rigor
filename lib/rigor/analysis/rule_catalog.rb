@@ -728,6 +728,164 @@ module Rigor
           since: "0.3.0"
         ),
 
+        CheckRules::RULE_EFFECT_ENVELOPE_EXCEEDED => Entry.new(
+          id: CheckRules::RULE_EFFECT_ENVELOPE_EXCEEDED,
+          summary: "A method performs an effect its declared envelope does not admit.",
+          fires_when: [
+            "The project's `.rigor.yml` carries an `effects:` block and `effects.check` is on (it " \
+            "defaults to on when the block is present).",
+            "The method's RBS carries an envelope — `%a{pure}` (the empty bound) or " \
+            "`%a{rigor:v1:effect <labels>}` — written on the method, or on its class / module and " \
+            "distributed to it.",
+            "The method's PROVEN effect labels — its own body plus the transitive closure over the " \
+            "project methods it calls — include a label no member of the bound subsumes."
+          ],
+          does_not_fire_when: [
+            "No `effects:` block is configured, or `effects.check: false` is set — an annotation " \
+            "alone never turns the check on.",
+            "The exceeding label is `mutate.local`: mutating what the frame itself allocated and " \
+            "never let escape is tolerated by every envelope, `%a{pure}` included.",
+            "The label is only suspected rather than proven — an unresolved or dynamic call taints " \
+            "the summary's exhaustiveness bit and contributes nothing to the proven lane, so " \
+            "\"possibly more\" never produces a finding.",
+            "The envelope names a label the effect registry does not recognise (a typo, a retired " \
+            "spelling): the whole tag then reads as unbounded, which suppresses findings rather " \
+            "than inventing them.",
+            "The envelope was written on a supertype rather than on this class — the inherited-bound " \
+            "(Liskov) reading is `effect.liskov-widened`.",
+            "The envelope was written outside the project's own `signature_paths:` RBS (core, a " \
+            "gem's shipped RBS): only project-authored envelopes are checked. Such an envelope is " \
+            "still imported as a `≤` bound at calls INTO it, which produces no finding."
+          ],
+          suppression: "`# rigor:disable effect.envelope-exceeded` on the Ruby `def` line (the " \
+                       "diagnostic is positioned there, not on the `.rbs` line), or " \
+                       "`disable: [\"effect.envelope-exceeded\"]` in `.rigor.yml`. Widening or " \
+                       "removing the envelope is the real fix.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :error },
+          # FP-safe by two accepted constructions at once: opt-in by author directive (the envelope IS
+          # the directive, so a firing is never unsolicited — the `conforms-to` construction) and
+          # as-strict-as-proven (the proven lane only; taint never fires). What it costs to be wrong is
+          # bounded by the author having asked the question.
+          evidence_tier: :high,
+          since: "0.3.4"
+        ),
+
+        CheckRules::RULE_EFFECT_LISKOV_WIDENED => Entry.new(
+          id: CheckRules::RULE_EFFECT_LISKOV_WIDENED,
+          summary: "An override performs or declares an effect the envelope it inherits does not admit.",
+          fires_when: [
+            "The project's `.rigor.yml` carries an `effects:` block and `effects.check` is on (it " \
+            "defaults to on when the block is present).",
+            "A method the project defines redefines a method of a SUPERCLASS, and that ancestor's " \
+            "definition carries an envelope — written on it, distributed from its class, or put " \
+            "there by an `effects.envelopes:` convention. The nearest enveloped ancestor wins.",
+            "The override declares NO envelope of its own and its PROVEN effect labels — its body " \
+            "plus the transitive closure over the project methods it calls — include a label the " \
+            "inherited bound does not admit.",
+            "Or the override declares its OWN envelope and that bound is wider than the inherited " \
+            "one. This half is proven-independent: two authored bounds, compared by subsumption."
+          ],
+          does_not_fire_when: [
+            "No `effects:` block is configured, or `effects.check: false` is set.",
+            "Nobody wrote an envelope on the overridden method. The check is both-sides-authored: " \
+            "an override alone can never produce it.",
+            "The override is purer than the bound it inherits — that is the whole point of an upper " \
+            "bound, and a narrower envelope on an override is correct by construction.",
+            "The relation is a module include rather than a subclass. An includer's own `def` sits " \
+            "AHEAD of the module's in Ruby's ancestry rather than under it, so the substitutability " \
+            "argument that licenses this check does not apply.",
+            "The exceeding label is `mutate.local`, or the label is only suspected rather than " \
+            "proven: an unresolved or dynamic call taints exhaustiveness and contributes nothing to " \
+            "the proven lane.",
+            "The ancestor's envelope names a label the registry does not recognise: the whole tag " \
+            "reads as unbounded, which suppresses findings rather than inventing them."
+          ],
+          suppression: "`# rigor:disable effect.liskov-widened` on the override's Ruby `def` line, or " \
+                       "`disable: [\"effect.liskov-widened\"]` in `.rigor.yml`. Widening the " \
+                       "ancestor's envelope — or moving the effect out of the override — is the real " \
+                       "fix.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :error },
+          # Both-sides-authored in the ADR-35 sense — an envelope on the ancestor is the directive, and
+          # the override is a `def` the project wrote — and as strict as proven on the half that reads a
+          # body at all. The other half compares two authored bounds and reads nothing inferred.
+          evidence_tier: :high,
+          since: "0.3.4"
+        ),
+
+        CheckRules::RULE_EFFECT_UNKNOWN_LABEL => Entry.new(
+          id: CheckRules::RULE_EFFECT_UNKNOWN_LABEL,
+          summary: "An effect declaration names a label the registry does not recognise, so it " \
+                   "bounds nothing.",
+          fires_when: [
+            "The project's `.rigor.yml` carries an `effects:` block and `effects.check` is on — the " \
+            "same gate as `effect.envelope-exceeded`, because opting into envelope enforcement is " \
+            "what turns on the diagnostic that says an envelope stopped enforcing.",
+            "A `%a{rigor:v1:effect <labels>}` envelope — in `.rbs`, or written as an rbs-inline " \
+            "`# @rbs %a{…}` comment — names a token the effect registry does not know after plugin " \
+            "load, which makes the WHOLE tag read as unbounded (⊤), or an `effects.tolerated:` " \
+            "entry names one, which then tolerates nothing.",
+            "Label intent is evident from one of four signals: the spelling is within two edits of " \
+            "a known label, another member of the same list is known, the token carries two or " \
+            "more dot-separated segments, or the registry's retired table names it."
+          ],
+          does_not_fire_when: [
+            "No `effects:` block is configured, or `effects.check: false` is set.",
+            "The unrecognised token is a lone far-off word (`database`): a vocabulary is open by " \
+            "design, so a bare word nothing resembles is as likely to be a label this project has " \
+            "not registered as it is a typo. The tag still reads ⊤ — silence here is about the " \
+            "diagnostic, never about the reading.",
+            "The tag is malformed rather than unrecognised (`io/db`, an empty list): a grammar " \
+            "violation is a different condition, reported through the `RBS::Extended` conflict " \
+            "channel.",
+            "The label is registered — by the shared registry, by `effects.labels:`, or by a " \
+            "plugin that owns its root."
+          ],
+          suppression: "`disable: [\"effect.unknown-label\"]` in `.rigor.yml`, or a baseline entry. " \
+                       "A `# rigor:disable` comment works only where the diagnostic lands in a " \
+                       "`.rb` file (an rbs-inline annotation); Rigor does not read suppression " \
+                       "comments out of `.rbs` or `.rigor.yml`. Fixing the spelling is the real fix.",
+          severity_authored: :info,
+          severity_by_profile: { lenient: :info, balanced: :info, strict: :warning },
+          # Syntactic and author-directed at once: the token is provably outside the vocabulary, and
+          # the author wrote the declaration that names it. The intent gate is what keeps an open
+          # vocabulary from turning into noise.
+          evidence_tier: :high,
+          since: "0.3.4"
+        ),
+
+        CheckRules::RULE_EFFECT_ANNOTATIONS_UNCHECKED => Entry.new(
+          id: CheckRules::RULE_EFFECT_ANNOTATIONS_UNCHECKED,
+          summary: "Effect annotations are present, but no `effects:` block enables anything that " \
+                   "reads them.",
+          fires_when: [
+            "The project's own `signature_paths:` RBS carries a `%a{pure}` or " \
+            "`%a{rigor:v1:effect …}` annotation.",
+            "`.rigor.yml` carries no `effects:` block, so effect collection never runs and nothing " \
+            "checks those annotations. One diagnostic per run, positioned at the first such " \
+            "annotation."
+          ],
+          does_not_fire_when: [
+            "An `effects:` block is present — including `effects: {}` and `effects: {check: false}`, " \
+            "both of which are deliberate answers to the question this asks.",
+            "No project-authored effect annotation exists.",
+            "The annotation is written only as an rbs-inline `# @rbs %a{…}` comment and this run " \
+            "did not already have an RBS environment at hand: detecting it would mean building one " \
+            "on a surface that must stay free, so the residual stays quiet rather than paying for " \
+            "an `:info`."
+          ],
+          suppression: "Add an `effects:` block (`effects: {}` enables collection), or " \
+                       "`disable: [\"effect.annotations-unchecked\"]` in `.rigor.yml` to keep the " \
+                       "annotations documentary.",
+          severity_authored: :info,
+          severity_by_profile: { lenient: :info, balanced: :info, strict: :info },
+          # Purely a presence report about the project's own files — nothing is inferred, so there is
+          # no proof to be wrong about.
+          evidence_tier: nil,
+          since: "0.3.4"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER,
           summary: "A comment uses a suppression marker Rigor does not recognise " \

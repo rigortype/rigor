@@ -35,7 +35,10 @@ module Rigor
           cache_store: cache_store,
           collect_stats: options.fetch(:stats),
           workers: resolve_workers(options, configuration),
-          buffer: buffer
+          buffer: buffer,
+          # ADR-103 #385 — absent from `doctor`'s option hash and every other reuser's, so it defaults off
+          # for them without each having to declare a key about a feature they do not surface.
+          no_tolerated_effects: options.fetch(:no_tolerated_effects, false)
         )
       end
 

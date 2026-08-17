@@ -13,13 +13,13 @@ module Rigor
     # for the slice-3 normative description.
     class MergeResult
       attr_reader :return_type, :truthy_facts, :falsey_facts, :post_return_facts,
-                  :mutations, :invalidations, :exceptional, :role_conformance,
+                  :mutations, :invalidations, :exceptional, :role_conformance, :effects,
                   :provenances, :conflicts
 
       # rubocop:disable Metrics/ParameterLists
       def initialize(return_type: nil, truthy_facts: [], falsey_facts: [],
                      post_return_facts: [], mutations: [], invalidations: [],
-                     exceptional: nil, role_conformance: [],
+                     exceptional: nil, role_conformance: [], effects: nil,
                      provenances: [], conflicts: [])
         # rubocop:enable Metrics/ParameterLists
         @return_type = return_type
@@ -30,6 +30,7 @@ module Rigor
         @invalidations = invalidations.dup.freeze
         @exceptional = exceptional
         @role_conformance = role_conformance.dup.freeze
+        @effects = effects
         @provenances = provenances.dup.freeze
         @conflicts = conflicts.dup.freeze
         freeze
@@ -42,7 +43,7 @@ module Rigor
       def empty?
         @return_type.nil? && @truthy_facts.empty? && @falsey_facts.empty? &&
           @post_return_facts.empty? && @mutations.empty? && @invalidations.empty? &&
-          @exceptional.nil? && @role_conformance.empty?
+          @exceptional.nil? && @role_conformance.empty? && @effects.nil?
       end
 
       def to_h
@@ -55,6 +56,7 @@ module Rigor
           "invalidations" => invalidations,
           "exceptional" => exceptional,
           "role_conformance" => role_conformance,
+          "effects" => effects,
           "provenances" => provenances.map { |p| p.respond_to?(:to_h) ? p.to_h : p },
           "conflicts" => conflicts.map(&:to_h)
         }

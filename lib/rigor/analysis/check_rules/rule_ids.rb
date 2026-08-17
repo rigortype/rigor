@@ -44,6 +44,28 @@ module Rigor
       # return, used in value context. Authored `:warning`, resolved `:off` by every profile and promoted to
       # `:warning` only by the `use-of-void-value` bleeding-edge feature.
       RULE_VALUE_USE_VOID = "static.value-use.void"
+      # ADR-103 WD8 / #383 — the first `effect.*` id: a method whose PROVEN effect labels are not
+      # subsumed by the envelope its author declared (`%a{pure}` / `%a{rigor:v1:effect ...}`). Opt-in
+      # twice over — the `effects:` block enables collection, and the envelope is the author's own
+      # directive — so it is never unsolicited.
+      RULE_EFFECT_ENVELOPE_EXCEEDED = "effect.envelope-exceeded"
+      # ADR-103 WD1 / #384 — the paired vocabulary diagnostic. An unknown label degrades the whole tag
+      # to ⊤, which is silent by construction; this is what keeps that fail-open reading honest. It
+      # fires only where label intent is evident (`Effects::LabelIntent`'s four signals), so a project
+      # opening its own vocabulary is never nagged, and it is gated by the same `effects.check` switch
+      # as its sibling: opting into envelope enforcement is exactly what turns on the diagnostic that
+      # says an envelope stopped enforcing.
+      RULE_EFFECT_UNKNOWN_LABEL = "effect.unknown-label"
+      # ADR-103 WD1 / WD14 / #386 — the inherited-bound reading. An override performs, or itself
+      # declares, an effect the envelope written on the method it overrides does not admit. Implementations
+      # may be purer than the bound they inherit, never less pure; both-sides-authored in the ADR-35 sense,
+      # so nothing fires unless someone wrote an envelope on the ancestor.
+      RULE_EFFECT_LISKOV_WIDENED = "effect.liskov-widened"
+      # ADR-103 WD13 commitment 1 / #384 — the residual. A project whose RBS carries `%a{pure}` /
+      # `%a{rigor:v1:effect …}` but no `effects:` block gets ONE `:info` per run saying so. An
+      # annotation must never turn collection on by itself (that would be a project-wide cost cliff
+      # nobody asked for), and it must equally never be silently inert.
+      RULE_EFFECT_ANNOTATIONS_UNCHECKED = "effect.annotations-unchecked"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -72,7 +94,11 @@ module Rigor
         RULE_SUPPRESSION_UNKNOWN_RULE,
         RULE_SUPPRESSION_EMPTY,
         RULE_SUPPRESSION_UNKNOWN_MARKER,
-        RULE_VALUE_USE_VOID
+        RULE_VALUE_USE_VOID,
+        RULE_EFFECT_ENVELOPE_EXCEEDED,
+        RULE_EFFECT_LISKOV_WIDENED,
+        RULE_EFFECT_UNKNOWN_LABEL,
+        RULE_EFFECT_ANNOTATIONS_UNCHECKED
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with
@@ -102,7 +128,7 @@ module Rigor
 
       # Family wildcard — a `<family>` token in a suppression comment or `disable:` list disables every rule
       # whose canonical id starts with `<family>.`. Per ADR-8 § "1".
-      RULE_FAMILIES = %w[call flow assert dump def suppression static].freeze
+      RULE_FAMILIES = %w[call flow assert dump def suppression static effect].freeze
 
       # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
       # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,

@@ -14,8 +14,12 @@ module Rigor
     def self.load: (?String? path) -> Configuration
     def self.discover: () -> String?
     def self.load_with_includes: (String path, ?visited: Set[String]) -> Hash[String, untyped]
-    def initialize: (?Hash[String, untyped] data) -> void
+    def initialize: (?Hash[String, untyped] data, ?bool effects_key_present) -> void
     def to_h: () -> Hash[String, untyped]
+    # ADR-103 WD13 — the `effects:` block, nil when the key was absent. Presence is the opt-in.
+    attr_reader effects: Hash[String, untyped]?
+    def effects_enabled?: () -> bool
+    def with_effects_enabled: () -> Rigor::Configuration
   end
 
   class CLI
@@ -125,6 +129,18 @@ module Rigor
       def analysis_file_set: (?Array[String] paths) -> Array[String]
       def file_dependents: () -> Hash[String, untyped]
       def prepare_project_scan: (?paths: Array[String]) -> untyped
+      # ADR-103 — the propagated effect graph and the merged per-file collections behind it. A report
+      # surface: never a diagnostic, empty when the configuration carries no `effects:` block. Typed
+      # `untyped` for the same reason `cache_store` is — `Rigor::Effects` is not sig-covered yet
+      # (`spec/rigor/public_api_drift_spec.rb`), and a named reference would raise `RBS::UnknownTypeName`.
+      def effect_table: () -> untyped
+      def effect_collection: () -> untyped
+      # #381 — `{ "Class#m" => [path] }`, which the snapshot's `reach:` globs match against. Same
+      # `untyped` reasoning as its two siblings above.
+      def effect_sources: () -> untyped
+      # #387 — the loaded plugins' compiled effect contributions, read by `rigor effects` so the snapshot's
+      # vocabulary is the one the collection window scanned under. Same `untyped` reasoning again.
+      def effect_plugin_facts: () -> untyped
     end
   end
 end

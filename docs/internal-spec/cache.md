@@ -291,7 +291,8 @@ hands off to the full path, which records its own.
 ### Engine identity in a computed-value key
 
 A cache whose value is a function of what the analyzer *computes* —
-`analysis.run-diagnostics`, `protection.mutation-file-result`, and the
+`analysis.run-diagnostics`, `analysis.run-effects`,
+`protection.mutation-file-result`, and the
 `IncrementalSnapshot` — MUST key on the engine's source, not only on
 `Rigor::VERSION`. The version pins the bytes for a gem installed from
 RubyGems and for nothing else, so on an edited working tree a warm run
@@ -514,8 +515,10 @@ passes, in order:
    judgement: `RbsCacheProducer.generation_cap` (2, inherited by every
    `rbs.*` subclass), `Analysis::RunCacheKey::GENERATION_CAP` (16 for
    `analysis.run-diagnostics`, one live generation per analyzed-path
-   SET), and `Plugin::Base.producer generation_cap:` (defaulting to
-   `:unbounded`) for plugin-side producers. The per-file
+   SET) and its `EFFECTS_GENERATION_CAP` twin (`analysis.run-effects`,
+   the ADR-103 effects sidecar — one generation per analyzed-path SET ×
+   effects identity), and `Plugin::Base.producer generation_cap:`
+   (defaulting to `:unbounded`) for plugin-side producers. The per-file
    `plugin.source_rbs_synthesizer` producer declares `:unbounded`.
 
    The Store records each declaration against the producer id as the
@@ -573,7 +576,7 @@ full run, so the snapshot can never wedge or stale an analysis.
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`
    is re-analysed and the rest served from `Payload#cache`.
 
-### `Payload` (current `SCHEMA = 10`)
+### `Payload` (current `SCHEMA = 12`)
 
 ```
 Payload :: Data[
@@ -583,7 +586,9 @@ Payload :: Data[
   missing, class_decls,                       # negative (unresolved) edges + per-file declared-class sets
   seed_bundles,                               # ADR-85 per-file pre-pass contribution (plain data + def-node handles)
   plugin_fact_digest,                         # ADR-88 plugin-fact surface fingerprint (see below)
-  return_summaries                            # ADR-89 observed-key return summaries (see below)
+  return_summaries,                           # ADR-89 observed-key return summaries (see below)
+  param_table,                                # ADR-67 WD6c the inferred-param seed table the run analysed under
+  effect_collections, effects_identity        # ADR-103 the effects sidecar and its own identity (see below)
 ]
 ```
 
@@ -591,8 +596,9 @@ Schema history worth pinning: `6` stored the seed bundles as
 `(node_id, name, fingerprint)` def-node handles (ADR-85); `8` added each
 bundle's comment-stripped `code_fingerprint` for the B1 comment-only gate;
 `9` added `plugin_fact_digest` (ADR-88); `10` added `return_summaries`
-(ADR-89). A blob from an older schema mismatches the `SCHEMA` gate and loads
-as `nil` — a clean cold rebuild, never a migration.
+(ADR-89); `11` added `param_table` (ADR-67 WD6c); `12` added the effects
+sidecar (ADR-103 WD13). A blob from an older schema mismatches the `SCHEMA`
+gate and loads as `nil` — a clean cold rebuild, never a migration.
 
 ### `plugin_fact_digest` — plugin-fact soundness ([ADR-88](../adr/88-incremental-plugin-fact-soundness.md))
 
@@ -637,6 +643,30 @@ Two persisted summaries prove "nothing changed":
 Both gates are premised on a `plugin_fact_digest` match for the run (asserted
 in code, not assumed); `--verify-incremental` is the standing byte-identity
 backstop for the whole mechanism.
+
+### `effect_collections` / `effects_identity` — the effects sidecar ([ADR-103](../adr/103-effect-labels.md) WD13)
+
+`effect_collections` maps each analyzed path to the `Rigor::Effects::FileCollection`
+that file contributed — the *direct* summaries and unresolved call edges, never the
+propagated table, which is re-run over the merged whole on every run (a leaf's summary
+reaches every caller, so a stored closure would have to be invalidated by all of them).
+A recheck re-collects only the changed closure and folds the rest back from here.
+
+`effects_identity` is a **second gate**, independent of the global fingerprint above,
+and it exists because the `effects:` block is deliberately absent from
+`configuration.to_h`: turning collection on must invalidate no diagnostics, so the
+global fingerprint cannot be what tells a run whether the persisted summaries mean what
+its vocabulary and catalogue say they mean. It stores `Rigor::Effects::Identity.digest`
+— the vocabulary version, the catalogue identity (`Catalog#identity`: schema + a content
+digest of `data/effects/core.yml`) and the `effects:` block digest — as of the run that
+wrote it, and `nil` when collection was off. A mismatch drops the collections **only**;
+the diagnostics half of the payload is untouched, and the session then takes a full
+baseline, because a recheck re-collects only the closure and a partial collection cannot
+be closed into a whole-project fixpoint. A run with collection off keeps no collections,
+writes `{}` / `nil`, and behaves exactly as it did before the slot existed.
+
+The contract in full — both slots, the two identities, and what each invalidates — is
+[`effect-summaries.md` § Caching](effect-summaries.md).
 
 ## Bundled RBS producer contract
 

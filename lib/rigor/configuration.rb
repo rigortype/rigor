@@ -6,6 +6,9 @@ require_relative "bleeding_edge"
 require_relative "ci_detector"
 require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
+require_relative "effects/entry_points"
+require_relative "effects/label"
+require_relative "effects/method_key"
 
 module Rigor
   class Configuration # rubocop:disable Metrics/ClassLength
@@ -21,6 +24,15 @@ module Rigor
     # Back-compat alias. Keep here so external callers that read `Configuration::DEFAULT_PATH` for help text /
     # fixture paths still work; the discovery list is the canonical source.
     DEFAULT_PATH = DISCOVERY_ORDER.first
+
+    # ADR-103 WD7 — where `rigor effects update` writes when `effects.snapshot.path:` is unset. Public
+    # because the schema pins its own `default` against it.
+    DEFAULT_EFFECTS_SNAPSHOT_PATH = ".rigor-effects.yml"
+
+    # ADR-103 WD15 — the {BleedingEdge::FEATURES} id that, when adopted, makes a loaded file with no
+    # `effects:` key behave as `effects: {}`. See {#coerce_effects}.
+    EFFECTS_ON_BY_DEFAULT_FEATURE_ID = "effects-on-by-default"
+    private_constant :EFFECTS_ON_BY_DEFAULT_FEATURE_ID
 
     # Built-in exclusion patterns appended to `exclude:` so vendored dependencies, Bundler artefacts, and
     # JavaScript node_modules are never analysed by accident when a directory glob expands. Users cannot
@@ -65,6 +77,24 @@ module Rigor
       # lifted): the incremental session recomputes the table each run and diffs it against its snapshot,
       # re-checking any callee whose seeds moved.
       "parameter_inference" => false,
+      # ADR-103 WD13 — the effect-labels opt-in, and the ONLY thing that turns effect collection on
+      # besides running `rigor effects`. **Presence is the switch**: `effects: {}` — or the bare key, which
+      # YAML parses as nil — enables collection with every sub-key at its default, because an annotation in
+      # a project's RBS must never create a project-wide cost cliff (that case earns a `:info` residual
+      # instead, #384).
+      #
+      # The default is `false` rather than `nil` precisely because presence is the switch and
+      # `Configuration.load` merges these DEFAULTS UNDER the loaded file: a `nil` default would be
+      # indistinguishable from a user's bare `effects:` key and would turn collection on for every project
+      # in existence. `false` is also the explicit-disable form a `.rigor.yml` uses to override an upstream
+      # `.rigor.dist.yml`'s `effects:` block — the same shape `baseline:` uses.
+      #
+      # The sub-keys are declared in `schemas/rigor-config.schema.json`. `check` (#383,
+      # {#effects_check?}), `snapshot.{path,reach,gate}`, `tolerated` (#381) and the policy trio
+      # `labels` / `attribution` / `envelopes` (#385, {#coerce_effects_policy}) are read; `views` lands
+      # with the slice that implements it (#390). Reserving a sub-key's shape before a reader exists is
+      # the same discipline the schema applies to a sibling implementation's namespace (ADR-99).
+      "effects" => false,
       "cache" => {
         "path" => ".rigor/cache",
         # LRU eviction cap in bytes (ADR-54 WD3). The least-recently-used entries are removed at the end of a
@@ -211,7 +241,27 @@ module Rigor
                 :dependencies, :parallel_workers,
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
                 :rbs_collection_lockfile, :rbs_collection_auto_detect,
-                :pre_eval, :baseline_path
+                :pre_eval, :baseline_path, :effects,
+                :effects_snapshot_path, :effects_snapshot_reach, :effects_snapshot_gate, :effects_tolerated,
+                :effects_labels, :effects_attribution, :effects_envelopes
+
+    # ADR-103 WD13 — whether effect collection runs. True exactly when the loaded configuration carried an
+    # `effects:` block, whatever its body; `rigor effects` enables it for its own run by loading an
+    # implicit `effects: {}` instead of by consulting anything else. Nothing else — no annotation, no
+    # plugin, no severity profile — can turn collection on.
+    def effects_enabled?
+      !@effects.nil?
+    end
+
+    # ADR-103 WD14 / #383 — whether author-declared effect envelopes (`%a{pure}`,
+    # `%a{rigor:v1:effect …}`) are checked against the collected summaries, surfacing
+    # `effect.envelope-exceeded`. Defaults to **true when the `effects:` block is present**: the block is
+    # the opt-in, and a project that asked for effects asked for its own declarations to hold. An explicit
+    # `check: false` disables the diagnostic and leaves collection — and therefore `rigor effects` and the
+    # snapshot — untouched. Always false without the block, so an annotation alone changes nothing.
+    def effects_check?
+      @effects_check
+    end
 
     # Loads a configuration file.
     #
@@ -226,13 +276,19 @@ module Rigor
     # [PHPStan](https://phpstan.org/config-reference#paths).
     def self.load(path = nil)
       resolved = path || discover
-      data =
-        if resolved.nil? || !File.exist?(resolved)
-          DEFAULTS
-        else
-          DEFAULTS.merge(load_with_includes(resolved))
-        end
-      new(autowire_default_plugins(data))
+      if resolved.nil? || !File.exist?(resolved)
+        data = DEFAULTS
+        effects_key_present = false
+      else
+        # ADR-103 WD15 — captured from the RAW, pre-`DEFAULTS.merge` file (+ its `includes:` chain) because
+        # `DEFAULTS` itself carries an `"effects" => false` entry: once merged, "the file never wrote
+        # `effects:`" and "the file wrote `effects: false`" collapse to the same value and become
+        # indistinguishable to {#initialize}. This is the only place that distinction still exists.
+        raw = load_with_includes(resolved)
+        effects_key_present = raw.key?("effects")
+        data = DEFAULTS.merge(raw)
+      end
+      new(autowire_default_plugins(data), effects_key_present)
     end
 
     # ADR-93 WD2 — the one bundled plugin default-wired without a `plugins:` entry. `rigor-rbs-inline` is the
@@ -394,7 +450,17 @@ module Rigor
                          :merge_value, :merge_dependencies_hash
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-    def initialize(data = DEFAULTS)
+    #
+    # @param effects_key_present [Boolean] ADR-103 WD15 — whether the file this `data` came from carried an
+    #   `effects:` key at all, independent of its value. Defaults to `data.key?("effects")`, which is the
+    #   right answer for a caller that passes a raw (non-`DEFAULTS`-merged) hash directly — the common shape
+    #   in specs — but is always `true` once `data` has been through `DEFAULTS.merge`, because `DEFAULTS`
+    #   itself carries the key; {.load} therefore computes this from the pre-merge file and passes it
+    #   explicitly. See {#coerce_effects}. **Positional, deliberately not a keyword**: a bare (unbraced)
+    #   `"key" => value` hash literal — this class's usual call shape, all over the spec suite — is coerced
+    #   into keyword arguments by Ruby whenever the method declares ANY keyword parameter, which would break
+    #   every `Configuration.new("some_key" => value)` call site with an "unknown keyword" `ArgumentError`.
+    def initialize(data = DEFAULTS, effects_key_present = data.key?("effects"))
       # Record before the per-key fetches below discard the evidence. Top level only, deliberately —
       # see {ConfigAudit.unknown_key_warnings} for why a nested check cannot key on DEFAULTS.
       @unknown_keys = (data.keys.map(&:to_s) - KNOWN_KEYS).sort.freeze
@@ -423,6 +489,18 @@ module Rigor
       # ADR-67 WD6a — resolve to a strict Boolean so a truthy non-`true` value (e.g. a stray String) does not
       # silently enable the gate; only the literal `true` activates the check-walk collector pre-pass.
       @parameter_inference = data.fetch("parameter_inference", DEFAULTS.fetch("parameter_inference")) == true
+      # Resolved before `@effects` — ADR-103 WD15's "effects-on-by-default" reads {#bleeding_edge_active?},
+      # which reads `@bleeding_edge_active_ids`.
+      @bleeding_edge = coerce_bleeding_edge(
+        data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge"))
+      )
+      @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
+      @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
+      # ADR-103 WD13 — presence, not truthiness: `effects:` written with no body parses as nil and still
+      # means "on", so the key's presence in the loaded data is what {#effects_enabled?} reads.
+      @effects = coerce_effects(data, effects_key_present: effects_key_present)
+      coerce_effects_snapshot(@effects)
+      coerce_effects_policy(@effects)
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
@@ -436,11 +514,6 @@ module Rigor
       @severity_overrides = coerce_severity_overrides(
         data.fetch("severity_overrides", DEFAULTS.fetch("severity_overrides"))
       )
-      @bleeding_edge = coerce_bleeding_edge(
-        data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge"))
-      )
-      @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
-      @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
       @dependencies = Dependencies.from_h(
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
@@ -576,7 +649,216 @@ module Rigor
       copy.freeze
     end
 
+    # ADR-103 WD14 — the ad-hoc opt-in `rigor effects` uses when the project's configuration carries no
+    # `effects:` block: a sibling Configuration with an implicit empty block, every other field shared.
+    # A configuration that already enables effects is returned unchanged, so a project's own settings
+    # always win over the implicit ones.
+    #
+    # Same `dup` + re-`freeze` shape as {#with_bleeding_edge}: every other ivar is the receiver's deeply
+    # frozen value, safe to share read-only, and the result stays `Ractor.shareable?` for the worker path.
+    def with_effects_enabled
+      return self if effects_enabled?
+
+      copy = dup
+      copy.instance_variable_set(:@effects, {}.freeze)
+      # The implicit block defaults like a written one. `rigor effects` emits no diagnostic either way,
+      # but the two configurations must not differ in a field a later reader could branch on.
+      copy.instance_variable_set(:@effects_check, true)
+      copy.freeze
+    end
+
     private
+
+    # ADR-103 WD13 — the `effects:` block, or nil when the key is absent or explicitly `false`. A
+    # present-but-empty key (`effects:` alone, which YAML parses as nil) and `effects: {}` are the same
+    # thing: collection on, every sub-key defaulted. A non-Hash body is normalised to `{}` rather than
+    # rejected — the sub-keys have no reader yet, so there is nothing a malformed body could break, and
+    # tier 1 (the schema) is where its shape is answered.
+    #
+    # ADR-103 WD15 — a loaded file that carries no `effects:` key AT ALL (`effects_key_present == false`,
+    # so `value` can only be the `false` DEFAULTS fallback here, never a user's own explicit `false`) behaves
+    # as `effects: {}` when the "effects-on-by-default" bleeding-edge feature is adopted. An explicit
+    # `effects: false` — `effects_key_present == true` — always stays off regardless of the feature, and a
+    # written block always wins outright: the feature can only fill an *absence*.
+    def coerce_effects(data, effects_key_present:)
+      value = data.fetch("effects", false)
+      return {}.freeze if value == false && !effects_key_present && effects_forced_on_by_bleeding_edge?
+      return nil if value == false
+
+      (value.is_a?(Hash) ? value : {}).freeze
+    end
+
+    # ADR-103 WD15 — guarded by {BleedingEdge.known_id?} rather than calling {#bleeding_edge_active?}
+    # directly: that predicate RAISES for an id neither queued nor graduated, which is correct for a
+    # contributor's typo against the registry in this same checkout, but a spec that stubs
+    # `BleedingEdge::FEATURES` down to an unrelated single feature (a common pattern for isolating the
+    # selector plumbing — see `spec/rigor/configuration_spec.rb`) must not have Configuration construction
+    # explode merely because the id this internal default-application reads is not the one under test.
+    def effects_forced_on_by_bleeding_edge?
+      BleedingEdge.known_id?(EFFECTS_ON_BY_DEFAULT_FEATURE_ID) &&
+        bleeding_edge_active?(EFFECTS_ON_BY_DEFAULT_FEATURE_ID)
+    end
+
+    # ADR-103 WD7 / WD14 — the snapshot keys and the minimal `tolerated:` policy list (#381).
+    #
+    # Every key resolves to its default when `effects:` is absent, so a consumer reads one uniform surface
+    # and never has to ask whether the block was there. The values are read by `rigor effects update` /
+    # `check` / `diff` / `explain` and by nothing on `rigor check`'s path.
+    #
+    # Validation is **tier 2** (`ArgumentError`, the run stops), because each of these is a value the
+    # snapshot commands cannot proceed on: an unknown `gate:` would silently pick a semantics, an unknown
+    # preset name would silently match no file, and a malformed label would silently tolerate nothing.
+    # A label that is well-formed but unknown to the *registry* is deliberately NOT rejected here — that is
+    # `effect.unknown-label`'s job (#384), and it fails open.
+    def coerce_effects_snapshot(effects)
+      @effects_check = coerce_effects_check?(effects)
+      snapshot = effects&.fetch("snapshot", nil)
+      snapshot = {} unless snapshot.is_a?(Hash)
+      @effects_snapshot_path = (snapshot.fetch("path", nil) || DEFAULT_EFFECTS_SNAPSHOT_PATH).to_s.freeze
+      @effects_snapshot_reach = coerce_effects_reach(snapshot.fetch("reach", nil))
+      @effects_snapshot_gate = coerce_effects_gate(snapshot.fetch("gate", nil))
+      @effects_tolerated = coerce_effects_tolerated(effects&.fetch("tolerated", nil))
+    end
+
+    # `effects.check:` — true by default under a present block, and never true without one. Only an
+    # explicit `false` turns it off; any other value is normalised to true rather than rejected, because a
+    # switch whose only two readings are "check" and "do not check" has nothing a tier-2 error would add.
+    def coerce_effects_check?(effects)
+      return false if effects.nil?
+
+      effects.fetch("check", true) != false
+    end
+
+    VALID_EFFECTS_GATES = %i[symmetric additions].freeze
+    private_constant :VALID_EFFECTS_GATES
+
+    def coerce_effects_gate(value)
+      return :symmetric if value.nil?
+
+      gate = value.to_s.to_sym
+      unless VALID_EFFECTS_GATES.include?(gate)
+        raise ArgumentError,
+              "effects.snapshot.gate must be one of #{VALID_EFFECTS_GATES.inspect}, got #{value.inspect}"
+      end
+
+      gate
+    end
+
+    # Entry-point globs and preset names, kept as written.
+    #
+    # **Shape only.** A preset is *named by a plugin* (#387; ADR-103 WD14) and plugins load from this very
+    # configuration, so at this point no preset is registered yet and asking `EntryPoints.known?` would
+    # reject `reach: [rails]` for every project that uses one. The existence check therefore lives where
+    # the snapshot expands `reach:` ({Effects::Snapshot.expand_reach}), which runs after plugin load and
+    # raises there — the same error, at the first moment it can be right.
+    def coerce_effects_reach(value)
+      entries = Array(value).map(&:to_s)
+      entries.each do |entry|
+        next if Effects::EntryPoints.glob?(entry) || Effects::EntryPoints.name?(entry)
+
+        raise ArgumentError,
+              "effects.snapshot.reach entry is neither a file glob nor a well-formed entry-point preset " \
+              "name: #{entry.inspect} (a preset name is #{Effects::EntryPoints::NAME_PATTERN.inspect}; " \
+              "anything carrying a path or glob character is treated as a file glob instead)"
+      end
+      entries.uniq.freeze
+    end
+
+    # Shape validation only: the label grammar of `docs/type-specification/effect-labels.md`.
+    def coerce_effects_tolerated(value)
+      labels = Array(value).map(&:to_s)
+      labels.each do |label|
+        raise ArgumentError, "effects.tolerated is not a well-formed effect label: #{label.inspect}" unless
+          Effects::Label.valid?(label)
+      end
+      labels.uniq.sort.freeze
+    end
+
+    # ADR-103 WD5 / WD6 / #385 — the three policy keys: the project's own vocabulary (`labels:`), its
+    # attribution table for code Rigor does not analyse (`attribution:`), and its envelopes by convention
+    # (`envelopes:`).
+    #
+    # Validation is **tier 2** for shape and tier 2 only. A label whose SPELLING is malformed, an entry
+    # naming neither `match:` nor `namespace:` (or both), and an attribution key that is not a method key
+    # each stop the run, because none of them has a reading the loader could pick. A label that is
+    # well-formed but unknown to the *registry* is deliberately fine here: it fails open (⊤ for an
+    # envelope, an unregistered meaning for an attribution) and surfaces as `effect.unknown-label`.
+    def coerce_effects_policy(effects)
+      @effects_labels = coerce_effects_labels(effects&.fetch("labels", nil))
+      @effects_attribution = coerce_effects_attribution(effects&.fetch("attribution", nil))
+      @effects_envelopes = coerce_effects_envelopes(effects&.fetch("envelopes", nil))
+    end
+
+    NO_ATTRIBUTION = {}.freeze
+    private_constant :NO_ATTRIBUTION
+
+    def coerce_effects_labels(value)
+      labels = Array(value).map(&:to_s)
+      labels.each do |label|
+        raise ArgumentError, "effects.labels is not a well-formed effect label: #{label.inspect}" unless
+          Effects::Label.valid?(label)
+      end
+      labels.uniq.sort.freeze
+    end
+
+    # `{ "Net::HTTP.get" => ["io.net.http"] }` — a method key exactly as the symbol tables spell one
+    # (`Owner#instance`, `Owner.singleton`), mapped to the labels a call to it contributes.
+    def coerce_effects_attribution(value)
+      return NO_ATTRIBUTION unless value.is_a?(Hash)
+
+      value.each_with_object({}) do |(key, labels), out|
+        name = key.to_s
+        unless Effects::MethodKey.valid?(name)
+          raise ArgumentError,
+                "effects.attribution key is not a method key (`Owner#method` / `Owner.method`): #{name.inspect}"
+        end
+
+        out[name] = coerce_effect_label_list(Array(labels), "effects.attribution[#{name.inspect}]")
+      end.freeze
+    end
+
+    # `[{ match: | namespace:, effect: [...] }]`. Exactly one selector per entry: an entry naming both
+    # would need a precedence rule between two selectors of the same entry, and one naming neither selects
+    # every class in the project, which is never what an author meant to write.
+    def coerce_effects_envelopes(value)
+      Array(value).each_with_index.map { |entry, index| coerce_effects_envelope(entry, index) }.freeze
+    end
+
+    def coerce_effects_envelope(entry, index)
+      where = "effects.envelopes[#{index}]"
+      raise ArgumentError, "#{where} is not a mapping: #{entry.inspect}" unless entry.is_a?(Hash)
+
+      match = coerce_effects_envelope_selector(entry["match"], "#{where}.match")
+      namespace = coerce_effects_envelope_selector(entry["namespace"], "#{where}.namespace")
+      if match.nil? == namespace.nil?
+        raise ArgumentError, "#{where} must name exactly one of `match:` (a path glob) or `namespace:` " \
+                             "(a constant glob), got #{match.nil? ? 'neither' : 'both'}"
+      end
+      unless entry.key?("effect")
+        raise ArgumentError, "#{where} has no `effect:` bound (write `effect: []` for the empty envelope)"
+      end
+
+      {
+        "match" => match, "namespace" => namespace,
+        "effect" => coerce_effect_label_list(Array(entry["effect"]), "#{where}.effect")
+      }.freeze
+    end
+
+    def coerce_effects_envelope_selector(value, where)
+      return nil if value.nil?
+
+      selector = value.to_s
+      raise ArgumentError, "#{where} is empty" if selector.strip.empty?
+
+      selector.freeze
+    end
+
+    def coerce_effect_label_list(labels, where)
+      labels.map(&:to_s).each do |label|
+        raise ArgumentError, "#{where} is not a well-formed effect label: #{label.inspect}" unless
+          Effects::Label.valid?(label)
+      end.uniq.sort.freeze
+    end
 
     # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is accepted as either a literal path (slice 1
     # contract) OR a `File.fnmatch?`-shaped glob pattern (`lib/core_ext/**/*.rb`). Glob meta characters (`*`,

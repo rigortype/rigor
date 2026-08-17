@@ -42,6 +42,7 @@ Ruby identifiers (`Rigor::Type`, `Rigor::Trinary`, `Rigor::Type::Combinator`, �
 | [diagnostic-shape.md](diagnostic-shape.md) | `Rigor::Analysis::Diagnostic` field shape — fields, the `from_node` / `from_location` position convention, `qualified_rule` derivation + provenance. Descriptive, not yet locked (see `public-api.md`). |
 | [baseline.md](baseline.md) | Baseline bucket-key derivation — the `[file, rule, message_regex]` tuple, path relativization, and the `:rule` / `:message` match modes (ADR-22). |
 | [worker-session.md](worker-session.md) | Worker-session protocol — `WorkerSession`'s shareable inputs, per-worker ownership boundary, and the sequential-equivalence contract behind parallel analysis (ADR-15). |
+| [effect-summaries.md](effect-summaries.md) | Effect-label collection and propagation (ADR-103) — the `effects:` activation switch and its cost when off, unit identity, what a scan may observe, per-file shape and merging, the post-pool fixpoint, and the fail-soft levels. |
 | [dependency-source-inference.md](dependency-source-inference.md) | Opt-in dependency-source inference (ADR-10) — `dependencies.source_inference:` configuration, walker / dispatcher tier, `DependencyEntry` cache slice, `dynamic.dependency-source.*` diagnostic family. |
 
 This list grows as further internal contracts stabilize.

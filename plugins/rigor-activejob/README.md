@@ -71,3 +71,45 @@ It was considered for the reachability report ([ADR-102](../../docs/adr/102-unus
 ## License
 
 MPL-2.0, matching the parent Rigor project.
+
+## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD4 / WD10)
+
+Inert unless the project has an `effects:` block.
+
+| Call | Labels |
+| --- | --- |
+| `Job.perform_later`, `perform_all_later`, `enqueue`, `enqueue_at` | *transport* (below) + `rails.activejob.enqueue` + `job.enqueue` |
+| `Job.set(wait: 1.hour).perform_later` | the same — `set` is a builder and returns a lazy `ConfiguredJob`; the enqueue is the effect |
+| `Job.perform_now` | an **edge** to `Job#perform`, no labels of its own |
+| `Job.perform_later` | **never** an edge to `perform` |
+
+### The transport is read from your configuration
+
+Argument-blind, an enqueue is bare `io` — true and useless for policy.
+But the adapter is declared once, and this plugin reads
+`config.active_job.queue_adapter` out of `config/application.rb` and
+`config/environments/*.rb`:
+
+| `queue_adapter` | Transport | Why |
+| --- | --- | --- |
+| `:solid_queue`, `:delayed_job`, `:good_job`, `:que`, `:queue_classic` | `io.db.write` | an `INSERT` into the queue table — a "no database on this path" envelope is right to object |
+| `:sidekiq`, `:resque`, `:sneakers`, `:shoryuken`, `:backburner` | `io.net` | a Redis / broker round trip |
+| `:async`, `:inline`, `:test`, `:sucker_punch` | — | in-process; the enqueue crosses no transport |
+| unread, unknown, or different per environment | `io` | the honest upper bound |
+
+`:inline` is the one setting that licenses an edge from
+`perform_later` to `perform`: Rails genuinely runs the job on the
+caller's stack there. The edge comes from your declaration, never from
+the plugin's opinion.
+
+### Why no edge into a deferred body
+
+`perform` runs in another process on another stack, so the caller's
+code does not contain it. "Attribution follows the code, not the
+clock" ([ADR-103](../../docs/adr/103-effect-labels.md) WD4) — the
+enqueue is the caller's effect, and the job body belongs to the job's
+own entry point (`reach: [rails-jobs]`).
+
+### Entry-point preset
+
+`rails-jobs` → `app/jobs/**/*.rb`.

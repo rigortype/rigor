@@ -1,0 +1,843 @@
+# Core effect catalogue — which core / stdlib methods colour a summary, and with what
+# (ADR-103 WD3 / WD14; the loader is `Rigor::Effects::Catalog`, the contract is
+# `docs/internal-spec/effect-summaries.md` § The catalogue).
+#
+# HAND-AUDITED, NOT GENERATED. The generated `data/builtins/ruby_core/*.yml` `purity:` facet is
+# **never** read here: it answers fold-safety in the C-dispatch sense — `Random#rand` is `leaf`,
+# `Array#push` is `leaf` — and reading it as effect freedom would be wrong in both directions.
+# What did seed this file, cited per row where it decided one: the `c_effects: mutate` / `block`
+# markers, the hand-audited `mutating_selectors:` blocklists in
+# `lib/rigor/inference/builtins/*_catalog.rb` (`random_catalog.rb` and `time_catalog.rb` in
+# particular), `MethodCatalog::NON_REPRODUCIBLE_SELECTORS`, `MutationWidening`'s mutator sets and
+# `ClosureEscapeAnalyzer`'s escape tables.
+#
+# Every row is an UPPER BOUND. An argument-blind row on a world-facing class is the parent label
+# (`IO#write` is `io`, not `io.fs.write` — the channel is a socket as readily as a file), and
+# precision returns only where the call's own literal arguments prove it (`narrow:`).
+#
+# Row grammar:
+#
+#   ClassName:
+#     posture: <key of `defaults:`>   # what an UNCATALOGUED method of this class contributes
+#     kind: object                    # the constant names an object, not a class (ENV, STDOUT, …)
+#     mutators: array | hash | string # the receiver-mutator set, BY REFERENCE — never re-spelt here
+#     why: "one line"
+#     methods:            { name: { effects: [...], narrow: handler, mutates: receiver, why: "…" } }
+#     singleton_methods:  { … }
+#
+# The `<<` selector is spelt `!!str "<<"`: a bare (even quoted) `<<` key is YAML's MERGE key, and
+# Psych would splice the row's own mapping into the enclosing `methods:` map instead of filing it
+# under the selector. The explicit string tag is the only spelling that survives `YAML.safe_load`.
+#
+# `effects:` is the row's labels, `[]` being an explicit ∅ — which is NOT the same as having no
+# row: an explicit ∅ says the catalogue knows the call and knows it contributes nothing, which is
+# what stops `Thread.new` from reading as an unresolved call while its block joins the enclosing
+# method by containment. `mutates: receiver` defers to `MutationClassifier`'s ownership judgment,
+# which taints `unknown-ownership` when it cannot classify.
+schema: 1
+vocabulary: 1
+
+# Per-class default postures. A class listed below contributes its posture's labels for any method
+# it does not row; a class absent from `classes:` contributes NOTHING and does not taint, which is
+# the tracer's behaviour and stays the reading for project and gem classes.
+#
+# Ruby's core surface is far larger than the frequency-seeded PHP set Steins catalogues, so a
+# per-class default is what keeps a bound honest without a row per method. `world` is the blunt
+# instrument; the narrower families exist because `io` is not an upper bound of `nondet.random`,
+# and a WRONG label is worse than a missing one (ADR-5).
+defaults:
+  value: []
+  world: [io]
+  fs: [io.fs]
+  net: [io.net]
+  ipc: [io.ipc]
+  http: [io.net.http]
+  process: [io.process]
+  signal: [io.signal]
+  global: [global]
+  nondet: [nondet]
+  ffi: [ffi]
+  stdout: [io.output.stdout]
+  stderr: [io.output.stderr]
+  stdin: [io.input]
+
+# Selectors present on EVERY receiver — `Object` / `BasicObject` / `Kernel`'s instance side — that
+# touch nothing. Consulted after a class's own rows and BEFORE its posture, so a world-facing
+# default does not colour `socket.class`, `io.respond_to?` or `handle.frozen?`. Without this the
+# posture would put a wrong label on the most-called methods in Ruby, and a wrong label is worse
+# than a missing one (ADR-5). A class's own row still wins over this list.
+universal:
+  - class
+  - singleton_class
+  - is_a?
+  - kind_of?
+  - instance_of?
+  - nil?
+  - respond_to?
+  - respond_to_missing?
+  - frozen?
+  - freeze
+  - dup
+  - clone
+  - itself
+  - tap
+  - then
+  - yield_self
+  - inspect
+  - to_s
+  - hash
+  - object_id
+  - __id__
+  - "=="
+  - "!="
+  - "==="
+  - "=~"
+  - "!"
+  - equal?
+  - eql?
+  - instance_variable_get
+  - instance_variable_defined?
+  - instance_variables
+  - methods
+  - public_methods
+  - method
+
+classes:
+  # ---------------------------------------------------------------------------------------------
+  # Kernel — the implicit-self surface.
+  #
+  # NOTE the posture rule's one carve-out, enforced in the collector rather than here: the `world`
+  # default is NOT applied to an implicit-self (or `self.`) call. Every unqualified call in a
+  # project body spells `Kernel#name`, and defaulting those to `io` would colour the whole world.
+  # An implicit-self call therefore matches a ROW or nothing.
+  # ---------------------------------------------------------------------------------------------
+  Kernel:
+    posture: world
+    # `Kernel.x` is the `module_function` copy, and what actually gets called that way is the
+    # conversion family (`Kernel.Float`, `Kernel.Integer`, `Kernel.Array`), which is pure. Measured:
+    # the `world` default on this side put `io` on `Kernel.Float` in Redmine. The instance-side rows
+    # are where Kernel's world-facing surface is spelt out, and they are not reached through `Kernel.`.
+    singleton_posture: value
+    why: "Kernel's own surface is the process boundary; a method of it that is not rowed touches the world"
+    methods:
+      puts: { effects: [io.output.stdout], why: "writes $stdout" }
+      print: { effects: [io.output.stdout], why: "writes $stdout" }
+      p: { effects: [io.output.stdout], why: "writes $stdout" }
+      pp: { effects: [io.output.stdout], why: "writes $stdout" }
+      printf: { effects: [io.output.stdout], why: "writes $stdout (the no-IO form)" }
+      putc: { effects: [io.output.stdout], why: "writes $stdout" }
+      display: { effects: [io.output.stdout], why: "Object#display writes $stdout" }
+      warn: { effects: [io.output.stderr], why: "writes $stderr" }
+      gets: { effects: [io.input], why: "reads ARGF or $stdin" }
+      readline: { effects: [io.input], why: "reads ARGF or $stdin" }
+      readlines: { effects: [io.input], why: "reads ARGF or $stdin to EOF" }
+      exit: { effects: [exit], why: "terminates the process (through an exception, but the process ends)" }
+      exit!: { effects: [exit], why: "terminates the process without running at_exit handlers" }
+      abort: { effects: [exit, io.output.stderr], why: "prints to $stderr, then terminates" }
+      at_exit: { effects: [], why: "registers a handler; the block joins this method by containment (WD4)" }
+      system: { effects: [io.process], why: "runs a subprocess" }
+      spawn: { effects: [io.process], why: "runs a subprocess" }
+      exec: { effects: [io.process], why: "replaces the process image" }
+      fork: { effects: [io.process], why: "forks the process; the block joins by containment" }
+      "`": { effects: [io.process], why: "backtick capture — the same origin the XStringNode construct records" }
+      trap: { effects: [io.signal], why: "installs a process-wide signal handler" }
+      require: { effects: [io.fs.read, mutate.static], why: "reads the load path AND installs constants and methods (WD14)" }
+      require_relative: { effects: [io.fs.read, mutate.static], why: "reads a file AND installs constants and methods (WD14)" }
+      load: { effects: [io.fs.read, mutate.static], why: "reads a file AND installs constants and methods (WD14)" }
+      autoload: { effects: [io.fs.read, mutate.static], why: "registers a deferred require; the registration itself is a static mutation" }
+      sleep: { effects: [io], why: "a syscall whose duration the world decides; no narrower label in the shared vocabulary fits (WD14)" }
+      rand: { effects: [nondet.random], why: "consumes the process-wide generator; `random_catalog.rb` blocklists :rand for the same reason" }
+      srand: { effects: [global.write, nondet.random], why: "re-seeds the process-wide generator AND consumes entropy for the old seed" }
+      open: { narrow: kernel_open, effects: [io], why: "a path, a `|command` pipe or a URI depending on the argument — the classic pipe-injection footgun, made visible" }
+      caller: { effects: [], why: "reads the frame stack, which is neither global state nor the world" }
+      raise: { effects: [], why: "control flow, not a label; the throw set lives in the flow-effect bundle (design note § 2)" }
+      catch: { effects: [], why: "control flow; the block joins by containment" }
+      throw: { effects: [], why: "control flow, not a label" }
+      loop: { effects: [], why: "control flow; the block joins by containment" }
+      lambda: { effects: [], why: "allocates a Proc; the literal's body joins by containment" }
+      proc: { effects: [], why: "allocates a Proc; the literal's body joins by containment" }
+      block_given?: { effects: [], why: "reads the frame's block slot" }
+      freeze: { effects: [], why: "Object#freeze — deliberately not a mutation; `MutationWidening::PURE_SELF_RETURNERS` lists it" }
+      dup: { effects: [], why: "allocates a copy; ADR-76's allocation witness, never a receiver mutation" }
+      clone: { effects: [], why: "allocates a copy; ADR-76's allocation witness, never a receiver mutation" }
+      format: { effects: [], why: "pure string formatting; only `printf` writes" }
+      sprintf: { effects: [], why: "pure string formatting" }
+
+  # ---------------------------------------------------------------------------------------------
+  # Object model. Every one of these installs or removes a method / constant at run time.
+  # ---------------------------------------------------------------------------------------------
+  Object:
+    posture: value
+    why: "the root of ordinary values; an uncatalogued Object method is not a world call"
+    methods:
+      instance_variable_set:
+        effects: []
+        mutates: receiver
+        why: "writes another object's state; the label follows the receiver's ownership (mutate.self on self, mutate.instance on a parameter, taint otherwise)"
+      instance_variable_get: { effects: [], why: "reads an ivar — object state, not global state" }
+      hash: { effects: [], why: "per-process SipHash salt makes it irreproducible (`NON_REPRODUCIBLE_SELECTORS`), but irreproducibility is a fold hazard, not an observable effect" }
+      object_id: { effects: [], why: "per-process identity — a fold hazard (`NON_REPRODUCIBLE_SELECTORS`), not an effect" }
+      __id__: { effects: [], why: "alias of object_id; same reading" }
+      extend: { effects: [mutate.static], why: "inserts a module into the receiver's singleton ancestry" }
+      define_singleton_method: { effects: [mutate.static], why: "installs a method on the receiver's singleton class" }
+      instance_variable_defined?: { effects: [], why: "reads object state" }
+
+  Module:
+    posture: value
+    why: "a Module's read surface (name, ancestors, instance_methods) is pure; only the object-model writers are rowed"
+    methods:
+      define_method: { effects: [mutate.static], why: "installs a method on the class object" }
+      alias_method: { effects: [mutate.static], why: "installs a method on the class object" }
+      remove_method: { effects: [mutate.static], why: "removes a method from the class object" }
+      undef_method: { effects: [mutate.static], why: "installs an undef entry on the class object" }
+      include: { effects: [mutate.static], why: "rewrites the class's ancestry" }
+      prepend: { effects: [mutate.static], why: "rewrites the class's ancestry" }
+      extend: { effects: [mutate.static], why: "rewrites the class object's singleton ancestry" }
+      attr_reader: { effects: [mutate.static], why: "installs a method on the class object" }
+      attr_writer: { effects: [mutate.static], why: "installs a method on the class object" }
+      attr_accessor: { effects: [mutate.static], why: "installs two methods on the class object" }
+      attr: { effects: [mutate.static], why: "installs a method on the class object" }
+      const_set: { effects: [mutate.static], why: "installs a constant" }
+      remove_const: { effects: [mutate.static], why: "removes a constant" }
+      const_get: { effects: [], why: "reads the constant table" }
+      private: { effects: [mutate.static], why: "changes a method's visibility on the class object" }
+      public: { effects: [mutate.static], why: "changes a method's visibility on the class object" }
+      protected: { effects: [mutate.static], why: "changes a method's visibility on the class object" }
+      private_constant: { effects: [mutate.static], why: "changes a constant's visibility on the class object" }
+      public_constant: { effects: [mutate.static], why: "changes a constant's visibility on the class object" }
+      module_function: { effects: [mutate.static], why: "installs singleton copies of the module's methods" }
+      private_class_method: { effects: [mutate.static], why: "changes a singleton method's visibility" }
+      public_class_method: { effects: [mutate.static], why: "changes a singleton method's visibility" }
+      refine: { effects: [mutate.static], why: "creates a refinement module and attaches it to the receiver" }
+      using: { effects: [mutate.static], why: "activates a refinement for the lexical scope" }
+      autoload: { effects: [io.fs.read, mutate.static], why: "Module#autoload — the same reading as Kernel#autoload (WD14)" }
+      module_eval: { effects: [mutate.static], why: "the block form is containment; the string form additionally taints (opaque-callable)" }
+      class_eval: { effects: [mutate.static], why: "the block form is containment; the string form additionally taints (opaque-callable)" }
+
+  Class:
+    posture: value
+    why: "Class inherits Module's surface; the rowed writers are Module's and resolve through it"
+
+  # ---------------------------------------------------------------------------------------------
+  # Value classes. Uncatalogued methods are ∅; the mutators come from the sets the widening rules
+  # and the mutation classifier already maintain, BY REFERENCE — this file never re-spells them,
+  # so the two cannot drift (a spec pins the agreement).
+  # ---------------------------------------------------------------------------------------------
+  Array:
+    posture: value
+    mutators: array
+    why: "a value class; mutation is ownership-classified from `MutationWidening::ARRAY_MUTATORS`"
+    methods:
+      shuffle: { effects: [nondet.random], why: "draws from the process-wide generator unless `random:` is given" }
+      shuffle!: { effects: [nondet.random], mutates: receiver, why: "draws from the process-wide generator AND reorders the receiver" }
+      sample: { effects: [nondet.random], why: "draws from the process-wide generator unless `random:` is given" }
+
+  Hash:
+    posture: value
+    mutators: hash
+    why: "a value class; mutation is ownership-classified from `MutationWidening::HASH_MUTATORS`"
+
+  String:
+    posture: value
+    mutators: string
+    why: "a value class; mutation is ownership-classified from `MutationClassifier::STRING_MUTATORS`"
+
+  Symbol: { posture: value, why: "immutable value class" }
+  Integer: { posture: value, why: "immutable value class" }
+  Float: { posture: value, why: "immutable value class" }
+  Rational: { posture: value, why: "immutable value class" }
+  Complex: { posture: value, why: "immutable value class" }
+  Numeric: { posture: value, why: "immutable value class" }
+  Range: { posture: value, why: "immutable value class" }
+  Regexp: { posture: value, why: "immutable value class; `$~` and friends are frame-local, not global state" }
+  MatchData: { posture: value, why: "immutable value class" }
+  NilClass: { posture: value, why: "immutable value class" }
+  TrueClass: { posture: value, why: "immutable value class" }
+  FalseClass: { posture: value, why: "immutable value class" }
+  Struct: { posture: value, why: "a value class; its writers are attribute writers, which the universal writer rule already classifies" }
+  Data: { posture: value, why: "an immutable value class" }
+  Comparable: { posture: value, why: "a mixin over value receivers" }
+  Enumerable: { posture: value, why: "a mixin over value receivers; a block argument joins by containment" }
+  Set:
+    posture: value
+    why: "a value class; its mutators are not in a shared set yet, so only the universal writer rule claims them"
+  Proc:
+    posture: value
+    why: "a value class — but `Proc#call` is deliberately NOT rowed: the collector defers `call` to the opaque-callable taint, which is the more specific reading of an uninspectable body"
+  Method:
+    posture: value
+    why: "same as Proc: `call` defers to the opaque-callable taint"
+  Enumerator: { posture: value, why: "a value class; the block a lazy enumerator carries joins by containment at its literal" }
+
+  # ---------------------------------------------------------------------------------------------
+  # Filesystem and streams. `io.fs.read` / `io.fs.write` where the direction is proven; `io.fs`
+  # where only the subsystem is; bare `io` where even the channel is open.
+  # ---------------------------------------------------------------------------------------------
+  IO:
+    posture: world
+    why: "an IO's channel is a file, a socket, a pipe or a terminal — the parent `io` is the only sound default"
+    methods:
+      write: { effects: [io], why: "the channel is unknown; a narrower label would be a guess" }
+      !!str "<<": { effects: [io], why: "stream write on an unknown channel" }
+      puts: { effects: [io], why: "stream write on an unknown channel" }
+      print: { effects: [io], why: "stream write on an unknown channel" }
+      printf: { effects: [io], why: "stream write on an unknown channel" }
+      read: { effects: [io], why: "stream read on an unknown channel" }
+      gets: { effects: [io], why: "stream read on an unknown channel" }
+      readlines: { effects: [io], why: "stream read on an unknown channel" }
+      each_line: { effects: [io], why: "stream read on an unknown channel; the block joins by containment" }
+      close: { effects: [io], why: "releases a descriptor the world owns" }
+      flush: { effects: [io], why: "forces the buffered write out" }
+      fileno: { effects: [], why: "reads a field of the IO object" }
+      path: { effects: [], why: "reads a field of the IO object" }
+      closed?: { effects: [], why: "reads a field of the IO object" }
+    singleton_methods:
+      read: { effects: [io.fs.read], why: "IO.read takes a path" }
+      binread: { effects: [io.fs.read], why: "IO.binread takes a path" }
+      readlines: { effects: [io.fs.read], why: "IO.readlines takes a path" }
+      foreach: { effects: [io.fs.read], why: "IO.foreach takes a path; the block joins by containment" }
+      write: { effects: [io.fs.write], why: "IO.write takes a path" }
+      binwrite: { effects: [io.fs.write], why: "IO.binwrite takes a path" }
+      popen: { effects: [io.process], why: "runs a subprocess and attaches to its stream" }
+      pipe: { effects: [io.ipc], why: "creates an anonymous in-process pipe pair" }
+      select: { effects: [io], why: "blocks on a set of descriptors of unknown kind" }
+      sysopen: { effects: [io.fs], why: "opens a path; the direction is the mode argument, which is not read here" }
+      copy_stream: { effects: [io], why: "both ends are of unknown kind" }
+
+  File:
+    posture: fs
+    why: "every File method that is not path algebra touches the filesystem; the direction is rowed where it is known"
+    methods:
+      path: { effects: [], why: "reads a field of the File object" }
+      to_path: { effects: [], why: "reads a field of the File object" }
+      write: { effects: [io.fs.write], why: "writes the open file" }
+      !!str "<<": { effects: [io.fs.write], why: "writes the open file" }
+      puts: { effects: [io.fs.write], why: "writes the open file" }
+      print: { effects: [io.fs.write], why: "writes the open file" }
+      read: { effects: [io.fs.read], why: "reads the open file" }
+      gets: { effects: [io.fs.read], why: "reads the open file" }
+      readlines: { effects: [io.fs.read], why: "reads the open file" }
+      each_line: { effects: [io.fs.read], why: "reads the open file; the block joins by containment" }
+      flock: { effects: [io.fs.write], why: "takes a lock other processes observe" }
+    singleton_methods:
+      open: { narrow: file_open, effects: [io.fs], why: "the mode literal decides the direction; a non-literal mode reads as the subsystem parent" }
+      read: { effects: [io.fs.read], why: "reads a path whole" }
+      binread: { effects: [io.fs.read], why: "reads a path whole" }
+      readlines: { effects: [io.fs.read], why: "reads a path whole" }
+      foreach: { effects: [io.fs.read], why: "reads a path; the block joins by containment" }
+      exist?: { effects: [io.fs.read], why: "stats a path" }
+      exists?: { effects: [io.fs.read], why: "deprecated alias of exist?" }
+      file?: { effects: [io.fs.read], why: "stats a path" }
+      directory?: { effects: [io.fs.read], why: "stats a path" }
+      readable?: { effects: [io.fs.read], why: "stats a path" }
+      writable?: { effects: [io.fs.read], why: "stats a path" }
+      executable?: { effects: [io.fs.read], why: "stats a path" }
+      symlink?: { effects: [io.fs.read], why: "lstats a path" }
+      size: { effects: [io.fs.read], why: "stats a path" }
+      size?: { effects: [io.fs.read], why: "stats a path" }
+      zero?: { effects: [io.fs.read], why: "stats a path" }
+      empty?: { effects: [io.fs.read], why: "stats a path" }
+      stat: { effects: [io.fs.read], why: "stats a path" }
+      lstat: { effects: [io.fs.read], why: "lstats a path" }
+      mtime: { effects: [io.fs.read], why: "stats a path" }
+      ctime: { effects: [io.fs.read], why: "stats a path" }
+      atime: { effects: [io.fs.read], why: "stats a path" }
+      birthtime: { effects: [io.fs.read], why: "stats a path" }
+      ftype: { effects: [io.fs.read], why: "stats a path" }
+      realpath: { effects: [io.fs.read], why: "resolves symlinks, which reads the filesystem" }
+      realdirpath: { effects: [io.fs.read], why: "resolves symlinks, which reads the filesystem" }
+      identical?: { effects: [io.fs.read], why: "stats both paths" }
+      write: { effects: [io.fs.write], why: "writes a path whole" }
+      binwrite: { effects: [io.fs.write], why: "writes a path whole" }
+      delete: { effects: [io.fs.write], why: "unlinks a path" }
+      unlink: { effects: [io.fs.write], why: "unlinks a path" }
+      rename: { effects: [io.fs.write], why: "renames a path" }
+      chmod: { effects: [io.fs.write], why: "changes a path's mode" }
+      chown: { effects: [io.fs.write], why: "changes a path's owner" }
+      utime: { effects: [io.fs.write], why: "changes a path's timestamps" }
+      truncate: { effects: [io.fs.write], why: "truncates a path" }
+      symlink: { effects: [io.fs.write], why: "creates a symlink" }
+      link: { effects: [io.fs.write], why: "creates a hard link" }
+      readlink: { effects: [io.fs.read], why: "reads a symlink's target" }
+      # Pure path algebra. These are the reason File is not blanket-`io.fs`: a `File.join` in a
+      # method body must not colour it.
+      join: { effects: [], why: "string algebra over separators; touches no filesystem" }
+      basename: { effects: [], why: "string algebra; touches no filesystem" }
+      dirname: { effects: [], why: "string algebra; touches no filesystem" }
+      extname: { effects: [], why: "string algebra; touches no filesystem" }
+      split: { effects: [], why: "string algebra; touches no filesystem" }
+      absolute_path?: { effects: [], why: "string algebra; touches no filesystem" }
+      fnmatch: { effects: [], why: "glob matching over a string; touches no filesystem" }
+      fnmatch?: { effects: [], why: "glob matching over a string; touches no filesystem" }
+      # `expand_path` consults the CWD (and `~`) when the path is relative, which is process-global
+      # state rather than a filesystem read.
+      expand_path: { effects: [global.read], why: "resolves against the process CWD and $HOME when the argument is relative" }
+
+  Dir:
+    posture: fs
+    why: "every Dir method touches the filesystem or the process CWD"
+    singleton_methods:
+      glob: { effects: [io.fs.read], why: "walks the filesystem" }
+      "[]": { effects: [io.fs.read], why: "Dir[] is glob" }
+      entries: { effects: [io.fs.read], why: "reads a directory" }
+      children: { effects: [io.fs.read], why: "reads a directory" }
+      each_child: { effects: [io.fs.read], why: "reads a directory; the block joins by containment" }
+      foreach: { effects: [io.fs.read], why: "reads a directory; the block joins by containment" }
+      exist?: { effects: [io.fs.read], why: "stats a path" }
+      empty?: { effects: [io.fs.read], why: "reads a directory" }
+      home: { effects: [global.read], why: "reads $HOME / the passwd entry — process-global state, not the filesystem tree" }
+      tmpdir: { effects: [global.read], why: "reads $TMPDIR and friends" }
+      mkdir: { effects: [io.fs.write], why: "creates a directory" }
+      rmdir: { effects: [io.fs.write], why: "removes a directory" }
+      delete: { effects: [io.fs.write], why: "removes a directory" }
+      unlink: { effects: [io.fs.write], why: "removes a directory" }
+      mktmpdir: { effects: [io.fs.write], why: "tmpdir's extension: creates a directory; the block joins by containment" }
+      pwd: { effects: [global.read], why: "reads the process CWD — global state, not a filesystem read" }
+      getwd: { effects: [global.read], why: "alias of pwd" }
+      chdir: { effects: [global.write], why: "writes the process CWD, which every later relative path observes" }
+
+  FileUtils:
+    posture: fs
+    why: "a filesystem toolbox; the writers dominate and are rowed, the few readers likewise"
+    singleton_methods:
+      cp: { effects: [io.fs.read, io.fs.write], why: "reads the source and writes the destination" }
+      cp_r: { effects: [io.fs.read, io.fs.write], why: "reads the source tree and writes the destination" }
+      copy: { effects: [io.fs.read, io.fs.write], why: "alias of cp" }
+      mv: { effects: [io.fs.write], why: "renames or copies-and-unlinks" }
+      move: { effects: [io.fs.write], why: "alias of mv" }
+      rm: { effects: [io.fs.write], why: "unlinks" }
+      rm_f: { effects: [io.fs.write], why: "unlinks, ignoring errors" }
+      rm_r: { effects: [io.fs.write], why: "unlinks a tree" }
+      rm_rf: { effects: [io.fs.write], why: "unlinks a tree, ignoring errors" }
+      rmtree: { effects: [io.fs.write], why: "unlinks a tree" }
+      remove_entry: { effects: [io.fs.write], why: "unlinks a tree" }
+      mkdir: { effects: [io.fs.write], why: "creates a directory" }
+      mkdir_p: { effects: [io.fs.write], why: "creates a directory chain" }
+      mkpath: { effects: [io.fs.write], why: "alias of mkdir_p" }
+      makedirs: { effects: [io.fs.write], why: "alias of mkdir_p" }
+      touch: { effects: [io.fs.write], why: "creates or restamps a path" }
+      ln: { effects: [io.fs.write], why: "creates a hard link" }
+      ln_s: { effects: [io.fs.write], why: "creates a symlink" }
+      ln_sf: { effects: [io.fs.write], why: "creates a symlink, replacing" }
+      install: { effects: [io.fs.read, io.fs.write], why: "copies and sets a mode" }
+      chmod: { effects: [io.fs.write], why: "changes a mode" }
+      chmod_R: { effects: [io.fs.write], why: "changes a tree's modes" }
+      chown: { effects: [io.fs.write], why: "changes an owner" }
+      chown_R: { effects: [io.fs.write], why: "changes a tree's owners" }
+      compare_file: { effects: [io.fs.read], why: "reads both paths" }
+      identical?: { effects: [io.fs.read], why: "reads both paths" }
+      pwd: { effects: [global.read], why: "reads the process CWD" }
+      cd: { effects: [global.write], why: "writes the process CWD" }
+
+  Tempfile:
+    posture: fs
+    why: "a Tempfile is a File over a path the library creates"
+    singleton_methods:
+      new: { effects: [io.fs.write], why: "creates a file under the temporary directory" }
+      create: { effects: [io.fs.write], why: "creates a file under the temporary directory; the block joins by containment" }
+      open: { effects: [io.fs.write], why: "creates a file under the temporary directory; the block joins by containment" }
+
+  Pathname:
+    posture: value
+    why: "Pathname's surface is mostly path algebra (`+`, `join`, `basename`, `to_s`); a blanket io.fs would colour string manipulation, so only the filesystem calls are rowed"
+    methods:
+      read: { effects: [io.fs.read], why: "reads the path whole" }
+      binread: { effects: [io.fs.read], why: "reads the path whole" }
+      readlines: { effects: [io.fs.read], why: "reads the path whole" }
+      each_line: { effects: [io.fs.read], why: "reads the path; the block joins by containment" }
+      exist?: { effects: [io.fs.read], why: "stats the path" }
+      file?: { effects: [io.fs.read], why: "stats the path" }
+      directory?: { effects: [io.fs.read], why: "stats the path" }
+      symlink?: { effects: [io.fs.read], why: "lstats the path" }
+      readable?: { effects: [io.fs.read], why: "stats the path" }
+      writable?: { effects: [io.fs.read], why: "stats the path" }
+      size: { effects: [io.fs.read], why: "stats the path" }
+      stat: { effects: [io.fs.read], why: "stats the path" }
+      lstat: { effects: [io.fs.read], why: "lstats the path" }
+      mtime: { effects: [io.fs.read], why: "stats the path" }
+      children: { effects: [io.fs.read], why: "reads the directory" }
+      entries: { effects: [io.fs.read], why: "reads the directory" }
+      glob: { effects: [io.fs.read], why: "walks the filesystem" }
+      find: { effects: [io.fs.read], why: "walks the filesystem; the block joins by containment" }
+      realpath: { effects: [io.fs.read], why: "resolves symlinks" }
+      realdirpath: { effects: [io.fs.read], why: "resolves symlinks" }
+      open: { narrow: pathname_open, effects: [io.fs], why: "Pathname#open forwards to File.open, with the path as the receiver — so the mode is the FIRST argument" }
+      write: { effects: [io.fs.write], why: "writes the path whole" }
+      binwrite: { effects: [io.fs.write], why: "writes the path whole" }
+      mkdir: { effects: [io.fs.write], why: "creates the directory" }
+      mkpath: { effects: [io.fs.write], why: "creates the directory chain" }
+      rmdir: { effects: [io.fs.write], why: "removes the directory" }
+      rmtree: { effects: [io.fs.write], why: "removes the tree" }
+      delete: { effects: [io.fs.write], why: "unlinks the path" }
+      unlink: { effects: [io.fs.write], why: "unlinks the path" }
+      rename: { effects: [io.fs.write], why: "renames the path" }
+      chmod: { effects: [io.fs.write], why: "changes the path's mode" }
+      touch: { effects: [io.fs.write], why: "creates or restamps the path" }
+      expand_path: { effects: [global.read], why: "resolves against the process CWD when the path is relative" }
+    singleton_methods:
+      pwd: { effects: [global.read], why: "reads the process CWD" }
+      getwd: { effects: [global.read], why: "reads the process CWD" }
+      glob: { effects: [io.fs.read], why: "walks the filesystem" }
+
+  StringIO:
+    posture: value
+    why: "an in-memory stream; nothing leaves the process, so its writes are receiver mutation rather than io"
+
+  # ---------------------------------------------------------------------------------------------
+  # Processes and signals.
+  # ---------------------------------------------------------------------------------------------
+  Process:
+    posture: process
+    why: "the process-control surface; an uncatalogued Process method acts on a process"
+    singleton_methods:
+      pid: { effects: [global.read], why: "reads process-global identity, spawns nothing" }
+      ppid: { effects: [global.read], why: "reads process-global identity" }
+      uid: { effects: [global.read], why: "reads the process credentials" }
+      gid: { effects: [global.read], why: "reads the process credentials" }
+      euid: { effects: [global.read], why: "reads the process credentials" }
+      egid: { effects: [global.read], why: "reads the process credentials" }
+      clock_gettime: { effects: [nondet.time], why: "reads a clock — the same axis Time.now is on" }
+      exit: { effects: [exit], why: "terminates the process" }
+      exit!: { effects: [exit], why: "terminates the process without handlers" }
+      abort: { effects: [exit, io.output.stderr], why: "prints to $stderr, then terminates" }
+      kill: { effects: [io.signal], why: "sends a signal to another process" }
+      fork: { effects: [io.process], why: "forks the process; the block joins by containment" }
+      spawn: { effects: [io.process], why: "runs a subprocess" }
+      wait: { effects: [io.process], why: "blocks on a child" }
+      wait2: { effects: [io.process], why: "blocks on a child" }
+      waitpid: { effects: [io.process], why: "blocks on a child" }
+      waitpid2: { effects: [io.process], why: "blocks on a child" }
+      daemon: { effects: [io.process, global.write], why: "forks, detaches and rewrites the CWD" }
+      setsid: { effects: [io.process], why: "changes the process's session" }
+      setproctitle: { effects: [global.write], why: "rewrites process-global state the OS shows" }
+      argv0: { effects: [global.read], why: "reads process-global state" }
+
+  Signal:
+    posture: signal
+    why: "the signal surface"
+    singleton_methods:
+      trap: { effects: [io.signal], why: "installs a process-wide handler; the block joins by containment" }
+      list: { effects: [], why: "returns a constant table" }
+      signame: { effects: [], why: "returns a name from a constant table" }
+
+  Open3:
+    posture: process
+    why: "every Open3 entry point runs a subprocess"
+
+  PTY:
+    posture: process
+    why: "allocates a pseudo-terminal and runs a subprocess on it"
+
+  # ---------------------------------------------------------------------------------------------
+  # Network.
+  # ---------------------------------------------------------------------------------------------
+  Socket: { posture: net, why: "the BSD socket surface" }
+  BasicSocket: { posture: net, why: "the shared socket surface" }
+  TCPSocket: { posture: net, why: "a TCP stream" }
+  TCPServer: { posture: net, why: "a listening TCP socket" }
+  UDPSocket: { posture: net, why: "a UDP socket" }
+  SOCKSSocket: { posture: net, why: "a proxied TCP stream" }
+  Addrinfo:
+    posture: net
+    why: "resolution touches the resolver; the pure accessors are rowed"
+    methods:
+      ip_address: { effects: [], why: "reads a field of the Addrinfo object" }
+      ip_port: { effects: [], why: "reads a field of the Addrinfo object" }
+      afamily: { effects: [], why: "reads a field of the Addrinfo object" }
+      to_s: { effects: [], why: "reads a field of the Addrinfo object" }
+  Resolv: { posture: net, why: "the DNS resolver surface" }
+  "Resolv::DNS": { posture: net, why: "the DNS resolver surface" }
+  "OpenSSL::SSL::SSLSocket": { posture: net, why: "a TLS stream over a socket" }
+  UNIXSocket: { posture: ipc, why: "a UNIX-domain stream — inter-process, never off the machine" }
+  UNIXServer: { posture: ipc, why: "a listening UNIX-domain socket" }
+
+  "Net::HTTP":
+    posture: http
+    why: "every Net::HTTP entry point speaks HTTP"
+    methods:
+      request: { effects: [io.net.http], why: "issues the request" }
+      start: { effects: [io.net.http], why: "opens the connection; the block joins by containment" }
+      get: { effects: [io.net.http], why: "issues a GET" }
+      post: { effects: [io.net.http], why: "issues a POST" }
+      put: { effects: [io.net.http], why: "issues a PUT" }
+      delete: { effects: [io.net.http], why: "issues a DELETE" }
+      head: { effects: [io.net.http], why: "issues a HEAD" }
+      patch: { effects: [io.net.http], why: "issues a PATCH" }
+      "use_ssl=": { effects: [], mutates: receiver, why: "sets a field on the client before the connection opens; nothing is sent, so the only effect is the receiver mutation" }
+    singleton_methods:
+      get: { effects: [io.net.http], why: "issues a GET" }
+      get_response: { effects: [io.net.http], why: "issues a GET" }
+      post: { effects: [io.net.http], why: "issues a POST" }
+      post_form: { effects: [io.net.http], why: "issues a POST" }
+      start: { effects: [io.net.http], why: "opens the connection; the block joins by containment" }
+      new: { effects: [], why: "allocates the client; nothing is sent until start / request" }
+  "Net::SMTP": { posture: net, why: "an SMTP session; `email.send` is the plugin's semantic layer, not the transport's" }
+  "Net::FTP": { posture: net, why: "an FTP session" }
+
+  URI:
+    posture: value
+    why: "URI is parsing — string algebra — except for the open-uri extension"
+    singleton_methods:
+      open: { narrow: uri_open, effects: [io], why: "open-uri: an http(s) literal is HTTP, a file:// or bare path is a filesystem read, anything unproven is the parent" }
+      parse: { effects: [], why: "string parsing" }
+      join: { effects: [], why: "string algebra" }
+      encode_www_form: { effects: [], why: "string algebra" }
+  OpenURI:
+    posture: value
+    why: "only the entry point is world-facing"
+    singleton_methods:
+      open_uri: { narrow: uri_open, effects: [io], why: "the same narrowing as URI.open, which forwards here" }
+
+  # ---------------------------------------------------------------------------------------------
+  # Non-determinism: clocks and generators.
+  # ---------------------------------------------------------------------------------------------
+  Time:
+    posture: value
+    why: "a Time is a value; only the constructors that consult a clock and the receiver mutators are world-facing"
+    methods:
+      # `time_catalog.rb` blocklists these as receiver mutators, quoting the C bodies:
+      # `time_localtime` / `time_gmtime` call `time_modify(time)` and rewrite the `vtm` cache.
+      localtime: { effects: [global.read], mutates: receiver, why: "rewrites the receiver's vtm cache in place AND reads the process TZ (time_catalog.rb blocklists it for the same C body)" }
+      gmtime: { effects: [], mutates: receiver, why: "rewrites the receiver's vtm cache in place (time_catalog.rb: time_modify then TZMODE_SET_UTC)" }
+      utc: { effects: [], mutates: receiver, why: "the same cfunc as gmtime, registered under a second name" }
+      getlocal: { effects: [global.read], why: "returns a fresh Time pinned to the process TZ; time_catalog.rb blocks the fold for exactly this host-dependence" }
+      getutc: { effects: [], why: "UTC, so machine-independent — time_catalog.rb leaves it foldable" }
+      getgm: { effects: [], why: "UTC, so machine-independent" }
+      strftime: { effects: [], why: "formatting; the TZ is already fixed in the receiver" }
+    singleton_methods:
+      now: { effects: [nondet.time], why: "reads the wall clock" }
+      new: { narrow: time_new, effects: [nondet.time], why: "no arguments is Time.now; with arguments it constructs from them and consults nothing" }
+      at: { effects: [], why: "constructs from its argument" }
+      utc: { effects: [], why: "constructs from its arguments" }
+      gm: { effects: [], why: "constructs from its arguments" }
+      local: { effects: [global.read], why: "constructs from its arguments in the process TZ" }
+      mktime: { effects: [global.read], why: "alias of local" }
+      parse: { effects: [global.read], why: "an unqualified parse fills missing fields from the process TZ and today's date" }
+
+  Date:
+    posture: value
+    why: "a Date is a value; only `today` consults a clock"
+    singleton_methods:
+      today: { effects: [nondet.time], why: "reads the wall clock (and the process TZ)" }
+      parse: { effects: [], why: "string parsing" }
+      new: { effects: [], why: "constructs from its arguments" }
+  DateTime:
+    posture: value
+    why: "a DateTime is a value; only `now` consults a clock"
+    singleton_methods:
+      now: { effects: [nondet.time], why: "reads the wall clock" }
+      parse: { effects: [], why: "string parsing" }
+      new: { effects: [], why: "constructs from its arguments" }
+
+  Random:
+    posture: value
+    why: "a seeded Random is a value object; the rows are the generator-consuming methods `random_catalog.rb` already blocklists"
+    methods:
+      rand: { effects: [nondet.random], mutates: receiver, why: "advances the receiver's MT state (random_catalog.rb blocklists :rand for the indirect mutation)" }
+      bytes: { effects: [nondet.random], mutates: receiver, why: "consumes MT output the same way #rand does (random_catalog.rb)" }
+      seed: { effects: [], why: "reads the seed the receiver was constructed with" }
+    singleton_methods:
+      new: { narrow: random_new, effects: [nondet.random], why: "a seed argument makes the generator reproducible; without one it draws from platform entropy" }
+      rand: { effects: [nondet.random], why: "advances the process-wide generator (random_catalog.rb)" }
+      bytes: { effects: [nondet.random], why: "advances the process-wide generator" }
+      new_seed: { effects: [nondet.random], why: "reads platform entropy (random_catalog.rb: with_random_seed)" }
+      urandom: { effects: [nondet.random], why: "reads the platform CSPRNG (random_catalog.rb)" }
+
+  SecureRandom:
+    posture: nondet
+    why: "every SecureRandom entry point draws from the platform CSPRNG"
+    singleton_methods:
+      hex: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      uuid: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      uuid_v4: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      uuid_v7: { effects: [nondet.random, nondet.time], why: "draws from the platform CSPRNG AND stamps the wall clock into the prefix" }
+      random_bytes: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      bytes: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      base64: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      urlsafe_base64: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      alphanumeric: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+      random_number: { effects: [nondet.random], why: "draws from the platform CSPRNG" }
+
+  # ---------------------------------------------------------------------------------------------
+  # Process-global state.
+  # ---------------------------------------------------------------------------------------------
+  ENV:
+    kind: object
+    posture: global
+    why: "ENV is the process environment; every access is global state in one direction or the other"
+    methods:
+      "[]": { effects: [global.read], why: "reads the process environment" }
+      fetch: { effects: [global.read], why: "reads the process environment" }
+      key?: { effects: [global.read], why: "reads the process environment" }
+      has_key?: { effects: [global.read], why: "reads the process environment" }
+      include?: { effects: [global.read], why: "reads the process environment" }
+      member?: { effects: [global.read], why: "reads the process environment" }
+      keys: { effects: [global.read], why: "reads the process environment" }
+      values: { effects: [global.read], why: "reads the process environment" }
+      values_at: { effects: [global.read], why: "reads the process environment" }
+      to_h: { effects: [global.read], why: "reads the process environment" }
+      to_hash: { effects: [global.read], why: "reads the process environment" }
+      each: { effects: [global.read], why: "reads the process environment; the block joins by containment" }
+      each_pair: { effects: [global.read], why: "reads the process environment; the block joins by containment" }
+      dig: { effects: [global.read], why: "reads the process environment" }
+      "[]=": { effects: [global.write], why: "writes the process environment, which every later read and every subprocess observes" }
+      store: { effects: [global.write], why: "writes the process environment" }
+      delete: { effects: [global.write], why: "writes the process environment" }
+      update: { effects: [global.write], why: "writes the process environment" }
+      merge!: { effects: [global.write], why: "writes the process environment" }
+      replace: { effects: [global.write], why: "writes the process environment" }
+      clear: { effects: [global.write], why: "writes the process environment" }
+
+  ARGF:
+    kind: object
+    posture: stdin
+    why: "ARGF reads the files named on the command line, or $stdin"
+  STDIN:
+    kind: object
+    posture: stdin
+    why: "the process's standard input"
+  STDOUT:
+    kind: object
+    posture: stdout
+    why: "the process's standard output"
+  STDERR:
+    kind: object
+    posture: stderr
+    why: "the process's standard error"
+
+  Thread:
+    posture: value
+    why: "a Thread object's accessors are ordinary reads; the world-facing rows are the blocking ones"
+    methods:
+      join: { effects: [io], why: "blocks until another thread finishes — a wait the world's scheduling decides (the same reading WD14 gives sleep)" }
+      value: { effects: [io], why: "joins, then reads the result" }
+      "[]": { effects: [global.read], why: "fiber-local storage is state shared beyond this frame" }
+      "[]=": { effects: [global.write], why: "fiber-local storage is state shared beyond this frame" }
+      thread_variable_get: { effects: [global.read], why: "thread-local storage is state shared beyond this frame" }
+      thread_variable_set: { effects: [global.write], why: "thread-local storage is state shared beyond this frame" }
+      kill: { effects: [global.write], why: "terminates another thread, which every observer of its work sees" }
+    singleton_methods:
+      new: { effects: [], why: "the primitive carries no label; the block joins the enclosing method by containment (WD14)" }
+      start: { effects: [], why: "the primitive carries no label; the block joins by containment (WD14)" }
+      fork: { effects: [], why: "Thread.fork is Thread.start; no label, containment (WD14)" }
+      current: { effects: [], why: "returns the running thread object; the storage accessors on it are what carry global" }
+      pass: { effects: [], why: "a scheduling hint" }
+
+  Fiber:
+    posture: value
+    why: "a coroutine primitive; nothing leaves the process"
+    singleton_methods:
+      new: { effects: [], why: "the primitive carries no label; the block joins by containment (WD14)" }
+      yield: { effects: [], why: "transfers control within the process" }
+
+  Ractor:
+    posture: value
+    why: "a concurrency primitive; nothing leaves the process"
+    singleton_methods:
+      new: { effects: [], why: "the primitive carries no label; the block joins by containment (WD14)" }
+
+  Mutex:
+    posture: value
+    why: "a lock primitive; WD14 fixes it at ∅ + containment"
+    methods:
+      synchronize: { effects: [], why: "no label; the block joins the enclosing method by containment (WD14)" }
+      lock: { effects: [], why: "no label (WD14); a contended lock waits, but the waiting is not an observable effect of this code" }
+      unlock: { effects: [], why: "no label (WD14)" }
+      try_lock: { effects: [], why: "no label (WD14)" }
+  Monitor:
+    posture: value
+    why: "a reentrant Mutex; the same reading"
+    methods:
+      synchronize: { effects: [], why: "no label; the block joins by containment (WD14)" }
+
+  Queue:
+    posture: value
+    why: "an in-process channel; only the blocking ends are world-facing"
+    methods:
+      pop: { effects: [io], why: "blocks until another thread pushes — a wait the world decides (WD14)" }
+      shift: { effects: [io], why: "alias of pop (WD14)" }
+      deq: { effects: [io], why: "alias of pop (WD14)" }
+      push: { effects: [], why: "never blocks on a plain Queue" }
+  SizedQueue:
+    posture: value
+    why: "a Queue with a bound, so the push end blocks too"
+    methods:
+      pop: { effects: [io], why: "blocks until another thread pushes (WD14)" }
+      push: { effects: [io], why: "blocks when the queue is full (WD14)" }
+      !!str "<<": { effects: [io], why: "alias of push (WD14)" }
+      enq: { effects: [io], why: "alias of push (WD14)" }
+  ConditionVariable:
+    posture: value
+    why: "a wait primitive"
+    methods:
+      wait: { effects: [io], why: "blocks until another thread signals (WD14)" }
+      signal: { effects: [], why: "a wake-up, not a wait" }
+      broadcast: { effects: [], why: "a wake-up, not a wait" }
+
+  GC:
+    posture: global
+    why: "the collector is process-global machinery"
+    singleton_methods:
+      stat: { effects: [global.read], why: "reads collector counters" }
+      count: { effects: [global.read], why: "reads a collector counter" }
+      stress: { effects: [global.read], why: "reads the collector's stress flag" }
+      disable: { effects: [global.write], why: "changes collector behaviour for the whole process" }
+      enable: { effects: [global.write], why: "changes collector behaviour for the whole process" }
+      start: { effects: [global.write], why: "runs a collection, which every allocation timing observes" }
+      compact: { effects: [global.write], why: "moves objects for the whole process" }
+
+  ObjectSpace:
+    posture: global
+    why: "reads and writes the process's whole object graph"
+    singleton_methods:
+      each_object: { effects: [global.read], why: "walks every live object; the block joins by containment" }
+      count_objects: { effects: [global.read], why: "reads allocator counters" }
+      define_finalizer: { effects: [global.write], why: "installs a process-global finalizer" }
+      undefine_finalizer: { effects: [global.write], why: "removes a process-global finalizer" }
+      garbage_collect: { effects: [global.write], why: "runs a collection" }
+
+  Warning:
+    posture: value
+    why: "only the category switch is global"
+    singleton_methods:
+      "[]": { effects: [global.read], why: "reads a process-global warning category" }
+      "[]=": { effects: [global.write], why: "writes a process-global warning category" }
+      warn: { effects: [io.output.stderr], why: "writes $stderr" }
+
+  Encoding:
+    posture: value
+    why: "an Encoding is a value; only the process-wide default switches are global"
+    singleton_methods:
+      default_external: { effects: [global.read], why: "reads a process-global default" }
+      "default_external=": { effects: [global.write], why: "writes a process-global default every later IO observes" }
+      default_internal: { effects: [global.read], why: "reads a process-global default" }
+      "default_internal=": { effects: [global.write], why: "writes a process-global default every later IO observes" }
+      find: { effects: [], why: "looks a name up in a constant table" }
+      list: { effects: [], why: "reads a constant table" }
+
+  # ---------------------------------------------------------------------------------------------
+  # Logging and FFI.
+  # ---------------------------------------------------------------------------------------------
+  Logger:
+    posture: value
+    why: "a Logger's configuration accessors are ordinary; the emitters are the tolerated-policy poster child"
+    methods:
+      debug: { effects: [io, telemetry], why: "writes an unknown destination (file, socket, stdout) and carries telemetry meaning" }
+      info: { effects: [io, telemetry], why: "writes an unknown destination and carries telemetry meaning" }
+      warn: { effects: [io, telemetry], why: "writes an unknown destination and carries telemetry meaning" }
+      error: { effects: [io, telemetry], why: "writes an unknown destination and carries telemetry meaning" }
+      fatal: { effects: [io, telemetry], why: "writes an unknown destination and carries telemetry meaning" }
+      unknown: { effects: [io, telemetry], why: "writes an unknown destination and carries telemetry meaning" }
+      add: { effects: [io, telemetry], why: "the primitive every level method forwards to" }
+      log: { effects: [io, telemetry], why: "alias of add" }
+      !!str "<<": { effects: [io, telemetry], why: "writes the destination raw" }
+      level: { effects: [], why: "reads a field of the Logger object" }
+
+  "Fiddle::Function":
+    posture: value
+    why: "the object is a value; calling it leaves Ruby"
+    methods:
+      call: { effects: [ffi], why: "transfers control to a native function, whose effects Ruby cannot see" }
+  "Fiddle::Handle":
+    posture: ffi
+    why: "opens and reads a shared object, then hands out native function pointers"

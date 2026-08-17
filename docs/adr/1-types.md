@@ -427,7 +427,7 @@ The minimal first implementation pairs a category-bucketed fact store with immut
 The pre-plugin purity policy controls how method-call results are remembered or forgotten across re-invocations and how PHPStan-style remembered values map onto Rigor's category buckets:
 
 - Methods are treated as impure by default. Calling an impure method on a receiver invalidates the receiver's object-content bucket and discards remembered value facts for prior calls to the same receiver.
-- Purity becomes effective only when an authoritative source declares it. Core Ruby and stdlib RBS distributed with Rigor, accepted ordinary RBS files, and explicit `rigor:v1:pure` annotations on `RBS::Extended` are the initial sources. Generated signatures and plugin contributions may refine purity within their tier.
+- Purity becomes effective only when an authoritative source declares it. Core Ruby and stdlib RBS distributed with Rigor, accepted ordinary RBS files, and explicit `%a{pure}` annotations on `RBS::Extended` (originally spelled `rigor:v1:pure`, never implemented and dropped by [ADR-103](103-effect-labels.md) WD14) are the initial sources. Generated signatures and plugin contributions may refine purity within their tier.
 - A configuration switch should make the default look more like PHPStan's "value-returning is pure unless declared impure" policy for projects that want stronger narrowing across repeated calls. The switch flips the default but never overrides explicit `pure` or mutation declarations.
 - `pure` combined with any receiver-mutation, argument-mutation, or fact-invalidation effect remains a contract conflict, as already specified in the `RBS::Extended` merge rules.
 

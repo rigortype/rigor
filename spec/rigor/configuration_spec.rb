@@ -808,4 +808,289 @@ RSpec.describe Rigor::Configuration do
       end
     end
   end
+
+  # ADR-103 WD13 — the effect-labels opt-in. PRESENCE is the switch, not truthiness: an annotation in a
+  # project's RBS must never create a project-wide cost cliff, so `effects:` in the config file is the
+  # only thing (besides running `rigor effects`) that turns collection on.
+  describe "#effects_enabled?" do
+    it "is false with no effects: key" do
+      expect(described_class.new({}).effects_enabled?).to be(false)
+      expect(described_class.new({}).effects).to be_nil
+    end
+
+    it "is true for an empty block, and for the bare key YAML parses as nil" do
+      expect(described_class.new({ "effects" => {} }).effects_enabled?).to be(true)
+      expect(described_class.new({ "effects" => nil }).effects_enabled?).to be(true)
+    end
+
+    it "keeps the block's body for the slices that read its sub-keys" do
+      configuration = described_class.new({ "effects" => { "check" => false } })
+
+      expect(configuration.effects).to eq({ "check" => false })
+      expect(configuration.effects).to be_frozen
+    end
+
+    # The ad-hoc opt-in `rigor effects` uses when the project configures nothing.
+    describe "#with_effects_enabled" do
+      it "returns a frozen sibling with an implicit empty block" do
+        enabled = described_class.new({ "paths" => ["app"] }).with_effects_enabled
+
+        expect(enabled.effects_enabled?).to be(true)
+        expect(enabled.paths).to eq(["app"])
+        expect(enabled).to be_frozen
+      end
+
+      it "leaves a configuration that already enables effects untouched" do
+        configured = described_class.new({ "effects" => { "views" => true } })
+
+        expect(configured.with_effects_enabled).to equal(configured)
+      end
+    end
+  end
+
+  # ADR-103 WD15 — the "effects-on-by-default" bleeding-edge preview of the v0.4.0 default. The shipped
+  # feature id is used directly (not stubbed): these examples pin the coercion-path wiring, not the
+  # registry's shape, which `spec/rigor/bleeding_edge_spec.rb` already covers. Every example constructs a
+  # raw, non-`DEFAULTS`-merged hash so an absent `"effects"` key genuinely means "the file never wrote
+  # `effects:`" — merging `DEFAULTS` first would make the key present (with value `false`) and could never
+  # exercise the forcing branch.
+  describe "effects-on-by-default (ADR-103 WD15)" do
+    it "turns effects on with every sub-key defaulted when adopted and the file writes no effects: key" do
+      configuration = described_class.new({ "bleeding_edge" => ["effects-on-by-default"] })
+
+      expect(configuration.effects_enabled?).to be(true)
+      expect(configuration.effects).to eq({})
+      expect(configuration.effects_check?).to be(true)
+      expect(configuration.effects_snapshot_path).to eq(Rigor::Configuration::DEFAULT_EFFECTS_SNAPSHOT_PATH)
+    end
+
+    it "keeps effects off when the file writes effects: false explicitly, whatever the feature says" do
+      configuration = described_class.new({ "bleeding_edge" => ["effects-on-by-default"], "effects" => false })
+
+      expect(configuration.effects_enabled?).to be(false)
+      expect(configuration.effects).to be_nil
+    end
+
+    it "leaves a written effects: block exactly as written — the block always wins" do
+      configuration = described_class.new(
+        { "bleeding_edge" => ["effects-on-by-default"], "effects" => { "check" => false } }
+      )
+
+      expect(configuration.effects_enabled?).to be(true)
+      expect(configuration.effects).to eq({ "check" => false })
+      expect(configuration.effects_check?).to be(false)
+    end
+
+    it "changes nothing when the feature is not adopted" do
+      configuration = described_class.new({})
+
+      expect(configuration.effects_enabled?).to be(false)
+      expect(configuration.effects).to be_nil
+    end
+
+    it "is also turned on by bleeding_edge: true (adopting the whole overlay)" do
+      configuration = described_class.new({ "bleeding_edge" => true })
+
+      expect(configuration.effects_enabled?).to be(true)
+      expect(configuration.effects).to eq({})
+    end
+
+    it "does not turn effects on for an unrelated adopted feature" do
+      configuration = described_class.new({ "bleeding_edge" => ["reject-unparseable-signatures"] })
+
+      expect(configuration.effects_enabled?).to be(false)
+    end
+
+    # ADR-103 WD15 — `Configuration.load`'s own capture of `effects_key_present`, from the file BEFORE the
+    # `DEFAULTS.merge` that would otherwise make "no `effects:` key" indistinguishable from "`effects:
+    # false`".
+    it "reads the same distinction through Configuration.load" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "bleeding_edge:\n  - effects-on-by-default\n")
+        expect(described_class.load(path).effects_enabled?).to be(true)
+
+        File.write(path, "bleeding_edge:\n  - effects-on-by-default\neffects: false\n")
+        expect(described_class.load(path).effects_enabled?).to be(false)
+      end
+    end
+
+    # A spec elsewhere in this file stubs `BleedingEdge::FEATURES` down to a single unrelated feature to
+    # isolate the selector plumbing (e.g. the `#bleeding_edge_active?` examples above). Constructing a
+    # Configuration under that stub, with no `effects:` key, must not raise merely because
+    # "effects-on-by-default" is not the id under test.
+    it "does not raise when FEATURES is stubbed to a registry that does not carry this id" do
+      stub_const(
+        "Rigor::BleedingEdge::FEATURES",
+        [Rigor::BleedingEdge::Feature.new(id: "feat-b", summary: "s", kind: :behaviour)].freeze
+      )
+
+      expect { described_class.new({ "bleeding_edge" => true }) }.not_to raise_error
+      expect(described_class.new({ "bleeding_edge" => true }).effects_enabled?).to be(false)
+    end
+  end
+
+  # ADR-103 WD7 / WD14 (#381) — the snapshot keys and the minimal `tolerated:` policy list. Every one
+  # resolves to its default when `effects:` is absent, so a consumer reads one uniform surface and never
+  # has to ask whether the block was there.
+  describe "the effect-snapshot keys" do
+    def snapshot_config(snapshot)
+      described_class.new({ "effects" => { "snapshot" => snapshot } })
+    end
+
+    it "defaults every key with no effects: block at all" do
+      configuration = described_class.new({})
+
+      expect(configuration.effects_snapshot_path).to eq(".rigor-effects.yml")
+      expect(configuration.effects_snapshot_reach).to eq([])
+      expect(configuration.effects_snapshot_gate).to eq(:symmetric)
+      expect(configuration.effects_tolerated).to eq([])
+    end
+
+    it "reads the configured path, reach globs and gate" do
+      configuration = snapshot_config("path" => "effects.yml", "reach" => ["app/**/*.rb"],
+                                      "gate" => "additions")
+
+      expect(configuration.effects_snapshot_path).to eq("effects.yml")
+      expect(configuration.effects_snapshot_reach).to eq(["app/**/*.rb"])
+      expect(configuration.effects_snapshot_gate).to eq(:additions)
+    end
+
+    # Tier 2 (`ArgumentError`, the run stops): an unknown gate would silently pick a semantics.
+    it "rejects an unknown gate" do
+      expect { snapshot_config("gate" => "ratchet") }
+        .to raise_error(ArgumentError, /effects\.snapshot\.gate must be one of/)
+    end
+
+    # #387 — presets are named by PLUGINS, and plugins load from the configuration being validated, so at
+    # this point none is registered. Only the SHAPE is checked here; `Snapshot.expand_reach` runs the
+    # existence check, which is the first moment the registered set is complete.
+    it "accepts a well-formed preset name no plugin has registered yet" do
+      expect(snapshot_config("reach" => ["controllers"]).effects_snapshot_reach).to eq(["controllers"])
+    end
+
+    it "rejects a reach entry that is neither a glob nor a well-formed preset name" do
+      expect { snapshot_config("reach" => ["Controller Actions"]) }
+        .to raise_error(ArgumentError, /neither a file glob nor a well-formed entry-point preset name/)
+    end
+
+    describe "tolerated:" do
+      it "validates the label SHAPE and sorts the set" do
+        configuration = described_class.new({ "effects" => { "tolerated" => %w[nondet.time io.fs] } })
+
+        expect(configuration.effects_tolerated).to eq(%w[io.fs nondet.time])
+      end
+
+      it "rejects a malformed label" do
+        expect { described_class.new({ "effects" => { "tolerated" => ["IO::Net"] } }) }
+          .to raise_error(ArgumentError, /not a well-formed effect label/)
+      end
+
+      # A well-formed label the REGISTRY does not know is deliberately accepted here: that is
+      # `effect.unknown-label`'s job (#384), and it fails open rather than stopping a run.
+      it "accepts a well-formed label the registry has never heard of" do
+        expect(described_class.new({ "effects" => { "tolerated" => ["acme.widget"] } }).effects_tolerated)
+          .to eq(["acme.widget"])
+      end
+    end
+  end
+
+  # ADR-103 WD5 / WD6 (#385) — the policy keys. Tier 2 answers SHAPE and only shape: a value the loader
+  # cannot pick a reading for stops the run, and a value that is merely unknown to the vocabulary loads
+  # fine because it fails open (`effect.unknown-label`).
+  describe "the effect-policy keys" do
+    def policy_config(effects)
+      described_class.new({ "effects" => effects })
+    end
+
+    it "defaults every key with no effects: block at all" do
+      configuration = described_class.new({})
+
+      expect(configuration.effects_labels).to eq([])
+      expect(configuration.effects_attribution).to eq({})
+      expect(configuration.effects_envelopes).to eq([])
+    end
+
+    describe "labels:" do
+      it "validates the label shape and sorts the vocabulary" do
+        expect(policy_config("labels" => %w[acme.cache acme.bus]).effects_labels)
+          .to eq(%w[acme.bus acme.cache])
+      end
+
+      it "rejects a malformed label" do
+        expect { policy_config("labels" => ["Acme::Cache"]) }
+          .to raise_error(ArgumentError, /effects\.labels is not a well-formed effect label/)
+      end
+    end
+
+    describe "attribution:" do
+      it "reads a method-keyed table of label lists" do
+        table = policy_config("attribution" => { "Net::HTTP.get" => ["io.net.http"] }).effects_attribution
+
+        expect(table).to eq({ "Net::HTTP.get" => ["io.net.http"] })
+        expect(table).to be_frozen
+      end
+
+      # The key is a method key exactly as the symbol tables spell one. A key the scanner would never
+      # produce is a table that silently colours nothing, which is the failure tier 2 exists to prevent.
+      it "rejects a key that is not a method key" do
+        expect { policy_config("attribution" => { "Net::HTTP" => ["io"] }) }
+          .to raise_error(ArgumentError, /effects\.attribution key is not a method key/)
+      end
+
+      it "rejects a malformed label" do
+        expect { policy_config("attribution" => { "Net::HTTP.get" => ["IO"] }) }
+          .to raise_error(ArgumentError, /effects\.attribution\["Net::HTTP.get"\] is not a well-formed/)
+      end
+
+      it "accepts a well-formed label the registry has never heard of" do
+        expect(policy_config("attribution" => { "Acme::Cache.fetch" => ["acme.cache"] }).effects_attribution)
+          .to eq({ "Acme::Cache.fetch" => ["acme.cache"] })
+      end
+    end
+
+    describe "envelopes:" do
+      it "reads each entry's selector and bound, keeping list order" do
+        entries = policy_config(
+          "envelopes" => [
+            { "match" => "app/presenters/**/*.rb", "effect" => [] },
+            { "namespace" => "Policies::*", "effect" => ["mutate.local"] }
+          ]
+        ).effects_envelopes
+
+        expect(entries).to eq(
+          [
+            { "match" => "app/presenters/**/*.rb", "namespace" => nil, "effect" => [] },
+            { "match" => nil, "namespace" => "Policies::*", "effect" => ["mutate.local"] }
+          ]
+        )
+      end
+
+      # Exactly one selector: naming both would need a precedence rule inside one entry, and naming
+      # neither selects the whole project, which is never what an author meant to write.
+      it "rejects an entry naming both selectors" do
+        expect { policy_config("envelopes" => [{ "match" => "app/**", "namespace" => "A::*", "effect" => [] }]) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[0\] must name exactly one of.*got both/m)
+      end
+
+      it "rejects an entry naming neither selector" do
+        expect { policy_config("envelopes" => [{ "effect" => [] }]) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[0\] must name exactly one of.*got neither/m)
+      end
+
+      # `effect: []` is a bound (the empty envelope); a MISSING `effect:` is an entry that bounds
+      # nothing, and the two must not be spelled the same way.
+      it "rejects an entry with no effect: bound" do
+        expect { policy_config("envelopes" => [{ "namespace" => "A::*" }]) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[0\] has no `effect:` bound/)
+      end
+
+      it "rejects a malformed label, naming the entry index" do
+        entries = [{ "namespace" => "A", "effect" => [] }, { "match" => "a/**", "effect" => ["Io"] }]
+
+        expect { policy_config("envelopes" => entries) }
+          .to raise_error(ArgumentError, /effects\.envelopes\[1\]\.effect is not a well-formed/)
+      end
+    end
+  end
 end

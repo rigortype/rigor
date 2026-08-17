@@ -30,6 +30,18 @@ RSpec.describe Rigor::BleedingEdge do
       expect(described_class::GRADUATED).to eq([])
     end
 
+    # ADR-103 WD15 — the v0.4.0 default-on preview. Its gate is `Configuration#effects_enabled?` /
+    # `Configuration.load`, not an engine call site, so the registry entry carries no severity map either.
+    it "ships effects-on-by-default as a behaviour feature with no severity diff" do
+      feature = described_class.feature("effects-on-by-default")
+      expect(feature.kind).to eq(:behaviour)
+      expect(feature).to be_behaviour
+      expect(feature.severity_overrides).to be_empty
+      expect(described_class.severity_overrides_for({ "mode" => "all" })).not_to have_key("effects-on-by-default")
+      expect(described_class.active_ids_for({ "mode" => "none" })).not_to include(feature.id)
+      expect(described_class.active_ids_for({ "mode" => "all" })).to include(feature.id)
+    end
+
     # Issue #253 — the first shipped `:behaviour` feature. Its gate is `Configuration#bleeding_edge_active?`
     # at one CLI call site, so the registry entry must carry no severity map at all: a queued change that also
     # moved a rule's severity would be two changes wearing one id.

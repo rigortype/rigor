@@ -159,6 +159,28 @@ module Rigor
                  "the two corpora measured so far (Rigor's own `lib`, redmine `app/models`) it added no " \
                  "kills — every surviving breakage there is one the analyzer reports nowhere at all, not one " \
                  "it reports in a caller."
+      ),
+      # ADR-103 WD15 — the owner-ruled preview of the v0.4.0 default. `:behaviour` because it moves no rule's
+      # severity; safe under the header comment's cache-identity rule for a reason specific to this feature
+      # rather than the generic WD13 argument, so it is spelled out here: `effects:` collection is
+      # OBSERVATIONAL (ADR-103 WD13) and the `effects:` block itself is deliberately absent from the
+      # diagnostics cache-key identity, so whether this feature is adopted never changes what a `rigor check`
+      # diagnostics entry holds — only whether the (separately identity-keyed) effects sidecar slot
+      # (`Effects::Identity.descriptor`, `lib/rigor/analysis/runner.rb`) gets populated. Envelope findings
+      # (`effect.envelope-exceeded`) are recomputed every run from that sidecar and are never written into
+      # the diagnostics entry (ADR-103 WD12), so a warm diagnostics HIT is correct whichever way this feature
+      # is set, exactly like every other `:behaviour` feature. Verified against `Runner#compute_run_diagnostics`
+      # / `#serve_effect_collections` on 2026-08-17.
+      Feature.new(
+        id: "effects-on-by-default",
+        kind: :behaviour,
+        summary: "With it, a project whose `.rigor.yml` carries no `effects:` key at all behaves as though " \
+                 "it had written `effects: {}` — effect collection, the `rigor effects` verbs' cache sharing, " \
+                 "and `effects.check` all turn on with every sub-key at its default. Writing `effects: false` " \
+                 "explicitly still opts out, and a project that writes its own `effects:` block keeps that " \
+                 "block's shape untouched either way. Graduates to default-on at v0.4.0 (owner ruling, " \
+                 "2026-08-17): ADR-50 § WD7 reads \"at a major\" as \"at v0.4.0\" for this feature on the 0.x " \
+                 "evaluation line. See ADR-103 § WD15 for the preconditions that gate the flip."
       )
     ].freeze
 

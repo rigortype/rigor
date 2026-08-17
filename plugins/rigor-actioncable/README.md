@@ -75,3 +75,28 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 ## License
 
 MPL-2.0, matching the parent Rigor project.
+
+## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10)
+
+Inert unless the project has an `effects:` block.
+
+| Call | Labels |
+| --- | --- |
+| `<Channel>.broadcast_to`, `#transmit`, `#stream_from`, `#stream_for` | `io` + `rails.actioncable.broadcast` |
+| `ActionCable.server.broadcast` | `io` + `rails.actioncable.broadcast` |
+| Turbo Streams `broadcast_replace_to` / `broadcast_append_to` / … on a model | `io` + `rails.actioncable.broadcast` |
+| the `broadcast_*_later_to` twins | the same, plus `rails.activejob.enqueue` + `job.enqueue` |
+
+A broadcast leaves the process — through Redis, through the async
+in-memory adapter, or through Solid Cable's table, depending on
+`config/cable.yml` — so bare `io` is the only sound transport and
+`rails.actioncable.broadcast` is what a reviewer means by "this model
+callback pushes to every connected browser".
+
+The Turbo rows are keyed on `ActiveRecord::Base` because that is where
+`Turbo::Broadcastable` is mixed in, and they are exactly the effect an
+`app/models/**` policy exists to surface.
+
+### Entry-point preset
+
+`rails-channels` → `app/channels/**/*.rb`.

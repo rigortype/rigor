@@ -10,6 +10,9 @@ require_relative "../rbs_extended/reporter"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
+require_relative "../effects/attribution"
+require_relative "../effects/collector"
+require_relative "../effects/envelope_index"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
@@ -93,6 +96,14 @@ module Rigor
         # normal `--workers N` run leaves it false and pays nothing (the recorder's disabled fast path).
         @record_dependencies = record_dependencies
         @file_dependencies = {}
+        # ADR-103 WD13 — effect collection, derived from the configuration exactly as `Runner` derives it,
+        # so a worker and the parent agree without a flag to keep in sync. Records marshal back through
+        # {#drain_effects}.
+        @record_effects = configuration.effects_enabled?
+        # ADR-103 WD6 / #385 — same table, derived the same way, for the same reason as `@record_effects`
+        # above: a worker and the parent agree without a flag to keep in sync.
+        @effect_attribution = Effects::Attribution.build(configuration.effects_attribution)
+        @file_effects = {}
         # ADR-32 WD4 — full project file list (frozen Array<String>) for env-build-time invocation of any
         # loaded plugin's `source_rbs_synthesizer` callable.
         @source_files = source_files
@@ -144,13 +155,49 @@ module Rigor
       # worker captures the file's cross-file reads for {#drain_dependencies}; the recorder's own disabled
       # fast path makes the unwrapped case free.
       def analyze(path)
-        return analyze_body(path) unless @record_dependencies
+        return analyze_with_effects(path) unless @record_dependencies
 
         diagnostics = nil
-        record = DependencyRecorder.record_for(path) { diagnostics = analyze_body(path) }
+        record = DependencyRecorder.record_for(path) { diagnostics = analyze_with_effects(path) }
         @file_dependencies[path] = record
         diagnostics
       end
+
+      # ADR-103 WD13 — the worker-side mirror of `Runner#analyze_with_effects`.
+      def analyze_with_effects(path)
+        return analyze_body(path) unless @record_effects
+
+        diagnostics = nil
+        collection = Effects::Collector.collect_for(
+          path, attribution: @effect_attribution, envelopes: effect_envelope_index,
+                plugin_facts: effect_plugin_facts
+        ) do
+          diagnostics = analyze_body(path)
+        end
+        @file_effects[path] = collection
+        diagnostics
+      end
+      private :analyze_with_effects
+
+      # ADR-103 WD6 / #386 — the worker-side mirror of `Runner#effect_envelope_index`. Derived from the
+      # same configuration and the session's own environment, so a worker's `≤` lane is the one the
+      # parent would have computed for the same file.
+      # ADR-103 WD10 / #387 — the worker-side mirror of `Runner#effect_plugin_facts`. The superclass table
+      # arrives with the coordinator's scope seed, so a worker resolves an `ActiveRecord::Base` row through
+      # the same project ancestry the parent would have walked.
+      def effect_plugin_facts
+        @effect_plugin_facts ||= Effects::PluginFacts.build(
+          @plugin_registry, superclasses: @project_scope_seed[:discovered_superclasses] || {}
+        )
+      end
+      private :effect_plugin_facts
+
+      def effect_envelope_index
+        @effect_envelope_index ||= Effects::EnvelopeIndex.build(
+          configuration: @configuration, environment: @environment, plugin_facts: effect_plugin_facts
+        )
+      end
+      private :effect_envelope_index
 
       def analyze_body(path)
         parse_result = parse_source(path)
@@ -160,6 +207,7 @@ module Rigor
           return parse_diagnostics(path, parse_result)
         end
 
+        Effects::Collector.record_root(parse_result.value)
         scope = seed_project_scope(Scope.empty(environment: @environment, source_path: path))
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
@@ -202,6 +250,14 @@ module Rigor
       # exactly as the sequential recording path would.
       def drain_dependencies
         @file_dependencies
+      end
+
+      # ADR-103 WD12 — the per-file {Effects::FileCollection}s this session collected (empty unless the
+      # configuration carries an `effects:` block). Marshal-clean by construction — frozen Hashes of
+      # Strings, `LabelSet`s of frozen Arrays, and `Data` edges — so the fork pool ships them back to the
+      # coordinator, which folds them into the runner's collection exactly as the sequential path would.
+      def drain_effects
+        @file_effects
       end
 
       private

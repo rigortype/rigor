@@ -20,6 +20,27 @@ def read_name: () -> String
 
 The plain `() -> String` stays the compatibility contract; the
 annotation tells Rigor the return is a non-empty string.
+
+You may also write any of them **in a `.rb` file**, as an
+rbs-inline `# @rbs %a{…}` comment — `%a{}` is rbs-inline's own
+upstream grammar, and the annotation reaches Rigor on the same
+path the generated signature does:
+
+```rb
+# rbs_inline: enabled
+
+class Reader
+  # @rbs %a{rigor:v1:return: non-empty-string}
+  # @rbs return: String
+  def read_name = "x"
+end
+```
+
+This needs the `rbs-inline` library installed; Rigor ingests
+inline annotations by default when it is
+([ADR-93](../adr/93-default-rbs-inline-ingestion.md)). There is
+no Rigor-only comment dialect: `# rigor:` comments remain
+suppression-only.
 This page is the *operational* reference — the directives you can
 write and their syntax. For the normative rules (conflict
 handling, merging, provenance) see
@@ -134,6 +155,62 @@ a satisfied directive is silent. Multiple `conforms-to`
 directives on one class combine like an intersection of
 interfaces. The directive is purely additive — a class that
 already satisfies the interface type-checks with or without it.
+
+## Effect envelopes — bounding what a method *does*
+
+Every directive above describes what a method returns. Two
+describe what it *does*: `%a{pure}` — rbs' own purity
+annotation, read as "nothing at all" — and
+`%a{rigor:v1:effect <labels>}`, a comma-separated list of bare
+[effect labels](../type-specification/effect-labels.md) the
+method may not exceed. Both attach to a method or to a `class` /
+`module`, where they distribute to that class's own methods
+(nearest wins), and both tolerate mutating objects the method
+itself allocated and never let out:
+
+```rbs
+class UserRepository
+  %a{rigor:v1:effect io.db, nondet.time}
+  def find: (Integer) -> User
+
+  %a{pure}
+  def slug: (String) -> String
+end
+```
+
+The same two work as rbs-inline comments in a `.rb` file:
+
+```rb
+# rbs_inline: enabled
+
+class UserRepository
+  # @rbs %a{rigor:v1:effect io.db}
+  # @rbs id: Integer
+  # @rbs return: User
+  def find(id) = User.find(id)
+
+  # @rbs %a{pure}
+  # @rbs return: String
+  def slug(s) = s.strip.downcase
+end
+```
+
+Three things follow, and all three need an `effects:` block in
+`.rigor.yml` — an annotation alone never turns effect collection
+on:
+
+- A method whose proven effects escape its bound fires
+  [`effect.envelope-exceeded`](04-diagnostics.md#rule-effect-envelope-exceeded),
+  positioned at the Ruby `def`.
+- A label the registry does not recognise makes the **whole
+  annotation** read as unbounded — a typo can never manufacture
+  a finding — and, where the spelling is evidently meant to be a
+  label, says so as
+  [`effect.unknown-label`](04-diagnostics.md#rule-effect-unknown-label)
+  at the declaration.
+- Without the block, one
+  [`effect.annotations-unchecked`](04-diagnostics.md#rule-effect-annotations-unchecked)
+  `:info` per run tells you the annotations are inert.
 
 ## Higher-kinded type directives
 

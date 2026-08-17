@@ -1,0 +1,23 @@
+# One envelope per intent signal `effect.unknown-label` recognises, plus the lone far-off word that
+# must stay silent. Every tag here reads as ⊤ — that is the fail-open rule, and the diagnostic is
+# only ever a report ABOUT the degradation.
+module UnknownLabels
+  class Signals
+    # Signal 1 alone: one edit from `exit`, a single segment, no recognised sibling.
+    %a{rigor:v1:effect exi}
+    def near_miss: () -> void
+
+    # Signal 2 alone: `frobnicate` resembles nothing, but `io.db` next to it is recognised.
+    %a{rigor:v1:effect io.db, frobnicate}
+    def known_sibling: () -> void
+
+    # Signal 3 alone: two dot-separated segments, far from every recognised spelling.
+    %a{rigor:v1:effect widget.render}
+    def dotted: () -> void
+
+    # No signal: a lone word nothing resembles. Silent, and STILL unbounded — the body writes to
+    # stdout, which any narrower reading of this tag would have reported.
+    %a{rigor:v1:effect database}
+    def lone_word: () -> void
+  end
+end

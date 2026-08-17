@@ -48,6 +48,7 @@ the `paths:` list from the configuration file.
 | `--treat-all-as-inline-rbs` | Force-load `rigor-rbs-inline` with `require_magic_comment: false`, so every analysed file is treated as inline-RBS without the `# rbs_inline: enabled` comment (ADR-32). |
 | `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
 | `--no-bleeding-edge` | Ignore any configured `bleeding_edge:` selection for this run (adopt none). |
+| `--no-tolerated-effects` | Check effect envelopes as if [`effects.tolerated:`](03-configuration.md) were empty — the audit switch for your discharge policy (ADR-103). Judgment only: the run, what it collects and its cache entry are identical either way, so this never costs a re-analysis. |
 | `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. Alone, only the buffer's own file produces diagnostics; add `--incremental` for whole-project scope (see below). |
 
 Exit `0` when no error-severity diagnostics remain, `1` when
@@ -161,6 +162,204 @@ rigor type-scan PATH...
 `--threshold=RATIO` makes the command exit non-zero when the
 unrecognized-node ratio exceeds `RATIO`, and `--format=text|json`
 selects the output format.
+
+## `rigor effects`
+
+Report what each method *does* — its effect labels — rather
+than what it returns, and manage the committed **effect
+snapshot** that gates drift. Opt-in and observational: nothing
+here emits a diagnostic or changes `rigor check`'s output, and
+only `rigor effects check` ever exits non-zero.
+
+```sh
+rigor effects [PATH...]                       # the report
+rigor effects {update,check,diff,explain}     # the snapshot
+```
+
+With no paths the report analyses the configured `paths:`. It
+runs with effect collection enabled even when your `.rigor.yml`
+carries no `effects:` block, so you can try it before
+configuring anything; such an ad-hoc run shares no cache with
+`rigor check`, because a run served from that cache would have
+collected nothing.
+
+Each line is one method, sorted by key:
+
+```
+Tracer::Reporter#report: [io.output.stdout, nondet.time]
+Tracer::Gateway#fetch: [] …?
+    dynamic-receiver (external_gem_without_rbs)
+```
+
+The labels are the **transitive** footprint — the method's own
+plus every project method it reaches. A ` …?` suffix means the
+list is not exhaustive: some call could not be resolved, so the
+reading is "these effects, and possibly more". The indented
+lines say why. A taint is never a finding.
+
+A ` ≤ [...]` clause after the labels is the **declared** lane:
+what a source Rigor trusts but did not verify *claims* the
+method does, today the `effects.attribution:` table you wrote
+for gem methods it cannot see. It is printed apart from the
+proven labels and never folded in among them, because the two
+answer different questions. It follows call edges exactly as
+the proven labels do, so a controller two hops above an
+attributed gem call carries the claim rather than only a
+"possibly more"; a declared label the proven list already
+covers is not printed twice.
+
+```
+Gateways::Client#fetch: [] ≤ [io.net.http] …?
+    plugin-attribution (Acme::Http.get)
+```
+
+A method is omitted when it is exhaustive and proves nothing
+beyond `mutate.local` — mutation of objects its own frame
+allocated and never let out, which every effect envelope
+tolerates. `--full` lists every method instead.
+
+`--format=text|json` selects the output format; the JSON
+payload additionally carries each method's *direct* summary
+broken down per origin. `--config=PATH` picks a config file.
+`--no-tolerated-effects` is accepted for symmetry with the
+subcommands and does nothing here: the report is an
+observation, and observations are undischarged.
+
+What is collected and how it propagates is
+[the effect-summaries internal spec](../internal-spec/effect-summaries.md);
+the label vocabulary is
+[the effect-labels specification](../type-specification/effect-labels.md).
+
+### The effect snapshot
+
+Four subcommands manage a committed record of the effects
+Rigor observed — `.rigor-effects.yml`, the effect equivalent
+of `db/schema.rb`:
+
+```sh
+rigor effects update    # write the snapshot; commit it
+rigor effects check     # 0 fresh, 1 drift — the CI gate
+rigor effects diff      # the same comparison, never gating
+rigor effects explain   # why an entry point reaches a label
+```
+
+Unlike the report, the subcommands take no paths: a snapshot
+records the whole project, and one written over a subset would
+read as a project where every other method vanished. They all
+accept `--config=PATH`, `--format=text|json` and `--full`;
+`check`, `diff` and `explain` additionally accept
+`--baseline=PATH` (compare against a file other than the
+configured one — `--baseline <(git show
+origin/main:.rigor-effects.yml)` in a bot),
+`--strict-tolerated` and `--no-tolerated-effects`.
+
+The file records two tables. `methods:` holds each method's
+**direct** summary — what its own body does, block literals
+and catalogued callees included, but not what the project
+methods it calls do. That is deliberate: an entry moves only
+when its own lines changed, so the diff stays attributable to
+the pull request that caused it. `reach:` holds the
+**transitive** footprint at the entry points
+`effects.snapshot.reach:` names, where a leaf change is
+supposed to fan out — the fan-out is the blast radius.
+
+```yaml
+# .rigor-effects.yml — generated by `rigor effects update`. Commit it; review its diff.
+schema: 1
+rigor: "0.3.3"
+vocabulary: 1
+config_digest: "9ec82bfc…"
+methods:
+  "PaymentGateway#charge":
+    effects: ["io.net.http", "telemetry"]
+  "Reports::Nightly#perform":
+    effects: ["io.db.read"]
+    exhaustive: false
+    unresolved: ["dynamic-send"]
+reach:
+  "OrdersController#create":
+    effects: ["io.db.read", "io.net.http", "job.enqueue"]
+```
+
+A method is left out when it is exhaustive and proves nothing
+beyond `mutate.local`, and when its summary is a synthesised
+accessor's; `--full` records everything. The header carries
+the Rigor and vocabulary versions and a digest of your
+`effects:` block, so an upgrade or a policy edit shows up as a
+*regeneration event* rather than as silent reinterpretation.
+
+Under `methods:` the declared lane is what that method's own
+body claims; under `reach:` it is the transitive claim, like
+the proven labels beside it.
+
+`check` prints one line per difference: `+ label` / `- label`
+for the proven lane, `≤+` / `≤-` for the declared one,
+`materialised` when a declared label became proven,
+`exhaustive → not` when someone introduced a call Rigor cannot
+follow, and `+symbol` / `-symbol` for methods that appeared or
+vanished (a rename is one of each, counted in the footer). A
+removal read off a summary that is no longer exhaustive is
+printed hedged — "possibly more" cannot prove an absence.
+
+`effects.snapshot.gate:` decides what fails. `symmetric` (the
+default) fails on any drift: a job that stopped enqueueing is
+news too. `additions` is the ratchet — only growth fails.
+`effects.tolerated:` is applied at judgment time, never while
+writing: a difference confined to tolerated labels is printed
+under a `tolerated:` heading and does not fail the gate unless
+you pass `--strict-tolerated`. `--no-tolerated-effects` judges
+as if the list were empty; on `update` it changes nothing,
+because the record itself is undischarged.
+
+Discharge works **per origin**, not per label. `Logger#info`
+carries `io` and `telemetry` together, so `tolerated:
+[telemetry]` frees the `io` that came with the logging — and
+leaves an `io.fs.read` from a `File.read` two lines down
+exactly where it was. An added label is discharged only when
+every origin that introduces it is discharged.
+
+### Reviewing effect drift
+
+Day one, run `rigor effects update` and commit the result. The
+diff you are committing is the team's first map: which
+controllers reach the network, which jobs write, which
+presenters query.
+
+Add `rigor effects check` to CI. From then on a pull request
+that changes what the code *does* fails it with the reason
+spelled out:
+
+```
+Effect drift against .rigor-effects.yml:
+
+methods:
+  PaymentGateway#charge  + io.net.http
+
+reach:
+  OrdersController#create  + io.net.http
+
+Run `rigor effects update` and commit the result if this change is intended.
+```
+
+The author runs `rigor effects explain` to see the route —
+
+```
+reach:
+  OrdersController#create → OrderService#place → PaymentGateway#charge → Net::HTTP.get [io.net.http]
+```
+
+— then runs `rigor effects update` and commits the regenerated
+file. **Intent is expressed by committing the regenerated
+snapshot**, not by annotating the code; the reviewer reads the
+two-line diff alongside the code change and either nods or
+pushes back. A bundle update that moves effects with no code
+diff of its own works the same way, and is exactly the case
+worth seeing.
+
+None of this is a diagnostic. `rigor check`'s output and exit
+code are identical whether or not you use the snapshot, and
+drift is never a finding: whether it *matters* is the
+reviewer's judgment, which is what makes it a review artefact.
 
 ## `rigor explain`
 
@@ -760,6 +959,7 @@ Queued today:
 | `use-of-void-value` | severity | Using a value recovered from an author-declared `-> void` return in value context is reported as `static.value-use.void` (`warning`). |
 | `discovery-seeded-mutation-sites` | behaviour | [`rigor coverage --protection --mutation`](15-type-protection-coverage.md) measures against the same cross-file project discovery Tier 1 already uses — both when picking the sites and when deciding whether a breakage was caught — so a call on a project class declared in a *sibling* file is measured instead of dropped, and a breakage there can actually be caught. **Adds sites to the denominator, so the reported effectiveness ratio moves** — check it against any `--threshold` you pin in CI before adopting. |
 | `dependent-closure-kill-oracle` | behaviour | [`rigor coverage --protection --mutation`](15-type-protection-coverage.md) counts a breakage as caught when the diagnostic appears anywhere in the mutated file **or the files that depend on it**, instead of in the mutated file alone — so changing what a method returns counts as caught when the error lands in its callers. Can only **add** kills, so the ratio moves up or not at all; it costs about a third more wall time per mutant, and a ratio measured under it is not comparable with one measured without it. |
+| `effects-on-by-default` | behaviour | A project whose `.rigor.yml` carries no [`effects:`](03-configuration.md#effect-labels) key at all is treated as if it had written `effects: {}` — [effect collection](03-configuration.md#effect-labels), the `rigor effects` verbs' cache sharing, and `effects.check` all turn on with every sub-key at its default. Writing `effects: false` explicitly still opts out. **Scheduled to graduate at v0.4.0** ([ADR-103](../adr/103-effect-labels.md) § WD15) rather than at the next major — an owner ruling specific to this feature, ahead of the general v1.0.0 majors-only cadence below. |
 
 Once a feature **graduates** — it becomes the default at a major
 ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD7)
@@ -864,7 +1064,7 @@ diagnostics about Rigor's own inference cutoffs and memory — see
 | Code | Meaning |
 | --- | --- |
 | `0` | Success — no error-severity diagnostics. |
-| `1` | Diagnostics found, or a per-command failure (parse error, missing file, new diagnostics on `diff`). |
+| `1` | Diagnostics found, or a per-command failure (parse error, missing file, new diagnostics on `diff`, effect drift on `effects check`). |
 | `64` | Usage error — unknown command, bad flag, malformed argument. |
 
 `rigor triage` is the exception: it is advisory and always

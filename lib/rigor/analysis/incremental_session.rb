@@ -5,6 +5,9 @@ require_relative "incremental"
 require_relative "plugin_fact_fingerprint"
 require_relative "../cache/file_digest"
 require_relative "../cache/incremental_snapshot"
+require_relative "../effects/file_collection"
+require_relative "../effects/identity"
+require_relative "../effects/propagator"
 require_relative "../inference/scope_indexer"
 
 module Rigor
@@ -105,6 +108,7 @@ module Rigor
         # and a missing invalidation edge is impossible by construction — the reason this is a table diff
         # and not the caller→callee edge recording #204 first sketched.
         @param_table = {}
+        reset_effect_state
         # ADR-88 WD1 — the plugin fact-surface digest computed for THIS invocation (nil until a
         # `#run_incremental` pass runs / a plugin-free project) and the reporting flags a caller (the CLI
         # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
@@ -122,6 +126,32 @@ module Rigor
         @analyzed
       end
 
+      # ADR-103 WD12 / issue #382 — the session's effect graph: the fixpoint over the merged whole,
+      # recomputed on every ask. This is the invariant that makes per-file collection reuse sound — the
+      # closure is never partially reused, only its per-file *inputs* are, so a leaf edit whose new label
+      # reaches a caller in an unchanged file still shows up in that caller's `reach`.
+      def effect_table
+        Effects::Propagator.propagate(
+          effect_collection, discharge: Effects::Discharge.new(@configuration.effects_tolerated)
+        )
+      end
+
+      # The merged direct summaries the table above closes over.
+      def effect_collection
+        Effects::FileCollection.merge_all(sorted_effect_collections)
+      end
+
+      # Where each unit was defined — the same shape (and the same purpose: the snapshot's `reach:` globs)
+      # as `Runner#effect_sources`, answered from the session's own per-file collections.
+      def effect_sources
+        sorted_effect_collections.each_with_object({}) do |collection, out|
+          path = collection.path
+          next if path.nil?
+
+          collection.summaries.each_key { |key| (out[key] ||= []) << path }
+        end
+      end
+
       # Full baseline analysis with recording. Returns the run's diagnostics; populates the in-process cache
       # + dependency state.
       def baseline
@@ -135,6 +165,9 @@ module Rigor
         # ADR-67 WD6c lift — the seed table the runner's own pre-pass computed ({} when the gate is off).
         # Reading it back, rather than computing it here, keeps the baseline single-collect.
         @param_table = runner.param_inferred_types
+        # ADR-103 WD13 / #382 — a baseline collects every file, so its collections are the whole world.
+        @effect_collections = runner.effect_collections_by_path
+        @effects_identity = current_effects_identity
         @cache = per_file(diagnostics)
         @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
         diagnostics
@@ -417,10 +450,18 @@ module Rigor
           # (types with no fingerprint surface) make the snapshot un-reusable.
           if restored
             restore(restored)
+            # ADR-103 WD13 / #382 — the effects sidecar joins the same reuse decision, for a structurally
+            # identical reason: a snapshot whose summaries were collected under a different vocabulary /
+            # catalogue / `effects:` block restores as empty, and a recheck only re-collects the changed
+            # closure, so the merged table would be missing every unchanged file. A full baseline is the
+            # honest answer — it is what "recompute effects" means when collecting requires analysing, and
+            # it is paid on the first collecting run and on an identity change, never with collection off.
+            # Asked BEFORE the recheck, which re-stamps the session with the current identity.
+            effects_reusable = effects_reuse_permitted?(restored)
             result = recheck
             adopt_plugin_fact_fingerprint
-            reuse = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
-            if reuse
+            fact_reusable = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
+            if fact_reusable && effects_reusable
               diagnostics = result.diagnostics
               warm = true
               # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
@@ -428,10 +469,12 @@ module Rigor
               # A cold baseline always persists — there was no valid snapshot to reuse.
               skip_save = result.no_change?
             else
-              # The fact surface moved (a plugin sig/catalog edit) or a plugin is opaque: the cached-served
-              # files the recheck merged may be stale, so re-analyze the whole tree. The current fact-surface
+              # The fact surface moved (a plugin sig/catalog edit), a plugin is opaque, or the effects
+              # identity moved: the cached-served files the recheck merged may be stale (or, for effects, a
+              # partial collection cannot be closed), so re-analyze the whole tree. The current fact-surface
               # digest (from the recheck runner) is unchanged by the re-analysis, so it is kept for the save.
-              @fact_surface_invalidated = true
+              # Only a genuine fact-surface reason sets the reporting flag the CLI banner reads.
+              @fact_surface_invalidated = true unless fact_reusable
               diagnostics = baseline
               warm = false
               skip_save = false
@@ -458,6 +501,12 @@ module Rigor
       end
 
       private
+
+      # Path-sorted, so the fold is reproducible whatever order the files were absorbed in (the same reason
+      # `Runner#effect_collections` sorts).
+      def sorted_effect_collections
+        @effect_collections.sort_by { |path, _| path.to_s }.map(&:last)
+      end
 
       # ADR-88 WD1 — capture this invocation's fact-surface fingerprint (from the last analysis runner) onto the
       # reporting ivars + the `@plugin_fact_reusable` decision object.
@@ -509,6 +558,12 @@ module Rigor
         @class_decls       = payload.class_decls || {}
         @return_summaries  = payload.return_summaries || {}
         @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
+        # ADR-103 WD13 / #382 — the effects sidecar rides its own identity, so a snapshot whose summaries
+        # were collected under a different vocabulary / catalogue / `effects:` block restores as EMPTY
+        # rather than as stale rows. {#run_incremental} turns that emptiness into a full baseline, because
+        # a partial re-collection cannot be closed into a whole-project fixpoint.
+        @effects_identity  = payload.effects_identity
+        @effect_collections = effect_collections_reusable?(payload) ? payload.effect_collections.dup : {}
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
         @negative_dependents = Incremental.invert(@missing)
@@ -522,8 +577,69 @@ module Rigor
           class_decls: @class_decls, seed_bundles: @seed_bundles,
           plugin_fact_digest: @plugin_fact_digest,
           return_summaries: marshal_safe_return_summaries,
-          param_table: marshal_safe_param_table
+          param_table: marshal_safe_param_table,
+          effect_collections: marshal_safe_effect_collections,
+          effects_identity: @effects_identity
         )
+      end
+
+      # ADR-103 WD13 / issue #382 — the per-file effect collections the session serves unchanged files
+      # from, and the effects identity they were collected under. Empty / nil when collection is off, which
+      # is every run that does not carry an `effects:` block. The PROPAGATED table is never kept here:
+      # {#effect_table} re-runs the fixpoint over the merged whole on every ask, because a leaf's summary
+      # reaches every caller and there is no per-file invalidation for a whole-graph closure.
+      def reset_effect_state
+        @effect_collections = {}
+        @effects_identity = nil
+      end
+
+      # Whether the effects half of a restored snapshot permits reuse. Collection off is vacuously true —
+      # the session keeps no collections, writes none, and the pre-#382 reuse decision stands unchanged.
+      def effects_reuse_permitted?(payload)
+        !@configuration.effects_enabled? || effect_collections_reusable?(payload)
+      end
+
+      # ADR-103 WD13 / #382 — whether a restored payload's effect collections may be served this run:
+      # collection is on, and they were collected under the identity this run computes. Collection being
+      # OFF answers false and costs nothing — the session then keeps no collections, writes none, and is
+      # the pre-#382 session in every observable way.
+      def effect_collections_reusable?(payload)
+        return false unless @configuration.effects_enabled?
+        return false if payload.effects_identity.nil? || !payload.effect_collections.is_a?(Hash)
+
+        payload.effects_identity == current_effects_identity
+      end
+
+      # The effects identity for THIS run, memoised: it digests a YAML catalogue and the `effects:` block,
+      # and a recheck asks for it on both the restore and the absorb side. nil when collection is off, so a
+      # non-collecting run never loads the catalogue at all.
+      #
+      # **Deliberately plugin-blind**, unlike the ADR-45 whole-run effects slot, whose descriptor carries
+      # {Effects::PluginFacts#digest} (#387). The two sides of this comparison sit on opposite sides of the
+      # run: the restore asks before any plugin is loaded and the save asks after, so folding the plugin
+      # facts in here would compare a blind digest against a sighted one and miss every single time. The
+      # bound it leaves — a plugin upgrade that moves a row does not invalidate an `--incremental`
+      # snapshot's effect collections — is recorded in `docs/internal-spec/effect-summaries.md`; the
+      # primary (whole-run) path has no such hole, and `--incremental` is opt-in.
+      def current_effects_identity
+        return nil unless @configuration.effects_enabled?
+
+        @current_effects_identity ||= Effects::Identity.digest(configuration: @configuration)
+      end
+
+      # The same Marshal-clean guard {#marshal_safe_return_summaries} applies, for the same reason: a
+      # snapshot save must never raise. A dropped collection makes that file's summaries absent from the
+      # next run's merged table, which understates its effects — so it is dropped only when it genuinely
+      # will not serialise, and {FileCollection} is built to (the fork pool marshals one per file already).
+      def marshal_safe_effect_collections
+        return {} unless @configuration.effects_enabled?
+
+        @effect_collections.each_with_object({}) do |(path, collection), safe|
+          Marshal.dump(collection)
+          safe[path] = collection
+        rescue StandardError
+          next
+        end
       end
 
       # ADR-89 WD2 — the return summaries filtered to Marshal-clean entries. A summary's `keys` hold live
@@ -568,6 +684,21 @@ module Rigor
         end
         absorb_dependency_graph(runner)
         refresh_return_summaries(runner, analyze_set)
+        refresh_effect_collections(runner, analyze_set)
+      end
+
+      # ADR-103 WD13 / #382 — the effects analogue of {#refresh_return_summaries}, and the same soundness
+      # order: drop every re-analyzed file's collection first, then fold this run's harvest in. A file the
+      # recheck did NOT analyze keeps the collection the snapshot carried, which is exactly the reuse the
+      # slot exists for; a re-analyzed file that produced nothing (a parse failure, a file of constants)
+      # correctly ends up with nothing rather than with its pre-edit summaries.
+      def refresh_effect_collections(runner, analyze_set)
+        return unless @configuration.effects_enabled?
+
+        analyzed = analyze_set.to_set
+        @effect_collections.reject! { |path, _| analyzed.include?(path) }
+        @effect_collections.merge!(runner.effect_collections_by_path)
+        @effects_identity = current_effects_identity
       end
 
       # ADR-89 WD2 — replace the behavioural summaries of every re-analyzed file with THIS run's harvest: drop
@@ -599,6 +730,9 @@ module Rigor
         @symbol_fingerprints.delete(path)
         # ADR-89 WD2 — drop every behavioural summary a removed file provided (keys are `[path, symbol]`).
         @return_summaries.reject! { |(summary_path, _symbol), _| summary_path == path }
+        # ADR-103 WD13 / #382 — and its effect collection, so a deleted file stops contributing summaries
+        # and edges to the merged table the fixpoint closes.
+        @effect_collections.delete(path)
         # @class_decls is wholesale-replaced from the (removed-excluding)
         # pre-pass in absorb_dependency_graph, and is frozen, so no delete.
       end

@@ -70,6 +70,14 @@
       "description": "ADR-67 WD6 — opt-in call-site parameter type inference on the `check` walk. When `true`, `rigor check` runs a one-round pre-pass that types each undeclared `def` / `initialize` / setter parameter to the union of its resolved call-site argument types, sharpening downstream ivar reads, folds, narrowing, and protection coverage. Precision-additive only: the in-body negative rules (undefined-method, wrong-arity, argument-type-mismatch, possible-nil, visibility) decline on an inferred-parameter receiver/argument, because an open call-site union is a lower bound (WD6b). Default `false`, resolved off by every severity profile — a diagnostics-affecting activation is a compatibility change (ADR-50). Mutually exclusive with `--incremental` (WD6c).",
       "type": "boolean"
     },
+    "effects": {
+      "description": "ADR-103 — effect labels. The PRESENCE of this block is the opt-in: `effects: {}` (or the bare key, which YAML parses as null) turns effect collection on with every sub-key at its default, and its absence keeps `rigor check` byte-identical and free. `false` is the explicit-disable form, useful in `.rigor.yml` to override an upstream `.rigor.dist.yml`'s block — the same shape `baseline:` uses. Nothing else enables collection: an `%a{rigor:v1:effect …}` or `%a{pure}` annotation in a project's RBS does not, because an annotation must not create a project-wide cost cliff. `rigor effects` runs under an implicit `effects: {}` when the key is absent. Every sub-key but `views:` is read; `views:` stays declared-and-unread until its slice, which is the same discipline ADR-99 applies to a sibling implementation's namespace.",
+      "oneOf": [
+        { "$ref": "#/$defs/effectsBlock" },
+        { "type": "null" },
+        { "type": "boolean", "const": false }
+      ]
+    },
     "cache": {
       "description": "On-disk cache settings. The cache stores parsed RBS environments, class ancestor tables, and plugin-side artefacts; deleting the directory is always safe (re-populates on next run).",
       "type": "object",
@@ -233,6 +241,90 @@
     }
   },
   "$defs": {
+    "effectsBlock": {
+      "description": "The body of the `effects:` opt-in. Every key but `views:` is read: `check:` and `envelopes:` decide the envelope contract (#383 / #385), `snapshot:` and `tolerated:` the committed record and its gate (#381), `labels:` the project's vocabulary and `attribution:` its claims about code Rigor does not analyse (#385). `views:` is reserved — declared, accepted, and not yet read by this implementation.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "description": "Whether authored envelopes (`%a{pure}`, `%a{rigor:v1:effect …}`) are checked against the collected summaries, surfacing `effect.envelope-exceeded`. Default `true` under a present `effects:` block, and never on without one. `false` keeps collection, the report and the snapshot while silencing the diagnostic. READ.",
+          "type": "boolean",
+          "default": true
+        },
+        "snapshot": {
+          "description": "The committed effect snapshot and its drift gate — `rigor effects update` / `check` / `diff` / `explain` (ADR-103 WD7). READ.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "description": "Snapshot file path. Default `.rigor-effects.yml`.",
+              "type": "string",
+              "default": ".rigor-effects.yml"
+            },
+            "reach": {
+              "description": "Entry points whose TRANSITIVE footprint the snapshot records under `reach:`. Each entry is either a file glob — anything carrying a path or glob character, matched project-relative with the `unused --entry-point` semantics (`File.fnmatch?` with `FNM_PATHNAME`, so `**` is the only way across a directory boundary) — or the bare name of an entry-point preset a plugin registered. An unknown preset name is a load-time error. Default `[]` — `methods:` only.",
+              "type": "array",
+              "items": { "type": "string" },
+              "default": []
+            },
+            "gate": {
+              "description": "What `rigor effects check` treats as drift. `symmetric` (default) reports removals too — a job that stopped enqueueing is news; `additions` is the ratchet option.",
+              "type": "string",
+              "enum": ["symmetric", "additions"],
+              "default": "symmetric"
+            }
+          }
+        },
+        "labels": {
+          "description": "Project-owned vocabulary extensions, layered over `data/effects/registry.yml`. A project may open any root — listing a label in its own configuration IS the vouching act, where a plugin may open only the root it owns. Registered labels become known everywhere a label is judged: `effect.unknown-label`, envelope bounds, attribution values, `tolerated:`. Label SHAPE is validated at load (tier 2). READ.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "attribution": {
+          "description": "Per-method effect attribution for third-party code Rigor cannot see: `{ \"Net::HTTP.get\": [io.net.http], \"Logger#info\": [telemetry] }`. A key is a method key exactly as the symbol tables spell one — `Owner#instance_method` or `Owner.singleton_method` — and a malformed key is a load-time error (tier 2). A call resolving to that owner and selector contributes the labels to the caller's DECLARED (`\u2264`) lane and leaves a `plugin-attribution` taint: attributed labels never enter the proven lane and never discharge a taint, because they read as \"declared this, and possibly more\" (ADR-103 WD6). An unrecognised label is `effect.unknown-label`, not an error. READ.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "envelopes": {
+          "description": "Envelopes by convention rather than by annotation — the ADR-28 path/namespace shape. Each entry bounds every method of every class it selects, distributing exactly as a class-level annotation does. Precedence is nearest-wins: a per-method annotation beats a class-level one, which beats a config entry; among config entries the FIRST match in list order wins. `effect.envelope-exceeded` names the stanza (`.rigor.yml effects.envelopes[2]`). READ.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/effectEnvelopeEntry" }
+        },
+        "tolerated": {
+          "description": "Labels a judgment discharges by policy. Read by the snapshot gate: a `rigor effects check` difference confined to tolerated labels is reported under a `tolerated:` heading and does not fail (`--strict-tolerated` makes it fail, `--no-tolerated-effects` judges as if the list were empty). The snapshot RECORD is undischarged either way. Label SHAPE is validated at load; a label the registry does not know is `effect.unknown-label`'s business, not an error. Per-origin discharge — a bundle is discharged when ANY of its labels is tolerated, because tolerating what an origin was FOR frees the transport it came with (ADR-103 WD14) — arrives with the envelope slices.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "views": {
+          "description": "Whether view templates are analysed as effect units (ADR-103 WD11). Default `false`. NOT READ YET.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "effectEnvelopeEntry": {
+      "description": "One convention envelope: the methods it selects, and the bound it puts on them.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "description": "Path glob selecting the classes the envelope applies to, by the file any of their definitions is written in. `File.fnmatch?` with `FNM_PATHNAME`, project-relative — the `unused --entry-point` and `effects.snapshot.reach:` semantics, so `**` is the only way across a directory boundary. Exactly one of `match:` / `namespace:` per entry; naming both or neither is a load-time error.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Constant-path glob selecting the classes the envelope applies to, matched segment by segment over the fully-qualified name. `*` matches exactly one segment (`Presenters::*` selects `Presenters::User`, not `Presenters::Admin::User` and not bare `Presenters`); `**` matches one or more (`Presenters::**` selects both). A `*` inside a segment matches within it (`Api::V*`). Exactly one of `match:` / `namespace:` per entry.",
+          "type": "string"
+        },
+        "effect": {
+          "description": "The bound: a list of labels, or the empty list for the empty envelope (`pure`, which still tolerates `mutate.local`). Required — an entry with no `effect:` is a load-time error. Label SHAPE is validated at load (tier 2); a label the registry does not know makes the whole entry read as \u22a4 (bounding nothing) and surfaces as `effect.unknown-label` positioned at `.rigor.yml`.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "sourceInferenceEntry": {
       "description": "A single per-gem source-inference opt-in.",
       "type": "object",

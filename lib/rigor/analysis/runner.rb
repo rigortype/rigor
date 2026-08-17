@@ -18,6 +18,11 @@ require_relative "../rbs_extended/conformance_checker"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
+require_relative "../effects/attribution"
+require_relative "../effects/collector"
+require_relative "../effects/envelope_index"
+require_relative "../effects/identity"
+require_relative "../effects/propagator"
 require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/pre_eval_constants"
 require_relative "../inference/scope_indexer"
@@ -41,6 +46,8 @@ require_relative "runner/run_snapshots"
 require_relative "runner/project_pre_passes"
 require_relative "runner/pool_coordinator"
 require_relative "runner/diagnostic_aggregator"
+require_relative "runner/effect_envelope_pass"
+require_relative "runner/effect_annotation_residual_pass"
 require_relative "runner/buffer_pool_dispatcher"
 
 module Rigor
@@ -67,6 +74,90 @@ module Rigor
       def file_dependencies
         pooled = @pool_coordinator.collected_dependencies
         pooled.empty? ? @file_dependencies : @file_dependencies.merge(pooled)
+      end
+
+      # ADR-103 — the run's propagated effect graph, or {Effects::EffectTable.empty} when collection did
+      # not run. Reconciled from the sequential and pooled halves exactly as {#file_dependencies} is, then
+      # closed by the post-pool fixpoint in {#assemble_run_diagnostics}.
+      #
+      # This is a **report surface, not a diagnostic one**: nothing here enters the diagnostic stream, and
+      # `rigor check`'s output is identical whether or not it was computed (ADR-102's line).
+      def effect_table
+        @effect_table || Effects::EffectTable.empty
+      end
+
+      # ADR-103 WD2 / WD6 / WD10 / #387 — the loaded plugins' effect contributions, compiled once per
+      # process. Memoised on first use rather than built in the constructor for two reasons: the plugin
+      # registry is adopted after construction (`apply_prebuilt` / the plugin-load pre-pass), and the
+      # project's as-written superclass table — which is what makes an `ActiveRecord::Base` row reach
+      # `User.find` — is filled by the cross-file discovery pre-pass, which on the sequential path runs
+      # AFTER the first file has already asked for these facts.
+      #
+      # So the memo is keyed on the ancestry table's identity rather than being unconditional, exactly as
+      # {#effect_envelope_index}'s is keyed on the environment's. An unconditional `||=` pinned the whole
+      # run to the empty table the first file saw, and the measured symptom was the Rails layer's central
+      # claim silently failing: `Issue.find` on a `Issue < ApplicationRecord < ActiveRecord::Base` found no
+      # row on a sequential run, while a pooled one (whose workers are seeded with the finished table
+      # before they fork) worked.
+      #
+      # Public and declared here beside the other effect surfaces: `rigor effects` builds its snapshot off
+      # the run's own vocabulary and has to read the same compiled tables the collection window scanned
+      # under.
+      def effect_plugin_facts
+        table = @project_discovered_superclasses
+        return @effect_plugin_facts if @effect_plugin_facts && @effect_plugin_facts_ancestry.equal?(table)
+
+        @effect_plugin_facts_ancestry = table
+        @effect_plugin_facts = Effects::PluginFacts.build(@plugin_registry, superclasses: table)
+      end
+
+      # The merged per-file collections behind {#effect_table} — the *direct* summaries, before the graph
+      # closure. #381's snapshot records these, because a diff over direct summaries stays attributable to
+      # the pull request's own lines.
+      def effect_collection
+        Effects::FileCollection.merge_all(effect_collections)
+      end
+
+      # Issue #382 — the same collections keyed by the path that produced each, which is the form the two
+      # caches persist: `{ "lib/a.rb" => FileCollection, … }`. The merged {#effect_collection} cannot be
+      # persisted per file (merging is where the path is deliberately dropped), and per file is what an
+      # ADR-46 recheck needs — it re-collects the changed closure and serves the rest from the snapshot.
+      def effect_collections_by_path
+        pooled = @pool_coordinator.collected_effects
+        pooled.empty? ? @file_effects.dup : @file_effects.merge(pooled)
+      end
+
+      # Issue #382 — adopt persisted collections as this run's own and close the graph over them. The
+      # warm-hit half of the whole-run effects slot: the analysis did not run, so `#assemble_run_diagnostics`
+      # never reached {#close_effect_graph} and the fixpoint is run here instead. The fixpoint is ALWAYS
+      # re-run rather than persisted — it is the cheap half, and a stored table would have to be invalidated
+      # by every input a summary has.
+      def adopt_effect_collections(collections)
+        @file_effects = collections
+        close_effect_graph
+      end
+
+      # Issue #382 — whether this run's effect collections came from the whole-run effects slot rather than
+      # from a fresh collection pass. Read by the specs and by nothing in the engine; `#effect_table` reads
+      # the same either way, which is the property the slot exists to provide.
+      def effects_served_from_cache?
+        @effects_served_from_cache
+      end
+
+      # Which file each effect unit was defined in — `{ "Class#m" => [path, …] }`, sorted, one entry per
+      # file that contributes a `def` to the key (a reopening spans several).
+      #
+      # The merged {#effect_collection} cannot answer this: merging drops the per-file path, deliberately,
+      # because a summary is line- and file-free by design. The snapshot's `reach:` table needs it anyway —
+      # its entry points are named by *file* globs (`effects.snapshot.reach:`, the `unused --entry-point`
+      # syntax), so the key has to be traced back to the file it was written in.
+      def effect_sources
+        effect_collections.each_with_object({}) do |collection, out|
+          path = collection.path
+          next if path.nil?
+
+          collection.summaries.each_key { |key| (out[key] ||= []) << path }
+        end
       end
 
       # @param configuration [Rigor::Configuration]
@@ -103,13 +194,16 @@ module Rigor
       #   discovery tables": {Protection::DiagnosticOracle} threads the table set Tier 2's site filter already
       #   judges anchors against, so a site admitted because a sibling-file class resolved is also a site the
       #   oracle can kill at. nil (the default) leaves the prebuilt/LSP contract byte-identical.
+      # @param no_tolerated_effects [Boolean] ADR-103 WD1 / #385 — `rigor check --no-tolerated-effects`.
+      #   Judges effect envelopes as if `effects.tolerated:` were empty. A judgment-time switch only: the
+      #   run, its collection and its cache identity are unchanged.
       def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
-                     discovery_seed: nil)
+                     discovery_seed: nil, no_tolerated_effects: false)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -129,6 +223,30 @@ module Rigor
         # diagnostics are byte-identical.
         @record_self_calls = record_self_calls
         @unresolved_self_calls = {}
+        # ADR-103 WD13 — effect collection. Derived from the configuration, never from a flag: the
+        # `effects:` block (or an implicit one, which is how `rigor effects` opts in) is the ONLY switch.
+        # Observational — diagnostics are byte-identical whichever way it resolves.
+        @record_effects = configuration.effects_enabled?
+        # ADR-103 WD6 / #385 — the project's `effects.attribution:` table, built once and carried on the
+        # collection window so a fork-pool worker scans under the same claims the parent does.
+        @effect_attribution = Effects::Attribution.build(configuration.effects_attribution)
+        # ADR-103 WD6 / #386 — the call-site envelope index, built lazily off the run's environment
+        # (`#effect_envelope_index`) because the strata it reads include the built RBS one.
+        @effect_envelope_index = nil
+        @effect_envelope_index_env = nil
+        # #387 — the compiled plugin effect tables, memoised on the ancestry table they were built from
+        # (see `#effect_plugin_facts`).
+        @effect_plugin_facts = nil
+        @effect_plugin_facts_ancestry = nil
+        # ADR-103 WD1 invariant 3 / #385 — `--no-tolerated-effects`, the audit switch. It changes the
+        # JUDGMENT only: collection, the propagated table and the cache identity are all untouched, so an
+        # audit run and an ordinary one share a cache entry and differ solely in which lane the envelope
+        # check reads.
+        @no_tolerated_effects = no_tolerated_effects
+        @file_effects = {}
+        @effect_table = nil
+        @effects_served_from_cache = false
+        @run_dependency_descriptor = nil
         # Memoised activation decision for the `call.self-undefined-method` rule (nil = not yet computed).
         # See `self_undefined_rule_active?`.
         @self_undefined_rule_active = nil
@@ -238,6 +356,9 @@ module Rigor
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
+        # Per-run reset of the environment the cacheable path resolves, reused by the envelope pass so a
+        # run never builds two.
+        @run_environment = nil
         # ADR-84 WD2 — roll the return-memo bucket: a fresh frozen token per run makes every per-file scope
         # of THIS run share one memo bucket while entries from any earlier run in this process (stale after
         # an edit) become unreachable.
@@ -255,6 +376,16 @@ module Rigor
         ensure_project_discovery(expansion) if force_eager_discovery?
 
         diagnostics = compute_run_diagnostics(expansion)
+        # ADR-103 WD12 / #383 — `effect.envelope-exceeded`, recomputed every run from the (possibly
+        # cached) effect table and never stored. It sits OUTSIDE `compute_run_diagnostics` on purpose:
+        # the `effects:` block is absent from the diagnostics cache identity, so a finding written into
+        # that entry would outlive the configuration that produced it. See {EffectEnvelopePass}.
+        diagnostics += effect_envelope_diagnostics(expansion)
+        # ADR-103 WD13 commitment 1 / #384 — the mirror image: a project that wrote effect annotations
+        # and NO `effects:` block. Same placement rationale (the block is absent from the diagnostics
+        # cache identity, so a residual stored there would outlive the edit that answers it), and the
+        # opposite gate, so exactly one of the two ever runs.
+        diagnostics += effect_annotation_residual_diagnostics
 
         Result.new(
           diagnostics: @diagnostic_aggregator.apply_severity_profile(diagnostics),
@@ -499,25 +630,170 @@ module Rigor
                          else
                            Cache::Descriptor.new
                          end
+        @run_environment = environment
         key_descriptor = run_key_descriptor(expansion, rbs_descriptor)
         return assemble_run_diagnostics(expansion, environment: environment) if key_descriptor.nil?
 
+        # ADR-103 WD13 / #382 — the effects slot is consulted FIRST, because it is the one that can force
+        # the analysis: a missing or differently-identified sidecar is a miss for effects consumers only,
+        # and the only way to re-collect is to re-analyze. When it hits (or collection is off) this returns
+        # nil and the diagnostics slot decides on its own, exactly as it did before effects existed.
+        analysis = serve_effect_collections(expansion, environment, key_descriptor, rbs_descriptor)
         computed = false
         diagnostics = @cache_store.fetch_or_validate(
           producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID, key_descriptor: key_descriptor,
           generation_cap: RunCacheKey::GENERATION_CAP
         ) do
           computed = true
-          diags = assemble_run_diagnostics(expansion, environment: environment)
+          diags = analysis || assemble_run_diagnostics(expansion, environment: environment)
           [diags, run_dependency_descriptor(expansion, rbs_descriptor)]
         end
-        @run_served_from_cache = !computed
+        # An effects miss that ran the analysis is not a cache-served run even when the diagnostics slot
+        # then hit — the stats it would otherwise suppress were all gathered.
+        @run_served_from_cache = !computed && analysis.nil?
         diagnostics
       rescue StandardError
         # The result cache must never break a run. If anything in the cache path fails, fall back to a
         # direct, uncached analysis.
         @run_served_from_cache = false
         assemble_run_diagnostics(expansion)
+      end
+
+      # ADR-103 WD13 / issue #382 — the whole-run **effects sidecar**, the second of "one cache, two
+      # identities, one extra slot". Keyed by {Effects::Identity.descriptor} — the diagnostics key
+      # descriptor plus the vocabulary version, the catalogue identity and the `effects:` digest — and
+      # validated against the same post-run dependency descriptor the diagnostics slot records, so exactly
+      # the file set that invalidates diagnostics invalidates summaries.
+      #
+      # Returns the diagnostics of the analysis it had to run (a miss — the run has to re-collect, and the
+      # only way to collect is to analyze), or nil when it did not have to run one (a hit, or collection
+      # off). The diagnostics slot is never written, read, or invalidated from here.
+      def serve_effect_collections(expansion, environment, key_descriptor, rbs_descriptor)
+        return nil unless @record_effects
+
+        descriptor = effects_key_descriptor(key_descriptor)
+        cached = descriptor && peek_effect_collections(descriptor)
+        if cached
+          adopt_effect_collections(cached)
+          @effects_served_from_cache = true
+          return nil
+        end
+
+        analysis = assemble_run_diagnostics(expansion, environment: environment)
+        store_effect_collections(descriptor, expansion, rbs_descriptor)
+        analysis
+      end
+
+      def effects_key_descriptor(key_descriptor)
+        Effects::Identity.descriptor(base: key_descriptor, configuration: @configuration,
+                                     plugin_facts: effect_plugin_facts)
+      rescue StandardError
+        nil
+      end
+
+      # The read half. A miss, a stale dependency, a corrupt entry and a stored value of the wrong shape
+      # are one answer — nil, "collect it again" — because none of them can be told apart from the outside
+      # and all of them have the same remedy.
+      def peek_effect_collections(descriptor)
+        cached = @cache_store.peek_validated(
+          producer_id: RunCacheKey::RUN_EFFECTS_PRODUCER_ID, key_descriptor: descriptor
+        )
+        cached.is_a?(Hash) ? cached : nil
+      rescue StandardError
+        nil
+      end
+
+      # The write half, run only after a miss, so the block never recomputes anything: it hands over the
+      # collections the analysis just produced, validated against the same post-run dependency descriptor
+      # the diagnostics slot records. Fail-soft — a collection that will not Marshal (which nothing in
+      # {Effects::FileCollection} should be, and the fork pool already proves per file) costs the next run
+      # its warm start and nothing else.
+      def store_effect_collections(descriptor, expansion, rbs_descriptor)
+        return if descriptor.nil?
+
+        collections = effect_collections_by_path
+        @cache_store.fetch_or_validate(
+          producer_id: RunCacheKey::RUN_EFFECTS_PRODUCER_ID, key_descriptor: descriptor,
+          generation_cap: RunCacheKey::EFFECTS_GENERATION_CAP
+        ) { [collections, run_dependency_descriptor(expansion, rbs_descriptor)] }
+        nil
+      rescue StandardError
+        nil
+      end
+      private :serve_effect_collections, :effects_key_descriptor,
+              :peek_effect_collections, :store_effect_collections
+
+      # ADR-103 WD8 / #383 — the envelope check. Nothing at all without an `effects:` block, and nothing
+      # under `effects.check: false`; with both, one walk of the project's own RBS for `%a{pure}` /
+      # `%a{rigor:v1:effect …}`, and only if that finds an envelope does anything else run (the discovery
+      # tables the `def` positions come from are forced from inside the pass, lazily, for that reason).
+      #
+      # The environment is the one the cacheable path already resolved when there is one, so a warm run
+      # reads the envelopes off the loader it built anyway rather than building a second.
+      def effect_envelope_diagnostics(expansion)
+        return [] unless @record_effects && @configuration.effects_check?
+
+        EffectEnvelopePass.new(
+          configuration: @configuration,
+          rbs_loader: envelope_rbs_loader(expansion),
+          effect_table: effect_table,
+          discovery: -> { envelope_discovery_tables(expansion) },
+          sources: @in_memory_sources,
+          unit_sources: effect_sources,
+          # ADR-103 WD1 / #386 — the nominal relation `effect.liskov-widened` reads, from the collector's
+          # own as-written superclass table, so the Liskov check and the closed-world proven lane resolve
+          # the same ancestry. Lazy: only a project that declared an envelope pays the merge.
+          ancestry: -> { effect_collection.superclasses },
+          apply_tolerated: !@no_tolerated_effects,
+          # #387 — the same compiled plugin tables the collection window scanned under, so an envelope may
+          # name a label a plugin opened and the unknown-label check agrees with the scan.
+          plugin_facts: effect_plugin_facts
+        ).diagnostics
+      end
+
+      # The residual takes the loader the run ALREADY resolved — never `envelope_rbs_loader`, which
+      # builds one on demand. This runs on the effects-off path, where an environment build is a cost
+      # the project did not ask for; the `signature_paths:` `.rbs` stratum is always read, and the
+      # rbs-inline stratum rides whatever the run happened to have.
+      def effect_annotation_residual_diagnostics
+        EffectAnnotationResidualPass.new(
+          configuration: @configuration, rbs_loader: @run_environment&.rbs_loader
+        ).diagnostics
+      end
+
+      def envelope_rbs_loader(expansion)
+        environment = @run_environment ||
+                      @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
+        environment&.rbs_loader
+      rescue StandardError
+        nil
+      end
+
+      def envelope_discovery_tables(expansion)
+        ensure_project_discovery(expansion)
+        [@project_discovered_def_sources, @project_discovered_singleton_def_sources,
+         @project_discovered_class_sources]
+      end
+
+      private :effect_envelope_diagnostics, :effect_annotation_residual_diagnostics,
+              :envelope_rbs_loader, :envelope_discovery_tables
+
+      # ADR-103 WD13 — fail-soft at the run level too: a propagator that raises leaves the table empty and
+      # the run untouched. `Propagator.propagate` already swallows its own failures; this guards the merge.
+      def close_effect_graph
+        return unless @record_effects
+
+        @effect_table = Effects::Propagator.propagate(effect_collection, discharge: effect_discharge)
+      rescue StandardError
+        @effect_table = Effects::EffectTable.empty
+      end
+
+      # ADR-103 WD14 / #385 — the `effects.tolerated:` policy the propagator's second (undischarged) lane
+      # is computed under. Built from the configuration and never from the audit flag: BOTH lanes are in
+      # the table, and `--no-tolerated-effects` picks the other one at judgment time, so one fixpoint
+      # serves an audit run and an ordinary one alike.
+      def effect_discharge
+        @effect_discharge ||= Effects::Discharge.new(@configuration.effects_tolerated)
       end
 
       def assemble_run_diagnostics(expansion, environment: nil)
@@ -544,6 +820,11 @@ module Rigor
         targets = target_files(expansion)
         @analyzed_files = targets
         diagnostics += @pool_coordinator.analyze_files(targets, environment: environment)
+        # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
+        # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
+        # contributes NO diagnostics and its result leaves through `#effect_table`, never through the
+        # stream. Skipped entirely when collection did not run.
+        close_effect_graph
         diagnostics += @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_environment_build_failed_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_synthesized_namespace_diagnostics
@@ -631,6 +912,11 @@ module Rigor
       # share the full run's result key (`run_key_descriptor` keys on the whole expansion, not the
       # subset), so serving one as the other would manufacture a wrong result. Both instead use the
       # store for the RBS-env + plugin-producer tiers, where the incremental win actually lives.
+      # ADR-103 WD13 / issue #382 — a COLLECTING run is no longer excluded. It was, for the same reason a
+      # `record_dependencies` run is (a cache-served run collects nothing, so `#effect_table` would come
+      # back empty from a warm hit), and the sidecar slot is what lifts it: the collections ride their own
+      # entry under their own identity, so a warm run restores them and re-runs only the fixpoint. A run
+      # with collection OFF never reads or writes that slot and is byte-identical here.
       def run_result_cacheable?
         !@cache_store.nil? && !@cache_store.read_only? &&
           @buffer.nil? && @prebuilt.nil? && !pool_mode? &&
@@ -654,7 +940,15 @@ module Rigor
       # Files the run actually depended on, collected AFTER it ran: every analyzed file, every RBS `sig`
       # file (`rbs_descriptor.files`), and every file each plugin read (complete post-run, so reads made
       # mid-analysis are included). Re-digested on the next run by {Descriptor#fresh?}.
+      # Memoised because a collecting run asks twice — once to validate the effects sidecar it just wrote,
+      # once for the diagnostics entry — and this is a whole-project stat + digest walk. Both asks happen
+      # after the same analysis, so they are answering about the same world; a run with collection off asks
+      # once and the memo is inert.
       def run_dependency_descriptor(expansion, rbs_descriptor)
+        @run_dependency_descriptor ||= build_run_dependency_descriptor(expansion, rbs_descriptor)
+      end
+
+      def build_run_dependency_descriptor(expansion, rbs_descriptor)
         entries = analyzed_file_entries(expansion) + pre_eval_file_entries + rbs_descriptor.files
         @plugin_registry.plugins.each do |plugin|
           # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
@@ -851,6 +1145,13 @@ module Rigor
       end
 
       private
+
+      # The run's per-file effect collections in sorted path order — the sequential half merged with the
+      # pool's, exactly as {#file_dependencies} reconciles its two halves. Sorted, because the fold below
+      # it must not depend on pool-completion order.
+      def effect_collections
+        effect_collections_by_path.sort_by { |path, _| path.to_s }.map(&:last)
+      end
 
       # Editor mode § "Scope choice — option A". Under `buffer:` non-nil the per-file analysis emits
       # diagnostics ONLY for the buffer's logical path; the rest of `paths:` is consumed by the
@@ -1219,15 +1520,51 @@ module Rigor
       # `DependencyRecorder.active? == false`. Recording is observational, so diagnostics are byte-identical
       # either way.
       def analyze_file(path, environment)
-        return analyze_file_body(path, environment) unless @record_dependencies
+        return analyze_with_effects(path, environment) unless @record_dependencies
 
         diagnostics = nil
         record = DependencyRecorder.record_for(path) do
-          diagnostics = analyze_file_body(path, environment)
+          diagnostics = analyze_with_effects(path, environment)
         end
         @file_dependencies[path] = record
         diagnostics
       end
+
+      # ADR-103 WD13 — the effect-collection window, in the same shape as the dependency one and nested
+      # inside it so a recording incremental run collects both. Off by default: `effects_enabled?` false
+      # calls the body directly, {Effects::Collector.active?} stays false, and the recorder's sites on the
+      # dispatch path short-circuit on one integer read.
+      def analyze_with_effects(path, environment)
+        return analyze_file_body(path, environment) unless @record_effects
+
+        diagnostics = nil
+        collection = Effects::Collector.collect_for(
+          path, attribution: @effect_attribution, envelopes: effect_envelope_index(environment),
+                plugin_facts: effect_plugin_facts
+        ) do
+          diagnostics = analyze_file_body(path, environment)
+        end
+        @file_effects[path] = collection
+        diagnostics
+      end
+
+      # ADR-103 WD6 / #386 — the envelopes a call site may import as a `≤` bound, built once per process
+      # over the first environment the analysis resolves and reused for every later file. A worker builds
+      # its own from the same configuration and the same signature content ({WorkerSession}), so the two
+      # agree without a channel to keep in sync.
+      #
+      # Memoised on the environment's identity rather than unconditionally: a run that resolves its
+      # environment lazily hands `nil` to the first files, and an index built from `nil` would silently
+      # pin the whole run to the strata a loader-less build can read.
+      def effect_envelope_index(environment)
+        return @effect_envelope_index if @effect_envelope_index && @effect_envelope_index_env.equal?(environment)
+
+        @effect_envelope_index_env = environment
+        @effect_envelope_index = Effects::EnvelopeIndex.build(
+          configuration: @configuration, environment: environment, plugin_facts: effect_plugin_facts
+        )
+      end
+      private :effect_envelope_index
 
       def analyze_file_body(path, environment) # rubocop:disable Metrics/MethodLength
         parse_result = parse_source(path)
@@ -1237,6 +1574,11 @@ module Rigor
           return parse_diagnostics(path, parse_result)
         end
 
+        # ADR-103 WD13 — hand the effect collector the root the typer is about to walk, so its per-def
+        # scan runs over exactly what was typed. Guarded inside the recorder rather than by `active?`: this
+        # is a per-FILE site, so one `Thread.current` read is already nothing. The per-dispatch site in
+        # `ExpressionTyper#call_type_for` is the one that pays for the integer fast path.
+        Effects::Collector.record_root(parse_result.value)
         scope = seed_project_scope(Scope.empty(environment: environment, source_path: path))
         # ADR-24 slice 4a/4 — record unresolved implicit-self calls during the typing pass ONLY (not
         # CheckRules, whose own `type_of` queries would otherwise re-trigger the choke-point).

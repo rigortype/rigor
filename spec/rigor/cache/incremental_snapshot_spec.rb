@@ -24,7 +24,10 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       plugin_fact_digest: "fact-digest-abc",
       return_summaries: { ["b.rb", "Foo#bar"] => { keys: [], returns: ["Integer"], effects: [0] } },
       # ADR-67 WD6c lift — the inferred-param seed table the run's diagnostics were computed under.
-      param_table: { ["Foo", :bar, :instance] => { value: "Integer-stand-in" } }
+      param_table: { ["Foo", :bar, :instance] => { value: "Integer-stand-in" } },
+      # ADR-103 WD13 / #382 — the effects sidecar and the identity it was collected under.
+      effect_collections: { "b.rb" => Rigor::Effects::FileCollection.empty("b.rb") },
+      effects_identity: "effects-identity-abc"
     )
   end
 
@@ -67,6 +70,33 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       snapshot.save(fingerprint: "fp1", payload: sample_payload)
       loaded = snapshot.load(fingerprint: "fp1")
       expect(loaded.return_summaries).to eq(["b.rb", "Foo#bar"] => { keys: [], returns: ["Integer"], effects: [0] })
+    end
+  end
+
+  # ADR-103 WD13 / #382 — the effects sidecar carries its OWN identity, because the `effects:` block is
+  # deliberately absent from the global fingerprint: it is the only thing that can tell a run whether the
+  # persisted summaries mean what this run's vocabulary and catalogue say they mean.
+  it "round-trips the effect collections and the identity they were collected under" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      snapshot.save(fingerprint: "fp1", payload: sample_payload)
+      loaded = snapshot.load(fingerprint: "fp1")
+      expect(loaded.effects_identity).to eq("effects-identity-abc")
+      expect(loaded.effect_collections.keys).to eq(["b.rb"])
+    end
+  end
+
+  it "loads a pre-effects (schema-11) snapshot as nil rather than as an empty effects sidecar" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      old = Marshal.dump(
+        schema: 11, fingerprint: "fp1", cache: {}, sources: {}, digests: {}, analyzed: [],
+        symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {}, missing: {}, class_decls: {},
+        seed_bundles: {}, plugin_fact_digest: "d", return_summaries: {}, param_table: {}
+      )
+      FileUtils.mkdir_p(File.dirname(snapshot.path))
+      File.binwrite(snapshot.path, Zlib::Deflate.deflate(old))
+      expect(snapshot.load(fingerprint: "fp1")).to be_nil
     end
   end
 

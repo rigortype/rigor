@@ -5,6 +5,7 @@ require "rigor/plugin"
 require_relative "rails_i18n/locale_index"
 require_relative "rails_i18n/locale_loader"
 require_relative "rails_i18n/analyzer"
+require_relative "rails_i18n/effects"
 
 module Rigor
   module Plugin
@@ -64,7 +65,12 @@ module Rigor
           "locale_search_paths" => { kind: :array, default: ["config/locales"] },
           "configured_locales" => { kind: :array, default: ["en"] },
           "view_search_paths" => { kind: :array, default: ["app/views"] }
-        }
+        },
+        # ADR-103 WD10 (#387) — see {Effects}. `rails.i18n.translate` is registered here because this is
+        # the plugin that models I18n, even though the label reads like a whole-framework one.
+        effect_root: "rails",
+        effect_labels: ["rails.i18n.translate"],
+        effect_attributions: Effects.attributions
       )
 
       # `watch:` covers every `.yml` / `.yaml` file under the locale search paths so the cache invalidates

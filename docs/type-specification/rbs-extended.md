@@ -78,6 +78,7 @@ def valid_string?: (untyped value) -> bool
 | `rigor:v1:assert target is T` | Refines `target` after the method returns normally. |
 | `rigor:v1:assert-if-true target is T` | Refines `target` when the method returns a truthy value. |
 | `rigor:v1:assert-if-false target is T` | Refines `target` when the method returns `false` or `nil`. |
+| `rigor:v1:effect <label-list>` | Declares an **effect envelope** — an upper bound on the effect labels the method's code may perform. Also valid on a `class` / `module` declaration, where it distributes (§ "Effect envelopes"). |
 
 A true-branch-only predicate is sufficient for Python `TypeGuard`-like behavior. A predicate pair that describes both branches is sufficient for Python `TypeIs`-like behavior. The false branch MAY be written as an explicit negative type when that is clearer:
 
@@ -125,6 +126,28 @@ end
 The directive instructs Rigor to verify the conformance regardless of whether any current call site exercises that requirement, which is useful for libraries that want their structural contract to be a checked design assertion rather than an emergent property of usage. Multiple `conforms-to` directives on the same class are allowed and combine like an intersection of interfaces. Rigor MUST report a diagnostic when a declared `conforms-to` interface is not satisfied; satisfied directives are silent.
 
 The directive is purely additive. Implicit structural compatibility continues to apply, and a class that already satisfies the interface continues to type-check without the annotation.
+
+## Effect envelopes
+
+An **effect envelope** bounds what a method may *do*, as opposed to what it returns. Two spellings carry it, and unlike every other directive above, one of them is not Rigor's:
+
+```rbs
+class UserRepository
+  %a{rigor:v1:effect io.db}
+  def find: (Integer) -> User
+
+  %a{pure}
+  def slug: (String) -> String
+end
+```
+
+`%a{pure}` is the ecosystem's existing purity annotation — rbs core carries it and Steep reads it — so Rigor reads it rather than inventing a synonym; it means the empty envelope, tolerating `mutate.local`. `rigor:v1:pure` was specified once and never implemented; it is not part of the language ([ADR-103](../adr/103-effect-labels.md) WD14). The two spellings on one declaration are contradictory: `pure` wins, and the contradiction is reported through the `RBS::Extended` conflict channel.
+
+The payload follows the `assert` / `conforms-to` shape — a space-separated head, then a comma-separated list of bare label tokens. There is no parenthesised comment form, because RBS has real comments, and an empty list is malformed. A malformed payload, or one naming a label the effect registry does not recognise, makes the whole tag read as *unbounded* rather than as the part that parsed: the fail-open direction, so a typo suppresses findings instead of manufacturing them.
+
+Written on a `class` or `module` declaration the envelope distributes to that Ruby class's own methods — reopenings, definitions in other files, and synthesized `attr_*` members included — never to subclasses, and a method-level envelope wins over a distributed one.
+
+The label grammar, the subsumption relation, what the bound is checked against, and the `effect.envelope-exceeded` diagnostic are normative in [effect-labels.md](effect-labels.md). Nothing here has any effect on a project whose `.rigor.yml` carries no `effects:` block.
 
 ## Higher-kinded type directives (ADR-20)
 

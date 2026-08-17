@@ -50,6 +50,7 @@ The documents are organized so foundational definitions come first and specific 
 | [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md) | RBS interfaces, inferred object shapes, capability roles, method-shape entries. |
 | [control-flow-analysis.md](control-flow-analysis.md) | Edge-aware narrowing, equality semantics, fact stability, mutation effects, pre-plugin surface. |
 | [rbs-extended.md](rbs-extended.md) | `%a{rigor:v1:…}` annotations, predicate/assertion grammar, explicit conformance, flow-effect bundles. |
+| [effect-labels.md](effect-labels.md) | Effect-label grammar and subsumption, the shared registry and its vocabulary-evolution rules, effect summaries and taint causes, effect-envelope syntax. |
 | [normalization.md](normalization.md) | Deterministic normalization rules. |
 | [rbs-erasure.md](rbs-erasure.md) | Conservative erasure to RBS, including the hash-shape erasure algorithm. |
 | [inference-budgets.md](inference-budgets.md) | Budget table, configuration, and boundary-contract behavior. |

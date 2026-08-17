@@ -5,6 +5,7 @@ require "rigor/plugin"
 require_relative "actioncable/channel_index"
 require_relative "actioncable/channel_discoverer"
 require_relative "actioncable/analyzer"
+require_relative "actioncable/effects"
 
 module Rigor
   module Plugin
@@ -80,7 +81,12 @@ module Rigor
             param_types: [{ index: 0, type_name: "Hash" }]
             # return_type_name: nil — receive's return value is discarded by the framework dispatcher.
           )
-        ]
+        ],
+        # ADR-103 WD10 (#387) — see {Effects} for what each row is and why.
+        effect_root: "rails",
+        effect_labels: ["rails.actioncable.broadcast"],
+        effect_attributions: Effects.attributions,
+        effect_entry_points: Effects.entry_points
       )
 
       # `watch:` covers every `.rb` file under the channel search paths so the cache invalidates when

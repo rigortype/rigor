@@ -5,6 +5,7 @@ module Rigor
       def self?.build_node_collectors: (String path, untyped scope_index) -> Hash[Symbol, untyped]
       def self?.node_collector_driver: (Hash[Symbol, untyped] collectors) -> untyped
       def self?.shadow_verify_converged_collectors: (String path, untyped root, untyped scope_index, Hash[Symbol, untyped]? collectors) -> void
+      def self?.filter_suppressed: (Array[Diagnostic] diagnostics, comments: untyped, disabled_rules: Array[String]) -> Array[Diagnostic]
     end
 
     class FactStore

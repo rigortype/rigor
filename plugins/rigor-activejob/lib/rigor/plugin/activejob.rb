@@ -5,6 +5,7 @@ require "rigor/plugin"
 require_relative "activejob/job_index"
 require_relative "activejob/job_discoverer"
 require_relative "activejob/analyzer"
+require_relative "activejob/effects"
 
 module Rigor
   module Plugin
@@ -39,8 +40,33 @@ module Rigor
         config_schema: {
           "job_search_paths" => { kind: :array, default: ["app/jobs"] },
           "job_base_classes" => { kind: :array, default: %w[ApplicationJob ActiveJob::Base] }
-        }
+        },
+        # ADR-103 WD4 / WD10 (#387). The rows themselves are NOT here: they depend on
+        # `config.active_job.queue_adapter`, which is a project fact, so they are built in
+        # `#effect_attributions` below. `effect_root: "rails"` is granted because the engine bundles this
+        # plugin ({Rigor::Plugin::FirstParty}); a third-party plugin declaring it would open `activejob.*`.
+        effect_root: "rails",
+        effect_labels: ["rails.activejob.enqueue"],
+        effect_entry_points: Effects.entry_points
       )
+
+      # ADR-103 WD10 — the enqueue's transport, read off the project's own configuration. Overridden rather
+      # than declared on the manifest because the answer is per project; memoised because
+      # `Plugin::Registry#effect_contributions` is lazy and asks once per process, and only on a run with
+      # collection on — a `rigor check` with no `effects:` block never opens `config/application.rb` for this.
+      def effect_attributions
+        Effects.attributions(detected_queue_adapter)
+      end
+
+      def effect_edges
+        Effects.edges(detected_queue_adapter)
+      end
+
+      def detected_queue_adapter
+        return @detected_queue_adapter if defined?(@detected_queue_adapter)
+
+        @detected_queue_adapter = Effects.detect_adapter(io_boundary, Dir.pwd)
+      end
 
       # Cached: discovered job index. `watch:` (ADR-60 WD3) covers every `.rb` under `job_search_paths`
       # so the cache invalidates when a job is added, removed, or edited; the discoverer's in-block

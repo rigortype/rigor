@@ -15,6 +15,7 @@ require_relative "plugin/load_error"
 require_relative "plugin/box"
 require_relative "plugin/isolation"
 require_relative "plugin/inflector"
+require_relative "plugin/first_party"
 
 module Rigor
   module Plugin

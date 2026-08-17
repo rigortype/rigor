@@ -1,0 +1,48 @@
+module Liskov
+  class Repo
+    %a{rigor:v1:effect io.db}
+    def find: (Integer id) -> String
+  end
+
+  class PgRepo < Repo
+    def find: (Integer id) -> String
+  end
+
+  class MemRepo < Repo
+    def find: (Integer id) -> String
+  end
+
+  class DeclaredRepo < Repo
+    %a{rigor:v1:effect io.net.http}
+    def find: (Integer id) -> String
+  end
+
+  class PureRepo < Repo
+    %a{pure}
+    def find: (Integer id) -> String
+  end
+
+  class Reader
+    %a{rigor:v1:effect io.db}
+    def fetch: (String key) -> String
+  end
+
+  class Loader
+    %a{rigor:v1:effect io.db}
+    def load: (Reader reader) -> String
+  end
+
+  module Conventions
+    class Store
+      def read: (String key) -> String
+    end
+
+    class HttpStore < Store
+      def read: (String key) -> String
+    end
+  end
+
+  class StoreCaller
+    def fetch: (Conventions::Store store) -> String
+  end
+end

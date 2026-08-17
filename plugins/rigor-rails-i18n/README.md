@@ -82,3 +82,22 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 ## License
 
 MPL-2.0, matching the parent Rigor project.
+
+## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10)
+
+Inert unless the project has an `effects:` block.
+
+| Call | Labels |
+| --- | --- |
+| `I18n.t` / `t!` / `translate` / `l` / `localize` | `global.read` + `rails.i18n.translate` |
+| `I18n.locale=`, `default_locale=`, `backend=`, `load_path=`, `with_locale` | `global.write` |
+
+`I18n.t` looks pure and is not: it reads `I18n.locale`, which is
+per-fiber mutable process state, and on first use it loads the
+backend's translations. The transport label is therefore honest and
+the *meaning* label is what a presenter envelope names —
+`effect: [mutate.local, rails.config.read, rails.i18n.translate]`
+permits translation and nothing else.
+
+`I18n.locale=` is worth surfacing on its own: a presenter that changes
+the locale changes it for everything downstream in the request.

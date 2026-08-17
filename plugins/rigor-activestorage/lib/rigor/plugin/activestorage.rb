@@ -5,6 +5,7 @@ require "rigor/plugin"
 require_relative "activestorage/attachment_discoverer"
 require_relative "activestorage/attachment_index"
 require_relative "activestorage/analyzer"
+require_relative "activestorage/effects"
 
 module Rigor
   module Plugin
@@ -41,7 +42,11 @@ module Rigor
         config_schema: {
           "model_search_paths" => { kind: :array, default: ["app/models"] }
         },
-        consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
+        consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }],
+        # ADR-103 WD10 (#387) — see {Effects} for what each row is and why.
+        effect_root: "rails",
+        effect_labels: %w[rails.activestorage.read rails.activestorage.write],
+        effect_attributions: Effects.attributions
       )
 
       # Cached: attachment index. Walks every `.rb` file under `model_search_paths` for `has_*_attached`

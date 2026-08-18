@@ -311,11 +311,18 @@ module Rigor
       # activesupport, the Rack status table) can then require the analyzed project's own locked gems when
       # Rigor's host gem environment does not carry them — the standalone `gem install rigortype` case,
       # where activesupport is deliberately not a runtime dependency.
+      # The hand-off is a module ivar, which a non-main Ractor may not write (`Ractor::IsolationError`) —
+      # and every Ractor-pool worker builds its Environment inside its own Ractor, so an unguarded write
+      # killed the whole backend at `WorkerSession#initialize` (#414). The resolution is deterministic per
+      # configuration and `Runner`'s pre-passes already perform it on the main Ractor before the pool
+      # spawns, so a worker reads the value the main set (a frozen String, hence shareable) and skips the
+      # write. The local return value is unaffected, so the missing-gem constant index still gets its root
+      # even when the write is skipped.
       def resolve_target_bundle_root(bundle_path:, project_root:, auto_detect:)
         bundle_root = BundleSigDiscovery.resolve_bundle_path(
           bundle_path: bundle_path, project_root: project_root, auto_detect: auto_detect
         )&.to_s
-        Plugin::Isolation.target_bundle_root = bundle_root
+        Plugin::Isolation.target_bundle_root = bundle_root if Ractor.current == Ractor.main
         bundle_root
       end
 

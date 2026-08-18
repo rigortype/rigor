@@ -687,9 +687,9 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
   # its opt-in gate. The self-mutation sweep's survivors on `#analyze_files_in_pool`'s own lines are accepted
   # as a scope reduction for that reason, not a missed gap — recorded here rather than left implicit.
 
-  describe "#fork_degraded_diagnostic (private)" do
+  describe "#pool_degraded_diagnostic (private)" do
     it "builds a :warning pool-degraded diagnostic naming the degraded file count" do
-      diagnostic = build_coordinator.send(:fork_degraded_diagnostic, 3)
+      diagnostic = build_coordinator.send(:pool_degraded_diagnostic, 3, "fork")
 
       expect(diagnostic.rule).to eq("pool-degraded")
       expect(diagnostic.severity).to eq(:warning)

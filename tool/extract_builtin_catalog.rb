@@ -811,7 +811,29 @@ module CBodyClassifier
     rb_hash_modify\w* rb_hash_aset rb_hash_delete\w* rb_hash_clear
     rb_obj_taint rb_obj_freeze\w*
   ].freeze
-  RAISE_RE = /\b(?:rb_raise\w*|rb_num_zerodiv|rb_cmperr\w*|rb_name_error\w*|rb_bug)\b/
+  # Every way a C body reaches a Ruby exception. Curated rather than shaped: CRuby is full of
+  # `*_error*` names that only read, print or flag an exception (`rb_errinfo`, `rb_ec_raised_p`,
+  # `rb_ec_error_print`, the whole `rb_debug_*` family), and a `\w*(raise|error|fail)\w*` pattern
+  # sweeps those in.
+  #
+  # Deliberately NOT here, because they answer a different question and folding one into this facet
+  # would make it unusable in the opposite direction (#417):
+  #
+  # - argument coercion and arity — `rb_num2*`, `rb_check_arity`, `rb_scan_args`. Every `-1`-arity C
+  #   function checks its arity; a TypeError on a bad argument is not the raise-as-validation idiom a
+  #   consumer of this facet is trying to exclude.
+  # - the frozen gate — `rb_check_frozen*`, which is a {RAW_MUTATORS} member and is recorded as
+  #   mutation, not as raising.
+  RAISERS = %w[
+    rb_raise\w* rb_f_raise rb_exc_raise rb_exc_fatal
+    rb_key_err_raise rb_name_err_raise rb_name_error\w* rb_enc_raise rb_enc_reg_raise
+    rb_cstr_to_dbl_raise rb_invalid_str rb_must_asciicompat
+    rb_sys_fail\w* rb_syserr_fail\w* rb_sys_enc_fail\w* rb_exec_fail rb_execarg_fail
+    rb_eof_error rb_loaderror\w* rb_memerror rb_error_arity rb_error_frozen\w*
+    rb_econv_check_error rb_num_zerodiv rb_cmperr\w*
+    rb_bug rb_bug_errno rb_bug_for_fatal_signal rb_async_bug_errno rb_assert_failure\w*
+  ].freeze
+  RAISE_RE = /\b(?:#{RAISERS.join('|')})\b/
 
   def classify(body_text, mutator_helpers: nil, formal_params: [])
     text = strip_comments(body_text)

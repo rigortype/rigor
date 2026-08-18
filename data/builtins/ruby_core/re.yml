@@ -578,9 +578,8 @@ classes:
         arity: 1
         defined_at: references/ruby/re.c:4902
         c_body_at: references/ruby/re.c:2495
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(Array[Symbol]? array_of_names) -> Hash[Symbol, String?]"
         rbs_at: references/rbs/core/match_data.rbs:273
@@ -590,9 +589,8 @@ classes:
         arity: -1
         defined_at: references/ruby/re.c:4903
         c_body_at: references/ruby/re.c:2321
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(*capture | range[int?] backrefs) -> Array[String?]"
         rbs_at: references/rbs/core/match_data.rbs:636
@@ -635,9 +633,8 @@ classes:
         arity: 0
         defined_at: references/ruby/re.c:4907
         c_body_at: references/ruby/re.c:2608
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> String"
         rbs_at: references/rbs/core/match_data.rbs:353

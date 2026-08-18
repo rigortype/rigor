@@ -799,40 +799,41 @@ module CBodyClassifier
   /x
   COERCE_FALLBACK_RE = /\brb_num_coerce_(?:bin|cmp|relop)\b/
   BLOCK_RE = /\b(?:rb_yield\w*|rb_block_given_p|rb_iterator_p|rb_block_call\w*)\b/
-  MUTATE_RE = /
-    \b(?:
-      rb_check_frozen\w* |
-      rb_str_modify\w* |
-      rb_str_resize |
-      rb_str_set_len |
-      rb_str_buf_cat\w* |
-      rb_str_buf_append |
-      rb_str_replace |
-      rb_str_update |
-      rb_ary_modify\w* |
-      rb_ary_set_len |
-      rb_ary_resize |
-      rb_ary_replace |
-      rb_ary_store |
-      rb_ary_push\w* |
-      rb_ary_pop |
-      rb_ary_shift |
-      rb_ary_unshift |
-      rb_ary_concat\w* |
-      rb_ary_splice |
-      rb_ary_clear |
-      rb_ary_delete\w* |
-      rb_ary_insert |
-      rb_ary_sort_bang |
-      rb_hash_modify\w* |
-      rb_hash_aset |
-      rb_hash_delete\w* |
-      rb_hash_clear |
-      rb_obj_taint |
-      rb_obj_freeze\w*
-    )\b
-  /x
-  RAISE_RE = /\b(?:rb_raise\w*|rb_num_zerodiv|rb_cmperr\w*|rb_name_error\w*|rb_bug)\b/
+  # The curated raw mutators, as patterns rather than as one alternation, because {mutates?} needs to ask
+  # WHICH VALUE each one is applied to and not merely whether the body mentions it.
+  RAW_MUTATORS = %w[
+    rb_check_frozen\w*
+    rb_str_modify\w* rb_str_resize rb_str_set_len rb_str_buf_cat\w* rb_str_buf_append
+    rb_str_replace rb_str_update
+    rb_ary_modify\w* rb_ary_set_len rb_ary_resize rb_ary_replace rb_ary_store rb_ary_push\w*
+    rb_ary_pop rb_ary_shift rb_ary_unshift rb_ary_concat\w* rb_ary_splice rb_ary_clear
+    rb_ary_delete\w* rb_ary_insert rb_ary_sort_bang
+    rb_hash_modify\w* rb_hash_aset rb_hash_delete\w* rb_hash_clear
+    rb_obj_taint rb_obj_freeze\w*
+  ].freeze
+  # Every way a C body reaches a Ruby exception. Curated rather than shaped: CRuby is full of
+  # `*_error*` names that only read, print or flag an exception (`rb_errinfo`, `rb_ec_raised_p`,
+  # `rb_ec_error_print`, the whole `rb_debug_*` family), and a `\w*(raise|error|fail)\w*` pattern
+  # sweeps those in.
+  #
+  # Deliberately NOT here, because they answer a different question and folding one into this facet
+  # would make it unusable in the opposite direction (#417):
+  #
+  # - argument coercion and arity — `rb_num2*`, `rb_check_arity`, `rb_scan_args`. Every `-1`-arity C
+  #   function checks its arity; a TypeError on a bad argument is not the raise-as-validation idiom a
+  #   consumer of this facet is trying to exclude.
+  # - the frozen gate — `rb_check_frozen*`, which is a {RAW_MUTATORS} member and is recorded as
+  #   mutation, not as raising.
+  RAISERS = %w[
+    rb_raise\w* rb_f_raise rb_exc_raise rb_exc_fatal
+    rb_key_err_raise rb_name_err_raise rb_name_error\w* rb_enc_raise rb_enc_reg_raise
+    rb_cstr_to_dbl_raise rb_invalid_str rb_must_asciicompat
+    rb_sys_fail\w* rb_syserr_fail\w* rb_sys_enc_fail\w* rb_exec_fail rb_execarg_fail
+    rb_eof_error rb_loaderror\w* rb_memerror rb_error_arity rb_error_frozen\w*
+    rb_econv_check_error rb_num_zerodiv rb_cmperr\w*
+    rb_bug rb_bug_errno rb_bug_for_fatal_signal rb_async_bug_errno rb_assert_failure\w*
+  ].freeze
+  RAISE_RE = /\b(?:#{RAISERS.join('|')})\b/
 
   def classify(body_text, mutator_helpers: nil, formal_params: [])
     text = strip_comments(body_text)
@@ -846,22 +847,21 @@ module CBodyClassifier
     }
   end
 
-  # A body counts as mutating self iff:
-  # - the stripped text contains one of the curated raw
-  #   mutators in `MUTATE_RE` (`rb_str_modify`, `rb_ary_pop`,
-  #   etc.), or
-  # - the body calls a `mutator_helpers` member whose first
-  #   argument is one of the body's own formal parameters
-  #   (`time_localtime` calls `time_modify(time)` where `time`
-  #   is a formal param). The "first arg = formal param" rule
-  #   is the safety net that keeps allocator-mutators out —
-  #   `rb_ary_to_a` calls `rb_ary_replace(dup, ary)` where the
-  #   first arg is `dup` (a local), so the body falls through
-  #   the helper match.
+  # A body counts as mutating self iff it applies a mutator — a curated raw one ({RAW_MUTATORS}) or a
+  # recognised `mutator_helpers` member — **to one of its own formal parameters**, that parameter not
+  # having been rebound earlier in the body.
+  #
+  # The "first argument is a live formal" rule is the whole safety net, and it has to cover BOTH sources.
+  # Until #418 the raw list short-circuited ahead of it — `return true if text =~ MUTATE_RE` — so any
+  # body that merely *mentioned* a raw mutator was mutating, whatever it applied it to. `rb_ary_sort` is
+  # `ary = rb_ary_dup(ary); rb_ary_sort_bang(ary);`: it sorts the dup, and the receiver is untouched. The
+  # rebinding guard below already detected that; it just sat on the branch the short-circuit skipped.
+  #
+  # Applying a mutator to a local is the ordinary build-a-new-object shape (`rb_ary_to_a` calls
+  # `rb_ary_replace(dup, ary)`), and it is what separates `Array#sort` from `Array#sort!`.
   def mutates?(text, mutator_helpers, formal_params)
-    return true if text =~ MUTATE_RE
-
-    calls_helper_on_own_param?(text, mutator_helpers, formal_params)
+    calls_mutator_on_own_param?(text, RAW_MUTATORS, formal_params) ||
+      calls_helper_on_own_param?(text, mutator_helpers, formal_params)
   end
 
   # Formal parameter names that the convention reserves for variadic-method bookkeeping (`int argc, VALUE *argv, VALUE
@@ -871,17 +871,26 @@ module CBodyClassifier
   VARARG_FORMAL_NAMES = %w[argc argv _argc _argv].freeze
 
   def calls_helper_on_own_param?(body_text, helpers, formal_params)
-    return false if helpers.nil? || helpers.empty?
+    on_own_param?(body_text, helpers, formal_params) { |helper| Regexp.escape(helper) }
+  end
+
+  # The {RAW_MUTATORS} arm. Its members are already regex source (`rb_ary_push\w*`), so unlike a helper
+  # name they are interpolated rather than escaped.
+  def calls_mutator_on_own_param?(body_text, mutators, formal_params)
+    on_own_param?(body_text, mutators, formal_params) { |mutator| mutator }
+  end
+
+  # Whether the body applies any of `callees` to one of its own formal parameters as the first argument.
+  def on_own_param?(body_text, callees, formal_params)
+    return false if callees.nil? || callees.empty?
     return false if formal_params.nil? || formal_params.empty?
 
-    text = body_text.is_a?(String) ? body_text : body_text.to_s
-    text = strip_comments(text)
-    candidates = formal_params - VARARG_FORMAL_NAMES
-    candidates.any? do |param|
+    text = strip_comments(body_text.to_s)
+    (formal_params - VARARG_FORMAL_NAMES).any? do |param|
       next false if formal_param_reassigned?(text, param)
 
-      helpers.any? do |helper|
-        text.match?(/\b#{Regexp.escape(helper)}\s*\(\s*#{Regexp.escape(param)}\b/)
+      callees.any? do |callee|
+        text.match?(/\b#{yield(callee)}\s*\(\s*#{Regexp.escape(param)}\b/)
       end
     end
   end

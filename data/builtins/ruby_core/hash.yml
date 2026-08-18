@@ -399,9 +399,8 @@ classes:
         arity: 0
         defined_at: references/ruby/hash.c:7394
         c_body_at: references/ruby/hash.c:3770
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> Array[K]"
         rbs_at: references/rbs/core/hash.rbs:1430
@@ -411,9 +410,8 @@ classes:
         arity: 0
         defined_at: references/ruby/hash.c:7395
         c_body_at: references/ruby/hash.c:3817
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> Array[V]"
         rbs_at: references/rbs/core/hash.rbs:2098
@@ -423,9 +421,8 @@ classes:
         arity: -1
         defined_at: references/ruby/hash.c:7396
         c_body_at: references/ruby/hash.c:2689
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(*_Key arg0) -> Array[V?]"
         rbs_at: references/rbs/core/hash.rbs:2116
@@ -435,9 +432,8 @@ classes:
         arity: -1
         defined_at: references/ruby/hash.c:7397
         c_body_at: references/ruby/hash.c:2725
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(*_Key keys) -> Array[V]"
         - "[K2 < _Key, T] (*K2 keys) { (K2 key) -> T } -> Array[V | T]"
@@ -567,9 +563,8 @@ classes:
         arity: -1
         defined_at: references/ruby/hash.c:7409
         c_body_at: references/ruby/hash.c:2620
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "[K2 < _Key] (*K2 keys) -> Hash[K2, V]"
         rbs_at: references/rbs/core/hash.rbs:1703
@@ -579,9 +574,8 @@ classes:
         arity: -1
         defined_at: references/ruby/hash.c:7410
         c_body_at: references/ruby/hash.c:2655
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(*_Key keys) -> Hash[K, V]"
         rbs_at: references/rbs/core/hash.rbs:1151
@@ -897,9 +891,8 @@ classes:
         defined_at: references/ruby/hash.c:7355
         c_body_at: references/ruby/hash.c:1787
         c_effects:
-        - mutate
         - raises
-        purity: mutates_self
+        purity: leaf
         rbs:
         - "[K, V] (hash[K, V] hash) -> instance"
         - "[K, V] (array[_Pair[K, V]] two_element_arrays) -> instance"

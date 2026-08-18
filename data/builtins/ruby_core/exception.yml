@@ -101,9 +101,8 @@ classes:
         arity: -1
         defined_at: references/ruby/error.c:3642
         c_body_at: references/ruby/error.c:1726
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(?highlight: bool?, ?order: (:top | :bottom | string)?) -> String"
         rbs_at: references/rbs/core/exception.rbs:484
@@ -113,9 +112,8 @@ classes:
         arity: 0
         defined_at: references/ruby/error.c:3643
         c_body_at: references/ruby/error.c:1837
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> String"
         rbs_at: references/rbs/core/exception.rbs:305
@@ -635,7 +633,6 @@ classes:
         arity: 0
         defined_at: references/ruby/error.c:3727
         c_body_at: references/ruby/error.c:263
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
     undefined: []

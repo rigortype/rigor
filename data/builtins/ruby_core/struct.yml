@@ -118,7 +118,6 @@ classes:
         c_body_at: references/ruby/struct.c:1091
         c_effects:
         - block
-        - mutate
         purity: block_dependent
         rbs:
         - "() -> Hash[Symbol, E]"
@@ -208,7 +207,6 @@ classes:
         c_body_at: references/ruby/struct.c:1388
         c_effects:
         - block
-        - mutate
         purity: block_dependent
         rbs:
         - "() -> Enumerator[E, Array[E]]"
@@ -222,7 +220,6 @@ classes:
         c_body_at: references/ruby/struct.c:1388
         c_effects:
         - block
-        - mutate
         purity: block_dependent
       values_at:
         source: c
@@ -286,7 +283,6 @@ classes:
         c_body_at: references/ruby/struct.c:643
         c_effects:
         - block
-        - mutate
         - raises
         purity: block_dependent
         rbs:
@@ -391,7 +387,6 @@ classes:
         c_body_at: references/ruby/struct.c:1091
         c_effects:
         - block
-        - mutate
         purity: block_dependent
       members:
         source: c
@@ -434,7 +429,6 @@ classes:
         c_body_at: references/ruby/struct.c:1709
         c_effects:
         - block
-        - mutate
         - raises
         purity: block_dependent
       members:

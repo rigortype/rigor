@@ -58,9 +58,8 @@ classes:
         arity: 0
         defined_at: references/ruby/enum.c:5210
         c_body_at: references/ruby/enum.c:1387
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
       sort_by:
         source: c
         cfunc: enum_sort_by
@@ -69,7 +68,6 @@ classes:
         c_body_at: references/ruby/enum.c:1707
         c_effects:
         - block
-        - mutate
         - raises
         purity: block_dependent
       grep:
@@ -248,9 +246,8 @@ classes:
         arity: -1
         defined_at: references/ruby/enum.c:5231
         c_body_at: references/ruby/enum.c:1285
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
       first:
         source: c
         cfunc: enum_first
@@ -542,7 +539,6 @@ classes:
         c_body_at: references/ruby/enum.c:4905
         c_effects:
         - block
-        - mutate
         purity: block_dependent
       compact:
         source: c

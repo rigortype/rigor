@@ -419,9 +419,8 @@ classes:
         defined_at: references/ruby/proc.c:4621
         c_body_at: references/ruby/proc.c:3339
         c_effects:
-        - mutate
         - dispatch
-        purity: mutates_self
+        purity: dispatch
         rbs:
         - "() -> String"
         rbs_at: references/rbs/core/method.rbs:87
@@ -432,9 +431,8 @@ classes:
         defined_at: references/ruby/proc.c:4622
         c_body_at: references/ruby/proc.c:3339
         c_effects:
-        - mutate
         - dispatch
-        purity: mutates_self
+        purity: dispatch
       to_proc:
         source: c
         cfunc: method_to_proc
@@ -621,9 +619,8 @@ classes:
         defined_at: references/ruby/proc.c:4648
         c_body_at: references/ruby/proc.c:3339
         c_effects:
-        - mutate
         - dispatch
-        purity: mutates_self
+        purity: dispatch
         rbs:
         - "() -> String"
         rbs_at: references/rbs/core/unbound_method.rbs:212
@@ -634,9 +631,8 @@ classes:
         defined_at: references/ruby/proc.c:4649
         c_body_at: references/ruby/proc.c:3339
         c_effects:
-        - mutate
         - dispatch
-        purity: mutates_self
+        purity: dispatch
       name:
         source: c
         cfunc: method_name

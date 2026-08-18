@@ -1282,9 +1282,8 @@ classes:
         arity: -1
         defined_at: references/ruby/io.c:15906
         c_body_at: references/ruby/io.c:13884
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
       readpartial:
         source: c
         cfunc: argf_readpartial
@@ -1307,18 +1306,16 @@ classes:
         arity: -1
         defined_at: references/ruby/io.c:15909
         c_body_at: references/ruby/io.c:10611
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
       to_a:
         source: c
         cfunc: argf_readlines
         arity: -1
         defined_at: references/ruby/io.c:15910
         c_body_at: references/ruby/io.c:10611
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
       gets:
         source: c
         cfunc: argf_gets

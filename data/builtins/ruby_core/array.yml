@@ -83,9 +83,8 @@ classes:
         arity: 0
         defined_at: references/ruby/array.c:8882
         c_body_at: references/ruby/array.c:3148
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> Array[E]"
         rbs_at: references/rbs/core/array.rbs:3795
@@ -97,7 +96,6 @@ classes:
         c_body_at: references/ruby/array.c:3184
         c_effects:
         - block
-        - mutate
         - raises
         purity: block_dependent
         rbs:
@@ -234,9 +232,8 @@ classes:
         arity: -1
         defined_at: references/ruby/array.c:8896
         c_body_at: references/ruby/array.c:5721
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(*array[untyped] other_arrays) -> Array[E]"
         rbs_at: references/rbs/core/array.rbs:1596
@@ -547,9 +544,8 @@ classes:
         arity: 0
         defined_at: references/ruby/array.c:8924
         c_body_at: references/ruby/array.c:3601
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> Array[E]"
         - "() { (E a, E b) -> Comparable::_CompareToZero } -> Array[E]"
@@ -593,7 +589,6 @@ classes:
         c_body_at: references/ruby/array.c:3759
         c_effects:
         - block
-        - mutate
         purity: block_dependent
         rbs:
         - "[T] () { (E item) -> T } -> Array[T]"
@@ -621,7 +616,6 @@ classes:
         c_body_at: references/ruby/array.c:3759
         c_effects:
         - block
-        - mutate
         purity: block_dependent
       map!:
         source: c
@@ -641,7 +635,6 @@ classes:
         c_body_at: references/ruby/array.c:4000
         c_effects:
         - block
-        - mutate
         purity: block_dependent
         rbs:
         - "() { (E element) -> boolish } -> Array[E]"
@@ -668,7 +661,6 @@ classes:
         c_body_at: references/ruby/array.c:4000
         c_effects:
         - block
-        - mutate
         purity: block_dependent
       filter!:
         source: c
@@ -770,7 +762,6 @@ classes:
         c_body_at: references/ruby/array.c:4680
         c_effects:
         - block
-        - mutate
         purity: block_dependent
         rbs:
         - "() -> Array[[ E ]]"
@@ -790,9 +781,8 @@ classes:
         defined_at: references/ruby/array.c:8943
         c_body_at: references/ruby/array.c:4753
         c_effects:
-        - mutate
         - raises
-        purity: mutates_self
+        purity: leaf
         rbs:
         - "() -> Array[Array[untyped]]"
         rbs_at: references/rbs/core/array.rbs:3857
@@ -938,9 +928,8 @@ classes:
         arity: 1
         defined_at: references/ruby/array.c:8959
         c_body_at: references/ruby/array.c:5673
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(array[untyped] other_array) -> Array[E]"
         rbs_at: references/rbs/core/array.rbs:726
@@ -950,9 +939,8 @@ classes:
         arity: 1
         defined_at: references/ruby/array.c:8960
         c_body_at: references/ruby/array.c:5782
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "(array[untyped] other_array) -> Array[E]"
         rbs_at: references/rbs/core/array.rbs:675
@@ -1175,7 +1163,6 @@ classes:
         c_body_at: references/ruby/array.c:7668
         c_effects:
         - block
-        - mutate
         - raises
         purity: block_dependent
         rbs:

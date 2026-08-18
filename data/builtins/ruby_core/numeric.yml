@@ -1294,9 +1294,8 @@ classes:
         arity: 0
         defined_at: references/ruby/numeric.c:6656
         c_body_at: references/ruby/numeric.c:951
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> String"
         rbs_at: references/rbs/core/float.rbs:1156

@@ -563,9 +563,8 @@ classes:
         arity: 0
         defined_at: references/ruby/set.c:2309
         c_body_at: references/ruby/set.c:644
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> Array[A]"
         rbs_at: references/rbs/core/set.rbs:729

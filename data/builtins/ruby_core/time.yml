@@ -216,9 +216,8 @@ classes:
         defined_at: references/ruby/time.c:6006
         c_body_at: references/ruby/time.c:4406
         c_effects:
-        - mutate
         - dispatch
-        purity: mutates_self
+        purity: dispatch
         rbs:
         - "() -> String"
         rbs_at: references/rbs/core/time.rbs:1182
@@ -241,9 +240,8 @@ classes:
         defined_at: references/ruby/time.c:6008
         c_body_at: references/ruby/time.c:5165
         c_effects:
-        - mutate
         - raises
-        purity: mutates_self
+        purity: leaf
         rbs:
         - "(Array[Symbol]?) -> Hash[Symbol, Integer]"
         rbs_at: references/rbs/core/time.rbs:913
@@ -672,9 +670,8 @@ classes:
         defined_at: references/ruby/time.c:6053
         c_body_at: references/ruby/time.c:5315
         c_effects:
-        - mutate
         - dispatch
-        purity: mutates_self
+        purity: dispatch
         rbs:
         - "(?Integer fraction_digits) -> String"
         rbs_at: references/rbs/core/time.rbs:1663

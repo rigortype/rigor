@@ -981,7 +981,6 @@ classes:
         c_body_at: references/ruby/string.c:10666
         c_effects:
         - block
-        - mutate
         purity: block_dependent
         rbs:
         - "(Regexp pattern) -> Array[String | Array[String?]]"
@@ -1543,9 +1542,8 @@ classes:
         arity: -1
         defined_at: references/ruby/string.c:12791
         c_body_at: references/ruby/string.c:2143
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
       try_convert:
         source: c
         cfunc: rb_str_s_try_convert
@@ -1602,9 +1600,8 @@ classes:
         arity: 0
         defined_at: references/ruby/string.c:12964
         c_body_at: references/ruby/string.c:12308
-        c_effects:
-        - mutate
-        purity: mutates_self
+        c_effects: []
+        purity: leaf
         rbs:
         - "() -> String"
         rbs_at: references/rbs/core/symbol.rbs:332

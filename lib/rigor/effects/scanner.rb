@@ -12,6 +12,7 @@ require_relative "origin"
 require_relative "framework_units"
 require_relative "plugin_facts"
 require_relative "summary"
+require_relative "discard_census"
 require_relative "unit_scan"
 
 module Rigor
@@ -64,6 +65,7 @@ module Rigor
       def initialize(path:, calls:, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
                      plugin_facts: PluginFacts.empty)
         @path = path
+        DiscardCensus.path = path if DiscardCensus.active?
         @calls = calls
         @attribution = attribution
         @envelopes = envelopes

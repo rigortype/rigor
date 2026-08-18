@@ -6,6 +6,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "attribution"
 require_relative "catalog"
+require_relative "discard_census"
 require_relative "envelope_index"
 require_relative "file_collection"
 require_relative "label_set"
@@ -128,6 +129,7 @@ module Rigor
         @causes = []
         @edges = []
         @nested = []
+        @discarded = {}.compare_by_identity # census probe (#390)
       end
 
       # Units discovered inside this one — a nested `def`, or a `define_method` with a literal name whose
@@ -166,8 +168,28 @@ module Rigor
         return unless node.is_a?(Prism::Node)
         return if unit_boundary?(node)
 
+        mark_discarded(node) if DiscardCensus.active?
+        return walk_censused(node) if @discarded.key?(node)
+
         visit(node)
         node.rigor_each_child { |child| walk(child) }
+      end
+
+      # Census probe (#390). A DELTA against the accumulated bundles is wrong: a second `lines << ""` in
+      # the same method contributes `mutate.local` that is already there, and the delta reads empty. So
+      # the subtree is walked against FRESH accumulators and merged back afterwards, which is exactly
+      # "what this call site contributed".
+      def walk_censused(node)
+        saved = [@bundles, @causes, @edges]
+        @bundles, @causes, @edges = {}, [], []
+        visit(node)
+        node.rigor_each_child { |child| walk(child) } # post-order: a block joins by containment
+        mine = [@bundles, @causes, @edges]
+        @bundles, @causes, @edges = saved
+        mine[0].each { |origin, set| add(origin, set) }
+        @causes.concat(mine[1])
+        @edges.concat(mine[2])
+        emit_census(node, mine)
       end
 
       # A nested unit is recorded and NOT descended into: its body belongs to its own summary, and the
@@ -215,6 +237,29 @@ module Rigor
              Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode
           classify_mutation(node.receiver)
         end
+      end
+
+      # Census probe (#390): every statement of a `StatementsNode` except the last discards its value.
+      # A lower bound deliberately — a loop/`each` body's last statement is discarded too and is not
+      # counted here.
+      def mark_discarded(node)
+        return unless node.is_a?(Prism::StatementsNode)
+
+        body = node.body
+        return if body.size < 2
+
+        body[0..-2].each { |child| @discarded[child] = true if child.is_a?(Prism::CallNode) }
+      end
+
+      def emit_census(node, mine)
+        bundles, causes, edges = mine
+        owner, singleton, = catalog_target(node, @calls[node])
+        DiscardCensus.emit(
+          line: node.location.start_line, owner: owner, singleton: singleton,
+          selector: node.name.to_s, record: @calls[node],
+          labels: bundles.each_value.reduce(LabelSet::EMPTY) { |a, s| a.join(s) }.to_a,
+          causes: causes, edges: edges, block: !node.block.nil?
+        )
       end
 
       def visit_call(node)

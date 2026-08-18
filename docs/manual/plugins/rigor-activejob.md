@@ -36,7 +36,46 @@ plugins:
     config:
       job_search_paths: ["app/jobs"]                            # default
       job_base_classes: ["ApplicationJob", "ActiveJob::Base"]   # default
+      recurring_paths: ["config/recurring.yml"]                 # default
 ```
+
+`recurring_paths` are the schedule *files* — not directories —
+behind the reachability roots below. The default is where Solid
+Queue's recurring schedule conventionally lives; list your own path
+if you keep it elsewhere.
+
+## Job roots for `rigor unused`
+
+Solid Queue is the Active Job backend Rails ships by default from
+8.0, and a **recurring task names its job by string**:
+
+```yaml
+# config/recurring.yml
+production:
+  send_reminder:
+    class: "SendReminderJob"
+    schedule: "*/3 * * * *"
+```
+
+That job runs every three minutes and there is no `perform_later`
+for it anywhere, so the constant scan sees nothing and
+[`rigor unused`](../02-cli-reference.md#rigor-unused) reports live
+production code as possibly dead. This plugin supplies the jobs your
+recurring schedule names, so they drop out of the candidate list.
+
+**Every environment block is read**, not just `production:` — a job
+scheduled in `staging:` is still live code. A flat, environment-less
+document works too.
+
+Only `class:` is read. A `command:` entry is inline Ruby
+(`command: "SomeModel.cleanup"`), and parsing a constant out of an
+arbitrary snippet would root a class on a guess, so it supplies
+nothing. A `class:` naming a job the plugin never discovered is
+dropped rather than published: a typo costs you a root instead of
+quietly hiding a dead job.
+
+The schedule is read with `YAML.safe_load`. Nothing boots Rails and
+nothing loads Solid Queue.
 
 ## Limitations
 
@@ -48,10 +87,14 @@ plugins:
 - **Positional arity only.** Required keyword arguments are
   recorded by the discoverer but not yet validated at the call
   site.
-- **No roots for [`rigor unused`](../02-cli-reference.md#rigor-unused).**
-  `MyJob.perform_later` names the job as an ordinary constant, which
-  the report already records. Rooting every class under `app/jobs`
-  instead would mark an orphaned job reachable forever on no evidence.
+- **Roots only from a recurring schedule.** A job is rooted for
+  `rigor unused` when `config/recurring.yml` names it, and never for
+  existing under `app/jobs`: `MyJob.perform_later` names the job as
+  an ordinary constant the report already records, and rooting every
+  discovered job would mark an orphaned one reachable forever on no
+  evidence. A schedule loaded from Ruby rather than from a file under
+  `recurring_paths` supplies nothing, by the same "read only what is
+  written" rule.
 
 ## Plugin internals
 

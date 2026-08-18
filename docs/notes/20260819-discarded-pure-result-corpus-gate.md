@@ -47,9 +47,13 @@ Each cell has a mechanical cause worth recording separately:
   `rb_name_err_raise` (30 — note the curated list has the near-miss sibling `rb_name_error`),
   `rb_syserr_fail`, `rb_eof_error`, `rb_enc_raise` and `rb_memerror`.
 - `Array#sort` reads `mutates_self` because `rb_ary_sort` is
-  `ary = rb_ary_dup(ary); rb_ary_sort_bang(ary);` — the extractor's "first argument is a formal
-  parameter" mutator heuristic fires on a formal parameter that was **rebound to the dup one line
-  earlier**. This one is a fixable extractor bug rather than an inherent limit.
+  `ary = rb_ary_dup(ary); rb_ary_sort_bang(ary);` and `mutates?` short-circuited on the curated raw
+  mutator list *before* any ownership analysis ran — `rb_ary_sort_bang` appears in the body, applied to
+  the dup. (The rebinding guard already detected the reassignment; it sat on the branch the
+  short-circuit skipped. An earlier revision of this note misattributed the cause to that guard
+  misfiring.) Fixed in #418, along with #417 for the `raises` hole; `Hash#fetch` now carries `raises`
+  and `Array#sort` is non-mutating. Neither changes an inferred type — the facets had no behavioural
+  consumer on these shapes.
 - `Kernel#Integer` has neither facet: `Kernel` is not among the 21 topic files under
   `data/builtins/ruby_core/`.
 

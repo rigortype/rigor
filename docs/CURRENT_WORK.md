@@ -59,11 +59,12 @@ this file is the one that is wrong.
   vocabulary before v0.4.0. #389 and #390 are both measured and declined, so **every remaining
   diagnostic consumer of the effect system has now been measured away** — what is left is reporting
   and annotation surface.
-- **Two builtin-catalogue extractor bugs fell out of the #390 audit and are filed** (neither is
-  effect-system work, both `ready-for-agent`): #417 — `RAISE_RE` misses every helper-macro raise, so 35
-  catalogued methods read `raises: false` while raising, `Hash#fetch` among them; #418 — `Array#sort`
-  reads `purity: mutates_self` because the mutator heuristic's "first argument is a formal parameter"
-  net fires on a parameter `rb_ary_sort` rebound to a dup, which also costs it constant folding.
+- **The two builtin-catalogue extractor bugs from the #390 audit are FIXED** on branch
+  `fix/builtin-catalog-extractor-facets`: #417 (`RAISE_RE` missed every helper-macro raise — 36 methods
+  gain `raises`, `Hash#fetch` among them) and #418 (`mutates?` short-circuited on the raw mutator list
+  before the ownership test — 51 methods change, `Array#sort` becomes non-mutating). Data corrections
+  only: nothing in `lib/` reads `c_effects`, `purity` is read only by `safe_for_folding?`, and inferred
+  types are unchanged (A/B'd). No CHANGELOG entry for that reason.
 - The next typing consumer worth trying is ADR-103 § 8 (2)'s computed purity for remembering call
   results across re-invocation (`if x.foo && x.foo.bar`): unlike B2.2's, its rule reads **locals**,
   which is the only receiver shape `call.possible-nil-receiver` fires on.

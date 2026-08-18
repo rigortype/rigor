@@ -87,6 +87,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** A parallel run whose worker dies now degrades and says so instead of hanging. This is reachable only through the experimental `RIGOR_POOL_BACKEND=ractor` override — the default `fork` backend already recovered — where every worker died on startup and the run then waited for them forever ([#414](https://github.com/rigortype/rigor/issues/414)).
+  - That backend remains unable to analyse anything under rbs 4.x, for a reason outside Rigor: rbs interns namespaces through a process-wide mutable cache a Ractor may not read. It now reports that per file rather than hanging. The default `fork` backend is unaffected.
 - **[engine]** `rigor unused` no longer lets a class root itself through its own RBS signature ([#373](https://github.com/rigortype/rigor/issues/373)).
   - A mixin argument inside a signature was recorded pre-qualified with the enclosing class name, and the report resolves a reference to a member as a reference to its owner — so `SignageResource::Alba::Resource` peeled back to `SignageResource` and rooted it. On one application this hid three genuinely dead classes on the default run; they were visible only with `signature_paths:` emptied.
 - **[cli]** `rigor unused --entry-point` now matches `**` the way the manual documents it ([#371](https://github.com/rigortype/rigor/issues/371)).

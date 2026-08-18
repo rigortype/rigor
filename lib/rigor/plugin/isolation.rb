@@ -43,8 +43,11 @@ module Rigor
         @target_bundle_root
       end
 
+      # Frozen so the value stays `Ractor.shareable?`: a Ractor-pool worker READS this (its Environment
+      # build resolves the same root and skips the write — #414), and reading an unshareable value out of
+      # a module ivar from a non-main Ractor is the same `Ractor::IsolationError` as writing one.
       def target_bundle_root=(root)
-        @target_bundle_root = root.nil? ? nil : File.expand_path(root.to_s)
+        @target_bundle_root = root.nil? ? nil : File.expand_path(root.to_s).freeze
       end
 
       # Requires `feature`, falling back to the analyzed project's bundler install tree. The fallback

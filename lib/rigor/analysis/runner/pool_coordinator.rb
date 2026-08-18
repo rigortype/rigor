@@ -264,6 +264,14 @@ module Rigor
         # replayed into the runner-side accumulators via their `record_*` APIs, which dedupe on the same
         # keys as a single-session run would. Net result: reporter state is identical to the sequential
         # path.
+        #
+        # **This backend cannot analyse a file under rbs 4.x, and the blocker is upstream** (#414).
+        # `RBS::Namespace.[]` interns every namespace through a process-wide flyweight cache held in
+        # module ivars (`@intern_trie_absolute` / `@intern_trie_relative`, mutable by design), and reading
+        # an unshareable module ivar from a non-main Ractor is `Ractor::IsolationError` — so every file a
+        # worker touches comes back as an internal analyzer error. What the code below fixes is the
+        # failure MODE, not the backend: the run used to hang forever instead of saying anything. Reviving
+        # the backend needs an upstream change, which is why `pool_backend` keeps `fork` as the default.
         def analyze_files_in_pool(files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
           # Pre-warm class-level lazy memos on the MAIN Ractor. `Environment::ClassRegistry.default` is the
           # default kwarg threaded through `Environment.new` inside each worker session; lazy-initialising
@@ -317,15 +325,30 @@ module Rigor
             end
           end
 
+          # #414 — every worker is monitored BEFORE any file is dispatched, so a worker that dies at
+          # construction is still observed. `Ractor#monitor` posts `:exited` / `:aborted` to this
+          # Ractor's default port, which is the same mailbox the workers push their results to.
+          pool.each { |worker| worker.monitor(Ractor.current.default_port) }
+
           files.each_with_index { |path, index| pool[index % pool.size].send(path) }
           pool.each { |worker| worker.send(nil) }
 
           prepare_diagnostics = nil
           results_by_path = {}
-          done_count = 0
+          terminated = 0
 
-          while done_count < pool.size
+          # Bounded by TERMINATION, not by `:done`. A worker that dies never says `:done`, and the loop
+          # that counted `:done` blocked on `Ractor.receive` for as long as the process lived — the whole
+          # backend hung that way once `Environment.for_project` started raising `Ractor::IsolationError`
+          # inside `WorkerSession#initialize` (#414). Monitor notices are bare Symbols; worker messages
+          # are Arrays, so the two never collide.
+          while terminated < pool.size
             message = Ractor.receive
+            if message.is_a?(Symbol)
+              terminated += 1
+              next
+            end
+
             case message.first
             when :prepare
               prepare_diagnostics ||= message.last
@@ -333,13 +356,27 @@ module Rigor
               results_by_path[message[1]] = message[2]
             when :done
               merge_worker_reporters(message.last)
-              done_count += 1
             end
           end
 
-          pool.each(&:join)
+          # `join` re-raises an abnormal worker's exception as `Ractor::RemoteError`; the degrade below is
+          # this path's answer to that, so the raise carries no information the coordinator acts on.
+          pool.each do |worker|
+            worker.join
+          rescue Ractor::Error
+            nil
+          end
 
-          Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
+          # The files no worker reported — every file of a worker that died, and any file in flight when
+          # it did. Re-analysed in process, exactly as the fork backend re-analyses a dead child's slice.
+          degraded = files.reject { |path| results_by_path.key?(path) }
+          unless degraded.empty?
+            environment = build_runner_environment(source_files: files)
+            degraded.each { |path| results_by_path[path] = @analyze_file.call(path, environment) }
+          end
+
+          diagnostics = Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
+          degraded.empty? ? diagnostics : diagnostics.unshift(pool_degraded_diagnostic(degraded.size, "ractor"))
         end
 
         # ADR-15 Amendment (2026-05-20) — fork-based worker pool, the active backend for `workers > 0`.
@@ -397,7 +434,7 @@ module Rigor
 
           diagnostics = Array(session.prepare_diagnostics) +
                         files.flat_map { |path| results_by_path.fetch(path, []) }
-          degraded.empty? ? diagnostics : diagnostics.unshift(fork_degraded_diagnostic(degraded.size))
+          degraded.empty? ? diagnostics : diagnostics.unshift(pool_degraded_diagnostic(degraded.size, "fork"))
         end
 
         # Child-process body for {#analyze_files_in_fork_pool}. Analyses the slice with the
@@ -467,10 +504,12 @@ module Rigor
           nil
         end
 
-        def fork_degraded_diagnostic(count)
+        # Both pool backends degrade the same way — the files a dead worker owed are re-analysed in
+        # process — so they say so the same way, naming which backend it was (#414).
+        def pool_degraded_diagnostic(count, backend)
           Diagnostic.new(
             path: ".rigor.yml", line: 1, column: 1,
-            message: "fork pool degraded: #{count} file(s) re-analysed in-process " \
+            message: "#{backend} pool degraded: #{count} file(s) re-analysed in-process " \
                      "after a worker exited abnormally",
             severity: :warning, rule: "pool-degraded", source_family: :builtin
           )

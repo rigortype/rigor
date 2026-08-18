@@ -18,63 +18,66 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **The effect-labels stack merged into master at `86226e62` (2026-08-17)** — thirteen PRs
-  #395 → #408 in one `gh stack merge`, then `make verify` re-run on the INTEGRATED master (9,845
-  examples, `check` + `check-plugins` clean). Design: [ADR-103](adr/103-effect-labels.md) (WD1–WD15)
-  and `docs/design/20260816-effect-labels.md`; umbrella issue #376. Slices #377, #379–#388 are
-  closed. v0.3.3 remains the released version — no bump is due; the CHANGELOG `[Unreleased]` carries
-  the `**[effects]**` / `**[plugins]**` entries.
-- **What shipped, in one line each**: the label vocabulary + registry (`data/effects/registry.yml`,
-  Steins' 25 verbatim + `mutate.self/instance/static` + shared roots); the collector (observational,
-  `DependencyRecorder`-shaped, one integer read when off) + post-pool fixpoint + `rigor effects`
-  report; the committed effect snapshot (`rigor effects update|check|diff|explain`,
-  `.rigor-effects.yml`, symmetric gate + `additions`); the hand-audited catalogue
-  (`data/effects/core.yml`, 80 classes / 420 rows, six narrowing handlers); the WD13 perf fix
-  (superlinear `FileCollection#merge` fold — mastodon +50 % → +3.9 %); persistence (one cache, two
-  identities, effects sidecar); RBS envelopes `%a{pure}` / `%a{rigor:v1:effect …}` +
-  `effect.envelope-exceeded`; `effect.unknown-label` + `effect.annotations-unchecked` + the `.rb`
-  rbs-inline path (handbook corrected); `.rigor.yml` `effects.{envelopes,attribution,labels,
-  tolerated}` with per-origin discharge and `--no-tolerated-effects`; the declared lane through
-  nominal carriers + `effect.liskov-widened`; the Rails layer (five manifest fields, new
-  `plugins/rigor-railties`, ~400 rows, callback / mailer / `perform_now` edges, queue-adapter
-  narrowing, `reach: [rails]`); `%a{pure}` across ActiveSupport core_ext; the
-  `effects-on-by-default` bleeding-edge preview.
-- **Owner ruling: effects become default-on at v0.4.0** (`effects: false` opts out) — ADR-103 WD15.
-  Preconditions are tracked in **#409** (with #410 non-fork pool backends carrying the side-table,
-  #411 the snapshot's taint-only rows, #378 Steins vocabulary alignment).
-- **Measured at the stack top** (redmine `app`+`lib`, sequential, cold): `rigor check` off 9.99 s /
-  375 MB → on 10.37 s / 396 MB; warm ~0.7 s either way; `rigor effects check` after a warm `check`
-  ≈ 1.1 s; diagnostics byte-identical off vs on. Corpus notes: `docs/notes/20260817-effect-*.md`.
+- **The effect system's second stack was triaged by measurement, and two of its three slices died.**
+  `make verify` + `make docs-check` are green on the INTEGRATED master at `a403da0f`. v0.3.3 remains
+  the released version; the CHANGELOG `[Unreleased]` carries the new entries.
+- **Landed**: PR #415 (#411 — taint-only snapshot rows omitted by default, `--full` keeps them;
+  redmine 3,581 rows / 660 KB → 1,560 / 296 KB) · PR #416 (#414 — the Ractor pool no longer hangs
+  when a worker dies). A docs commit carries the #389 measurement note.
+- **#389 (the B2.2 ivar-reset skip, the first *typing* consumer) is measured and declined.** Not a
+  scope call — an evidence one, and the issue's own acceptance criterion turned out unreproducible.
+  Full record: [`docs/notes/20260818-b22-ivar-reset-headroom.md`](notes/20260818-b22-ivar-reset-headroom.md);
+  harness on the deliberately unmerged branch `measure/b22-yield`. **The issue still needs closing by
+  hand** (the evidence comment is posted).
+- **#410 cannot be delivered, and #414 explains why.** The Ractor pool backend does not analyse a
+  file under rbs 4.x: `RBS::Namespace.[]` interns every namespace through a process-wide mutable
+  flyweight cache in module ivars, which a non-main Ractor may not read. PR #416 fixed the two
+  Rigor-side defects around it (a `Plugin::Isolation` module-ivar write from the worker Ractor, and
+  a drain loop bounded by `:done` counts that hung forever when every worker died), so the backend
+  now fails per file and degrades rather than hanging — but it is not revivable without upstream rbs.
 
 ## Next session
 
-- **A second stack** for the remaining slices, in this order: #389 (B2.2 ivar-reset skip — the
-  first *typing* consumer; must land as a `BleedingEdge` `:behaviour` feature folded into the
-  analysis-cache identity, off by default, corpus-adjudicated), #390 (`effect.discarded-pure-result`,
-  `:off` pending a corpus gate), #391 (`rigor sig-gen` write-back of `%a{pure}` / envelopes), then
-  views #392 → #393 → #394. #378 needs the owner (a Steins issue).
-- **The dominant taint on a Rails app is `unresolved-self-call`** (the Rails layer barely moved the
-  exhaustive ratio: redmine 16.1 → 16.6 %); `render`'s `template-not-analysed` fires 249/329 on the
-  corpus — #392's debt, now countable. Improving self-call resolution is the highest-leverage engine
-  work for the effect system's signal.
-- Two `sig/*.rbs` one-liners were hand-added where `rigor sig-gen --print` declined to emit
-  (`Configuration#initialize` arity, `read_effect_envelope`, `filter_suppressed`) — the ADR-14 gap
-  signal, reported in the PR bodies, not yet filed as a sig-gen issue.
+- **Two owner decisions are open, both on the graduation path (#409)**:
+  1. #410 — close as won't-do and relax the precondition to "without `fork`, a collecting run
+     degrades to sequential and says so" (today's behaviour, costs nothing, affects only Windows);
+     or keep it open pending upstream rbs.
+  2. #414 — retire the Ractor backend outright, or park it behind the override. It now fails
+     honestly, but a backend that reports an internal analyzer error for every file still costs a
+     spec-process isolation, an exclusion pattern and a `make test-ractor-pool` target.
+- **The effect system's remaining implementable slices**: #390 (`effect.discarded-pure-result`,
+  `:off` pending a corpus gate), #391 (`sig-gen` write-back of `%a{pure}` / envelopes), then views
+  #392 → #393 → #394. #378 is the human cross-repo item and gates the vocabulary before v0.4.0.
+- **Before building #390, measure it the way #389 was measured.** Its gate is the same shape
+  (proven + exhaustive + a label set), and the summary table is only 12.6 % exhaustive-and-mutate-free
+  on redmine — so count the firings on the corpus before writing the rule, not after.
+- The next typing consumer worth trying is ADR-103 § 8 (2)'s computed purity for remembering call
+  results across re-invocation (`if x.foo && x.foo.bar`): unlike B2.2's, its rule reads **locals**,
+  which is the only receiver shape `call.possible-nil-receiver` fires on.
 
 ## What this arc learned that is not in a commit
 
-- **The delegation brief that works** (unchanged from the last arc, confirmed on 13 slices): fixed
-  design + repo contract verbatim + gates by exit code + parent re-runs the gates + "report
-  contradictions, do not silently redesign" + **run gates in the FOREGROUND with an explicit
-  timeout**. One Sonnet slice (#388) stalled on a background `make verify` and had to be finished
-  by the parent — the foreground rule is not optional.
-- **Audit the design, not just the gates.** Two subagent decisions contradicted the ADR while every
-  gate was green: the declared lane was made direct-only (Steins/WD1: it travels edges) and the
-  catalogue slice's census exposed a superlinear fold the tracer's small fixture never showed. A
-  corpus measurement per slice is what caught both; keep it in every brief that changes hot code.
-- **`gh stack` non-interactive discipline held**: `submit --auto`, `view --json`, `merge --yes
-  --merge`; an empty top branch is removed with `unstack --local` + `init` over the existing names.
-- **Survey-project measurement traps**: `paths:` in a scratch config resolve relative to the config
-  file (use absolute paths); the `effects` verbs take no `--no-ci-detect`; a scratch config's
-  `cache.path` keeps the survey checkout clean, but `effects update` writes `.rigor-effects.yml`
-  into the cwd — delete it.
+- **Measure a consumer's headroom before building it, by removing the thing it optimises.** Disabling
+  the B2.2 reset entirely is an upper bound on every criterion #389 could gate on, and it cost two
+  runs per subject. It removed zero diagnostics over 809 reset sites and added one false positive.
+  A yield percentage would not have found this: the join said 3–5 % of sites were skippable, which
+  reads like a small win rather than like nothing.
+- **An acceptance criterion can be unreproducible, and writing the fixture is how you find out.**
+  #389 promised to remove a `call.possible-nil-receiver` from `return unless @user; audit!;
+  @user.name`. That shape has never reported one: the rule fires only on a local-variable receiver
+  (`check_rules.rb:1271`). The fixture took ten minutes; the slice would have taken days.
+- **Both extremes need a control.** Zero-diagnostic-change is the shape of a broken toggle, so the
+  census had to show the reset firing at that exact site and the toggle had to move the inferred type
+  (`String?` → `String`) before the zero meant anything. The same for the Ractor degrade: the fix was
+  proved by poisoning a worker and watching the run finish in seconds where it had hung past ten
+  minutes.
+- **A backend CI never selects is a backend that rots.** `runner_pool_spec.rb` runs in `make verify`,
+  but on the *fork* backend — only the no-`cache_store` example pins Ractor, and it returns before
+  spawning anything. The Ractor path had been dead for some time with every gate green. When a spec
+  file's name and the backend it exercises disagree, the name is not the thing that decides.
+- **A hang is worse than a crash and should be fixed even in dead code.** The Ractor coordinator's
+  `while done_count < pool.size` had no way to observe a worker dying. `Ractor#monitor` posts
+  `:exited` / `:aborted` to the same mailbox, so bounding the loop by termination rather than by
+  `:done` is a four-line change that turns an unbounded hang into a degrade.
+- **`gh issue close` and chained `gh` commands are not auto-approved in this harness**; comments and
+  `gh pr create` / `merge` are. Post the evidence, then leave the close to the owner.

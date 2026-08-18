@@ -24,6 +24,15 @@ this file is the one that is wrong.
 - **Landed**: PR #415 (#411 — taint-only snapshot rows omitted by default, `--full` keeps them;
   redmine 3,581 rows / 660 KB → 1,560 / 296 KB) · PR #416 (#414 — the Ractor pool no longer hangs
   when a worker dies). A docs commit carries the #389 measurement note.
+- **#390 (`effect.discarded-pure-result`) is measured and should be declined too.** 7,151
+  discarded-position call sites across `rigor lib` / redmine / mastodon yield **14 firings, all
+  false positives**, and the corpus contains no instance of the footgun the rule is named for. Its
+  acceptance fixture also cannot pass: under the `raises` facet `h.fetch(:k)` fires (`rb_key_err_raise`
+  is not in the extractor's `RAISE_RE`), and under the folding-purity alternative `arr.sort` and
+  `xs.map` do not. Full record:
+  [`docs/notes/20260819-discarded-pure-result-corpus-gate.md`](notes/20260819-discarded-pure-result-corpus-gate.md);
+  harness on the deliberately unmerged branch `measure/discarded-pure-result`. **The evidence comment
+  is posted; the issue still needs closing by hand.**
 - **#389 (the B2.2 ivar-reset skip, the first *typing* consumer) is measured and declined.** Not a
   scope call — an evidence one, and the issue's own acceptance criterion turned out unreproducible.
   Full record: [`docs/notes/20260818-b22-ivar-reset-headroom.md`](notes/20260818-b22-ivar-reset-headroom.md);
@@ -45,18 +54,40 @@ this file is the one that is wrong.
   2. #414 — retire the Ractor backend outright, or park it behind the override. It now fails
      honestly, but a backend that reports an internal analyzer error for every file still costs a
      spec-process isolation, an exclusion pattern and a `make test-ractor-pool` target.
-- **The effect system's remaining implementable slices**: #390 (`effect.discarded-pure-result`,
-  `:off` pending a corpus gate), #391 (`sig-gen` write-back of `%a{pure}` / envelopes), then views
-  #392 → #393 → #394. #378 is the human cross-repo item and gates the vocabulary before v0.4.0.
-- **Before building #390, measure it the way #389 was measured.** Its gate is the same shape
-  (proven + exhaustive + a label set), and the summary table is only 12.6 % exhaustive-and-mutate-free
-  on redmine — so count the firings on the corpus before writing the rule, not after.
+- **The effect system's remaining implementable slices**: #391 (`sig-gen` write-back of `%a{pure}` /
+  envelopes), then views #392 → #393 → #394. #378 is the human cross-repo item and gates the
+  vocabulary before v0.4.0. #389 and #390 are both measured and declined, so **every remaining
+  diagnostic consumer of the effect system has now been measured away** — what is left is reporting
+  and annotation surface.
+- **Two extractor bugs fell out of the #390 audit and are worth filing on their own** (neither is
+  effect-system work): `RAISE_RE` in `tool/extract_builtin_catalog.rb:835` misses `rb_key_err_raise` /
+  `rb_exc_raise` / `rb_sys_fail` / `rb_name_err_raise`, so 35 catalogued methods read `raises: false`
+  while raising; and `Array#sort` reads `purity: mutates_self` because the mutator heuristic's
+  "first argument is a formal parameter" net fires on a parameter `rb_ary_sort` rebound to a dup.
 - The next typing consumer worth trying is ADR-103 § 8 (2)'s computed purity for remembering call
   results across re-invocation (`if x.foo && x.foo.bar`): unlike B2.2's, its rule reads **locals**,
   which is the only receiver shape `call.possible-nil-receiver` fires on.
 
 ## What this arc learned that is not in a commit
 
+- **Evaluate the acceptance fixture against the real data files before building anything.** #390's
+  gate was named in the issue as "the catalogue's `raises` facet / the folding totality criterion".
+  Reading those two files against the five named cases took under an hour and showed no composition
+  of them passes. This is the second consecutive slice whose acceptance criterion was assumed rather
+  than checked (#389's was unreproducible), so it is now the cheapest first move on any gated rule.
+- **A census probe must measure a call's OWN contribution, not a delta.** The first cut snapshotted
+  the unit's accumulated labels around each call. A second `lines << ""` in one method contributes
+  `mutate.local` that is already present, so the delta read empty and 14 `Array#<<` sites looked pure.
+  Walking the subtree against fresh accumulators and merging back is the fix. The tell was a control
+  fixture disagreeing with the corpus — the corpus rows had a shape neither control could produce.
+- **Post-order, or containment is invisible.** A block literal's origins join through the child walk,
+  so a probe that emits at `visit_call` reports `xs.map { puts x }` as pure and quietly contradicts
+  the design's own containment claim.
+- **An effect system tuned for envelopes is mistuned for discards, and that is not a bug.**
+  `mutate.local` tolerance, `freeze` not being modelled, and `&:sym` not tainting are all right for
+  "what does this method's code do to the world" and all wrong for "did this statement do anything
+  for its caller". Three of #390's five FP mechanisms are that mismatch, so any future discard-shaped
+  rule inherits them.
 - **Measure a consumer's headroom before building it, by removing the thing it optimises.** Disabling
   the B2.2 reset entirely is an upper bound on every criterion #389 could gate on, and it cost two
   runs per subject. It removed zero diagnostics over 809 reset sites and added one false positive.

@@ -157,6 +157,32 @@ RSpec.describe "diagnostic suppression", type: :runner do
       source = %("x".no_method # rigor:disable call.undefined-metod, suppression.unknown-rule\n)
       expect(suppression_rules(source)).to be_empty
     end
+
+    # Issue #321. The self-acknowledgement above is the INTENDED polarity — the surveillance rules are
+    # ordinary tokens with no carve-out — but nothing pinned it over the whole diagnostic set, so a
+    # refactor that reordered "compute surveillance diagnostics" against "apply suppression filtering"
+    # could flip it with every example still green. The three below fix the polarity in place.
+    #
+    # They assert `rules_for`, not `suppression_rules`: the subset projection cannot tell "the
+    # surveillance was acknowledged" apart from "the whole line got suppressed", and those are opposite
+    # outcomes.
+    it "lets a directive acknowledge the very warning it provokes" do
+      source = "x = 1 # rigor:disable call.bogus-rule suppression.unknown-rule\n"
+      expect(rules_for(source)).to be_empty
+    end
+
+    # The control for the example above: without the acknowledging token the same directive warns, so the
+    # silence there is the self-ack and not a fixture that stopped firing.
+    it "warns on the same directive when the acknowledgement is absent" do
+      expect(rules_for("x = 1 # rigor:disable call.bogus-rule\n")).to contain_exactly("suppression.unknown-rule")
+    end
+
+    # The other half of the polarity: acknowledging the surveillance must not lend the bogus token any
+    # suppressing power it did not have. The diagnostic the typo failed to name still fires.
+    it "leaves the diagnostic the unknown token failed to name" do
+      source = %("x".no_method # rigor:disable call.bogus-rule suppression.unknown-rule\n)
+      expect(rules_for(source)).to contain_exactly("call.undefined-method")
+    end
   end
 
   # Issue #306 — the anchoring. Each decline is paired with the genuinely-anchored sibling that still works,

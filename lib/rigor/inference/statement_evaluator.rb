@@ -8,6 +8,7 @@ require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
 require_relative "../source/constant_path"
+require_relative "b22_census"
 require_relative "anonymous_meta_class"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
@@ -1459,6 +1460,7 @@ module Rigor
       # External- receiver calls (`obj.method`) cannot reach the caller's ivars; they pass through unchanged.
       def invalidate_ivars_for_intervening_call(call_node, current_scope)
         return current_scope unless intervening_call_candidate?(call_node)
+        return current_scope if B22Census.disabled?
 
         class_name = enclosing_class_name_for(current_scope.self_type)
         return current_scope if class_name.nil?
@@ -1466,12 +1468,16 @@ module Rigor
         seed = current_scope.class_ivars_for(class_name)
         return current_scope if seed.empty?
 
-        seed.reduce(current_scope) do |acc, (ivar_name, seed_type)|
+        result = seed.reduce(current_scope) do |acc, (ivar_name, seed_type)|
           local_type = current_scope.ivar(ivar_name)
           next acc if local_type.nil? || local_type == seed_type
 
           acc.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
         end
+        if B22Census.active? && !result.equal?(current_scope)
+          B22Census.record(class_name, call_node.name, call_node.location.start_line)
+        end
+        result
       end
 
       def intervening_call_candidate?(call_node)

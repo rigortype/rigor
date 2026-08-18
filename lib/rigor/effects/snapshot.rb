@@ -212,7 +212,8 @@ module Rigor
         # tolerates), and a synthesised default accessor summary. `--full` keeps both.
         def build_methods(table, full:)
           table.each_with_object({}) do |entry, out|
-            next if !full && omit?(entry.direct.trivial?, entry.direct)
+            next if !full && omit?(trivial: entry.direct.trivial?, direct: entry.direct,
+                                   proven: entry.direct.proven, declared: entry.direct.declared)
 
             out[entry.key] = entry_for(entry.key, entry.direct.proven, entry.direct,
                                        declared: entry.direct.declared)
@@ -228,7 +229,8 @@ module Rigor
 
           table.each_with_object({}) do |entry, out|
             next unless entry_point?(entry.key, globs, sources, project_root)
-            next if !full && omit?(entry.trivial?, entry.direct)
+            next if !full && omit?(trivial: entry.trivial?, direct: entry.direct,
+                                   proven: entry.proven, declared: entry.declared)
 
             out[entry.key] = entry_for(entry.key, entry.proven, entry.direct, declared: entry.declared,
                                                                               exhaustive: entry.exhaustive?,
@@ -283,8 +285,14 @@ module Rigor
         SYNTHESISED_ORIGINS = %w[construct:attr-writer].to_set.freeze
         private_constant :SYNTHESISED_ORIGINS
 
-        def omit?(trivial, direct)
+        # A **taint-only** row carries no label in either lane: it says "not exhaustive, and here is why",
+        # and nothing a reviewer ratchets against. The snapshot lists what is attributable (issue #411,
+        # option (b)), so the row is omitted and the exhaustiveness transition stays visible for every row
+        # that does carry a label or a declared bound. `--full` keeps it, and a method that later proves a
+        # label arrives as an added symbol.
+        def omit?(trivial:, direct:, proven:, declared:)
           return true if trivial
+          return true if proven.empty? && declared.empty?
           return false unless direct.exhaustive?
           return false if direct.bundles.empty?
 

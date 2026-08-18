@@ -312,6 +312,122 @@ RSpec.describe "plugin contributions to `rigor unused`" do
     end
   end
 
+  # #369 — Solid Queue is the default Active Job backend from Rails 8, and a recurring task names its job
+  # only as a string. Same shape as rigor-sidekiq above, one layout difference: `recurring.yml` is keyed by
+  # ENVIRONMENT at the top level, so every environment is read rather than a chosen one.
+  describe "rigor-activejob — supplies roots for recurring-schedule jobs only" do
+    let(:jobs) do
+      {
+        "app/jobs/send_reminder_job.rb" =>
+          "class SendReminderJob < ApplicationJob\n  def perform = nil\nend\n",
+        "app/jobs/orphan_job.rb" =>
+          "class OrphanJob < ApplicationJob\n  def perform(id) = id\nend\n"
+      }
+    end
+
+    # `OrphanJob` is the control — same directory, same base class, named by no schedule — so a plugin that
+    # rooted the discovered job set would claim it too and the examples below could not tell the difference.
+    let(:recurring) do
+      jobs.merge(
+        "config/recurring.yml" => <<~YAML
+          production:
+            send_reminder:
+              class: "SendReminderJob"
+              schedule: "*/3 * * * *"
+        YAML
+      )
+    end
+
+    it "publishes the `class:` name from config/recurring.yml and nothing else" do
+      collect_in("rigor-activejob", recurring) do |contribution, _dir|
+        expect(contribution.roots).to eq(["SendReminderJob"])
+        expect(contribution.references).to be_empty
+      end
+    end
+
+    it "takes the recurring job out of the candidate list and leaves the orphan in it" do
+      collect_in("rigor-activejob", recurring) do |contribution, dir|
+        report = report_for(dir, recurring, contribution)
+
+        expect(report.candidates.map(&:fqn)).to include("OrphanJob")
+        expect(report.candidates.map(&:fqn)).not_to include("SendReminderJob")
+      end
+    end
+
+    # Without the plugin the same project reports the recurring job as dead — the state #369 was filed
+    # from, on a real Rails 8 application, and the proof the example above is not passing for another
+    # reason.
+    it "is what makes the difference: with no contribution the recurring job is a candidate" do
+      collect_in("rigor-activejob", recurring) do |_contribution, dir|
+        empty = Rigor::Analysis::Reachability::PluginRoots::Contribution.empty
+        expect(report_for(dir, recurring, empty).candidates.map(&:fqn)).to include("SendReminderJob")
+      end
+    end
+
+    # EVERY environment block is read. A job scheduled only outside production is still live code, and
+    # picking `production:` would report it dead — the same miss this slice exists to fix.
+    it "reads a task scheduled only in a non-production environment" do
+      files = jobs.merge(
+        "config/recurring.yml" => <<~YAML
+          staging:
+            send_reminder:
+              class: "SendReminderJob"
+              schedule: "every hour"
+        YAML
+      )
+      collect_in("rigor-activejob", files) do |contribution, _dir|
+        expect(contribution.roots).to eq(["SendReminderJob"])
+      end
+    end
+
+    # The flat layout — no environment key, the document IS the task map. Both depths are read rather than
+    # guessed at, because neither layout yields anything under the other's reading.
+    it "reads a flat, environment-less document" do
+      files = jobs.merge(
+        "config/recurring.yml" => "send_reminder:\n  class: \"SendReminderJob\"\n  schedule: \"every hour\"\n"
+      )
+      collect_in("rigor-activejob", files) do |contribution, _dir|
+        expect(contribution.roots).to eq(["SendReminderJob"])
+      end
+    end
+
+    # THE decline. Solid Queue also accepts inline Ruby, and `command:` names no class the way `class:`
+    # does. Parsing a constant out of an arbitrary snippet would manufacture a root from a string — the
+    # same over-supply rigor-sidekiq refuses for queue names.
+    it "supplies no root for a `command:` entry naming a discovered job" do
+      files = jobs.merge(
+        "config/recurring.yml" => <<~YAML
+          production:
+            cleanup:
+              command: "OrphanJob.perform_now"
+              schedule: "every day at 4am"
+        YAML
+      )
+      collect_in("rigor-activejob", files) { |contribution, _dir| expect(contribution).to be_empty }
+    end
+
+    # A `class:` the JobIndex does not know is dropped rather than published: a typo costs coverage instead
+    # of manufacturing a root, and `matched no declaration` stays a meaningful number.
+    it "drops a `class:` naming a job it never discovered" do
+      files = jobs.merge(
+        "config/recurring.yml" => "production:\n  send:\n    class: \"SendRemidnerJob\"\n"
+      )
+      collect_in("rigor-activejob", files) { |contribution, _dir| expect(contribution).to be_empty }
+    end
+
+    # Fail-soft, paired with a must-still-succeed case — `PluginRoots.collect` swallows every error, so a
+    # decline example alone would pass just as well for a plugin that raised on the first byte of YAML.
+    it "skips a malformed schedule without losing the roots a valid one supplies" do
+      files = jobs.merge(
+        "config/recurring.yml" => "production:\n  send_reminder:\n    class: \"SendReminderJob\"\n",
+        "config/other_recurring.yml" => "production:\n - broken\n\t: indent\n"
+      )
+      collect_in("rigor-activejob", files) do |contribution, _dir|
+        expect(contribution.roots).to eq(["SendReminderJob"])
+      end
+    end
+  end
+
   # The declines. Each is a decision, and each is recorded here so that removing it is a visible edit.
   describe "plugins that deliberately contribute nothing" do
     # Publishing spec references as roots would promote every spec-referenced class to production-reachable
@@ -323,8 +439,10 @@ RSpec.describe "plugin contributions to `rigor unused`" do
       collect_in("rigor-rspec-rails", files) { |contribution, _dir| expect(contribution).to be_empty }
     end
 
-    # `MyJob.perform_later` / `MyMailer.welcome` are ordinary constant references too.
-    it "rigor-activejob and rigor-actionmailer contribute nothing" do
+    # `MyJob.perform_later` / `MyMailer.welcome` are ordinary constant references too. rigor-activejob is
+    # here for the SCHEDULE-LESS project, which is still the #350 decline: it roots a job only when a
+    # recurring schedule names one (above), never because a file exists under `app/jobs`.
+    it "rigor-activejob with no schedule, and rigor-actionmailer, contribute nothing" do
       job = { "app/jobs/welcome_job.rb" => "class WelcomeJob\n  def perform = nil\nend\n" }
       mailer = { "app/mailers/user_mailer.rb" => "class UserMailer\n  def welcome = nil\nend\n" }
 
@@ -333,7 +451,7 @@ RSpec.describe "plugin contributions to `rigor unused`" do
     end
 
     it "declares neither reachability fact in its manifest" do
-      %w[rigor-rspec rigor-rspec-rails rigor-activejob rigor-actionmailer].each do |gem_name|
+      %w[rigor-rspec rigor-rspec-rails rigor-actionmailer].each do |gem_name|
         produces = Object.const_get(REACHABILITY_PLUGIN_CLASSES.fetch(gem_name)).manifest.produces
         expect(produces).not_to include(:reachability_roots), gem_name
         expect(produces).not_to include(:reachability_references), gem_name
@@ -345,6 +463,8 @@ RSpec.describe "plugin contributions to `rigor unused`" do
     expect(Rigor::Plugin::Pundit.manifest.produces).to include(:reachability_roots)
     expect(Rigor::Plugin::Sidekiq.manifest.produces).to include(:reachability_roots)
     expect(Rigor::Plugin::Sidekiq.manifest.produces).not_to include(:reachability_references)
+    expect(Rigor::Plugin::Activejob.manifest.produces).to include(:reachability_roots)
+    expect(Rigor::Plugin::Activejob.manifest.produces).not_to include(:reachability_references)
     expect(Rigor::Plugin::Factorybot.manifest.produces).to include(:reachability_references)
   end
 end

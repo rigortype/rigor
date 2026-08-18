@@ -48,8 +48,15 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
     File.write("loud.rb", File.read("loud.rb").sub('puts("loud")', 'puts(File.read("loud.txt"))'))
   end
 
-  # An implicit-self call the project defines nowhere: the summary stops being exhaustive.
+  # An implicit-self call the project defines nowhere, kept ALONGSIDE the write the leaf already proves:
+  # the summary stops being exhaustive while the row keeps a label. The label is what keeps the row in
+  # the file at all — a row left carrying nothing but its taint is omitted (#411).
   def add_unresolved_call_to_the_leaf
+    File.write("loud.rb", File.read("loud.rb").sub('puts("loud")', 'no_such_helper && puts("loud")'))
+  end
+
+  # The same unresolved call REPLACING the write: the row ends up with no label in either lane.
+  def strip_the_leaf_to_taint_only
     File.write("loud.rb", File.read("loud.rb").sub('puts("loud")', "no_such_helper"))
   end
 
@@ -170,6 +177,26 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
 
       expect(status).to eq(1)
       expect(out).to include("Tracer::Loud#emit  exhaustive → not")
+    end
+
+    # #411 option (b) — a taint-only row carries no label in either lane, so the snapshot stops listing
+    # it: what it says ("not exhaustive, and here is why") is what the report and `explain` answer. The
+    # change still gates, as a removed symbol rather than an exhaustiveness event, and `--full` keeps the
+    # row for anyone who wants the whole table.
+    it "omits a row left carrying only its taint, and keeps it under --full" do
+      run("update")
+      strip_the_leaf_to_taint_only
+      status, out, = run("check")
+
+      expect(status).to eq(1)
+      expect(out).to include("Tracer::Loud#emit  -symbol [io.output.stdout]")
+      expect(snapshot_text).to include("Tracer::Loud#emit")
+
+      run("update")
+      expect(snapshot_text).not_to include("Tracer::Loud#emit")
+
+      run("update", "--full")
+      expect(snapshot_text).to include("Tracer::Loud#emit")
     end
 
     # A record written under a different Rigor, vocabulary or `effects:` block is not comparable; the

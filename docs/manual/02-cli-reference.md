@@ -282,8 +282,12 @@ reach:
 ```
 
 A method is left out when it is exhaustive and proves nothing
-beyond `mutate.local`, and when its summary is a synthesised
-accessor's; `--full` records everything. The header carries
+beyond `mutate.local`, when its summary is a synthesised
+accessor's, and when it carries no label in either lane — a
+row that would say only "not exhaustive, and here is why" is
+something `rigor effects` and `rigor effects explain` answer
+better than a committed record. `--full` records everything.
+The header carries
 the Rigor and vocabulary versions and a digest of your
 `effects:` block, so an upgrade or a policy edit shows up as a
 *regeneration event* rather than as silent reinterpretation.

@@ -10,6 +10,12 @@ name: OSS sweep
 # thresholds as a workflow artifact.  Download the artifact and commit
 # data/oss-sweep/mastodon-thresholds.json to activate the gate.
 #
+# A second job, `effect-budget`, re-verifies ADR-103 WD13's effect-collection
+# cost budget against the same pinned target (#409). It is advisory: it reports
+# the delta and never fails the run, following the perf-bench precedent
+# (ADR-50 WD6) that a measurement earns the power to fail a release only once
+# its band is known to be stable on the measuring host.
+#
 # Pinned target: data/oss-sweep/mastodon-sha.txt
 # Rigor config:  data/oss-sweep/mastodon-rigor.yml
 # Thresholds:    data/oss-sweep/mastodon-thresholds.json
@@ -172,3 +178,82 @@ jobs:
           print(f'Precise: {s[\"precise_count\"]}')
           print(f'Dynamic (opaque): {s[\"dynamic_opaque_count\"]}')
           " || true
+
+  # ── ADR-103 WD13 effect-collection budget (#409, advisory) ────────
+  #
+  # The graduation criterion for effects-default-on is that WD13's "≤ ~5 % wall
+  # / RSS on mastodon" still holds AT THE RELEASE: the original figures were
+  # measured when only opted-in projects paid the cost, and default-on changes
+  # the population the budget has to hold for.
+  #
+  # Its own job rather than a step in `sweep`, because that job restores a warm
+  # analysis cache across weekly runs — exactly what a cold cost measurement
+  # must not have. No `actions/cache` step here, deliberately.
+  #
+  # Linux is where this is measured: peak RSS is only readable from /proc, and
+  # a developer laptop shares its cores with a browser. tool/bench.rb already
+  # names the CI runner the authoritative measurement host.
+  effect-budget:
+    name: Effect-collection budget (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Rigor
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Set up Ruby (Rigor runtime)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Read pinned Mastodon tag
+        id: mastodon_tag
+        run: |
+          TAG=$(cat data/oss-sweep/mastodon-sha.txt | tr -d '[:space:]')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Clone Mastodon (sparse, pinned tag)
+        run: |
+          git clone \
+            --depth 1 \
+            --filter=blob:none \
+            --sparse \
+            --branch "${{ steps.mastodon_tag.outputs.tag }}" \
+            https://github.com/mastodon/mastodon.git \
+            /tmp/mastodon
+          git -C /tmp/mastodon sparse-checkout set app lib config
+
+      - name: Measure effects on vs off
+        run: |
+          bundle exec ruby tool/effect_budget.rb \
+            --target /tmp/mastodon \
+            --base-config data/oss-sweep/mastodon-rigor.yml \
+            --reps 5 \
+            --bound-pct 5.0 \
+            --json /tmp/mastodon-effect-budget.json \
+            | tee /tmp/mastodon-effect-budget.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### ADR-103 WD13 effect budget (advisory)"
+            echo
+            echo '```'
+            tail -3 /tmp/mastodon-effect-budget.txt 2>/dev/null || echo "no measurement"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload budget artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: effect-budget-mastodon-${{ steps.mastodon_tag.outputs.tag }}-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            /tmp/mastodon-effect-budget.json
+            /tmp/mastodon-effect-budget.txt

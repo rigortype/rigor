@@ -180,6 +180,17 @@ coverage:
 bench-perf:
 	bundle exec ruby tool/bench.rb --target lib
 
+# ADR-103 WD13 / #409 effect-collection cost budget. Interleaved A/B of
+# `rigor check` with and without `effects:` over an external corpus target,
+# reporting median wall / peak-RSS deltas against the ~5% bound. Advisory,
+# and like `bench-perf` deliberately NOT in `verify`. The authoritative host
+# is Linux CI (peak RSS reads from /proc, and a laptop shares its cores with
+# a browser) — `.github/workflows/oss-sweep.yml` runs it against the pinned
+# Mastodon. Locally: make effect-budget TARGET=~/repo/ruby/rigor-survey/redmine \
+#   BASE_CONFIG=/tmp/redmine-base.yml
+effect-budget:
+	bundle exec ruby tool/effect_budget.rb --target $(TARGET) --base-config $(BASE_CONFIG)
+
 # `verify` chains the spec suite, the gated pool-runner spec (its
 # own rspec process — see `test-ractor-pool`), rubocop, `rigor check
 # lib`, and the plugin-tree contract check. The spec phase runs via

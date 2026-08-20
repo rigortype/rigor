@@ -48,18 +48,25 @@ entries and no reader has walked it end to end.
   budget.
 - **v0.4.0** — a **Go / No-Go** on effects-default-on, decided against the CI band.
 
-## The measurement that reshaped this
+## The WD13 measurement — RETRACTED, and what survives
 
-**WD13's cost budget does not hold.** `rigor check` with `effects: {}` costs **+9.7 % wall on redmine
-and +27.9 % on mastodon** against a `≤ ~5 %` bound; RSS is within noise. The mastodon arms do not
-overlap, so the direction is certain and only the magnitude wants CI confirmation. Full record:
-[`docs/notes/20260819-wd13-effect-budget-verification.md`](notes/20260819-wd13-effect-budget-verification.md).
+I measured `effects: {}` at +9.7 % wall on redmine and +27.9 % on mastodon and reported the budget as
+failing. **That is retracted.** `docs/notes/20260817-effect-rails-layer-corpus.md` measured the same
+checkouts two days earlier, cold and sequential, with a *fuller* plugin set, and got **+3.4 % on both**
+— inside the budget. No commit since touches the collection hot path, and my host was contaminated.
+Correction on [#409](https://github.com/rigortype/rigor/issues/409); the note carries the full account.
 
-Two corrections to how the bound was being read: the 5 % names **mastodon** specifically, and
-**gitlab's bound is the closure** (`Propagator.propagate` ≤ 1 s), not the run — that half is still
-unmeasured and is far cheaper than it looks. First lead for #424, **unverified**: `Effects::Scanner`
-takes a second full AST walk per file rather than riding `ScopeIndexer`'s descent. Profile before
-optimising.
+**Read the checkbox as: last measured inside the budget, one unreconciled contradiction.** Not cleared,
+not failed. The advisory `effect-budget` job settles it, and #424 is re-scoped from "optimise" to
+"reconcile, then optimise only if needed".
+
+What does survive:
+- The bound's real wording — the 5 % names **mastodon** specifically, and **gitlab's bound is the
+  closure** (`Propagator.propagate` ≤ 1 s), not the run.
+- The 2026-08-17 note already reports that closure at **1.34 s** at gitlab scale — *outside* the bound,
+  unretracted, and the one figure here nobody has questioned. That is the live half.
+- One hint that the contradiction might not be pure noise: on redmine the off-arms nearly agreed
+  (8.77 vs 8.69 s) while the on-arms did not (9.07 vs 9.53 s).
 
 #409's other four boxes are all owner decisions: the #410 waiver, #378, `effects.lsp` semantics, and
 the flip itself.
@@ -84,6 +91,14 @@ the flip itself.
   extractor included the C function's signature line, which `body.text` does not, and produced a
   contaminated 53-method list with a phantom `String#replace` regression. Confirming the generator was
   byte-reproducible against the checked-in files first made the real diff trustworthy.
-- **My own published cause-analyses were wrong twice** (#418's mechanism, and the `String#replace`
-  claim in the correction to it). Both were corrected in the issue, the note and this file. The
-  measurement that decides is the one to run before writing the explanation down.
+- **Search the corpus for a prior measurement BEFORE publishing a new one.** The WD13 retraction is
+  the expensive version of this: a note measuring the same targets, more thoroughly, sat in
+  `docs/notes/` two days old while I filed an issue and a comment saying the budget failed by 6×. The
+  `rigor-prior-art` skill exists for exactly this question and would have cost one call.
+- **Non-overlapping ranges are not a control.** They prove the reps separated the arms *under the
+  conditions that prevailed* — they cannot distinguish a real effect from a host artifact consistent
+  across the batch. I leaned on them precisely where they do not bear weight.
+- **My own published cause-analyses were wrong three times** (#418's mechanism, the `String#replace`
+  claim in the correction to it, and the WD13 finding). Each was corrected in the issue, the note and
+  this file. The pattern is the same every time: publishing the explanation before running the check
+  that would refute it.

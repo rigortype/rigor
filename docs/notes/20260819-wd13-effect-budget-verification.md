@@ -1,7 +1,8 @@
 # Re-verifying the WD13 effect-collection budget (#409): method, and why it runs on CI
 
-Status: measurement note plus the harness it produced. No design commitments — the numbers below are
-provisional and the authoritative ones will come from
+Status: measurement note plus the harness it produced. No design commitments. **The local numbers below
+are contradicted by a better-provenanced measurement from 2026-08-17 and should not be acted on** — see
+the section marked so. The authoritative figures will come from
 [`oss-sweep.yml`](../../.github/workflows/oss-sweep.yml)'s `effect-budget` job.
 
 [ADR-103](../adr/103-effect-labels.md) § WD13 states the budget verbatim:
@@ -50,6 +51,36 @@ The `effect-budget` job therefore lives in `oss-sweep.yml` beside the existing M
 **as its own job** — the sweep restores a warm analysis cache across weekly runs, which is exactly what
 a cold cost measurement must not have.
 
+## These figures contradict a careful measurement from two days earlier — do not act on them
+
+**Read this section before the table.** On 2026-08-17,
+[`20260817-effect-rails-layer-corpus.md`](20260817-effect-rails-layer-corpus.md) measured the same
+question against the **same survey checkouts** (redmine `a12198ea0`, mastodon `163f96cee`), cold,
+sequential, cache-wiped, with each project's own plugin list **plus `rigor-railties`**:
+
+| | wall off → on | RSS |
+| --- | --- | --- |
+| redmine | 8.77 → 9.07 s (**+3.4 %**) | +3.3 % |
+| mastodon | 12.82 → 13.26 s (**+3.4 %**) | +0.4 % |
+
+Both inside the budget. The figures below say +9.7 % and +27.9 %. Both cannot be right, and the
+earlier one has the better provenance:
+
+- Only **three** commits have touched the effect path since (`b52f7552` snapshot rendering,
+  `e9410a9f` the Ractor hang fix — unused at `workers: 0` — and `9a6d482b` the Solid Queue roots, in
+  a plugin neither target loads). None of them is on the collection hot path, so a code regression of
+  this size has no candidate.
+- The earlier run carried **more** work, not less: a fuller plugin set including railties, and a cold
+  *enabled* cache that still writes entries where these runs pass `--no-cache` and write none. Both
+  differences should make the earlier run slower.
+- This host was demonstrably contaminated (below), and while redmine's numbers were taken before the
+  interloper started, "before that particular process" is not the same as "on a quiet machine".
+
+The redmine off-arms nearly agree (8.77 vs 8.69 s) while the on-arms do not (9.07 vs 9.53 s), which
+is the one detail that keeps this from being pure noise and is worth settling rather than dismissing.
+**Settling it is what the CI job is for.** Until it reports, WD13's budget should be read as *last
+measured inside, with an unreconciled local contradiction*, not as failing.
+
 ## Provisional local figures
 
 Sequential runs (`parallel.workers` defaults to `0`, and neither target sets it, so both arms are
@@ -61,11 +92,14 @@ also the default user experience, which is the population #409 is asking about.
 | redmine | 347 | 8.69 → 9.53 s (**+9.7 %**) | 304 → 328 MB (+7 %) | yes — ran before the interloper |
 | mastodon | 1,312 | 14.57 → 18.63 s (**+27.9 %**) | 558 → 553 MB (noise) | reps 1–4 only; needs CI confirmation |
 
-The mastodon arms did not overlap (max off 16.69 s < min on 17.24 s), so the direction is not in doubt
-even though the magnitude is. **Both targets are over the ~5 % wall bound, redmine by ~2× and mastodon
-by ~6×.** RSS is within noise on mastodon and near the bound on redmine.
+The mastodon arms did not overlap (max off 16.69 s < min on 17.24 s). Taken alone that would read as a
+solid direction; taken against the 2026-08-17 figures it reads as a host artifact that was consistent
+across the batch, which non-overlapping ranges cannot distinguish from a real effect. Range separation
+proves the reps were sufficient to separate the arms **under the conditions that prevailed**; it says
+nothing about whether those conditions were representative.
 
-A plausible mechanism, unverified: collection adds a second full AST walk per file. `Effects::Scanner`
+A mechanism that would explain a large cost *if one exists*, unverified and now doubtful given the
+above: collection adds a second full AST walk per file. `Effects::Scanner`
 is explicitly "a separate walk … taken here" rather than riding `ScopeIndexer`'s descent, because it
 must attribute each recorded call node to its enclosing unit. That is a per-file cost proportional to
 the tree, which is the shape of a double-digit percentage rather than a rounding error. Confirming or
@@ -82,8 +116,9 @@ the YJIT-on numbers and any future recalibration should say which it measured.
 The job ships **advisory**, following the perf-bench precedent ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
 WD6): a measurement earns the power to fail a release only once its band is known to be stable on the
 measuring host. Promoting it needs a few weekly runs establishing the CI band, and then `--gate` in the
-workflow step. Note that on today's evidence the gate would fail — which is a finding about the budget,
-not a reason to widen the bound.
+workflow step. The first thing those runs have to settle is the contradiction at the top of this note:
+whether collection costs ~3 % as measured on 2026-08-17 or something much larger. Whichever it is, the
+bound is not being widened to fit a measurement.
 
 ## Not done here
 

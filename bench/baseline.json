@@ -1,13 +1,13 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-07-30T12:00:03Z",
-  "calibrated_on": "ubuntu-latest (GitHub Actions), master @ run 30540710607",
-  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here — that artifact is produced on every run, not only an uncalibrated one. Recalibrated DOWN from 23,521,131 (the 2026-07-30 sig-correctness recalibration): `lib` allocations fell to 15,769,515 (-33.0%) when #207 replaced the referenced-type stub pass's detection half. It had built every project class instance- and singleton-side with a throwaway RBS::DefinitionBuilder to read the missing name out of NoTypeFoundError (7.84M allocations, a third of the run); detection now reads the declarations and applies RBS's own membership test, at ~25k. Unlike the previous refresh this IS a Rigor performance win — every project that ships RBS through `signature_paths:` benefits, measured -83.6% on a Rails-shaped app (docs/notes/20260730-stub-pass1-static-detection-evaluation.md). #237, merged alongside, also stops the stub fixpoint burning all five passes when a batch cannot be synthesized. Refreshed so the 5% allocation band keeps its teeth: against the stale target it permitted 24,697,188, i.e. +57% over the real cost. wall_s and peak_rss_kb come from the same run.",
+  "calibrated_at": "2026-08-20T23:48:13Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.3.4 @ run 32428356981 (rerun)",
+  "note": "Linux CI measurements. allocations is the tight signal; wall_s is a coarse backstop. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated UP from 15,769,515 at the v0.3.4 release because THE TARGET GREW, not because analysis got slower: `lib` went from 347 files / 75,343 lines at the 2026-07-30 calibration to 420 / 90,131 here (+21% files, +19.6% lines), largely the ADR-103 effect subsystem and ADR-102's `rigor unused`. Allocations rose +17.6% against +19.6% more code, so cost per line fell slightly. The rise is NOT effect collection: rigor's own .rigor.yml has no `effects:` block, and docs/notes/20260817-effect-collection-perf.md measured the effects-OFF path at +0.07% allocations while independently recording 17,926,639 for `lib` on 2026-08-17 — which brackets 2.16M of the 2.78M gap, the residual being the handful of PRs since. allocations reproduced across two runs of the same commit to within 87 (18,552,196 / 18,552,109), which is what says this is a real target measurement rather than noise. wall_s and peak_rss_kb take the LOWER of the two runs so the bands keep their teeth (wall 15.089 vs 15.869; RSS 300,068 vs 321,972 KB, and the +10% band still admits the higher one).",
   "targets": {
     "lib": {
-      "wall_s": 9.106,
-      "allocations": 15769515,
-      "peak_rss_kb": 301900,
+      "wall_s": 15.089,
+      "allocations": 18552109,
+      "peak_rss_kb": 300068,
       "diagnostics": 1
     }
   }

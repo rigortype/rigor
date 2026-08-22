@@ -36,9 +36,16 @@ module Rigor
     module RuleCatalog # rubocop:disable Metrics/ModuleLength
       # Stable documentation home for a built-in rule. `documentation_url` appends a per-rule fragment that
       # resolves to the rule's anchor in the published diagnostics catalogue; the page itself points at
-      # `rigor explain <rule>` as the authoritative per-rule reference. Mirrors the gemspec
-      # `documentation_uri` URL scheme (`…/tree/main`).
-      DOCUMENTATION_BASE = "https://github.com/rigortype/rigor/blob/main/docs/manual/04-diagnostics.md"
+      # `rigor explain <rule>` as the authoritative per-rule reference.
+      #
+      # The canonical docs host, deliberately NOT a `github.com/…/blob/<ref>/…` path (ADR-65 amendment,
+      # #438): a git ref inside a frozen public contract is a mutable component, and the one that was
+      # baked in here — `main`, a branch this repository has never had — made every emitted URL 404 from
+      # the day the field shipped. A branch name rots on a rename and a tag only resolves once that tag
+      # is pushed (so every unreleased build would emit 404s); the published site carries no ref at all.
+      # The site renders `docs/manual/04-diagnostics.md` verbatim, `<a id="rule-…">` anchors included, so
+      # the fragment half of the contract is unchanged.
+      DOCUMENTATION_BASE = "https://rigor.typedduck.fail/manual/04-diagnostics/"
 
       class Entry < Data.define(:id, :summary, :fires_when, :does_not_fire_when,
                                 :suppression, :severity_authored, :severity_by_profile,

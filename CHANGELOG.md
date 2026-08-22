@@ -21,6 +21,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** The `documentation_url` carried by every diagnostic in `rigor check --format json`, and printed by `rigor explain`, now resolves: it points at the catalogue page on the documentation site instead of a GitHub branch this project has never had, so following one no longer lands on a 404 ([#438](https://github.com/rigortype/rigor/issues/438)).
+  - Three more links shipped with the same wrong branch and are fixed too: the plugins link in the `.rigor.yml` that `rigor init` writes, and the homepage and installation links of the VS Code extension.
 - **[effects]** `effect.envelope-exceeded` is reported on every run, not only on the first one after clearing `.rigor/cache` ([#428](https://github.com/rigortype/rigor/issues/428)).
   - A warm run used to serve its diagnostics from the cache without re-checking your envelopes, so a project whose CI caches `.rigor/cache` between builds — the setup the manual recommends — saw the check fire once and stay silent afterwards, with the silence reading as a clean result. Both ways of declaring a bound were affected: an `effects.envelopes:` stanza in `.rigor.yml` and an `%a{pure}` / `%a{rigor:v1:effect …}` annotation in your signatures. The `effect.annotations-unchecked` notice went the same way and is back too.
   - Editing an envelope, a `tolerated:` list or an annotation now re-judges your code on the next run even though no Ruby file changed. Declaring an envelope costs a warm run about three quarters of a second on a mid-sized Rails application, because Rigor has to re-check it rather than replay the previous answer; a project with `effects:` on and no envelope declared is unaffected.

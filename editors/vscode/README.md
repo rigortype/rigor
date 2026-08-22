@@ -23,7 +23,7 @@ exposes settings, and surfaces lifecycle state.
 - A **trusted** workspace (the server is not started in restricted mode).
 - The **`rigortype` gem ≥ 0.1.6**, installed so `rigor` is on `PATH`
   (or reachable through a `mise` / `asdf` shim). See the manual's
-  [Installing Rigor](https://github.com/rigortype/rigor/blob/main/docs/manual/01-installation.md)
+  [Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md)
   chapter — `mise` is the recommended channel and ships a stable
   `rigor` shim the extension auto-discovers. Rigor is a tool, not a
   library, and does **not** go in the project's `Gemfile`. A legacy
@@ -57,7 +57,7 @@ loaded — fix the setup and run **Rigor: Restart Server**.
 
 `mise` is the recommended way to install Rigor — `mise use
 gem:rigortype` (see the manual's
-[Installing Rigor](https://github.com/rigortype/rigor/blob/main/docs/manual/01-installation.md)
+[Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md)
 chapter). A GUI-launched VS Code does not inherit the shell `PATH`
 that `mise activate` sets up, so step 3 above often misses a
 mise-managed `rigor` — step 4 covers that automatically by finding
@@ -107,7 +107,7 @@ diagnostics are tagged `source: "rigor"` in the Problems panel.
 
 ## Troubleshooting
 
-See the [editor integration guide](https://github.com/rigortype/rigor/blob/main/docs/manual/09-editor-integration.md)
+See the [editor integration guide](https://github.com/rigortype/rigor/blob/master/docs/manual/09-editor-integration.md)
 for diagnostics-not-appearing, empty-completion, and `untyped`-hover
 cases. For server-side detail, set `rigor.server.logPath` and open the
 log with **Rigor: Show Server Log**.

@@ -40,7 +40,7 @@ RSpec.describe Rigor::Analysis::RuleCatalog do
   describe ".documentation_url" do
     it "points at the rule's per-rule anchor in the published catalogue" do
       expect(described_class.documentation_url("call.undefined-method"))
-        .to end_with("/docs/manual/04-diagnostics.md#rule-call-undefined-method")
+        .to eq("https://rigor.typedduck.fail/manual/04-diagnostics/#rule-call-undefined-method")
       expect(described_class.documentation_url("def.return-type-mismatch"))
         .to end_with("#rule-def-return-type-mismatch")
     end

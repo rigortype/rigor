@@ -6,9 +6,12 @@
 #   2. Config keys — every top-level key in Configuration::DEFAULTS must be mentioned in the configuration reference.
 #   3. Rule IDs — every ID in CheckRules::ALL_RULES must appear in the diagnostic catalogue or the handbook
 #      errors chapter.
-#   4. Rule documentation_url anchors — every RuleCatalog entry's `documentation_url` (ADR-65, a frozen public
-#      contract) points at `04-diagnostics.md#rule-<id>`, so the catalogue must carry the matching anchor or the
-#      published URL silently 404s within the page.
+#   4. Rule documentation_url — every RuleCatalog entry's `documentation_url` (ADR-65, a frozen public contract)
+#      points at the published `04-diagnostics` catalogue, anchored per rule. Both halves are checked: the
+#      fragment (the catalogue must carry the matching `<a id>` anchor or the URL 404s within the page) and the
+#      page itself (host + path must map back to a catalogue file the gem actually packages, and must carry no
+#      mutable git ref — #438 shipped `blob/main/…` against a repository whose branch is `master`, so every
+#      emitted URL 404ed while the fragment half stayed green).
 #   5. Declared diagnostic families — every family the type spec's identifier taxonomy declares resolves to a
 #      real emitted id, or says in the row that it does not (ADR-92 WD4). Axes 1-4 all run impl -> doc; this
 #      one runs doc -> impl, the direction that let five divergences ship unnoticed.
@@ -34,6 +37,22 @@ MANUAL_DRIFT_HANDBOOK_DIR = File.join(MANUAL_DRIFT_DOCS_ROOT, "handbook")
 # Introspection helpers: emitted by the engine but documented in the handbook type-inspection chapter (05),
 # not the diagnostic catalogue.
 MANUAL_DRIFT_INTROSPECTION_RULES = %w[dump.type assert.type-mismatch].freeze
+
+# Axis 4: surfaces outside docs/ that the documentation_url page check is pinned against.
+MANUAL_DRIFT_REPO_ROOT = File.expand_path("../..", __dir__)
+
+# Axis 4: the files the gem actually ships, read straight from the gemspec — the in-repo authority for "this
+# catalogue page is published", available without a network call. `Gem::Specification#files` globs relative to
+# the process cwd, so the load is pinned to the repo root rather than wherever rspec was invoked.
+MANUAL_DRIFT_PACKAGED_FILES = Dir.chdir(MANUAL_DRIFT_REPO_ROOT) do
+  Gem::Specification.load(File.join(MANUAL_DRIFT_REPO_ROOT, "rigortype.gemspec")).files
+end.freeze
+
+# Axis 4: the canonical documentation host and its manual-path convention, witnessed by README.md — an authority
+# independent of the constant under test. Every README manual link is `https://<host>/manual/<slug>/`, mapping
+# 1:1 onto `docs/manual/<slug>.md`.
+MANUAL_DRIFT_README_MANUAL_LINKS = File.read(File.join(MANUAL_DRIFT_REPO_ROOT, "README.md"), encoding: "utf-8")
+                                       .scan(%r{(https://[a-z0-9.-]+)/manual/([a-z0-9-]+)/}).uniq.freeze
 
 # Axis 5: families whose ids are contributed at runtime rather than by the engine, so the vocabulary cannot be
 # enumerated here. `CheckRules.known_suppression_token?` takes the same under-warning stance for the same reason.
@@ -169,9 +188,9 @@ RSpec.describe "manual accuracy" do
     end
   end
 
-  # ── 4. Rule documentation_url anchor integrity (ADR-65) ──────────
+  # ── 4. Rule documentation_url integrity (ADR-65) ─────────────────
 
-  describe "rule documentation_url anchors (04-diagnostics.md)" do
+  describe "rule documentation_url (04-diagnostics.md)" do
     let(:catalogue_doc) { File.read(File.join(MANUAL_DRIFT_MANUAL_DIR, "04-diagnostics.md"), encoding: "utf-8") }
 
     # `RuleCatalog#documentation_url` is a frozen public contract (ADR-65): it points every built-in rule at
@@ -186,6 +205,52 @@ RSpec.describe "manual accuracy" do
                                    "RuleCatalog rules whose documentation_url anchor is missing from " \
                                    "04-diagnostics.md: #{missing.map(&:id).inspect}\n" \
                                    "Add `<a id=\"rule-<id-with-dots-as-dashes>\"></a>` for each."
+    end
+
+    # The PAGE half of the same contract. Only the fragment was ever gated, which is exactly how #438 shipped: the
+    # base pointed at `github.com/rigortype/rigor/blob/main/docs/manual/04-diagnostics.md` — a branch this
+    # repository has never had — so every emitted URL 404ed while the anchor check above stayed green, because it
+    # reads the local file and never looks at the host or the path.
+    #
+    # Pinned to two in-repo authorities so it fails on a rename rather than on a flaky network: README.md's own
+    # canonical doc links (the host, and the `/manual/<slug>/` ↔ `docs/manual/<slug>.md` convention) and the
+    # gemspec's packaged-file list (the catalogue page the gem really ships).
+    it "points at a catalogue page the project publishes, on the canonical docs host" do
+      base = Rigor::Analysis::RuleCatalog::DOCUMENTATION_BASE
+      host, slug = base.match(%r{\A(https://[a-z0-9.-]+)/manual/([a-z0-9-]+)/\z})&.captures
+
+      expect(slug).to eq("04-diagnostics"),
+                      "documentation_url's base is not a `<host>/manual/04-diagnostics/` page: #{base.inspect}"
+      expect(MANUAL_DRIFT_README_MANUAL_LINKS.map(&:first)).to include(host),
+                                                               "documentation_url points at #{host.inspect}, " \
+                                                               "which README.md uses for no doc link — the " \
+                                                               "canonical docs host is whatever README links to."
+      expect(MANUAL_DRIFT_PACKAGED_FILES).to include("docs/manual/#{slug}.md"),
+                                             "documentation_url points at a page the gemspec does not package: " \
+                                             "docs/manual/#{slug}.md"
+    end
+
+    # Guards the convention the check above rests on: every manual link README publishes must resolve to a real
+    # packaged chapter. Also catches the regex above matching nothing after a README reflow.
+    it "README's manual links all resolve to packaged chapters (guards the convention)" do
+      expect(MANUAL_DRIFT_README_MANUAL_LINKS).not_to be_empty
+
+      missing = MANUAL_DRIFT_README_MANUAL_LINKS
+                .map(&:last)
+                .reject { |slug| MANUAL_DRIFT_PACKAGED_FILES.include?("docs/manual/#{slug}.md") }
+      expect(missing).to be_empty,
+                         "README.md links manual chapters that are not packaged: #{missing.inspect}"
+    end
+
+    # #438's root cause stated as an invariant: a frozen public contract may not embed a mutable git ref. A branch
+    # name rots on a rename (what happened) and a tag resolves only once it is pushed, so every unreleased build
+    # would emit 404s. The published docs host carries neither.
+    it "embeds no mutable git ref" do
+      offenders = Rigor::Analysis::RuleCatalog.all
+                                              .map(&:documentation_url)
+                                              .grep(%r{/(?:blob|tree|raw)/})
+      expect(offenders.uniq).to be_empty,
+                                "documentation_url must not embed a branch or tag: #{offenders.uniq.inspect}"
     end
   end
 

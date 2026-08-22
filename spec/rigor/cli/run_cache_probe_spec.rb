@@ -98,6 +98,42 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
     expect(hit_engine).to eq(0)
   end
 
+  # #428 — the other half of the sentence above. `effect.envelope-exceeded` and its two siblings are
+  # recomputed every run from the effect table and never stored (ADR-103 WD12), so they are exactly what
+  # `analysis.run-diagnostics` does NOT carry; serving that slot verbatim dropped them on every warm run.
+  # A project that DECLARED an envelope therefore has to fall through to the full path — which is the one
+  # that can re-judge — and the cost of knowing that is one glob, off the declarations alone.
+  it "declines the probe (loads the engine) once the project declares an effect envelope" do
+    write_project
+    File.write(File.join(dir, ".rigor.yml"),
+               "severity_profile: balanced\neffects:\n  envelopes:\n    " \
+               "- match: \"lib/**/*.rb\"\n      effect: []\n")
+
+    miss_status, miss_engine, = check_run
+    expect(miss_status).to eq(0)
+    expect(miss_engine).to be > 0
+
+    _hit_status, hit_engine, = check_run
+    expect(hit_engine).to be > 0
+  end
+
+  # The pass the probe reproduces rather than declines for. `effect.annotations-unchecked` was built to be
+  # free — a glob and a regex over the project's own signature tree — so a hit can run it for itself, and
+  # this example is what pins that it stays engine-free while doing so.
+  it "reproduces effect.annotations-unchecked on an engine-free HIT" do
+    write_project
+    FileUtils.mkdir_p(File.join(dir, "sig"))
+    File.write(File.join(dir, "sig", "widget.rbs"),
+               "class Widget\n  %a{pure}\n  def price: () -> Integer\nend\n")
+
+    check_run # cold miss primes the cache
+
+    hit_status, hit_engine, hit_stdout = check_run
+    expect(hit_status).to eq(0)
+    expect(hit_engine).to eq(0)
+    expect(hit_stdout).to include("effect collection never runs")
+  end
+
   it "declines the probe (loads the engine) for --no-cache" do
     write_project
     check_run # prime

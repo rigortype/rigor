@@ -1,7 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "../diagnostic"
-require_relative "../check_rules"
+# ADR-87 WD4 — the pure-data rule-id table, never the engine-heavy `check_rules.rb` that reopens the
+# same module. This pass is one of the two the boot-slimming {Analysis::RunCacheProbe} has to run for
+# itself on a cache hit (#428), and requiring the full rule set would put `rigor/inference` back into
+# a hit's `$LOADED_FEATURES`.
+require_relative "../check_rules/rule_ids"
 require_relative "../../effects/signature_sources"
 
 module Rigor

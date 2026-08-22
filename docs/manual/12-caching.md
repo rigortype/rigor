@@ -71,6 +71,23 @@ The exception is a `rigor effects` run on a project with **no**
 shares no cache with `rigor check`, because a run served from that
 cache would have collected nothing.
 
+**Everything the effect system produces survives a cache hit.** A
+warm `rigor check` reports exactly the `effect.envelope-exceeded`
+warnings a cold one does; there is no configuration in which the
+effect checks fire on the first build of the day and go quiet
+afterwards. The judgment itself is never stored — it is recomputed
+each run from the summaries — so editing an envelope, a
+`tolerated:` list or an `%a{pure}` annotation re-judges your code
+on the next run even though no Ruby file changed, and a warning
+can never outlive the stanza that justified it.
+
+That costs speed in exactly one case. Declaring an envelope
+anywhere opts the project out of the cache-hit fast path, because
+Rigor has to load the analyzer to re-judge: a warm run takes about
+a second on a mid-sized Rails application instead of about a
+quarter of one. A project with `effects:` on and nothing declared
+anywhere pays nothing.
+
 ## How a file is checked for changes
 
 To decide whether a cached entry is still valid, Rigor needs to

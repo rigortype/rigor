@@ -116,12 +116,20 @@ module Rigor
       end
 
       def enter_def(node, prefix, singleton)
-        instance_method = !singleton && node.receiver.nil?
-        harvest_for(prefix)[:defs] << node.name.to_s if @harvest && instance_method && !prefix.empty?
-        add_unit(
-          class_name_for(prefix), node.name.to_s, singleton || !node.receiver.nil?,
-          node.body, node.parameters
-        )
+        own_singleton = singleton || !node.receiver.nil?
+        scan = add_unit(class_name_for(prefix), node.name.to_s, own_singleton, node.body, node.parameters)
+        harvest_def(prefix, node.name.to_s, own_singleton, scan) if @harvest && !prefix.empty?
+      end
+
+      # What the framework strategies need to know about a `def` the class body spelled out itself: that it
+      # exists, and whether it reaches `super`. `:defs` stays instance-only, because a mailer action is an
+      # instance method; `:units` is keyed by the suffix a synthetic unit key carries, so both sides of the
+      # `#` / `.` split are answerable (#440). A body the collector could not finish reads as delegating,
+      # which keeps the framework's claim — the fail-soft direction for an upper bound.
+      def harvest_def(prefix, name, singleton, scan)
+        entry = harvest_for(prefix)
+        entry[:defs] << name unless singleton
+        entry[:units]["#{singleton ? '.' : '#'}#{name}"] = scan.nil? || scan.delegates_upward?
       end
 
       # ADR-103 WD10 — a receiver-less call in a class body, recorded as `macro => [literal symbol
@@ -156,7 +164,7 @@ module Rigor
       end
 
       def harvest_for(prefix)
-        @harvest[class_name_for(prefix)] ||= { defs: [], macros: {}, uniqueness: false }
+        @harvest[class_name_for(prefix)] ||= { defs: [], units: {}, macros: {}, uniqueness: false }
       end
 
       # Files the units the framework contributes for each class this file declares. Runs after the walk,
@@ -168,7 +176,7 @@ module Rigor
         @harvest.each do |class_name, entry|
           FrameworkUnits.synthesize(
             class_name: class_name, instance_methods: entry[:defs], macros: entry[:macros],
-            uniqueness: entry[:uniqueness], plugin_facts: @plugin_facts
+            uniqueness: entry[:uniqueness], plugin_facts: @plugin_facts, own_units: entry[:units]
           ).each { |key, summary, edges| merge_unit(key, summary, edges) }
         end
       end
@@ -176,6 +184,8 @@ module Rigor
       # Scans one unit and files its summary, then recurses into the units its body declared. Fail-soft
       # per unit (ADR-103 WD13): a unit the scanner cannot finish is recorded as non-exhaustive with
       # `collector-error` and its siblings are unaffected.
+      #
+      # @return [UnitScan, nil] the finished scan, or nil when the unit failed soft
       def add_unit(class_name, method_name, singleton, body, parameters)
         key = "#{class_name}#{singleton ? '.' : '#'}#{method_name}"
         names = parameter_names(parameters)
@@ -191,8 +201,10 @@ module Rigor
         scan.nested.each do |name, nested_singleton, nested_body, nested_parameters|
           add_unit(class_name, name, singleton || nested_singleton, nested_body, nested_parameters)
         end
+        scan
       rescue StandardError
         merge_unit(key, Summary.tainted("collector-error", method_name), [])
+        nil
       end
 
       # A receiver-less call in a class / module body that declares units or ancestry. Class bodies are

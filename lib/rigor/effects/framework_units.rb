@@ -82,12 +82,15 @@ module Rigor
       #   arguments, as the scanner harvested them
       # @param uniqueness [Boolean] whether the class body declares a uniqueness validator
       # @param plugin_facts [PluginFacts]
-      def synthesize(class_name:, instance_methods:, macros:, uniqueness:, plugin_facts:)
+      # @param own_units [Hash{String=>Boolean}] the units the class body itself defines, keyed by the
+      #   suffix a synthetic key carries (`"#save"`, `".create"`), each mapped to whether that body
+      #   reaches `super`. Read by {.framework_row} and by nothing else.
+      def synthesize(class_name:, instance_methods:, macros:, uniqueness:, plugin_facts:, own_units: {})
         units = []
         plugin_facts.edges_for(:activerecord_callbacks).each do |edge|
           next unless plugin_facts.descends_from?(class_name, edge.receiver)
 
-          units.concat(active_record_units(class_name, macros, uniqueness))
+          units.concat(active_record_units(class_name, macros, uniqueness, plugin_facts, own_units))
         end
         plugin_facts.edges_for(:perform_now).each do |edge|
           next unless plugin_facts.descends_from?(class_name, edge.receiver)
@@ -110,17 +113,18 @@ module Rigor
       # `save` and friends, edged to the callbacks the class body declared. A trigger with no callbacks and
       # no uniqueness validator is NOT synthesised: an empty unit would put `User#save` in the snapshot for
       # every model in the project and say nothing.
-      def active_record_units(class_name, macros, uniqueness)
+      def active_record_units(class_name, macros, uniqueness, plugin_facts, own_units)
         validation = callbacks(macros, VALIDATION_MACROS)
         save = validation + callbacks(macros, SAVE_MACROS)
         destroy = callbacks(macros, DESTROY_MACROS)
         read = uniqueness ? uniqueness_summary(class_name) : nil
+        context = { plugin_facts: plugin_facts, own_units: own_units }
 
         units = []
-        units.concat(triggers(class_name, SAVE_TRIGGERS, save, read, singleton: false))
-        units.concat(triggers(class_name, SINGLETON_SAVE_TRIGGERS, save, read, singleton: true))
-        units.concat(triggers(class_name, VALIDATION_TRIGGERS, validation, read, singleton: false))
-        units.concat(triggers(class_name, DESTROY_TRIGGERS, destroy, nil, singleton: false))
+        units.concat(triggers(class_name, SAVE_TRIGGERS, save, read, singleton: false, **context))
+        units.concat(triggers(class_name, SINGLETON_SAVE_TRIGGERS, save, read, singleton: true, **context))
+        units.concat(triggers(class_name, VALIDATION_TRIGGERS, validation, read, singleton: false, **context))
+        units.concat(triggers(class_name, DESTROY_TRIGGERS, destroy, nil, singleton: false, **context))
         units
       end
 
@@ -132,11 +136,61 @@ module Rigor
         end
       end
 
-      def triggers(class_name, selectors, targets, read, singleton:)
+      # A synthesised trigger exists only when the class body earned it — see {.active_record_units} — but
+      # once it exists it stands for the whole of `save`, so it carries the framework's own claim about the
+      # selector as well as the callbacks (#440).
+      def triggers(class_name, selectors, targets, read, singleton:, plugin_facts:, own_units:)
         return [] if targets.empty? && read.nil?
 
         edges = targets.map { |target| edge_to(class_name, target) }
-        selectors.map { |selector| unit("#{class_name}#{singleton ? '.' : '#'}#{selector}", edges, read) }
+        selectors.map do |selector|
+          row = framework_row(class_name, selector, singleton, plugin_facts, own_units)
+          unit("#{class_name}#{singleton ? '.' : '#'}#{selector}", edges,
+               declared_bundles(read, row), causes(row))
+        end
+      end
+
+      # What the loaded plugins say `class_name`'s `selector` itself does — `ActiveRecord::Base#save` is
+      # `io.db.write` — read off the very table a call site reads (#440).
+      #
+      # Without it the synthetic unit carried the validator's `SELECT` and nothing else, so a model with a
+      # `before_save` or a uniqueness validator reported `AuthSource#save: ≤ io.db.read`: the write was
+      # attributed at every *call site* and never on the row that names the method, which is the row a
+      # reviewer reads. A `narrow:` row is skipped, because narrowing reads an argument at a call site and
+      # there is no call site here.
+      def framework_row(class_name, selector, singleton, plugin_facts, own_units)
+        return nil if replaced?(own_units, selector, singleton)
+
+        row = plugin_facts.class_row(class_name, singleton, selector)
+        return nil if row.nil? || row.narrow || row.labels.empty?
+
+        row
+      end
+
+      # Whether the class spelled the selector out itself and never reaches `super`. Such a body REPLACED
+      # the framework's implementation, so the framework's claim no longer describes what runs: a
+      # `def save = false` that persists nothing must keep reporting nothing. A body that does reach
+      # `super` keeps the claim, which is the case the exemption exists to not break.
+      def replaced?(own_units, selector, singleton)
+        key = "#{singleton ? '.' : '#'}#{selector}"
+        own_units.key?(key) && !own_units[key]
+      end
+
+      def declared_bundles(read, row)
+        bundles = read ? read.dup : {}
+        bundles[Origin.plugin(row.key)] = row.labels if row
+        bundles
+      end
+
+      # Mirrors {UnitScan#attribute_plugin}: a row may discharge and still taint, and a row from a plugin
+      # the engine does not bundle is a claim that leaves the unit non-exhaustive.
+      def causes(row)
+        return [] if row.nil?
+
+        list = []
+        list << [row.taint, row.key] if row.taint
+        list << ["plugin-attribution", row.key] unless row.discharge?
+        list
       end
 
       def callbacks(macros, names)
@@ -151,8 +205,9 @@ module Rigor
         { Origin.plugin("#{class_name}:uniqueness-validator") => IO_DB_READ }
       end
 
-      def unit(key, edges, declared = nil)
-        [key, Summary.new(declared_bundles: declared || {}), edges]
+      def unit(key, edges, declared = nil, causes = [])
+        summary = Summary.new(declared_bundles: declared || {}, exhaustive: causes.empty?, causes: causes)
+        [key, summary, edges]
       end
 
       def edge_to(class_name, selector)
@@ -160,8 +215,8 @@ module Rigor
                                  self_call: false)
       end
 
-      private_class_method :active_record_units, :mailer_units, :triggers, :callbacks, :uniqueness_summary,
-                           :unit, :edge_to
+      private_class_method :active_record_units, :mailer_units, :triggers, :framework_row, :replaced?,
+                           :declared_bundles, :causes, :callbacks, :uniqueness_summary, :unit, :edge_to
     end
   end
 end

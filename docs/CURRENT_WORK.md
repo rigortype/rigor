@@ -16,72 +16,68 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: #446 first, then the report's usability
+## Next session: the report's usability, then v0.3.5
 
-**#446 is the priority and it is new.** A `super` call contributes nothing to an effect summary and
-the row still claims to be **exhaustive**, so a method whose body is `super` reads as provably
-effect-free — it passes `%a{pure}` and any envelope while its parent is correctly flagged. Verified on
-a five-line fixture. That is a hole in the only half of the feature that can fail a build, in a shape
-Rails code is made of (`def create; super; end`). Read the issue: it lists what the fix has to weigh
-(which parent, overrides, the unresolved case, and a corpus measurement before landing).
-
-Then the report's usability, which is what the walkthrough said stops adopters cold:
+Every silent-failure bug the walkthrough opened is fixed. What is left of that batch is the surface
+a reader actually meets, and it is what the walkthrough said stops adopters cold:
 
 1. **#439** — a path argument narrows the *analysis*, so the same method gets a weaker answer, unmarked.
-   It is also the only tractability lever the report has, which makes it a trap.
+   It is also the only tractability lever the report has, which is what makes it a trap. Do it **before
+   or with** #434, whose fix is what removes the reason to reach for it.
 2. **#434** — 31,191 lines on Redmine, 38.5 % of rows content-free, no summary, no `--limit`.
-3. **#429** (nothing lists the vocabulary) · **#436** (empty `reach:` by default) · **#435** (four CLI
-   affordance gaps) · **#433** (config mistakes abort with a backtrace) · **#432** (rbs-inline
-   declaration position) · **#437** (`Date#to_time` collides with rbs's stdlib).
+3. **#435** (four CLI affordance gaps) · **#429** (nothing lists the vocabulary) · **#436**'s remaining
+   half (should a project whose plugins register a preset *default* `reach:` to it?).
 
-`make verify` + `make docs-check` green on integrated master at `90c15bf0`.
+**#434, #435, #429 and #436 all touch the same `rigor effects` output surface — give them to ONE agent**,
+not four. #439 is a different mechanism and separates cleanly.
 
-## Shipped since the walkthrough
+Also open and independent: **#452** (a class-level rbs-inline envelope is silently inert — the fourth
+instance of the declared lane going quiet), **#449** (the ActiveSupport overlay omits `Date#to_time`, so
+`date.to_time(:utc)` is a false positive without the plugin), **#427** (the warm==cold gate is blind on
+gem-bump PRs), **#430** / **#431** (both need a design call, not a fix).
 
-- **#428** — the declared-bound check fired cold and was dropped by every cache hit, both lanes. The
-  boot-slim probe serves a warm run before the engine loads, so anything appended after
-  `compute_run_diagnostics` was invisible. **Any new diagnostic outside the cached run assembly has to
-  answer to that probe.**
-- **#440** — a synthesised ActiveRecord `save` row carried only the validator's read. The row is built
-  by `Effects::FrameworkUnits`, which read one source and never the plugin's own `save → io.db.write`
-  claim, so callers were coloured correctly and the method's own row never was. 11 selectors plus the
-  `create` twins were affected; `io.db.write` rows on Redmine went 202 → 608.
-- **#441** — `effect.annotations-unchecked` dropped the rbs-inline lane on any run that was not plain
-  cacheable sequential: `--no-cache`, `--workers=N`, `--incremental` cold, editor buffers. The lane was
-  never the variable, the **run mode** was. Verified before/after: `--workers=2` silent → fires.
-- **#438** — every emitted `documentation_url` 404ed (`blob/main`; the branch is `master`). Now points
-  at the docs host with **no git ref in the string**, and a network-free spec pins any self-referential
-  GitHub URL against the branch `ci.yml` gates pushes on. The sweep found three more live 404s,
-  including the plugins link in the `.rigor.yml` that `rigor init` writes.
-- The CI templates carry a commented-out `rigor effects check` step (#443).
+`make verify` + `make docs-check` green on integrated master at `fbbdf8f5`.
+
+## Consider cutting v0.3.5
+
+`[Unreleased]` carries **11 entries**, seven of them fixes for bugs users are hitting today: the
+declared-bound check inert on every warm run (#428), every `documentation_url` 404ing (#438), `save`
+reporting no database write (#440), the annotations notice silent on parallel runs (#441), `Date`
+degrading to untyped (#437), `super` reported as effect-free (#446), and config mistakes arriving as
+backtraces (#433). **No autonomous version bumps** — this needs an explicit ask.
+
+## What shipped, and the one pattern worth carrying
+
+Six PRs today (#443, #444, #445, #447, #448, #450, #451, #453). The engine fixes were all one shape:
+
+- **#428** the declared-bound check was dropped by every cache hit; **#441** the annotations notice was
+  dropped on every parallel or `--no-cache` run; **#446** a `super` call contributed nothing *and the
+  row still claimed to be exhaustive*; **#452** (open) a class-level rbs-inline envelope is read by
+  nobody. Four ways for a declared bound to go unchecked, none of which said so.
+- **The rule that generalises: every path by which a declared bound can fail to be read must end in a
+  diagnostic, not in silence.** ADR-103's promise is that an unresolved call taints rather than being
+  guessed at; these were all cases where nothing was even reached, so nothing tainted.
+
+#446's fix is the model for the rest: the ancestor walk starts **above** the class and does no
+closed-world override join, because a subclass is never in `super`'s dispatch path — joining it would
+prove a label no execution can produce. Corpus note: `docs/notes/20260823-effect-super-edge-corpus.md`.
+`rigor check`'s diagnostic stream is byte-identical between arms on redmine and mastodon.
 
 ## The v0.4.0 graduation (#409)
 
-Five of six preconditions resolved by ADR-103 WD16 (2026-08-22). Left: the release-notes migration
-note and the flip commit. Two updates posted to the issue: the migration note needs **no lane caveat**
-and **no "clear your cache first"** (both cache keys carry `Rigor::VERSION`, so the first run after the
-upgrade is always cold and analysing) — and **#446 is a counterweight**: either it lands before the
-flip or the release note names it.
-
-## Also open, not effects
-
-- **#427** — the warm==cold self-check gate is structurally blind on every gem-bump PR. Green CI on a
-  gem bump is not evidence about the rbs marshal hazard.
-- **#431** — text output carries no rule ID for any rule; needs a design call, not a fix.
-- **#343** (rubocop 1.89.0) still fails Lint; **#86** stays held.
+Five of six preconditions resolved by ADR-103 WD16; #446 was the counterweight and is now cleared.
+Left: the release-notes migration note (which needs **no** lane caveat and **no** "clear your cache
+first" — both cache keys carry `Rigor::VERSION`) and the flip commit itself.
 
 ## What this session learned that is not in a commit
 
-- **Ask what varies before assuming which component is broken.** #441 was reported as an rbs-inline
-  lane bug. The lane was innocent; the run mode was the variable, and the reporter's fixture was a
-  `cache_store: nil` shape, i.e. `--no-cache`. Both observations were correct and the conclusion drawn
-  from them was not.
-- **A subagent's finding is a lead, not a fact.** Two of the walkthrough's 28 were misdiagnosed and
-  already public as issues when the next agent caught them; chasing the first correction is what turned
-  up #438. Verify before filing, and re-scope publicly when you did not.
-- **Give parallel agents disjoint worktrees AND disjoint survey targets.** Two agents shared
-  `rigor-survey/redmine`; one deleted the other's cache mid-measurement and that batch was void. The
-  three-agent wave after that ran cleanly with one target assigned to one agent.
-- **Rebase each PR onto master before merging a parallel batch, then re-run the gate on the integrated
-  result.** Four PRs landed today; three conflicted on `[Unreleased]` alone, which is cheap — but the
-  gate that matters is the one after the last merge, not the one on each branch.
+- **A CHANGELOG slip on master goes straight into other agents' CI.** I added a duplicate `### Fixed`
+  to `[Unreleased]` and #451's run went red on it before I noticed. `make docs-check` does **not** cover
+  `spec/docs/changelog_conformance_spec.rb` — run that spec after any changelog edit, every time.
+- **Give parallel agents disjoint worktrees, disjoint survey targets, and no CHANGELOG.** The four-agent
+  wave landed clean with the changelog written centrally afterwards (now in AGENTS.md § Release Cadence);
+  the wave before it hand-resolved a conflict per PR.
+- **Verify the agent's finding, not just its patch.** Two reports this session were accurate about the
+  observation and wrong about the cause (#441's "lane" was the run mode; #433's manual mislink was
+  already fixed). Two others handed over defects worth more than the fix — #449 and #452 — but only
+  because their briefs asked what else the change touched.

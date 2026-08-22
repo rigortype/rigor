@@ -88,6 +88,11 @@ flow is the `rigor-release-prep` skill.
 - Write each `## [Unreleased]` entry **user-facing at landing**, as if release notes were cut that day:
   one self-contained sentence under a `**[subsystem]**` label, no internal implementation detail. The
   commit body is where the engineering record goes. Full entry rules: the `rigor-release-prep` skill.
+- **Running agents in parallel: only the orchestrator writes `CHANGELOG.md`.** Tell each agent to skip
+  its `[Unreleased]` entry and to report instead what its change means for a user; write the entries
+  yourself once the branches are merged, in that same session. Otherwise every branch edits the same few
+  lines, and every PR after the first needs a hand-resolved conflict in the one file whose wording you
+  were going to review anyway.
 
 ## Implementation Guidelines
 

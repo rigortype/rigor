@@ -24,15 +24,20 @@ RSpec.describe "the shipped effect-label registry" do
   # Proposed shared core leaves, to raise with Steins.
   let(:proposed_shared) { %w[io.db.read io.db.write io.db.transaction] }
 
-  # The small shared set of application-meaning roots a policy actually names.
+  # Steins' own family (its ADR-0042), registered here and never produced: it names why a failure arm
+  # exists rather than what a method does, and exists so a Steins-authored policy parses (WD16).
+  let(:steins_side_unproduced) { %w[failure failure.environment failure.input failure.resource] }
+
+  # The small set of application-meaning roots a policy actually names. Rigor-owned and proposed to
+  # Steins, which holds ecosystem labels outside its builtin set (ADR-103 WD16).
   let(:application_meaning) { %w[telemetry email.send job.enqueue cache.read cache.write] }
 
   it "carries vocabulary version 1" do
     expect(registry.vocabulary_version).to eq(1)
   end
 
-  it "declares exactly the four groups and nothing else" do
-    expected = (steins_v1 + ruby_leaves + proposed_shared + application_meaning).sort
+  it "declares exactly the five groups and nothing else" do
+    expected = (steins_v1 + ruby_leaves + proposed_shared + steins_side_unproduced + application_meaning).sort
 
     expect(registry.labels).to eq(expected)
   end
@@ -59,8 +64,8 @@ RSpec.describe "the shipped effect-label registry" do
     expect(registry.retired("io.sql")).to be_nil
   end
 
-  it "opens only the roots the three layers name" do
-    expect(registry.roots).to eq(%w[cache email exit ffi global io job mutate nondet telemetry])
+  it "opens only the roots the layers name" do
+    expect(registry.roots).to eq(%w[cache email exit failure ffi global io job mutate nondet telemetry])
   end
 
   it "recognises the interior nodes a bound may name" do

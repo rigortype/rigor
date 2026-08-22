@@ -16,89 +16,73 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: build the manual and the user stories together
+## Next session: build the effect manual and the user stories together
 
-**This is the release blocker the owner named**, ahead of any version bump: work the effect system's
-user-facing manual and its user experience as one task — draft the manual, build the user stories that
-manual implies, and **feed what the stories expose back into the feature**. Author a SKILL where the
-workflow needs one. The `rigor-docs-review` skill runs the five-layer review battery over
-`docs/manual/` + `docs/handbook/` and is the right instrument once there is a draft to review.
+**Still the release blocker the owner named.** Draft the manual, build the user stories that manual
+implies, and **feed what the stories expose back into the feature**. Author a SKILL where the
+workflow needs one. `rigor-docs-review` runs the five-layer battery once there is a draft.
 
 Scope: the `rigor effects` chapters, the snapshot workflow (`effects update` / `check` / `diff` /
 `explain`), envelopes and `%a{pure}`, `effects.tolerated:` / `attribution:` / `envelopes:`, and the
-CLI-reference sections for `rigor effects` and `rigor unused`. The system shipped with 15 CHANGELOG
-entries and no reader has walked it end to end.
+CLI-reference sections for `rigor effects` and `rigor unused`. There is **no narrative chapter** in
+either `docs/manual/` or `docs/handbook/` today — only reference sections in 02/03/16. The system
+shipped in v0.3.4 and no reader has walked it end to end.
+
+**Write it default-on-shaped** (owner ruling, 2026-08-22): the chapter's narrative assumes v0.4.0's default,
+with the opt-in stated plainly where it bites — "v0.3.x needs an `effects:` block; from v0.4.0 it is
+the default". Writing it opt-in-shaped means a full rewrite at the flip.
 
 ## Where things stand
 
-- `make verify` + `make docs-check` green on the integrated master at `c1d8dc64`. Released version is
-  still **v0.3.3**; `[Unreleased]` carries 35 entries (Added + Fixed only — nothing breaking).
-- **Merged this session**: #419 (catalogue extractor's `mutate` / `raises` facets — #417, #418) ·
-  #421 (#321 suppression self-ack polarity) · #422 (#369 Solid Queue roots for `rigor unused`).
-- **Open PR**: #423 — the WD13 effect-budget harness + advisory CI job. CI green.
-- **#322 and #323 are still open and should be closed as no-change.** Both were already pinned by
-  `7591f802` (2026-07-16), three weeks before they were filed; evidence is posted on each. #322's
-  substantive half — `raise Object.new` is a missed diagnostic — is split out as **#420**.
+- **v0.3.4 released** (tag `v0.3.4`, 2026-08-21); `[Unreleased]` carries one entry.
+- `make verify` + `make docs-check` green on `design/effects-graduation-rulings`.
+- **Open PR**: the WD16 decision record (this branch). Dependabot: #413 (rack) and #412 (rbs 4.1.3)
+  are CI-green — **audit the rbs marshal patch before merging #412**; #343 (rubocop 1.89.0) fails
+  Lint and needs the offences fixed; #86 stays held on the `Style/ArrayIntersect` autocorrect bug.
 
-## The release plan (owner ruling, 2026-08-19)
+## The v0.4.0 graduation is nearly unblocked (ADR-103 WD16, 2026-08-22)
 
-- **v0.3.4** — ships the opt-in effect system as it stands, plus the WD13 harness. Gated on the
-  manual/UX work above, not on #409.
-- **v0.3.5 → v0.3.9** — the optimisation window, **#424**: bring effect collection inside the WD13
-  budget.
-- **v0.4.0** — a **Go / No-Go** on effects-default-on, decided against the CI band.
+Five of #409's six preconditions are resolved. Two of WD15's premises were written from the design
+rather than the code and did not survive contact:
 
-## The WD13 measurement — RETRACTED, and what survives
+- **Non-fork backends** — there is no thread backend, and the Ractor one cannot analyse a file under
+  rbs 4.x (upstream `RBS::Namespace` interning). Replaced by the sequential degrade, which is sound.
+  **#410 and #414 are closed.**
+- **Vocabulary** — read against Steins on 2026-08-22: the `mutate` spellings already agree, `io.db.*`
+  is ours and evolution-safe, and the application-meaning roots diverge *architecturally* (Steins
+  keeps ecosystem labels out of its builtin set entirely). Rigor keeps them; the spec's "shared /
+  MUST" claim was the thing that was wrong. Vocabulary 1 ships as it stands. #378 stays open as the
+  upstream conversation, not as a gate.
+- **WD13 budget** — the advisory CI `effect-budget` job is the sole arbiter. The gitlab closure
+  (`Propagator.propagate` 1.34 s vs 1 s) is #424's target for v0.3.5-v0.3.9, not a gate.
+- **`effects.lsp`** — editor mode stays effect-free, spelled as a key defaulting to `false`.
 
-I measured `effects: {}` at +9.7 % wall on redmine and +27.9 % on mastodon and reported the budget as
-failing. **That is retracted.** `docs/notes/20260817-effect-rails-layer-corpus.md` measured the same
-checkouts two days earlier, cold and sequential, with a *fuller* plugin set, and got **+3.4 % on both**
-— inside the budget. No commit since touches the collection hot path, and my host was contaminated.
-Correction on [#409](https://github.com/rigortype/rigor/issues/409); the note carries the full account.
+What is left: the **migration note** (written at the release) and the flip commit itself —
+`Configuration::DEFAULTS["effects"]`, `effects-on-by-default` `FEATURES` → `GRADUATED`, the
+`effects.lsp` key, manual / schema, CHANGELOG migration entry.
 
-**Read the checkbox as: last measured inside the budget, one unreconciled contradiction.** Not cleared,
-not failed. The advisory `effect-budget` job settles it, and #424 is re-scoped from "optimise" to
-"reconcile, then optimise only if needed".
+## Other decisions taken this session
 
-What does survive:
-- The bound's real wording — the 5 % names **mastodon** specifically, and **gitlab's bound is the
-  closure** (`Propagator.propagate` ≤ 1 s), not the run.
-- The 2026-08-17 note already reports that closure at **1.34 s** at gitlab scale — *outside* the bound,
-  unretracted, and the one figure here nobody has questioned. That is the live half.
-- One hint that the contradiction might not be pure noise: on redmine the off-arms nearly agreed
-  (8.77 vs 8.69 s) while the on-arms did not (9.07 vs 9.53 s).
+- **#370** (`rigor unused`: a data-file mention does not rescue a declaration from the test-only
+  section) — option 1: report it as its own category, "reachable from tests; also named in
+  configuration". The normative tier text lands with the behaviour, not before it.
 
-#409's other four boxes are all owner decisions: the #410 waiver, #378, `effects.lsp` semantics, and
-the flip itself.
+## Queue, in the order it consumes cleanly
+
+1. #413, then #412 (rbs marshal audit first), then #343's Lint offences.
+2. The manual + user stories above — the largest item, and the one the release waits on.
+3. #370, #420 (`raise Object.new` polarity, on corpus evidence), #391 (`sig-gen` writes `%a{pure}`).
+4. #424's propagation work in the v0.3.5-v0.3.9 window; #392 → #393 → #394 for the view slices.
 
 ## What this session learned that is not in a commit
 
-- **Verify a backlog item's premise before implementing it.** Two of wave 2's three issues (#322, #323)
-  were already fixed three weeks before they were filed — both came from differential runs against the
-  rigor-rs port that verified the *behaviour* and never checked the suite, so "no spec pins this" was
-  untrue on arrival. Cheap to check, and checking is what turned #321 from "add a spec" into the real
-  finding: its existing example projected to the `suppression.*` subset, which cannot distinguish
-  "the surveillance was acknowledged" from "the whole line got suppressed".
-- **A cost measurement needs a zero-work guard more than it needs precision.** The budget script's
-  first version wrote its variant configs to a tmpdir; relative `paths:` resolve against the config
-  file's own directory, so it analysed nothing, finished in 0.18 s and reported a 33 % *improvement*.
-  Both arms must analyse a positive and identical file count.
-- **Interleave A/B reps, and carry the ranges, not just the median.** A `target/debug/xtask` at 99.7 %
-  of a core invalidated a whole batch mid-run; the timestamps (round 1 ended 08:17:31, xtask started
-  08:23:34, the data breaks exactly there) are what made the clean reps separable from the ruined
-  ones. Non-overlapping ranges are what let a noisy measurement still support a direction.
-- **Regenerate-and-diff beats a reimplemented probe.** The catalogue audit's hand-rolled body
-  extractor included the C function's signature line, which `body.text` does not, and produced a
-  contaminated 53-method list with a phantom `String#replace` regression. Confirming the generator was
-  byte-reproducible against the checked-in files first made the real diff trustworthy.
-- **Search the corpus for a prior measurement BEFORE publishing a new one.** The WD13 retraction is
-  the expensive version of this: a note measuring the same targets, more thoroughly, sat in
-  `docs/notes/` two days old while I filed an issue and a comment saying the budget failed by 6×. The
-  `rigor-prior-art` skill exists for exactly this question and would have cost one call.
-- **Non-overlapping ranges are not a control.** They prove the reps separated the arms *under the
-  conditions that prevailed* — they cannot distinguish a real effect from a host artifact consistent
-  across the batch. I leaned on them precisely where they do not bear weight.
-- **My own published cause-analyses were wrong three times** (#418's mechanism, the `String#replace`
-  claim in the correction to it, and the WD13 finding). Each was corrected in the issue, the note and
-  this file. The pattern is the same every time: publishing the explanation before running the check
-  that would refute it.
+- **Read the other repository before writing an alignment issue.** #378 asked for a three-item
+  conversation with Steins; fetching `steins/docs/type-specification/effects.md` took one call and
+  showed item 3 already agreed, item 1 accurately documented, and item 2 a different *kind* of
+  divergence than the issue described — architectural, not lexical. It also surfaced a whole label
+  family (`failure.*`) our "verbatim" claim had gone stale against.
+- **A precondition can name something that does not exist.** WD15 required "the Ractor **and
+  thread** backends" to carry the side-table. `pool_backend` has three arms and none of them is a
+  thread pool. The issue built on it (#410) then inherited the phantom and scoped itself as "just a
+  message channel". Check the premise against the code before sizing the work — the same lesson the
+  last session recorded about #322 / #323, arriving from a different direction.

@@ -4,9 +4,10 @@ Status: **Proposed, 2026-08-16.** Records the decisions reached while designing 
 [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md) (the design note;
 its § 13 lists the choices, this ADR fixes them as working decisions; WD13, coexistence with
 `rigor check`, was added the same day; WD14, the pre-implementation decisions, and WD15, the
-v0.4.0 default-on ruling and its preconditions, both on 2026-08-17 — WD15's own preconditions are
-unmet, so nothing about the default changes yet). Two items remain open, both deferrable to the
-view slices. Implementation is sliced as GitHub issues under the umbrella
+v0.4.0 default-on ruling and its preconditions, both on 2026-08-17; WD16, which resolves five of
+those six preconditions, on 2026-08-22 — the sixth is the release-notes migration note, written at
+the release, so nothing about the default changes before v0.4.0). Two items remain open, both
+deferrable to the view slices. Implementation is sliced as GitHub issues under the umbrella
 [#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394; tracker
 convention: [ADR-98](98-development-flow-document-roles.md)).
 
@@ -285,7 +286,8 @@ today reaches the same default early. WD7's "graduates at a major" is read, for 
 rehearsal WD7 already describes for the general case (a `v0.2.x → v0.3.0` graduation), pinned to a
 specific version by owner ruling rather than left to "whenever the next minor lands".
 
-The flip is gated on clearing six preconditions first, none of which is closed as of this writing:
+The flip is gated on clearing six preconditions first, none of which was closed when this ruling
+was written; **WD16 resolves 1-4 and 6** (2026-08-22):
 
 1. **Pooled backends carry the effect side-table.** Collecting runs are pinned to the fork pool today;
    without `fork` (Windows) a run degrades to sequential. The Ractor and thread backends must carry the
@@ -305,6 +307,66 @@ The flip is gated on clearing six preconditions first, none of which is closed a
    `methods:` rows in the snapshot carry no proven label, only `unresolved:` — before `rigor init`
    recommends `effects update` to every project, whether that ratio is acceptable (and what, if anything,
    a project should be told about it) needs an answer.
+
+### WD16 — The graduation preconditions, resolved (owner ruling, 2026-08-22)
+
+WD15's list was written from the design, not from the code, and two of its premises do not hold.
+This ruling records what replaces them. Preconditions 1-4 and 6 are resolved here; 5 is written at
+the release itself.
+
+**1 — Pooled backends: the sequential degrade IS the answer.** There is no thread backend and there
+will not be one — `pool_backend` selects `:fork`, `:ractor` or `:sequential`, and a thread pool buys
+no parallelism under the GVL while sharing RBS's C-extension state across workers. The Ractor
+backend cannot analyse a single file under rbs 4.x: `RBS::Namespace.[]` interns every namespace
+through a process-wide mutable flyweight held in module ivars, a non-main Ractor may not read one,
+and pre-warming does not reach it because the trie is consulted while parsing the cached environment
+back ([#414](https://github.com/rigortype/rigor/issues/414)). The precondition as written therefore
+cannot be cleared by any work Rigor owns. It is replaced by the behaviour the code already has: with
+no `fork`, a collecting run degrades to sequential **and says so** through the same
+`pool_degraded_diagnostic` channel the fork path uses. That degrade is sound rather than merely safe
+— the sequential path still collects, so the effect graph is complete either way, and Windows pays
+wall-clock, never correctness. [#410](https://github.com/rigortype/rigor/issues/410) (carry the
+side-table through the non-fork backends) closes with it: its stated premise, "the only new piece is
+the message channel", is untrue while the backend it targets cannot analyse a file.
+
+**2 — Vocabulary: vocabulary 1 ships as it stands.** Read against Steins on 2026-08-22, the three
+items of [#378](https://github.com/rigortype/rigor/issues/378) resolve differently from how they were
+filed. The `mutate.self` / `mutate.instance` / `mutate.static` spelling already agrees (WD14). The
+`io.db.read` / `io.db.write` / `io.db.transaction` leaves are Rigor's alone — Steins' builtin set
+stops at `io.db` — which the registry table already says, and a leaf addition can never change what a
+recognised bound admits. The application-meaning roots are the real divergence, and it is
+architectural rather than lexical: Steins holds that ecosystem labels (`io.redis`, `email.send`) are
+**not builtin** and reach the registry through a plugin's own manifest, while Rigor ships
+`telemetry`, `email.send`, `job.enqueue`, `cache.read` and `cache.write` as rows of the shared file.
+Rigor keeps them: they are what `tolerated:` grips and what a policy actually names, and a project
+should not need a plugin before it can write one. What changes is the claim — the spec's registry
+table called that layer "shared" and its spelling agreement a MUST, which Steins does not today
+support, so the row becomes Rigor-owned and proposed upstream. Alignment is therefore not a blocker
+in either direction: a spelling Steins later insists on lands through `retired:` plus a vocabulary
+bump, which is the mechanism that exists for exactly this, and #378 stays open as the upstream
+conversation rather than as a gate.
+
+**3 — The WD13 budget: the CI `effect-budget` job is the arbiter.** The 2026-08-19 local measurement
+that reported the budget failing was retracted against a fuller, quieter measurement two days older;
+what separated them was host contamination, not method. A go/no-go decided on a developer host will
+keep reproducing that failure, so the advisory `effect-budget` job's band settles the mastodon half
+and nothing else does. The gitlab half — `Propagator.propagate` at 1.34 s against a 1 s bound — is
+unretracted and is the live figure, but it is a closure cost paid once per run at the largest scale
+in the corpus, not a per-project tax: it becomes the optimisation target of
+[#424](https://github.com/rigortype/rigor/issues/424) across the v0.3.5-v0.3.9 window and does **not**
+gate the flip, provided the release notes disclose it.
+
+**4 — `effects.lsp`: editor mode stays effect-free, and the config says so.** WD13's "editor mode
+does not run effects in v1" becomes the standing answer rather than a v1 caveat, spelled as a real
+key defaulting to `false`. A key that exists and is off is what keeps the seat from being silently
+empty after the flip; a hover that reports a method's labels is a v0.4.x slice with its own
+consumer, not a precondition. Nothing in `lib/rigor/language_server/` reads effects today, so the
+work is the key, its documentation, and the guard that keeps a default-on project from paying
+collection cost per keystroke.
+
+**6 — Taint-only rows** were decided by [#411](https://github.com/rigortype/rigor/issues/411) and
+shipped in [#415](https://github.com/rigortype/rigor/pull/415): a row carrying only its taint is
+omitted by default and `--full` keeps it.
 
 ## Rejected and deferred alternatives
 

@@ -52,12 +52,13 @@ The shipped registry is the shared base plus three layers:
 
 | Layer | Contents | Who owns it |
 | --- | --- | --- |
-| Shared base | Steins' v1 set verbatim: `exit`, `ffi`, `global.read`, `global.write`, `io`, `io.db`, `io.fs`, `io.fs.read`, `io.fs.write`, `io.input`, `io.ipc`, `io.net`, `io.net.http`, `io.output`, `io.output.buffer`, `io.output.header`, `io.output.stdout`, `io.output.stderr`, `io.process`, `io.signal`, `mutate`, `mutate.local`, `nondet`, `nondet.random`, `nondet.time` | Steins and Rigor jointly; a divergence is raised upstream before it ships |
+| Shared base | Steins' v1 set: `exit`, `ffi`, `global.read`, `global.write`, `io`, `io.db`, `io.fs`, `io.fs.read`, `io.fs.write`, `io.input`, `io.ipc`, `io.net`, `io.net.http`, `io.output`, `io.output.buffer`, `io.output.header`, `io.output.stdout`, `io.output.stderr`, `io.process`, `io.signal`, `mutate`, `mutate.local`, `nondet`, `nondet.random`, `nondet.time` | Steins and Rigor jointly; a divergence is raised upstream before it ships |
+| Steins-side, unproduced here | `failure`, `failure.environment`, `failure.input`, `failure.resource` | Steins (its ADR-0042); registered here so a policy written against Steins parses |
 | Ruby leaves | `mutate.self` (self's state), `mutate.instance` (a receiver that is neither self nor frame-owned), `mutate.static` | Rigor |
 | Proposed shared core leaves | `io.db.read`, `io.db.write`, `io.db.transaction` | Rigor, pending adoption by Steins |
-| Application meaning | `telemetry`, `email.send`, `job.enqueue`, `cache.read`, `cache.write` | shared; these are the labels a policy names and a `tolerated:` set grips, so they MUST spell the same in both analyzers |
+| Application meaning | `telemetry`, `email.send`, `job.enqueue`, `cache.read`, `cache.write` | Rigor, proposed to Steins ([ADR-103](../adr/103-effect-labels.md) WD16). These are the labels a policy names and a `tolerated:` set grips, so a project must not need a plugin before it can write one — but Steins holds ecosystem labels outside its builtin set and supplies them through a plugin manifest, so the shared spelling is an intent, not yet an agreement |
 
-`io.output.buffer` and `io.output.header` are registered but unproduced in Ruby: they exist so a policy written against Steins parses here.
+`io.output.buffer`, `io.output.header` and the `failure.*` family are registered but unproduced in Ruby: they exist so a policy written against Steins parses here. `failure.*` is the odd one — in Steins it names a failure arm's *value provenance* rather than an effect, and it shares the registry only so prefix subsumption reaches it. Rigor produces no `failure.*` label and MUST NOT infer one; a bound that names it is satisfied vacuously.
 
 Framework roots (`rails.*`) are contributed by the plugin that models the framework and are not part of the shipped file.
 

@@ -12,6 +12,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[effects]** An effect policy or envelope that names Steins' `failure.*` labels now parses instead of earning `effect.unknown-label`, so a policy written for the PHP analyzer reads unchanged here ([#378](https://github.com/rigortype/rigor/issues/378), [ADR-103](docs/adr/103-effect-labels.md)).
+  - Rigor produces no `failure.*` label of its own — in Steins the family names why a failure arm exists rather than what a method does — so a bound that names one is satisfied vacuously, the same way `io.output.buffer` is already registered here without any Ruby method producing it.
+
 ## [0.3.4] - 2026-08-21
 
 v0.3.4 is about what your code *does*, not only what it returns. The headline is the effect system ([ADR-103](docs/adr/103-effect-labels.md)): `rigor effects` reports the effects of every method, `rigor effects update` commits that report as a reviewable record the way `db/schema.rb` records a schema, and an `%a{pure}` or `%a{rigor:v1:effect io.db}` annotation becomes a contract Rigor checks. The whole family is opt-in behind an `effects:` block, and a project without one gets a byte-identical `rigor check` at unchanged cost. Alongside it, `rigor unused` ([ADR-102](docs/adr/102-unused-code-reachability-report.md)) reports classes and modules nothing reachable references, with your plugins supplying the roots a framework reaches by name. Other fixes cover constant resolution through the ancestor chain and several `rigor unused` edge cases.

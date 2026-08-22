@@ -483,6 +483,19 @@ A run with collection **on** is no longer excluded from the whole-run result cac
 
 An entry whose effects slot is missing, differently identified, or corrupt is a miss **for effects consumers only**. A run with collection **off** never reads or writes the slot: `rigor check` is byte-identical, its cache key is unchanged, and the ADR-87 boot-slim probe still serves it from `analysis.run-diagnostics` without loading the engine.
 
+### The boot-slim probe and the two out-of-band passes
+
+The envelope judgment and the annotations-unchecked residual are recomputed every run and never stored (§ *Where the pass runs*, and its mirror in `EffectAnnotationResidualPass`), so `analysis.run-diagnostics` is exactly the slot that does **not** carry them. `rigor check`'s ADR-87 WD4 probe serves that slot without loading the engine, which is the code that would have appended them — so for its first three releases it dropped every `effect.envelope-exceeded` a project could earn on every warm run, and only on a warm run (issue #428). Silence read as success, and the manual's recommended CI setup — cache `.rigor/cache` between builds — is precisely the configuration in which the check never ran after the first build.
+
+A probe that serves a slot answers for what the slot omits, and the two passes get opposite answers because they were built to opposite budgets:
+
+| Pass | On an engine-free hit | Why |
+| --- | --- | --- |
+| `effect.annotations-unchecked` | **reproduced** by the probe, with no loader | It is a glob and a regex over `signature_paths:` by construction. The dropped virtual-RBS stratum is that pass's own documented fail-quiet direction, and is the stratum a run with no environment never had. |
+| `effect.envelope-exceeded` / `effect.liskov-widened` / `effect.unknown-label` | the probe **declines** the whole run | They read the propagated table and the cross-file discovery tables. Nothing engine-free can recompute them, and serving the slot without them is the false negative above. |
+
+The decline is measured off the **declarations** — the four `effects:` policy lists, and whether the signature tree carries an `ANNOTATION_HINT` match at all — never off what they would judge to, because the judgment is the thing the probe cannot reach. Over-declining costs a fast lane for a run the full path still serves out of its two warm slots — measured on redmine (347 files, one `app/helpers/**/*.rb` stanza, 343 findings), a warm run goes 0.25 s → 0.93 s against 8 s cold — and under-declining is the bug. A project with `effects:` on and no declaration anywhere keeps the fast path unchanged, which is also the shape [#409](https://github.com/rigortype/rigor/issues/409)'s default-on flip lands in. Reproducing the residual costs the signature walk on every hit instead: unmeasurable at 200 `.rbs` files, about 40 ms at 2,000.
+
 Consequently `rigor effects` and the snapshot verbs go through the same cache `rigor check` does: after a `rigor check` under a configured `effects:` block, `rigor effects check` in the same job is a warm hit plus the fixpoint, and never re-collects.
 
 The `--incremental` snapshot's identity is deliberately **plugin-blind** (`IncrementalSession#current_effects_identity` omits `plugin_facts:`), because its two sides sit on opposite sides of the run: the restore asks before any plugin is loaded and the save after, so a sighted digest would never match a blind one and the reuse would be dead. The bound is that a plugin upgrade does not invalidate an `--incremental` snapshot's effect collections; the whole-run slot, which is the primary path, has no such hole, and `--incremental` is opt-in.

@@ -100,6 +100,34 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
       expect(snapshot_text).to eq(plain)
     end
 
+    # #436 — an empty `reach:` is reported with the names that would close it. The list is the loaded
+    # plugin set's, so a project with no preset-registering plugin is told how a preset comes to exist
+    # instead of being handed names it cannot use.
+    describe "the empty-reach: note" do
+      around do |example|
+        Rigor::Effects::EntryPoints.reset!
+        example.run
+        Rigor::Effects::EntryPoints.reset!
+      end
+
+      it "names the presets available to this project" do
+        Rigor::Effects::EntryPoints.register("rails-controllers", ["app/controllers/**/*.rb"])
+        write_config(reach: [])
+        status, _out, err = run("update")
+
+        expect(status).to eq(0)
+        expect(err).to include("`effects.snapshot.reach:` is empty",
+                               "presets registered in this project: rails-controllers")
+      end
+
+      it "says how a preset comes to exist when the project has none" do
+        write_config(reach: [])
+        _status, _out, err = run("update")
+
+        expect(err).to include("no plugin in this project registers an entry-point preset")
+      end
+    end
+
     it "lists the omitted trivial methods under --full" do
       run("update")
       default = snapshot_text

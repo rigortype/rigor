@@ -82,7 +82,48 @@ RSpec.describe Rigor::Effects::EntryPoints do
         Rigor::Effects::Snapshot.build(table: Rigor::Effects::EffectTable.empty, sources: {},
                                        configuration: configuration(["rails"]))
       end
-        .to raise_error(described_class::Error, /no registered entry-point preset: "rails"/)
+        .to raise_error(described_class::UnknownPreset, /no registered entry-point preset: "rails"/)
+    end
+
+    # #433 — the rejection is a mistake in `.rigor.yml`, so it carries the class the CLI renders as a
+    # `rigor:` line rather than the one reserved for a plugin's own registration going wrong.
+    it "raises a configuration error, not the registration error" do
+      expect(described_class::UnknownPreset.ancestors).to include(Rigor::ConfigurationError)
+      expect(described_class::Error.ancestors).not_to include(Rigor::ConfigurationError)
+    end
+  end
+
+  # #433 / #436 — the enumeration both the unregistered-preset error and `rigor effects update`'s
+  # empty-`reach:` note read, so neither can answer "which presets may I write?" on its own.
+  describe ".availability" do
+    it "names the presets this project's plugins registered" do
+      described_class.register("rails-mailers", ["app/mailers/**/*.rb"])
+      described_class.register("rails-controllers", ["app/controllers/**/*.rb"])
+
+      expect(described_class.availability)
+        .to eq("presets registered in this project: rails-controllers, rails-mailers")
+    end
+
+    it "says how a preset comes to exist when the project has none" do
+      expect(described_class.availability)
+        .to include("no plugin in this project registers an entry-point preset", "`plugins:`")
+    end
+  end
+
+  describe ".resolve!" do
+    it "returns the globs of a registered preset" do
+      described_class.register("actions", ["app/controllers/**/*.rb"])
+
+      expect(described_class.resolve!("actions")).to eq(["app/controllers/**/*.rb"])
+    end
+
+    it "answers an unregistered name with what this project could have written instead" do
+      described_class.register("rails-controllers", ["app/controllers/**/*.rb"])
+
+      expect { described_class.resolve!("rails") }
+        .to raise_error(described_class::UnknownPreset,
+                        'effects.snapshot.reach names no registered entry-point preset: "rails" ' \
+                        "(presets registered in this project: rails-controllers)")
     end
   end
 end

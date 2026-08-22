@@ -84,6 +84,17 @@ module Rigor
     rescue OptionParser::ParseError => e
       @err.puts(e.message)
       EXIT_USAGE
+    rescue ConfigurationError => e
+      # #433 — a mistake in `.rigor.yml` is the same kind of event as a bad flag, and belongs in the same
+      # shape: one `rigor:` line naming the key, and the conventional usage exit code. It used to escape
+      # as an uncaught exception with a ~30-frame backtrace naming a file inside `lib/rigor/`, which reads
+      # as a crash even though the message it carried said exactly which key to fix.
+      #
+      # Caught here rather than per command because every command loads a configuration, and the ones
+      # that resolve a key later (`effects update` expanding `snapshot.reach:` once the plugins that
+      # register presets have loaded) would each need their own rescue at their own point.
+      @err.puts("rigor: #{e.message}")
+      EXIT_USAGE
     end
 
     private

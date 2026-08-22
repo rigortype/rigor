@@ -164,11 +164,7 @@ module Rigor
           entries.flat_map do |entry|
             next [entry] if EntryPoints.glob?(entry)
 
-            EntryPoints.globs_for(entry) ||
-              raise(EntryPoints::Error,
-                    "effects.snapshot.reach names no registered entry-point preset: #{entry.inspect} " \
-                    "(registered: #{EntryPoints.names.inspect}; a preset is named by the plugin that " \
-                    "models the framework, so listing that plugin is what registers it)")
+            EntryPoints.resolve!(entry)
           end.uniq.sort.freeze
         end
 

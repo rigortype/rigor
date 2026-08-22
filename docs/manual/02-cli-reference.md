@@ -1084,7 +1084,15 @@ diagnostics about Rigor's own inference cutoffs and memory — see
 | --- | --- |
 | `0` | Success — no error-severity diagnostics. |
 | `1` | Diagnostics found, or a per-command failure (parse error, missing file, new diagnostics on `diff`, effect drift on `effects check`). |
-| `64` | Usage error — unknown command, bad flag, malformed argument. |
+| `64` | Usage error — unknown command, bad flag, malformed argument, or a value in `.rigor.yml` the loader cannot proceed on. |
 
 `rigor triage` is the exception: it is advisory and always
 exits `0`.
+
+A configuration mistake prints one `rigor:` line naming the key
+and nothing else — no backtrace, on every command:
+
+```
+$ rigor effects update
+rigor: effects.attribution key is not a method key (`Owner#method` / `Owner.method`): "Net::HTTP get"
+```

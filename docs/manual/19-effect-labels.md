@@ -241,8 +241,12 @@ rigor effects update
 
 ```
 rigor: wrote .rigor-effects.yml (1529 method(s), 0 reach entries)
-rigor: note — `effects.snapshot.reach:` is empty, so the snapshot records `methods:` only.
+rigor: note — `effects.snapshot.reach:` is empty, so the snapshot records `methods:` only (presets registered in this project: rails, rails-channels, rails-controllers, rails-jobs, rails-mailers).
 ```
+
+The note lists the preset names *your* plugins registered, so the fix is the
+line it already printed: put one of them in `effects.snapshot.reach:`. A project
+whose plugins register none is told that instead.
 
 Commit the file. Its header pins the Rigor version, the vocabulary version and a
 digest of your `effects:` block, so an upgrade or a policy edit shows up as a

@@ -14,6 +14,13 @@ RSpec.describe Rigor::Effects::Propagator do
     )
   end
 
+  # What a `super` records (#446): the enclosing unit's own class and selector, resolved above them.
+  def super_edge(owner, selector, kind: :instance)
+    Rigor::Effects::FileCollection::Edge.new(
+      receiver_class: owner, kind: kind, selector: selector, self_call: true, super_call: true
+    )
+  end
+
   def collection(summaries:, edges: {}, superclasses: {}, includes: {})
     Rigor::Effects::FileCollection.new(
       summaries: summaries, edges: edges, superclasses: superclasses, includes: includes
@@ -99,6 +106,102 @@ RSpec.describe Rigor::Effects::Propagator do
     )
 
     expect(table["T::D#run"].proven.to_a).to eq(["exit"])
+  end
+
+  # #446 — a `super` edge carries the ENCLOSING unit's class and selector, and resolves above it.
+  describe "a super edge" do
+    it "resolves to the definition the ancestry above the enclosing class answers with" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "Sub#emit" => summary, "Base#emit" => summary("io.fs.read") },
+          edges: { "Sub#emit" => [super_edge("Sub", "emit")] },
+          superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["Sub#emit"].proven.to_a).to eq(["io.fs.read"])
+      expect(table["Sub#emit"]).to be_exhaustive
+    end
+
+    # `include M` puts `M#emit` between the class and its superclass, which is where `super` looks first.
+    it "resolves through an included module before the superclass" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "Sub#emit" => summary, "M#emit" => summary("io.fs.write"), "Base#emit" => summary("exit") },
+          edges: { "Sub#emit" => [super_edge("Sub", "emit")] },
+          superclasses: { "Sub" => ["Base"] }, includes: { "Sub" => ["M"] }
+        )
+      )
+
+      expect(table["Sub#emit"].proven.to_a).to eq(["io.fs.write"])
+    end
+
+    # The guard rail, and the one place a super edge must differ from an ordinary one: `super` in `Sub#emit`
+    # dispatches into `Sub`'s ancestors, and `Deep` is never among them however the receiver was built. The
+    # closed-world join that is right for `x.emit` would put a label here that no execution can produce.
+    it "does not join a subclass override the way an ordinary call edge does" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "Sub#emit" => summary, "Base#emit" => summary("io.fs.read"),
+                       "Deep#emit" => summary("io.process") },
+          edges: { "Sub#emit" => [super_edge("Sub", "emit")] },
+          superclasses: { "Sub" => ["Base"], "Deep" => ["Sub"] }
+        )
+      )
+
+      expect(table["Sub#emit"].proven.to_a).to eq(["io.fs.read"])
+      expect(table["Sub#emit"].edges).to eq(["Base#emit"])
+    end
+
+    it "never resolves to the enclosing definition itself" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "Solo#emit" => summary("io.fs.read") },
+          edges: { "Solo#emit" => [super_edge("Solo", "emit")] }
+        )
+      )
+
+      expect(table["Solo#emit"].edges).to be_empty
+    end
+
+    # Where an ordinary unresolved edge is dropped in silence, an unresolved `super` taints: the parent is
+    # in a gem, in core, or in a module prepended at run time, and the row must not claim completeness.
+    it "taints the caller when the project's ancestry answers nothing" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "Sub#emit" => summary }, edges: { "Sub#emit" => [super_edge("Sub", "emit")] },
+          superclasses: { "Sub" => ["ActiveRecord::Base"] }
+        )
+      )
+
+      expect(table["Sub#emit"]).not_to be_exhaustive
+      expect(table["Sub#emit"].causes).to eq([%w[unresolved-super emit]])
+    end
+
+    # The taint is seeded before the fixpoint, so it travels to callers exactly as a collected one does.
+    it "carries the taint to the callers of the delegating method" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Sub#emit" => summary },
+          edges: { "A#run" => [edge("Sub", "emit")], "Sub#emit" => [super_edge("Sub", "emit")] }
+        )
+      )
+
+      expect(table["A#run"]).not_to be_exhaustive
+      expect(table["A#run"].causes).to eq([%w[unresolved-super emit]])
+    end
+
+    it "resolves the singleton side through the superclass chain" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "Sub.build" => summary, "Base.build" => summary("nondet.time") },
+          edges: { "Sub.build" => [super_edge("Sub", "build", kind: :singleton)] },
+          superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["Sub.build"].proven.to_a).to eq(["nondet.time"])
+    end
   end
 
   it "drops an edge that reaches no project definition rather than tainting" do

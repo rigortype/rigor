@@ -53,21 +53,47 @@ module Rigor
         return EffectTable.empty if collection.summaries.empty?
 
         summaries = collection.summaries
-        edges = resolve_edges(collection)
         state = seed(summaries, discharge)
+        edges = resolve_edges(collection, state)
         iterate(state, edges)
         EffectTable.new(build_entries(summaries, edges, state))
       rescue StandardError
         EffectTable.empty
       end
 
-      # `{caller_key => [callee_key]}`, sorted and de-duplicated.
-      def resolve_edges(collection)
+      # `{caller_key => [callee_key]}`, sorted and de-duplicated. Seeds the `unresolved-super` taint in
+      # the same pass, because whether a `super` resolved is exactly what this resolution answers.
+      def resolve_edges(collection, state)
         index = Index.new(collection)
         collection.edges.each_with_object({}) do |(caller_key, list), out|
-          targets = list.flat_map { |edge| index.targets_for(edge) }.uniq.sort
+          targets = list.flat_map do |edge|
+            resolved = index.targets_for(edge)
+            taint_unresolved_super(state, caller_key, edge) if edge.super_call && resolved.empty?
+            resolved
+          end.uniq.sort
           out[caller_key] = targets.freeze unless targets.empty?
         end
+      end
+
+      # A `super` the project's own ancestry does not answer — the implementation is in a gem, in Ruby's
+      # core, or in a module prepended at run time — is the case the taint exists for (#446). Silence
+      # would be the one thing the effect model must never say: that the list is complete when a call in
+      # the body was not read. An unresolved ORDINARY edge is dropped instead, because most such calls
+      # are inherited ones the catalogue simply has no row for and the site's own taint was already
+      # decided from the typer's verdict; a `super` has no site verdict to fall back on, and it always
+      # dispatches to something.
+      #
+      # Decided here rather than in the collector because only the merged ancestry can say whether the
+      # parent resolves, and written into the SEED rather than into the direct summary so the fixpoint
+      # carries it to this method's callers exactly as it carries any other cause. A snapshot's
+      # `methods:` table records direct summaries and so does not show it; `reach:`, the report and the
+      # judgment all read the closure and do.
+      def taint_unresolved_super(state, caller_key, edge)
+        entry = state[caller_key]
+        return if entry.nil?
+
+        entry[:exhaustive] = false
+        entry[:causes] << ["unresolved-super", edge.selector].freeze
       end
 
       # Causes are carried as a Set through the fixpoint and flattened back to a sorted Array in
@@ -170,8 +196,8 @@ module Rigor
         end
       end
 
-      private_class_method :resolve_edges, :seed, :iterate, :reverse_edges, :absorb, :join_lane,
-                           :build_entries
+      private_class_method :resolve_edges, :taint_unresolved_super, :seed, :iterate, :reverse_edges,
+                           :absorb, :join_lane, :build_entries
 
       # The class graph a run's collections describe, and the edge resolution over it. Built once per
       # propagation; every lookup is a Hash read.
@@ -189,24 +215,42 @@ module Rigor
         # Every project method key `edge` may reach: the definition its ancestry resolves to, plus every
         # override of the same selector in a project subclass of the receiver's class.
         #
-        # Memoised on `(receiver class, kind, selector)` — the answer depends on nothing else, and one
-        # such triple is asked for once per call site in the project. `ApplicationRecord#save` alone is
+        # Memoised on `(receiver class, kind, selector, super?)` — the answer depends on nothing else, and
+        # one such tuple is asked for once per call site in the project. `ApplicationRecord#save` alone is
         # thousands of sites on a Rails app, each of which used to re-walk the whole subclass forest.
         def targets_for(edge)
-          @targets[[edge.receiver_class, edge.kind, edge.selector]] ||= begin
+          @targets[[edge.receiver_class, edge.kind, edge.selector, edge.super_call]] ||= begin
             separator = edge.kind == :singleton ? "." : "#"
-            targets = []
-            owner = resolve_owner(edge.receiver_class, separator, edge.selector)
-            targets << owner if owner
-            descendant_closure(edge.receiver_class).each do |subclass|
-              key = "#{subclass}#{separator}#{edge.selector}"
-              targets << key if @summaries.key?(key)
-            end
-            targets.freeze
+            edge.super_call ? super_targets(edge, separator) : call_targets(edge, separator)
           end
         end
 
         private
+
+        def call_targets(edge, separator)
+          targets = []
+          owner = resolve_owner(edge.receiver_class, separator, edge.selector)
+          targets << owner if owner
+          descendant_closure(edge.receiver_class).each do |subclass|
+            key = "#{subclass}#{separator}#{edge.selector}"
+            targets << key if @summaries.key?(key)
+          end
+          targets.freeze
+        end
+
+        # A `super` reaches **one** definition, and the closed-world override join every other edge gets
+        # is deliberately absent from it (#446). `super` in `C#m` dispatches into the ancestry above `C`
+        # in the receiver's chain, and a subclass of `C` is never in it however the receiver was
+        # constructed — so joining `D#m` would put a proven label on `C#m` that no execution of `C#m` can
+        # produce. Ruby's lack of `final` is the argument for the join at an ordinary call site and says
+        # nothing here.
+        def super_targets(edge, separator)
+          target = resolve_super(edge.receiver_class, separator, edge.selector)
+          target ? [target].freeze : NO_TARGETS
+        end
+
+        NO_TARGETS = [].freeze
+        private_constant :NO_TARGETS
 
         # The transitive subclass closure, memoised per class. A deep hierarchy's root is asked for it
         # once, not once per selector reaching it.
@@ -220,8 +264,24 @@ module Rigor
         # enqueued and the most-qualified one comes first, so the right constant wins the race and a
         # spelling that names nothing simply matches no key.
         def resolve_owner(class_name, separator, selector)
-          seen = Set.new
-          queue = [class_name]
+          walk_ancestors([class_name], Set.new, separator, selector)
+        end
+
+        # Where `super` from `class_name#selector` lands: the same ancestor walk, started one step up —
+        # the modules the class includes, then its superclass chain — with the class itself already in
+        # `seen`, because a method never `super`s into itself.
+        #
+        # The includes are instance-side only. `include M` puts `M#m` between the class and its
+        # superclass, which is exactly where `super` looks, while `M.m` is a singleton method `include`
+        # never contributes; a singleton `super` that really does reach a module went through `extend` or
+        # a `class << self` include, neither of which is collected, so it resolves to nothing and taints.
+        def resolve_super(class_name, separator, selector)
+          queue = separator == "#" ? @includes.fetch(class_name, []).dup : []
+          queue.concat(@superclasses.fetch(class_name, []))
+          walk_ancestors(queue, Set.new([class_name]), separator, selector)
+        end
+
+        def walk_ancestors(queue, seen, separator, selector)
           until queue.empty?
             current = queue.shift
             next if current.nil? || !seen.add?(current)

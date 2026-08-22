@@ -30,7 +30,16 @@ module Rigor
       # receiver, or a construct that is not a call). `kind` is `:instance` for a `Nominal` receiver and
       # `:singleton` for a `Singleton` one. `self_call` marks an implicit-self call, which is the only shape
       # whose failure to resolve is an `unresolved-self-call` taint rather than silence.
-      Edge = Data.define(:receiver_class, :kind, :selector, :self_call)
+      #
+      # `super_call` marks the edge a `super` contributes (#446). It carries the ENCLOSING unit's class and
+      # selector rather than a receiver's, and the propagator resolves it against the ancestry *above* that
+      # class with no closed-world override join — a different question from every other edge, which is why
+      # it is a field rather than a convention over the other three.
+      Edge = Data.define(:receiver_class, :kind, :selector, :self_call, :super_call) do
+        # Defaulted because every producer but the `super` one records an ordinary call, and an ordinary
+        # call is not a `super`.
+        def initialize(super_call: false, **) = super
+      end
 
       NO_TABLE = {}.freeze
       private_constant :NO_TABLE
@@ -144,16 +153,21 @@ module Rigor
       end
 
       # Edge lists are sorted so a marshalled worker collection and a sequential one are `==` and the
-      # report they feed is byte-identical. The key is TOTAL over the de-duplicated list — `self_call` is
-      # in it because two edges can otherwise agree on every other field, and `sort_by` is not stable.
+      # report they feed is byte-identical. The key is TOTAL over the de-duplicated list — `self_call` and
+      # `super_call` are in it because two edges can otherwise agree on every other field (`def emit; super;
+      # emit; end` records both), and `sort_by` is not stable.
       def freeze_edges(table)
         return NO_TABLE if table.empty?
 
         table.transform_values do |list|
           sorted = list.uniq
-          sorted.sort_by! { |edge| [edge.receiver_class.to_s, edge.kind.to_s, edge.selector, edge.self_call ? 1 : 0] }
+          sorted.sort_by! { |edge| edge_order(edge) }
           sorted.freeze
         end.freeze
+      end
+
+      def edge_order(edge)
+        [edge.receiver_class.to_s, edge.kind.to_s, edge.selector, edge.self_call ? 1 : 0, edge.super_call ? 1 : 0]
       end
     end
   end

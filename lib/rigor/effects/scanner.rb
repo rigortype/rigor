@@ -194,7 +194,7 @@ module Rigor
           block_parameter: block_parameter_name(parameters),
           owned_locals: LocalOwnership.owned(body, names), calls: @calls,
           attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
-          owner_class: class_name
+          owner_class: class_name, method_name: method_name
         )
         summary, edges = scan.run(body)
         merge_unit(key, summary, edges)

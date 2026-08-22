@@ -598,8 +598,23 @@ class Date
   %a{pure}
   def advance: (untyped options) -> Date
   def all_day: () -> Range[Time]
+  # NOTE: `Date#to_time` is an OVERLOAD CONTINUATION (`| ...`), not a plain
+  # declaration — stdlib `date` already types `to_time: () -> Time`, and a
+  # second full declaration of the same method from a second signature source
+  # makes `RBS::DefinitionBuilder` raise `DuplicatedMethodDefinitionError`,
+  # which collapses `Date` AND `DateTime` to `Dynamic[top]` for every project
+  # that activates this plugin (#437 — the same failure the `DateTime#to_time`
+  # note below records). The row cannot simply be DROPPED the way
+  # `DateTime#to_time` was: ActiveSupport genuinely widens the arity, and
+  # without the row `date.to_time(:utc)` — correct Rails code — would draw an
+  # arity diagnostic. `| ...` appends this overload ahead of the stdlib one, so
+  # both arities resolve and the `%a{pure}` envelope stays attached to the
+  # ActiveSupport overload (which is the one a no-argument call selects).
+  # `| ...` requires the base declaration to exist, which `Environment.for_project`
+  # guarantees: it merges `DEFAULT_LIBRARIES` — including `date` — into every
+  # environment that loads a plugin's `signature_paths`.
   %a{pure}
-  def to_time: (?Symbol form) -> Time
+  def to_time: (?Symbol form) -> Time | ...
 end
 
 # ---------------------------------------------------------------

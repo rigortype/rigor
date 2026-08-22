@@ -160,7 +160,7 @@ module Rigor
         # - paths:       directories scanned by `rigor check` and
         #                `rigor type-scan` when no path is given.
         # - plugins:     opt-in list of plugin gem names to load.
-        #                See https://github.com/rigortype/rigor/tree/main/plugins
+        #                See https://github.com/rigortype/rigor/tree/master/plugins
         #                for production plugins (rigor-activerecord, rigor-sorbet, …).
         # - disable:     list of `rigor check` rule identifiers to
         #                silence project-wide. The shipped rules are

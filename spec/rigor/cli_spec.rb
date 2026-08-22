@@ -1082,7 +1082,7 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("Authored severity:")
       expect(out).to include("Severity by profile:")
       expect(out).to include("Evidence tier: high")
-      expect(out).to include("Documentation: https://github.com/rigortype/rigor")
+      expect(out).to include("Documentation: https://rigor.typedduck.fail/manual/04-diagnostics/")
       expect(out).to include("Since: rigor")
     end
 

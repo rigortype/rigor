@@ -155,7 +155,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
 
     diag = JSON.parse(out).fetch("diagnostics").find { |d| d["rule"] == "call.undefined-method" }
     expect(diag.fetch("evidence_tier")).to eq("high")
-    expect(diag.fetch("documentation_url")).to end_with("04-diagnostics.md#rule-call-undefined-method")
+    expect(diag.fetch("documentation_url")).to end_with("04-diagnostics/#rule-call-undefined-method")
   end
 
   it "adds a coverage block under --coverage --format=json" do

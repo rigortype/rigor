@@ -28,7 +28,7 @@
   "bugs": {
     "url": "https://github.com/rigortype/rigor/issues"
   },
-  "homepage": "https://github.com/rigortype/rigor/tree/main/editors/vscode",
+  "homepage": "https://github.com/rigortype/rigor/tree/master/editors/vscode",
   "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:ruby",

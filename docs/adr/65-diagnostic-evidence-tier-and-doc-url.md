@@ -1,6 +1,8 @@
 # ADR-65 — Diagnostic evidence tier and documentation URL
 
-Status: **Accepted — implemented 2026-06-15.** Two additive fields on
+Status: **Accepted — implemented 2026-06-15; `documentation_url` moved off
+the GitHub blob path to the published docs host (Amendment 2026-08-23).**
+Two additive fields on
 the public diagnostic surface: every built-in rule carries an
 **`evidence_tier`** (`high` / `medium` / `low`, or none for an
 informational helper) — Rigor's own confidence that a firing is a true
@@ -106,6 +108,9 @@ manufacture a gate, neither of which the user asked for.
 
 ### WD3 — `documentation_url` is a per-rule anchor in the published catalogue
 
+*The base URL below is superseded by the 2026-08-23 amendment; the
+per-rule anchor scheme is unchanged.*
+
 The URL is the published diagnostics manual page anchored per rule —
 `…/docs/manual/04-diagnostics.md#rule-<id-with-dots-as-dashes>` — mirroring
 the gemspec `documentation_uri` scheme. The catalogue page carries the
@@ -156,3 +161,69 @@ before any rule fires), so it carries no information.
   is the real per-rule reference, and the manual anchor resolves today.
 - **Feeding the tier into severity or the exit code** — rejected: the tier
   routes attention, it does not gate (WD2 guardrail).
+
+## Amendment (2026-08-23) — the URL drops the git ref ([#438](https://github.com/rigortype/rigor/issues/438))
+
+WD3 shipped a base of `…/blob/main/docs/manual/04-diagnostics.md`.
+This repository's default branch is `master` and `origin` has never had a
+`main`, so **every `documentation_url` Rigor has ever emitted 404ed** —
+for the whole life of the field, on every `rigor check --format json` and
+every `rigor explain`. The catalogue anchor was right; the page it hung
+off did not exist. `DOCUMENTATION_BASE` is now
+`https://rigor.typedduck.fail/manual/04-diagnostics/`.
+
+**The form, and why not the obvious repair.** Rewriting `main` to
+`master` fixes today and reinstates the defect class: a branch name is a
+*mutable* component sitting inside a contract we froze, and the rename
+that breaks it need not even happen here — GitHub's default-branch
+migration is exactly the event this repository would eventually take. A
+released tag (`blob/v0.3.4/…`) is immutable but resolves only after that
+tag is pushed, so every build between a version bump and its tag — the
+window in which contributors and agents actually read these URLs, and the
+window in which #438 was found — would emit 404s again, harder to notice
+because most versions work. The published docs host carries no ref at
+all: there is nothing in the string that a rename or a release can
+invalidate. It renders `docs/manual/04-diagnostics.md` verbatim,
+`<a id="rule-…">` tags included, so the fragment half of WD3 — the half
+`spec/docs/manual_drift_spec.rb` axis 4 already guarded — is unchanged,
+and the anchors carried over one-for-one at the cut.
+
+This does **not** reverse WD3's rejection of a documentation site. What
+was rejected was *inventing* `rigor.dev/rules/<kind>`, a per-rule surface
+that did not exist — "a URL to a non-existent page is dishonest". The
+docs host publishes the catalogue chapter itself, which is what WD3 chose
+to point at; only the rendering moves. The single source of truth is
+still `docs/manual/04-diagnostics.md` in this repository, and
+`rigor explain <rule>` is still the offline authority.
+
+**Is changing a frozen contract value a breaking change?** No, and it
+needs no deprecation dance. ADR-50 freezes the public output surface so
+consumers can *rely* on it; what is frozen is the field's presence, name,
+type, and meaning — "a stable URL to this rule's entry in the published
+catalogue" — all of which are untouched. The value was never usable: it
+resolved for nobody, so no consumer can have built on it, and the only
+behaviour that changes for anyone is that following the link now works.
+A deprecation window here would mean deliberately emitting a known-404
+for another release to protect a compatibility nobody has. The
+FP/honesty ethos WD3 invokes runs the other way: emit only what resolves.
+The rule this sets for the next such case is narrow — a frozen field's
+*value* may be corrected without ceremony when the old value is
+demonstrably inoperative (it 404s, it fails to parse, it names something
+that does not exist); a value that works and merely displeases us is a
+breaking change and takes the full dance.
+
+**The invariant, and what now enforces it.** No frozen public contract
+may embed a mutable git ref. Two gates, both network-free so they fail on
+a rename rather than on a flaky connection:
+
+- `spec/docs/manual_drift_spec.rb` axis 4 now checks the *page* as well
+  as the fragment — the base must be a `<host>/manual/<slug>/` URL whose
+  host README.md itself uses, whose `docs/manual/<slug>.md` the gemspec
+  actually packages, and which contains no `blob` / `tree` / `raw` path
+  segment.
+- `spec/docs/link_integrity_spec.rb` sweeps every shipped surface for
+  self-referential `github.com/rigortype/rigor/<blob|tree|raw>/<ref>/`
+  URLs and requires `<ref>` to be the default branch named in
+  `.github/workflows/ci.yml`. It found three more live 404s that shipped
+  with the same assumption: the `rigor init` config template's plugins
+  link, and the VS Code extension's `homepage` and README.

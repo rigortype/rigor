@@ -27,7 +27,8 @@ built-in rule ID; `rigor explain` with no argument lists them all.
 Each built-in rule has a stable per-rule anchor on this page
 (`#rule-<family>-<name>`, dots written as dashes) — the
 `documentation_url` field in `--format json` and `rigor explain`'s
-`Documentation:` line both point here. The `Evidence` column is
+`Documentation:` line both point here, at this chapter's published
+copy on <https://rigor.typedduck.fail/manual/04-diagnostics/>. The `Evidence` column is
 Rigor's confidence that a firing is a true positive (see
 [Evidence tier](#evidence-tier) below). The one exception is
 `rbs_extended.unsatisfied-conformance`, an `rbs_extended`-family rule

@@ -78,7 +78,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-62 | [Mutation-testing the analyzer (false-negative / teeth measurement)](62-mutation-testing-teeth-measurement.md) | Accepted (harness + first fixes landed 2026-06-13; remaining backlog demand-gated) |
 | ADR-63 | [User-facing type-protection coverage](63-type-protection-coverage.md) | Accepted (Tier 1 and Tier 2 both implemented 2026-06-14) |
 | ADR-64 | [Non-nil argument-type-mismatch and the coerce barrier](64-non-nil-argument-type-mismatch.md) | Accepted (non-nil channel built and gated for multi-overload methods) |
-| ADR-65 | [Diagnostic evidence tier and documentation URL](65-diagnostic-evidence-tier-and-doc-url.md) | Accepted (implemented 2026-06-15; precision-additive) |
+| ADR-65 | [Diagnostic evidence tier and documentation URL](65-diagnostic-evidence-tier-and-doc-url.md) | Accepted (implemented 2026-06-15; doc URL amended 2026-08-23) |
 | ADR-66 | [Discriminated-union member typing (tag-keyed narrowing)](66-discriminated-union-member-typing.md) | Proposed (not implemented; demand-gated) |
 | ADR-67 | [Parameter type inference (the M3 frontier)](67-parameter-type-inference.md) | Accepted (WD6 landed opt-in; default-on declined 2026-07-30; WD6c incremental exclusion lifted; WD2 deferred) |
 | ADR-68 | [Plugin-declarable class-builder folding](68-class-builder-folding.md) | Proposed (demand-gated) |

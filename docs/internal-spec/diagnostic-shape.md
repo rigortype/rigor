@@ -56,7 +56,7 @@ diagnostic ([ADR-65](../adr/65-diagnostic-evidence-tier-and-doc-url.md)):
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `evidence_tier` | `String?` | Rigor's own confidence a firing is a true positive: `"high"` / `"medium"` / `"low"`. **Omitted** (absent) for informational rules that carry no tier. Orthogonal to `severity`; it never gates. |
-| `documentation_url` | `String` | Stable per-rule URL into the published diagnostics catalogue (`docs/manual/04-diagnostics.md#…`). |
+| `documentation_url` | `String` | Stable per-rule URL into the published diagnostics catalogue: `https://rigor.typedduck.fail/manual/04-diagnostics/#rule-<id-with-dots-as-dashes>`, the published rendering of `docs/manual/04-diagnostics.md`. The URL carries **no git ref** — no `blob/<branch>` or `tree/<tag>` path — because a ref inside a frozen contract rots (see the ADR-65 amendment). |
 
 Both are enriched in `CLI::CheckCommand#enrich_json` only for diagnostics
 whose `source_family` is the default `:builtin` and whose `rule` is

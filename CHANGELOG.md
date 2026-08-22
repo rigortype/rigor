@@ -12,10 +12,6 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
-### Fixed
-
-- **[plugins]** `rigor-activesupport-core-ext` no longer collides with rbs's bundled `stdlib/date` on `Date#to_time`, so `Date` and `DateTime` type as themselves instead of silently degrading to an untyped value for every project that activates the plugin, while `date.to_time(:utc)` keeps resolving through ActiveSupport's widened arity ([#437](https://github.com/rigortype/rigor/issues/437)).
-
 ### Added
 
 - **[docs]** The CI templates now carry a commented-out `rigor effects check` step, so a project adopting effect labels has one line to uncomment rather than a workflow to compose ([#376](https://github.com/rigortype/rigor/issues/376)).
@@ -35,6 +31,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 - **[effects]** `effect.annotations-unchecked` now reports an `%a{pure}` written as an rbs-inline comment in your Ruby source on every run that analyses anything, not only on the runs that write the result cache ([#441](https://github.com/rigortype/rigor/issues/441)).
   - `rigor check --no-cache`, `--workers N` and `--incremental` used to report the notice for an annotation in a `sig/*.rbs` file and stay silent about the identical annotation written inline, so which lane you had chosen decided whether you learned your annotations were inert. Both lanes now answer the same. The one run that still cannot see the inline lane is a warm `--incremental` with nothing changed, which analyses no file and so has no synthesised RBS to read.
 - **[effects]** `effect.envelope-exceeded` is reported on every run, not only on the first one after clearing `.rigor/cache` ([#428](https://github.com/rigortype/rigor/issues/428)).
+- **[plugins]** `rigor-activesupport-core-ext` no longer collides with rbs's bundled `stdlib/date` on `Date#to_time`, so `Date` and `DateTime` type as themselves instead of silently degrading to an untyped value for every project that activates the plugin, while `date.to_time(:utc)` keeps resolving through ActiveSupport's widened arity ([#437](https://github.com/rigortype/rigor/issues/437)).
   - A warm run used to serve its diagnostics from the cache without re-checking your envelopes, so a project whose CI caches `.rigor/cache` between builds — the setup the manual recommends — saw the check fire once and stay silent afterwards, with the silence reading as a clean result. Both ways of declaring a bound were affected: an `effects.envelopes:` stanza in `.rigor.yml` and an `%a{pure}` / `%a{rigor:v1:effect …}` annotation in your signatures. The `effect.annotations-unchecked` notice went the same way and is back too.
   - Editing an envelope, a `tolerated:` list or an annotation now re-judges your code on the next run even though no Ruby file changed. Declaring an envelope costs a warm run about three quarters of a second on a mid-sized Rails application, because Rigor has to re-check it rather than replay the previous answer; a project with `effects:` on and no envelope declared is unaffected.
 

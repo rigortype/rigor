@@ -176,6 +176,9 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 
 ### Effect labels
 
+The key reference is below; the workflow these keys serve — the vocabulary, the report, the committed
+snapshot, the CI gate — is [Effect labels](19-effect-labels.md).
+
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `effects` | Hash | absent | **Opt-in to effect labels ([ADR-103](../adr/103-effect-labels.md)).** The *presence* of this block is the switch — `effects: {}` enables collection with every sub-key at its default, and leaving it out keeps `rigor check` byte-identical and free. Nothing else turns collection on: an `%a{pure}` or `%a{rigor:v1:effect …}` annotation in your RBS does not, because an annotation must not silently make every run more expensive — such a project gets one `effect.annotations-unchecked` `:info` per run instead, saying the annotations are inert. `rigor effects` runs under an implicit empty block when the key is absent, so you can try the report before configuring anything. Effect summaries are cached under their own identity (Rigor's effect vocabulary, its built-in catalogue and this block), so `rigor effects` after `rigor check` in the same job is a cache hit plus the propagation, and turning this block on or off does not invalidate your diagnostics cache. The sub-keys are below. `views` is declared in the schema and reserved: accepted and **not yet read**. See [`rigor effects`](02-cli-reference.md#rigor-effects). |
@@ -215,7 +218,8 @@ effects:
     reach: [rails]
 ```
 
-`rails` — registered by [`rigor-railties`](plugins/rigor-rails.md) — stands for `app/controllers/**`,
+`rails` — registered by `rigor-railties`, which is a distinct plugin from the
+[`rigor-rails`](plugins/rigor-rails.md) convenience grouping — stands for `app/controllers/**`,
 `app/jobs/**`, `app/mailers/**` and `app/channels/**`: every way the outside world enters the
 application. The component plugins also register the narrower `rails-controllers`, `rails-jobs`,
 `rails-mailers` and `rails-channels` if you want one layer's footprint rather than all four. A preset is
@@ -247,12 +251,17 @@ stanza it broke:
 ```
 app/presenters/user_presenter.rb:14:1: warning: Method Presenters::User#render performs io.fs.read
   (File.read), but is declared effect: [] at .rigor.yml effects.envelopes[0], so io.fs.read exceeds
-  the envelope. [effect.envelope-exceeded]
+  the envelope.
 ```
 
 When one method is a deliberate exception, write the narrower envelope on it in RBS — nearest wins,
 and no `except:` key is needed. When a whole *kind* of effect is acceptable everywhere, name it in
 `tolerated:` instead of loosening every stanza.
+
+**One stanza can land hundreds of warnings**, one per (method, label) pair — on a mid-size Rails
+application, `match: "app/helpers/**/*.rb"` with `effect: []` produced 343 across 18 files. That is
+the layer telling you what it does rather than a misconfiguration, but it is not a work list either;
+[Effect labels § Envelopes by convention](19-effect-labels.md) walks the recipe for working it down.
 
 If a layer is not ready for a bound yet, leave `envelopes:` out and start with the committed snapshot
 ([`rigor effects update`](02-cli-reference.md#the-effect-snapshot)) — it needs no declaration at all,

@@ -162,7 +162,7 @@ Every directive above describes what a method returns. Two
 describe what it *does*: `%a{pure}` — rbs' own purity
 annotation, read as "nothing at all" — and
 `%a{rigor:v1:effect <labels>}`, a comma-separated list of bare
-[effect labels](../type-specification/effect-labels.md) the
+[effect labels](19-effect-labels.md) the
 method may not exceed. Both attach to a method or to a `class` /
 `module`, where they distribute to that class's own methods
 (nearest wins), and both tolerate mutating objects the method
@@ -211,6 +211,15 @@ on:
 - Without the block, one
   [`effect.annotations-unchecked`](04-diagnostics.md#rule-effect-annotations-unchecked)
   `:info` per run tells you the annotations are inert.
+
+Two practical notes. Annotating one method in a `.rbs` file forces you to
+declare its whole signature — RBS has no way to annotate a method it does
+not declare — while the rbs-inline form above does not, so prefer the
+inline lane when the bound is all you want. And an envelope is checked
+against the **proven** lane only: a method whose labels all sit in the
+declared (`≤`) lane passes `%a{pure}` in silence.
+[Effect labels](19-effect-labels.md) covers both, with the vocabulary
+these annotations draw from.
 
 ## Higher-kinded type directives
 

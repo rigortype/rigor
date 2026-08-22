@@ -65,6 +65,11 @@ flag, key, or command that *acts* on it.
     `rigor unused` as a campaign on an old codebase: why the list
     starts long, which lever actually shortens it, what to confirm
     before deleting, and how to make the case to a reviewer.
+19. [Effect labels](19-effect-labels.md) — what your code *does*
+    beside what it returns: the label vocabulary, the `rigor
+    effects` report, the committed `.rigor-effects.yml` snapshot
+    and its review loop, the CI gate, and the envelopes and
+    `%a{pure}` annotations that bound a layer.
 
 ### Integration and operations
 

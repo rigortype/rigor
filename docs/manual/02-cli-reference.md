@@ -169,7 +169,10 @@ Report what each method *does* — its effect labels — rather
 than what it returns, and manage the committed **effect
 snapshot** that gates drift. Opt-in and observational: nothing
 here emits a diagnostic or changes `rigor check`'s output, and
-only `rigor effects check` ever exits non-zero.
+only `rigor effects check` ever exits non-zero. The workflow
+around these verbs — the label vocabulary, how to read the
+report at scale, the review loop and the CI step — is
+[Effect labels](19-effect-labels.md).
 
 ```sh
 rigor effects [PATH...]                       # the report
@@ -182,6 +185,13 @@ carries no `effects:` block, so you can try it before
 configuring anything; such an ad-hoc run shares no cache with
 `rigor check`, because a run served from that cache would have
 collected nothing.
+
+Passing paths narrows the **analysis**, not just the output.
+Labels are transitive over what was analysed, so a method whose
+callees were not analysed reports fewer labels and a wider
+"possibly more" than the same method in a whole-project run —
+honest, but not a cheaper way to get the whole-project answer.
+Filter the output when you want the real footprint.
 
 Each line is one method, sorted by key:
 
@@ -199,10 +209,13 @@ lines say why. A taint is never a finding.
 
 A ` ≤ [...]` clause after the labels is the **declared** lane:
 what a source Rigor trusts but did not verify *claims* the
-method does, today the `effects.attribution:` table you wrote
-for gem methods it cannot see. It is printed apart from the
-proven labels and never folded in among them, because the two
-answer different questions. It follows call edges exactly as
+method does. Two sources feed it — the plugins you activated,
+which on a framework application contribute most of it
+(`rails.session.write` and the rest of `rails.*` are Action
+Pack's rows, not yours), and the `effects.attribution:` table
+you wrote for gem methods nothing models. It is printed apart
+from the proven labels and never folded in among them, because
+the two answer different questions. It follows call edges exactly as
 the proven labels do, so a controller two hops above an
 attributed gem call carries the claim rather than only a
 "possibly more"; a declared label the proven list already
@@ -226,8 +239,10 @@ subcommands and does nothing here: the report is an
 observation, and observations are undischarged.
 
 What is collected and how it propagates is
-[the effect-summaries internal spec](../internal-spec/effect-summaries.md);
-the label vocabulary is
+[the effect-summaries internal spec](../internal-spec/effect-summaries.md).
+The label vocabulary is tabulated in
+[Effect labels § The label vocabulary](19-effect-labels.md) and specified
+normatively in
 [the effect-labels specification](../type-specification/effect-labels.md).
 
 ### The effect snapshot

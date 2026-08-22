@@ -49,6 +49,28 @@ The cache is also schema-versioned: after a Rigor upgrade that
 changes the cache format, the stale cache is purged on the
 first writable run.
 
+## Effect summaries
+
+[Effect labels](19-effect-labels.md) are cached alongside the rest,
+but under their **own** identity: Rigor's effect vocabulary, its
+built-in effect catalogue, and your `effects:` block. Two
+consequences worth knowing:
+
+- **Turning `effects:` on or off does not invalidate the entries
+  your `rigor check` already relies on.** The two identities are
+  separate, so adopting effect labels costs a first collection
+  pass and leaves the diagnostics cache alone. Upgrading to a
+  Rigor whose catalogue changed does the reverse — it re-reads
+  your effects without re-running your check.
+- **The `rigor effects` verbs share those summaries with `rigor
+  check`.** In a job that runs both, the second command pays for
+  the propagation rather than for a second analysis.
+
+The exception is a `rigor effects` run on a project with **no**
+`effects:` block: it collects under an implicit empty block and
+shares no cache with `rigor check`, because a run served from that
+cache would have collected nothing.
+
 ## How a file is checked for changes
 
 To decide whether a cached entry is still valid, Rigor needs to

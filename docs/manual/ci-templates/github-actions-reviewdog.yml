@@ -35,3 +35,11 @@ jobs:
       - run: rigor check --format checkstyle | reviewdog -f=checkstyle -reporter=github-pr-review -fail-level=error
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Effect labels (opt-in until v0.4.0, then the default): if the project
+      # has an `effects:` block and a committed .rigor-effects.yml, uncomment
+      # this to fail the build when a branch changes what the code *does*.
+      # Left commented because `effects check` exits 1 when the snapshot file
+      # is absent — which is the point on a project that has one, and noise on
+      # one that does not. See docs/manual/19-effect-labels.md § In CI.
+      # - run: rigor effects check

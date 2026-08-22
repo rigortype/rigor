@@ -26,6 +26,15 @@ comments (it works the same way against GitLab, Gerrit, Bitbucket, and Gitea
 — see the [`rigor-ci-setup`](../../../skills/rigor-ci-setup/SKILL.md) skill).
 All run Rigor the same way — only the output format and publish step differ.
 
+Every template ends with a **commented-out `rigor effects check` step**.
+Uncomment it once the project has an `effects:` block and a committed
+`.rigor-effects.yml`, and CI will fail when a branch changes what the code
+*does* — a job that starts talking to the network, a presenter that starts
+querying. It ships commented because `effects check` exits `1` when the
+snapshot file is absent, which is exactly what you want on a project that
+has one and pure noise on a project that does not. The workflow around it
+is [chapter 19, "Effect labels"](../19-effect-labels.md).
+
 ## Other runners (generic recipe)
 
 On any CI system, the four steps are: provision Ruby 4.0, install

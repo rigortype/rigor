@@ -11,6 +11,7 @@ RSpec.describe Rigor::Effects::TaintCause do
       dynamic-send
       method-missing
       unresolved-self-call
+      unresolved-super
       opaque-callable
       unknown-ownership
       plugin-attribution

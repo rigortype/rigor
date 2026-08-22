@@ -110,9 +110,12 @@ module Rigor
       # @param plugin_facts [PluginFacts] the loaded plugins' `effect_attributions:` (#387)
       # @param owner_class [String, nil] the class this unit is defined on — the carrier an
       #   implicit-self call's envelope is looked up under, since the syntax spells `Kernel#name`
+      # @param method_name [String, nil] this unit's own selector — what a `super` in its body names as
+      #   the target the propagator resolves above `owner_class` (#446). With no name to state, a `super`
+      #   taints instead.
       def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
                      attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
-                     plugin_facts: PluginFacts.empty, owner_class: nil)
+                     plugin_facts: PluginFacts.empty, owner_class: nil, method_name: nil)
         @singleton = singleton
         @block_parameter = block_parameter
         @calls = calls
@@ -120,6 +123,7 @@ module Rigor
         @envelopes = envelopes
         @plugin_facts = plugin_facts
         @owner_class = owner_class
+        @method_name = method_name
         @mutation = MutationClassifier.new(
           singleton: singleton, parameters: parameters, owned_locals: owned_locals
         )
@@ -138,9 +142,10 @@ module Rigor
       # Whether this body reaches `super` — an override that delegates upward still runs whatever the
       # superclass does. Nested `def`s are unit boundaries, so a `super` counted here is this unit's.
       #
-      # v1 does nothing else with `super`: it contributes no edge and no taint, which is a gap of its own.
-      # What reads this bit is {FrameworkUnits.replaced?}, to tell a `def save` that replaces the
-      # framework's implementation from one that wraps it (#440).
+      # A separate reading of the same node from the edge {#visit_super} records: what this bit answers is
+      # whether a framework's claim about the selector survives the class having written a body for it
+      # ({FrameworkUnits.replaced?}, #440), which is a question about the *class*, not about what the
+      # parent implementation does.
       def delegates_upward?
         @delegates_upward
       end
@@ -226,8 +231,28 @@ module Rigor
              Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode
           classify_mutation(node.receiver)
         when Prism::SuperNode, Prism::ForwardingSuperNode
-          @delegates_upward = true
+          visit_super
         end
+      end
+
+      # `super` in every shape — bare, `super()`, `super(args)`, and each of those inside a block or a
+      # rescue, since the walk descends into both (#446).
+      #
+      # It is a dispatch and must contribute like one. What the scan can settle from the syntax is the
+      # *identity* of the target — this unit's own class and selector — and nothing more: which definition
+      # sits above the class is a question about the whole project, so it goes out as an edge and the
+      # propagator resolves it against the merged ancestry, tainting when nothing there answers.
+      #
+      # A unit with no class or no name has no target to state. That is not a shape the scanner produces,
+      # and the taint is what a "cannot say" must read as rather than a silently dropped call.
+      def visit_super
+        @delegates_upward = true
+        return taint("unresolved-super", @method_name) if @owner_class.nil? || @method_name.nil?
+
+        @edges << FileCollection::Edge.new(
+          receiver_class: @owner_class, kind: @singleton ? :singleton : :instance,
+          selector: @method_name, self_call: true, super_call: true
+        )
       end
 
       def visit_call(node)

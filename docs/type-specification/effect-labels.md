@@ -115,6 +115,7 @@ When the exhaustiveness bit is false, the summary records why, from this closed 
 | `dynamic-send` | `send` / `public_send` with a non-literal selector |
 | `method-missing` | dispatch reached a `method_missing` the analyzer does not model |
 | `unresolved-self-call` | an implicit-self call with no project-known definition |
+| `unresolved-super` | a `super` whose target the project's own ancestry does not define |
 | `opaque-callable` | a block or proc the analyzer could not follow to a body |
 | `unknown-ownership` | a mutating call whose receiver could not be proven frame-owned; the mutation is recorded as taint rather than as a proven `mutate` label |
 | `plugin-attribution` | a label contributed by a source whose trust tier does not discharge |
@@ -124,7 +125,7 @@ When the exhaustiveness bit is false, the summary records why, from this closed 
 
 The enum is closed. A new cause is a change to this document, not a producer's free choice.
 
-> As of this writing `method-missing`, `template-not-analysed` and `budget` are reserved and unproduced; the other seven have producers (`plugin-attribution` since [#385](https://github.com/rigortype/rigor/issues/385), from the configured attribution table). Which shapes reach which cause is [`effect-summaries.md`](../internal-spec/effect-summaries.md) § Taints.
+> As of this writing `method-missing`, `template-not-analysed` and `budget` are reserved and unproduced; the other eight have producers (`plugin-attribution` since [#385](https://github.com/rigortype/rigor/issues/385), from the configured attribution table; `unresolved-super` since [#446](https://github.com/rigortype/rigor/issues/446)). Which shapes reach which cause is [`effect-summaries.md`](../internal-spec/effect-summaries.md) § Taints.
 
 ## Effect envelopes
 

@@ -98,6 +98,12 @@ The label then follows the receiver's ownership, which is a syntactic question:
 
 An unprovable ownership MUST taint rather than produce a proven bare `mutate`.
 
+### `super`
+
+A `super` is a dispatch and contributes an **edge**, in every shape it takes — bare, `super()`, `super(args)`, and each of those inside a block or a rescue, both of which the containment walk descends into. The edge is the one thing the syntax settles about it: the enclosing unit's own class and selector, marked `super_call:`. Which definition sits above that class is a whole-project question, so it is resolved in § Propagation like any other edge and, unlike any other edge, taints when nothing answers.
+
+`UnitScan#delegates_upward?` reads the same node for an unrelated question — whether a class that wrote a body for a selector has *replaced* the framework's implementation or wrapped it (§ Framework units) — and the two must not be conflated: that bit is about the class, the edge is about what the parent does.
+
 ### Taints
 
 | Cause | When the tracer records it |
@@ -106,6 +112,7 @@ An unprovable ownership MUST taint rather than produce a proven bare `mutate`.
 | `dynamic-send` | `send` / `public_send` / `__send__` with a non-literal selector (a literal one is an ordinary edge) |
 | `opaque-callable` | `.call` on a receiver that is neither a lambda literal nor the unit's own block parameter and whose class is unknown or `Proc` / `Method`; or a `&expr` block argument that is neither a symbol nor the unit's block parameter |
 | `unresolved-self-call` | an implicit-self call for which **every** dispatch tier declined, and whose selector the unit's own class carries no envelope for; the detail is the selector |
+| `unresolved-super` | a `super` whose target the project's own ancestry does not define; the detail is the selector. Recorded by the **propagator**, not the tracer — only the merged ancestry can answer it (§ Propagation) |
 | `unknown-ownership` | a mutating call whose receiver ownership is not classifiable |
 | `collector-error` | the scan of that unit raised |
 
@@ -115,7 +122,6 @@ Taint never produces a finding. A non-exhaustive summary reads "these effects, a
 
 ### Known bounds of this slice
 
-- `super` is neither an edge nor a taint. Resolving it needs the ancestor *above* the enclosing class, which the propagator could supply; it is left out to keep the tracer thin.
 - An implicit-self call the dispatcher resolves optimistically through the user-class ancestor fallback does **not** taint, even when the project defines no such method. That shape is exactly what `call.self-undefined-method` covers, and it is off by default on false-positive grounds ([ADR-24](../adr/24-self-method-call-resolution.md) slice 4).
 - An uncatalogued call on a receiver whose class the catalogue does not list contributes nothing and does not taint. A class the catalogue *does* list answers its posture — see § The catalogue below.
 - Class bodies are not effect units. Their statements run at load time, which is a unit of its own that no slice models yet.
@@ -215,7 +221,14 @@ The subclass index resolves each as-written superclass to a single parent — th
 
 An edge that reaches no project definition is **dropped**, not tainted: most such calls are ordinary inherited ones the catalogue has no row for, and tainting them would make the bit carry no information.
 
-Edge resolution is memoised on `(receiver class, kind, selector)`, and the transitive subclass closure on the class name. Both are required, not incidental: one triple is asked for once per call site, and a Rails root class's subclass forest is otherwise re-walked thousands of times.
+A **`super` edge** is resolved by the same walk with two differences, and each is load-bearing:
+
+1. the walk starts *above* the enclosing class — its includes, then its superclass chain, with the class itself excluded, because a method never `super`s into itself. The includes are consulted for an instance-side `super` only: `include M` puts `M#m` where `super` looks, while `M.m` is a singleton method `include` never contributes;
+2. **no closed-world override join.** `super` in `C#m` dispatches into `C`'s ancestors, and a subclass of `C` is never among them however the receiver was constructed, so joining `D#m` would put a proven label on `C#m` that no execution of `C#m` can produce. Ruby's lack of `final` is the argument for the join at an ordinary call site and says nothing here.
+
+And a `super` edge that resolves to nothing **taints** `unresolved-super` where an ordinary one is dropped. The parent is then in a gem, in Ruby's core, or in a module prepended at run time: the call is not merely unresolved but unread, and a row that stayed exhaustive would assert a completeness it has not earned. The taint is applied to the fixpoint's seed rather than to the direct summary, so it reaches this method's callers exactly as a collected cause does — a snapshot's `methods:` table records direct summaries and does not show it; `reach:`, the report and the judgment read the closure and do.
+
+Edge resolution is memoised on `(receiver class, kind, selector, super?)`, and the transitive subclass closure on the class name. Both are required, not incidental: one tuple is asked for once per call site, and a Rails root class's subclass forest is otherwise re-walked thousands of times.
 
 **Fixpoint.** A worklist in sorted key order, to a true fixpoint:
 
@@ -362,7 +375,7 @@ Synthesising on the class rather than at the call site is what makes this work a
 
 A synthesised unit stands for the **whole** of the selector, not for the callbacks alone, so it MUST also carry the loaded plugins' own attribution row for that `(class, singleton, selector)` — the same `class_row` lookup a call site performs, with the same origin (`plugin:ActiveRecord::Base#save`), the same `taint:`, and the same `plugin-attribution` cause when the contributing plugin does not discharge. A row carrying a `narrow:` is skipped: narrowing reads an argument at a call site, and a synthesised unit has none. Without this the write was attributed at every *call site* and never on the row that names the method, and `AuthSource#save: ≤ io.db.read` — "save does not write to the database" — was what a Rails reviewer read. This enriches units that the rule above already creates; it does **not** create new ones, because a `Klass#save` row for every model in the project is precisely the noise that rule exists to prevent.
 
-The one exemption: when the class body itself defines the selector and that body never reaches `super`, the plugin's claim is dropped for that selector. Such a body has replaced the framework's implementation, and `def save = false` must keep reporting that it persists nothing. The exemption is per selector — the siblings the class did not override keep the claim — and a body that does reach `super` keeps it, since an override that delegates upward still runs whatever the superclass does. `Effects::UnitScan#delegates_upward?` is the bit; v1 gives `super` no other meaning, contributing neither an edge nor a taint.
+The one exemption: when the class body itself defines the selector and that body never reaches `super`, the plugin's claim is dropped for that selector. Such a body has replaced the framework's implementation, and `def save = false` must keep reporting that it persists nothing. The exemption is per selector — the siblings the class did not override keep the claim — and a body that does reach `super` keeps it, since an override that delegates upward still runs whatever the superclass does. `Effects::UnitScan#delegates_upward?` is the bit, and it is the *only* thing this exemption reads: the edge the same `super` contributes (§ `super`) answers what the parent does, which is a different question from whether the framework's claim about the selector still holds.
 
 The enum has **no `perform_later` → `perform`**, which is the mechanical enforcement of ADR-103 WD4's "attribution follows the code, not the clock". The one edge that looks like it — `target: :perform_now, method: :perform_later` — is emitted only by a plugin that has read the project's own `queue_adapter = :inline`, where Rails genuinely runs the job on the caller's stack.
 

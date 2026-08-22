@@ -18,6 +18,7 @@ module Rigor
         dynamic-send
         method-missing
         unresolved-self-call
+        unresolved-super
         opaque-callable
         unknown-ownership
         plugin-attribution

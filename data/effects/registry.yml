@@ -53,9 +53,18 @@ labels:
   - io.db.write
   - io.db.transaction
 
-  # Application-meaning roots, small and shared. These are the labels a policy actually names
-  # ("presenters do not enqueue jobs") and the ones `tolerated:` grips, so they must spell the same
-  # in Steins and Rigor.
+  # Steins carries these (its ADR-0042) and Rigor does not produce them: they name a failure arm's
+  # value provenance rather than an effect. Registered for the same reason `io.output.buffer` is —
+  # so a policy written against Steins parses here — and never inferred (ADR-103 WD16).
+  - failure
+  - failure.environment
+  - failure.input
+  - failure.resource
+
+  # Application-meaning roots. These are the labels a policy actually names ("presenters do not
+  # enqueue jobs") and the ones `tolerated:` grips, so a project must not need a plugin before it
+  # can write one. Rigor-owned and proposed to Steins, which holds ecosystem labels outside its
+  # builtin set and supplies them through a plugin manifest (ADR-103 WD16).
   - telemetry
   - email.send
   - job.enqueue

@@ -16,77 +16,72 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: work the effect backlog the walkthrough opened
+## Next session: #446 first, then the report's usability
 
-The owner's manual/UX blocker is **done** — [`docs/manual/19-effect-labels.md`](manual/19-effect-labels.md)
-exists, the user story ran end to end on Redmine, and its worst finding is fixed. What is left is the
-rest of what the story exposed, now filed. Take them in this order:
+**#446 is the priority and it is new.** A `super` call contributes nothing to an effect summary and
+the row still claims to be **exhaustive**, so a method whose body is `super` reads as provably
+effect-free — it passes `%a{pure}` and any envelope while its parent is correctly flagged. Verified on
+a five-line fixture. That is a hole in the only half of the feature that can fail a build, in a shape
+Rails code is made of (`def create; super; end`). Read the issue: it lists what the fix has to weigh
+(which parent, overrides, the unresolved case, and a corpus measurement before landing).
 
-1. **#440** — `AuthSource#save` reports the validator's read and drops `io.db.write`. Needs a minimal
-   fixture first; it is the line that decides whether a Rails developer believes the report.
-2. **#439** — a path argument silently weakens every label, and it is the only tractability lever the
-   report has. Pairs with **#434** (31,191 lines, 38.5 % of rows content-free).
-3. **#441** — `effect.annotations-unchecked` may not fire for the rbs-inline lane. Settle before the
-   v0.4.0 flip: it is how a project learns its `%a{pure}` tags are about to start being checked.
-4. **#438** — every emitted `documentation_url` points at `blob/main` and 404s; the branch is `master`.
-   Small, and it has been broken for every consumer that ever followed one.
-5. **#429** / **#436** / **#435** / **#433** / **#432** / **#437** — vocabulary discoverability, empty
-   `reach:` default, CLI affordances, config errors with backtraces, rbs-inline declaration position,
-   the `Date#to_time` collision.
+Then the report's usability, which is what the walkthrough said stops adopters cold:
 
-`make verify` + `make docs-check` green on integrated master at `08d1a97a`.
+1. **#439** — a path argument narrows the *analysis*, so the same method gets a weaker answer, unmarked.
+   It is also the only tractability lever the report has, which makes it a trap.
+2. **#434** — 31,191 lines on Redmine, 38.5 % of rows content-free, no summary, no `--limit`.
+3. **#429** (nothing lists the vocabulary) · **#436** (empty `reach:` by default) · **#435** (four CLI
+   affordance gaps) · **#433** (config mistakes abort with a backtrace) · **#432** (rbs-inline
+   declaration position) · **#437** (`Date#to_time` collides with rbs's stdlib).
 
-## What shipped this session
+`make verify` + `make docs-check` green on integrated master at `90c15bf0`.
 
-- **ADR-103 WD16** (PR #426) — five of #409's six graduation preconditions resolved; #410 and #414
-  closed. See below.
-- **The effect-labels manual chapter** (541 lines) plus effect sections in chapters 11 and 12, and
-  fixes to the mislinks and phantom output chapters 02/03/16 carried.
-- **#428 fixed** (PR #442) — the declared-envelope check fired cold and was dropped by every cache hit,
-  on both lanes. Mechanism below; it is worth knowing.
-- Dependabot #413 (rack) and #412 (rbs 4.1.3, audited — see #427) merged.
+## Shipped since the walkthrough
 
-## #428's mechanism, because it will recur
+- **#428** — the declared-bound check fired cold and was dropped by every cache hit, both lanes. The
+  boot-slim probe serves a warm run before the engine loads, so anything appended after
+  `compute_run_diagnostics` was invisible. **Any new diagnostic outside the cached run assembly has to
+  answer to that probe.**
+- **#440** — a synthesised ActiveRecord `save` row carried only the validator's read. The row is built
+  by `Effects::FrameworkUnits`, which read one source and never the plugin's own `save → io.db.write`
+  claim, so callers were coloured correctly and the method's own row never was. 11 selectors plus the
+  `create` twins were affected; `io.db.write` rows on Redmine went 202 → 608.
+- **#441** — `effect.annotations-unchecked` dropped the rbs-inline lane on any run that was not plain
+  cacheable sequential: `--no-cache`, `--workers=N`, `--incremental` cold, editor buffers. The lane was
+  never the variable, the **run mode** was. Verified before/after: `--workers=2` silent → fires.
+- **#438** — every emitted `documentation_url` 404ed (`blob/main`; the branch is `master`). Now points
+  at the docs host with **no git ref in the string**, and a network-free spec pins any self-referential
+  GitHub URL against the branch `ci.yml` gates pushes on. The sweep found three more live 404s,
+  including the plugins link in the `.rigor.yml` that `rigor init` writes.
+- The CI templates carry a commented-out `rigor effects check` step (#443).
 
-`CheckCommand#try_run_cache_hit` serves a whole warm run from the ADR-45 `analysis.run-diagnostics`
-slot **before the inference engine loads** (ADR-87 WD4 boot-slimming). ADR-103 WD12 deliberately keeps
-the effect passes *out* of that slot, so `Runner#run_analysis` appends them after
-`#compute_run_diagnostics` — exactly the code a served hit skips. Two correct decisions, one gap
-between them. **Any diagnostic appended after `compute_run_diagnostics` is invisible on a warm run.**
-The fix makes the probe answer for what the slot omits: reproduce the cheap residual pass, and
-*decline* the fast path for a project that could earn an envelope diagnostic, measured off the
-declarations alone. Cost: warm runs go 0.25 s → 0.92 s on redmine **only** when an envelope is
-declared; projects without one are unchanged.
+## The v0.4.0 graduation (#409)
 
-## The v0.4.0 graduation (ADR-103 WD16, 2026-08-22)
-
-Five of #409's six preconditions are resolved: non-fork backends **replaced** by the sequential degrade
-(no thread backend exists; the Ractor one is dead upstream), vocabulary **cleared** (vocabulary 1 ships
-as it stands; the Steins divergence is architectural, raised as steins#468 / steins#469), WD13 budget
-**arbitrated** by the CI `effect-budget` job, `effects.lsp` **decided** (editor mode stays effect-free,
-spelled as a key defaulting to `false`), taint-only rows closed by #411/#415.
-
-Left: the release-notes migration note, and the flip commit itself.
+Five of six preconditions resolved by ADR-103 WD16 (2026-08-22). Left: the release-notes migration
+note and the flip commit. Two updates posted to the issue: the migration note needs **no lane caveat**
+and **no "clear your cache first"** (both cache keys carry `Rigor::VERSION`, so the first run after the
+upgrade is always cold and analysing) — and **#446 is a counterweight**: either it lands before the
+flip or the release note names it.
 
 ## Also open, not effects
 
-- **#427** — the warm==cold self-check gate is structurally blind on every gem-bump PR: the cache key is
-  scoped to `hashFiles('Gemfile.lock')`, so the warm arm starts empty and the gate compares cold to
-  cold. **Green CI on a gem bump is not evidence about the rbs marshal hazard.**
-- **#431** — text output carries no rule ID for any rule. Re-scoped from an effects-only claim after
-  checking; needs a design call, not a fix.
-- **#343** (rubocop 1.89.0) still fails Lint; #86 stays held.
+- **#427** — the warm==cold self-check gate is structurally blind on every gem-bump PR. Green CI on a
+  gem bump is not evidence about the rbs marshal hazard.
+- **#431** — text output carries no rule ID for any rule; needs a design call, not a fix.
+- **#343** (rubocop 1.89.0) still fails Lint; **#86** stays held.
 
 ## What this session learned that is not in a commit
 
-- **Verify a subagent's finding before filing it.** Two of the walkthrough's 28 were misdiagnosed —
-  "effect diagnostics lack rule IDs" (no rule has them) and "`plugin-attribution` is never emitted" (it
-  is; first-party rows discharge their own taint). Both were already public issues when the next agent
-  caught them. Chasing the first correction is what turned up #438, so the checking paid twice.
-- **Give parallel agents disjoint survey checkouts.** Two agents used
-  `rigor-survey/redmine` at once; one deleted the other's cache mid-measurement, and that batch had to
-  be discarded and re-run on a private copy. The rigor repo tolerates concurrent readers; a survey
-  target under measurement does not.
-- **A walkthrough finds what a spec cannot.** Every item in the batch was in shipped, gated, green code.
-  The suite proves the feature works; only a person walking it finds that half of it is inert warm, that
-  narrowing the path weakens the answer, and that nothing lists the vocabulary.
+- **Ask what varies before assuming which component is broken.** #441 was reported as an rbs-inline
+  lane bug. The lane was innocent; the run mode was the variable, and the reporter's fixture was a
+  `cache_store: nil` shape, i.e. `--no-cache`. Both observations were correct and the conclusion drawn
+  from them was not.
+- **A subagent's finding is a lead, not a fact.** Two of the walkthrough's 28 were misdiagnosed and
+  already public as issues when the next agent caught them; chasing the first correction is what turned
+  up #438. Verify before filing, and re-scope publicly when you did not.
+- **Give parallel agents disjoint worktrees AND disjoint survey targets.** Two agents shared
+  `rigor-survey/redmine`; one deleted the other's cache mid-measurement and that batch was void. The
+  three-agent wave after that ran cleanly with one target assigned to one agent.
+- **Rebase each PR onto master before merging a parallel batch, then re-run the gate on the integrated
+  result.** Four PRs landed today; three conflicted on `[Unreleased]` alone, which is cheap — but the
+  gate that matters is the one after the last merge, not the one on each branch.

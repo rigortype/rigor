@@ -12,6 +12,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[plugins]** `rigor-activesupport-core-ext` no longer collides with rbs's bundled `stdlib/date` on `Date#to_time`, so `Date` and `DateTime` type as themselves instead of silently degrading to an untyped value for every project that activates the plugin, while `date.to_time(:utc)` keeps resolving through ActiveSupport's widened arity ([#437](https://github.com/rigortype/rigor/issues/437)).
+
 ### Added
 
 - **[docs]** The CI templates now carry a commented-out `rigor effects check` step, so a project adopting effect labels has one line to uncomment rather than a workflow to compose ([#376](https://github.com/rigortype/rigor/issues/376)).

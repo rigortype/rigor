@@ -3,10 +3,11 @@
 module Rigor
   module Analysis
     class Runner
-      # Mutable per-run holder for the four end-of-pass snapshots that the analysis paths compute as a side
+      # Mutable per-run holder for the end-of-pass snapshots that the analysis paths compute as a side
       # effect and the rest of the run reads back: the RBS `class_decl_paths` / `signature_paths` tables
-      # (consumed by {RunStats}), the synthesized-namespace name list, and the `conforms-to` scan results
-      # (consumed by the diagnostic aggregator).
+      # (consumed by {RunStats}), the synthesized-namespace name list, the `conforms-to` scan results
+      # (consumed by the diagnostic aggregator), and the effect-annotation carrier (#441 — consumed by
+      # {EffectAnnotationResidualPass} on the runs that never store the environment).
       #
       # The snapshots are written by whichever analysis path ran ({PoolCoordinator} sequential / fork-pool /
       # fallback) and read by the {Runner} and {DiagnosticAggregator}. A shared mutable holder keeps the
@@ -16,7 +17,7 @@ module Rigor
       class RunSnapshots
         attr_accessor :class_decl_paths, :signature_paths,
                       :synthesized_namespaces, :quarantined_signatures, :conformance_results,
-                      :env_build_failure
+                      :env_build_failure, :effect_annotation_carrier
 
         # Constructor defaults match the {Runner} constructor: the pre-seed values `build_run_stats` /
         # `pre_file_diagnostics` read before the first analysis path runs are frozen empties. The
@@ -29,6 +30,7 @@ module Rigor
           @quarantined_signatures = [].freeze
           @conformance_results = [].freeze
           @env_build_failure = nil
+          @effect_annotation_carrier = [].freeze
         end
 
         # Per-`#run` reset. Mirrors the original `#run` body, which reset these to NON-frozen empties (distinct
@@ -40,6 +42,7 @@ module Rigor
           @quarantined_signatures = []
           @conformance_results = []
           @env_build_failure = nil
+          @effect_annotation_carrier = [].freeze
         end
       end
     end

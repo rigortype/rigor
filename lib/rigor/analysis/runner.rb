@@ -751,13 +751,20 @@ module Rigor
         ).diagnostics
       end
 
-      # The residual takes the loader the run ALREADY resolved — never `envelope_rbs_loader`, which
+      # The residual takes the virtual RBS the run ALREADY resolved — never `envelope_rbs_loader`, which
       # builds one on demand. This runs on the effects-off path, where an environment build is a cost
       # the project did not ask for; the `signature_paths:` `.rbs` stratum is always read, and the
       # rbs-inline stratum rides whatever the run happened to have.
+      #
+      # #441 — two sources, because two shapes of run resolve an environment and only one of them keeps
+      # it: `@run_environment` is assigned solely by the ADR-45 result-cacheable path, while every
+      # ANALYZING run (`--no-cache`, `--workers N`, `--incremental`, an editor buffer) builds one inside
+      # {PoolCoordinator} and lets it go. The snapshot is that run's carrier, and taking it second
+      # preserves the cacheable path's byte-identical behaviour.
       def effect_annotation_residual_diagnostics
         EffectAnnotationResidualPass.new(
-          configuration: @configuration, rbs_loader: @run_environment&.rbs_loader
+          configuration: @configuration,
+          virtual_rbs: @run_environment&.rbs_loader&.virtual_rbs || @snapshots.effect_annotation_carrier
         ).diagnostics
       end
 

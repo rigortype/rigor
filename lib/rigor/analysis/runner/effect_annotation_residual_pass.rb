@@ -29,9 +29,15 @@ module Rigor
       #   parse, no analysis, no environment build, and nothing at all when the tree does not exist.
       # - It consults the run's virtual RBS — rbs-inline's `# @rbs %a{…}` — only when the run ALREADY
       #   resolved an environment. Building one here to find an `:info` would cost more than the
-      #   `:info` is worth, so an inline-only annotation is reported when the run happens to have a
-      #   loader at hand and not otherwise. Under-reporting is the fail-quiet direction; the check
-      #   itself never depends on this pass.
+      #   `:info` is worth, so the pass never reaches for a loader; every caller hands it what the run
+      #   had. #441 is why the caller side matters: an ANALYZING run always has an environment, so the
+      #   stratum is carried out of the analysis path as
+      #   {Runner::RunSnapshots#effect_annotation_carrier} whatever its mode, and the two lanes of
+      #   chapter 16 report the same annotation. The one shape that genuinely has no environment is a
+      #   warm ADR-87 WD4 cache hit served by {Analysis::RunCacheProbe} — an engine-free path whose
+      #   whole point is not building one — so there, and only there, an inline-only annotation goes
+      #   unreported. Under-reporting is the fail-quiet direction; the check itself never depends on
+      #   this pass.
       #
       # It is computed OUTSIDE the cached run assembly for the same reason `EffectEnvelopePass` is:
       # the `effects:` block is deliberately absent from the diagnostics cache identity, so a residual
@@ -55,11 +61,12 @@ module Rigor
         private_constant :MESSAGE
 
         # @param configuration [Rigor::Configuration]
-        # @param rbs_loader [Rigor::Environment::RbsLoader, nil] a loader the run ALREADY has; never
-        #   one built for this pass. `nil` simply drops the virtual-RBS stratum.
-        def initialize(configuration:, rbs_loader: nil)
+        # @param virtual_rbs [Array<Array(String, String)>, nil] `[buffer name, RBS source]` pairs the
+        #   run ALREADY resolved; never a loader built for this pass. Empty / nil simply drops the
+        #   virtual-RBS stratum.
+        def initialize(configuration:, virtual_rbs: nil)
           @configuration = configuration
-          @rbs_loader = rbs_loader
+          @virtual_rbs = virtual_rbs
         end
 
         # @return [Array<Diagnostic>] zero or one.
@@ -68,7 +75,7 @@ module Rigor
           return NO_DIAGNOSTICS if @configuration.disabled_rules.include?(RULE)
 
           sources = Effects::SignatureSources.collect(
-            signature_paths: @configuration.signature_paths, virtual_rbs: @rbs_loader&.virtual_rbs
+            signature_paths: @configuration.signature_paths, virtual_rbs: @virtual_rbs
           )
           return NO_DIAGNOSTICS if sources.empty?
 

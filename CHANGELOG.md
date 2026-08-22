@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[docs]** The CI templates now carry a commented-out `rigor effects check` step, so a project adopting effect labels has one line to uncomment rather than a workflow to compose ([#376](https://github.com/rigortype/rigor/issues/376)).
+
 - **[docs]** The manual gained a chapter on effect labels — [Effect labels](docs/manual/19-effect-labels.md) — walking the whole feature end to end for the first time: the label vocabulary in one table, what the `rigor effects` report really looks like on a mid-size Rails application, the direct-versus-transitive split between the report and the snapshot, the `check` / `explain` / `update` review loop, the CI step and its exit codes, and the envelopes and `%a{pure}` annotations that turn an observation into a bound.
   - Written as the workflow around the reference material that already existed: [`rigor effects`](docs/manual/02-cli-reference.md#rigor-effects) keeps every flag, [Configuration](docs/manual/03-configuration.md#effect-labels) keeps every key. The CI chapter gained a `rigor effects check` step with its exit codes and the `--baseline <(git show origin/main:…)` review pattern, and the caching chapter now says how effect summaries are keyed.
 - **[effects]** An effect policy or envelope that names Steins' `failure.*` labels now parses instead of earning `effect.unknown-label`, so a policy written for the PHP analyzer reads unchanged here ([#378](https://github.com/rigortype/rigor/issues/378), [ADR-103](docs/adr/103-effect-labels.md)).

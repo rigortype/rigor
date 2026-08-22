@@ -6,6 +6,7 @@ require_relative "../diagnostic"
 # itself on a cache hit (#428), and requiring the full rule set would put `rigor/inference` back into
 # a hit's `$LOADED_FEATURES`.
 require_relative "../check_rules/rule_ids"
+require_relative "../../effects/inline_anchor"
 require_relative "../../effects/signature_sources"
 
 module Rigor
@@ -48,9 +49,6 @@ module Rigor
 
         RULE = CheckRules::RULE_EFFECT_ANNOTATIONS_UNCHECKED
 
-        RUBY_EXTENSION = ".rb"
-        private_constant :RUBY_EXTENSION
-
         MESSAGE = "Effect annotations (`%a{pure}` / `%a{rigor:v1:effect …}`) are present in your " \
                   "project's signatures, but `.rigor.yml` carries no `effects:` block, so effect " \
                   "collection never runs and nothing checks them — they are documentation, not a " \
@@ -91,27 +89,18 @@ module Rigor
         # Positioned at the first annotation itself rather than at `.rigor.yml:1`: the fix is a config
         # edit, but the thing being reported is something the author wrote, and pointing at it is what
         # tells them WHICH declaration is inert.
+        #
+        # A `virtual:` buffer's line numbers are the synthesized RBS's, not the `.rb`'s, so the position
+        # is re-anchored onto the Ruby file the same way the envelope reader anchors a declaration
+        # ({Effects::InlineAnchor}) — one mapping, so the advisory and the check can never name two
+        # different lines for one annotation.
         def build_diagnostic(found)
           name, content, line = found
           path = Effects::SignatureSources.source_path(name)
-          line = inline_line(path, content, line) if path.end_with?(RUBY_EXTENSION)
           Diagnostic.new(
-            path: path, line: line, column: 1, message: MESSAGE,
-            severity: :info, rule: RULE, source_family: :builtin
+            path: path, line: Effects::InlineAnchor.ruby_line(path: path, buffer: content, buffer_line: line),
+            column: 1, message: MESSAGE, severity: :info, rule: RULE, source_family: :builtin
           )
-        end
-
-        # A `virtual:` buffer's line numbers are the synthesized RBS's, not the `.rb`'s — rbs-inline
-        # re-emits the author's comment block above each generated member, so the two drift apart by
-        # the length of every body above. Find the annotation's own text in the Ruby file instead.
-        def inline_line(path, content, line)
-          spelling = content.each_line.to_a[line - 1].to_s[/%a\{[^}]*\}/]
-          return line if spelling.nil?
-
-          File.foreach(path).with_index(1) { |source_line, number| return number if source_line.include?(spelling) }
-          line
-        rescue StandardError
-          line
         end
       end
     end

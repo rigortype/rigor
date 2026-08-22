@@ -10,17 +10,19 @@ module Rigor
       # one (the `rbs_extended.unsatisfied-conformance` precedent) — there is no Ruby `def` that could
       # carry the typo. A value written in configuration has no location at all and lands at
       # `.rigor.yml:1`, the `rbs.coverage.quarantined-signature` precedent.
+      # A declaration's `location` is already the position a reader can open, `.rbs` and rbs-inline
+      # alike: the synthesized-buffer line is re-anchored onto the Ruby file where the envelope is
+      # built ({Rigor::Effects::InlineAnchor}, #432), so this module only has to split it. Doing the
+      # re-anchoring here as well used to be the fix, and it could not tell two identically-spelled
+      # annotations in one file apart — every finding in it landed on the first.
       module DeclarationPosition
         CONFIG_PATH = ".rigor.yml"
-        RUBY_EXTENSION = ".rb"
-        private_constant :RUBY_EXTENSION
 
         module_function
 
-        # @param finding [#location, #spelling]
-        # @param sources [Hash{String => String}] in-memory sources, for the buffer-backed run path
+        # @param finding [#location]
         # @return [Array(String, Integer)] `[path, line]`
-        def of(finding, sources: {})
+        def of(finding)
           location = finding.location
           return [CONFIG_PATH, 1] if location.nil?
 
@@ -28,25 +30,7 @@ module Rigor
           return [CONFIG_PATH, 1] if path.empty?
 
           line = raw_line.to_i
-          line = 1 unless line.positive?
-          return [path, line] unless path.end_with?(RUBY_EXTENSION)
-
-          [path, inline_line(path, finding.spelling, sources) || line]
-        end
-
-        # rbs-inline's writer re-emits the author's own comment block ABOVE the annotation it generates,
-        # so a line number read out of the synthesized buffer drifts from the `.rb` line the author
-        # actually wrote — by the length of every method body above it. The annotation's own text is
-        # unique enough to find again, so the Ruby file is what answers. One read, and only when a
-        # finding already exists.
-        def inline_line(path, spelling, sources)
-          return nil if spelling.nil?
-
-          source = sources[path] || File.read(path)
-          source.each_line.with_index(1) { |line, number| return number if line.include?(spelling) }
-          nil
-        rescue StandardError
-          nil
+          [path, line.positive? ? line : 1]
         end
       end
     end

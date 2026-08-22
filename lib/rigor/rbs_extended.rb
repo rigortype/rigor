@@ -4,6 +4,7 @@ require_relative "type"
 require_relative "builtins/imported_refinements"
 require_relative "flow_contribution"
 require_relative "effects/envelope"
+require_relative "effects/inline_anchor"
 require_relative "effects/label"
 require_relative "effects/label_set"
 require_relative "effects/signature_sources"
@@ -769,6 +770,12 @@ module Rigor
 
     # `path:line` for the annotation, project-relative when it sits under the working directory, so a
     # diagnostic message names `sig/foo.rbs:12` rather than an absolute path.
+    #
+    # A synthesized buffer is re-anchored here rather than at any of the surfaces that render it
+    # ({Effects::InlineAnchor}; #432). The buffer's own line numbers describe a document the author
+    # never saw, so an envelope carrying one is wrong for every consumer at once — the diagnostic, the
+    # `effect.unknown-label` position, `rigor explain`, the JSON formatter, LSP hover. Correcting it
+    # where the value is *built* is what makes them agree without each learning the mapping.
     def render_annotation_location(annotation)
       location = annotation_location(annotation)
       return nil if location.nil?
@@ -777,10 +784,23 @@ module Rigor
       name = buffer.respond_to?(:name) ? buffer.name.to_s : nil
       return nil if name.nil? || name.empty?
 
-      line = location.respond_to?(:start_line) ? location.start_line : 1
-      "#{relative_annotation_path(name)}:#{line}"
+      path = relative_annotation_path(name)
+      "#{path}:#{annotation_line(annotation, location, buffer, path)}"
     rescue StandardError
       nil
+    end
+
+    # The line a reader can open. For a real `.rbs` that is the parser's own answer; for the
+    # `virtual:rbs-inline:…rb` buffer the writer produced, the annotation is found again in the Ruby
+    # source by its own spelling.
+    def annotation_line(annotation, location, buffer, path)
+      line = location.respond_to?(:start_line) ? location.start_line : 1
+      content = buffer.respond_to?(:content) ? buffer.content : nil
+      return line if content.nil?
+
+      Effects::InlineAnchor.ruby_line(
+        path: path, buffer: content, buffer_line: line, spelling: "%a{#{annotation.string}}"
+      )
     end
 
     # The buffer-name → readable-path rule lives with the walk that produces the buffers

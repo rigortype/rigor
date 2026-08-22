@@ -220,7 +220,7 @@ module Rigor
         end
 
         def position_of(finding)
-          DeclarationPosition.of(finding, sources: @sources)
+          DeclarationPosition.of(finding)
         end
 
         # The vocabulary an unknown label is judged against: the shipped registry plus whatever

@@ -36,6 +36,99 @@ RSpec.describe Rigor::CLI do
     expect(err).to include("Unknown command: nope")
   end
 
+  # #433 — a mistake in `.rigor.yml` used to abort with an uncaught exception and a ~30-frame backtrace
+  # naming a file inside `lib/rigor/`, which reads as a crash rather than as "fix this key". The message
+  # was always right; only its delivery was not. These examples assert what the user SEES — the rendered
+  # line — because the exception class is an implementation detail of where the check happens to live.
+  describe "a configuration mistake" do
+    # Every example writes its own `.rigor.yml` over one trivial file, so the run reaches configuration
+    # handling and nothing else.
+    def in_project(config, &)
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "class A\n  def b = 1\nend\n")
+        File.write(File.join(dir, ".rigor.yml"), config)
+        Dir.chdir(dir, &)
+      end
+    end
+
+    # `EntryPoints` is a process-global registry, and these examples care about exactly what it holds.
+    around do |example|
+      Rigor::Effects::EntryPoints.reset!
+      example.run
+      Rigor::Effects::EntryPoints.reset!
+    end
+
+    it "renders an unregistered reach: preset as one rigor: line naming the presets this project has" do
+      Rigor::Effects::EntryPoints.register("rails-controllers", ["app/controllers/**/*.rb"])
+      Rigor::Effects::EntryPoints.register("rails-mailers", ["app/mailers/**/*.rb"])
+
+      status, _out, err = in_project("paths: [.]\neffects:\n  snapshot:\n    reach: [rails]\n") do
+        run_cli("effects", "update")
+      end
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err.lines.size).to eq(1)
+      expect(err).to start_with("rigor: ")
+      expect(err).to include('effects.snapshot.reach names no registered entry-point preset: "rails"',
+                             "presets registered in this project: rails-controllers, rails-mailers")
+      expect(err).not_to include("lib/rigor/")
+    end
+
+    it "tells a project with no preset-registering plugin how a preset comes to exist" do
+      status, _out, err = in_project("paths: [.]\neffects:\n  snapshot:\n    reach: [rails]\n") do
+        run_cli("effects", "update")
+      end
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("no plugin in this project registers an entry-point preset",
+                             "listing that plugin under `plugins:`")
+    end
+
+    it "renders a malformed effects.attribution: key as one rigor: line naming the key" do
+      config = "paths: [.]\neffects:\n  attribution:\n    \"Net::HTTP get\": [io.net.http]\n"
+      status, _out, err = in_project(config) { run_cli("effects", "update") }
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err.lines.size).to eq(1)
+      expect(err).to eq("rigor: effects.attribution key is not a method key " \
+                        "(`Owner#method` / `Owner.method`): \"Net::HTTP get\"\n")
+    end
+
+    # The two the issue named are not special: every tier-2 value `Configuration` cannot proceed on now
+    # arrives the same way, on every command that loads a configuration.
+    it "renders the sibling effects: keys and a non-effects key the same way" do
+      cases = {
+        "paths: [.]\neffects:\n  tolerated: [\"not a label\"]\n" =>
+          "rigor: effects.tolerated is not a well-formed effect label: \"not a label\"\n",
+        "paths: [.]\neffects:\n  labels: [\"Bad Label\"]\n" =>
+          "rigor: effects.labels is not a well-formed effect label: \"Bad Label\"\n",
+        "paths: [.]\neffects:\n  envelopes:\n    - match: \"*.rb\"\n" =>
+          "rigor: effects.envelopes[0] has no `effect:` bound (write `effect: []` for the empty envelope)\n",
+        "paths: [.]\ntarget_ruby: nope\n" =>
+          "rigor: target_ruby must be a version (e.g. \"3.4\", \"4.0\", \"3.4.0\") or \"latest\", got \"nope\"\n"
+      }
+
+      cases.each do |config, expected|
+        status, _out, err = in_project(config) { run_cli("check", ".") }
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to eq(expected)
+      end
+    end
+
+    # A typo in the file the user is about to be told to fix used to escape as a `Psych::SyntaxError`
+    # backtrace naming a file inside Ruby's stdlib, which points nowhere useful at all.
+    it "renders a syntax error in .rigor.yml at the position that caused it" do
+      status, _out, err = in_project("paths: [.\neffects: {}\n") { run_cli("check", ".") }
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err.lines.size).to eq(1)
+      expect(err).to start_with("rigor: ")
+      expect(err).to match(/\.rigor\.yml:\d+:\d+: not valid YAML: /)
+      expect(err).not_to include("psych")
+    end
+  end
+
   # ADR-46 — the incremental-analysis acceptance gate.
   describe "check --verify-incremental" do
     it "reports OK and exits 0 when incremental matches a full run" do

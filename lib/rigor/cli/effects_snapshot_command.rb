@@ -6,6 +6,7 @@ require_relative "../analysis/runner"
 require_relative "../cache/store"
 require_relative "../configuration"
 require_relative "../effects/discharge"
+require_relative "../effects/entry_points"
 require_relative "../effects/path_finder"
 require_relative "../effects/snapshot"
 require_relative "../effects/snapshot_diff"
@@ -79,8 +80,13 @@ module Rigor
         File.write(path, snapshot.to_yaml)
         @err.puts("rigor: wrote #{path} (#{snapshot.methods.size} method(s), #{snapshot.reach.size} reach entr" \
                   "#{snapshot.reach.size == 1 ? 'y' : 'ies'})")
-        @err.puts("rigor: note — `effects.snapshot.reach:` is empty, so the snapshot records `methods:` only.") if
-          configuration.effects_snapshot_reach.empty?
+        # #436 — the note names what to write, not only what is missing: the same per-project preset
+        # enumeration the unregistered-preset error uses, so the two can never disagree about which
+        # names this project's plugin set makes available.
+        if configuration.effects_snapshot_reach.empty?
+          @err.puts("rigor: note — `effects.snapshot.reach:` is empty, so the snapshot records `methods:` " \
+                    "only (#{Effects::EntryPoints.availability}).")
+        end
         0
       end
 

@@ -6,6 +6,7 @@ require_relative "bleeding_edge"
 require_relative "ci_detector"
 require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
+require_relative "configuration_error"
 require_relative "effects/entry_points"
 require_relative "effects/label"
 require_relative "effects/method_key"
@@ -358,16 +359,27 @@ module Rigor
     # {CLI::CheckCommand#load_check_configuration}).
     def self.load_with_includes(path, visited: Set.new)
       absolute = File.expand_path(path)
-      raise ArgumentError, "circular include: #{absolute}" if visited.include?(absolute)
+      raise ConfigurationError, "circular include: #{absolute}" if visited.include?(absolute)
 
-      raw = YAML.safe_load_file(absolute, aliases: false) || {}
-      raise ArgumentError, "config file must be a YAML mapping: #{absolute}" unless raw.is_a?(Hash)
+      raw = read_yaml(absolute)
+      raise ConfigurationError, "config file must be a YAML mapping: #{absolute}" unless raw.is_a?(Hash)
 
       base_dir = File.dirname(absolute)
       includes = Array(raw.delete("includes") || [])
       data = resolve_paths_in(raw, base_dir)
       next_visited = visited + [absolute]
       merge_includes(data, includes, base_dir, next_visited)
+    end
+
+    # #433's sibling: a typo in the file the user is about to be told to fix is a configuration mistake
+    # like any other, and escaped as a `Psych::SyntaxError` backtrace naming a file inside Ruby's stdlib.
+    # Psych's own `#message` embeds the path in a parenthesised prefix that reads badly after `rigor: `,
+    # so the position is re-rendered in the `path:line:column` form the rest of Rigor's output uses.
+    def self.read_yaml(absolute)
+      YAML.safe_load_file(absolute, aliases: false) || {}
+    rescue Psych::SyntaxError => e
+      detail = [e.problem, e.context].compact.join(" ")
+      raise ConfigurationError, "#{absolute}:#{e.line}:#{e.column}: not valid YAML: #{detail}"
     end
 
     def self.merge_includes(data, includes, base_dir, visited)
@@ -377,7 +389,7 @@ module Rigor
       includes.each do |inc|
         inc_path = File.expand_path(inc.to_s, base_dir)
         unless File.exist?(inc_path)
-          raise ArgumentError, "include not found: #{inc.inspect} (referenced from #{base_dir})"
+          raise ConfigurationError, "include not found: #{inc.inspect} (referenced from #{base_dir})"
         end
 
         accumulated = deep_merge(accumulated, load_with_includes(inc_path, visited: visited))
@@ -737,7 +749,7 @@ module Rigor
 
       gate = value.to_s.to_sym
       unless VALID_EFFECTS_GATES.include?(gate)
-        raise ArgumentError,
+        raise ConfigurationError,
               "effects.snapshot.gate must be one of #{VALID_EFFECTS_GATES.inspect}, got #{value.inspect}"
       end
 
@@ -756,7 +768,7 @@ module Rigor
       entries.each do |entry|
         next if Effects::EntryPoints.glob?(entry) || Effects::EntryPoints.name?(entry)
 
-        raise ArgumentError,
+        raise ConfigurationError,
               "effects.snapshot.reach entry is neither a file glob nor a well-formed entry-point preset " \
               "name: #{entry.inspect} (a preset name is #{Effects::EntryPoints::NAME_PATTERN.inspect}; " \
               "anything carrying a path or glob character is treated as a file glob instead)"
@@ -768,7 +780,7 @@ module Rigor
     def coerce_effects_tolerated(value)
       labels = Array(value).map(&:to_s)
       labels.each do |label|
-        raise ArgumentError, "effects.tolerated is not a well-formed effect label: #{label.inspect}" unless
+        raise ConfigurationError, "effects.tolerated is not a well-formed effect label: #{label.inspect}" unless
           Effects::Label.valid?(label)
       end
       labels.uniq.sort.freeze
@@ -795,7 +807,7 @@ module Rigor
     def coerce_effects_labels(value)
       labels = Array(value).map(&:to_s)
       labels.each do |label|
-        raise ArgumentError, "effects.labels is not a well-formed effect label: #{label.inspect}" unless
+        raise ConfigurationError, "effects.labels is not a well-formed effect label: #{label.inspect}" unless
           Effects::Label.valid?(label)
       end
       labels.uniq.sort.freeze
@@ -809,7 +821,7 @@ module Rigor
       value.each_with_object({}) do |(key, labels), out|
         name = key.to_s
         unless Effects::MethodKey.valid?(name)
-          raise ArgumentError,
+          raise ConfigurationError,
                 "effects.attribution key is not a method key (`Owner#method` / `Owner.method`): #{name.inspect}"
         end
 
@@ -826,16 +838,16 @@ module Rigor
 
     def coerce_effects_envelope(entry, index)
       where = "effects.envelopes[#{index}]"
-      raise ArgumentError, "#{where} is not a mapping: #{entry.inspect}" unless entry.is_a?(Hash)
+      raise ConfigurationError, "#{where} is not a mapping: #{entry.inspect}" unless entry.is_a?(Hash)
 
       match = coerce_effects_envelope_selector(entry["match"], "#{where}.match")
       namespace = coerce_effects_envelope_selector(entry["namespace"], "#{where}.namespace")
       if match.nil? == namespace.nil?
-        raise ArgumentError, "#{where} must name exactly one of `match:` (a path glob) or `namespace:` " \
-                             "(a constant glob), got #{match.nil? ? 'neither' : 'both'}"
+        raise ConfigurationError, "#{where} must name exactly one of `match:` (a path glob) or `namespace:` " \
+                                  "(a constant glob), got #{match.nil? ? 'neither' : 'both'}"
       end
       unless entry.key?("effect")
-        raise ArgumentError, "#{where} has no `effect:` bound (write `effect: []` for the empty envelope)"
+        raise ConfigurationError, "#{where} has no `effect:` bound (write `effect: []` for the empty envelope)"
       end
 
       {
@@ -848,14 +860,14 @@ module Rigor
       return nil if value.nil?
 
       selector = value.to_s
-      raise ArgumentError, "#{where} is empty" if selector.strip.empty?
+      raise ConfigurationError, "#{where} is empty" if selector.strip.empty?
 
       selector.freeze
     end
 
     def coerce_effect_label_list(labels, where)
       labels.map(&:to_s).each do |label|
-        raise ArgumentError, "#{where} is not a well-formed effect label: #{label.inspect}" unless
+        raise ConfigurationError, "#{where} is not a well-formed effect label: #{label.inspect}" unless
           Effects::Label.valid?(label)
       end.uniq.sort.freeze
     end
@@ -886,7 +898,7 @@ module Rigor
       when Hash
         entry.to_h { |k, v| [k.to_s, v] }.freeze
       else
-        raise ArgumentError,
+        raise ConfigurationError,
               "plugin configuration entry must be a String or Hash, got #{entry.inspect}"
       end
     end
@@ -903,7 +915,7 @@ module Rigor
     def coerce_target_ruby(value)
       s = value.to_s
       unless s.match?(TARGET_RUBY_FORMAT)
-        raise ArgumentError,
+        raise ConfigurationError,
               "target_ruby must be a version (e.g. \"3.4\", \"4.0\", \"3.4.0\") or \"latest\", got #{value.inspect}"
       end
 
@@ -924,11 +936,11 @@ module Rigor
     # disabling parallelism.
     def coerce_parallel_workers(value)
       integer = Integer(value)
-      raise ArgumentError, "parallel.workers must be >= 0, got #{value.inspect}" if integer.negative?
+      raise ConfigurationError, "parallel.workers must be >= 0, got #{value.inspect}" if integer.negative?
 
       integer
     rescue TypeError, ArgumentError => e
-      raise ArgumentError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
+      raise ConfigurationError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
     end
 
     # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
@@ -955,7 +967,7 @@ module Rigor
     def coerce_network_policy(value)
       sym = value.to_sym
       unless VALID_NETWORK_POLICIES.include?(sym)
-        raise ArgumentError,
+        raise ConfigurationError,
               "plugins_io.network must be one of #{VALID_NETWORK_POLICIES.inspect}, got #{value.inspect}"
       end
 
@@ -967,7 +979,7 @@ module Rigor
     def coerce_severity_profile(value)
       sym = value.to_sym
       unless SeverityProfile::VALID_PROFILES.include?(sym)
-        raise ArgumentError,
+        raise ConfigurationError,
               "severity_profile must be one of " \
               "#{SeverityProfile::VALID_PROFILES.inspect}, got #{value.inspect}"
       end
@@ -980,7 +992,7 @@ module Rigor
     # {SeverityProfile::VALID_SEVERITIES} symbols (`:error` / `:warning` / `:info` / `:off`). Unknown
     # severities raise; unknown rule ids are silently kept (the override is inert until the rule lands).
     def coerce_severity_overrides(value)
-      raise ArgumentError, "severity_overrides must be a Hash, got #{value.inspect}" unless value.is_a?(Hash)
+      raise ConfigurationError, "severity_overrides must be a Hash, got #{value.inspect}" unless value.is_a?(Hash)
 
       value.to_h do |k, v|
         # YAML 1.1 parses bare `off`/`on`/`no`/`yes`/`true`/`false` as booleans, so a user who wrote `off` (a
@@ -988,7 +1000,7 @@ module Rigor
         # `to_sym` blows up with a backtrace.
         unless v.is_a?(String) || v.is_a?(Symbol)
           hint = v == false ? %( — did you mean the string "off"?) : ""
-          raise ArgumentError,
+          raise ConfigurationError,
                 "severity_overrides[#{k.inspect}] is #{v.inspect}, a YAML boolean#{hint} " \
                 "Bare off/on/no/yes/true/false are parsed as booleans; quote the severity " \
                 "(e.g. \"off\")."
@@ -996,7 +1008,7 @@ module Rigor
 
         sym = v.to_sym
         unless SeverityProfile::VALID_SEVERITIES.include?(sym)
-          raise ArgumentError,
+          raise ConfigurationError,
                 "severity_overrides[#{k.inspect}] must be one of " \
                 "#{SeverityProfile::VALID_SEVERITIES.inspect}, got #{v.inspect}"
         end
@@ -1016,7 +1028,7 @@ module Rigor
       when Array then { "mode" => "list", "ids" => freeze_ids(value) }
       when Hash then coerce_bleeding_edge_hash(value)
       else
-        raise ArgumentError,
+        raise ConfigurationError,
               "bleeding_edge must be true, false, a list of feature ids, " \
               "or { all: true, except: [...] }, got #{value.inspect}"
       end.freeze

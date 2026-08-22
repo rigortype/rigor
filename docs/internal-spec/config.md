@@ -37,7 +37,7 @@ design, not an implementation detail** — a key may sit in one tier, or all thr
 | Tier | Checker | When | On failure |
 | --- | --- | --- | --- |
 | **1. Schema** | editor / CI | edit time | An editor squiggle. **No runtime effect whatsoever.** |
-| **2. `Configuration` load** | this implementation | load time | `ArgumentError` — the run stops. |
+| **2. `Configuration` load** | this implementation | load time | `Rigor::ConfigurationError` (an `ArgumentError`) — the run stops. |
 | **3. Config audit** | this implementation | check time | A STDERR warning, and a tagged entry under `config_warnings` in the `--format=json` payload. **The exit code is unchanged.** |
 
 Tier 2 is for a value the loader cannot proceed on (a malformed `dependencies.source_inference[]`
@@ -47,7 +47,26 @@ entry, an out-of-range `budget_per_gem`, an `effects.snapshot.gate` outside the 
 effect label, an `effects.attribution` key that is not a method key, an `effects.envelopes[]` entry
 naming both or neither of `match:` / `namespace:`, or one carrying no `effect:` bound at all). Tier 2
 answers *shape*, not *meaning*: a label the effect registry has never heard of loads fine wherever it
-appears, because an unknown label fails open and is `effect.unknown-label`'s business. Tier 3 is for a
+appears, because an unknown label fails open and is `effect.unknown-label`'s business.
+
+A file that is not parseable YAML at all fails the same way, one step earlier, with the position
+re-rendered as `path:line:column` rather than in Psych's own prefix form.
+
+**A tier-2 failure MUST reach the user as a `rigor:` line, never as a backtrace.** `Rigor::CLI#run`
+rescues `Rigor::ConfigurationError` for every command, prints `rigor: <message>` and exits `64` — the
+same shape a bad flag takes, because a mistake in `.rigor.yml` is the same kind of event. This is why
+the class is narrower than `ArgumentError`: it separates *the user got the file wrong* from *Rigor got
+itself wrong*, and only the first is presentable. It stays an `ArgumentError` subclass so the
+long-standing tier-2 contract, and every caller outside the CLI that rescues by that name, are
+unaffected. The message is the whole diagnostic — it MUST name the offending key, and where the answer
+is knowable it MUST carry it (`effects.snapshot.reach`'s unregistered-preset error enumerates the
+presets this project's plugins did register).
+
+One tier-2 check does not run at load: an `effects.snapshot.reach` **preset name** is validated where
+the snapshot expands it, because presets are registered by plugins and the plugins load *from* the
+configuration being validated. Load time checks the entry's shape; the registry is only complete once
+analysis begins. The two halves are `Configuration#coerce_effects_reach` and
+`Rigor::Effects::EntryPoints.resolve!`, and the CLI renders both the same way. Tier 3 is for a
 value that is well-formed but **silently resolves to nothing** — a missing signature path, an unknown
 library name, an inert suppression, an unrecognised top-level key; the class of mistake whose only
 symptom is confusing and downstream.

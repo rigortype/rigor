@@ -58,6 +58,22 @@ module Rigor
         signature_paths.nil? || signature_paths.empty? ? DEFAULT_ROOTS : signature_paths
       end
 
+      # The FIRST annotated virtual entry, as a `collect`-shaped one-element array (or an empty one).
+      #
+      # #441 — the analysis paths use this to hand the annotations-unchecked residual the inline stratum
+      # of a run that resolved an environment but never stored it. Reduced to one entry on purpose: the
+      # residual reports one annotation per run, so the carrier a run holds past the environment's own
+      # lifetime is a single synthesized buffer rather than the project's whole virtual tree.
+      #
+      # @param virtual_rbs [Array<Array(String, String)>, nil]
+      # @return [Array<Array(String, String)>] zero or one pair.
+      def annotated_carrier(virtual_rbs)
+        Array(virtual_rbs).each do |name, content|
+          return [[name.to_s, content.to_s]] if ANNOTATION_HINT.match?(content)
+        end
+        [].freeze
+      end
+
       # The first `[name, content, line]` carrying an effect annotation, or nil. Line numbers are
       # 1-based and count into `content`, which for a `virtual:` buffer is the SYNTHESIZED text — the
       # caller re-anchors it against the Ruby file when that matters.

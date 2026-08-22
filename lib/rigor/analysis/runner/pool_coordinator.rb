@@ -6,6 +6,7 @@ require_relative "../../environment"
 require_relative "../diagnostic"
 require_relative "../worker_session"
 require_relative "../run_stats"
+require_relative "../../effects/signature_sources"
 require_relative "../../rbs_extended/conformance_checker"
 require_relative "../../runtime/jit"
 
@@ -123,6 +124,7 @@ module Rigor
 
         def analyze_files_sequentially(files, environment)
           snapshot_project_signature_state(environment)
+          snapshot_effect_annotation_carrier(environment&.rbs_loader)
           result = files.flat_map { |path| @analyze_file.call(path, environment) }
           if @collect_stats
             loader = environment.rbs_loader
@@ -155,6 +157,27 @@ module Rigor
           @snapshots.quarantined_signatures = loader&.quarantined_signatures || []
           @snapshots.env_build_failure = loader&.env_build_failure
           @snapshots.conformance_results = RbsExtended::ConformanceChecker.scan(loader)
+        end
+
+        # #441 — the inline stratum of `effect.annotations-unchecked`, carried out of the analysis path as
+        # small plain data, for the same reason the block above is: the environment stays a LOCAL so it goes
+        # GC-eligible when the path returns, and the residual pass runs after it.
+        #
+        # {Runner#effect_annotation_residual_diagnostics} used to read the loader off `@run_environment`,
+        # which only the ADR-45 result-cacheable path ever assigns — so a `--no-cache`, `--workers N` or
+        # `--incremental` run reported a `.rbs` annotation and stayed silent about the identical one written
+        # as an rbs-inline comment, while a default run reported both. The environment was there either way;
+        # nothing was carrying it. {Effects::SignatureSources.annotated_carrier} reduces it to at most ONE
+        # synthesized buffer, which is all a one-`:info`-per-run pass can spend.
+        #
+        # Skipped when collection is on — then {Runner::EffectEnvelopePass} reads the loader directly and
+        # this pass is gated off — so a collecting run pays nothing, and a project with no synthesizing
+        # plugin answers with an empty array and no regex at all.
+        def snapshot_effect_annotation_carrier(loader)
+          virtual = @record_effects ? nil : loader&.virtual_rbs
+          @snapshots.effect_annotation_carrier = Effects::SignatureSources.annotated_carrier(virtual)
+        rescue StandardError
+          @snapshots.effect_annotation_carrier = [].freeze
         end
 
         # Sequential-mode environment resolver. Returns the supplied `environment:` override (with the
@@ -408,6 +431,7 @@ module Rigor
           # Force the full RBS load on the parent so children copy-on-write inherit a warm Environment
           # rather than each rebuilding it after the fork.
           session.environment.rbs_loader&.prewarm
+          snapshot_effect_annotation_carrier(session.environment.rbs_loader)
           snapshot_fork_pool_stats(session) if @collect_stats
 
           worker_count = [@workers, files.size].min
@@ -540,6 +564,7 @@ module Rigor
         # per-file analysis runs on the coordinator, identical to the default sequential path.
         def analyze_files_sequentially_fallback(files, reason:)
           environment = build_runner_environment
+          snapshot_effect_annotation_carrier(environment.rbs_loader)
           diagnostics = files.flat_map { |path| @analyze_file.call(path, environment) }
           loader = environment.rbs_loader
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze

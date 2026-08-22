@@ -39,8 +39,11 @@ module Rigor
     #
     # - `effect.annotations-unchecked` is **reproduced here**. It was built to be free (a glob and a regex
     #   over the project's own signature tree — {Effects::SignatureSources}), so the probe simply runs it,
-    #   with no loader: the inline stratum is the documented fail-quiet direction of that pass, and it is
-    #   the stratum a run without an environment never had.
+    #   with no virtual RBS: the inline stratum is the documented fail-quiet direction of that pass, and it
+    #   is the stratum a run without an environment never had. #441 — that omission is unreachable rather
+    #   than merely tolerated, because a project whose plugins synthesise virtual RBS is exactly the one
+    #   whose probe key omits the `rbs.virtual_rbs` entry (§ above), so it misses here and the full path —
+    #   which carries the stratum in every run mode — answers instead.
     # - `effect.envelope-exceeded` / `effect.liskov-widened` / `effect.unknown-label` cannot be: they read
     #   the propagated effect graph and the cross-file discovery tables, i.e. the engine this path exists
     #   to skip. So the probe **declines** for a project that could earn one ({#envelope_lane_live?}) and

@@ -154,7 +154,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       coordinator = build_coordinator(collect_stats: true, snapshots: snapshots)
       loader = instance_double(
-        Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"]
+        Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"],
+                                       virtual_rbs: []
       )
       environment = instance_double(Rigor::Environment, rbs_loader: loader)
 
@@ -170,7 +171,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       # A loader that WOULD supply different values, so the assertion below fails if collect_stats stops
       # gating the read.
       loader = instance_double(
-        Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"]
+        Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"],
+                                       virtual_rbs: []
       )
       environment = instance_double(Rigor::Environment, rbs_loader: loader)
 
@@ -178,6 +180,40 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect(snapshots.class_decl_paths).to eq({})
       expect(snapshots.signature_paths).to eq([].freeze)
+    end
+
+    # #441 — the environment stays a LOCAL here (it must go GC-eligible when the path returns), so the one
+    # thing the run needs from it afterwards is carried out as data: the FIRST virtual buffer carrying an
+    # effect annotation, which is what `effect.annotations-unchecked` reports for the rbs-inline lane.
+    # Reduced to one entry on purpose — a one-`:info`-per-run pass cannot spend a whole virtual tree.
+    it "carries the first effect-annotated virtual buffer out of the sequential path" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      coordinator = build_coordinator(snapshots: snapshots)
+      loader = instance_double(
+        Rigor::Environment::RbsLoader,
+        virtual_rbs: [["virtual:x:plain.rb", "class Plain\nend\n"],
+                      ["virtual:x:memo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"],
+                      ["virtual:x:other.rb", "class Other\n  %a{pure}\nend\n"]]
+      )
+
+      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+
+      expect(snapshots.effect_annotation_carrier.map(&:first)).to eq(["virtual:x:memo.rb"])
+    end
+
+    # Collection ON is the envelope pass's lane, and it reads the loader directly — so the walk here is
+    # skipped rather than duplicated, and a collecting run pays nothing for a diagnostic it cannot emit.
+    it "carries nothing when effect collection is on" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      coordinator = build_coordinator(
+        configuration: Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("effects" => {})),
+        snapshots: snapshots
+      )
+      loader = instance_double(Rigor::Environment::RbsLoader)
+
+      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+
+      expect(snapshots.effect_annotation_carrier).to eq([])
     end
   end
 
@@ -567,7 +603,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       coordinator = build_coordinator(snapshots: snapshots)
       loader = instance_double(
-        Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"]
+        Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"],
+                                       virtual_rbs: []
       )
       session = instance_double(
         Rigor::Analysis::WorkerSession, environment: instance_double(Rigor::Environment, rbs_loader: loader)
@@ -587,7 +624,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       coordinator = build_coordinator(configuration: configuration, snapshots: snapshots)
       loader = instance_double(
-        Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [],
+        Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [], virtual_rbs: [],
                                        quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 2, []]
       )
       session = instance_double(
@@ -807,7 +844,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         configuration: configuration, snapshots: snapshots, analyze_file: ->(_p, _e) { [] }
       )
       loader = instance_double(
-        Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [],
+        Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [], virtual_rbs: [],
                                        quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 1, []]
       )
       built = instance_double(Rigor::Environment, rbs_loader: loader)
@@ -823,7 +860,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
        "when the project declares no signature_paths" do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       coordinator = build_coordinator(snapshots: snapshots, analyze_file: ->(_p, _e) { [] })
-      loader = instance_double(Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [])
+      loader = instance_double(Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [],
+                                                              virtual_rbs: [])
       built = instance_double(Rigor::Environment, rbs_loader: loader)
       allow(coordinator).to receive(:build_runner_environment).and_return(built)
 

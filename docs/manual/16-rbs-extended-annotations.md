@@ -210,7 +210,11 @@ on:
   at the declaration.
 - Without the block, one
   [`effect.annotations-unchecked`](04-diagnostics.md#rule-effect-annotations-unchecked)
-  `:info` per run tells you the annotations are inert.
+  `:info` per run tells you the annotations are inert — from either
+  lane, with one exception: a run that analyses **no file at all**
+  (a warm `rigor check --incremental` with nothing changed) has no
+  synthesised RBS to read, so it reports a `.rbs` annotation and not
+  an inline one. Any run that analyses something reports both.
 
 Two practical notes. Annotating one method in a `.rbs` file forces you to
 declare its whole signature — RBS has no way to annotate a method it does

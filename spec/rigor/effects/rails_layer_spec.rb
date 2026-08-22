@@ -142,6 +142,69 @@ RSpec.describe "the Rails effect layer" do
     end
   end
 
+  # #440 — the row that names the method, as opposed to the rows that name its callers.
+  #
+  # `User` never writes `def save`, so its `save` row is synthesised whole from the class body's callbacks
+  # and its uniqueness validator. That row used to carry the validator's SELECT and nothing else, and read
+  # `User#save: ≤ io.db.read` — "save does not write to the database", which is the one line in a Rails
+  # report a reader can check at a glance. The write was there all along at every *call site*; what was
+  # missing was the framework's own claim about the selector on the synthesised unit.
+  describe "the synthesised persistence row" do
+    # Every selector `rigor-activerecord` maps to a write, on a model that defines none of them. One
+    # example per method rather than one for `save`, because the defect was structural and they shared it.
+    %w[save save! update update! update_attribute touch increment! decrement!].each do |selector|
+      it "reports the write on an inherited ##{selector}" do
+        expect(declared("User##{selector}")).to include("io.db.write")
+      end
+    end
+
+    # The destroy triggers are synthesised from `before_destroy` rather than from `before_save`, so they
+    # come off a second code path and a fix that only reached the save group would leave them behind.
+    %w[destroy destroy! delete].each do |selector|
+      it "reports the write on a destroy-side ##{selector}" do
+        expect(declared("Audit##{selector}")).to include("io.db.write")
+      end
+    end
+
+    it "reports the write on the singleton twins a callback synthesises" do
+      expect(declared("User.create")).to include("io.db.write")
+      expect(declared("User.create!")).to include("io.db.write")
+    end
+
+    it "keeps the validator's read beside the write rather than instead of it" do
+      expect(declared("User#save")).to include("io.db.read", "io.db.write")
+    end
+
+    # `valid?` runs the validators and issues no INSERT; a fix that reached for the write list by name
+    # would have coloured this one too.
+    it "leaves a read-only trigger a read" do
+      expect(declared("User#valid?")).to include("io.db.read")
+      expect(declared("User#valid?")).not_to include("io.db.write")
+    end
+
+    # The guard rail. A model that spells out `def save` and never reaches `super` has replaced the
+    # framework's implementation, and the report must keep saying what that body really does.
+    it "does not paint the write onto an override that never delegates upward" do
+      expect(declared("RefusedAudit#save")).not_to include("io.db.write")
+    end
+
+    # …while the same class's *un*-overridden siblings still carry it, so the exemption is per selector.
+    it "keeps the write on the siblings such an override did not replace" do
+      expect(declared("RefusedAudit#save!")).to include("io.db.write")
+    end
+
+    it "keeps the write on an override that wraps the framework with super" do
+      expect(declared("WrappedAudit#save")).to include("io.db.write")
+    end
+
+    # A model with neither a callback nor a uniqueness validator earns no synthetic unit at all, and the
+    # fix must not invent one: `PlainRecord#save` would otherwise land in the snapshot for every model in
+    # the project. Silence is not the same claim as `≤ io.db.read`.
+    it "invents no row for a model whose class body declares nothing" do
+      expect(table["ApplicationRecord#save"]).to be_nil
+    end
+  end
+
   describe "the queue adapter" do
     # `config/application.rb` says `:solid_queue`, so the enqueue is an INSERT and a "no database on this
     # path" envelope is right to object to it.

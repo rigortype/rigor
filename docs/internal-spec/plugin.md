@@ -636,6 +636,12 @@ FrameworkUnits`), not as edges at the call site: the call site is in another fil
 in the model's. The propagator then resolves an ordinary `(User, :instance, "save")` edge to the
 synthetic unit exactly as it resolves any other, ancestry and closed-world override join included.
 
+A synthesised unit stands for the whole selector, so it also carries whatever the plugin's own
+`effect_attributions:` say about that `(class, singleton, selector)` — a plugin that rows
+`ActiveRecord::Base#save` as `io.db.write` gets that write on `User#save`, not only at `user.save`. See
+[the effect-summaries spec](effect-summaries.md) for the normative rule, including the one exemption
+for a class body that replaces the selector without reaching `super`.
+
 The enum has **no spelling for `perform_later` → `perform`**, and that absence is the enforcement of
 ADR-103 WD4: the deferred body runs in another process on another stack, so the caller's code does not
 contain it. The one exception is licensed by the project rather than by the plugin — under a declared

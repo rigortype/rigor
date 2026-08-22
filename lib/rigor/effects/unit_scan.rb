@@ -128,11 +128,22 @@ module Rigor
         @causes = []
         @edges = []
         @nested = []
+        @delegates_upward = false
       end
 
       # Units discovered inside this one — a nested `def`, or a `define_method` with a literal name whose
       # block becomes that method's body. Each is `[name, singleton, body_node, parameters_node]`.
       attr_reader :nested
+
+      # Whether this body reaches `super` — an override that delegates upward still runs whatever the
+      # superclass does. Nested `def`s are unit boundaries, so a `super` counted here is this unit's.
+      #
+      # v1 does nothing else with `super`: it contributes no edge and no taint, which is a gap of its own.
+      # What reads this bit is {FrameworkUnits.replaced?}, to tell a `def save` that replaces the
+      # framework's implementation from one that wraps it (#440).
+      def delegates_upward?
+        @delegates_upward
+      end
 
       # Walks `body` and returns `[Summary, edges]`.
       def run(body)
@@ -214,6 +225,8 @@ module Rigor
         when Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
              Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode
           classify_mutation(node.receiver)
+        when Prism::SuperNode, Prism::ForwardingSuperNode
+          @delegates_upward = true
         end
       end
 

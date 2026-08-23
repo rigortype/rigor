@@ -262,8 +262,7 @@ The negative query. It fails, and it fails in the worst way: the answer looks co
 
 Redmine has twenty-seven `#update` actions and not one of them records a database write.
 
-**The mechanism, isolated to a two-method A/B inside one controller.** `GroupsController` — same
-class, same `@group.save` call:
+**The A/B, inside one controller.** `GroupsController` — same class, same `@group.save` call:
 
 ```ruby
 def create
@@ -276,16 +275,35 @@ def update
   … if @group.save                          # → reach records []
 ```
 
-The plugin's `ActiveRecord::Base#save` row matches through the *project's* superclass table, keyed on
-the receiver's type. An ivar assigned in the same method is typed; an ivar assigned by a
-`before_action` in a superclass (`ApplicationController#find_issue`, `#find_model_object`) is not, so
-the receiver is dynamic and the row never matches. `IssuesController#update` proves the point from
-the other side — its reach explains `mutate.self`, `mutate.local`, `mutate.static` and `global.read`
-through `save_issue_with_child_records`, and nothing at all about `@issue.save`.
+> **Correction, 2026-08-24 — this note first read that pair as "an ivar assigned by a `before_action`
+> is untyped", and that was wrong.** `find_group` is in `GroupsController` itself, not in a
+> superclass, so nothing here is a cross-class flow. Two separate mechanisms were being read as one:
+>
+> 1. **A union receiver projected to no class at all** ([#455](https://github.com/rigortype/rigor/issues/455), fixed
+>    2026-08-24). [ADR-58](../adr/58-ivar-field-typing.md) contributes a declaration-sourced `nil` to
+>    every ivar `initialize` does not write, so *every cross-method ivar read is a `T | nil`* — and the
+>    effect collector's receiver projection had no union arm. The call contributed no label and no edge
+>    **while the row still read exhaustive**. The same hole swallowed every `find_by` + `&.` site, which
+>    is why it was worth more than the ivar framing: `featured_tag&.destroy!` in Mastodon's
+>    `ActivityPub::Activity::Remove#remove_featured_tags` is an ivar-free instance of it.
+> 2. **`Group.visible.find(params[:id])` types `Dynamic`** — an ActiveRecord scope chain nothing models
+>    — so `GroupsController#update` is a plain `dynamic-receiver`, which the report *does* disclose. It
+>    is an ordinary inference gap, not a silent one, and the union fix does not touch it. What separated
+>    the two actions was never where the ivar was assigned but how it was *produced*: `Group.new` types,
+>    a scope chain does not.
+>
+> With #455 fixed, the table's after-figures are: redmine `io.db.write` reach entries **27 → 35** and
+> `#update` **0 / 27 → 3 / 27**; mastodon **114 → 169** and `#update` **8 / 41 → 21 / 43**,
+> `#destroy` **9 / 59 → 23 / 64**. `rigor check`'s diagnostic stream is byte-identical on both. The
+> verdict on the story does not change — a negative reading is still unlicensed — but its size does.
 
-**So the effect system's Rails value is bounded by cross-method ivar receiver typing** — which is
-[ADR-58](../adr/58-ivar-field-typing.md)'s subject, and the dominant Rails idiom is the case it does
-not cover. Every US-5 and US-8 number in this note moves when that moves.
+`IssuesController#update` shows the second mechanism from the other side: its reach explains
+`mutate.self`, `mutate.local`, `mutate.static` and `global.read` through
+`save_issue_with_child_records`, and (before #455) nothing at all about `@issue.save`.
+
+**So the effect system's Rails value is bounded by receiver typing** — the union projection above, and
+beyond it the ActiveRecord scope chains that type `Dynamic`. Every US-5 and US-8 number in this note
+moves when those move.
 
 Compounding it: `reach:` rows are exhaustive for **2.4 %** (redmine) / **8.7 %** (mastodon) of entry
 points, so a negative reading is unlicensed 91–98 % of the time — and the report says so only through
@@ -326,9 +344,12 @@ content-free.
    been stated: **on a Rails application, every effect a team would write a policy about is in the
    unjudgeable lane.** The snapshot's `≤+` marker is the escape hatch and is undocumented as such.
 
-2. **Rails effect visibility equals ivar receiver typing.** The `GroupsController#create` /
-   `#update` A/B is the whole story in nine lines of application code. This is the single highest-value
-   engine lever for the effect system, and it is not an effects issue.
+2. **Rails effect visibility equals receiver typing.** The `GroupsController#create` / `#update` A/B is
+   the whole story in nine lines of application code — but see the correction under US-8: it is two
+   mechanisms, not one. The first, a union receiver projecting to no class, was an effects bug and is
+   [#455](https://github.com/rigortype/rigor/issues/455), fixed 2026-08-24 (+8 / +55 write-recording
+   entry points). The second, an ActiveRecord scope chain typing `Dynamic`, is an inference gap and
+   remains the highest-value lever — and it is not an effects issue.
 
 3. **A negative reading is never licensed and nothing at the point of reading says so.** 2.4 % / 8.7 %
    exhaustive on `reach:`. The ` …?` hedge cannot carry that weight at 93 % density; a reader needs the
@@ -337,7 +358,7 @@ content-free.
 ## Filed
 
 - [#454](https://github.com/rigortype/rigor/issues/454) — every label a Rails policy would name lives in the lane no diagnostic can read (design call)
-- [#455](https://github.com/rigortype/rigor/issues/455) — a `before_action`-assigned ivar hides every ActiveRecord effect (the `GroupsController` A/B)
+- [#455](https://github.com/rigortype/rigor/issues/455) — a union-typed receiver projected to no class, so every cross-method ivar read and every `find_by` + `&.` contributed nothing while reading exhaustive (**fixed 2026-08-24**; filed under a mechanism that turned out to be wrong — see the correction under US-8)
 - [#456](https://github.com/rigortype/rigor/issues/456) — `job.*` and `email.*` have zero producers; the Rails plugins attribute neither
 - [#457](https://github.com/rigortype/rigor/issues/457) — `rigor effects` has no query surface; the pure set (449 methods on redmine) is the one answer nobody can ask for
 - [#458](https://github.com/rigortype/rigor/issues/458) — `Socket.gethostname` proves `io.net`, colouring 5 % of Redmine's rows as network

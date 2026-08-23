@@ -23,6 +23,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[effects]** `rigor effects` now reads a call on an optional receiver — a `Foo | nil`, which is what every cross-method instance-variable read and every `find_by`-shaped return is — as a call on a `Foo`, instead of contributing nothing while the row still claimed to be exhaustive ([#455](https://github.com/rigortype/rigor/issues/455)).
+  - The idioms this covers are ordinary: `@record.save` read in a method other than the one that assigned `@record`, and `thing&.destroy!` after a `find_by`. On Redmine the entry points recorded as writing to the database go from 27 to 35 and on Mastodon from 114 to 169; three of Redmine's twenty-seven `#update` actions now record the write they perform, where none did before.
+  - A receiver whose arms disagree still contributes no label, and a receiver one of whose arms the analyzer could not name now marks the summary non-exhaustive rather than reading as effect-free. `rigor check`'s diagnostics are unchanged on both applications.
+
 - **[cli]** The `documentation_url` carried by every diagnostic in `rigor check --format json`, and printed by `rigor explain`, now resolves: it points at the catalogue page on the documentation site instead of a GitHub branch this project has never had, so following one no longer lands on a 404 ([#438](https://github.com/rigortype/rigor/issues/438)).
   - Three more links shipped with the same wrong branch and are fixed too: the plugins link in the `.rigor.yml` that `rigor init` writes, and the homepage and installation links of the VS Code extension.
 - **[plugins]** `rigor effects` reports the database write on an ActiveRecord model's own `save` row, where a model with a callback or a uniqueness validator used to read `AuthSource#save: ≤ io.db.read` — the validator's query and no write at all ([#440](https://github.com/rigortype/rigor/issues/440)).

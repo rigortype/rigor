@@ -16,27 +16,41 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: the report's usability, then v0.3.5
+## Next session: two design calls, then the report's usability
 
-Every silent-failure bug the walkthrough opened is fixed. What is left of that batch is the surface
-a reader actually meets, and it is what the walkthrough said stops adopters cold:
+The effect system's *bugs* are fixed and its *surface* is filed. What the corpus adjudication
+(`docs/notes/20260823-effect-user-stories-corpus.md`, ten user stories run against redmine +
+mastodon) added is that two of the ten failures are not surface at all:
 
-1. **#439** — a path argument narrows the *analysis*, so the same method gets a weaker answer, unmarked.
-   It is also the only tractability lever the report has, which is what makes it a trap. Do it **before
-   or with** #434, whose fix is what removes the reason to reach for it.
-2. **#434** — 31,191 lines on Redmine, 38.5 % of rows content-free, no summary, no `--limit`.
-3. **#435** (four CLI affordance gaps) · **#429** (nothing lists the vocabulary) · **#436**'s remaining
-   half (should a project whose plugins register a preset *default* `reach:` to it?).
+1. **#454 — every label a Rails policy would name is unjudgeable.** Plugin rows go to the declared
+   lane (`unit_scan.rb:296`) and `EnvelopeCheck` reads the proven lane only
+   (`envelope_check.rb:14-20`); both are correct, and composed they mean **no bound can ever fire on
+   a database access**. `io.db.*` is proven zero times in 11,702 corpus rows. The snapshot's `≤+`
+   marker *does* gate it and nothing documents that. Needs an ADR-103 WD ruling — document-only, an
+   opt-in `:info` rule, or a verified-plugin-row lane — before v0.4.0 promises anything about bounds.
+2. **#455 — Rails effect visibility equals ivar receiver typing.** `GroupsController#create` records
+   `io.db.write` (`@group = Group.new` in the method); `#update` records nothing (same `@group.save`,
+   ivar from `before_action`). 0 of redmine's 27 `#update` actions record a write. ADR-58's per-class
+   ivar index does not span the superclass-writes / subclass-reads flow. This is the highest-value
+   engine lever for the whole feature and it is not an effects change.
 
-**#434, #435, #429 and #436 all touch the same `rigor effects` output surface — give them to ONE agent**,
-not four. #439 is a different mechanism and separates cleanly.
+Then the surface batch, unchanged from last session and still one agent's worth:
 
-Also open and independent: **#452** (a class-level rbs-inline envelope is silently inert — the fourth
-instance of the declared lane going quiet), **#449** (the ActiveSupport overlay omits `Date#to_time`, so
-`date.to_time(:utc)` is a false positive without the plugin), **#427** (the warm==cold gate is blind on
-gem-bump PRs), **#430** / **#431** (both need a design call, not a fix).
+3. **#439** — a path argument narrows the *analysis*, so the same method gets a weaker answer,
+   unmarked. Do it **before or with** #434, whose fix removes the reason to reach for it.
+4. **#434** (31k-line report) · **#435** (four CLI affordance gaps) · **#429** (nothing lists the
+   vocabulary) · **#436** (should a preset-registering project default `reach:`?) · **#457** (the
+   report has no *query* surface — `--label`, `--pure`; distinct from #434's "make it smaller").
+   **All five touch the same output surface — give them to ONE agent.**
 
-`make verify` + `make docs-check` green on integrated master at `fbbdf8f5`.
+Also open and independent: **#456** (`job.*` / `email.*` have zero producers on either app, though
+`rigor-sidekiq` and `rigor-actionmailer` are loaded), **#458** (`Socket.gethostname` proves `io.net`,
+so 5 % of redmine reads as networked on a Message-ID lookup), **#452** (class-level rbs-inline
+envelope inert), **#449** (`Date#to_time` overlay gap), **#427** (warm==cold gate blind on gem-bump
+PRs), **#430** / **#431** (design calls).
+
+`make verify` + `make docs-check` green on master at `fbbdf8f5`; `make docs-check` green again at
+`3bfa7ad2` (docs-only).
 
 ## Consider cutting v0.3.5
 
@@ -46,38 +60,32 @@ reporting no database write (#440), the annotations notice silent on parallel ru
 degrading to untyped (#437), `super` reported as effect-free (#446), and config mistakes arriving as
 backtraces (#433). **No autonomous version bumps** — this needs an explicit ask.
 
-## What shipped, and the one pattern worth carrying
+## What the corpus adjudication is good for beyond its issues
 
-Six PRs today (#443, #444, #445, #447, #448, #450, #451, #453). The engine fixes were all one shape:
-
-- **#428** the declared-bound check was dropped by every cache hit; **#441** the annotations notice was
-  dropped on every parallel or `--no-cache` run; **#446** a `super` call contributed nothing *and the
-  row still claimed to be exhaustive*; **#452** (open) a class-level rbs-inline envelope is read by
-  nobody. Four ways for a declared bound to go unchecked, none of which said so.
-- **The rule that generalises: every path by which a declared bound can fail to be read must end in a
-  diagnostic, not in silence.** ADR-103's promise is that an unresolved call taints rather than being
-  guessed at; these were all cases where nothing was even reached, so nothing tainted.
-
-#446's fix is the model for the rest: the ancestor walk starts **above** the class and does no
-closed-world override join, because a subclass is never in `super`'s dispatch path — joining it would
-prove a label no execution can produce. Corpus note: `docs/notes/20260823-effect-super-edge-corpus.md`.
-`rigor check`'s diagnostic stream is byte-identical between arms on redmine and mastodon.
+The note is the first artefact that says what the feature is *worth*, with numbers, and four stories
+do work end to end — the reviewer's drift story especially (`effects check` is ten lines and exit 1;
+`explain` names the call chain unprompted). Both the v0.4.0 release notes and any talk or blog post
+about effects should be written from it rather than from the ADR, which describes the model and not
+the value. Two figures belong in the manual verbatim: `reach:` rows are exhaustive for **2.4 %**
+(redmine) / **8.7 %** (mastodon) of entry points, so **absence proves nothing** — and the ` …?` hedge
+sits on nine rows in ten, where it reads as wallpaper rather than as a warning.
 
 ## The v0.4.0 graduation (#409)
 
-Five of six preconditions resolved by ADR-103 WD16; #446 was the counterweight and is now cleared.
-Left: the release-notes migration note (which needs **no** lane caveat and **no** "clear your cache
-first" — both cache keys carry `Rigor::VERSION`) and the flip commit itself.
+Five of six preconditions resolved by ADR-103 WD16; #446 was the counterweight and is cleared. Left:
+the release-notes migration note (which needs **no** lane caveat and **no** "clear your cache first" —
+both cache keys carry `Rigor::VERSION`) and the flip commit itself. **#454 is now worth deciding
+first**: default-on ships a `check` surface whose bounds are structurally silent on the labels Rails
+users will reach for, and the migration note is where that has to be said if the answer is
+"document only".
 
-## What this session learned that is not in a commit
+## Pitfalls this session paid for
 
-- **A CHANGELOG slip on master goes straight into other agents' CI.** I added a duplicate `### Fixed`
-  to `[Unreleased]` and #451's run went red on it before I noticed. `make docs-check` does **not** cover
-  `spec/docs/changelog_conformance_spec.rb` — run that spec after any changelog edit, every time.
-- **Give parallel agents disjoint worktrees, disjoint survey targets, and no CHANGELOG.** The four-agent
-  wave landed clean with the changelog written centrally afterwards (now in AGENTS.md § Release Cadence);
-  the wave before it hand-resolved a conflict per PR.
-- **Verify the agent's finding, not just its patch.** Two reports this session were accurate about the
-  observation and wrong about the cause (#441's "lane" was the run mode; #433's manual mislink was
-  already fixed). Two others handed over defects worth more than the fix — #449 and #452 — but only
-  because their briefs asked what else the change touched.
+- **The snapshot omits `exhaustive:` when it is true** (`snapshot.rb:63`). A reader doing
+  `v['exhaustive']` gets `nil` on every exhaustive row and reports 0 %. Use `.fetch(_, true)`. My
+  headline number was that artefact for one round.
+- **`explain` is the fastest way to check whether a label means what you think.** Redmine's 215
+  `io.net` rows look like SMTP and are `Socket.gethostname`; one `explain --symbol` call showed it.
+  Never read a label census without sampling its origins.
+- **Nix + external cwd**: `nix develop --command` must be invoked with cwd inside the rigor repo;
+  `cd <target> && nix develop …` fails with "not part of a flake". Chdir *inside* the `bash -c`.

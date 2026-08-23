@@ -74,6 +74,9 @@ comparison) appears nowhere else in this index.
 | 2026-08-17 | [Effect catalogue — corpus measurement, before and after (issue #380)](20260817-effect-catalogue-corpus.md) |
 | 2026-08-17 | [Effect collection — where the WD13 budget went, and what got it back (issue #382)](20260817-effect-collection-perf.md) |
 | 2026-08-17 | [Rails effect layer — corpus measurement, before and after (issue #387)](20260817-effect-rails-layer-corpus.md) |
+| 2026-08-22 | [Effect system — first-adopter user story on Redmine](20260822-effect-user-story-redmine.md) |
+| 2026-08-23 | [`super` effect edge — corpus measurement (issue #446)](20260823-effect-super-edge-corpus.md) |
+| 2026-08-23 | [Effect labels — ten user stories, adjudicated against the corpus (redmine + mastodon)](20260823-effect-user-stories-corpus.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

@@ -23,6 +23,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[effects]** An effect envelope written on a **class** or **module** as an rbs-inline comment — `# @rbs %a{pure}` above `class Memo` — is now checked, instead of being silently ignored while the identical bound in a `.rbs` file worked ([#452](https://github.com/rigortype/rigor/issues/452)).
+  - It is the cheapest bound in the feature: one line, no per-method annotation, and it distributes over every method of the class. Before this, writing one and getting a clean run meant nothing had been checked. `%a{rigor:v1:effect …}` on a class or module was affected the same way and is fixed too; a method's own annotation still wins over the class bound, and an annotation a blank line separates from the declaration is still not attached to it — that is upstream's reading of the comment, and both lanes agree on it.
+
 - **[effects]** `rigor effects` now reads a call on an optional receiver — a `Foo | nil`, which is what every cross-method instance-variable read and every `find_by`-shaped return is — as a call on a `Foo`, instead of contributing nothing while the row still claimed to be exhaustive ([#455](https://github.com/rigortype/rigor/issues/455)).
   - The idioms this covers are ordinary: `@record.save` read in a method other than the one that assigned `@record`, and `thing&.destroy!` after a `find_by`. On Redmine the entry points recorded as writing to the database go from 27 to 35 and on Mastodon from 114 to 169; three of Redmine's twenty-seven `#update` actions now record the write they perform, where none did before.
   - A receiver whose arms disagree still contributes no label, and a receiver one of whose arms the analyzer could not name now marks the summary non-exhaustive rather than reading as effect-free. `rigor check`'s diagnostics are unchanged on both applications.

@@ -41,7 +41,7 @@ RSpec.describe "effect envelopes written as rbs-inline comments" do
 
   # The declaration reference each message carries — "declared … at PATH:LINE".
   def declared_at(diagnostics)
-    diagnostics.map { |diagnostic| diagnostic.message[/declared %a\{[^}]*\} at (\S+?),/, 1] }
+    diagnostics.map { |diagnostic| diagnostic.message[/declared %a\{[^}]*\}(?: on \S+)? at (\S+?),/, 1] }
   end
 
   it "checks a `# @rbs %a{pure}` envelope against the method's proven effects" do
@@ -149,6 +149,113 @@ RSpec.describe "effect envelopes written as rbs-inline comments" do
 
       expect(diagnostics.map(&:line)).to eq([9, 13])
       expect(declared_at(diagnostics)).to eq(["sig/demo.rbs:2", "sig/demo.rbs:5"])
+    end
+  end
+
+  # #452 — a bound written on the `class` or `module` itself, which is the cheapest one to write and the
+  # only one that needs no per-method annotation. `RBS::Inline::Writer` emits a *member's* annotations as
+  # real annotation lines and a *declaration's* as nothing at all: it echoes the author's comment above
+  # `class Foo` and stops. So this lane reached the envelope reader as a comment — no bound, no
+  # diagnostic, and a clean run that had checked nothing, while the identical `%a{pure}` above the same
+  # `class` in a `.rbs` file worked. Every example here is paired with that `.rbs` control.
+  describe "a bound written on the class or module (#452)" do
+    it "checks a class-level `# @rbs %a{pure}` against every method of the class" do
+      diagnostics = run_in(<<~RUBY)
+        # rbs_inline: enabled
+        # @rbs %a{pure}
+        class Memo
+          # @rbs return: String
+          def render
+            File.read("/etc/hosts")
+          end
+        end
+      RUBY
+
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include(
+        "Method Memo#render performs io.fs.read", "is declared %a{pure} on Memo at demo.rb:2"
+      )
+    end
+
+    it "reports the same finding for the same bound written in the signature tree" do
+      diagnostics = run_in(<<~RUBY, signature: <<~RBS, plugins: [])
+        class Memo
+          def render
+            File.read("/etc/hosts")
+          end
+        end
+      RUBY
+        %a{pure}
+        class Memo
+          def render: () -> String
+        end
+      RBS
+
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include("Method Memo#render performs io.fs.read")
+      expect(declared_at(diagnostics)).to eq(["sig/demo.rbs:1"])
+    end
+
+    it "checks a module-level `%a{rigor:v1:effect …}` the same way" do
+      diagnostics = run_in(<<~RUBY)
+        # rbs_inline: enabled
+        # @rbs %a{rigor:v1:effect io.fs.write}
+        module Memo
+          # @rbs return: String
+          def render
+            File.read("/etc/hosts")
+          end
+        end
+      RUBY
+
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include(
+        "performs io.fs.read", "declared %a{rigor:v1:effect io.fs.write} on Memo at demo.rb:2"
+      )
+    end
+
+    # Nearest wins, and the re-attachment must not disturb it: the method's own annotation is the one the
+    # writer already emitted, and a class bound distributing over it would make the narrower declaration
+    # unwritable.
+    it "lets a method's own annotation beat the class bound" do
+      diagnostics = run_in(<<~RUBY)
+        # rbs_inline: enabled
+        # @rbs %a{pure}
+        class Memo
+          # @rbs %a{rigor:v1:effect io.fs.read}
+          # @rbs return: String
+          def allowed
+            File.read("/etc/hosts")
+          end
+
+          # @rbs return: String
+          def bounded
+            File.read("/etc/passwd")
+          end
+        end
+      RUBY
+
+      expect(diagnostics.map { |diagnostic| diagnostic.message[/Method (\S+)/, 1] }).to eq(["Memo#bounded"])
+    end
+
+    # The writer echoes a comment block only when it emits the member it belongs to, so an annotation a
+    # blank line detaches from the declaration is never echoed and never re-attached. That is upstream's
+    # reading of the author's comment, and the re-attachment deliberately inherits it rather than
+    # inventing a second attachment rule.
+    it "leaves an annotation the author detached from the declaration alone" do
+      diagnostics = run_in(<<~RUBY)
+        # rbs_inline: enabled
+        # @rbs %a{pure}
+
+        class Memo
+          # @rbs return: String
+          def render
+            File.read("/etc/hosts")
+          end
+        end
+      RUBY
+
+      expect(diagnostics).to be_empty
     end
   end
 end

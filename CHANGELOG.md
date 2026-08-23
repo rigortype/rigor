@@ -23,6 +23,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[effects]** `Socket.gethostname` and the other calls that read this machine's own identity are reported as `io` rather than `io.net`, so a method no longer reads as network traffic because something under it looked up a hostname ([#458](https://github.com/rigortype/rigor/issues/458)).
+  - On Redmine the label travelled a long way from its source: `Mailer` builds each Message-ID from the hostname, so **219 of 4,234 rows** — every model `save`, every `Mailer` method, and the IMAP and POP3 pollers, whose actual connections are invisible — claimed `io.net`. Three rows carry it now, all of them genuine DNS resolution. `Socket.gethostbyname`, `Socket.getaddrinfo` and every other socket call are unchanged.
+
 - **[effects]** An effect envelope written on a **class** or **module** as an rbs-inline comment — `# @rbs %a{pure}` above `class Memo` — is now checked, instead of being silently ignored while the identical bound in a `.rbs` file worked ([#452](https://github.com/rigortype/rigor/issues/452)).
   - It is the cheapest bound in the feature: one line, no per-method annotation, and it distributes over every method of the class. Before this, writing one and getting a clean run meant nothing had been checked. `%a{rigor:v1:effect …}` on a class or module was affected the same way and is fixed too; a method's own annotation still wins over the class bound, and an annotation a blank line separates from the declaration is still not attached to it — that is upstream's reading of the comment, and both lanes agree on it.
 

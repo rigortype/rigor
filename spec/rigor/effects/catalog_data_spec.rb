@@ -135,6 +135,25 @@ RSpec.describe "the shipped core effect catalogue" do
       expect(catalog.lookup("Kernel", "puts").labels.to_a).to eq(["io.output.stdout"])
     end
 
+    # Measured on Redmine (#458): `Socket.gethostname` read as `io.net` under the class's `net` posture,
+    # and Redmine builds its Message-IDs from it — so 219 of 4,234 rows, every model `save` and every
+    # `Mailer#*` among them, claimed network traffic on the strength of a hostname lookup. `io` is the
+    # honest bound for a call that leaves the process and sends nothing.
+    it "reads the machine's own identity as io rather than io.net" do
+      expect(catalog.lookup("Socket", "gethostname", singleton: true).labels.to_a).to eq(["io"])
+      expect(catalog.lookup("Socket", "ip_address_list", singleton: true).labels.to_a).to eq(["io"])
+      expect(catalog.lookup("Socket", "getifaddrs", singleton: true).labels.to_a).to eq(["io"])
+    end
+
+    # The other half of the same decision: resolution really does reach the network, and the class's
+    # posture still answers for every socket call the rows do not name.
+    it "keeps io.net for resolution and for the rest of the socket surface" do
+      expect(catalog.lookup("Socket", "gethostbyname", singleton: true).labels.to_a).to eq(["io.net"])
+      expect(catalog.lookup("Socket", "getaddrinfo", singleton: true).labels.to_a).to eq(["io.net"])
+      expect(catalog.lookup("Socket", "connect").labels.to_a).to eq(["io.net"])
+      expect(catalog.lookup("Addrinfo", "foreach", singleton: true).labels.to_a).to eq(["io.net"])
+    end
+
     it "contributes nothing at all for a class the catalogue does not list" do
       expect(catalog.lookup("Tracer::Reporter", "report")).to be_nil
     end

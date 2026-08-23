@@ -50,6 +50,19 @@ module Rigor
         # space-free spelling is affected; `# :nodoc:` never reaches upstream's annotation grammar.
         RDOC_DIRECTIVE_COMMENT = /\A#:[a-z_][\w-]*:/
 
+        # An `%a{…}` the author wrote above a `class` / `module`, as upstream's writer echoes it: an ordinary
+        # comment, because the writer emits no annotation on a declaration
+        # ([#452](https://github.com/rigortype/rigor/issues/452)).
+        ECHOED_ANNOTATION = /\A\s*#\s*@rbs\s+(%a\{[^}]*\})\s*\z/
+
+        # The declaration the pending annotations belong to. `class`/`module` and the whitespace after the
+        # keyword, so `class_eval` is not one and the indentation to re-emit at is captured.
+        DECLARATION_LINE = /\A(\s*)(?:class|module)\s/
+
+        COMMENT_LINE = /\A\s*#/
+
+        private_constant :ECHOED_ANNOTATION, :DECLARATION_LINE, :COMMENT_LINE
+
         # @param require_magic_comment [Boolean] when `false` (the default since ADR-93 WD1), the magic
         #   comment is not required and the file is processed only if it actually carries an annotation — see
         #   {#annotated?}. When `true` (the old ADR-32 WD2 gate), only files opening with
@@ -82,7 +95,7 @@ module Rigor
           return nil if parsed.nil?
 
           uses, decls, rbs_decls = parsed
-          rendered = ::RBS::Inline::Writer.write(uses, decls, rbs_decls)
+          rendered = reattach_declaration_annotations(::RBS::Inline::Writer.write(uses, decls, rbs_decls))
           return nil if rendered.nil? || rendered.strip.empty?
 
           notices = unhonoured_annotations(result)
@@ -95,6 +108,48 @@ module Rigor
         end
 
         private
+
+        # Re-attaches a class- or module-level `%a{…}` that upstream's writer dropped (#452).
+        #
+        # `RBS::Inline::Writer` emits a member's annotations as real annotation lines and a *declaration's*
+        # as nothing at all — it echoes the author's comment block above `class Foo` and stops there. So the
+        # cheapest bound in the feature, one line above a class, reached the envelope reader as a comment:
+        # no bound, no diagnostic, and a clean run that had checked nothing. The `.rbs` lane, writing the
+        # same `%a{pure}` above the same `class`, worked. Both lanes now answer the same.
+        #
+        # The rewrite reads only what the writer itself emitted, in one pass, and is deliberately literal:
+        # an annotation the author spelled in a comment block that the writer echoed is re-emitted, at the
+        # declaration's own indentation, on the line the RBS grammar wants it on. Three properties make that
+        # safe rather than clever:
+        #
+        # - a comment block is echoed **only when its member is emitted**, so a detached annotation (one a
+        #   blank line separates from the declaration, which upstream drops) is never echoed and so never
+        #   re-attached — the two lanes agree about that too;
+        # - any non-comment line clears the pending set, so a member's own annotation — which the writer
+        #   *does* emit, on the line between the echo and the `def` — ends the run before a declaration can
+        #   claim it, and no annotation is ever attached twice;
+        # - the same property makes this forward-compatible: if upstream some day emits the declaration
+        #   annotation itself, that line clears the pending set and this contributes nothing.
+        def reattach_declaration_annotations(rendered)
+          return rendered if rendered.nil? || !rendered.include?("%a{")
+
+          pending = []
+          rendered.lines.flat_map do |line|
+            if (annotation = ECHOED_ANNOTATION.match(line))
+              pending << annotation[1]
+              line
+            elsif COMMENT_LINE.match?(line)
+              line
+            elsif (declaration = DECLARATION_LINE.match(line)) && !pending.empty?
+              emitted = pending.map { |spelling| "#{declaration[1]}#{spelling}\n" } << line
+              pending = []
+              emitted
+            else
+              pending = []
+              line
+            end
+          end.join
+        end
 
         # True when the file carries at least one rbs-inline annotation. Gates the magic-comment-free mode,
         # and is the difference between "honour annotations wherever they are" and "fabricate signatures for

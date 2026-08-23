@@ -128,7 +128,7 @@ module Rigor
         # {Accumulator#record} is what stops it paying for the `Data` and the origin lookup below.
         return if accumulator.recorded?(node)
 
-        dynamic = receiver.is_a?(Type::Dynamic)
+        dynamic = dynamic_receiver?(receiver)
         class_name, kind = descriptor_for(receiver)
         accumulator.record(
           node,
@@ -160,7 +160,44 @@ module Rigor
         when Type::HashShape then ["Hash", :instance]
         when Type::Constant then [receiver.value.class.name, :instance]
         when Type::Dynamic then descriptor_for(receiver.static_facet)
+        when Type::Union then union_descriptor(receiver)
         end
+      end
+
+      # Whether the typer's verdict on this receiver leaves its class a guess. A bare `Dynamic` is the
+      # original case; a union carrying a `Dynamic` arm is the same knowledge in a different shape, and
+      # before #455 it was the shape that said nothing — no class, no edge, and no taint, so the summary
+      # read *exhaustive* while an arm of its receiver was admittedly unknown.
+      def dynamic_receiver?(receiver)
+        return true if receiver.is_a?(Type::Dynamic)
+
+        receiver.is_a?(Type::Union) && receiver.members.any?(Type::Dynamic)
+      end
+
+      # A union projects to a class exactly when its non-nil arms all project to the SAME one (#455).
+      #
+      # `T?` is the case that pays, and it is not a corner: ADR-58 contributes a declaration-sourced
+      # `nil` to every instance variable not written in `initialize`, so **every cross-method ivar read
+      # is a union** — `@group.save` reads `Group | nil` where the same `Group.new.save` two lines up
+      # reads `Group`. Without this arm the receiver had no class, so the plugin row never matched, the
+      # edge was dropped, and the site contributed nothing *while the summary still read exhaustive*.
+      # Whether the nil arm means the call happens at all is a question for `possible-nil-receiver`; it
+      # says nothing about what the call does when it does happen, which is the only question here.
+      #
+      # Arms that disagree (`File | StringIO`) still project to nothing. Answering with either one would
+      # state an effect no single execution need perform, and answering with both is a shape the record
+      # has no room for — one call site carries one receiver class.
+      def union_descriptor(receiver)
+        descriptors = receiver.members.reject { |member| nil_member?(member) }.map { |member| descriptor_for(member) }
+        first = descriptors.first
+        return nil if first.nil?
+
+        descriptors.all? { |descriptor| descriptor == first } ? first : nil
+      end
+
+      def nil_member?(member)
+        (member.is_a?(Type::Constant) && member.value.nil?) ||
+          (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
       end
 
       # Fail-soft (WD13): the scan raising drops this file's summaries and never reaches `rigor check`.

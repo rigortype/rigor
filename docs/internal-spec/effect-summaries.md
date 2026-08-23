@@ -104,11 +104,19 @@ A `super` is a dispatch and contributes an **edge**, in every shape it takes —
 
 `UnitScan#delegates_upward?` reads the same node for an unrelated question — whether a class that wrote a body for a selector has *replaced* the framework's implementation or wrapped it (§ Framework units) — and the two must not be conflated: that bit is about the class, the edge is about what the parent does.
 
+### The receiver's class projection
+
+The tracer records one receiver class per call site, projected from the type the typer computed: a `Nominal` / `Singleton` names itself, a `Tuple` is an `Array`, a `HashShape` a `Hash`, a `Constant` its value's class, and a `Dynamic` whatever its static facet projects to. A type that projects to nothing costs an edge; it never produces a wrong one.
+
+A **union** projects to a class exactly when its non-`nil` arms all project to the same one. This is not a corner: [ADR-58](../adr/58-ivar-field-typing.md) contributes a declaration-sourced `nil` to every instance variable `initialize` does not write, so *every cross-method instance-variable read is a union*, as is every `find_by`-shaped return read through `&.`. Whether the `nil` arm means the call happens at all is `possible-nil-receiver`'s question and says nothing about what the call does when it does happen, which is the only question here.
+
+Arms that disagree project to nothing, because the record has room for one receiver class and answering with either arm would state an effect no single execution need perform. Arms that *cannot be named* — a union carrying a `Dynamic` — are the same knowledge as a bare `Dynamic` receiver in a different shape, and MUST taint accordingly: a summary whose receiver was admittedly unknown may not read exhaustive.
+
 ### Taints
 
 | Cause | When the tracer records it |
 | --- | --- |
-| `dynamic-receiver` | the typer's receiver type was `Dynamic`, and no envelope bounds the class its static facet named (§ The declared lane at call sites); the detail is the `DynamicOrigin` cause name, when one was recorded |
+| `dynamic-receiver` | the typer's receiver type was `Dynamic`, **or a union one of whose arms is** (§ The receiver's class projection), and no envelope bounds the class its static facet named (§ The declared lane at call sites); the detail is the `DynamicOrigin` cause name, when one was recorded |
 | `dynamic-send` | `send` / `public_send` / `__send__` with a non-literal selector (a literal one is an ordinary edge) |
 | `opaque-callable` | `.call` on a receiver that is neither a lambda literal nor the unit's own block parameter and whose class is unknown or `Proc` / `Method`; or a `&expr` block argument that is neither a symbol nor the unit's block parameter |
 | `unresolved-self-call` | an implicit-self call for which **every** dispatch tier declined, and whose selector the unit's own class carries no envelope for; the detail is the selector |

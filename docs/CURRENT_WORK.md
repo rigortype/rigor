@@ -28,11 +28,13 @@ mastodon) added is that two of the ten failures are not surface at all:
    a database access**. `io.db.*` is proven zero times in 11,702 corpus rows. The snapshot's `≤+`
    marker *does* gate it and nothing documents that. Needs an ADR-103 WD ruling — document-only, an
    opt-in `:info` rule, or a verified-plugin-row lane — before v0.4.0 promises anything about bounds.
-2. **#455 — Rails effect visibility equals ivar receiver typing.** `GroupsController#create` records
-   `io.db.write` (`@group = Group.new` in the method); `#update` records nothing (same `@group.save`,
-   ivar from `before_action`). 0 of redmine's 27 `#update` actions record a write. ADR-58's per-class
-   ivar index does not span the superclass-writes / subclass-reads flow. This is the highest-value
-   engine lever for the whole feature and it is not an effects change.
+2. **#460 — ActiveRecord scope chains type `Dynamic`.** The successor to #455, which **landed as
+   #459** and turned out to be a different bug than filed: the effect collector's receiver projection
+   had no `Type::Union` arm, so every `Foo | nil` — i.e. every cross-method ivar read (ADR-58 nil) and
+   every `find_by` + `&.` — named no class *while the row read exhaustive*. Fixed; write-recording
+   entry points redmine 27→35, mastodon 114→169. What is left is #460: `Group.visible.find(id)` types
+   `Dynamic`, so redmine's `#update` figure moved to 3/27 rather than to 27/27. Needs a design call on
+   where the relation type lives and on `find` / `find_by` / `first` nil polarity — the FP-risk axis.
 
 Then the surface batch, unchanged from last session and still one agent's worth:
 
@@ -43,14 +45,14 @@ Then the surface batch, unchanged from last session and still one agent's worth:
    report has no *query* surface — `--label`, `--pure`; distinct from #434's "make it smaller").
    **All five touch the same output surface — give them to ONE agent.**
 
-Also open and independent: **#456** (`job.*` / `email.*` have zero producers on either app, though
+Also open and independent: **#460** (above), **#456** (`job.*` / `email.*` have zero producers on either app, though
 `rigor-sidekiq` and `rigor-actionmailer` are loaded), **#458** (`Socket.gethostname` proves `io.net`,
 so 5 % of redmine reads as networked on a Message-ID lookup), **#452** (class-level rbs-inline
 envelope inert), **#449** (`Date#to_time` overlay gap), **#427** (warm==cold gate blind on gem-bump
 PRs), **#430** / **#431** (design calls).
 
-`make verify` + `make docs-check` green on master at `fbbdf8f5`; `make docs-check` green again at
-`3bfa7ad2` (docs-only).
+`make verify` + `make docs-check` green on master at `fbbdf8f5`; full CI green on #459's tree, merged
+at `9b6acc79` with master unmoved under it.
 
 ## Consider cutting v0.3.5
 
@@ -89,3 +91,9 @@ users will reach for, and the migration note is where that has to be said if the
   Never read a label census without sampling its origins.
 - **Nix + external cwd**: `nix develop --command` must be invoked with cwd inside the rigor repo;
   `cd <target> && nix develop …` fails with "not part of a flake". Chdir *inside* the `bash -c`.
+- **A correlation read off two corpus rows is not a mechanism.** #455 was filed as "a
+  `before_action`-assigned ivar is untyped" because that was the visible difference between
+  `GroupsController#create` and `#update`. Editing the `before_action` body to `@group = Group.new`
+  changed nothing and killed the hypothesis in fifteen seconds — `find_group` is in that same class.
+  **Perturb the suspected cause before filing**; the A/B that isolates a mechanism is the one where you
+  change that cause and nothing else.

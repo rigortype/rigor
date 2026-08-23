@@ -323,14 +323,30 @@ module Rigor
 
       # The class whose call produced this receiver, for an `on_result:` row: the constant in
       # `UserMailer.welcome(u).deliver_now`, the receiver class the typer had otherwise. Nil unless the
-      # receiver is itself a call with a receiver — a bare local variable says nothing about what made it.
+      # receiver is itself a call — a bare local variable says nothing about what made it.
+      #
+      # Two shapes beyond the constant, because between them they are how mail is actually sent (#456):
+      #
+      # - **an implicit-self producing call** — `issue_add(user, issue).deliver_later`, which is what a
+      #   mailer's own `def self.deliver_issue_add` wrapper looks like in Redmine, 97 call sites of it.
+      #   The producer is the unit's own class, which is exactly what an unqualified name resolves
+      #   against;
+      # - **a builder one link further out** — `AdminMailer.with(recipient: a).new_trends(…).deliver_later!`,
+      #   ActionMailer's parameterized form and the spelling Mastodon uses. `with` returns a lazy
+      #   `Parameterized::Mailer` no project declares a type for, so the constant is two calls away rather
+      #   than one, and stopping at the first link found nothing.
+      #
+      # The walk is the same heuristic the `on_result:` row already is — "the class that produced this" —
+      # applied transitively rather than once. A row still has to match the producer's ancestry AND the
+      # selector, so a chain that ends somewhere unrelated contributes nothing rather than a wrong label.
       def producer_class(receiver)
         return nil unless receiver.is_a?(Prism::CallNode)
 
         inner = receiver.receiver
-        return nil if inner.nil?
+        return @owner_class if inner.nil?
 
-        Source::ConstantPath.qualified_name(inner) || @calls[receiver]&.receiver_class
+        Source::ConstantPath.qualified_name(inner) || producer_class(inner) ||
+          @calls[receiver]&.receiver_class
       end
 
       # The receiver expression as the syntax spells it — `"Rails.cache"`, `"self.flash.now"` — or nil when

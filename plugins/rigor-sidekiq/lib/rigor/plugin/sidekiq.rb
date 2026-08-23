@@ -6,6 +6,7 @@ require_relative "sidekiq/worker_index"
 require_relative "sidekiq/worker_discoverer"
 require_relative "sidekiq/schedule_scan"
 require_relative "sidekiq/analyzer"
+require_relative "sidekiq/effects"
 
 module Rigor
   module Plugin
@@ -62,8 +63,19 @@ module Rigor
           # these are file paths, not directories, because a schedule is a named document rather than a tree.
           "schedule_paths" => { kind: :array, default: ["config/schedule.yml", "config/sidekiq.yml"] }
         },
-        produces: [:reachability_roots]
+        produces: [:reachability_roots],
+        # ADR-103 WD4 / WD10 (#456). The rows themselves are NOT here: they key on the project's own
+        # `worker_marker_modules:` setting, so they are built in `#effect_attributions` below.
+        effect_labels: []
       )
+
+      # ADR-103 WD10 — the enqueue rows, keyed on whichever modules this project's workers include.
+      # Overridden rather than declared on the manifest because the marker set is configuration;
+      # `Plugin::Registry#effect_contributions` is lazy and asks once per process, and only on a run with
+      # collection on.
+      def effect_attributions
+        Effects.attributions(@worker_marker_modules || Array(config.fetch("worker_marker_modules")).map(&:to_s))
+      end
 
       producer :worker_index, watch: -> { [[@worker_search_paths, "**/*.rb"]] } do |_params|
         WorkerDiscoverer.new(

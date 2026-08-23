@@ -14,7 +14,7 @@ RAILS_PLUGIN_GEMS = {
   "rigor-activejob" => "Activejob", "rigor-actionmailer" => "Actionmailer",
   "rigor-actionpack" => "Actionpack", "rigor-actioncable" => "Actioncable",
   "rigor-activestorage" => "Activestorage", "rigor-rails-i18n" => "RailsI18n",
-  "rigor-activesupport-core-ext" => "ActivesupportCoreExt"
+  "rigor-activesupport-core-ext" => "ActivesupportCoreExt", "rigor-sidekiq" => "Sidekiq"
 }.freeze
 
 RAILS_PLUGIN_GEMS.each_key do |gem_name|
@@ -239,6 +239,25 @@ RSpec.describe "the Rails effect layer" do
   describe "ActionMailer and ActionPack" do
     it "colours deliver_now as a send" do
       expect(declared("UsersController#deliver")).to include("email.send", "rails.actionmailer.deliver")
+    end
+
+    # #456 — `job.enqueue` shipped in the vocabulary and nothing produced it: across Redmine and Mastodon
+    # the census found zero instances, while Mastodon alone writes 219 `perform_async`-shaped call sites.
+    # A Sidekiq worker has no base class, so no spelling of the row could have matched until the
+    # plugin-fact ancestry learned to walk `include`.
+    it "colours a Sidekiq enqueue through the marker module the worker includes" do
+      expect(declared("UsersController#enqueue")).to include("job.enqueue", "io.net")
+    end
+
+    # #456 — the two shapes a real application actually writes, neither of which names the mailer class
+    # at the `deliver_*` call site. Both were silent: `email.send` appeared zero times across Redmine and
+    # Mastodon, on 97 and 39 delivery sites respectively.
+    it "colours a delivery whose builder is an implicit self-call" do
+      expect(declared("UserMailer.deliver_welcome")).to include("email.send", "job.enqueue")
+    end
+
+    it "colours a delivery through ActionMailer's parameterized `with` builder" do
+      expect(declared("UsersController#deliver_parameterized")).to include("email.send", "job.enqueue")
     end
 
     # `session[:user_id] = 1` is `[]=` on a receiver nothing types; the self-path row is what reaches it.

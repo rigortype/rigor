@@ -46,9 +46,16 @@ module Rigor
     # models are declared only in RBS gets no plugin attribution and no taint, which is the fail-quiet
     # direction.
     class PluginFacts
-      # How far the superclass walk climbs before giving up. A project hierarchy deeper than this is either
-      # pathological or cyclic, and a cycle is possible in a project's *as-written* table.
-      ANCESTRY_CAP = 24
+      # How many ancestors the walk visits before giving up. It bounds *work*, not correctness: cycles are
+      # already handled by the visited set, and the walk is memoised per class.
+      #
+      # It was 24 while the walk climbed superclasses only, where a project deeper than that is
+      # pathological. Once included modules joined the walk (#456) the number stopped measuring depth and
+      # started measuring breadth, and Rails concerns make breadth ordinary — Mastodon's `Account` includes
+      # 21 modules, so `ActiveRecord::Base` fell off the end of a 24-entry chain and every `Account#save`
+      # silently lost its `io.db.write`. A cap that can be reached by ordinary code is a correctness bug
+      # wearing a budget's clothes.
+      ANCESTRY_CAP = 128
 
       NO_ROWS = {}.freeze
       private_constant :NO_ROWS
@@ -67,18 +74,21 @@ module Rigor
       Edge = Data.define(:target, :receiver, :selector, :plugin_id)
 
       def self.empty
-        @empty ||= new(contributions: [], superclasses: NO_ROWS)
+        @empty ||= new(contributions: [], superclasses: NO_ROWS, includes: NO_ROWS)
       end
 
       # @param plugin_registry [Rigor::Plugin::Registry, nil]
       # @param superclasses [Hash{String=>String,Array<String>}] the project's as-written superclass table
       #   (`Scope::DiscoveryIndex#discovered_superclasses`). Empty is legal and simply means no row matches
       #   through inheritance.
-      def self.build(plugin_registry, superclasses: NO_ROWS)
+      # @param includes [Hash{String=>Array<String>}] the project's as-written include / prepend table
+      #   (`Scope::DiscoveryIndex#discovered_includes`), for the frameworks whose contract is a module
+      #   rather than a base class (#456).
+      def self.build(plugin_registry, superclasses: NO_ROWS, includes: NO_ROWS)
         contributions = plugin_registry&.effect_contributions || []
         return empty if contributions.empty?
 
-        new(contributions: contributions, superclasses: superclasses)
+        new(contributions: contributions, superclasses: superclasses, includes: includes)
       rescue StandardError
         empty
       end
@@ -94,7 +104,7 @@ module Rigor
       # Every `effect_entry_points:` preset across the loaded set, in registration order.
       attr_reader :entry_points
 
-      def initialize(contributions:, superclasses:)
+      def initialize(contributions:, superclasses:, includes: NO_ROWS)
         @warnings = []
         @class_rows = {}
         @path_rows = {}
@@ -105,6 +115,7 @@ module Rigor
         @entry_points = []
         contributions.each { |contribution| absorb(contribution) }
         @superclasses = superclasses || NO_ROWS
+        @includes = includes || NO_ROWS
         @ancestry = {}
         @digest = compute_digest
         finalize
@@ -259,16 +270,28 @@ module Rigor
         false
       end
 
-      # `[class_name, …ancestors]`, memoised per class. Cycle-guarded and capped: the table is *as written*,
-      # so a project can spell one that loops.
+      # `[class_name, …ancestors]`, memoised per class. Cycle-guarded and capped: the tables are *as
+      # written*, so a project can spell an ancestry that loops.
+      #
+      # Included and prepended modules are walked beside the superclass, nearer first, because that is
+      # Ruby's own lookup order and because a framework's contract is as often a module as a base class:
+      # a Sidekiq worker is `class TriggerWebhookWorker; include Sidekiq::Job`, with no base class at all,
+      # so a superclass-only walk could not match a row about it however the plugin spelled one (#456).
+      # `ExpressionTyper#enqueue_ancestors` already resolves a self-call this way; the two tables
+      # disagreeing about what an ancestor is was the bug.
       def ancestry(class_name)
         @ancestry[class_name] ||= begin
           chain = []
           seen = Set.new
-          current = class_name
-          while current && seen.add?(current) && chain.length < ANCESTRY_CAP
+          queue = [class_name]
+          until queue.empty? || chain.length >= ANCESTRY_CAP
+            current = queue.shift
+            next unless current && seen.add?(current)
+
             chain << current
-            current = Array(@superclasses[current]).first
+            queue.concat(Array(@includes[current]).compact)
+            parent = Array(@superclasses[current]).first
+            queue << parent if parent
           end
           chain.freeze
         end

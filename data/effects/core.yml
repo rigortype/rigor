@@ -531,7 +531,19 @@ classes:
   # ---------------------------------------------------------------------------------------------
   # Network.
   # ---------------------------------------------------------------------------------------------
-  Socket: { posture: net, why: "the BSD socket surface" }
+  Socket:
+    posture: net
+    why: "the BSD socket surface; the rows below read the machine's own identity and send nothing"
+    singleton_methods:
+      # `io.net` on these was a wrong label, not a conservative one, and it travelled: Redmine builds
+      # its Message-IDs from `Socket.gethostname`, so 215 of 4,234 rows — every model `save`, every
+      # `Mailer#*`, and `Redmine::IMAP.check`, whose actual IMAP connection is invisible — read as
+      # network traffic on the strength of a hostname lookup (#458). `io` is the honest bound: the
+      # call leaves the process to ask the kernel, and nothing goes over a wire.
+      gethostname: { effects: [io], why: "reads this machine's own name; no packet leaves the process" }
+      gethostbyname: { effects: [io.net], why: "resolves a name — the resolver, and possibly DNS" }
+      getifaddrs: { effects: [io], why: "reads this machine's own interfaces; local configuration, not resolution" }
+      ip_address_list: { effects: [io], why: "reads this machine's own addresses; local configuration, not resolution" }
   BasicSocket: { posture: net, why: "the shared socket surface" }
   TCPSocket: { posture: net, why: "a TCP stream" }
   TCPServer: { posture: net, why: "a listening TCP socket" }

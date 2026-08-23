@@ -47,9 +47,15 @@ Then the surface batch, unchanged from last session and still one agent's worth:
 
 Also open and independent: **#460** (above), **#456** (`job.*` / `email.*` have zero producers on either app, though
 `rigor-sidekiq` and `rigor-actionmailer` are loaded), **#458** (`Socket.gethostname` proves `io.net`,
-so 5 % of redmine reads as networked on a Message-ID lookup), **#452** (class-level rbs-inline
-envelope inert), **#449** (`Date#to_time` overlay gap), **#427** (warm==cold gate blind on gem-bump
-PRs), **#430** / **#431** (design calls).
+so 5 % of redmine reads as networked on a Message-ID lookup), **#449** (`Date#to_time` overlay gap),
+**#427** (warm==cold gate blind on gem-bump PRs), **#430** / **#431** (design calls).
+
+**The "declared lane goes quiet" family is closed.** #428 (cache hit), #441 (parallel runs), #446
+(`super`), #452 (a class-level rbs-inline envelope, landed 2026-08-24 — upstream's writer emits a
+*member's* annotations and a *declaration's* as nothing, so the cheapest bound in the feature bounded
+nothing) — four mechanisms, all fixed. The rule they produced still binds new work here: **every path
+by which a declared bound can fail to be read must end in a diagnostic, not in silence.** #459's
+union-arm taint was the same rule applied to the collector.
 
 `make verify` + `make docs-check` green on master at `fbbdf8f5`; full CI green on #459's tree, merged
 at `9b6acc79` with master unmoved under it.

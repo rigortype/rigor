@@ -46,6 +46,57 @@ RSpec.describe Rigor::CLI::EffectsCommand do
     expect(out).to include("Tracer::Gateway#probe: [] …?\n    dynamic-receiver (inferred_return_untyped)\n")
   end
 
+  # #439 — a path argument used to narrow the ANALYSIS, and an effect summary is transitive over
+  # whatever was analysed, so the narrowed run answered `[] …?` for methods the whole-project run
+  # answered labels for. Nothing distinguished that from a method which genuinely does nothing, and a
+  # path argument was the only tractability lever the report had, so it was the first thing an adopter
+  # reached for.
+  describe "a path argument (#439)" do
+    # A configuration whose `paths:` is the fixture, so the argument under test is a *narrowing* of an
+    # already-analysed set — which is what a path argument is inside a real project.
+    def config_file
+      path = File.join(Dir.pwd, ".rigor.yml")
+      File.write(path, "paths:\n  - #{fixture}\n")
+      path
+    end
+
+    # `app.rb` is the discriminating selection: `Tracer::Dispatcher#run` reaches `Tracer::Loud#emit`,
+    # which lives in `loud.rb` precisely so that a per-file view cannot see it. Under the old behaviour
+    # this run analysed `app.rb` alone and answered a weaker row for it.
+    it "selects which units are printed and leaves every label the whole-project one" do
+      _, whole, = run(["--config", config_file])
+      _, narrowed, = run(["--config", config_file, File.join(fixture, "app.rb")])
+
+      selected = narrowed.lines.grep(/\A\S/)
+      expect(selected).not_to be_empty
+      expect(selected).to all(satisfy { |line| whole.include?(line) })
+      expect(selected.length).to be < whole.lines.grep(/\A\S/).length
+    end
+
+    it "says how much it selected, and that the analysis was not narrowed" do
+      _, _, err = run(["--config", config_file, File.join(fixture, "app.rb")])
+
+      expect(err).to match(/showing \d+ of \d+ units, selected by/)
+      expect(err).to include("a path narrows the printing and not the analysis")
+    end
+
+    it "says so when a path names no unit, rather than printing an empty report" do
+      status, out, err = run(["--config", config_file, File.join(fixture, "nothing_here")])
+
+      expect(status).to eq(0)
+      expect(out).to be_empty
+      expect(err).to include("no effect unit is defined in")
+      expect(err).to include("a path selects what is printed, not what is analysed")
+    end
+
+    it "prints the whole report and no note when no path is given" do
+      _, out, err = run(["--config", config_file])
+
+      expect(out.lines.grep(/\A\S/)).not_to be_empty
+      expect(err).to be_empty
+    end
+  end
+
   # Omission rule: exhaustive AND proving nothing beyond `mutate.local`, which every envelope tolerates.
   it "omits a pure method by default and lists it under --full" do
     _, default, = run([fixture])

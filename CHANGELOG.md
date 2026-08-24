@@ -26,6 +26,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** A path argument to `rigor effects` now selects which methods are **printed** instead of narrowing the analysis, so `rigor effects app/controllers/issues_controller.rb` reports exactly what the whole-project run reports for those methods ([#439](https://github.com/rigortype/rigor/issues/439)).
+  - It used to narrow the analysed set, and an effect summary is transitive over whatever was analysed — so the narrowed run answered `IssuesController#create: [] …?` where the full run answered four proven labels and eight declared ones, and nothing distinguished that from a method which genuinely does nothing. A note on stderr now says how many of how many units you are looking at; a path that names no method says so instead of printing an empty report; and a path your configuration's `paths:` does not cover is analysed as well as them, so pointing the command at another tree still works. `rigor effects update` and the other subcommands have always refused a path and still do.
+
 - **[plugins]** A class you subclass from a gem no longer cuts off the effects Rigor knows about it: `class UserMailer < Devise::Mailer` and `class Auth::SessionsController < Devise::SessionsController` now get ActionMailer's and ActionPack's effects ([#465](https://github.com/rigortype/rigor/issues/465)).
   - Rigor reaches a framework's effects by following your own `class … <` and `include` lines, so a chain that leaves your source never came back — `Devise::Mailer < ActionMailer::Base` is a line in the devise gem, not in your application. A bundled plugin can now declare the ancestry its own gem introduces, and `rigor-devise` declares the six. On Mastodon that is 68 methods declaring `email.send` where 39 did, and 749 declaring `job.enqueue` where 737 did; `rigor check`'s diagnostics are unchanged.
 

@@ -78,10 +78,36 @@ module Rigor
         return usage_error("unsupported format: #{options.fetch(:format)}") unless FORMATS.include?(options[:format])
 
         configuration = Configuration.load(options.fetch(:config)).with_effects_enabled
-        table = analyze(configuration)
-        report = EffectsReport.build(table, full: options.fetch(:full))
+        scope = @argv.dup
+        table, sources = analyze(configuration, scope)
+        report = EffectsReport.build(table, full: options.fetch(:full), sources: sources, scope: scope)
+        note_scope(scope, report, table)
         EffectsRenderer.new(out: @out).render(report, format: options.fetch(:format))
         0
+      end
+
+      # A path argument is a **view**, and the note says so (#439).
+      #
+      # It used to narrow the analysed set, and effect labels are transitive over whatever was analysed —
+      # so `rigor effects app/controllers/issues_controller.rb` reported `IssuesController#create: [] …?`
+      # where the whole-project run reported four labels and a declared lane. The weakened answer was
+      # indistinguishable from a genuinely effect-free method, and a path argument is the only tractability
+      # lever the report has, so it was the thing an adopter reached for first.
+      #
+      # The note goes to stderr rather than into the report: it is about the invocation, not about the
+      # code, and `--format json` and `rigor effects … > report.txt` both stay exactly what they were.
+      def note_scope(scope, report, table)
+        return if scope.empty?
+
+        if report.empty?
+          @err.puts("rigor: no effect unit is defined in #{scope.join(', ')} " \
+                    "(a path selects what is printed, not what is analysed)")
+          return
+        end
+
+        @err.puts("rigor: showing #{report.rows.length} of #{table.size} units, selected by " \
+                  "#{scope.join(', ')}; a path narrows the printing and not the analysis, so every " \
+                  "label is the one the whole-project run reports")
       end
 
       FORMATS = %w[text json].freeze
@@ -116,15 +142,28 @@ module Rigor
       # the diagnostics entry serves the run and the #382 effects sidecar serves the collections, leaving
       # only the fixpoint. Sequential is not a cache decision — the run-result cache declines pool mode —
       # but a collecting run is pinned to the fork backend anyway, so `workers: 0` costs nothing here.
-      def analyze(configuration)
+      # The analysed set is the configured `paths:` **plus** whatever the arguments name — never the
+      # arguments alone (#439). An effect summary is transitive over whatever was analysed, so analysing
+      # less does not filter the report, it lowers every answer in it: `rigor effects
+      # app/controllers/issues_controller.rb` used to report `IssuesController#create: [] …?` where the
+      # whole-project run reported four labels and a declared lane, with nothing marking the difference.
+      #
+      # The union rather than the configured paths alone, so that pointing the command at a tree the
+      # configuration does not cover — which is what every `rigor effects PATH` invocation from outside a
+      # project does — still analyses it. Inside a project the argument is already under `paths:` and the
+      # union is the configured set unchanged.
+      #
+      # @return [Array(Rigor::Effects::EffectTable, Hash{String=>Array<String>})] the table, and which
+      #   file each unit was defined in — the map {EffectsReport} needs to answer a path argument.
+      def analyze(configuration, scope)
         runner = Analysis::Runner.new(
           configuration: configuration,
           cache_store: Cache::Store.new(root: configuration.cache_path),
           collect_stats: false,
           workers: 0
         )
-        runner.run(@argv.empty? ? configuration.paths : @argv)
-        runner.effect_table
+        runner.run((configuration.paths + scope).uniq)
+        [runner.effect_table, runner.effect_sources]
       end
     end
   end

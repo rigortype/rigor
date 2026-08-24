@@ -39,11 +39,17 @@ RSpec.describe Rigor::CLI::EffectsCommand do
       .map { |line| line.split(":").first }.sort)
   end
 
-  it "suffixes a non-exhaustive method and lists the causes under it" do
-    _, out, = run([fixture])
+  # #434 — the reason block was 86.5 % of the bytes of a 31,191-line Redmine run, so the default keeps
+  # the count on the row that made a reader curious and `--why` expands it. These two rows carry no label
+  # in either lane, which is the other thing the default drops, so they need `--full` to be printed at all.
+  it "collapses a non-exhaustive method's causes to a count, and expands them under --why" do
+    _, collapsed, = run(["--full", fixture])
+    _, expanded, = run(["--full", "--why", fixture])
 
-    expect(out).to include("Tracer::Gateway#dispatch: [] …?\n    dynamic-send\n")
-    expect(out).to include("Tracer::Gateway#probe: [] …?\n    dynamic-receiver (inferred_return_untyped)\n")
+    expect(collapsed).to include("Tracer::Gateway#dispatch: [] …? (1 reason, --why)\n")
+    expect(collapsed).not_to include("    dynamic-send")
+    expect(expanded).to include("Tracer::Gateway#dispatch: [] …?\n    dynamic-send\n")
+    expect(expanded).to include("Tracer::Gateway#probe: [] …?\n    dynamic-receiver (inferred_return_untyped)\n")
   end
 
   # #439 — a path argument used to narrow the ANALYSIS, and an effect summary is transitive over
@@ -67,10 +73,10 @@ RSpec.describe Rigor::CLI::EffectsCommand do
       _, whole, = run(["--config", config_file])
       _, narrowed, = run(["--config", config_file, File.join(fixture, "app.rb")])
 
-      selected = narrowed.lines.grep(/\A\S/)
+      selected = narrowed.lines.grep(/: \[/)
       expect(selected).not_to be_empty
       expect(selected).to all(satisfy { |line| whole.include?(line) })
-      expect(selected.length).to be < whole.lines.grep(/\A\S/).length
+      expect(selected.length).to be < whole.lines.grep(/: \[/).length
     end
 
     it "says how much it selected, and that the analysis was not narrowed" do
@@ -84,7 +90,7 @@ RSpec.describe Rigor::CLI::EffectsCommand do
       status, out, err = run(["--config", config_file, File.join(fixture, "nothing_here")])
 
       expect(status).to eq(0)
-      expect(out).to be_empty
+      expect(out.lines.grep(/: \[/)).to be_empty
       expect(err).to include("no effect unit is defined in")
       expect(err).to include("a path selects what is printed, not what is analysed")
     end
@@ -92,7 +98,7 @@ RSpec.describe Rigor::CLI::EffectsCommand do
     it "prints the whole report and no note when no path is given" do
       _, out, err = run(["--config", config_file])
 
-      expect(out.lines.grep(/\A\S/)).not_to be_empty
+      expect(out.lines.grep(/: \[/)).not_to be_empty
       expect(err).to be_empty
     end
   end
@@ -108,6 +114,65 @@ RSpec.describe Rigor::CLI::EffectsCommand do
     expect(full).to include("Tracer::Reporter#label: []\n")
   end
 
+  # #457 — every question in the user-story note was answered with `grep` and a throwaway script, and
+  # the sharpest instance was that the report's own on-ramp — "find the methods you can safely declare
+  # pure" — is exactly the set the default omits.
+  describe "the query surface (#457)" do
+    it "selects by label, matching a label and everything under it, in either lane" do
+      _, out, = run(["--label", "io.output.stdout", fixture])
+
+      rows = out.lines.grep(/: \[/)
+      expect(rows).not_to be_empty
+      expect(rows).to all(include("io.output"))
+      expect(out).to include("Tracer::Reporter#report:")
+    end
+
+    it "selects a root and matches its leaves" do
+      _, leaf, = run(["--label", "io.output.stdout", fixture])
+      _, root, = run(["--label", "io", fixture])
+
+      expect(root.lines.grep(/: \[/).length).to be >= leaf.lines.grep(/: \[/).length
+      expect(root).to include("Tracer::Reporter#report:")
+    end
+
+    it "prints the pure set, which the default report omits by construction" do
+      _, default, = run([fixture])
+      _, pure, = run(["--pure", fixture])
+
+      expect(default).not_to include("Tracer::Reporter#collect")
+      expect(pure).to include("Tracer::Reporter#collect: [mutate.local]\n")
+      expect(pure).to include("Tracer::Reporter#label: []\n")
+      expect(pure.lines.grep(/: \[/)).to all(satisfy { |line| !line.include?("…?") && !line.include?("≤") })
+    end
+
+    # `--full` answers the omission rule and nothing else, so a filtered run must not offer it as the
+    # way to see what the filter dropped.
+    it "says rows were not selected rather than offering --full for them" do
+      _, filtered, = run(["--label", "io.output.stdout", fixture])
+      _, unfiltered, = run([fixture])
+
+      expect(filtered).to include("not selected")
+      expect(filtered).not_to include("--full")
+      expect(unfiltered).to include("omitted (--full)")
+    end
+
+    it "caps the printed rows with --limit and says how many it cut" do
+      _, out, = run(["--limit", "1", fixture])
+
+      expect(out.lines.grep(/: \[/).length).to eq(1)
+      expect(out).to include("cut by --limit")
+    end
+  end
+
+  # #434 — the report had no summary line at all, and the two lanes are counted apart because they have
+  # different powers: a declared label can never fail a build (ADR-103 § WD17).
+  it "closes with a footer counting the two lanes apart" do
+    _, out, = run([fixture])
+
+    expect(out).to match(/^\d+ of \d+ units printed/)
+    expect(out).to match(/^\d+ carry a proven label · \d+ carry a declared \(≤\) one · \d+ are exhaustive$/)
+  end
+
   it "emits the methods table under --format json" do
     status, out, = run(["--format", "json", fixture])
     payload = JSON.parse(out)
@@ -118,12 +183,24 @@ RSpec.describe Rigor::CLI::EffectsCommand do
       "declared" => [],
       "exhaustive" => true,
       "causes" => [],
-      "direct" => { "catalogue:Kernel#puts" => ["io.output.stdout"], "catalogue:Time.now" => ["nondet.time"] }
+      "direct" => { "catalogue:Kernel#puts" => ["io.output.stdout"], "catalogue:Time.now" => ["nondet.time"] },
+      "attribution" => {}
     )
   end
 
-  it "reports the taint causes as [cause, detail] pairs in JSON" do
+  # The footer's counts, for the reader that is a script (#434).
+  it "carries the totals in the JSON payload" do
     _, out, = run(["--format", "json", fixture])
+    totals = JSON.parse(out).fetch("totals")
+
+    expect(totals.keys).to contain_exactly("units", "printed", "omitted", "unselected", "proven",
+                                           "declared", "exhaustive", "truncated")
+    expect(totals.fetch("printed")).to be_positive
+    expect(totals.fetch("units")).to be >= totals.fetch("printed")
+  end
+
+  it "reports the taint causes as [cause, detail] pairs in JSON" do
+    _, out, = run(["--full", "--format", "json", fixture])
 
     expect(JSON.parse(out).dig("methods", "Tracer::Gateway#probe", "causes"))
       .to eq([%w[dynamic-receiver inferred_return_untyped]])

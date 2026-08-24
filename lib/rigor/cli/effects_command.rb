@@ -61,7 +61,16 @@ module Rigor
           #{USAGE}
 
           With no subcommand, prints one line per method: its proven effect labels and whether that
-          list is exhaustive.
+          list is exhaustive. A PATH selects which methods are printed, never which are analysed.
+
+          Options:
+            --config=PATH        Path to the Rigor configuration file
+            --format=FORMAT      Output format: text (default) or json
+            --full               List every method, including the ones with nothing to say
+            --label=LABEL        Only methods carrying LABEL (or a label under it), in either lane
+            --pure               Only methods proven to do nothing beyond mutate.local
+            --limit=N            Print at most N methods
+            --why                Expand each method's unresolved reasons and declared-lane sources
 
           Subcommands (the committed effect snapshot, ADR-103 WD7):
             update      Write the snapshot to effects.snapshot.path. Commit it; review its diff.
@@ -80,9 +89,12 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config)).with_effects_enabled
         scope = @argv.dup
         table, sources = analyze(configuration, scope)
-        report = EffectsReport.build(table, full: options.fetch(:full), sources: sources, scope: scope)
+        report = EffectsReport.build(
+          table, full: options.fetch(:full), sources: sources, scope: scope,
+                 label: options.fetch(:label), pure: options.fetch(:pure), limit: options.fetch(:limit)
+        )
         note_scope(scope, report, table)
-        EffectsRenderer.new(out: @out).render(report, format: options.fetch(:format))
+        EffectsRenderer.new(out: @out, why: options.fetch(:why)).render(report, format: options.fetch(:format))
         0
       end
 
@@ -114,13 +126,24 @@ module Rigor
       private_constant :FORMATS
 
       def parse_options
-        options = { config: nil, format: "text", full: false, no_tolerated: false }
+        options = { config: nil, format: "text", full: false, no_tolerated: false, label: [], pure: false,
+                    limit: nil, why: false }
         OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_config(opts, options)
           opts.on("--format=FORMAT", "Output format: text (default) or json") { |value| options[:format] = value }
-          opts.on("--full", "List every method, including exhaustive ones with no effects beyond mutate.local") do
+          opts.on("--full", "List every method, including the ones with nothing to say") do
             options[:full] = true
+          end
+          opts.on("--label=LABEL", "Only methods carrying LABEL (or a label under it), in either lane") do |value|
+            options[:label].concat(value.split(",").map(&:strip).reject(&:empty?))
+          end
+          opts.on("--pure", "Only methods proven to do nothing beyond mutate.local — the %a{pure} set") do
+            options[:pure] = true
+          end
+          opts.on("--limit=N", Integer, "Print at most N methods") { |value| options[:limit] = value }
+          opts.on("--why", "Expand each method's unresolved reasons and declared-lane sources") do
+            options[:why] = true
           end
           # Accepted here and deliberately inert, exactly as it is on `update`: the report is an
           # observation, and observations are undischarged. Only a JUDGMENT reads `effects.tolerated:` —

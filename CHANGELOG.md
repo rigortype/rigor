@@ -14,6 +14,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[cli]** `rigor effects` can be asked a question. `--label=LABEL` prints only the methods carrying that label or one under it, `--pure` prints the methods proven to do nothing — the `%a{pure}` candidates, which the report omitted by construction — and `--limit=N` caps the output ([#457](https://github.com/rigortype/rigor/issues/457)).
+  - On Redmine, `rigor effects --label io.net` is five rows and `rigor effects --pure` is 436, where both questions previously needed `--full`, a `grep` and a guess about the row grammar.
+
 - **[docs]** [Effect labels](docs/manual/19-effect-labels.md) now says which labels a declared bound can actually fail on, and where to enforce the ones it cannot ([ADR-103](docs/adr/103-effect-labels.md) § WD17).
   - A bound is checked against a method's *proven* labels — what Rigor got by reading your code. On a Rails application `io.db.*`, `cache.*`, `telemetry`, `email.send`, `job.enqueue` and every `rails.*` come from a plugin modelling a framework Rigor did not read, so an envelope naming them is satisfied vacuously; the committed snapshot is what enforces them, and `rigor effects check` marks a new one with `≤+`. The chapter gained a section on the split, the surfaces table now says which question each one answers, and the configuration reference says it at `effects.envelopes:`.
 
@@ -25,6 +28,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - Rigor produces no `failure.*` label of its own — in Steins the family names why a failure arm exists rather than what a method does — so a bound that names one is satisfied vacuously, the same way `io.output.buffer` is already registered here without any Ruby method producing it.
 
 ### Fixed
+
+- **[cli]** `rigor effects` prints a report sized for an application instead of for a fixture: 2,733 lines on Redmine where it printed 31,191, with nothing lost ([#434](https://github.com/rigortype/rigor/issues/434)).
+  - Three changes get there. A row with no label in either lane says nothing at all and is now omitted — 1,953 of Redmine's 4,683. The unresolved-reason block, which was 30,000 of the 34,680 lines a full report prints, is collapsed to a count on the row, and `--why` expands it. And the report closes with a footer: how many units of how many are printed, and how many carry a **proven** label against a **declared** one — counted apart because only the first can ever fail a build. `--full` still prints exactly what the old default did, `--why` restores the reason blocks, and `--format json` carries the same totals.
+  - `--why` also names the plugin row behind each declared label (`plugin:ActionController::Base#redirect_to → [mutate.self, rails.response.write]`), which nothing did before: a bundled plugin's row is trusted and so leaves no taint line, which is why `plugin-attribution` appeared zero times in a whole Redmine run while 1,320 rows carried a `≤` clause.
 
 - **[cli]** A path argument to `rigor effects` now selects which methods are **printed** instead of narrowing the analysis, so `rigor effects app/controllers/issues_controller.rb` reports exactly what the whole-project run reports for those methods ([#439](https://github.com/rigortype/rigor/issues/439)).
   - It used to narrow the analysed set, and an effect summary is transitive over whatever was analysed — so the narrowed run answered `IssuesController#create: [] …?` where the full run answered four proven labels and eight declared ones, and nothing distinguished that from a method which genuinely does nothing. A note on stderr now says how many of how many units you are looking at; a path that names no method says so instead of printing an empty report; and a path your configuration's `paths:` does not cover is analysed as well as them, so pointing the command at another tree still works. `rigor effects update` and the other subcommands have always refused a path and still do.

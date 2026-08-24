@@ -117,30 +117,36 @@ its own — the report is:
 
 | | count | share |
 | --- | --- | --- |
-| lines on stdout | 31,191 | |
-| method rows | 4,223 | 13.5% |
-| indented reason lines | 26,968 | 86.5% |
-| rows ending in ` …?` | 3,930 | **93.1% of rows** |
-| rows that are exhaustive | 293 | 6.9% |
-| rows reading exactly `Foo#bar: [] …?` | 1,627 | 38.5% of rows |
+| units analysed | 4,683 | |
+| rows printed by default | 2,730 | 58% of units |
+| rows omitted, because they say nothing at all | 1,953 | 42% |
+| lines on stdout | 2,733 | (the rows, plus a three-line footer) |
+| printed rows ending in ` …?` | 2,468 | **90% of rows** |
+| lines under `--full --why` | 34,680 | |
 
-**Ninety-three percent hedged is the normal, healthy state of a Rails
-application**, not a sign that something is broken. Rails resolves an enormous
-amount at runtime, and Rigor reports what it proved rather than what it feared.
-If you were expecting an exhaustive answer for every method, recalibrate here
-rather than at the end of the chapter.
+**Ninety percent hedged is the normal, healthy state of a Rails application**,
+not a sign that something is broken. Rails resolves an enormous amount at
+runtime, and Rigor reports what it proved rather than what it feared. If you
+were expecting an exhaustive answer for every method, recalibrate here rather
+than at the end of the chapter.
+
+The report closes with a footer, and it counts the two lanes apart on purpose:
+
+```
+──
+2730 of 4683 units printed; 1953 omitted (--full)
+2183 carry a proven label · 1555 carry a declared (≤) one · 262 are exhaustive
+```
+
+Those two numbers have different powers, and the rest of this chapter is about
+the difference. A **proven** label can fail a build. A **declared** one cannot —
+it is a claim by a plugin about a framework Rigor never read, and the snapshot
+is what enforces it.
 
 ### Reading a row
 
 ```
-IssuesController#create: [global.read, mutate.local, mutate.self, mutate.static] ≤ [mutate, rails.flash.write, rails.i18n.translate, rails.response.write] …?
-    dynamic-receiver
-    dynamic-receiver (explicit_untyped)
-    dynamic-receiver (inferred_return_untyped)
-    dynamic-receiver (unsupported_syntax)
-    dynamic-send
-    template-not-analysed (ActionController::Base#render)
-    … 15 more
+IssuesController#create: [global.read, io, mutate.instance, mutate.local, mutate.self, mutate.static] ≤ [email.send, job.enqueue, mutate, rails.flash.write, rails.i18n.translate, rails.response.write] …? (21 reasons, --why)
 ```
 
 Four fields, and they answer four different questions:
@@ -165,27 +171,57 @@ Four fields, and they answer four different questions:
    line naming the call; a row a bundled plugin contributed does not, because a
    trusted row discharges its own taint.
 4. **` …?`** — "these effects, and **possibly more**". Some call could not be
-   resolved. The indented lines say which kind; across the whole Redmine report
-   they break down as `unresolved-self-call` 15,652, `dynamic-receiver` 8,912,
-   `unknown-ownership` 1,340, `dynamic-send` 685, `template-not-analysed` 249,
-   `opaque-callable` 130.
+   resolved, and the count says how many kinds. `--why` expands them under the
+   row, along with the plugin row behind each declared label:
 
-A row is **omitted** when it is exhaustive and proves nothing beyond
-`mutate.local`. `--full` prints those too, which is the one good use for it:
+   ```
+   IssuesController#create: … …?
+       dynamic-receiver (inferred_return_untyped)
+       template-not-analysed (ActionController::Base#render)
+       plugin:ActionController::Base#redirect_to → [mutate.self, rails.response.write]
+   ```
+
+   They are collapsed by default because on Redmine they are 30,000 of the
+   34,680 lines a full report prints, and they answer a question you ask about
+   one row after having read many.
+
+Two kinds of row are **omitted** by default:
+
+- a method that proves nothing beyond `mutate.local` and claims nothing — the
+  reading of `%a{pure}`;
+- a method with no label in either lane, which exists only to record that
+  something below it was unresolved. That is 1,953 rows on Redmine, and the
+  footer counts them.
+
+`--full` prints both. But the first group is worth asking for by name:
 
 ```sh
-rigor effects --full | grep ': \[\]$'
+rigor effects --pure
 ```
 
-Those are the methods Rigor proved do nothing at all — 460 of them on Redmine.
-They are your `%a{pure}` candidates, and they are precisely the rows the default
-report hides.
+436 methods on Redmine, and they are your `%a{pure}` candidates — the on-ramp to
+the last section of this chapter.
 
-### Making 31,000 lines tractable — with one caveat
+### Asking it a question
 
-The report has no summary line and no pager. Two levers work:
+**By label.** The question this chapter opens with, in one command:
 
-**A path argument selects what is printed.**
+```sh
+$ rigor effects --label io.net
+Redmine::IMAP.check: [exit, global.read, io, io.fs.read, io.fs.write, io.net, …] ≤ [email.send, job.enqueue, …] …? (121 reasons, --why)
+Redmine::POP3.check: …
+WebhookEndpointValidator#validate_each: …
+──
+5 of 4683 units printed; 4678 not selected
+```
+
+`--label` matches a label and everything under it — `--label io` selects the
+`io.net` rows above and the `io.fs.read` ones too — and it looks in **both**
+lanes, because "what talks to the network" is a question about your code rather
+than about which lane happens to know it. The row's own rendering keeps the two
+apart.
+
+**By path.**
 
 ```
 $ rigor effects app/controllers/issues_controller.rb
@@ -203,9 +239,12 @@ effect summary is transitive, so analysing less would not filter this report, it
 would lower every answer in it. A path that names no method says so rather than
 printing an empty report.
 
-**Reading fewer rows is free.** `grep`, `sort`, `--format=json` piped into `jq`
-— the text is stable and sorted, and post-processing it costs you nothing. The
-note goes to stderr, so a redirect or a pipe gets the report alone.
+**By count.** `--limit N` prints the first N rows and the footer says how many
+it cut.
+
+And `grep`, `sort` and `--format=json` piped into `jq` all still work — the text
+is stable and sorted, the JSON payload carries the same totals the footer
+prints, and the path note goes to stderr so a redirect gets the report alone.
 
 ## Direct and transitive
 

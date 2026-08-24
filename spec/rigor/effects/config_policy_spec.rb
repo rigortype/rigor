@@ -173,7 +173,9 @@ RSpec.describe "the effects policy configuration" do
     it "prints the declared lane apart from the proven one, as a `≤` bound" do
       text = run(policy) do |_diagnostics, runner|
         out = StringIO.new
-        Rigor::CLI::EffectsRenderer.new(out: out)
+        # `why: true` keeps the plain `…?` suffix: the default collapses each row's reason count onto it
+        # (#434), and this example is about the `≤` spelling rather than about the hedge.
+        Rigor::CLI::EffectsRenderer.new(out: out, why: true)
                                    .render(Rigor::CLI::EffectsReport.build(runner.effect_table), format: "text")
         out.string
       end

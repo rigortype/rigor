@@ -226,10 +226,22 @@ Gateways::Client#fetch: [] ≤ [io.net.http] …?
     plugin-attribution (Acme::Http.get)
 ```
 
-A method is omitted when it is exhaustive and proves nothing
-beyond `mutate.local` — mutation of objects its own frame
-allocated and never let out, which every effect envelope
-tolerates. `--full` lists every method instead.
+Two kinds of method are omitted: one that proves nothing
+beyond `mutate.local` and claims nothing — mutation of objects
+its own frame allocated and never let out, which every effect
+envelope tolerates — and one with no label in either lane,
+which exists only to record that something below it was
+unresolved. `--full` lists both. `--pure` asks for the first
+group by name, which is the set worth annotating `%a{pure}`.
+
+`--label=LABEL` prints only the methods carrying `LABEL` or a
+label under it, in either lane. `--limit=N` caps the rows.
+`--why` expands each row's unresolved reasons and the plugin
+row behind each declared label, which are collapsed to a count
+by default. The report closes with a footer counting the two
+lanes apart, because they have different powers: a proven label
+can fail a build and a declared one cannot
+([ADR-103](../adr/103-effect-labels.md) § WD17).
 
 A `PATH` argument selects which methods are **printed**, never
 which are analysed: Rigor analyses your configured `paths:`

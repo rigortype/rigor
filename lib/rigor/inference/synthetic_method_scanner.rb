@@ -65,6 +65,13 @@ module Rigor
         registries = collect_trait_registries(plugin_registry)
         nested_templates = collect_nested_class_templates(plugin_registry)
         return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty? && nested_templates.empty?
+        # Tier B alone cannot emit without an environment: every trait entry — the direct route and the
+        # concern-re-targeted one — funnels through `module_instance_method_names`, whose first line
+        # answers `[]` for a nil environment. The production pre-pass passes `environment: nil` (#476),
+        # so a project whose only contributing plugin registers trait registries (rigor-devise on a
+        # Rails app) would otherwise pay a whole-project parse to build a provably empty index. This
+        # gate mirrors that nil guard and MUST be removed in the change that threads a real environment.
+        return SyntheticMethodIndex::EMPTY if environment.nil? && templates.empty? && nested_templates.empty?
 
         asts = parse_paths(paths, buffer: buffer)
         hierarchy = build_hierarchy(asts)

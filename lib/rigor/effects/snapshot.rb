@@ -331,6 +331,25 @@ module Rigor
       # Renders the file. Hand-rolled rather than `YAML.dump`ed so the leading comment, the key order and
       # the flow sequences are ours: two runs over one tree must be byte-identical, and a snapshot written
       # by a pooled run must equal the sequential one bit for bit.
+      # The hint goes in the artefact, not only in the run's output (#436): `reach:` is the half of the
+      # snapshot that answers what an entry point *causes*, and a project that never configured one
+      # commits the less interesting half with no way to know it. The run also names the presets its own
+      # plugin set registered, which this file cannot — a committed artefact must not carry a list that
+      # goes stale when the plugin list changes.
+      EMPTY_REACH_NOTE = [
+        "",
+        "# `reach:` is empty. It records the TRANSITIVE footprint at your entry points — what a",
+        "# controller action or a job causes, rather than what its own body does — and it is the half of",
+        "# this file most worth reviewing. Fill it in by naming entry points in `.rigor.yml`:",
+        "#",
+        "#   effects:",
+        "#     snapshot:",
+        "#       reach: [rails]          # a preset a plugin registered, or a project-relative file glob",
+        "#",
+        "# `rigor effects update` prints the presets this project's plugins actually register."
+      ].freeze
+      private_constant :EMPTY_REACH_NOTE
+
       def to_yaml
         lines = [HEADER]
         lines << "schema: #{@header.fetch('schema')}"
@@ -338,6 +357,7 @@ module Rigor
         lines << "vocabulary: #{@header.fetch('vocabulary')}"
         lines << "config_digest: #{scalar(@header.fetch('config_digest'))}"
         render_table(lines, "methods", @methods)
+        lines.concat(EMPTY_REACH_NOTE) if @reach.empty?
         render_table(lines, "reach", @reach)
         "#{lines.join("\n")}\n"
       end

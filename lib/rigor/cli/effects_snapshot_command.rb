@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "did_you_mean"
 require "optionparser"
 
 require_relative "../analysis/runner"
@@ -85,7 +86,8 @@ module Rigor
         # names this project's plugin set makes available.
         if configuration.effects_snapshot_reach.empty?
           @err.puts("rigor: note — `effects.snapshot.reach:` is empty, so the snapshot records `methods:` " \
-                    "only (#{Effects::EntryPoints.availability}).")
+                    "only — the direct half. Name your entry points to record what they cause: " \
+                    "#{Effects::EntryPoints.availability}. The written file carries the same hint.")
         end
         0
       end
@@ -132,18 +134,29 @@ module Rigor
 
       def explain(diff, options)
         rows = options.fetch(:symbol) ? rows_for_symbol(options.fetch(:symbol)) : rows_for_changes(diff)
+        return CLI::EXIT_USAGE if rows == :unknown
+
         EffectsExplainRenderer.new(out: @out).render(rows, format: options.fetch(:format))
         0
       end
 
+      # A misspelled `--symbol` used to print `Nothing to explain.` and exit 0, which is exactly what a
+      # method with no effects prints — so a typo and a real answer were indistinguishable, and a script
+      # could not tell them apart at all (#435). It is a usage error now, with the nearest key offered:
+      # the key set is right there, and a method key is long enough to get wrong.
       def rows_for_symbol(symbol)
         entry = @table[symbol]
         if entry.nil?
-          @err.puts("rigor: no effect unit named #{symbol}")
-          return []
+          @err.puts("rigor: no effect unit named #{symbol}#{suggestion(symbol)}")
+          return :unknown
         end
 
         reach_rows(symbol, entry.proven.to_a) + method_rows(symbol, entry.direct.proven.to_a)
+      end
+
+      def suggestion(symbol)
+        nearest = ::DidYouMean::SpellChecker.new(dictionary: @table.keys).correct(symbol).first
+        nearest ? " — did you mean #{nearest}?" : ""
       end
 
       # Every label a change introduced, explained once: a `reach:` change gets its shortest edge path, a

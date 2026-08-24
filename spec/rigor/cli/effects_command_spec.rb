@@ -164,6 +164,34 @@ RSpec.describe Rigor::CLI::EffectsCommand do
     end
   end
 
+  # #429 — four configuration keys and two annotation forms all require typing an effect label, and
+  # nothing in an installed Rigor could say what the labels are: the manual's pointers resolve into
+  # `docs/type-specification/`, which the gemspec does not package.
+  describe "--list-labels (#429)" do
+    it "prints the whole vocabulary, grouped by root, with each root's meaning" do
+      status, out, = run(["--list-labels", fixture])
+
+      expect(status).to eq(0)
+      expect(out).to match(/\AEffect vocabulary — \d+ labels \(vocabulary \d+\)/)
+      expect(out).to include("io — talks to something outside the process")
+      expect(out).to include("io.db.read")
+      expect(out).to include("nondet — reads something that differs between two otherwise identical runs")
+      expect(out).to include("mutate.local")
+    end
+
+    it "explains the subsumption rule the four config keys depend on" do
+      _, out, = run(["--list-labels", fixture])
+
+      expect(out).to include("`io` covers `io.db.read`, `io.db.read` does not cover `io`")
+    end
+
+    it "analyses nothing" do
+      _, listed, = run(["--list-labels", fixture])
+
+      expect(listed).not_to include("Tracer::Reporter#report")
+    end
+  end
+
   # #434 — the report had no summary line at all, and the two lanes are counted apart because they have
   # different powers: a declared label can never fail a build (ADR-103 § WD17).
   it "closes with a footer counting the two lanes apart" do

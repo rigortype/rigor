@@ -260,10 +260,14 @@ observation, and observations are undischarged.
 
 What is collected and how it propagates is
 [the effect-summaries internal spec](../internal-spec/effect-summaries.md).
-The label vocabulary is tabulated in
-[Effect labels § The label vocabulary](19-effect-labels.md) and specified
-normatively in
-[the effect-labels specification](../type-specification/effect-labels.md).
+`--list-labels` prints the vocabulary this project can name —
+every shipped label with its root's meaning, plus whatever your
+plugins and your `effects.labels:` opened — and exits without
+analysing anything. The same table is in
+[Effect labels § The label vocabulary](19-effect-labels.md), and
+the grammar is specified normatively in the effect-labels
+specification, which the gem does not ship:
+<https://rigor.typedduck.fail/type-specification/effect-labels/>.
 
 ### The effect snapshot
 

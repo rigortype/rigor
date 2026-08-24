@@ -291,6 +291,20 @@ and reused. `process` falls back to `none` where `fork` is unavailable.
   (only the process-wide `RUBY_BOX=1`) — it is **not** triggered by
   Rigor's `Plugin::Box`. A Ruby bug-report draft is in
   [`docs/notes/20260602-ruby-box-segfault-bug-report.md`](../notes/20260602-ruby-box-segfault-bug-report.md).
+- **2026-08-24: the segfault's root cause is found and patched (locally).**
+  It is `Ractor.make_shareable` on a class/module-body proc: `env_copy`
+  clobbers the box stored in a TOP/CLASS env's SPECVAL slot, so the first
+  method call inside the isolated proc dereferences a NULL box — Rigor hit
+  it through its Ractor-shareable module-scope lambdas, not through
+  `Plugin::Box`. One-line VM fix + regression test verified against CRuby
+  master (see the updated note above; patch on the `fix/box` branch of the
+  local CRuby checkout, being submitted upstream). On a patched Ruby, the
+  full Redmine `app` run completes under `RUBY_BOX=1`, and — with the two
+  Rigor-side fixes of PR #469 (a `::ScriptError`-safe decline, and a
+  gem-resolving fallback to the in-box `Kernel#require`, since
+  `Ruby::Box#require` consults only the raw `$LOAD_PATH`) — the `ruby_box`
+  strategy produces diagnostics identical to `none` / `process` on
+  Redmine `app/models`, the box answering the inflections.
 
 So **`process` (fork) is the default** — the production-ready isolation
 that works today: validated on a full Redmine `app` run (byte-identical
@@ -298,9 +312,11 @@ diagnostics, no segfault) and across the whole spec suite with no env set,
 because the fork boundary contains exactly the crash that breaks
 `ruby_box`. It falls back to `none` where `fork` is unavailable.
 `ruby_box` is **landed but gated as experimental** (selectable, but
-blocked on the upstream `Ruby::Box` VM bug above); it becomes attractive
-(lighter, in-process, + exact-version coexistence) once that bug is fixed.
-`none` is the explicit opt-out + the fork-less fallback.
+blocked on the upstream `Ruby::Box` VM bug above — root-caused and patched
+locally 2026-08-24, awaiting an upstream release that ships the fix); it
+becomes attractive (lighter, in-process, + exact-version coexistence) once
+a fixed Ruby is released. `none` is the explicit opt-out + the fork-less
+fallback.
 
 ### Engine support
 

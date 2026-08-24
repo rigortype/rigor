@@ -129,14 +129,22 @@ module Rigor
         pooled.empty? ? @file_effects.dup : @file_effects.merge(pooled)
       end
 
-      # Issue #382 — adopt persisted collections as this run's own and close the graph over them. The
-      # warm-hit half of the whole-run effects slot: the analysis did not run, so `#assemble_run_diagnostics`
-      # never reached {#close_effect_graph} and the fixpoint is run here instead. The fixpoint is ALWAYS
-      # re-run rather than persisted — it is the cheap half, and a stored table would have to be invalidated
-      # by every input a summary has.
-      def adopt_effect_collections(collections)
+      # Issue #382 — adopt persisted collections as this run's own. The warm-hit half of the whole-run
+      # effects slot: the analysis did not run, so `#assemble_run_diagnostics` never reached
+      # {#close_effect_graph}. The slot stores the propagated table BESIDE the collections — the whole-run
+      # entry is already invalidated by every analyzed file (the same post-run dependency descriptor as
+      # the diagnostics slot) and by every meaning input (the effects identity), which is exactly the
+      # invalidation a stored closure needs — so a warm hit adopts both and re-runs nothing. An entry
+      # from before the table rode along reads as a miss (`#peek_effect_collections`' shape guard), and
+      # the ADR-46 incremental snapshot still persists per-file collections only: a recheck re-collects a
+      # partial closure, which is the case a stored table genuinely cannot serve.
+      def adopt_effect_collections(collections, table: nil)
         @file_effects = collections
-        close_effect_graph
+        if table
+          @effect_table = table
+        else
+          close_effect_graph
+        end
       end
 
       # Issue #382 — whether this run's effect collections came from the whole-run effects slot rather than
@@ -676,7 +684,8 @@ module Rigor
         descriptor = effects_key_descriptor(key_descriptor)
         cached = descriptor && peek_effect_collections(descriptor)
         if cached
-          adopt_effect_collections(cached)
+          collections, table = cached
+          adopt_effect_collections(collections, table: table)
           @effects_served_from_cache = true
           return nil
         end
@@ -695,35 +704,53 @@ module Rigor
 
       # The read half. A miss, a stale dependency, a corrupt entry and a stored value of the wrong shape
       # are one answer — nil, "collect it again" — because none of them can be told apart from the outside
-      # and all of them have the same remedy.
+      # and all of them have the same remedy. The shape is `[collections, table]`; an entry written before
+      # the table rode along is a Hash, fails the guard, and re-collects once.
       def peek_effect_collections(descriptor)
         cached = @cache_store.peek_validated(
           producer_id: RunCacheKey::RUN_EFFECTS_PRODUCER_ID, key_descriptor: descriptor
         )
-        cached.is_a?(Hash) ? cached : nil
+        return nil unless cached.is_a?(Array) && cached.length == 2 && cached.first.is_a?(Hash)
+
+        collections, table = cached
+        [collections, table.is_a?(Effects::EffectTable) ? table : nil]
       rescue StandardError
         nil
       end
 
       # The write half, run only after a miss, so the block never recomputes anything: it hands over the
-      # collections the analysis just produced, validated against the same post-run dependency descriptor
-      # the diagnostics slot records. Fail-soft — a collection that will not Marshal (which nothing in
-      # {Effects::FileCollection} should be, and the fork pool already proves per file) costs the next run
-      # its warm start and nothing else.
+      # collections the analysis just produced — and the table the analysis already closed over them, so
+      # a warm hit re-runs neither the merge nor the fixpoint — validated against the same post-run
+      # dependency descriptor the diagnostics slot records. Fail-soft — a collection that will not
+      # Marshal (which nothing in {Effects::FileCollection} should be, and the fork pool already proves
+      # per file) costs the next run its warm start and nothing else.
       def store_effect_collections(descriptor, expansion, rbs_descriptor)
         return if descriptor.nil?
 
         collections = effect_collections_by_path
+        payload = [collections, storable_effect_table(collections)]
         @cache_store.fetch_or_validate(
           producer_id: RunCacheKey::RUN_EFFECTS_PRODUCER_ID, key_descriptor: descriptor,
           generation_cap: RunCacheKey::EFFECTS_GENERATION_CAP
-        ) { [collections, run_dependency_descriptor(expansion, rbs_descriptor)] }
+        ) { [payload, run_dependency_descriptor(expansion, rbs_descriptor)] }
         nil
       rescue StandardError
         nil
       end
+
+      # An empty table over non-empty summaries is {#close_effect_graph}'s fail-soft answer, not a
+      # result — persisting it would freeze one run's propagation failure into every warm hit until the
+      # next invalidation. Storing nil instead makes the warm hit re-run the fixpoint, which is exactly
+      # the retry the fail-soft posture wants.
+      def storable_effect_table(collections)
+        table = @effect_table
+        return nil if table.nil?
+        return nil if table.empty? && collections.any? { |_, collection| !collection.summaries.empty? }
+
+        table
+      end
       private :serve_effect_collections, :effects_key_descriptor,
-              :peek_effect_collections, :store_effect_collections
+              :peek_effect_collections, :store_effect_collections, :storable_effect_table
 
       # ADR-103 WD8 / #383 — the envelope check. Nothing at all without an `effects:` block, and nothing
       # under `effects.check: false`; with both, one walk of the project's own RBS for `%a{pure}` /

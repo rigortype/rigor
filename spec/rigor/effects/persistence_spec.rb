@@ -59,16 +59,43 @@ RSpec.describe "effect-summary persistence" do
 
   attr_reader :cache
 
-  it "serves a second collecting run's summaries from the sidecar and re-runs only the fixpoint" do
+  it "serves a second collecting run's summaries from the sidecar, adopting the stored table whole" do
     cold, _cold_store, = analyze(cache)
     warm, warm_store, = analyze(cache)
 
     expect(cold.effects_served_from_cache?).to be(false)
     expect(warm.effects_served_from_cache?).to be(true)
-    # The whole point: a warm run's table is the cold run's table. The fixpoint ran; the collection did not.
+    # The whole point: a warm run's table is the cold run's table — neither the collection nor the
+    # fixpoint re-ran (the table rides the same entry, under the same two identities).
     expect(units(warm.effect_table)).to eq(units(cold.effect_table))
     expect(warm.effect_sources).to eq(cold.effect_sources)
     expect(diagnostics_counts(warm_store)[:hits]).to eq(1)
+  end
+
+  it "does not re-run the fixpoint on a sidecar hit — the stored table serves it" do
+    cold, = analyze(cache)
+
+    allow(Rigor::Effects::Propagator).to receive(:propagate).and_call_original
+    warm, = analyze(cache)
+
+    expect(warm.effects_served_from_cache?).to be(true)
+    expect(Rigor::Effects::Propagator).not_to have_received(:propagate)
+    expect(units(warm.effect_table)).to eq(units(cold.effect_table))
+  end
+
+  # An empty table over non-empty summaries is `close_effect_graph`'s fail-soft answer, not a result.
+  # Persisting it would freeze one run's propagation failure into every warm hit; storing nil makes the
+  # hit re-run the fixpoint, which is the retry the fail-soft posture wants.
+  it "stores no table when propagation fail-softed, so the warm hit retries the fixpoint" do
+    allow(Rigor::Effects::Propagator).to receive(:propagate).and_raise("transient propagation failure")
+    cold, = analyze(cache)
+    expect(cold.effect_table.keys).to be_empty
+
+    allow(Rigor::Effects::Propagator).to receive(:propagate).and_call_original
+    warm, = analyze(cache)
+
+    expect(warm.effects_served_from_cache?).to be(true)
+    expect(warm.effect_table.keys).not_to be_empty
   end
 
   it "treats a diagnostics-only warm entry as an effects miss and leaves the diagnostics slot untouched" do

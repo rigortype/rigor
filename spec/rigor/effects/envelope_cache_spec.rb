@@ -168,6 +168,20 @@ RSpec.describe "effect envelope diagnostics across a cache hit" do
     end
   end
 
+  # RBS accepts five bracket pairs for an annotation and the reader honours the payload whatever the
+  # brackets, so the probe's routing hint must too: with the hint reading `%a{` alone, this exact
+  # project shape served the fast path warm and the envelope diagnostic silently vanished — the #428
+  # silent-lane failure, reachable again through a spelling.
+  context "with an `%a(pure)` annotation in the parenthesis spelling" do
+    before do
+      write_project
+      write_config(annotation_config)
+      write_signature(pure_signature.sub("%a{pure}", "%a(pure)"))
+    end
+
+    it_behaves_like "a declared envelope that survives a cache hit"
+  end
+
   # `effect.annotations-unchecked` — the mirror-image pass, on the effects-OFF surface. It went the same way
   # for the same reason, and comes back by a different route: the probe reproduces it rather than declining,
   # because it was built to cost a glob and a regex.

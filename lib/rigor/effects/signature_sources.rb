@@ -21,10 +21,21 @@ module Rigor
       DEFAULT_ROOTS = ["sig"].freeze
 
       # A cheap text pre-filter for "does this source carry an effect annotation at all". It matches
-      # the two spellings the envelope reader honours and nothing else, so a signature tree with no
+      # the two payloads the envelope reader honours and nothing else, so a signature tree with no
       # effect annotation is answered by one regex per file and never parsed. It is a ROUTING test,
       # not the grammar — `RbsExtended.parse_effect_annotation` is still what decides meaning.
-      ANNOTATION_HINT = /%a\{\s*(?:pure\s*\}|rigor:v1:effect\b)/
+      #
+      # RBS accepts five bracket pairs for an annotation, and the reader sees only the text inside
+      # them, so the hint must accept all five too: routing on `%a{` alone made a `%a(pure)` project
+      # invisible to the run-cache probe, which then served the fast path while a bound existed —
+      # the silent-lane shape the #428 family is about. Over-matching (a mismatched closer) is safe:
+      # the cost is one declined fast path or one parsed file, never a missed bound.
+      ANNOTATION_BRACKETS = { "{" => "}", "(" => ")", "[" => "]", "|" => "|", "<" => ">" }.freeze
+      ANNOTATION_HINT = Regexp.union(
+        ANNOTATION_BRACKETS.map do |opener, closer|
+          /%a#{Regexp.escape(opener)}\s*(?:pure\s*#{Regexp.escape(closer)}|rigor:v1:effect\b)/
+        end
+      )
 
       # A `virtual:<plugin-id>:<source path>` buffer is rbs-inline's (or a plugin's) synthesized RBS for
       # a Ruby file the author actually wrote in. Naming that file is what a reader can act on, so the

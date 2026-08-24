@@ -2,6 +2,7 @@
 
 require "rbs"
 
+require_relative "../effects/signature_sources"
 require_relative "../rbs_extended"
 require_relative "reporter"
 
@@ -50,11 +51,19 @@ module Rigor
       #   `.rbs` files, plus the virtual entries rbs-inline and plugin `source_rbs` synthesis contribute.
       # @param registry [Rigor::Effects::Registry] the vocabulary an unknown label is judged against.
       # @return [Result]
+      #
+      # The `ANNOTATION_HINT` routing test runs here, before any parse: a source with no honoured
+      # payload can contribute neither an envelope nor an unresolved report, so a signature tree with
+      # no effect annotation is answered by one regex per file — which is what that hint's own
+      # documentation promises, and what every warm envelope-lane run was paying a full
+      # `RBS::Parser.parse_signature` per file for.
       def scan(sources:, registry:)
         reporter = Reporter.new
         methods = {}
         classes = {}
         sources.each do |name, content|
+          next unless Effects::SignatureSources::ANNOTATION_HINT.match?(content)
+
           declarations(name, content).each do |decl|
             walk(decl, [], methods, classes, registry, reporter)
           end

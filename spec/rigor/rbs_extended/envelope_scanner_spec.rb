@@ -59,6 +59,26 @@ RSpec.describe Rigor::RbsExtended::EnvelopeScanner do
       expect(result.method_envelopes["Repo#slug"].tolerates?("mutate.local")).to be(true)
     end
 
+    # RBS accepts five bracket pairs for an annotation; the reader sees only the payload inside them,
+    # so every spelling binds — and the routing pre-filter below must not lose any of them.
+    it "reads the annotation whatever bracket pair RBS accepted it in" do
+      result = scan(<<~RBS)
+        class Repo
+          %a(pure)
+          def a: () -> String
+          %a[rigor:v1:effect io.db]
+          def b: () -> String
+          %a<rigor:v1:effect telemetry>
+          def c: () -> String
+          %a|pure|
+          def d: () -> String
+        end
+      RBS
+
+      expect(result.method_envelopes.keys).to contain_exactly("Repo#a", "Repo#b", "Repo#c", "Repo#d")
+      expect(result.method_envelopes["Repo#b"].bound.to_a).to eq(["io.db"])
+    end
+
     it "keys a singleton member on the `.` side and `def self?.` on both" do
       result = scan(<<~RBS)
         class Repo
@@ -84,6 +104,25 @@ RSpec.describe Rigor::RbsExtended::EnvelopeScanner do
       RBS
 
       expect(result.method_envelopes.keys).to eq(["App::Repo#find"])
+    end
+  end
+
+  describe "the routing pre-filter" do
+    # The positive controls are every example above: an annotated source IS parsed and read. This is
+    # the other half — a source with no honoured payload can contribute neither an envelope nor an
+    # unresolved report, so it is answered by one regex and never parsed.
+    it "never parses a source that carries no effect annotation" do
+      allow(RBS::Parser).to receive(:parse_signature)
+
+      result = scan(<<~RBS)
+        class Repo
+          %a{implicitly-returns-nil}
+          def find: (Integer) -> String?
+        end
+      RBS
+
+      expect(result).to be_empty
+      expect(RBS::Parser).not_to have_received(:parse_signature)
     end
   end
 

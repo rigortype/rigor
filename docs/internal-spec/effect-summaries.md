@@ -164,7 +164,7 @@ Two refinements keep a posture from putting a **wrong** label on an ordinary cal
 A posture MUST NOT answer in three places, each of which would swallow a more specific reading the tracer already had:
 
 - an **implicit-self** (or `self.`) call. Every unqualified call in a project body spells `Kernel#name`, so the `world` default would colour the whole world.
-- a **`Dynamic` receiver**. The class the typer projected to is a guess there, and `dynamic-receiver` is the truthful answer.
+- a **`Dynamic` receiver** *whose class the syntax did not name*. The class the typer projected to is a guess there, and `dynamic-receiver` is the truthful answer. A **constant path** is not a guess — the receiver of `Net::IMAP.new` is that constant, exactly — so the posture answers and the site discharges like any other catalogue claim ([#463](https://github.com/rigortype/rigor/issues/463)). `UnitScan#catalog_target` already trusted the written constant for the row lookup; the two disagreeing made the catalogue's reach a function of whether the bundled rbs happens to ship a signature for the class, which is why `Net::HTTP.get` proved `io.net.http`, `Net::IMAP.new` proved nothing, and the `Net::FTP` row had never once fired.
 - **`send` / `public_send` / `__send__` / `call`**, whose own taints (`dynamic-send`, `opaque-callable`) are the more specific reading of the same site. An explicit ROW still wins, so `Fiddle::Function#call` is `ffi`.
 
 ### Rows, postures and the project edge

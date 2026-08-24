@@ -56,6 +56,7 @@ RSpec.describe Rigor::Plugin::Box do
 
       it "caches a failed load as false" do
         allow(box_instance).to receive(:require).and_raise(StandardError, "load failed")
+        allow(box_instance).to receive(:eval).and_raise(StandardError, "load failed")
         expect(described_class.require_feature("missing")).to be(false)
       end
 
@@ -63,7 +64,16 @@ RSpec.describe Rigor::Plugin::Box do
         # `LoadError` is a ScriptError, not a StandardError — before the `::ScriptError` rescue, a target
         # gem absent from the box's load path aborted the whole run instead of declining to silence.
         allow(box_instance).to receive(:require).and_raise(LoadError, "cannot load such file")
+        allow(box_instance).to receive(:eval).and_raise(LoadError, "cannot load such file")
         expect(described_class.require_feature("missing")).to be(false)
+      end
+
+      it "falls back to the require inside the box when Ruby::Box#require cannot resolve a gem" do
+        # `Ruby::Box#require` resolves only against the raw `$LOAD_PATH`; a gem-installed target library
+        # is reachable only through the box's own RubyGems, i.e. the `Kernel#require` inside the box.
+        allow(box_instance).to receive(:require).and_raise(LoadError, "cannot load such file")
+        expect(described_class.require_feature("my_gem")).to be(true)
+        expect(box_instance).to have_received(:eval).with('require "my_gem"')
       end
     end
 

@@ -43,7 +43,19 @@ module Rigor
         shared.require(feature)
         @required[feature] = true
       rescue ::StandardError, ::ScriptError
-        @required[feature] = false
+        @required[feature] = eval_require(feature)
+      end
+
+      # The gem-resolving fallback: `Ruby::Box#require` resolves against the raw `$LOAD_PATH` only (it
+      # calls the C-level require directly), so a target library installed as a gem is reachable only
+      # through the box's own RubyGems — the `Kernel#require` *inside* the box. `feature` is a fixed,
+      # plugin-declared name rendered via `String#inspect` (a safe Ruby literal), so the eval carries no
+      # free input. Returns false when the box cannot load the feature either way (the caller declines).
+      def eval_require(feature)
+        shared.eval("require #{feature.inspect}") # require "active_support/inflector"
+        true
+      rescue ::StandardError, ::ScriptError
+        false
       end
 
       # Evaluates `code` inside the shared box and returns the result across the box boundary. The caller MUST

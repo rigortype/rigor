@@ -30,9 +30,10 @@ module Rigor
     # identical to a bare `Digest::SHA256.file`.
     module FileDigest
       MEMO_KEY = :rigor_cache_file_digest_memo
+      STAT_KEY = :rigor_cache_file_stat_memo
       INSTANT_KEY = :rigor_cache_recording_instant
       STRICT_KEY = :rigor_cache_strict_validation
-      private_constant :MEMO_KEY, :INSTANT_KEY, :STRICT_KEY
+      private_constant :MEMO_KEY, :STAT_KEY, :INSTANT_KEY, :STRICT_KEY
 
       # Set in the environment to force the strict digest-always validation path for a single run, regardless
       # of the `cache.validation` config setting (the env wins). The escape hatch for a filesystem whose stat
@@ -47,14 +48,17 @@ module Rigor
       # digest-always path for `cache.validation: digest`.
       def self.with_run(strict: false)
         previous_memo = Thread.current[MEMO_KEY]
+        previous_stat = Thread.current[STAT_KEY]
         previous_instant = Thread.current[INSTANT_KEY]
         previous_strict = Thread.current[STRICT_KEY]
         Thread.current[MEMO_KEY] = {}
+        Thread.current[STAT_KEY] = {}
         Thread.current[INSTANT_KEY] = now_ns
         Thread.current[STRICT_KEY] = strict
         yield
       ensure
         Thread.current[MEMO_KEY] = previous_memo
+        Thread.current[STAT_KEY] = previous_stat
         Thread.current[INSTANT_KEY] = previous_instant
         Thread.current[STRICT_KEY] = previous_strict
       end
@@ -102,10 +106,24 @@ module Rigor
         digest = parsed[0]
         return hexdigest(path) == digest if strict_validation?
 
-        st = File.stat(path)
+        st = validation_stat(path)
         return true if !racy?(parsed) && tuple_matches?(st, parsed)
 
         hexdigest(path) == digest
+      end
+
+      # The VALIDATION-side stat, served from the per-run table when one is installed — a collecting run
+      # validates the effects entry and the diagnostics entry against the same ~thousands-of-files
+      # dependency descriptor, and the second pass is pure repetition under the run's own stable-filesystem
+      # premise (see the module doc). The RECORDING side ({.pack_stat}) deliberately keeps its direct
+      # `File.stat`: it packs the tuple a *future* run validates, after the content was read, and must
+      # describe that moment rather than an earlier probe's. A stat failure propagates un-memoised, exactly
+      # as {.hexdigest} treats a read failure.
+      def self.validation_stat(path)
+        memo = Thread.current[STAT_KEY]
+        return File.stat(path) if memo.nil?
+
+        memo[path] ||= File.stat(path)
       end
 
       def self.recording_instant_ns

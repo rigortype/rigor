@@ -211,6 +211,23 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       env
     end
 
+    # The #476 interim gate: every trait entry funnels through `module_instance_method_names`, whose
+    # first line answers [] for a nil environment, so a registry-only scan with no environment is
+    # provably empty — and must not pay a whole-project read + parse to say so. The example above is
+    # this one's positive control: the same registry with an environment emits.
+    it "reads no file when only trait registries contribute and there is no environment" do
+      registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+      _, paths = write_files(
+        "user.rb" => "class User < ApplicationRecord\n  devise :database_authenticatable\nend\n"
+      )
+      allow(Prism).to receive(:parse)
+
+      index = described_class.scan(plugin_registry: registry, paths: paths, environment: nil)
+
+      expect(index).to be_empty
+      expect(Prism).not_to have_received(:parse)
+    end
+
     it "explodes always_included + per-symbol modules' instance methods into the index" do
       registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
       _, paths = write_files(

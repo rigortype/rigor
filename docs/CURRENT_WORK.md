@@ -16,19 +16,23 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: the report's usability, as one agent's batch
+## Next session: the snapshot surface, then a release
 
-**Every design call the corpus adjudication opened is settled** (grilling session, 2026-08-24 — the
-tree and its evidence are in ADR-103 § WD17 and in the PRs below). What is left is the surface, and it
-is one agent's worth of work on one output:
+**The report surface is done.** #439, #457, #429 and #436 are closed; #434 and #435 are open only for
+their **snapshot-side** residue, which was deliberately scoped out of the three report PRs because it
+touches a different artefact:
 
-1. **#439** — a path argument narrows the *analysis*, so the same method gets a weaker answer,
-   unmarked. Do it **before or with** #434, whose fix removes the reason to reach for it.
-2. **#434** (31k-line report; its acceptance list now also requires the footer to count the **proven**
-   and **declared** lanes separately — WD17) · **#435** (four CLI affordance gaps) · **#429** (nothing
-   lists the vocabulary) · **#436** (should a preset-registering project default `reach:`?) · **#457**
-   (the report has no *query* surface — `--label`, `--pure`; distinct from #434's "make it smaller").
-   **All five touch the same output surface — give them to ONE agent.**
+1. **#434's remaining two** — a regeneration event (a moved `config_digest:`) still prints the full
+   `-symbol` diff instead of the regeneration line and the counts; and `unresolved:` arrays are half
+   the snapshot's bytes (144,771 of 293,276 on redmine, lines up to 821 characters), which is
+   simultaneously the half a reviewer cannot read and the half that churns on unrelated changes.
+2. **#435 item 3** — drift rows carry no `file:line`, and `explain` covers the label lines but never
+   an `exhaustive → not` transition, which is the drift row a reader is least equipped to interpret.
+
+They are one PR: same file, same renderer, same specs. Close both issues with it.
+
+**Then consider cutting v0.3.5** — see below; `[Unreleased]` is now well past the point where the
+fixes are worth shipping.
 
 **#460 is parked deliberately, not forgotten.** `Group.visible.find(id)` types `Dynamic`, which is why
 redmine's write-recording `#update` figure is 3/27 rather than 27/27. It is an *inference-quality* item
@@ -38,7 +42,10 @@ session ruled that improving the effect numbers must not be the reason to spend 
 Also open and independent: **#449** (`Date#to_time` overlay gap), **#427** (warm==cold gate blind on
 gem-bump PRs), **#430** / **#431** (design calls).
 
-**Landed since: #459, #461, #462, #464, #466, #467** plus ADR-103 § WD17 and the manual re-frame.
+**Landed since: #459, #461, #462, #464, #466, #467, #468, #470, #471** plus ADR-103 § WD17 and the
+manual re-frame. The report went from 31,191 lines on redmine to **2,733** with nothing lost
+(`--full --why` prints 34,680), gained `--label` / `--pure` / `--limit` / `--list-labels`, and a path
+argument is now a view rather than a scope.
 The 2026-08-24 grilling session settled four design calls in three rounds, all recorded: the
 proven/declared binary **stands** (a plugin row is never judged — WD17); the **snapshot gate** is the
 enforcement surface for plugin-sourced labels, which is what chapter 19 now says; a catalogue posture

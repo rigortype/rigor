@@ -433,12 +433,12 @@ module Rigor
       # receiver mutation; `Time#localtime` is both). A **posture** states nothing about this selector,
       # so the uncatalogued path's own mutation rule applies to it unchanged.
       def claimed_by_catalogue?(node, record)
-        owner, singleton, implicit = catalog_target(node, record)
+        owner, singleton, implicit, named = catalog_target(node, record)
         return false if owner.nil?
 
         entry = Catalog.default.lookup(
           owner, node.name.to_s, singleton: singleton, call_node: node,
-                                 posture: posture_allowed?(node, record, implicit)
+                                 posture: posture_allowed?(node, record, implicit, named)
         )
         return false if entry.nil?
 
@@ -480,8 +480,26 @@ module Rigor
       #   it would be a proven label with nothing proving it (the `dynamic-receiver` taint is the right
       #   answer, and the uncatalogued path records it);
       # - `send` / `call`, whose own taints are the more specific reading ({DEFERRED_SELECTORS}).
-      def posture_allowed?(node, record, implicit)
-        !implicit && !record&.dynamic && !DEFERRED_SELECTORS.include?(node.name)
+      #
+      # **Unless the syntax named the class** (#463). The `Dynamic` exclusion exists because a projected
+      # receiver class is a guess; a written constant path is not one, and {#catalog_target} already
+      # trusts it for the row lookup. Refusing the posture there made the catalogue's reach a function of
+      # whether the bundled rbs happens to ship a signature for the constant: `Net::HTTP.get` proves
+      # `io.net.http` and `Net::IMAP.new` proved nothing, because rbs ships `net-http` and not
+      # `net-imap`. That is why the `Net::FTP` row has never once fired, and why Redmine's IMAP and POP3
+      # pollers proved no network at all.
+      #
+      # The site is then **claimed**, and so discharges, like every other catalogue answer. That is not a
+      # softening of the `dynamic-receiver` rule but its premise failing: the taint says the class the
+      # typer projected is a guess, and on a constant path there is no projection — the receiver of
+      # `Net::IMAP.new` is that constant, exactly. What the posture asserts on top is the hand-audited
+      # claim the catalogue is made of, the same one `Socket#connect` rests on when the typer did name
+      # the receiver. `implicit` and {DEFERRED_SELECTORS} keep their exclusions, which are about what the
+      # syntax means rather than about what the typer knew.
+      def posture_allowed?(node, record, implicit, named)
+        return false if implicit || DEFERRED_SELECTORS.include?(node.name)
+
+        named || !record&.dynamic
       end
 
       def visit_uncatalogued(node, record, bound = nil)
@@ -604,18 +622,21 @@ module Rigor
       # The class the catalogue would look this call up under, as `[owner, singleton, implicit_self]`.
       # Spelled from the syntax where the syntax settles it and from the typer's receiver otherwise;
       # `[nil, …]` when neither does.
+      # `[owner, singleton, implicit, named]`. `named` says the owner came from a **constant path the
+      # author wrote**, which is what licenses the posture on a receiver the typer could not resolve
+      # ({#posture_allowed?}).
       def catalog_target(node, record)
         receiver = node.receiver
-        return ["Kernel", false, true] if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+        return ["Kernel", false, true, false] if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
         constant = Source::ConstantPath.qualified_name(receiver)
-        return [constant, !Catalog.default.object_constant?(constant), false] if constant
+        return [constant, !Catalog.default.object_constant?(constant), false, true] if constant
         return NO_TARGET if record.nil? || record.receiver_class.nil?
 
-        [record.receiver_class, record.kind == :singleton, false]
+        [record.receiver_class, record.kind == :singleton, false, false]
       end
 
-      NO_TARGET = [nil, false, false].freeze
+      NO_TARGET = [nil, false, false, false].freeze
       private_constant :NO_TARGET
 
       def positional_arity(node)

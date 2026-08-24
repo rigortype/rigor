@@ -584,6 +584,11 @@ classes:
       start: { effects: [io.net.http], why: "opens the connection; the block joins by containment" }
       new: { effects: [], why: "allocates the client; nothing is sent until start / request" }
   "Net::SMTP": { posture: net, why: "an SMTP session; `email.send` is the plugin's semantic layer, not the transport's" }
+  # rbs ships `net-http` / `net-smtp` and not these, so a project's `Net::IMAP` types as `Dynamic` and
+  # only the constant the author wrote names the class. #463 is what lets a posture answer there; before
+  # it, `Net::FTP` had a row that could never fire and these two were not worth writing.
+  "Net::IMAP": { posture: net, why: "an IMAP session" }
+  "Net::POP3": { posture: net, why: "a POP3 session" }
   "Net::FTP": { posture: net, why: "an FTP session" }
 
   URI:

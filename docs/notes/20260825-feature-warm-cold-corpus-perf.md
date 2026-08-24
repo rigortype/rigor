@@ -109,6 +109,9 @@ The `template_mentions` shape: 1,498 declaration names × 21.5 MB of templates (
 - **`unused` residue** (mastodon ~2.5 s): the per-file Prism scan (0.47 s, single-threaded,
   cacheless), the narrowed-but-still-N×M template scan, and the graph. A per-file scan cache or a
   pool ride is the next lever; the `tainted` O(U × mentions) term shrank with the mention count.
+- ~~The envelope-judgment discovery parse~~ — landed as
+  [#479](https://github.com/rigortype/rigor/pull/479) after this note's first cut (see the †
+  caveat above).
 - **`fresh?` scope topology**: the probe opens its own `with_run`, so a probe-decline `check` still
   pays validation twice (probe + Runner). Hoisting the scope into `check_command` would collapse it
   but `with_run` nesting installs a *fresh* table by design (coverage_mutation relies on it) — a
@@ -140,8 +143,10 @@ Diagnostic/report bytes are identical to the baseline sweep in every cell. Two h
   — one Prism parse of every analyzed file — **even when zero findings result**, and mail is the
   corpus's parse-cost outlier (0.53 s for 111 files, P6 recon), which is the whole +0.5 s. Redmine
   and mastodon beat their vacuous baselines *while* paying the real judgment. The lever this
-  exposes: `EffectEnvelopePass#positions` could be forced per finding rather than per judgment, so
-  a clean envelope run skips the whole-project parse. Filed as follow-up work.
+  exposed **landed same-session as [#479](https://github.com/rigortype/rigor/pull/479)**: both
+  judgments now read positions per finding through a `DeferredPositions`, so a judged-clean
+  envelope forces no discovery — mail env warm 1.03 s → **0.46 s (−55 %)**, redmine/mastodon
+  timing-neutral (their parse is not the dominant term), output byte-identical on all three.
 - The across-sweep improvement in the untouched `check warm` / cold columns (−7…−25 %) is host
   drift between the two sweep sessions, not a lever; the per-lever interleaved A/Bs above are the
   precision evidence, the integrated sweep the corroboration.

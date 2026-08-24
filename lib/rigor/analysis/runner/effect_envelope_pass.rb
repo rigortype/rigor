@@ -30,11 +30,13 @@ module Rigor
       #
       # 1. **Read the envelopes** off the project's own RBS ({RbsExtended::EnvelopeScanner}). A project
       #    with `effects:` but no envelope pays this walk and stops here.
-      # 2. **Force cross-file discovery**, but only when step 1 found something — the diagnostic is
-      #    positioned at the Ruby `def`, and the discovery tables are what map a method key to one.
-      # 3. **Judge** ({Effects::EnvelopeCheck}) and render, then run the findings through the ordinary
-      #    suppression filter so `# rigor:disable effect.envelope-exceeded` on the `def` line and
-      #    `disable:` in `.rigor.yml` work exactly as they do for a per-file rule.
+      # 2. **Judge** ({Effects::EnvelopeCheck}). Cross-file discovery — the diagnostic is positioned
+      #    at the Ruby `def`, and the discovery tables are what map a method key to one — is forced
+      #    from inside the judgment, on the first finding built, so an envelope nothing exceeds costs
+      #    no discovery parse at all.
+      # 3. **Render**, then run the findings through the ordinary suppression filter so
+      #    `# rigor:disable effect.envelope-exceeded` on the `def` line and `disable:` in `.rigor.yml`
+      #    work exactly as they do for a per-file rule.
       #
       # **Why this is not part of the cached run assembly.** ADR-103 WD12 says envelope diagnostics are
       # recomputed every run from the (possibly cached) summaries and never stored. The `effects:` block
@@ -80,7 +82,8 @@ module Rigor
         # @param rbs_loader [Rigor::Environment::RbsLoader, nil] the run's loader; nil disables the pass.
         # @param effect_table [Rigor::Effects::EffectTable] the propagated graph.
         # @param discovery [#call] forces and returns the cross-file discovery tables as
-        #   `[def_sources, singleton_def_sources, class_sources]`. Called only when an envelope exists.
+        #   `[def_sources, singleton_def_sources, class_sources]`. Called only when a finding needs a
+        #   position — a judged-clean envelope never forces it.
         # @param sources [Hash{String => String}] in-memory sources, for the buffer-backed run path.
         # @param unit_sources [Hash{String => Array<String>}] `Runner#effect_sources` — where each effect
         #   unit is defined, which is what an `effects.envelopes[].match:` path glob selects on. Its paths
@@ -272,9 +275,12 @@ module Rigor
           )
         end
 
-        # The discovery tables both judgments position their findings from, forced once.
+        # The discovery tables both judgments position their findings from — behind a deferred value,
+        # forced at most once, on the first finding either judgment builds. A clean run (an envelope
+        # nothing exceeds — the common CI case) therefore never calls `@discovery` at all, which on a
+        # warm run is the difference between a no-op and a Prism parse of every project file.
         def positions
-          @positions ||= begin
+          @positions ||= Effects::EnvelopeCheck::DeferredPositions.new do
             def_sources, singleton_def_sources, class_sources = @discovery.call
             Effects::EnvelopeCheck::Positions.build(
               def_sources: def_sources, singleton_def_sources: singleton_def_sources,

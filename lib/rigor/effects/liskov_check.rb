@@ -112,11 +112,13 @@ module Rigor
 
         inherited = envelopes.fetch(ancestor_key)
         own = envelopes[key]
-        position = positions.for(key)
+        # The position is read inside the two collectors, after they know a finding exists: `.for` is
+        # what forces a deferred position table, and an inherited envelope nothing widens must not
+        # cost a whole-project discovery parse.
         if own && !own.top?
-          collect_declared(findings, key, ancestor_key, inherited, own, position)
+          collect_declared(findings, key, ancestor_key, inherited, own, positions)
         else
-          collect_proven(findings, table, key, ancestor_key, inherited, position, apply_tolerated)
+          collect_proven(findings, table, key, ancestor_key, inherited, positions, apply_tolerated)
         end
       end
 
@@ -135,16 +137,19 @@ module Rigor
         nil
       end
 
-      def collect_proven(findings, table, key, ancestor_key, inherited, position, apply_tolerated)
+      def collect_proven(findings, table, key, ancestor_key, inherited, positions, apply_tolerated)
         entry = table[key]
         return if entry.nil?
 
         exceeding = inherited.exceeded_by(apply_tolerated ? entry.undischarged : entry.proven)
+        return if exceeding.empty?
+
+        path, line = positions.for(key)
         exceeding.each do |label|
           trail = PathFinder.shortest(table, symbol: key, label: label)
           findings << Finding.new(
             key: key, label: label, ancestor_key: ancestor_key, ancestor_envelope: inherited,
-            own_envelope: nil, path: position.first, line: position.last,
+            own_envelope: nil, path: path, line: line,
             chain: trail&.chain || [key].freeze, origin: trail&.origin
           )
         end
@@ -152,11 +157,15 @@ module Rigor
 
       # Two authored bounds, compared by subsumption alone. `mutate.local` is tolerated here as it is
       # everywhere, so declaring it under an inherited `%a{pure}` is not a widening.
-      def collect_declared(findings, key, ancestor_key, inherited, own, position)
-        own.bound.to_a.reject { |label| inherited.tolerates?(label) }.each do |label|
+      def collect_declared(findings, key, ancestor_key, inherited, own, positions)
+        widened = own.bound.to_a.reject { |label| inherited.tolerates?(label) }
+        return if widened.empty?
+
+        path, line = positions.for(key)
+        widened.each do |label|
           findings << Finding.new(
             key: key, label: label, ancestor_key: ancestor_key, ancestor_envelope: inherited,
-            own_envelope: own, path: position.first, line: position.last, chain: nil, origin: nil
+            own_envelope: own, path: path, line: line, chain: nil, origin: nil
           )
         end
       end

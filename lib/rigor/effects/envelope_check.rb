@@ -83,6 +83,21 @@ module Rigor
         end
       end
 
+      # {Positions} behind a thunk: the discovery tables — one Prism parse of every project file —
+      # are built on the first `.for`, which both judgments reach only once a finding is being
+      # constructed. A clean judgment, the common CI case, therefore forces no discovery and parses
+      # nothing; that is the whole point of this class existing rather than the pass forcing the
+      # tables up front.
+      class DeferredPositions
+        def initialize(&build)
+          @build = build
+        end
+
+        def for(key)
+          (@positions ||= @build.call).for(key)
+        end
+      end
+
       NO_FINDINGS = [].freeze
       private_constant :NO_FINDINGS
 
@@ -93,7 +108,9 @@ module Rigor
       # @param class_envelopes [Hash{String => Envelope}] class- / module-level envelopes, to distribute.
       # @param config_envelopes [Hash{String => Envelope}] `effects.envelopes:` entries already resolved
       #   to the classes they select ({ConfigEnvelopes.for_classes}), to distribute at the lowest precedence.
-      # @param positions [Positions] the discovery tables a finding's `def` position is read from.
+      # @param positions [Positions, DeferredPositions] the discovery tables a finding's `def`
+      #   position is read from — consulted only when a finding is built, so a deferred value's
+      #   discovery force is reached exactly as often as a finding exists.
       # @param apply_tolerated [Boolean] false judges against the undischarged-by-policy `proven` lane —
       #   the `--no-tolerated-effects` audit switch.
       # @return [Array<Finding>] sorted by position then key then label, so a run explains identically twice.

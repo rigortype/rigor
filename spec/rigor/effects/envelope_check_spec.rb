@@ -169,4 +169,85 @@ RSpec.describe Rigor::Effects::EnvelopeCheck do
       expect(findings.map { |f| [f.path, f.line] }).to eq([["lib/repo.rb", 1], ["lib/repo.rb", 1]])
     end
   end
+
+  # The tables behind a position are a whole-project discovery parse on the pass side, so both
+  # judgments read them through {EnvelopeCheck::DeferredPositions} and must reach `.for` exactly as
+  # often as a finding exists — a judged-clean envelope, the common CI case, forces nothing.
+  describe "deferred positions" do
+    def deferred(&)
+      described_class::DeferredPositions.new(&)
+    end
+
+    it "never builds the tables when nothing exceeds" do
+      forced = false
+      graph = table(entry("Repo#find", proven: %w[io.db.read]))
+
+      findings = described_class.run(
+        table: graph, method_envelopes: { "Repo#find" => envelope("Repo#find", "io.db") },
+        class_envelopes: {},
+        positions: deferred do
+          forced = true
+          described_class::Positions.empty
+        end
+      )
+
+      expect(findings).to be_empty
+      expect(forced).to be(false)
+    end
+
+    it "builds them exactly once, on the first finding, and positions every later one from the memo" do
+      count = 0
+      graph = table(entry("Repo#find", proven: %w[io.net]), entry("Repo#also", proven: %w[io.net]))
+      positions = deferred do
+        count += 1
+        described_class::Positions.build(def_sources: { "Repo" => { find: "lib/repo.rb:3", also: "lib/repo.rb:9" } })
+      end
+
+      findings = described_class.run(
+        table: graph,
+        method_envelopes: { "Repo#find" => envelope("Repo#find", "io.db"),
+                            "Repo#also" => envelope("Repo#also", "io.db") },
+        class_envelopes: {}, positions: positions
+      )
+
+      expect(findings.map { |f| [f.path, f.line] }).to contain_exactly(["lib/repo.rb", 3], ["lib/repo.rb", 9])
+      expect(count).to eq(1)
+    end
+
+    it "stays unforced through a Liskov judgment whose overrides all honour their inherited bounds" do
+      forced = false
+      graph = table(entry("Base#find", proven: %w[io.db.read]), entry("Repo#find", proven: %w[io.db.read]))
+
+      findings = Rigor::Effects::LiskovCheck.run(
+        table: graph, superclasses: { "Repo" => "Base" },
+        method_envelopes: { "Base#find" => envelope("Base#find", "io.db") },
+        class_envelopes: {},
+        positions: deferred do
+          forced = true
+          described_class::Positions.empty
+        end
+      )
+
+      expect(findings).to be_empty
+      expect(forced).to be(false)
+    end
+
+    it "forces for a Liskov widening — the positive control for the example above" do
+      forced = false
+      graph = table(entry("Base#find", proven: %w[io.db.read]), entry("Repo#find", proven: %w[io.net]))
+
+      findings = Rigor::Effects::LiskovCheck.run(
+        table: graph, superclasses: { "Repo" => "Base" },
+        method_envelopes: { "Base#find" => envelope("Base#find", "io.db") },
+        class_envelopes: {},
+        positions: deferred do
+          forced = true
+          described_class::Positions.build(def_sources: { "Repo" => { find: "lib/repo.rb:7" } })
+        end
+      )
+
+      expect(findings.map { |f| [f.path, f.line] }).to eq([["lib/repo.rb", 7]])
+      expect(forced).to be(true)
+    end
+  end
 end

@@ -187,7 +187,9 @@ module Rigor
       # the same project ancestry the parent would have walked.
       def effect_plugin_facts
         @effect_plugin_facts ||= Effects::PluginFacts.build(
-          @plugin_registry, superclasses: @project_scope_seed[:discovered_superclasses] || {}
+          @plugin_registry,
+          superclasses: @project_scope_seed[:discovered_superclasses] || {},
+          includes: @project_scope_seed[:discovered_includes] || {}
         )
       end
       private :effect_plugin_facts

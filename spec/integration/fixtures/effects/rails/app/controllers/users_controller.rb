@@ -35,4 +35,15 @@ class UsersController < ApplicationController
   def render_page
     render(:show)
   end
+
+  # ActionMailer's parameterized form: `with` returns a lazy Parameterized::Mailer nothing types, so the
+  # class that produced the delivery is two calls out rather than one (#456). Mastodon spells it this way.
+  def deliver_parameterized
+    UserMailer.with(id: 1).welcome(1).deliver_later
+  end
+  # The enqueue. `NotifyWorker` includes rather than inherits, so this is the row a superclass-only
+  # ancestry walk could never have reached (#456).
+  def enqueue
+    NotifyWorker.perform_async(1)
+  end
 end

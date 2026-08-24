@@ -23,6 +23,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[plugins]** `rigor effects` reports the job enqueues and mail sends a Rails application performs. `job.enqueue` and `email.send` shipped in the vocabulary and nothing produced them: across two real applications the count of both was zero ([#456](https://github.com/rigortype/rigor/issues/456)).
+  - Three things had to be true at once. A Sidekiq worker has **no base class** — it includes `Sidekiq::Job` — so plugin rows, which reached a project class through its `class … <` lines only, could never match one; the ancestry walk now follows included and prepended modules too, as Ruby's own method lookup does. `rigor-sidekiq` gained the enqueue rows that walk was missing. And the class a delivery is attributed to is now resolved through the whole receiver chain, so `issue_add(user, issue).deliver_later` inside a mailer's own wrapper, and `AdminMailer.with(recipient: a).new_trends(…).deliver_later!`, both name their mailer — between them, that is how every delivery in Redmine and Mastodon is written.
+  - On Redmine, 175 methods now declare `email.send` and 173 `job.enqueue`, where none did. On Mastodon, 737 declare `job.enqueue` and 39 `email.send`. `rigor check`'s diagnostics are unchanged on both.
+
 - **[effects]** `Socket.gethostname` and the other calls that read this machine's own identity are reported as `io` rather than `io.net`, so a method no longer reads as network traffic because something under it looked up a hostname ([#458](https://github.com/rigortype/rigor/issues/458)).
   - On Redmine the label travelled a long way from its source: `Mailer` builds each Message-ID from the hostname, so **219 of 4,234 rows** — every model `save`, every `Mailer` method, and the IMAP and POP3 pollers, whose actual connections are invisible — claimed `io.net`. Three rows carry it now, all of them genuine DNS resolution. `Socket.gethostbyname`, `Socket.getaddrinfo` and every other socket call are unchanged.
 

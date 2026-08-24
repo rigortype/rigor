@@ -108,7 +108,9 @@ module Rigor
         return @effect_plugin_facts if @effect_plugin_facts && @effect_plugin_facts_ancestry.equal?(table)
 
         @effect_plugin_facts_ancestry = table
-        @effect_plugin_facts = Effects::PluginFacts.build(@plugin_registry, superclasses: table)
+        @effect_plugin_facts = Effects::PluginFacts.build(
+          @plugin_registry, superclasses: table, includes: @project_discovered_includes
+        )
       end
 
       # The merged per-file collections behind {#effect_table} — the *direct* summaries, before the graph

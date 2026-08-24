@@ -24,9 +24,9 @@ RSpec.describe "the plugin effect contract" do
     )
   end
 
-  def facts_for(*manifests, superclasses: {})
+  def facts_for(*manifests, superclasses: {}, includes: {})
     Rigor::Effects::PluginFacts.new(
-      contributions: manifests.map { |m| contribution(m) }, superclasses: superclasses
+      contributions: manifests.map { |m| contribution(m) }, superclasses: superclasses, includes: includes
     )
   end
 
@@ -112,6 +112,41 @@ RSpec.describe "the plugin effect contract" do
       facts = facts_for(manifest(id: "acme", effect_attributions: [row("Base")]))
 
       expect(facts.class_row("User", false, "call")).to be_nil
+    end
+
+    # #456 — a Sidekiq worker has no base class at all: `class TriggerWebhookWorker; include Sidekiq::Job`.
+    # A superclass-only walk could not match a row about it however the plugin spelled one, so `job.enqueue`
+    # shipped in the vocabulary with nothing on two Rails applications able to produce it.
+    it "reaches a class through the modules it includes" do
+      facts = facts_for(manifest(id: "acme", effect_attributions: [row("Sidekiq::Job")]),
+                        includes: { "Worker" => ["Sidekiq::Job"] })
+
+      expect(facts.class_row("Worker", false, "call")).not_to be_nil
+    end
+
+    it "walks includes and the superclass together, and through both at once" do
+      facts = facts_for(manifest(id: "acme", effect_attributions: [row("Base")]),
+                        superclasses: { "Worker" => "Middle" }, includes: { "Middle" => ["Base"] })
+
+      expect(facts.class_row("Worker", false, "call")).not_to be_nil
+    end
+
+    # The cap bounds work, not correctness. Rails concerns make breadth ordinary — Mastodon's `Account`
+    # includes 21 modules — and a cap ordinary code can reach silently drops the base class the row is
+    # actually written about.
+    it "still reaches the superclass past a wide include list" do
+      wide = Array.new(60) { |i| "Concern#{i}" }
+      facts = facts_for(manifest(id: "acme", effect_attributions: [row("Base")]),
+                        superclasses: { "Model" => "Base" }, includes: { "Model" => wide })
+
+      expect(facts.class_row("Model", false, "call")).not_to be_nil
+    end
+
+    it "survives a cyclic as-written include table" do
+      facts = facts_for(manifest(id: "acme", effect_attributions: [row("Base")]),
+                        includes: { "A" => ["B"], "B" => ["A"] })
+
+      expect(facts.class_row("A", false, "call")).to be_nil
     end
 
     it "survives a cyclic as-written superclass table" do

@@ -5,6 +5,7 @@ require_relative "protocol_contract"
 require_relative "additional_initializer"
 require_relative "effect_attribution"
 require_relative "effect_edge"
+require_relative "effect_ancestry"
 require_relative "effect_entry_points"
 require_relative "first_party"
 
@@ -46,7 +47,8 @@ module Rigor
                   :heredoc_templates, :nested_class_templates, :trait_registries,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
                   :source_rbs_synthesizer, :additional_initializers,
-                  :effect_root, :effect_labels, :effect_attributions, :effect_edges, :effect_entry_points
+                  :effect_root, :effect_labels, :effect_attributions, :effect_edges, :effect_entry_points,
+                  :effect_ancestry
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
@@ -57,7 +59,7 @@ module Rigor
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
         source_rbs_synthesizer: nil, additional_initializers: [],
         effect_root: nil, effect_labels: [], effect_attributions: [], effect_edges: [],
-        effect_entry_points: []
+        effect_entry_points: [], effect_ancestry: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -76,11 +78,8 @@ module Rigor
         validate_protocol_contracts!(protocol_contracts)
         validate_source_rbs_synthesizer!(source_rbs_synthesizer)
         validate_additional_initializers!(additional_initializers)
-        validate_effect_root!(effect_root)
-        validate_effect_labels!(effect_labels)
-        validate_effect_attributions!(effect_attributions)
-        validate_effect_edges!(effect_edges)
-        validate_effect_entry_points!(effect_entry_points)
+        validate_effect_fields!(effect_root, effect_labels, effect_attributions, effect_edges,
+                                effect_entry_points, effect_ancestry)
 
         assign_fields(id, version, description, config_schema, produces, consumes, owns_receivers,
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
@@ -88,7 +87,8 @@ module Rigor
                       source_rbs_synthesizer)
         assign_nested_class_templates(nested_class_templates)
         assign_additional_initializers(additional_initializers)
-        assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges, effect_entry_points)
+        assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
+                             effect_entry_points, effect_ancestry)
         freeze
       end
 
@@ -135,12 +135,26 @@ module Rigor
 
       # ADR-103 WD2 / WD6 / WD10 / WD14 — the effect contract's five fields, assigned together and outside
       # `assign_fields` (which already carries the maximum positional arity).
-      def assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges, effect_entry_points)
+      # The six `effect_*` fields validate together, so {#initialize} carries one call rather than six.
+      def validate_effect_fields!(effect_root, effect_labels, effect_attributions, effect_edges,
+                                  effect_entry_points, effect_ancestry)
+        validate_effect_root!(effect_root)
+        validate_effect_labels!(effect_labels)
+        validate_effect_attributions!(effect_attributions)
+        validate_effect_edges!(effect_edges)
+        validate_effect_entry_points!(effect_entry_points)
+        validate_effect_ancestry!(effect_ancestry)
+      end
+      private :validate_effect_fields!
+
+      def assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
+                               effect_entry_points, effect_ancestry)
         @effect_root = effect_root.nil? ? nil : effect_root.to_s.dup.freeze
         @effect_labels = effect_labels.map { |label| label.to_s.dup.freeze }.uniq.sort.freeze
         @effect_attributions = effect_attributions.dup.freeze
         @effect_edges = effect_edges.dup.freeze
         @effect_entry_points = effect_entry_points.dup.freeze
+        @effect_ancestry = effect_ancestry.dup.freeze
       end
       private :assign_effect_fields
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
@@ -194,7 +208,8 @@ module Rigor
           "effect_labels" => effect_labels,
           "effect_attributions" => effect_attributions.map(&:to_h),
           "effect_edges" => effect_edges.map(&:to_h),
-          "effect_entry_points" => effect_entry_points.map(&:to_h)
+          "effect_entry_points" => effect_entry_points.map(&:to_h),
+          "effect_ancestry" => effect_ancestry.map(&:to_h)
         }
       end
 
@@ -503,6 +518,15 @@ module Rigor
       def validate_effect_edges!(entries)
         validate_array_of!("effect_edges", entries, "Rigor::Plugin::EffectEdge instances") do |e|
           e.is_a?(EffectEdge)
+        end
+      end
+
+      # ADR-103 WD17 (#465) — `effect_ancestry:` states an ancestry edge the plugin's own gem introduces
+      # and the project's source never writes. Each entry MUST be a {Rigor::Plugin::EffectAncestry}; only
+      # a bundled plugin's survives, which `Effects::PluginFacts` enforces.
+      def validate_effect_ancestry!(entries)
+        validate_array_of!("effect_ancestry", entries, "Rigor::Plugin::EffectAncestry instances") do |e|
+          e.is_a?(EffectAncestry)
         end
       end
 

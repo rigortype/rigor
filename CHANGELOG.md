@@ -26,6 +26,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[plugins]** A class you subclass from a gem no longer cuts off the effects Rigor knows about it: `class UserMailer < Devise::Mailer` and `class Auth::SessionsController < Devise::SessionsController` now get ActionMailer's and ActionPack's effects ([#465](https://github.com/rigortype/rigor/issues/465)).
+  - Rigor reaches a framework's effects by following your own `class … <` and `include` lines, so a chain that leaves your source never came back — `Devise::Mailer < ActionMailer::Base` is a line in the devise gem, not in your application. A bundled plugin can now declare the ancestry its own gem introduces, and `rigor-devise` declares the six. On Mastodon that is 68 methods declaring `email.send` where 39 did, and 749 declaring `job.enqueue` where 737 did; `rigor check`'s diagnostics are unchanged.
+
 - **[effects]** A call on a class the source names by constant now gets that class's effects even when no signature for it is installed — so `Net::IMAP.new(…)`, `Net::POP3.APOP(…)` and `Net::FTP.open(…)` report `io.net` instead of nothing ([#463](https://github.com/rigortype/rigor/issues/463)).
   - Rigor withheld a catalogued class's default effects whenever it could not type the receiver, which is right when it had to guess the class and wrong when you wrote the class's name. The practical effect was that whether a call was reported depended on whether `rbs` happens to ship a signature for the library: `Net::HTTP` has one, `net-imap`, `net-pop` and `net-ftp` do not. Redmine's IMAP and POP3 mail pollers reported no network access at all; they do now.
 

@@ -20,7 +20,7 @@ RSpec.describe "the plugin effect contract" do
       id: manifest.id, owner: manifest.effect_owner, requested_root: manifest.effect_root,
       discharge_allowed: manifest.effect_discharge_allowed?, labels: manifest.effect_labels,
       attributions: manifest.effect_attributions, edges: manifest.effect_edges,
-      entry_points: manifest.effect_entry_points, **overrides
+      entry_points: manifest.effect_entry_points, ancestry: manifest.effect_ancestry, **overrides
     )
   end
 
@@ -147,6 +147,50 @@ RSpec.describe "the plugin effect contract" do
                         includes: { "A" => ["B"], "B" => ["A"] })
 
       expect(facts.class_row("A", false, "call")).to be_nil
+    end
+
+    # #465 — a chain that leaves project source never came back: `class UserMailer < Devise::Mailer` and
+    # `Devise::Mailer < ActionMailer::Base` is a line in the gem, so rigor-actionmailer's rows stopped one
+    # step short of every mailer a Devise application writes.
+    it "continues the walk through an ancestry a bundled plugin declares" do
+      claim = Rigor::Plugin::EffectAncestry.new(child: "GemBase", parent: "Base", why: "spec fixture")
+      facts = Rigor::Effects::PluginFacts.new(
+        contributions: [contribution(manifest(id: "acme", effect_attributions: [row("Base")],
+                                              effect_ancestry: [claim]),
+                                     discharge_allowed: true)],
+        superclasses: { "User" => "GemBase" }, includes: {}
+      )
+
+      expect(facts.class_row("User", false, "call")).not_to be_nil
+    end
+
+    # The claim carries no labels, which is what makes it look harmless. What it does is make OTHER
+    # plugins' rows reachable, so a third-party plugin asserting `Foo < ActiveRecord::Base` would pull
+    # first-party discharging rows onto `Foo`.
+    it "ignores an ancestry claim from a plugin the engine does not bundle, and says so" do
+      claim = Rigor::Plugin::EffectAncestry.new(child: "GemBase", parent: "Base", why: "spec fixture")
+      facts = Rigor::Effects::PluginFacts.new(
+        contributions: [contribution(manifest(id: "acme-widgets", effect_attributions: [row("Base")],
+                                              effect_ancestry: [claim]),
+                                     discharge_allowed: false)],
+        superclasses: { "User" => "GemBase" }, includes: {}
+      )
+
+      expect(facts.class_row("User", false, "call")).to be_nil
+      expect(facts.warnings.join).to include("GemBase < Base ancestry claim is ignored")
+    end
+
+    it "lets the project's own declaration win the first-match race against a claim" do
+      claim = Rigor::Plugin::EffectAncestry.new(child: "User", parent: "Claimed", why: "spec fixture")
+      facts = Rigor::Effects::PluginFacts.new(
+        contributions: [contribution(manifest(id: "acme",
+                                              effect_attributions: [row("Written"), row("Claimed")],
+                                              effect_ancestry: [claim]),
+                                     discharge_allowed: true)],
+        superclasses: { "User" => "Written" }, includes: {}
+      )
+
+      expect(facts.class_row("User", false, "call").key).to eq("Written#call")
     end
 
     it "survives a cyclic as-written superclass table" do

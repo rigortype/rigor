@@ -523,12 +523,13 @@ a plugin declaring none of them is a plain per-file analyzer:
 | `effect_attributions` | `Array<EffectAttribution>` | What a call into the framework this plugin models does (ADR-103 WD6 / WD10). |
 | `effect_edges` | `Array<EffectEdge>` | Framework call-graph edges the syntax does not contain — callbacks, `perform_now`, mailer bodies (ADR-103 WD10). |
 | `effect_entry_points` | `Array<EffectEntryPoints>` | Named `effects.snapshot.reach:` presets (ADR-103 WD14). |
+| `effect_ancestry` | `Array<EffectAncestry>` | Ancestry edges this plugin's own gem introduces and the project's source never writes (ADR-103 WD17). Bundled plugins only; see _Discharge and first-party standing_ below. |
 
 `#validate_config(config)` returns an array of error strings; the
 loader converts a non-empty result into a `LoadError`. Each extension
 field carries its own validation in `Manifest#initialize`.
 
-#### Effect contributions — `effect_root` / `effect_labels` / `effect_attributions` / `effect_edges` / `effect_entry_points` ([ADR-103](../adr/103-effect-labels.md), issue #387)
+#### Effect contributions — `effect_root` / `effect_labels` / `effect_attributions` / `effect_edges` / `effect_entry_points` / `effect_ancestry` ([ADR-103](../adr/103-effect-labels.md), issue #387)
 
 **Status: normative as of #387.** A plugin that models a framework knows things about effects that no
 amount of reading the application's source can recover: that `save` runs the class body's callbacks,
@@ -602,7 +603,20 @@ ADR-103 WD6 grants two things to a **first-party bundled** plugin and to nothing
 - its attributions may carry `discharge: true`, which makes the call site **exhaustive** rather than
   tainted — the same standing an accepted signature's `%a{…}` has, and for the same reason: the
   contribution is versioned with the engine, reviewed in this repository, and gated by
-  `make check-plugins`.
+  `make check-plugins`;
+- its `effect_ancestry:` claims are honoured ([#465](https://github.com/rigortype/rigor/issues/465)).
+  A claim carries no labels, which is what makes it look like the harmless one of the three: what it
+  does is make **other** plugins' rows reachable, so a third-party plugin asserting
+  `Foo < ActiveRecord::Base` would pull rigor-activerecord's first-party discharging rows onto `Foo`.
+  A refused claim is warned about rather than dropped in silence, on the same reasoning as the
+  `effect_root:` demotion — an author whose claim vanished would read it as the rows having vanished.
+
+An `EffectAncestry` is `{ child:, parent:, why: }`, and `parent:` need only be a **true** ancestor
+rather than the immediate superclass. The ancestry's only use is to make a row reachable, and no plugin
+row is ever keyed on a project class, so skipping intermediate links loses nothing — while insisting on
+the immediate parent would force a claim a project can falsify: `Devise::SessionsController`'s real
+parent is `DeviseController`, whose own parent is `Devise.parent_controller`, which an application may
+configure. A claim that skips links says so in its `why:`.
 
 "First-party" is **derived, never listed**: `Rigor::Plugin::FirstParty.bundled?(id)` asks whether the
 engine bundles `rigor-<id>`, which is the same question `Loader.bundled_plugin_path` already answers when

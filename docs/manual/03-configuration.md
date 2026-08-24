@@ -263,6 +263,14 @@ application, `match: "app/helpers/**/*.rb"` with `effect: []` produced 343 acros
 the layer telling you what it does rather than a misconfiguration, but it is not a work list either;
 [Effect labels § Envelopes by convention](19-effect-labels.md) walks the recipe for working it down.
 
+A stanza is checked against **proven** labels only, so on a Rails application it cannot fire on
+`io.db.*`, `cache.*`, `telemetry`, `email.send`, `job.enqueue` or any `rails.*`: those come from a
+plugin modelling a framework Rigor did not read, and a claim about unread code must not be able to
+fail your build. The enforcement path for that half is the committed snapshot, whose `rigor effects
+check` marks a declared-lane addition with `≤+` — [Effect labels § What a bound can and cannot
+see](19-effect-labels.md#what-a-bound-can-and-cannot-see), and
+[ADR-103](../adr/103-effect-labels.md) § WD17 for why.
+
 If a layer is not ready for a bound yet, leave `envelopes:` out and start with the committed snapshot
 ([`rigor effects update`](02-cli-reference.md#the-effect-snapshot)) — it needs no declaration at all,
 and stanzas are the second step, written once the record has told you what the layer actually does.

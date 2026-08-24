@@ -27,13 +27,21 @@ confuse them constantly, so it is worth pinning down before anything else:
 | Surface | Command | Answers | Can it fail? |
 | --- | --- | --- | --- |
 | **The report** | `rigor effects` | "What does every method do, right now?" | Never — always exits 0 |
-| **The snapshot** | `rigor effects update` / `check` / `diff` / `explain` | "What changed since we last agreed?" | `check` exits 1 on drift |
-| **Declared bounds** | `effects.envelopes:` in `.rigor.yml`, `%a{pure}` / `%a{rigor:v1:effect …}` in signatures | "Did anything exceed what we said it may do?" | Yes — a `rigor check` diagnostic |
+| **The snapshot** | `rigor effects update` / `check` / `diff` / `explain` | "What changed since we last agreed?" | `check` exits 1 on **any** drift |
+| **Declared bounds** | `effects.envelopes:` in `.rigor.yml`, `%a{pure}` / `%a{rigor:v1:effect …}` in signatures | "Did this method's own code exceed what we said it may do?" | A `rigor check` diagnostic, on **proven** labels only |
 
 The report is for reading. The snapshot is for reviewing — it is to effects what
 `db/schema.rb` is to your schema: a generated file you commit, whose *diff* is
-the artefact. The declared bounds are the only place you assert a policy, and
-the only place effects behave like the rest of Rigor.
+the artefact. The declared bounds are where you assert a contract about code
+Rigor read, and the only place effects behave like the rest of Rigor.
+
+The two failing surfaces answer different questions, and the difference decides
+which one your policy belongs in:
+
+| If your policy is… | Write it as | Because |
+| --- | --- | --- |
+| "this method does nothing but compute" | a declared bound | `mutate.*`, `io.fs.*`, `nondet.*`, `global.*` and `exit` are proven from your own code, so a bound on them fires |
+| "this layer must not touch the database / the cache / the mailer / the queue" | a committed snapshot + `rigor effects check` | those labels come from a plugin modelling a framework Rigor did not read, so no bound can fire on them — see [What a bound can and cannot see](#what-a-bound-can-and-cannot-see) |
 
 Adopt them in that order. Each one is useful without the next.
 
@@ -521,6 +529,56 @@ Check whether a plugin already covers the gem before writing rows by hand — on
 framework application the plugins supply most of the declared lane, and a table
 that duplicates them is a table you have to maintain.
 
+### What a bound can and cannot see
+
+A bound is checked against the method's **proven** labels — the ones Rigor got by
+reading code. It is never checked against the `≤` lane, and on a Rails
+application that distinction decides almost everything.
+
+Take a serializer under a `effect: []` stanza that ends up calling
+`UserRole.create!`:
+
+```
+app/serializers/rest/v1/instance_serializer.rb:89:1: warning: Method
+  REST::V1::InstanceSerializer#invites_enabled performs mutate.self
+  (receiver-mutation via UserRole.everyone → UserRole.create! → UserRole#set_position),
+  but is declared effect: [] at .rigor.yml effects.envelopes[0], so mutate.self
+  exceeds the envelope.
+```
+
+Rigor walked *through* the database write and reported the ivar assignment beyond
+it. The row for that method says `≤ [io.db.read, io.db.write]`, so the write is
+not hidden — it is in the lane a bound may not read, because `io.db.write` there
+is what `rigor-activerecord` says `create!` does, not something Rigor saw. A
+claim about code the analyzer never read must not be able to fail your build; if
+it could, every plugin upgrade would be a build risk.
+
+So on a Rails application:
+
+- **`mutate.*`, `io.fs.*`, `io.net`, `nondet.*`, `global.*`, `exit`** are proven
+  from your own code. A bound on these fires.
+- **`io.db.*`, `cache.*`, `telemetry`, `email.send`, `job.enqueue`, every
+  `rails.*`**, and anything you write in `effects.attribution:`, are declared. A
+  bound naming them is satisfied vacuously.
+
+**The enforcement path for the second group is the snapshot.** `rigor effects
+check` diffs both lanes and marks a declared-lane addition with `≤+`:
+
+```
+reach:
+  IssuesController#index  + io.net
+  IssuesController#index  ≤+ io.db.write
+```
+
+That is how you enforce "the issue list must not start writing to the database":
+commit the snapshot, review the diff, and let `rigor effects check` fail the
+build when a `≤+` appears where you did not want one. It is a ratchet on
+observed state rather than a declared policy — which is why `effects.snapshot.gate`
+exists, and why this chapter puts the snapshot before this section.
+
+The rule and the evidence behind it are
+[ADR-103](../adr/103-effect-labels.md) § WD17.
+
 ## The diagnostics
 
 Four rules. Three of them need an `effects:` block; the fourth exists to tell
@@ -542,4 +600,7 @@ baseline. Setting `effects.check: false` keeps the report and the snapshot while
 silencing the first three.
 
 Unproven effects never fire any of them. "Possibly more" is not evidence, and a
-check that fired on a shrug would teach you to route around it.
+check that fired on a shrug would teach you to route around it. Nor does a
+declared (`≤`) label fire one — see
+[What a bound can and cannot see](#what-a-bound-can-and-cannot-see) for which
+labels that rules out and where to enforce them instead.

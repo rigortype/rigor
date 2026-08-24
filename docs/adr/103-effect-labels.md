@@ -6,7 +6,8 @@ its § 13 lists the choices, this ADR fixes them as working decisions; WD13, coe
 `rigor check`, was added the same day; WD14, the pre-implementation decisions, and WD15, the
 v0.4.0 default-on ruling and its preconditions, both on 2026-08-17; WD16, which resolves five of
 those six preconditions, on 2026-08-22 — the sixth is the release-notes migration note, written at
-the release, so nothing about the default changes before v0.4.0). Two items remain open, both
+the release, so nothing about the default changes before v0.4.0; WD17, which rules that the declared
+lane is never judged and names the snapshot gate as what enforces it, on 2026-08-24). Two items remain open, both
 deferrable to the view slices. Implementation is sliced as GitHub issues under the umbrella
 [#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394; tracker
 convention: [ADR-98](98-development-flow-document-roles.md)).
@@ -367,6 +368,63 @@ collection cost per keystroke.
 **6 — Taint-only rows** were decided by [#411](https://github.com/rigortype/rigor/issues/411) and
 shipped in [#415](https://github.com/rigortype/rigor/pull/415): a row carrying only its taint is
 omitted by default and `--full` keeps it.
+
+### WD17 — The declared lane is never judged; the snapshot gate is what enforces it (owner ruling, 2026-08-24)
+
+A first-adopter walk of the shipped feature across two Rails applications
+([`20260823-effect-user-stories-corpus.md`](../notes/20260823-effect-user-stories-corpus.md)) asked ten
+questions a team brings to an effect system and found the flagship one unanswerable: *"this layer must
+not touch the database"* cannot be a diagnostic. Not by oversight — by the composition of two decisions
+this ADR already made, each correct on its own.
+
+`PluginFacts` routes every plugin row through the declared lane and `Attribution` does the same for the
+project's own table, because **`proven` means "the analyzer read the code"** and neither of those is
+read code (WD6). `EnvelopeCheck` reads the proven lane only, because a claim must never manufacture a
+finding (the discriminating criterion). Composed: **no envelope, no `%a{pure}`, no
+`effect.envelope-exceeded` can ever fire on a database access, a cache write, a mail send or a job
+enqueue** — which on a Rails application is every label a policy would name.
+
+The measurement, over 11,702 report rows on `rigor-survey/redmine` @ `a12198ea0` and
+`rigor-survey/mastodon` @ `163f96cee`: `io.db.read` and `io.db.write` appear in the proven lane
+**zero** times (declared: 709 / 644 and 1,975 / 1,283). An `effect: []` envelope over mastodon's
+`app/serializers/**` lands 56 findings — 45 `mutate.self`, 7 `global.read`, 3 `nondet.time`, 1
+`mutate.static`, and no `io.db.*` — while the message for
+`REST::V1::InstanceSerializer#invites_enabled` prints a chain that walks *through* `UserRole.create!`
+and reports the ivar assignment beyond it. The same stanza over redmine's `app/helpers/**` lands 343
+findings with the same absence.
+
+**The ruling: the binary stands, and the enforcement surface for a plugin-sourced label is
+`rigor effects check`.** The snapshot records the declared lane and diffs it under its own marker —
+adding `Journal.create!` to a redmine call path prints `IssuesController#index ≤+ io.db.write` — so
+"this layer must not *start* writing to the database" is enforceable today, and only there. What was
+wrong was never the model; it was [`19-effect-labels.md`](../manual/19-effect-labels.md), which
+presents declared bounds as the surface that judges and the snapshot as the surface that observes.
+That is the right way round for a bound about your own code and the wrong way round for the label a
+Rails team cares most about.
+
+Two alternatives were weighed and declined:
+
+- **An opt-in `:info` `effect.declared-exceeded`.** A rule that is off by default and cannot fail a
+  build is the same shape as the four defects of the 2026-08-22/23 batch — a declaration nobody reads.
+  It would also spend the FP budget on plugin-row accuracy, and #456 has just shown that a row can
+  fail to match through three independent mechanisms and over-match through none of them yet.
+- **Promoting a first-party plugin's framework-derived row into the proven lane.** This is not an
+  extension of `proven` but a redefinition of it, and it stakes `rigor check`'s red on the correctness
+  of plugin authorship rather than on code Rigor read. Reconsider only if a plugin row ever becomes
+  *verified* — derived from a signature or a source the analyzer actually read — which is a different
+  contribution kind, not a trust flag on this one.
+
+**What the ruling does not forbid.** Two adjacent narrowings landed beside it and are not exceptions:
+a catalogue posture may answer for a receiver the **syntax** names as a constant
+([#463](https://github.com/rigortype/rigor/issues/463) — the catalogue is read, audited knowledge and
+the only question was who identified the receiver), and a bundled plugin may declare the ancestry its
+own gem introduces ([#465](https://github.com/rigortype/rigor/issues/465) — an ancestry claim adds no
+label, it only makes an existing row *reachable*, and the row's lane is unchanged).
+
+**For WD15 precondition 5**, the release-notes migration note gains one sentence: default-on turns on
+collection and the envelope check, the envelope check cannot fail on a plugin-sourced label, and
+`rigor effects check` is where those are enforced. It still needs no lane caveat and no "clear your
+cache first".
 
 ## Rejected and deferred alternatives
 

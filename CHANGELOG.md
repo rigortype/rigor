@@ -14,6 +14,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[docs]** [Effect labels](docs/manual/19-effect-labels.md) now says which labels a declared bound can actually fail on, and where to enforce the ones it cannot ([ADR-103](docs/adr/103-effect-labels.md) § WD17).
+  - A bound is checked against a method's *proven* labels — what Rigor got by reading your code. On a Rails application `io.db.*`, `cache.*`, `telemetry`, `email.send`, `job.enqueue` and every `rails.*` come from a plugin modelling a framework Rigor did not read, so an envelope naming them is satisfied vacuously; the committed snapshot is what enforces them, and `rigor effects check` marks a new one with `≤+`. The chapter gained a section on the split, the surfaces table now says which question each one answers, and the configuration reference says it at `effects.envelopes:`.
+
 - **[docs]** The CI templates now carry a commented-out `rigor effects check` step, so a project adopting effect labels has one line to uncomment rather than a workflow to compose ([#376](https://github.com/rigortype/rigor/issues/376)).
 
 - **[docs]** The manual gained a chapter on effect labels — [Effect labels](docs/manual/19-effect-labels.md) — walking the whole feature end to end for the first time: the label vocabulary in one table, what the `rigor effects` report really looks like on a mid-size Rails application, the direct-versus-transitive split between the report and the snapshot, the `check` / `explain` / `update` review loop, the CI step and its exit codes, and the envelopes and `%a{pure}` annotations that turn an observation into a bound.

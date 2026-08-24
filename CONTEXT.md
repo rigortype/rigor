@@ -72,6 +72,19 @@ define *behaviour*.
   `T`" and ADR-100's "FP envelope".
 - **origin** — where an effect label came from: `(callee-or-construct, colouring-source)`,
   line-free; policy tolerance discharges a whole origin at once.
+- **posture** — the default effect labels a catalogued class gives a method it does not row.
+  Withheld wherever the receiver's class is a *guess* — an implicit-self call, `send` / `call` — and
+  granted where the syntax names a constant, because a written constant path is not a guess.
+- **attribution** — a *claim* about what code Rigor never read does (`effects.attribution:`, a
+  plugin row). It lands in the **declared** lane and never the proven one, by the definition of
+  proven, so it can never produce a finding (ADR-103 WD17); the snapshot's `≤+` drift marker is what
+  enforces it.
+- **project ancestry** — the superclass and `include` / `prepend` chain read from the project's own
+  `class … <` and mixin lines. Deliberately *not* the RBS ancestor chain, which would make a
+  plugin row's reach a function of whether anyone ran `rbs prototype`. A bundled plugin may declare
+  the edges its own gem introduces (`effect_ancestry:`).
+- **discharge** — a stratum trusted enough to leave a call site **exhaustive**: a catalogue row, and
+  a bundled plugin's framework-derived row. A third-party plugin's row is a claim and taints.
 - **effect snapshot** — `.rigor-effects.yml`, the committed record of every method's *direct*
   summary plus the transitive **reach** at declared entry points; `rigor effects check` gates its
   drift. Not a **baseline**: a baseline hides known findings so only new ones surface, the snapshot

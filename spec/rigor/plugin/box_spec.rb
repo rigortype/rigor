@@ -58,6 +58,13 @@ RSpec.describe Rigor::Plugin::Box do
         allow(box_instance).to receive(:require).and_raise(StandardError, "load failed")
         expect(described_class.require_feature("missing")).to be(false)
       end
+
+      it "declines a LoadError from the box require instead of letting it escape" do
+        # `LoadError` is a ScriptError, not a StandardError — before the `::ScriptError` rescue, a target
+        # gem absent from the box's load path aborted the whole run instead of declining to silence.
+        allow(box_instance).to receive(:require).and_raise(LoadError, "cannot load such file")
+        expect(described_class.require_feature("missing")).to be(false)
+      end
     end
 
     describe ".eval" do

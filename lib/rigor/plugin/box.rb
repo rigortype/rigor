@@ -32,13 +32,17 @@ module Rigor
       # Requires `feature` into the shared box exactly once. Returns true when the feature is available in the
       # box, false when it could not be loaded (the caller then declines — never falls back to loading into the
       # main space, which would defeat the boundary).
+      #
+      # The rescue is `::`-qualified and covers `::ScriptError`, matching {Isolation::Process.run_worker_loop}:
+      # a failed box require raises `::LoadError` — a ScriptError, not a StandardError — and a plain
+      # `rescue StandardError` lets it escape and abort the whole run instead of the clean decline.
       def require_feature(feature)
         @required ||= {}
         return @required[feature] if @required.key?(feature)
 
         shared.require(feature)
         @required[feature] = true
-      rescue StandardError
+      rescue ::StandardError, ::ScriptError
         @required[feature] = false
       end
 

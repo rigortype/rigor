@@ -16,6 +16,12 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[cli]** `rigor unused` now reuses the analysis cache for its RBS environment and its plugins' prepare work, and scans templates for class names against only the identifier-bearing fraction of each file — the report is byte-identical and 1.4–3.3× faster on the measured corpus (8.3 s → 2.5 s warm on Mastodon).
 
+- **[effects]** A warm `rigor effects` / `rigor effects check` / envelope-checked `rigor check` no longer re-runs the effect fixpoint: the propagated table rides the whole-run effects cache entry beside the per-file collections, under the same identities, so a cache hit adopts it whole (Redmine `rigor effects` warm 0.75 s → 0.61 s, output byte-identical cold vs warm).
+
+- **[engine]** A run whose only synthetic-method contributor registers trait registries (rigor-devise on a Rails app) no longer parses the whole project to build a provably empty index — the scan short-circuits before any I/O until the trait tier's environment threading is fixed ([#476](https://github.com/rigortype/rigor/issues/476); Mastodon `rigor effects` warm 1.12 s → 0.90 s).
+
+- **[cache]** Warm-run cache validation stats each dependency file once per run instead of once per cache slot — a collecting run validated the effects entry and the diagnostics entry against the same multi-thousand-file descriptor twice.
+
 ### Fixed
 
 - **[effects]** An effect annotation written in any of RBS's other bracket spellings — `%a(pure)`, `%a[rigor:v1:effect …]`, `%a|…|`, `%a<…>` — was invisible to the warm-run cache probe and to the annotations-unchecked notice, so its envelope was judged on cold runs and silently skipped on every cache hit; all five spellings now route identically, and a signature file with no effect annotation is no longer parsed by the envelope reader at all.

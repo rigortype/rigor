@@ -35,7 +35,11 @@ module Rigor
 
       HEDGED_REMOVAL = "-? %<label>s (current summary is not exhaustive)"
 
-      CLOSING_LINE = "Run `rigor effects update` and commit the result if this change is intended."
+      # Both commands, because they answer the two questions a drift report raises and a reader almost
+      # always asks them in this order (#435). `explain` is the one the manual's own narrative reaches for
+      # first, and the footer used to name only the one that makes the report go away.
+      CLOSING_LINE = "Run `rigor effects explain` to see what caused this, and `rigor effects update` to " \
+                     "accept it."
 
       def initialize(out:, path:)
         @out = out

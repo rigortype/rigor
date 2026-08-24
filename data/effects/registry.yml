@@ -11,6 +11,25 @@
 # still reads.
 vocabulary: 1
 
+# What each root means, in one line. Read by `rigor effects --list-labels` (#429), which is the only
+# way an installed Rigor can tell a reader what to write in `effects.envelopes:`, `effects.tolerated:`,
+# `effects.attribution:` or an `%a{rigor:v1:effect …}` annotation — four surfaces that all require
+# typing a label. `docs/manual/19-effect-labels.md`'s vocabulary table is the same wording for the same
+# reason; a root without a line here simply prints without one, which is what a plugin-opened root does.
+descriptions:
+  io: talks to something outside the process — a file, a socket, a database, a terminal, a subprocess
+  mutate: changes state in place, in the frame's own objects, the receiver, another object, or the class
+  nondet: reads something that differs between two otherwise identical runs
+  global: process-wide state — ENV, $stdout, a class variable
+  exit: can end the process
+  ffi: calls out through a foreign-function interface
+  telemetry: reports on the program rather than doing its work — logs, metrics, traces
+  email: sends mail, whatever the transport underneath is
+  job: hands work to a queue for another process to run
+  cache: reads or writes a cache, whatever backs it
+  failure: registered so a policy written for Steins, the sibling PHP analyzer, parses here; Rigor never
+    produces one, so a bound naming it is satisfied vacuously
+
 labels:
   # Steins v1, verbatim (rigortype/steins `docs/type-specification/effects.md`). Shared vocabulary:
   # a policy naming these labels must read the same against a PHP service and a Rails app.

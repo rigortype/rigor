@@ -74,14 +74,16 @@ module Rigor
         new(
           vocabulary_version: raw.fetch("vocabulary", 0),
           labels: raw.fetch("labels", nil) || [],
-          retired: raw.fetch("retired", nil) || {}
+          retired: raw.fetch("retired", nil) || {},
+          descriptions: raw.fetch("descriptions", nil) || {}
         )
       end
 
       attr_reader :vocabulary_version
 
-      def initialize(vocabulary_version:, labels:, retired: {})
+      def initialize(vocabulary_version:, labels:, retired: {}, descriptions: {})
         @vocabulary_version = vocabulary_version
+        @descriptions = descriptions.to_h { |root, text| [root.to_s, text.to_s.gsub(/\s+/, " ").strip] }.freeze
         @labels = labels.map(&:to_s).uniq.sort.freeze
         @known = build_known(@labels)
         @roots = @known.select { |label| Label.parent(label).nil? }.sort.freeze
@@ -95,6 +97,10 @@ module Rigor
 
       # The roots of the vocabulary — the outermost segments {#with} treats as already owned.
       attr_reader :roots
+
+      # One line per root, from the data file's `descriptions:` — what `rigor effects --list-labels`
+      # prints beside a root (#429). A root nothing describes (a plugin's, a project's) has no entry.
+      attr_reader :descriptions
 
       # Whether the vocabulary recognises `label`: an exact row, or an ancestor of one. A declared
       # `io` is recognised because `io.net` exists, so a bound may name an interior node the data
@@ -142,7 +148,8 @@ module Rigor
 
           check_ownership(label, owner)
         end
-        self.class.new(vocabulary_version: @vocabulary_version, labels: @labels + added, retired: @retired)
+        self.class.new(vocabulary_version: @vocabulary_version, labels: @labels + added, retired: @retired,
+                       descriptions: @descriptions)
       end
 
       private

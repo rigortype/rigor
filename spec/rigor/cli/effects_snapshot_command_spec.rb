@@ -157,7 +157,8 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
       expect(status).to eq(1)
       expect(out).to include("methods:\n  Tracer::Loud#emit  + io.fs.read\n")
       expect(out).to include("reach:\n  Tracer::Dispatcher#run  + io.fs.read\n")
-      expect(out).to end_with("Run `rigor effects update` and commit the result if this change is intended.\n")
+      expect(out).to end_with("Run `rigor effects explain` to see what caused this, and " \
+                              "`rigor effects update` to accept it.\n")
     end
 
     it "goes fresh again once the developer regenerates" do
@@ -324,6 +325,18 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
       _status, out, = run("explain", "--symbol", "Tracer::Dispatcher#run")
 
       expect(out).to include("Tracer::Dispatcher#run → Tracer::Loud#emit → Kernel#puts [io.output.stdout]")
+    end
+
+    # #435 — a misspelled `--symbol` printed `Nothing to explain.` and exited 0, which is exactly what a
+    # method with no effects prints. A typo and a real answer were indistinguishable, and a script could
+    # not tell them apart at all.
+    it "rejects an unknown --symbol with a usage status and the nearest key" do
+      run("update")
+      status, _out, err = run("explain", "--symbol", "Tracer::Dispatcher#ru")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("no effect unit named Tracer::Dispatcher#ru")
+      expect(err).to include("did you mean Tracer::Dispatcher#run?")
     end
 
     it "carries the paths under --format json" do

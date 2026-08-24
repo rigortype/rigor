@@ -4,6 +4,9 @@ require "optionparser"
 
 require_relative "../configuration"
 require_relative "../analysis/runner"
+require_relative "../effects/plugin_facts"
+require_relative "../effects/registry"
+require_relative "../plugin/loader"
 require_relative "../cache/store"
 require_relative "command"
 require_relative "effects_renderer"
@@ -71,6 +74,7 @@ module Rigor
             --pure               Only methods proven to do nothing beyond mutate.local
             --limit=N            Print at most N methods
             --why                Expand each method's unresolved reasons and declared-lane sources
+            --list-labels        Print the effect vocabulary this project can name, and exit
 
           Subcommands (the committed effect snapshot, ADR-103 WD7):
             update      Write the snapshot to effects.snapshot.path. Commit it; review its diff.
@@ -87,6 +91,8 @@ module Rigor
         return usage_error("unsupported format: #{options.fetch(:format)}") unless FORMATS.include?(options[:format])
 
         configuration = Configuration.load(options.fetch(:config)).with_effects_enabled
+        return list_labels(configuration) if options.fetch(:list_labels)
+
         scope = @argv.dup
         table, sources = analyze(configuration, scope)
         report = EffectsReport.build(
@@ -127,7 +133,7 @@ module Rigor
 
       def parse_options
         options = { config: nil, format: "text", full: false, no_tolerated: false, label: [], pure: false,
-                    limit: nil, why: false }
+                    limit: nil, why: false, list_labels: false }
         OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_config(opts, options)
@@ -144,6 +150,9 @@ module Rigor
           opts.on("--limit=N", Integer, "Print at most N methods") { |value| options[:limit] = value }
           opts.on("--why", "Expand each method's unresolved reasons and declared-lane sources") do
             options[:why] = true
+          end
+          opts.on("--list-labels", "Print the effect vocabulary this project can name, and exit") do
+            options[:list_labels] = true
           end
           # Accepted here and deliberately inert, exactly as it is on `update`: the report is an
           # observation, and observations are undischarged. Only a JUDGMENT reads `effects.tolerated:` —
@@ -165,6 +174,49 @@ module Rigor
       # the diagnostics entry serves the run and the #382 effects sidecar serves the collections, leaving
       # only the fixpoint. Sequential is not a cache decision — the run-result cache declines pool mode —
       # but a collecting run is pinned to the fork backend anyway, so `workers: 0` costs nothing here.
+      # #429 — the vocabulary, from the product rather than from a document the gem does not ship.
+      #
+      # Four configuration keys and two annotation forms all require typing an effect label, and until
+      # this there was no way to find out what the labels are: the manual's pointers resolve into
+      # `docs/type-specification/`, which `rigortype.gemspec` does not package. The registry is shipped
+      # data and already knows the answer; nothing surfaced it.
+      #
+      # It loads plugins but never analyses, because a plugin is where `rails.flash.write` comes from and
+      # a reader deciding what to write in `effects.envelopes:` needs to see it. A plugin that fails to
+      # load costs its labels and nothing else — `rigor plugins` is where that failure is reported.
+      def list_labels(configuration)
+        registry = project_registry(configuration)
+        @out.puts("Effect vocabulary — #{registry.labels.length} labels (vocabulary #{registry.vocabulary_version})")
+        registry.roots.each do |root|
+          @out.puts
+          @out.puts(root_heading(root, registry))
+          in_root = registry.labels.select { |label| Effects::Label.root(label) == root }
+          in_root.each_slice(4) { |slice| @out.puts("  #{slice.join(', ')}") }
+        end
+        @out.puts
+        @out.puts("A bound naming a label admits everything under it and nothing above it: `io` covers " \
+                  "`io.db.read`, `io.db.read` does not cover `io`.")
+        0
+      end
+
+      # A shipped root carries the registry's own one-liner; a root a plugin or this project opened
+      # carries where it came from instead, which is the more useful thing to say about it.
+      def root_heading(root, registry)
+        description = registry.descriptions[root]
+        return "#{root} — #{description}" if description
+
+        "#{root} — opened by a plugin or by this project's `effects.labels:`"
+      end
+
+      def project_registry(configuration)
+        services = Plugin::Services.new(reflection: Reflection, type: Type::Combinator,
+                                        configuration: configuration, cache_store: nil)
+        plugins = Plugin::Loader.load(configuration: configuration, services: services)
+        Effects::Registry.for_configuration(configuration, plugin_facts: Effects::PluginFacts.build(plugins))
+      rescue StandardError
+        Effects::Registry.for_configuration(configuration)
+      end
+
       # The analysed set is the configured `paths:` **plus** whatever the arguments name — never the
       # arguments alone (#439). An effect summary is transitive over whatever was analysed, so analysing
       # less does not filter the report, it lowers every answer in it: `rigor effects

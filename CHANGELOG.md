@@ -14,6 +14,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[cli]** `rigor effects --list-labels` prints the effect vocabulary your project can name — every shipped label with its root's meaning, plus whatever your plugins and your `effects.labels:` opened ([#429](https://github.com/rigortype/rigor/issues/429)).
+  - Four configuration keys and two annotation forms all require you to type an effect label, and until now nothing in an installed Rigor could tell you what the labels are: the manual's pointers led into `docs/type-specification/`, which the gem does not package. It analyses nothing, so it is instant. The manual's [vocabulary table](docs/manual/19-effect-labels.md) carries the same content for a reader who is not at a terminal, and the two links that led out of the gem now name the documentation site instead.
+
 - **[cli]** `rigor effects` can be asked a question. `--label=LABEL` prints only the methods carrying that label or one under it, `--pure` prints the methods proven to do nothing — the `%a{pure}` candidates, which the report omitted by construction — and `--limit=N` caps the output ([#457](https://github.com/rigortype/rigor/issues/457)).
   - On Redmine, `rigor effects --label io.net` is five rows and `rigor effects --pure` is 436, where both questions previously needed `--full`, a `grep` and a guess about the row grammar.
 
@@ -28,6 +31,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - Rigor produces no `failure.*` label of its own — in Steins the family names why a failure arm exists rather than what a method does — so a bound that names one is satisfied vacuously, the same way `io.output.buffer` is already registered here without any Ruby method producing it.
 
 ### Fixed
+
+- **[cli]** `rigor effects explain --symbol` with a misspelled key is now an error naming the nearest one, instead of printing `Nothing to explain.` and exiting 0 — which is exactly what a method with no effects prints, so a typo and a real answer were indistinguishable ([#435](https://github.com/rigortype/rigor/issues/435)).
+  - `rigor effects check`'s failure footer now offers `rigor effects explain` beside `rigor effects update`: the two answer the questions a drift report raises, and it used to name only the one that makes the report go away.
+- **[cli]** A first `rigor effects update` explains what to do about an empty `reach:` in the written file itself, not only in the run's output ([#436](https://github.com/rigortype/rigor/issues/436)).
+  - `reach:` records what your entry points *cause*, which is the half of the snapshot most worth reviewing, and a project that never configured one committed the other half with no way to know it. The default stays empty deliberately — a snapshot whose contents moved because your plugin list moved would be a worse artefact than one you configured — so the run names the presets your plugins actually registered and the file carries the same hint.
 
 - **[cli]** `rigor effects` prints a report sized for an application instead of for a fixture: 2,733 lines on Redmine where it printed 31,191, with nothing lost ([#434](https://github.com/rigortype/rigor/issues/434)).
   - Three changes get there. A row with no label in either lane says nothing at all and is now omitted — 1,953 of Redmine's 4,683. The unresolved-reason block, which was 30,000 of the 34,680 lines a full report prints, is collapsed to a count on the row, and `--why` expands it. And the report closes with a footer: how many units of how many are printed, and how many carry a **proven** label against a **declared** one — counted apart because only the first can ever fail a build. `--full` still prints exactly what the old default did, `--why` restores the reason blocks, and `--format json` carries the same totals.

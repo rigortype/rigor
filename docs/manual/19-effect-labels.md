@@ -75,8 +75,20 @@ Two things to internalise now, because everything below depends on them:
   from the shipped file. Your own project can open any root it likes with
   [`effects.labels:`](03-configuration.md#effect-labels).
 
+Your installed Rigor can print all of this, including whatever your plugins and
+your own `effects.labels:` opened:
+
+```sh
+rigor effects --list-labels
+```
+
+It analyses nothing, so it is instant, and it is the answer to "what may I write
+in `effects.envelopes:`" — a question four configuration keys and two annotation
+forms all ask of you.
+
 The full grammar, the subsumption rules and the registry's evolution policy are
-normative in [the effect-labels specification](../type-specification/effect-labels.md).
+normative in the effect-labels specification, which the gem does not ship:
+<https://rigor.typedduck.fail/type-specification/effect-labels/>.
 
 ## Turning it on
 
@@ -320,6 +332,20 @@ Two notes on reading the file:
   records everything, and produces a much larger and much noisier file.
 
 ### `reach:` and entry-point presets
+
+**It starts empty, and that is deliberate.** Rigor could guess — on a Rails
+application with `rigor-railties` loaded, `reach: [rails]` is almost certainly
+what you want — but a snapshot is a record you agree to and then review the diff
+of, and one whose contents changed because your plugin list changed would be a
+worse artefact than one you configured. So `rigor effects update` writes the
+direct half, names the presets your plugins actually registered, and leaves the
+same hint in the file:
+
+```
+# `reach:` is empty. It records the TRANSITIVE footprint at your entry points —
+# what a controller action or a job causes, rather than what its own body does …
+```
+
 
 Out of the box the snapshot records **no `reach:` table at all** — that is what
 the `0 reach entries` note above is telling you. The framing question the

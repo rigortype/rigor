@@ -32,14 +32,30 @@ module Rigor
       # Requires `feature` into the shared box exactly once. Returns true when the feature is available in the
       # box, false when it could not be loaded (the caller then declines — never falls back to loading into the
       # main space, which would defeat the boundary).
+      #
+      # The rescue is `::`-qualified and covers `::ScriptError`, matching {Isolation::Process.run_worker_loop}:
+      # a failed box require raises `::LoadError` — a ScriptError, not a StandardError — and a plain
+      # `rescue StandardError` lets it escape and abort the whole run instead of the clean decline.
       def require_feature(feature)
         @required ||= {}
         return @required[feature] if @required.key?(feature)
 
         shared.require(feature)
         @required[feature] = true
-      rescue StandardError
-        @required[feature] = false
+      rescue ::StandardError, ::ScriptError
+        @required[feature] = eval_require(feature)
+      end
+
+      # The gem-resolving fallback: `Ruby::Box#require` resolves against the raw `$LOAD_PATH` only (it
+      # calls the C-level require directly), so a target library installed as a gem is reachable only
+      # through the box's own RubyGems — the `Kernel#require` *inside* the box. `feature` is a fixed,
+      # plugin-declared name rendered via `String#inspect` (a safe Ruby literal), so the eval carries no
+      # free input. Returns false when the box cannot load the feature either way (the caller declines).
+      def eval_require(feature)
+        shared.eval("require #{feature.inspect}") # require "active_support/inflector"
+        true
+      rescue ::StandardError, ::ScriptError
+        false
       end
 
       # Evaluates `code` inside the shared box and returns the result across the box boundary. The caller MUST

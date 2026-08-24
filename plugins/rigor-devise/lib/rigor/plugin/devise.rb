@@ -82,6 +82,33 @@ module Rigor
             },
             always_included: ["Devise::Models::Authenticatable"]
           )
+        ],
+        # ADR-103 WD17 (#465) — the ancestry Devise introduces and a project's own source never writes.
+        #
+        # `class UserMailer < Devise::Mailer` and `class Auth::SessionsController <
+        # Devise::SessionsController` are what a Devise application looks like, and the walk that reaches
+        # a plugin row climbs the project's own `class … <` lines only — so it stopped at the gem class
+        # and `rigor-actionmailer`'s and `rigor-actionpack`'s rows never arrived. Measured on Mastodon:
+        # six classes, five of them controllers, which are entry points.
+        #
+        # Every `parent:` below is a **true ancestor and not the immediate one**, deliberately. Devise's
+        # controllers descend through `DeviseController`, whose own parent is `Devise.parent_controller`
+        # — configurable per project, defaulting to the application's own `ApplicationController`. Naming
+        # the intermediate links would state something a project can make false; naming a true ancestor
+        # loses nothing, because no plugin row is ever keyed on a project class.
+        effect_ancestry: [
+          Rigor::Plugin::EffectAncestry.new(
+            child: "Devise::Mailer", parent: "ActionMailer::Base",
+            why: "Devise::Mailer is an ActionMailer; a true ancestor, skipping Devise's own intermediates"
+          ),
+          *%w[SessionsController RegistrationsController PasswordsController ConfirmationsController
+              UnlocksController OmniauthCallbacksController].map do |controller|
+            Rigor::Plugin::EffectAncestry.new(
+              child: "Devise::#{controller}", parent: "ActionController::Base",
+              why: "a Devise controller is an ActionController; a true ancestor, skipping DeviseController " \
+                   "and `Devise.parent_controller`, which a project may configure"
+            )
+          end
         ]
       )
     end

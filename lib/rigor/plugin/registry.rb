@@ -262,9 +262,15 @@ module Rigor
       # plugin may open, and `discharge_allowed`, whether its attributions may discharge — so nothing
       # downstream has to re-derive who is first-party.
       Contribution = Data.define(:id, :owner, :requested_root, :discharge_allowed, :labels, :attributions,
-                                 :edges, :entry_points) do
+                                 :edges, :entry_points, :ancestry) do
+        # `ancestry:` defaults so a caller written before #465 — and every spec that constructs one by
+        # hand — keeps working; a plugin that declares none contributes none.
+        def initialize(ancestry: [], **rest)
+          super
+        end
+
         def empty?
-          labels.empty? && attributions.empty? && edges.empty? && entry_points.empty?
+          labels.empty? && attributions.empty? && edges.empty? && entry_points.empty? && ancestry.empty?
         end
       end
 
@@ -422,7 +428,8 @@ module Rigor
           id: manifest.id, owner: manifest.effect_owner, requested_root: manifest.effect_root,
           discharge_allowed: manifest.effect_discharge_allowed?,
           labels: plugin.effect_labels, attributions: plugin.effect_attributions,
-          edges: plugin.effect_edges, entry_points: plugin.effect_entry_points
+          edges: plugin.effect_edges, entry_points: plugin.effect_entry_points,
+          ancestry: plugin.effect_ancestry
         )
         contribution.empty? ? nil : contribution
       rescue StandardError

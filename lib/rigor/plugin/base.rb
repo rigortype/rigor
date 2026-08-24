@@ -734,6 +734,10 @@ module Rigor
         manifest.effect_entry_points
       end
 
+      def effect_ancestry
+        manifest.effect_ancestry
+      end
+
       # ADR-7 § "Slice 6-A/6-B" — per-plugin {IoBoundary}. Memoised so the boundary's accumulated `FileEntry`
       # rows persist across producer invocations within the same plugin instance and feed cache invalidation
       # via `cache_for`.

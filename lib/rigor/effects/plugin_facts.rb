@@ -113,6 +113,7 @@ module Rigor
         @edges = []
         @labels_by_owner = {}
         @entry_points = []
+        @declared_ancestry = {}
         contributions.each { |contribution| absorb(contribution) }
         @superclasses = superclasses || NO_ROWS
         @includes = includes || NO_ROWS
@@ -231,6 +232,27 @@ module Rigor
                              plugin_id: contribution.id)
         end
         @entry_points.concat(contribution.entry_points)
+        contribution.ancestry.each { |entry| absorb_ancestry(contribution, entry) }
+      end
+
+      # ADR-103 WD17 (#465) — an ancestry edge the plugin's gem introduces, which the project's own
+      # source never writes.
+      #
+      # **Bundled plugins only**, and this is the one place it is enforced. A claim carries no labels of
+      # its own, which is what makes it look harmless: what it does is make *other* plugins' rows
+      # reachable, so a third-party plugin asserting `Foo < ActiveRecord::Base` would pull
+      # rigor-activerecord's first-party discharging rows onto `Foo`. The grant is the same fact
+      # {#discharge_granted?} reads — that the engine bundles this plugin — and the refusal is warned
+      # about rather than silent, because a claim that quietly did nothing would read to its author as
+      # the rows having vanished.
+      def absorb_ancestry(contribution, entry)
+        unless contribution.discharge_allowed
+          @warnings << "plugin #{contribution.id.inspect} is not bundled with the engine; its " \
+                       "#{entry.child} < #{entry.parent} ancestry claim is ignored"
+          return
+        end
+
+        (@declared_ancestry[entry.child] ||= []) << entry.parent
       end
 
       # ADR-103 WD2 — a plugin that asked to own a framework root and is not one the engine bundles keeps
@@ -292,6 +314,9 @@ module Rigor
             queue.concat(Array(@includes[current]).compact)
             parent = Array(@superclasses[current]).first
             queue << parent if parent
+            # Last, so a project's own declaration always wins the first-match race against a plugin's
+            # claim about a gem (#465).
+            queue.concat(Array(@declared_ancestry[current]))
           end
           chain.freeze
         end
@@ -304,7 +329,8 @@ module Rigor
                           .map { |singleton| [singleton, sorted(@class_rows[singleton])] },
           sorted(@path_rows), sorted(@self_rows), sorted(@result_rows),
           @edges.map { |edge| [edge.target.to_s, edge.receiver, edge.selector.to_s, edge.plugin_id] }.sort,
-          @entry_points.map(&:to_h).sort_by { |preset| preset["name"] }
+          @entry_points.map(&:to_h).sort_by { |preset| preset["name"] },
+          @declared_ancestry.sort.map { |child, parents| [child, parents.sort] }
         ]
         Digest::SHA256.hexdigest(payload.inspect)
       end

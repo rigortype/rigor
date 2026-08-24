@@ -231,6 +231,14 @@ beyond `mutate.local` — mutation of objects its own frame
 allocated and never let out, which every effect envelope
 tolerates. `--full` lists every method instead.
 
+A `PATH` argument selects which methods are **printed**, never
+which are analysed: Rigor analyses your configured `paths:`
+either way, so a selected row carries exactly the labels the
+whole-project run gives it, and a note on stderr says how many
+of how many you are looking at. A path outside `paths:` is
+analysed as well as them, so pointing the command at a tree
+your configuration does not cover still works.
+
 `--format=text|json` selects the output format; the JSON
 payload additionally carries each method's *direct* summary
 broken down per origin. `--config=PATH` picks a config file.

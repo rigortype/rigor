@@ -183,29 +183,29 @@ report hides.
 
 ### Making 31,000 lines tractable — with one caveat
 
-The report has no summary line, no pager and no filter. Two levers work, and
-the difference between them matters:
+The report has no summary line and no pager. Two levers work:
+
+**A path argument selects what is printed.**
+
+```
+$ rigor effects app/controllers/issues_controller.rb
+rigor: showing 20 of 4683 units, selected by app/controllers/issues_controller.rb;
+       a path narrows the printing and not the analysis, so every label is the one
+       the whole-project run reports
+IssuesController#create: [global.read, io, mutate.instance, mutate.local, mutate.self, mutate.static] ≤ [email.send, job.enqueue, …] …?
+```
+
+It is a **view**, not a scope. Rigor still analyses your configured `paths:`, so
+the twenty rows it prints are the same twenty lines the whole-project run
+prints. That costs a full analysis — the note on stderr is there so you know
+what you paid for and what you got — and it is the only honest way to do it: an
+effect summary is transitive, so analysing less would not filter this report, it
+would lower every answer in it. A path that names no method says so rather than
+printing an empty report.
 
 **Reading fewer rows is free.** `grep`, `sort`, `--format=json` piped into `jq`
-— the text is stable and sorted, and post-processing it costs you nothing.
-
-**Analysing fewer files is not.** `rigor effects app/models/change.rb` narrows
-the *analysis*, and the labels are transitive over what was analysed, so a
-narrowed run gives a **weaker answer for the same method**:
-
-```
-# rigor effects
-IssuesController#create: [global.read, mutate.local, mutate.self, mutate.static] ≤ [mutate, rails.flash.write, rails.i18n.translate, rails.response.write] …?
-
-# rigor effects app/controllers/issues_controller.rb
-IssuesController#create: [] …?
-```
-
-Both are honest — the second run genuinely could not see the models below the
-controller, so it says "possibly more" rather than guessing. But it is not a
-cheaper way to get the first answer. Use a path argument to read one file in
-isolation; run the whole project when you want the real footprint, and filter
-the output afterwards.
+— the text is stable and sorted, and post-processing it costs you nothing. The
+note goes to stderr, so a redirect or a pipe gets the report alone.
 
 ## Direct and transitive
 

@@ -90,4 +90,44 @@ RSpec.describe Rigor::Cache::FileDigest do
       end
     end
   end
+
+  # A collecting run validates the effects entry and the diagnostics entry against the same
+  # dependency descriptor; under the run's stable-filesystem premise the second stat pass is pure
+  # repetition, so the validation side shares one stat per path per run scope.
+  describe "the validation stat memo" do
+    def packed
+      described_class.pack_stat(path, expected)
+    end
+
+    it "stats a path once across repeated validations inside one run scope" do
+      entry = packed
+      allow(File).to receive(:stat).and_call_original
+      described_class.with_run do
+        expect(described_class.stat_fresh?(path, entry)).to be(true)
+        expect(described_class.stat_fresh?(path, entry)).to be(true)
+      end
+      expect(File).to have_received(:stat).with(path).once
+    end
+
+    it "stats directly when no run scope is active" do
+      entry = packed
+      allow(File).to receive(:stat).and_call_original
+      described_class.stat_fresh?(path, entry)
+      described_class.stat_fresh?(path, entry)
+      expect(File).to have_received(:stat).with(path).twice
+    end
+
+    # The recording side packs the tuple a FUTURE run validates, after the content was read — it must
+    # describe that moment, never an earlier probe's, or a mid-run edit could pair a pre-edit tuple
+    # with post-edit content in the stored entry.
+    it "keeps the recording side un-memoised even after a validation warmed the table" do
+      entry = packed
+      described_class.with_run do
+        described_class.stat_fresh?(path, entry)
+        allow(File).to receive(:stat).and_call_original
+        described_class.pack_stat(path, expected)
+        expect(File).to have_received(:stat).with(path).once
+      end
+    end
+  end
 end

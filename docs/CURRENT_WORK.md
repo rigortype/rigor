@@ -16,41 +16,38 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: two design calls, then the report's usability
+## Next session: the report's usability, as one agent's batch
 
-The effect system's *bugs* are fixed and its *surface* is filed. What the corpus adjudication
-(`docs/notes/20260823-effect-user-stories-corpus.md`, ten user stories run against redmine +
-mastodon) added is that two of the ten failures are not surface at all:
+**Every design call the corpus adjudication opened is settled** (grilling session, 2026-08-24 — the
+tree and its evidence are in ADR-103 § WD17 and in the PRs below). What is left is the surface, and it
+is one agent's worth of work on one output:
 
-1. **#454 — every label a Rails policy would name is unjudgeable.** Plugin rows go to the declared
-   lane (`unit_scan.rb:296`) and `EnvelopeCheck` reads the proven lane only
-   (`envelope_check.rb:14-20`); both are correct, and composed they mean **no bound can ever fire on
-   a database access**. `io.db.*` is proven zero times in 11,702 corpus rows. The snapshot's `≤+`
-   marker *does* gate it and nothing documents that. Needs an ADR-103 WD ruling — document-only, an
-   opt-in `:info` rule, or a verified-plugin-row lane — before v0.4.0 promises anything about bounds.
-2. **#460 — ActiveRecord scope chains type `Dynamic`.** The successor to #455, which **landed as
-   #459** and turned out to be a different bug than filed: the effect collector's receiver projection
-   had no `Type::Union` arm, so every `Foo | nil` — i.e. every cross-method ivar read (ADR-58 nil) and
-   every `find_by` + `&.` — named no class *while the row read exhaustive*. Fixed; write-recording
-   entry points redmine 27→35, mastodon 114→169. What is left is #460: `Group.visible.find(id)` types
-   `Dynamic`, so redmine's `#update` figure moved to 3/27 rather than to 27/27. Needs a design call on
-   where the relation type lives and on `find` / `find_by` / `first` nil polarity — the FP-risk axis.
-
-Then the surface batch, unchanged from last session and still one agent's worth:
-
-3. **#439** — a path argument narrows the *analysis*, so the same method gets a weaker answer,
+1. **#439** — a path argument narrows the *analysis*, so the same method gets a weaker answer,
    unmarked. Do it **before or with** #434, whose fix removes the reason to reach for it.
-4. **#434** (31k-line report) · **#435** (four CLI affordance gaps) · **#429** (nothing lists the
-   vocabulary) · **#436** (should a preset-registering project default `reach:`?) · **#457** (the
-   report has no *query* surface — `--label`, `--pure`; distinct from #434's "make it smaller").
+2. **#434** (31k-line report; its acceptance list now also requires the footer to count the **proven**
+   and **declared** lanes separately — WD17) · **#435** (four CLI affordance gaps) · **#429** (nothing
+   lists the vocabulary) · **#436** (should a preset-registering project default `reach:`?) · **#457**
+   (the report has no *query* surface — `--label`, `--pure`; distinct from #434's "make it smaller").
    **All five touch the same output surface — give them to ONE agent.**
 
-Also open and independent: **#460** (above), **#463** (a catalogue posture cannot reach a class the
-bundled RBS does not ship, so `Net::IMAP.new` contributes nothing), **#465** (a project class whose base
-class comes from a gem gets no plugin row — `UserMailer < Devise::Mailer`), **#449** (`Date#to_time`
-overlay gap), **#427** (warm==cold gate blind on gem-bump PRs), **#430** / **#431** (design calls).
+**#460 is parked deliberately, not forgotten.** `Group.visible.find(id)` types `Dynamic`, which is why
+redmine's write-recording `#update` figure is 3/27 rather than 27/27. It is an *inference-quality* item
+— typing an AR relation touches `possible-nil-receiver`, this project's largest FP class — and the
+session ruled that improving the effect numbers must not be the reason to spend that budget. v0.4.x.
 
-**Landed since: #459, #461, #462, #464.** The last two came out of the user-story note's own issues and
+Also open and independent: **#449** (`Date#to_time` overlay gap), **#427** (warm==cold gate blind on
+gem-bump PRs), **#430** / **#431** (design calls).
+
+**Landed since: #459, #461, #462, #464, #466, #467** plus ADR-103 § WD17 and the manual re-frame.
+The 2026-08-24 grilling session settled four design calls in three rounds, all recorded: the
+proven/declared binary **stands** (a plugin row is never judged — WD17); the **snapshot gate** is the
+enforcement surface for plugin-sourced labels, which is what chapter 19 now says; a catalogue posture
+**may** answer for a receiver the syntax names as a constant (#466 — redmine's IMAP/POP3 pollers prove
+`io.net` again, for the connection this time); and a **bundled** plugin may declare the ancestry its own
+gem introduces (#467 — mastodon `email.send` 39 → 68). One recommendation was wrong and was corrected
+in flight: #463's named-constant posture **discharges** rather than keeping the `dynamic-receiver`
+taint, because on a constant path there is no projection for the taint to be about.
+ The last two came out of the user-story note's own issues and
 both found the filed mechanism to be wrong, which is now three for three — **#455** was a union receiver,
 not a `before_action` ivar; **#456** was not "the plugins attribute nothing" (rigor-actionmailer has
 attributed `email.send` since #387) but three things stopping the rows matching: a plugin row could not

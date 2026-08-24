@@ -12,6 +12,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Changed
+
+- **[cli]** `rigor unused` now reuses the analysis cache for its RBS environment and its plugins' prepare work, and scans templates for class names against only the identifier-bearing fraction of each file — the report is byte-identical and 1.4–3.3× faster on the measured corpus (8.3 s → 2.5 s warm on Mastodon).
+
 ## [0.3.5] - 2026-08-25
 
 v0.3.5 is about making the effect system usable rather than merely present. The `rigor effects` report went from 31,191 lines on a mid-size Rails application to 2,733 with nothing lost, gained `--label`, `--pure` and `--limit` so it can be asked a question, and can now print the label vocabulary itself. A larger group of fixes is about what the report *sees*: an optional receiver, a module a worker includes, a base class from a gem, a `super`, and a class-level annotation were each contributing nothing, several of them while the method still read as exhaustive. The manual gained a [chapter on effect labels](docs/manual/19-effect-labels.md), and [ADR-103](docs/adr/103-effect-labels.md) § WD17 records which labels a declared bound can actually fail on and where to enforce the rest.

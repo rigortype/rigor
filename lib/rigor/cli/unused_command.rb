@@ -10,6 +10,7 @@ require_relative "../analysis/reachability/graph"
 require_relative "../analysis/reachability/plugin_roots"
 require_relative "../analysis/reachability/signature_scan"
 require_relative "../analysis/reachability/project_files"
+require_relative "../cache/store"
 require_relative "options"
 require_relative "command"
 require_relative "probe_environment"
@@ -47,7 +48,8 @@ module Rigor
         references.concat(signature_references(configuration))
         dynamic_uses.concat(template_mentions(declarations))
 
-        contribution = Analysis::Reachability::PluginRoots.collect(configuration: configuration)
+        contribution = Analysis::Reachability::PluginRoots.collect(configuration: configuration,
+                                                                   cache_store: cache_store(configuration))
         references.concat(plugin_references(contribution.references))
         graph = Analysis::Reachability::Graph.new(
           declarations: declarations, references: references, dynamic_uses: dynamic_uses,
@@ -160,9 +162,9 @@ module Rigor
         return [] if names.empty?
 
         Analysis::Reachability::ProjectFiles.own(Dir.glob(TEMPLATE_GLOB, base: Dir.pwd), Dir.pwd).flat_map do |rel|
-          text = File.read(File.expand_path(rel)).scrub
+          haystack = constant_bearing_text(File.read(File.expand_path(rel)).scrub)
           names.filter_map do |fqn|
-            next unless text.include?(fqn)
+            next unless haystack.include?(fqn)
 
             Analysis::Reachability::Scan::DynamicUse.new(name: nil, prefix: fqn, site: nil,
                                                          reason: "named as a string in #{rel}",
@@ -171,6 +173,19 @@ module Rigor
         rescue SystemCallError, ArgumentError
           []
         end
+      end
+
+      # A maximal run of constant-path characters carrying at least one capital — the only substrings a
+      # declaration FQN can occur inside, since an FQN starts with a capital and uses this charset alone.
+      # An occurrence cannot cross a non-charset character, so `include?` over the de-duplicated runs
+      # (joined by a character outside the charset) answers exactly what `include?` over the whole text
+      # did, on a fraction of the bytes: a locale YAML or fixture JSON is almost entirely lowercase prose,
+      # and scanning 21 MB of it per declaration name was 81% of this command's wall time on mastodon.
+      CONSTANT_BEARING_RUN = /[A-Za-z0-9_:]*[A-Z][A-Za-z0-9_:]*/
+      private_constant :CONSTANT_BEARING_RUN
+
+      def constant_bearing_text(text)
+        text.scan(CONSTANT_BEARING_RUN).uniq.join("\n")
       end
 
       def root_fqns(declarations, globs)
@@ -188,11 +203,29 @@ module Rigor
       # declaration, which produced three of redmine's artifacts from a single initializer. A name the bundled
       # (non-project) environment already knows is not ours to call unused. The project's own `sig/` is
       # deliberately excluded from this environment, so a project class that ships a signature stays owned.
+      #
+      # The cache store makes the environment a Marshal restore instead of a cold RBS build on every
+      # invocation — the same ADR-54 slot `rigor check` reads, keyed apart by this environment's own
+      # (sig-less) descriptor. The report only ever asks "is this name known", which the cached
+      # environment answers identically: the one thing the cache degrades is `RBS::Location`, and no
+      # location is read here.
       def foreign_predicate(configuration)
-        env = Environment.for_project(libraries: configuration.libraries, signature_paths: [])
+        env = Environment.for_project(libraries: configuration.libraries, signature_paths: [],
+                                      cache_store: cache_store(configuration))
         ->(fqn) { !env.singleton_for_name(fqn).nil? }
       rescue StandardError
         ->(_fqn) { false }
+      end
+
+      # One store per run, shared by the environment build and the plugin-roots collection. Nil when the
+      # store cannot be opened — both consumers already treat a nil store as "recompute", which was this
+      # command's only mode before it had a cache at all.
+      def cache_store(configuration)
+        return @cache_store if defined?(@cache_store)
+
+        @cache_store = Cache::Store.new(root: configuration.cache_path)
+      rescue StandardError
+        @cache_store = nil
       end
 
       # ADR-102 § Consequences — "a root source that OVER-supplies silently hides real dead code, which is

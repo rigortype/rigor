@@ -755,7 +755,8 @@ module Rigor
       # ADR-103 WD8 / #383 — the envelope check. Nothing at all without an `effects:` block, and nothing
       # under `effects.check: false`; with both, one walk of the project's own RBS for `%a{pure}` /
       # `%a{rigor:v1:effect …}`, and only if that finds an envelope does anything else run (the discovery
-      # tables the `def` positions come from are forced from inside the pass, lazily, for that reason).
+      # tables the `def` positions come from are forced from inside the judgment, on the first finding
+      # built — a judged-clean envelope forces no discovery at all).
       #
       # The environment is the one the cacheable path already resolved when there is one, so a warm run
       # reads the envelopes off the loader it built anyway rather than building a second.

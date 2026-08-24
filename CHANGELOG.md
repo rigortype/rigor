@@ -22,6 +22,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[cache]** Warm-run cache validation stats each dependency file once per run instead of once per cache slot — a collecting run validated the effects entry and the diagnostics entry against the same multi-thousand-file descriptor twice.
 
+- **[effects]** An envelope judgment that finds nothing no longer pays the whole-project discovery parse: the `def`-position tables are built on the first finding instead of up front, so a clean `rigor check` under `effects.envelopes:` skips them entirely (mail 1.03 s → 0.46 s warm).
+
 ### Fixed
 
 - **[effects]** An effect annotation written in any of RBS's other bracket spellings — `%a(pure)`, `%a[rigor:v1:effect …]`, `%a|…|`, `%a<…>` — was invisible to the warm-run cache probe and to the annotations-unchecked notice, so its envelope was judged on cold runs and silently skipped on every cache hit; all five spellings now route identically, and a signature file with no effect annotation is no longer parsed by the envelope reader at all.

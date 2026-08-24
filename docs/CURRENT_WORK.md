@@ -45,10 +45,18 @@ Then the surface batch, unchanged from last session and still one agent's worth:
    report has no *query* surface — `--label`, `--pure`; distinct from #434's "make it smaller").
    **All five touch the same output surface — give them to ONE agent.**
 
-Also open and independent: **#460** (above), **#456** (`job.*` / `email.*` have zero producers on either app, though
-`rigor-sidekiq` and `rigor-actionmailer` are loaded), **#458** (`Socket.gethostname` proves `io.net`,
-so 5 % of redmine reads as networked on a Message-ID lookup), **#449** (`Date#to_time` overlay gap),
-**#427** (warm==cold gate blind on gem-bump PRs), **#430** / **#431** (design calls).
+Also open and independent: **#460** (above), **#463** (a catalogue posture cannot reach a class the
+bundled RBS does not ship, so `Net::IMAP.new` contributes nothing), **#465** (a project class whose base
+class comes from a gem gets no plugin row — `UserMailer < Devise::Mailer`), **#449** (`Date#to_time`
+overlay gap), **#427** (warm==cold gate blind on gem-bump PRs), **#430** / **#431** (design calls).
+
+**Landed since: #459, #461, #462, #464.** The last two came out of the user-story note's own issues and
+both found the filed mechanism to be wrong, which is now three for three — **#455** was a union receiver,
+not a `before_action` ivar; **#456** was not "the plugins attribute nothing" (rigor-actionmailer has
+attributed `email.send` since #387) but three things stopping the rows matching: a plugin row could not
+reach a class through an `include`, `ANCESTRY_CAP` silently truncated Rails concern lists, and an
+`on_result:` row stopped one link short of the mailer. Corpus after #464: redmine 0 → 175 methods
+declaring `email.send`, mastodon 0 → 737 declaring `job.enqueue`.
 
 **The "declared lane goes quiet" family is closed.** #428 (cache hit), #441 (parallel runs), #446
 (`super`), #452 (a class-level rbs-inline envelope, landed 2026-08-24 — upstream's writer emits a

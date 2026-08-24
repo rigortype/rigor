@@ -86,12 +86,16 @@ module Rigor
         # @param configuration [Rigor::Configuration] the loaded project configuration.
         # @param plugin_requirer [#call] how a plugin gem is brought into the process. The same seam
         #   `Analysis::Runner` exposes, so a spec can register a plugin class without publishing a gem.
+        # @param cache_store [Rigor::Cache::Store, nil] when given, each plugin's `#prepare` producers read
+        #   and write the same ADR-60 record-and-validate slots they use under `rigor check`, instead of
+        #   recomputing from scratch — a routes parse or a factory discovery is a validated cache read on
+        #   every invocation after the first. Nil keeps the historical recompute-always behaviour.
         # @return [Contribution] sorted and de-duplicated. Empty whenever the project declares no plugins, no
         #   plugin contributes anything, or anything at all goes wrong.
-        def collect(configuration:, plugin_requirer: ->(name) { require name })
+        def collect(configuration:, plugin_requirer: ->(name) { require name }, cache_store: nil)
           return Contribution.empty if configuration.plugins.empty?
 
-          services = build_services(configuration)
+          services = build_services(configuration, cache_store)
           registry = Plugin::Loader.load(configuration: configuration, services: services,
                                          requirer: plugin_requirer)
           return Contribution.empty if registry.nil? || registry.empty?
@@ -102,16 +106,15 @@ module Rigor
           Contribution.empty
         end
 
-        # Mirrors `CLI::ProbeEnvironment.load_plugin_registry`: a `Plugin::Services` with no cache store
-        # (this is a one-shot report, so a producer recomputes rather than reading and writing cache slots)
-        # driving `Plugin::Loader.load`. Holding the `Services` is what gives access to the fact store the
-        # loaded plugins share — the loader hands the same instance to every plugin.
-        def build_services(configuration)
+        # Mirrors `Analysis::WorkerSession`'s services: the shared fact store plus whatever cache store the
+        # caller holds. Holding the `Services` is what gives access to the fact store the loaded plugins
+        # share — the loader hands the same instance to every plugin.
+        def build_services(configuration, cache_store)
           Plugin::Services.new(
             reflection: Reflection,
             type: Type::Combinator,
             configuration: configuration,
-            cache_store: nil
+            cache_store: cache_store
           )
         end
 

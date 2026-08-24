@@ -89,6 +89,19 @@ RSpec.describe Rigor::Analysis::Reachability::PluginRoots do
       expect(described_class.collect(configuration: configuration_for)).to be_empty
     end
 
+    it "hands the caller's cache store to the plugins' services, so producers hit their check-time slots" do
+      store = instance_double(Rigor::Cache::Store)
+      allow(Rigor::Plugin::Services).to receive(:new).and_call_original
+
+      described_class.collect(
+        configuration: configuration_for("rigor-roots-a"),
+        plugin_requirer: requirer_for("rigor-roots-a" => root_publisher),
+        cache_store: store
+      )
+
+      expect(Rigor::Plugin::Services).to have_received(:new).with(hash_including(cache_store: store))
+    end
+
     it "degrades when a plugin gem cannot be resolved" do
       contribution = described_class.collect(
         configuration: configuration_for("rigor-does-not-exist"),

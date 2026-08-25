@@ -28,6 +28,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[effects]** An effect annotation written in any of RBS's other bracket spellings — `%a(pure)`, `%a[rigor:v1:effect …]`, `%a|…|`, `%a<…>` — was invisible to the warm-run cache probe and to the annotations-unchecked notice, so its envelope was judged on cold runs and silently skipped on every cache hit; all five spellings now route identically, and a signature file with no effect annotation is no longer parsed by the envelope reader at all.
 
+- **[cli]** Every dispatched command now arms the deferred YJIT deadline, not just `check` and `coverage` — a cold `rigor effects` over Mastodon previously ran its whole 21 s interpreted where the identical analysis under `check` took 14.8 s; both now finish together, and commands that finish inside the deadline still never pay JIT compile cost.
+
 ## [0.3.5] - 2026-08-25
 
 v0.3.5 is about making the effect system usable rather than merely present. The `rigor effects` report went from 31,191 lines on a mid-size Rails application to 2,733 with nothing lost, gained `--label`, `--pure` and `--limit` so it can be asked a question, and can now print the label vocabulary itself. A larger group of fixes is about what the report *sees*: an optional receiver, a module a worker includes, a base class from a gem, a `super`, and a class-level annotation were each contributing nothing, several of them while the method still read as exhaustive. The manual gained a [chapter on effect labels](docs/manual/19-effect-labels.md), and [ADR-103](docs/adr/103-effect-labels.md) § WD17 records which labels a declared bound can actually fail on and where to enforce the rest.

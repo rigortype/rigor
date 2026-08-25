@@ -11,7 +11,6 @@ require_relative "../analysis/rule_catalog"
 # The baseline filter runs on EVERY exit path — including the ADR-87 WD4 cache-HIT fast path, which skips
 # `load_check_dependencies` — so it must be a load-time require. It pulls only YAML, never the engine.
 require_relative "../analysis/baseline"
-require_relative "../runtime/jit"
 require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
@@ -34,12 +33,10 @@ module Rigor
     # concerns that are clearer read together than split across micro-classes.
     class CheckCommand < Command # rubocop:disable Metrics/ClassLength
       # @return [Integer] CLI exit status.
-      def run # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-        # Arm deferred YJIT enablement before any analysis work: the deadline
-        # thread only fires once a run outlasts the amortization window, so a
-        # short check finishes before it ever pays JIT compile cost while a
-        # long run JITs its dominant tail (Runtime::Jit).
-        Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
+      #
+      # Deferred YJIT enablement (Runtime::Jit) is armed by `CLI#dispatch` for every command, this
+      # one included, before any analysis work runs.
+      def run # rubocop:disable Metrics/AbcSize
         # ADR-87 WD4 — parse options + resolve config WITHOUT the inference engine, so the run-cache hit probe
         # can run first. The heavy engine (`load_check_dependencies`) loads only on a miss / non-cacheable run.
         options = parse_check_options

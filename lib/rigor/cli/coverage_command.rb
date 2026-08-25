@@ -14,7 +14,6 @@ require_relative "../inference/parameter_inference_collector"
 require_relative "../protection/mutation_scanner"
 require_relative "../protection/test_suite_oracle"
 require_relative "../language_server/project_context"
-require_relative "../runtime/jit"
 require_relative "../scope"
 require_relative "coverage_report"
 require_relative "coverage_renderer"
@@ -55,11 +54,11 @@ module Rigor
       DEFAULT_TEST_COMMAND = %w[bundle exec rake].freeze
 
       # @return [Integer] CLI exit status.
-      def run # rubocop:disable Metrics/AbcSize
-        # Arm deferred YJIT enablement (Runtime::Jit): a scan long enough to
-        # amortize JIT compile cost enables mid-flight; a short one finishes
-        # first and never pays it. Same seam as `rigor check`.
-        Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
+      #
+      # Deferred YJIT enablement (Runtime::Jit) is armed by `CLI#dispatch` for every command, this
+      # one included: a scan long enough to amortize JIT compile cost enables mid-flight; a short one
+      # finishes first and never pays it.
+      def run
         options = parse_options
         return mutation_misuse_error if options[:mutation] && !options[:protection]
         return with_tests_misuse_error if options[:with_tests] && !options[:mutation]

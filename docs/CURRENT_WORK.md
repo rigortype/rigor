@@ -48,6 +48,15 @@ harness preserved on branch `perfbench-harness-20260825`; memory
   environment is nil (it built a provably empty index from a 3,229-file parse per run).
 - **#478** — per-run validation-stat memo; recording side (`pack_stat`, `GlobEntry`) deliberately
   un-memoised.
+- **#480** (continuation) — the sweep's odd cold cell (`effects` +41 % over `check`, same
+  analysis) was YJIT: only check/coverage armed the deadline. Proven by perturbing both directions;
+  `CLI#dispatch` now arms it for every command. Cold effects at check parity.
+- **#481** (continuation) — `Reachability::ScanCache`: one self-validating stat-signed bundle for
+  `unused`'s per-file scan + template extraction (the #473 narrowing had moved the bottleneck into
+  extraction). Mastodon unused warm 2.7 → 1.1 s; campaign total 8.4 → ~1.1 s (7.8×).
+- **ADR-104 (Proposed)** — the effects boot-slim probe, feasibility verified in-code and
+  empirically (declared lane cold==warm byte-identical, email.send 68 rows). **#482** (sidecar
+  blob split, 0.7 s at gitlab scale) is folded into its implementation slice, not standalone.
 
 **#476 (filed, needs a human design call):** synthetic Tier B is dead in production —
 `project_pre_passes` passes `environment: nil` and every trait entry needs the env to explode
@@ -56,11 +65,12 @@ lazy dispatch-time resolution, or retire the tier; whichever lands removes #477'
 
 ## Next perf levers, evidence-ranked (do not re-derive; the note has the numbers)
 
-1. **Effects boot-slim probe** — ~0.5 s of the residual warm `rigor effects` wall is process
-   boot + engine require; #475's stored table makes an engine-free serve conceivable. Design
-   slice: the effects identity needs plugin facts, which today need plugin load.
-2. **`unused` residual** (mastodon ~2.5 s): the single-threaded cacheless per-file Prism scan
-   (0.47 s) and the narrowed template scan.
+1. **Implement ADR-104** (effects boot-slim probe, #482 inside it) — the last big warm lever:
+   ~0.5 s of every warm effects surface is engine require, plus 0.7 s of blob load at gitlab
+   scale. The decline-rule criterion and the `$LOADED_FEATURES` spec shape are in the ADR.
+2. **Environment restore at scale** — 0.83 s on gitlab warm, unattributed below
+   `Environment.for_project`; sub-attribute before touching (RbsDescriptor digest vs Marshal vs
+   lockfile resolve).
 3. **`fresh?` scope hoist** for the probe-decline `check` path needs a `with_run` inheritance
    flag — nesting installs a fresh table by design (coverage_mutation relies on it).
 
@@ -77,3 +87,8 @@ lazy dispatch-time resolution, or retire the tier; whichever lands removes #477'
 - **`String#scan(...).uniq!` returns nil when nothing was removed** — use `.uniq`.
 - Wall on this host moved ±0.3 s between same-arm blocks; every landed claim rests on
   byte-identity plus a phase-probe mechanism, not a wall delta alone.
+- **After an engine-moving merge, re-prime the diagnostics slot with a `check` run** — `unused`
+  never writes it, so the next "warm check" measurement is silently a cold one (it was, twice).
+- **The gate call and the commit must never share one `&&` chain** — the piped-exit trap fired
+  again (changelog conformance red behind `| tail`, pushed, force-amended). Gate in its own call,
+  read `$?`, then commit.

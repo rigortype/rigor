@@ -151,6 +151,55 @@ Diagnostic/report bytes are identical to the baseline sweep in every cell. Two h
   drift between the two sweep sessions, not a lever; the per-lever interleaved A/Bs above are the
   precision evidence, the integrated sweep the corroboration.
 
+## Continuation (same day) — the cold gap, the gitlab validation, and the second `unused` cache
+
+The residue list above scheduled two measurements before further optimisation; both paid off.
+
+**The cold `effects` gap was YJIT, and the fix covers every command ([#480](https://github.com/rigortype/rigor/pull/480)).**
+The baseline sweep's odd cold cell — `rigor effects` 20.9 s against `check` 15.4 s on mastodon,
+same config — reproduced interleaved (14.7/14.8/14.9 s vs 21.6/20.8/21.9 s, +41–47 %), with both
+arms writing byte-for-byte the same 8,640 KB cache (collection and the sidecar write — measured at
+0.17 s in-process — both exonerated). The mechanism: `Runtime::Jit.enable_after` was armed only in
+`check` / `coverage`, so every other command ran interpreted however long it took. Perturbing it
+both ways swapped the numbers exactly (effects + `RUBY_YJIT_ENABLE=1` → 15.9 s; check +
+`RIGOR_DISABLE_YJIT=1` → 21.1 s). The fix arms the deadline in `CLI#dispatch` for every command —
+a run that finishes inside the window still never pays compile — confirmed at parity (17.4 s check
+/ 17.8 s effects in one pair). This also covers `unused`, `sig-gen`, `type-scan`, `annotate`.
+
+**gitlab-scale validation of the #475 sidecar.** Cold prime 205.9 s; warm `rigor effects`
+3.1–3.7 s (check warm 0.7 s). The warm decomposition at this scale: environment restore 0.83 s,
+sidecar Marshal load 0.71 s (the entry is **6.9 MB** of `[collections, table]`), dependency
+validation 0.48–0.58 s across the slots, plugin prepare 0.42 s. The warm path only consumes the
+table, the sources and the ancestry from that blob — the split is filed as
+[#482](https://github.com/rigortype/rigor/issues/482) and deliberately folded into ADR-104's
+implementation (the boot-slim probe needs the same small payload), not landed twice.
+
+**`unused` round two: the extraction was the new bottleneck, and a per-file bundle removes it
+([#481](https://github.com/rigortype/rigor/pull/481)).** Decision measurements first: the #473
+narrowing had moved the template cost from matching into extraction (read + scrub + regex = 1.29 s
+against 0.27 s of matching on mastodon), so a global-haystack index would have optimised the wrong
+term; and a Marshal restore of all per-file scan results is 25× under the ADR-54 beats-recompute
+bar (1.8 MB blob, 0.03 s load vs 0.66 s rescan). `Analysis::Reachability::ScanCache` — one
+self-validating stat-signed bundle, the IncrementalSnapshot shape because the sound unit of reuse
+is the file — caches both passes: mastodon 2.74 → **1.07 s**, redmine 1.53 → **0.81 s**, mail
+0.59 → 0.42 s, kramdown/liquid at parity, `--format json` byte-identical on all five. Cumulative
+across the campaign, mastodon `rigor unused` went **8.37 → 1.07 s (7.8×)**.
+
+Integrated spot-check on the merged master (`905602ea`, warm cells, this host): redmine
+check 0.30 s / effects 0.64 s / effects check 0.62 s / unused 0.74 s; mastodon 0.31 / 0.90 /
+0.80 / 1.20 s. One harness note for the next session: after an engine-source-moving merge,
+re-prime the **diagnostics** slot with a `check` run — `unused` does not write it, and the first
+"warm" check otherwise measures a cold one (it did here, 8.6/11.8 s, before re-priming).
+
+**The boot-slim probe is now [ADR-104](../adr/104-effects-boot-slim-probe.md) (Proposed).** The
+feasibility facts are verified in the ADR: the effects identity is a pure function of
+configuration, shipped data and plugin contributions (`PluginFacts#compute_digest` reads no
+discovery table), and the declared-lane ancestry linking is baked into the cached collections.
+Remaining residue after this continuation: the probe itself (~0.5 s of every warm effects
+subprocess), #482's blob split (0.7 s at gitlab scale, inside ADR-104), the environment restore's
+scale behaviour (0.83 s on gitlab — unattributed below `Environment.for_project`), and the
+`fresh?` scope topology and GlobEntry items above, unchanged.
+
 ## Reconciliation with prior art
 
 The redmine warm-check 0.25→0.92 s figure in the #442 probe note reproduces here as

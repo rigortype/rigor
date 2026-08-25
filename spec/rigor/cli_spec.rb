@@ -36,6 +36,30 @@ RSpec.describe Rigor::CLI do
     expect(err).to include("Unknown command: nope")
   end
 
+  # The deadline makes the decision command-independent — a run that finishes inside the window never
+  # pays JIT compile — so dispatch arms it for EVERY command. `rigor effects` cold over Mastodon ran
+  # its whole 21 s interpreted while the same analysis under `check` (which armed the deadline) took
+  # 14.8 s; pinning the arm at the dispatch seam is what keeps the next command from repeating that.
+  describe "deferred YJIT" do
+    before do
+      require "rigor/runtime/jit"
+      allow(Rigor::Runtime::Jit).to receive(:enable_after)
+    end
+
+    it "arms the deadline for a dispatched command" do
+      run_cli("effects", "--help")
+
+      expect(Rigor::Runtime::Jit).to have_received(:enable_after)
+        .with(Rigor::Runtime::Jit.deadline_seconds)
+    end
+
+    it "leaves the trivial built-ins unarmed" do
+      run_cli("version")
+
+      expect(Rigor::Runtime::Jit).not_to have_received(:enable_after)
+    end
+  end
+
   # #433 — a mistake in `.rigor.yml` used to abort with an uncaught exception and a ~30-frame backtrace
   # naming a file inside `lib/rigor/`, which reads as a crash rather than as "fix this key". The message
   # was always right; only its delivery was not. These examples assert what the user SEES — the rendered

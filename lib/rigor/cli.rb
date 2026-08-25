@@ -101,11 +101,24 @@ module Rigor
 
     def dispatch(command)
       handler = HANDLERS[command]
-      return send(handler) if handler
+      return arm_jit_deadline { send(handler) } if handler
 
       @err.puts("Unknown command: #{command}")
       @err.puts(help)
       EXIT_USAGE
+    end
+
+    # Deferred YJIT for EVERY dispatched command, not just `check` / `coverage` where PR #75 first
+    # calibrated it. The deadline makes the decision command-independent: a run that finishes inside
+    # the window never pays JIT compile, and a run that outlasts it JITs its dominant tail — measured
+    # on `rigor effects` cold over Mastodon, which ran its whole 21 s interpreted while the same
+    # analysis under `check` took 14.8 s (forcing YJIT on the effects run: 15.9 s; disabling it on
+    # check: 21.1 s). `lsp` / `mcp` still call `Runtime::Jit.enable_now` at boot, which makes the
+    # deadline thread armed here a no-op when it later fires.
+    def arm_jit_deadline
+      require_relative "runtime/jit"
+      Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
+      yield
     end
 
     def run_check

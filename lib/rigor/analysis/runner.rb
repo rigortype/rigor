@@ -120,13 +120,36 @@ module Rigor
         Effects::FileCollection.merge_all(effect_collections)
       end
 
+      # The run's as-written superclass table — what `effect.liskov-widened` reads. Served straight from
+      # the summary entry on a warm hit (#482), where merging every collection to recover one of its
+      # tables would be the whole cost the split removes.
+      def effect_ancestry
+        @cached_effect_ancestry || effect_collection.superclasses
+      end
+
       # Issue #382 — the same collections keyed by the path that produced each, which is the form the two
       # caches persist: `{ "lib/a.rb" => FileCollection, … }`. The merged {#effect_collection} cannot be
       # persisted per file (merging is where the path is deliberately dropped), and per file is what an
       # ADR-46 recheck needs — it re-collects the changed closure and serves the rest from the snapshot.
       def effect_collections_by_path
         pooled = @pool_coordinator.collected_effects
-        pooled.empty? ? @file_effects.dup : @file_effects.merge(pooled)
+        base = forced_file_effects
+        pooled.empty? ? base.dup : base.merge(pooled)
+      end
+
+      # #482 — the per-file collections of a run served from the summary entry, loaded on the first
+      # question that genuinely needs them. A served run adopts the table, the sources and the ancestry
+      # from the small entry and never touches the collections blob; this is the escape hatch that makes
+      # that split safe, because a consumer the split did not anticipate loads the blob here instead of
+      # silently reading an empty table. Nil loader (an analyzing run) is the identity.
+      def forced_file_effects
+        loader = @cached_collections_loader
+        return @file_effects if loader.nil?
+
+        @cached_collections_loader = nil
+        loaded = loader.call
+        @file_effects = loaded if loaded.is_a?(Hash)
+        @file_effects
       end
 
       # Issue #382 — adopt persisted collections as this run's own. The warm-hit half of the whole-run
@@ -147,6 +170,17 @@ module Rigor
         end
       end
 
+      # #482 — the warm-hit half after the split: everything a served run reads, with the collections left
+      # behind a loader ({#forced_file_effects}). `sources` and `ancestry` are the two derived tables a
+      # served run would otherwise have to merge the whole collection set to recover.
+      def adopt_effect_summary(table:, sources:, ancestry:, collections_loader:)
+        @effect_table = table
+        @cached_effect_sources = sources
+        @cached_effect_ancestry = ancestry
+        @cached_collections_loader = collections_loader
+        @file_effects = {}
+      end
+
       # Issue #382 — whether this run's effect collections came from the whole-run effects slot rather than
       # from a fresh collection pass. Read by the specs and by nothing in the engine; `#effect_table` reads
       # the same either way, which is the property the slot exists to provide.
@@ -162,6 +196,8 @@ module Rigor
       # its entry points are named by *file* globs (`effects.snapshot.reach:`, the `unused --entry-point`
       # syntax), so the key has to be traced back to the file it was written in.
       def effect_sources
+        return @cached_effect_sources if @cached_effect_sources
+
         effect_collections.each_with_object({}) do |collection, out|
           path = collection.path
           next if path.nil?
@@ -256,6 +292,11 @@ module Rigor
         @file_effects = {}
         @effect_table = nil
         @effects_served_from_cache = false
+        # #482 — set only by a run served from the summary entry: the two derived tables it carries, and
+        # the loader that fetches the collections blob if anything still asks for per-file form.
+        @cached_effect_sources = nil
+        @cached_effect_ancestry = nil
+        @cached_collections_loader = nil
         @run_dependency_descriptor = nil
         # Memoised activation decision for the `call.self-undefined-method` rule (nil = not yet computed).
         # See `self_undefined_rule_active?`.
@@ -682,10 +723,7 @@ module Rigor
         return nil unless @record_effects
 
         descriptor = effects_key_descriptor(key_descriptor)
-        cached = descriptor && peek_effect_collections(descriptor)
-        if cached
-          collections, table = cached
-          adopt_effect_collections(collections, table: table)
+        if descriptor && served_from_effect_entries?(descriptor)
           @effects_served_from_cache = true
           return nil
         end
@@ -695,6 +733,32 @@ module Rigor
         analysis
       end
 
+      # The two warm lanes, in cost order (#482).
+      #
+      # The summary entry is what a warm run wants: the table and the two derived tables, and no
+      # collections blob. Its absence is not a miss on its own — a run whose propagation fail-softed
+      # deliberately stores no table (see {#storable_effect_table}), and an entry written before the
+      # split has only the collections — so the second lane adopts the collections and re-runs the
+      # fixpoint over them, which is the pre-split behaviour and the retry the fail-soft posture wants.
+      # Only when neither entry answers does the run re-analyse.
+      #
+      # @return [Boolean] whether this run was served.
+      def served_from_effect_entries?(descriptor)
+        summary = peek_effect_summary(descriptor)
+        if summary
+          table, sources, ancestry = summary
+          adopt_effect_summary(table: table, sources: sources, ancestry: ancestry,
+                               collections_loader: -> { peek_effect_collections(descriptor) || {} })
+          return true
+        end
+
+        collections = peek_effect_collections(descriptor)
+        return false if collections.nil?
+
+        adopt_effect_collections(collections)
+        true
+      end
+
       def effects_key_descriptor(key_descriptor)
         Effects::Identity.descriptor(base: key_descriptor, configuration: @configuration,
                                      plugin_facts: effect_plugin_facts)
@@ -702,18 +766,33 @@ module Rigor
         nil
       end
 
-      # The read half. A miss, a stale dependency, a corrupt entry and a stored value of the wrong shape
-      # are one answer — nil, "collect it again" — because none of them can be told apart from the outside
-      # and all of them have the same remedy. The shape is `[collections, table]`; an entry written before
-      # the table rode along is a Hash, fails the guard, and re-collects once.
+      # The read half of the serving entry (#482). A miss, a stale dependency, a corrupt entry and a
+      # stored value of the wrong shape are one answer — nil, "collect it again" — because none of them
+      # can be told apart from the outside and all of them have the same remedy. An entry from before the
+      # split simply does not exist under this producer id, so an older cache re-collects once.
+      def peek_effect_summary(descriptor)
+        cached = @cache_store.peek_validated(
+          producer_id: RunCacheKey::RUN_EFFECTS_TABLE_PRODUCER_ID, key_descriptor: descriptor
+        )
+        return nil unless cached.is_a?(Array) && cached.length == 3
+        return nil unless cached[0].is_a?(Effects::EffectTable) && cached[1].is_a?(Hash) &&
+                          cached[2].is_a?(Hash)
+
+        cached
+      rescue StandardError
+        nil
+      end
+
+      # The read half of the collections entry — only ever asked by {#forced_file_effects}, on the paths
+      # that need per-file form. The stored shape is `[collections]`; an entry from before the split is
+      # `[collections, table]` and its first member is the same Hash, so it still reads.
       def peek_effect_collections(descriptor)
         cached = @cache_store.peek_validated(
           producer_id: RunCacheKey::RUN_EFFECTS_PRODUCER_ID, key_descriptor: descriptor
         )
-        return nil unless cached.is_a?(Array) && cached.length == 2 && cached.first.is_a?(Hash)
+        return nil unless cached.is_a?(Array) && cached.first.is_a?(Hash)
 
-        collections, table = cached
-        [collections, table.is_a?(Effects::EffectTable) ? table : nil]
+        cached.first
       rescue StandardError
         nil
       end
@@ -724,18 +803,32 @@ module Rigor
       # dependency descriptor the diagnostics slot records. Fail-soft — a collection that will not
       # Marshal (which nothing in {Effects::FileCollection} should be, and the fork pool already proves
       # per file) costs the next run its warm start and nothing else.
+      # The write half, run only after a miss, so neither block recomputes anything. Two entries under one
+      # key descriptor and one dependency descriptor (#482): the summary a warm run serves from, and the
+      # collections the incremental and fail-soft paths read. The summary is written LAST, so a run
+      # interrupted between the two leaves a collections entry that the next run's summary miss simply
+      # re-collects — never a summary whose collections are absent.
       def store_effect_collections(descriptor, expansion, rbs_descriptor)
         return if descriptor.nil?
 
         collections = effect_collections_by_path
-        payload = [collections, storable_effect_table(collections)]
-        @cache_store.fetch_or_validate(
-          producer_id: RunCacheKey::RUN_EFFECTS_PRODUCER_ID, key_descriptor: descriptor,
-          generation_cap: RunCacheKey::EFFECTS_GENERATION_CAP
-        ) { [payload, run_dependency_descriptor(expansion, rbs_descriptor)] }
+        dependencies = run_dependency_descriptor(expansion, rbs_descriptor)
+        write_effect_entry(RunCacheKey::RUN_EFFECTS_PRODUCER_ID, descriptor, [collections], dependencies)
+        table = storable_effect_table(collections)
+        return nil if table.nil?
+
+        write_effect_entry(RunCacheKey::RUN_EFFECTS_TABLE_PRODUCER_ID, descriptor,
+                           [table, effect_sources, effect_collection.superclasses], dependencies)
         nil
       rescue StandardError
         nil
+      end
+
+      def write_effect_entry(producer_id, descriptor, payload, dependencies)
+        @cache_store.fetch_or_validate(
+          producer_id: producer_id, key_descriptor: descriptor,
+          generation_cap: RunCacheKey::EFFECTS_GENERATION_CAP
+        ) { [payload, dependencies] }
       end
 
       # An empty table over non-empty summaries is {#close_effect_graph}'s fail-soft answer, not a
@@ -749,8 +842,10 @@ module Rigor
 
         table
       end
-      private :serve_effect_collections, :effects_key_descriptor,
-              :peek_effect_collections, :store_effect_collections, :storable_effect_table
+      private :serve_effect_collections, :served_from_effect_entries?,
+              :effects_key_descriptor, :peek_effect_summary,
+              :peek_effect_collections, :store_effect_collections, :write_effect_entry,
+              :storable_effect_table, :forced_file_effects
 
       # ADR-103 WD8 / #383 — the envelope check. Nothing at all without an `effects:` block, and nothing
       # under `effects.check: false`; with both, one walk of the project's own RBS for `%a{pure}` /
@@ -773,7 +868,7 @@ module Rigor
           # ADR-103 WD1 / #386 — the nominal relation `effect.liskov-widened` reads, from the collector's
           # own as-written superclass table, so the Liskov check and the closed-world proven lane resolve
           # the same ancestry. Lazy: only a project that declared an envelope pays the merge.
-          ancestry: -> { effect_collection.superclasses },
+          ancestry: -> { effect_ancestry },
           apply_tolerated: !@no_tolerated_effects,
           # #387 — the same compiled plugin tables the collection window scanned under, so an envelope may
           # name a label a plugin opened and the unknown-label check agrees with the scan.

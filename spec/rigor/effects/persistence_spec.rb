@@ -147,11 +147,16 @@ RSpec.describe "effect-summary persistence" do
     expect(diagnostics_counts(store)[:hits]).to eq(1)
   end
 
-  it "reads a corrupt sidecar as a miss and completes the run" do
-    analyze(cache)
-    entries = Dir.glob(File.join(cache, Rigor::Analysis::RunCacheKey::RUN_EFFECTS_PRODUCER_ID, "**", "*.entry"))
+  def corrupt(producer_id)
+    entries = Dir.glob(File.join(cache, producer_id, "**", "*.entry"))
     expect(entries.size).to eq(1)
     File.binwrite(entries.first, "not an entry")
+  end
+
+  it "reads a corrupt sidecar as a miss and completes the run" do
+    analyze(cache)
+    corrupt(Rigor::Analysis::RunCacheKey::RUN_EFFECTS_TABLE_PRODUCER_ID)
+    corrupt(Rigor::Analysis::RunCacheKey::RUN_EFFECTS_PRODUCER_ID)
 
     runner, store, diagnostics = analyze(cache)
 
@@ -159,6 +164,32 @@ RSpec.describe "effect-summary persistence" do
     expect(runner.effect_table["Tracer::Reporter#report"].proven.to_a).to eq(%w[io.output.stdout nondet.time])
     expect(diagnostics).not_to be_nil
     expect(diagnostics_counts(store)[:hits]).to eq(1)
+  end
+
+  # #482 — the split's two halves degrade independently, and each degradation is a step down one lane
+  # rather than a failure: a corrupt summary falls back to re-propagating the cached collections, and a
+  # corrupt collections blob costs nothing at all to a run the summary already answered.
+  it "falls back to the collections lane when only the summary entry is corrupt" do
+    analyze(cache)
+    corrupt(Rigor::Analysis::RunCacheKey::RUN_EFFECTS_TABLE_PRODUCER_ID)
+
+    runner, = analyze(cache)
+
+    expect(runner.effects_served_from_cache?).to be(true)
+    expect(runner.effect_table["Tracer::Reporter#report"].proven.to_a).to eq(%w[io.output.stdout nondet.time])
+  end
+
+  it "serves from the summary entry without reading the collections blob at all" do
+    analyze(cache)
+    corrupt(Rigor::Analysis::RunCacheKey::RUN_EFFECTS_PRODUCER_ID)
+
+    runner, = analyze(cache)
+
+    expect(runner.effects_served_from_cache?).to be(true)
+    expect(runner.effect_table["Tracer::Reporter#report"].proven.to_a).to eq(%w[io.output.stdout nondet.time])
+    # The lazy loader is the guard, not a lie: asking for per-file form on this run reaches the corrupt
+    # blob and degrades to empty rather than raising.
+    expect(runner.effect_collections_by_path).to eq({})
   end
 
   # The acceptance case ADR-103 WD13 names: the snapshot verbs go through the same cache `rigor check` does,

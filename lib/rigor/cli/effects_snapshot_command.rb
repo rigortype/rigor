@@ -3,7 +3,9 @@
 require "did_you_mean"
 require "optionparser"
 
-require_relative "../analysis/runner"
+# ADR-104 — `analysis/runner` is required lazily (in `#analyze`): a warm snapshot verb served by the
+# probe must reach its answer without `rigor/inference` in `$LOADED_FEATURES`.
+require_relative "../analysis/effects_cache_probe"
 require_relative "../cache/store"
 require_relative "../configuration"
 require_relative "../effects/discharge"
@@ -207,7 +209,20 @@ module Rigor
       # the ADR-45 whole-run result cache like `rigor check` — the diagnostics entry plus the #382 effects
       # sidecar keyed beside it, so `rigor effects check` after `rigor check` under a configured `effects:`
       # block is a warm hit plus the fixpoint.
+      # ADR-104 — a snapshot is built from the table, the sources and the vocabulary, all three of which
+      # the #482 summary entry (plus the plugins' own declarations) carries, so a warm run takes the
+      # probe and never loads the engine. A decline is the runner path below, unchanged.
       def build_snapshot(configuration, full:)
+        served = Analysis::EffectsCacheProbe.new(
+          configuration: configuration, cache_root: configuration.cache_path
+        ).serve(configuration.paths)
+        return snapshot_from(configuration, full, served) if served
+
+        snapshot_from(configuration, full, analyze(configuration))
+      end
+
+      def analyze(configuration)
+        require_relative "../analysis/runner"
         runner = Analysis::Runner.new(
           configuration: configuration,
           cache_store: Cache::Store.new(root: configuration.cache_path),
@@ -215,11 +230,20 @@ module Rigor
           workers: 0
         )
         runner.run(configuration.paths)
-        @table = runner.effect_table
-        Effects::Snapshot.build(
-          table: @table, configuration: configuration, sources: runner.effect_sources, full: full,
+        Analysis::EffectsCacheProbe::Served.new(
+          table: runner.effect_table, sources: runner.effect_sources, plugin_facts: nil,
           registry: Effects::Registry.for_configuration(configuration,
                                                         plugin_facts: runner.effect_plugin_facts)
+        )
+      end
+
+      # WD3 — one build, whichever lane produced the inputs, so a served snapshot and an analysed one
+      # cannot drift in how they are assembled.
+      def snapshot_from(configuration, full, served)
+        @table = served.table
+        Effects::Snapshot.build(
+          table: @table, configuration: configuration, sources: served.sources, full: full,
+          registry: served.registry
         )
       end
 

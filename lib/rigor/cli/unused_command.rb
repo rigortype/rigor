@@ -6,6 +6,7 @@ require "json"
 require_relative "../configuration"
 require_relative "../analysis/path_expansion"
 require_relative "../analysis/reachability/scan"
+require_relative "../analysis/reachability/scan_cache"
 require_relative "../analysis/reachability/graph"
 require_relative "../analysis/reachability/plugin_roots"
 require_relative "../analysis/reachability/signature_scan"
@@ -23,7 +24,11 @@ module Rigor
     # measured precision of this signal is 7.0% on an adjudicated corpus target
     # (`docs/notes/20260813-unused-constant-fp-baseline.md`), so its output is a review queue, not a defect
     # list, and it never enters `rigor check`'s stream at any severity (WD1). Exits 0 whatever it finds.
-    class UnusedCommand < Command
+    #
+    # Like {CheckCommand}, it aggregates one command's concerns — the two scans, the graph, and both
+    # render formats — that read clearer together than split across micro-classes, so it carries the
+    # same ClassLength exemption.
+    class UnusedCommand < Command # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor unused [options] [paths]"
 
       # WD7 — the REFERENCE corpus is wider than the ANALYSIS corpus. `.rake` files sit inside `paths:` and
@@ -44,23 +49,31 @@ module Rigor
 
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
-        declarations, references, dynamic_uses = scan(paths, configuration)
+        scan_cache = Analysis::Reachability::ScanCache.open(configuration.cache_path,
+                                                            target_ruby: configuration.target_ruby)
+        declarations, references, dynamic_uses = scan(paths, configuration, scan_cache)
         references.concat(signature_references(configuration))
-        dynamic_uses.concat(template_mentions(declarations))
+        dynamic_uses.concat(template_mentions(declarations, scan_cache))
 
         contribution = Analysis::Reachability::PluginRoots.collect(configuration: configuration,
                                                                    cache_store: cache_store(configuration))
         references.concat(plugin_references(contribution.references))
-        graph = Analysis::Reachability::Graph.new(
-          declarations: declarations, references: references, dynamic_uses: dynamic_uses,
-          root_fqns: root_fqns(declarations, options.fetch(:entry_points)) + contribution.roots,
-          foreign: foreign_predicate(configuration)
-        )
+        graph = build_graph(configuration, options, contribution,
+                            declarations: declarations, references: references, dynamic_uses: dynamic_uses)
         emit(graph.report, options, supply: root_supply(contribution.roots, declarations))
+        scan_cache.save
         0
       end
 
       private
+
+      def build_graph(configuration, options, contribution, declarations:, references:, dynamic_uses:)
+        Analysis::Reachability::Graph.new(
+          declarations: declarations, references: references, dynamic_uses: dynamic_uses,
+          root_fqns: root_fqns(declarations, options.fetch(:entry_points)) + contribution.roots,
+          foreign: foreign_predicate(configuration)
+        )
+      end
 
       def parse_options
         options = { config: nil, format: "text", entry_points: [], limit: nil }
@@ -93,13 +106,15 @@ module Rigor
       end
 
       # Declarations come from the analysed paths; references additionally from the wider corpus (WD7).
-      def scan(paths, configuration)
+      # Every file is consulted every run — an unchanged one contributes its cached scan, so the
+      # whole-project completeness the `--incremental` refusal protects is unaffected.
+      def scan(paths, configuration, cache)
         declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns).to_set
         declarations = []
         references = []
         dynamic_uses = []
         (declaration_files + reference_files(paths, configuration)).sort.each do |file|
-          result = read_and_scan(file, configuration)
+          result = cache.serve(:scan, file) { read_and_scan(file, configuration) }
           next if result.nil?
 
           declarations.concat(result.declarations) if declaration_files.include?(file)
@@ -157,12 +172,13 @@ module Rigor
         end
       end
 
-      def template_mentions(declarations)
+      def template_mentions(declarations, cache)
         names = declarations.map(&:fqn)
         return [] if names.empty?
 
         Analysis::Reachability::ProjectFiles.own(Dir.glob(TEMPLATE_GLOB, base: Dir.pwd), Dir.pwd).flat_map do |rel|
-          haystack = constant_bearing_text(File.read(File.expand_path(rel)).scrub)
+          absolute = File.expand_path(rel)
+          haystack = cache.serve(:runs, absolute) { constant_bearing_text(File.read(absolute).scrub) }
           names.filter_map do |fqn|
             next unless haystack.include?(fqn)
 

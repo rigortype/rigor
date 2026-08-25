@@ -16,6 +16,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[cli]** `rigor unused` now reuses the analysis cache for its RBS environment and its plugins' prepare work, and scans templates for class names against only the identifier-bearing fraction of each file — the report is byte-identical and 1.4–3.3× faster on the measured corpus (8.3 s → 2.5 s warm on Mastodon).
 
+- **[cli]** `rigor unused` also caches its per-file work — the reachability scan of every Ruby file and the template extraction — in one self-validating bundle under the cache directory, so a repeat run re-reads only the files that changed: warm runs are a further 1.9–2.6× faster on the mid-size corpus (Mastodon 2.7 s → 1.1 s, Redmine 1.5 s → 0.8 s) with a byte-identical report.
+
 - **[effects]** A warm `rigor effects` / `rigor effects check` / envelope-checked `rigor check` no longer re-runs the effect fixpoint: the propagated table rides the whole-run effects cache entry beside the per-file collections, under the same identities, so a cache hit adopts it whole (Redmine `rigor effects` warm 0.75 s → 0.61 s, output byte-identical cold vs warm).
 
 - **[engine]** A run whose only synthetic-method contributor registers trait registries (rigor-devise on a Rails app) no longer parses the whole project to build a provably empty index — the scan short-circuits before any I/O until the trait tier's environment threading is fixed ([#476](https://github.com/rigortype/rigor/issues/476); Mastodon `rigor effects` warm 1.12 s → 0.90 s).

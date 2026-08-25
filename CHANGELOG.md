@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[effects]** A warm `rigor effects` and `rigor effects check` now answer without loading the analysis engine at all — they read the propagated table straight from the cache the analysing run left behind — and the whole-run effects cache no longer loads the per-file collections a warm run never reads. Both are 26–38 % faster on the measured corpus, with byte-identical output including `--full --why`, `--format json` and `explain` ([ADR-104](docs/adr/104-effects-boot-slim-probe.md), [#482](https://github.com/rigortype/rigor/issues/482)).
+
 - **[cli]** `rigor unused` now reuses the analysis cache for its RBS environment and its plugins' prepare work, and scans templates for class names against only the identifier-bearing fraction of each file — the report is byte-identical and 1.4–3.3× faster on the measured corpus (8.3 s → 2.5 s warm on Mastodon).
 
 - **[cli]** `rigor unused` also caches its per-file work — the reachability scan of every Ruby file and the template extraction — in one self-validating bundle under the cache directory, so a repeat run re-reads only the files that changed: warm runs are a further 1.9–2.6× faster on the mid-size corpus (Mastodon 2.7 s → 1.1 s, Redmine 1.5 s → 0.8 s) with a byte-identical report.

@@ -1,7 +1,9 @@
 # ADR-104 — Boot-slim probe for the effects surfaces
 
-Status: **Proposed, 2026-08-25.** No implementation. Grounded in the 2026-08-25 feature warm/cold
-campaign ([`docs/notes/20260825-feature-warm-cold-corpus-perf.md`](../notes/20260825-feature-warm-cold-corpus-perf.md)).
+Status: **Accepted, 2026-08-26.** Implemented for `rigor effects` and the four snapshot verbs
+(`Analysis::EffectsCacheProbe`), on top of the #482 entry split this ADR's slice absorbed. Grounded
+in the 2026-08-25 feature warm/cold campaign
+([`docs/notes/20260825-feature-warm-cold-corpus-perf.md`](../notes/20260825-feature-warm-cold-corpus-perf.md)).
 
 ## Context
 
@@ -31,13 +33,12 @@ Feasibility, verified against the current code rather than assumed:
   (configuration) and the committed snapshot (a YAML read). `Snapshot.build` was measured at
   0.006 s.
 
-## Decision (proposed)
+## Decision
 
-Add an effects probe beside the check probe: `rigor effects` (report), `effects check` and
-`effects diff` first attempt to serve from the diagnostics descriptor plus the effects sidecar,
-loading configuration, cache, plugin loader and the `effects/*` value layer — not
-`rigor/inference`, not `Environment`. Any miss, and any mode the stored values cannot answer,
-declines to the full Runner path unchanged.
+An effects probe beside the check probe: `rigor effects` and the four snapshot verbs first
+attempt to serve from the whole-run effects summary entry, loading configuration, cache, the
+plugin loader and the `effects/*` value layer — not `rigor/inference`, not `Environment`. Any
+miss, and any mode the stored values cannot answer, declines to the full Runner path unchanged.
 
 The criterion, which is the #442/#428 rule generalised: **a probe may serve a surface only when
 every answer that surface can give is reproducible from stored values and declarations alone;
@@ -45,17 +46,29 @@ an answer computed from live analysis state must either ride the cache entry or 
 decline.** The #428 family documented what happens when the two halves of that rule are decided
 separately; a new probe surface adopts it as a design precondition, not a lesson to relearn.
 
-Working decisions expected at implementation time:
+Working decisions, as implemented:
 
-- **WD1** — the decline list: sidecar or diagnostics miss, pool-mode configuration, an editor
-  buffer, and any CLI mode whose answer is not a pure function of the stored values. Judgment-
-  time switches (`--no-tolerated-effects`) stay servable: `tolerated:` is in the effects
-  identity, and the switch only changes how the served table is judged.
-- **WD2** — non-vacuous serving specs in the ADR-87 shape: the served arm asserts
-  `rigor/inference` is absent from `$LOADED_FEATURES`, and the cold arm proves the same
-  invocation can produce the answer at all.
-- **WD3** — the probe and the Runner share one implementation of "sources from collections" and
-  one of the snapshot build, so the served and full paths cannot drift.
+- **WD1** — the decline list is every reason the key cannot be reproduced or the entry cannot
+  answer: no cache root, `effects.check?` off, a key the probe cannot rebuild (a project whose
+  plugins synthesise virtual RBS, which the ADR-87 probe already declines for the same reason),
+  a miss, a stale dependency, a corrupt entry, a stored value of the wrong shape. A path
+  argument is *not* a decline — it joins the analysed set exactly as it does on the runner path,
+  and keys the entry accordingly, so an uncovered scope declines as an ordinary miss.
+- **WD2** — non-vacuous serving specs in the ADR-87 shape, in a subprocess. The served arm
+  asserts **zero** `analysis/runner` / `environment` / `scope` entries in `$LOADED_FEATURES`
+  against an analysing control that loads ~90; the `inference/` directory count is asserted as
+  an order-of-magnitude drop rather than zero, because `Effects::Catalog` and `Reflection` pull
+  a handful of value-layer files from that directory on any path that can name a label at all.
+  Every decline example is paired with a must-still-answer one, and the drift gate is proven to
+  still exit 1.
+- **WD3** — one snapshot build, whichever lane produced its inputs (`#snapshot_from`), and the
+  probe hands back the vocabulary it already built for the key rather than letting the caller
+  rebuild one, so a served answer and an analysed one cannot drift.
+- **WD4** (absorbed from [#482](https://github.com/rigortype/rigor/issues/482)) — the whole-run
+  effects cache spends two entries under one key and one dependency descriptor: the summary a
+  warm run serves from, and the collections only an incremental recheck and the fail-soft
+  re-propagation read. The collections stay reachable behind a loader, so a consumer the split
+  did not anticipate loads them rather than reading an empty table.
 
 ## Rejected / deferred alternatives
 
@@ -69,15 +82,23 @@ Working decisions expected at implementation time:
 
 ## Consequences
 
-- Warm `rigor effects` / `effects check` land at check-parity plus plugin load and one Marshal
-  read (estimated ~0.45 s on Mastodon from the phase attribution; the saving is the engine
-  require).
+- Warm `rigor effects` **−34 % / −38 %** and `rigor effects check` **−26 % / −38 %** on
+  redmine / mastodon (interleaved A/B, three reps, medians 0.76 → 0.50 s and 0.93 → 0.58 s;
+  every rep of the served arm beat every rep of the analysing one). Output is byte-identical on
+  both projects across the default report, `--full --why`, `--format json` and `explain` —
+  175,534 lines of JSON on mastodon.
 - A second probe surface must stay answer-complete as the effects surfaces grow. The criterion
   above is the guard, and WD2's `$LOADED_FEATURES` specs make a silent divergence a red spec
   rather than a silent lane. **Re-evaluation trigger:** any new effects answer computed from
-  live analysis state must add either a sidecar field or a decline before it ships.
-- Plugin load stays on the served path (the registry's labels come from it) — measured at
-  0.02–0.04 s and required for correctness, not an optimisation gap.
+  live analysis state must add either a summary-entry field or a decline before it ships.
+- Plugin load stays on the served path (the vocabulary comes from it, and so does the key) —
+  measured at 0.02–0.04 s and required for correctness, not an optimisation gap.
+- **The summary entry is not small at scale, and #482's estimate of it was wrong.** On gitlab
+  `app lib` it is 5.1 MB against the collections' 4.8 MB: the table carries `causes` and `edges`
+  per row, which is what makes `explain` and `--why` servable. Dropping them would halve the
+  read and silently break both surfaces on a warm run — precisely what the criterion forbids —
+  so the split's win at monorepo scale is "load one blob instead of two", not "load almost
+  nothing". Measured, recorded, not chased.
 
 ## Relationship to other ADRs
 

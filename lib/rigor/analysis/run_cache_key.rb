@@ -48,6 +48,18 @@ module Rigor
       # collecting run wrote elsewhere.
       RUN_EFFECTS_PRODUCER_ID = "analysis.run-effects"
 
+      # #482 — the **serving** half of the sidecar, under the same effects identity: the propagated table,
+      # the unit sources and the merged as-written superclass table. Everything a warm run reads, and
+      # nothing else.
+      #
+      # It is a separate entry rather than a section of {RUN_EFFECTS_PRODUCER_ID} because the collections
+      # blob is large in exactly the projects where warm latency matters — 6.9 MB and 0.71 s of `Marshal`
+      # on gitlab `app lib`, against ~40 KB here — and a warm run consumes none of it. The collections
+      # entry stays, read lazily by the paths that genuinely need per-file form (an ADR-46 recheck, the
+      # fail-soft re-propagation), so a consumer this split did not anticipate loads the blob rather than
+      # seeing an empty table.
+      RUN_EFFECTS_TABLE_PRODUCER_ID = "analysis.run-effects-table"
+
       # The run-result producer's declared compaction budget (`Cache::Store#evict!` pass 2). Whole-project,
       # but unlike the `rbs.*` producers several generations can be live at once: the `paths` key slot means
       # one entry per analyzed-path SET, so `rigor check` over the whole project, over `lib`, and over a

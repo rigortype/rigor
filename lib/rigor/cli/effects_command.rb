@@ -3,7 +3,10 @@
 require "optionparser"
 
 require_relative "../configuration"
-require_relative "../analysis/runner"
+# ADR-104 — `analysis/runner` is required lazily (in `#analyze`), not here: a warm report served by
+# {Analysis::EffectsCacheProbe} must reach its answer without `rigor/inference` in `$LOADED_FEATURES`,
+# which is the whole of the boot saving. The probe pulls only the cache and the effects value layer.
+require_relative "../analysis/effects_cache_probe"
 require_relative "../effects/plugin_facts"
 require_relative "../effects/registry"
 require_relative "../plugin/loader"
@@ -94,7 +97,7 @@ module Rigor
         return list_labels(configuration) if options.fetch(:list_labels)
 
         scope = @argv.dup
-        table, sources = analyze(configuration, scope)
+        table, sources = resolve_table(configuration, scope)
         report = EffectsReport.build(
           table, full: options.fetch(:full), sources: sources, scope: scope,
                  label: options.fetch(:label), pure: options.fetch(:pure), limit: options.fetch(:limit)
@@ -231,6 +234,7 @@ module Rigor
       # @return [Array(Rigor::Effects::EffectTable, Hash{String=>Array<String>})] the table, and which
       #   file each unit was defined in — the map {EffectsReport} needs to answer a path argument.
       def analyze(configuration, scope)
+        require_relative "../analysis/runner"
         runner = Analysis::Runner.new(
           configuration: configuration,
           cache_store: Cache::Store.new(root: configuration.cache_path),
@@ -239,6 +243,27 @@ module Rigor
         )
         runner.run((configuration.paths + scope).uniq)
         [runner.effect_table, runner.effect_sources]
+      end
+
+      # ADR-104 — the report before the engine. A warm run's whole answer is the #482 summary entry, so
+      # {Analysis::EffectsCacheProbe} tries to serve it without loading `rigor/inference`; any decline
+      # falls through to the full runner, which behaves exactly as it did.
+      #
+      # The report is a pure function of the table, the sources and the configuration: the envelope
+      # diagnostics the analysing path also computes are discarded here (this method reads the table
+      # and the sources and nothing else), which is what makes the served answer identical rather than
+      # merely similar.
+      def resolve_table(configuration, scope)
+        served = probe(configuration, scope)
+        return [served.table, served.sources] if served
+
+        analyze(configuration, scope)
+      end
+
+      def probe(configuration, scope)
+        Analysis::EffectsCacheProbe.new(
+          configuration: configuration, cache_root: configuration.cache_path
+        ).serve((configuration.paths + scope).uniq)
       end
     end
   end

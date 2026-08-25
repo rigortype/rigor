@@ -54,9 +54,11 @@ harness preserved on branch `perfbench-harness-20260825`; memory
 - **#481** (continuation) — `Reachability::ScanCache`: one self-validating stat-signed bundle for
   `unused`'s per-file scan + template extraction (the #473 narrowing had moved the bottleneck into
   extraction). Mastodon unused warm 2.7 → 1.1 s; campaign total 8.4 → ~1.1 s (7.8×).
-- **ADR-104 (Proposed)** — the effects boot-slim probe, feasibility verified in-code and
-  empirically (declared lane cold==warm byte-identical, email.send 68 rows). **#482** (sidecar
-  blob split, 0.7 s at gitlab scale) is folded into its implementation slice, not standalone.
+- **#483 / ADR-104 (Accepted, implemented)** — `Analysis::EffectsCacheProbe` serves `rigor
+  effects` and the four snapshot verbs from the summary entry with **zero** engine features in
+  `$LOADED_FEATURES`; **#482**'s two-entry split landed inside the same slice (the probe reads
+  exactly that payload). Interleaved A/B ×3: effects redmine 0.76 → 0.50 s, mastodon
+  0.93 → 0.58 s; check −26 % / −38 %; byte-identical incl. `--full --why`, JSON, `explain`.
 
 **#476 (filed, needs a human design call):** synthetic Tier B is dead in production —
 `project_pre_passes` passes `environment: nil` and every trait entry needs the env to explode
@@ -65,14 +67,17 @@ lazy dispatch-time resolution, or retire the tier; whichever lands removes #477'
 
 ## Next perf levers, evidence-ranked (do not re-derive; the note has the numbers)
 
-1. **Implement ADR-104** (effects boot-slim probe, #482 inside it) — the last big warm lever:
-   ~0.5 s of every warm effects surface is engine require, plus 0.7 s of blob load at gitlab
-   scale. The decline-rule criterion and the `$LOADED_FEATURES` spec shape are in the ADR.
-2. **Environment restore at scale** — 0.83 s on gitlab warm, unattributed below
+The campaign's named levers are spent. Integrated warm floor on merged master (`db0cf0ab`):
+redmine check 0.31 / effects 0.47 / effects check 0.46 / unused 0.72 s; mastodon 0.39 / 0.49 /
+0.51 / 1.05 s. What is left is smaller and needs attribution before code:
+
+1. **Environment restore at scale** — 0.83 s on gitlab warm, unattributed below
    `Environment.for_project`; sub-attribute before touching (RbsDescriptor digest vs Marshal vs
-   lockfile resolve).
-3. **`fresh?` scope hoist** for the probe-decline `check` path needs a `with_run` inheritance
+   lockfile resolve). The only remaining item measured in whole seconds.
+2. **`fresh?` scope hoist** for the probe-decline `check` path needs a `with_run` inheritance
    flag — nesting installs a fresh table by design (coverage_mutation relies on it).
+3. **`unused`'s residue** is now graph + plugin roots + boot, all sub-100 ms on the corpus; the
+   per-file work is cached. Nothing here is worth a slice on its own.
 
 ## Pitfalls this session paid for
 
@@ -92,3 +97,7 @@ lazy dispatch-time resolution, or retire the tier; whichever lands removes #477'
 - **The gate call and the commit must never share one `&&` chain** — the piped-exit trap fired
   again (changelog conformance red behind `| tail`, pushed, force-amended). Gate in its own call,
   read `$?`, then commit.
+- **A PHASED A/B is not a control, and it inverted a sign.** "All of master, then all of the
+  branch" reported a 45 % redmine *regression* that did not exist; alternating the arms rep by
+  rep (separate cache dir each) showed −34 %. The phase boundary is confounded with the
+  treatment on a drifting host. `tool/perfbench/ab_probe_interleaved.sh` is the template.

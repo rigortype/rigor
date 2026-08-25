@@ -200,6 +200,37 @@ subprocess), #482's blob split (0.7 s at gitlab scale, inside ADR-104), the envi
 scale behaviour (0.83 s on gitlab — unattributed below `Environment.for_project`), and the
 `fresh?` scope topology and GlobEntry items above, unchanged.
 
+## The probe, landed (2026-08-26) — and the two things the measurement corrected
+
+ADR-104 shipped as [#483](https://github.com/rigortype/rigor/pull/483), with #482's entry split
+absorbed into the same slice because the probe reads exactly the payload the split creates.
+`rigor effects` and the four snapshot verbs now answer from the summary entry with **zero**
+`analysis/runner` / `environment` / `scope` features in `$LOADED_FEATURES` (353 rigor files
+against ~600 on an analysing run). Interleaved A/B, three reps: `effects` redmine 0.76 → 0.50 s
+(−34 %) and mastodon 0.93 → 0.58 s (−38 %); `effects check` −26 % / −38 %. Output byte-identical
+on both projects across the default report, `--full --why`, `--format json` (175,534 lines on
+mastodon) and `explain`.
+
+**Correction 1 — #482's payload estimate was wrong by two orders of magnitude.** The issue
+predicted a small summary entry beside a large collections blob. On gitlab `app lib` the summary
+is **5.1 MB** against the collections' 4.8 MB: `EffectTable::Entry` carries `causes` and `edges`
+per row, which is precisely what makes `explain` and `--why` servable from cache. Dropping them
+would halve the read and silently break both surfaces on a warm run — the failure mode ADR-104's
+own criterion forbids — so at monorepo scale the split's win is "load one blob instead of two",
+not "load almost nothing". The mid-size projects, where the table is small, get the full win.
+
+**Correction 2 — a phased A/B inverted a sign, and only interleaving caught it.** The first
+harness ran all of master's projects, then all of the branch's (one file swap, clean script). It
+reported redmine `effects` at 0.62 → 0.90 s: a 45 % **regression**. Re-run with the arms
+alternated rep by rep and a separate cache directory per arm, the same comparison is 0.76 →
+0.50 s. A phase boundary is perfectly confounded with the treatment on a drifting host, and this
+note's own § Method warned about wall drift without naming the shape that causes it. Both
+harnesses are preserved on `perfbench-harness-20260825` — `ab_effects_probe.sh` as what the trap
+looks like, `ab_probe_interleaved.sh` as the control — beside `probe_verdict.rb`, which answers
+"does the probe serve on this project, and if not which key slot diverges" in one run (it is what
+established that the probe genuinely serves on both Rails corpora, so the wall question was only
+ever a wall question).
+
 ## Reconciliation with prior art
 
 The redmine warm-check 0.25→0.92 s figure in the #442 probe note reproduces here as

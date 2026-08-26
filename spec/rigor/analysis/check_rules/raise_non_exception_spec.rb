@@ -112,6 +112,25 @@ RSpec.describe "raise non-exception operand" do
       expect(raise_diagnostics("raise Comparable\n")).not_to be_empty
     end
 
+    # #420 asked whether this silence is a real bound or a vestigial exclusion, since `raise Object.new`
+    # does raise TypeError at run time. It is real, and the reason is that the rule never sees the
+    # expression — it sees the carrier, and this carrier is shared with values that are NOT exact.
+    # Measured: `Object.new` and a method declared `() -> Object` both type as exactly `Object`, so there
+    # is no reading under which the first fires and the second stays silent. Converging the instance path
+    # with the singleton one (allowing `:superclass`, AND dropping `Object` from
+    # RAISE_UNEXACT_INSTANCE_CLASSES — both guards had to go, each was sufficient on its own) was tried
+    # against a project fixture whose `() -> Object` method returns `ArgumentError.new`: it fires there,
+    # on code that raises an ArgumentError at run time. AGENTS.md puts that cost above the worst-case
+    # static reading. The demonstration is not an example here because this harness cannot express an
+    # rbs-inline declared return — the fixture types as `Dynamic` and would pass either way.
+    #
+    # The corpus could not decide this and is recorded as such: `call.raise-non-exception` fires 0 / 2 /
+    # 0 / 0 times on redmine, mastodon, mail and kramdown, and the convergence added zero firings to all
+    # four — an absence, not a clearance, because the corpus contains no `raise <Object-typed value>`
+    # site at all.
+    #
+    # The singleton path is different and stays as it is: `raise Object` names one exact class object,
+    # `Object.exception` does not exist, and no subtype can intervene.
     it "stays silent on `raise Object.new` — an Object-typed INSTANCE is not exact knowledge" do
       expect(raise_diagnostics("raise Object.new\n")).to be_empty
     end

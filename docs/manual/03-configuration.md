@@ -251,7 +251,7 @@ stanza it broke:
 ```
 app/presenters/user_presenter.rb:14:1: warning: Method Presenters::User#render performs io.fs.read
   (File.read), but is declared effect: [] at .rigor.yml effects.envelopes[0], so io.fs.read exceeds
-  the envelope.
+  the envelope. [effect.envelope-exceeded]
 ```
 
 When one method is a deliberate exception, write the narrower envelope on it in RBS — nearest wins,

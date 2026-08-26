@@ -35,6 +35,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** Every diagnostic's text output now ends with its rule identifier in brackets — `[call.undefined-method]` — so the ID you need for `# rigor:disable`, `disable:` and `severity_profile:` is the one you are already looking at, and a run can be grepped for a rule. Previously only plugin and RBS-sourced diagnostics carried it, which was exactly the wrong half: built-in rules are the ones the manual tells you to configure by ID ([#431](https://github.com/rigortype/rigor/issues/431)).
+
 - **[rbs]** `date.to_time(:utc)` and eleven other ordinary ActiveSupport calls — `String#dasherize`, `Object#in?`, `Time#all_day`, `ERB::Util.html_escape_once` among them — no longer draw a false diagnostic on a project that locks `activesupport` without opting into the `rigor-activesupport-core-ext` plugin ([#449](https://github.com/rigortype/rigor/issues/449)).
 
 - **[effects]** An effect annotation written in any of RBS's other bracket spellings — `%a(pure)`, `%a[rigor:v1:effect …]`, `%a|…|`, `%a<…>` — was invisible to the warm-run cache probe and to the annotations-unchecked notice, so its envelope was judged on cold runs and silently skipped on every cache hit; all five spellings now route identically, and a signature file with no effect annotation is no longer parsed by the envelope reader at all.

@@ -19,6 +19,18 @@ Every rule has a two-segment `family.rule` identifier:
 | `assert` | `assert_type` checks. |
 | `dump` | `dump_type` notices. |
 
+Every diagnostic carries its identifier in brackets at the end of the
+line, so the ID you need for `# rigor:disable`, for `disable:` and for
+`severity_profile:` is the one you are already looking at:
+
+```text
+app/user.rb:11:3: error: undefined method `lenght' for "hello" [call.undefined-method]
+```
+
+A diagnostic no rule produced — a parse error, a path error, an
+internal analyzer error — has nothing to suppress and carries no
+bracket.
+
 `rigor explain <rule>` prints the full catalogue entry for any
 built-in rule ID; `rigor explain` with no argument lists them all.
 

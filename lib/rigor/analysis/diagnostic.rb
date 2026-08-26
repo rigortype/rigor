@@ -134,14 +134,25 @@ module Rigor
       end
 
       # Text rendering for `rigor check`. The qualified rule identifier (per ADR-2 § "Plugin Diagnostic
-      # Provenance" — `plugin.<id>.<rule>`, `rbs_extended.<rule>`, `generated.<provider>.<rule>`) is appended
-      # in brackets whenever the diagnostic carries a non-default `source_family`, so plugin / RBS::Extended
-      # / generated provenance is visible in the standard text output without changing the layout for
-      # built-in rules. Slice 5 (v0.1.0) wires this surface.
+      # Provenance" — `call.undefined-method`, `plugin.<id>.<rule>`, `rbs_extended.<rule>`,
+      # `generated.<provider>.<rule>`) is appended in brackets.
+      #
+      # Slice 5 (v0.1.0) introduced the bracket for non-builtin families only, "without changing the layout
+      # for built-in rules" — a layout-conservatism call made when provenance was the point, not a judgment
+      # that the identifier is noise. The consequence outlived the reason (#431): the exception covers the
+      # rules `docs/manual/04-diagnostics.md` tells the reader to suppress with `# rigor:disable <id>` and
+      # to key `severity_profile:` on, so the default output was the one place the identifier could not be
+      # read. A run could not be grepped for a rule either — the effect-system walkthrough grepped
+      # `effect\.` over a whole Redmine run, got nothing, and concluded the feature was broken.
+      #
+      # The cost is bounded and was measured before the change: on Redmine every diagnostic carries an
+      # identifier, only 13 distinct ones appear across the project, and the suffix adds 14 characters to a
+      # 165-character median line.
+      #
+      # `rule` is nil for diagnostics no rule produced — parse errors, path errors, internal analyzer
+      # errors — and those stay unsuffixed, because there is nothing to suppress or configure.
       def to_s
         base = "#{path}:#{line}:#{column}: #{severity}: #{message}"
-        return base if source_family == DEFAULT_SOURCE_FAMILY
-
         qualified = qualified_rule
         return base if qualified.nil?
 

@@ -184,7 +184,7 @@ module Rigor
 
             Analysis::Reachability::Scan::DynamicUse.new(name: nil, prefix: fqn, site: nil,
                                                          reason: "named as a string in #{rel}",
-                                                         path: rel, line: 1)
+                                                         path: rel, line: 1, scope: :exact)
           end
         rescue SystemCallError, ArgumentError
           []

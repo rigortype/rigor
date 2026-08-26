@@ -54,15 +54,24 @@ module Rigor
           reachable = walk(edges, seeds: production_seeds | test_seeds, roles: %i[production task config test])
           unreached = @owned - reachable
           namespaces = namespace_only(unreached, reachable)
-          undecidable = tainted(unreached - namespaces)
-          Report.new(declared: @owned.size, reachable: reachable.size,
-                     candidates: rows(unreached - namespaces - undecidable.keys.to_set),
-                     undecidable: undecidable.map { |fqn, reason| undecidable_row(fqn, reason) }.freeze,
-                     test_only: rows(reachable - production),
-                     namespaces: namespaces.size, roots: production_seeds.size, edges: edges.size)
+          # The data-file demotion applies to BOTH buckets it can speak to, which is what the tier
+          # contract says and what the implementation had narrowed (#370). See {#tainted}.
+          test_only = reachable - production
+          undecidable = tainted(unreached - namespaces).merge(tainted(test_only))
+          build_report(edges: edges, reachable: reachable, unreached: unreached, namespaces: namespaces,
+                       test_only: test_only, undecidable: undecidable)
         end
 
         private
+
+        def build_report(edges:, reachable:, unreached:, namespaces:, test_only:, undecidable:)
+          demoted = undecidable.keys.to_set
+          Report.new(declared: @owned.size, reachable: reachable.size,
+                     candidates: rows(unreached - namespaces - demoted),
+                     undecidable: undecidable.map { |fqn, reason| undecidable_row(fqn, reason) }.freeze,
+                     test_only: rows(test_only - demoted),
+                     namespaces: namespaces.size, roots: production_seeds.size, edges: edges.size)
+        end
 
         # A literal-argument `"Foo::Bar".constantize` names its constant exactly, so it is a REFERENCE, not an
         # unknown. Keeping this distinct from the taint below is what stops the tier being a blanket namespace
@@ -76,17 +85,27 @@ module Rigor
           end
         end
 
-        # `{fqn => reason}` for every unreached declaration a dynamic site could still be naming. A site with a
+        # `{fqn => reason}` for every declaration in `fqns` a dynamic site could still be naming. A site with a
         # literal prefix taints that namespace and everything under it; a site with no prefix at all cannot be
         # bounded, so it taints nothing rather than everything — poisoning the whole project would empty the
         # report and teach the reader that the tier means nothing.
-        def tainted(unreached)
-          prefixes = @dynamic_uses.filter_map { |use| [use.prefix, use] if use.name.nil? && use.prefix }
+        #
+        # Asked of the unreached AND of the test-only set (#370). The tier contract says a name appearing in a
+        # data file "MUST demote to this tier"; the implementation had asked only about the unreached, so a
+        # declaration a spec references AND `config/recurring.yml` names kept its data-file evidence discarded
+        # and landed under "live test, dead production path". That heading is an assertion about production,
+        # and a scheduler entry is evidence against it — the reported case runs every three minutes.
+        #
+        # Both buckets ask a different question of the same ambiguity ("is this dead?" against "is the
+        # production path dead?"), and the answer for both is that this reading cannot settle it. The reason
+        # string is what tells the two apart for a reader, so it names the evidence rather than the bucket.
+        def tainted(fqns)
+          sites = @dynamic_uses.select { |use| use.name.nil? && use.prefix }
 
-          return {} if prefixes.empty?
+          return {} if sites.empty?
 
-          unreached.each_with_object({}) do |fqn, out|
-            _, use = prefixes.find { |prefix, _| fqn == prefix || fqn.start_with?("#{prefix}::") }
+          fqns.each_with_object({}) do |fqn, out|
+            use = sites.find { |site| site.taints?(fqn) }
             out[fqn] = use.site.nil? ? use.reason : "#{use.reason} (#{use.site})" if use
           end
         end

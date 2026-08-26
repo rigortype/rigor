@@ -167,10 +167,10 @@ RSpec.describe Rigor::Analysis::Reachability do
   # ADR-102 WD4 — a constant reachable by a mechanism this reading cannot follow is reported as undecidable,
   # never folded into "unused" and never silently treated as used.
   describe "the cannot-decide tier (WD4)" do
-    def report_for(files, roots: [])
+    def report_for(files, roots: [], dynamic: [])
       decls = []
       refs = []
-      dyn = []
+      dyn = dynamic.dup
       files.each do |path, source|
         result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
         decls.concat(result.declarations)
@@ -179,6 +179,15 @@ RSpec.describe Rigor::Analysis::Reachability do
       end
       Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, dynamic_uses: dyn,
                                                root_fqns: roots).report
+    end
+
+    # What `CLI::UnusedCommand#template_mentions` contributes for a name found in a `.yml` / `.json` /
+    # template: a prefix with no exact name, which is what makes it evidence rather than a reference.
+    def dynamic_mention(fqn, file)
+      Rigor::Analysis::Reachability::Scan::DynamicUse.new(
+        name: nil, prefix: fqn, site: nil, reason: "named as a string in #{file}", path: file, line: 1,
+        scope: :exact
+      )
     end
 
     # The case that proves the tier is not a blanket namespace poison: Rigor knows the argument's shape, so a
@@ -202,6 +211,62 @@ RSpec.describe Rigor::Analysis::Reachability do
       expect(report.candidates.map(&:fqn)).to be_empty
       expect(report.undecidable.map(&:fqn)).to include("H", "H::Alpha")
       expect(report.undecidable.first.reason).to include("interpolated string")
+    end
+
+    # #370 — the tier contract says a data-file mention "MUST demote to this tier", and the sweep asked
+    # only about the UNREACHED, so a declaration a spec references and a scheduler config names kept its
+    # evidence discarded and landed under "live test, dead production path". That heading is an assertion
+    # about production; a `config/recurring.yml` entry is evidence against it.
+    it "demotes a test-only declaration that a data file also names" do
+      report = report_for(
+        { "app/jobs/reminder_job.rb" => "class ReminderJob\nend\n",
+          "spec/jobs/reminder_job_spec.rb" => "ReminderJob\n" },
+        dynamic: [dynamic_mention("ReminderJob", "config/recurring.yml")]
+      )
+
+      expect(report.test_only.map(&:fqn)).not_to include("ReminderJob")
+      row = report.undecidable.find { |u| u.fqn == "ReminderJob" }
+      expect(row).not_to be_nil
+      expect(row.reason).to include("config/recurring.yml")
+    end
+
+    # The control, and the reason the example above is not merely "the tier swallowed a row": the SAME
+    # declaration with no data-file mention still reports as test-only, which is the answer that section
+    # exists to give.
+    it "keeps a test-only declaration with no data-file mention in the test-only section" do
+      report = report_for(
+        { "app/jobs/reminder_job.rb" => "class ReminderJob\nend\n",
+          "spec/jobs/reminder_job_spec.rb" => "ReminderJob\n" }
+      )
+
+      expect(report.test_only.map(&:fqn)).to eq(["ReminderJob"])
+      expect(report.undecidable).to be_empty
+    end
+
+    # #370 — the two kinds of weak evidence are not the same shape, and conflating them is what made the
+    # fix above dangerous before this. An interpolated `constantize` can CONSTRUCT any name under its
+    # literal head, so it taints descendants; a data file merely CONTAINS a name, which says nothing about
+    # that name's children. Read as a namespace taint, one Afrikaans word ("Administrasie" contains
+    # "Admin") demoted 18 unrelated `Admin::*` rows on Mastodon, and the word "Redmine" in a YAML file
+    # demoted 47 `Redmine::*` rows out of `candidates`.
+    it "taints only the named declaration for a data-file mention, not its children" do
+      report = report_for(
+        { "app/admin.rb" => "module Admin\nend\n",
+          "app/admin/policy.rb" => "module Admin\n  class Policy\n  end\nend\n" },
+        dynamic: [dynamic_mention("Admin", "config/locales/af.yml")]
+      )
+
+      expect(report.undecidable.map(&:fqn)).to eq(["Admin"])
+      expect(report.candidates.map(&:fqn)).to include("Admin::Policy")
+    end
+
+    # The control for the rule above: an interpolated site keeps tainting the whole namespace, because it
+    # can genuinely build any of those names.
+    it "still taints descendants for an interpolated constantize" do
+      report = report_for({ "lib/a.rb" => %(class Root\n  def go(k) = "Admin::\#{k}".constantize\nend\n),
+                            "lib/b.rb" => "module Admin\n  class Policy\n  end\nend\n" }, roots: ["Root"])
+
+      expect(report.undecidable.map(&:fqn)).to include("Admin", "Admin::Policy")
     end
 
     # An unbounded site taints nothing rather than everything: poisoning the whole project would empty the

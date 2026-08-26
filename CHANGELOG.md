@@ -35,6 +35,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** `rigor unused` no longer reports a class as having no production caller when a data file also names it — a job listed in `config/recurring.yml` and referenced from its spec was landing under "live test, dead production path" while it ran every three minutes. A data-file mention now also demotes to *cannot decide*, and it demotes only the name it matched rather than everything beneath it: the word "Administrasie" in a locale file was demoting 18 unrelated `Admin::*` rows ([#370](https://github.com/rigortype/rigor/issues/370)).
+
 - **[docs]** The plugin manual pages now show what the plugins actually print. Every example block had drifted — the `[plugin.<id>.<rule>]` identifier was missing from all of them, line numbers pointed at where the demo code used to be, and one page cited the wrong file entirely ([#488](https://github.com/rigortype/rigor/issues/488)).
 
 - **[cli]** Every diagnostic's text output now ends with its rule identifier in brackets — `[call.undefined-method]` — so the ID you need for `# rigor:disable`, `disable:` and `severity_profile:` is the one you are already looking at, and a run can be grepped for a rule. Previously only plugin and RBS-sourced diagnostics carried it, which was exactly the wrong half: built-in rules are the ones the manual tells you to configure by ID ([#431](https://github.com/rigortype/rigor/issues/431)).

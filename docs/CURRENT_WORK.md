@@ -16,18 +16,20 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: the snapshot surface, then a release
+## Next session: consider cutting v0.3.6
 
-Unchanged from the previous handoff and still the next *feature* work: **#434's remaining two**
-(regeneration event printing the full `-symbol` diff; `unresolved:` arrays = half the snapshot's
-bytes) and **#435 item 3** (drift rows carry no `file:line`; `explain` never covers an
-`exhaustive → not` transition) are one PR — same file, same renderer, same specs. Close both with
-it. Then consider cutting **v0.3.6**: `[Unreleased]` now carries the 2026-08-25 perf batch plus the
-`%a(pure)` silent-lane fix, which is a bug users can hit today. **No autonomous version bumps.**
+The snapshot surface is **done** — #434 is closed and #435 is open only for the `file:line` half of
+its item 3, which is a decision rather than work (the comment on the issue lays out the three
+options; the line costs the whole-project parse ADR-104 just removed, so the recommendation is
+#479's lazy shape or nothing).
+
+`[Unreleased]` carries **11 entries**, including the `%a(pure)` silent-lane fix and a schema bump
+users will meet on their next `rigor effects check`. **No autonomous version bumps** — this needs
+an explicit ask. The release note must mention the one-line snapshot migration.
 
 Also open and independent: **#449** (`Date#to_time` overlay gap), **#427** (warm==cold gate blind
-on gem-bump PRs), **#430** / **#431** (design calls), **#460** (parked deliberately — v0.4.x),
-**#454** (decide before the #409 default-on flip).
+on gem-bump PRs), **#430** / **#431** (design calls), **#476** (synthetic Tier B dead — needs a
+design call), **#460** (parked deliberately — v0.4.x), **#454** (decide before the #409 flip).
 
 ## What the 2026-08-25 session shipped (all merged, master verified green after integration)
 
@@ -54,6 +56,11 @@ harness preserved on branch `perfbench-harness-20260825`; memory
 - **#481** (continuation) — `Reachability::ScanCache`: one self-validating stat-signed bundle for
   `unused`'s per-file scan + template extraction (the #473 narrowing had moved the bottleneck into
   extraction). Mastodon unused warm 2.7 → 1.1 s; campaign total 8.4 → ~1.1 s (7.8×).
+- **#484** — the snapshot surface: a regeneration event withholds the per-symbol diff it was
+  documented as being unable to compare (482 unreadable lines on redmine); `unresolved:` became a
+  count at **schema 2** (redmine's record 326,964 → 197,968 bytes, −39 %) with a schema-1 file
+  still loading so the migration is one line; `explain` expands `exhaustive → not` by naming the
+  causes the record stopped keeping — the two halves meet there. Drift rows name the file.
 - **#483 / ADR-104 (Accepted, implemented)** — `Analysis::EffectsCacheProbe` serves `rigor
   effects` and the four snapshot verbs from the summary entry with **zero** engine features in
   `$LOADED_FEATURES`; **#482**'s two-entry split landed inside the same slice (the probe reads

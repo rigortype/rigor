@@ -2,6 +2,7 @@
 
 require "json"
 
+require_relative "../effects/snapshot"
 require_relative "../effects/snapshot_diff"
 require_relative "renderable"
 
@@ -41,9 +42,20 @@ module Rigor
       CLOSING_LINE = "Run `rigor effects explain` to see what caused this, and `rigor effects update` to " \
                      "accept it."
 
-      def initialize(out:, path:)
+      # A regeneration event routes to `update` alone: `explain` answers "what caused this label to
+      # appear", and the answer here is "the record was written under different rules", which explain
+      # cannot expand and the line above already said.
+      REGENERATION_CLOSING_LINE = "Run `rigor effects update` to regenerate the record under the current " \
+                                  "rules."
+
+      # @param sources [Hash{String=>Array<String>}] `Runner#effect_sources` — where each unit is defined.
+      #   A drift row names the file so a reviewer does not have to search for the method (#435); it is
+      #   the file and not `file:line` because a line would cost a whole-project parse this command no
+      #   longer does (ADR-104), and the method key already locates the definition within the file.
+      def initialize(out:, path:, sources: nil)
         @out = out
         @path = path
+        @sources = sources || {}
       end
 
       private
@@ -67,10 +79,7 @@ module Rigor
 
         @out.puts("")
         @out.puts("#{section_name(table)}:")
-        events.each do |event|
-          suffix = qualified ? "  (#{event.table})" : ""
-          @out.puts("  #{render_event(event)}#{suffix}")
-        end
+        events.each { |event| @out.puts("  #{render_event(event, qualified: qualified)}") }
       end
 
       def section_name(table)
@@ -81,9 +90,23 @@ module Rigor
         end
       end
 
-      def render_event(event)
+      def render_event(event, qualified: false)
         marker = marker_for(event)
-        event.symbol.nil? ? marker : "#{event.symbol}  #{marker}"
+        return marker if event.symbol.nil?
+
+        "#{event.symbol}  #{marker}#{annotation(event, qualified)}"
+      end
+
+      # One parenthetical, never two: the file the unit is defined in, and — under `tolerated:`, which
+      # pools both tables — which table the event came from. A row with no known source under
+      # `tolerated:` renders exactly as it did before this suffix existed.
+      #
+      # A unit defined by a reopening spans several files and the row names them all rather than picking
+      # one; which of them a reviewer wants is exactly what the row cannot know.
+      def annotation(event, qualified)
+        parts = Array(@sources[event.symbol]).map { |path| Effects::Snapshot.relativize(path, Dir.pwd) }
+        parts << event.table if qualified
+        parts.empty? ? "" : "  (#{parts.join(', ')})"
       end
 
       def marker_for(event)
@@ -99,11 +122,23 @@ module Rigor
       def render_footer(diff)
         footer = diff.footer
         @out.puts("")
+        @out.puts(withheld_line(footer)) if diff.regeneration?
         unless footer[:added_symbols].zero? && footer[:removed_symbols].zero?
           @out.puts("symbols: +#{footer[:added_symbols]} / -#{footer[:removed_symbols]} " \
                     "(a rename is one of each)")
         end
-        @out.puts(CLOSING_LINE)
+        @out.puts(diff.regeneration? ? REGENERATION_CLOSING_LINE : CLOSING_LINE)
+      end
+
+      # What a regeneration withheld, said as a count. The counts below it are still printed, so the
+      # reader sees the scale of the difference without reading it row by row.
+      def withheld_line(footer)
+        suppressed = footer[:suppressed]
+        return "The two records are not comparable, so no per-method difference is shown." if
+          suppressed.zero?
+
+        noun = suppressed == 1 ? "1 per-method difference is" : "#{suppressed} per-method differences are"
+        "The two records were computed under different rules and are not comparable, so #{noun} not shown."
       end
 
       def render_json(diff)
@@ -112,8 +147,10 @@ module Rigor
                     "events" => diff.events.map(&:to_h),
                     "footer" => {
                       "added_symbols" => diff.footer[:added_symbols],
-                      "removed_symbols" => diff.footer[:removed_symbols]
+                      "removed_symbols" => diff.footer[:removed_symbols],
+                      "suppressed" => diff.footer[:suppressed]
                     },
+                    "regeneration" => diff.regeneration?,
                     "header" => {
                       "snapshot" => @path,
                       "gate" => diff.gate.to_s,

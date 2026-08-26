@@ -324,10 +324,12 @@ methods:
 
 Two notes on reading the file:
 
-- **Do not read the `unresolved:` arrays.** They are inference-quality metadata,
-  they are what makes half the file's bytes, and they churn on Rigor upgrades
-  and on unrelated edits. They exist so `check` can print
-  `exhaustive → not`. The lines a reviewer reads are `effects:` and `declared:`.
+- **`unresolved:` is a count, not a list.** It says how many calls the analyzer
+  could not follow, which is why `exhaustive:` is false. The causes themselves
+  are not recorded — they are inference-quality metadata that churns on Rigor
+  upgrades and on unrelated edits — so ask for them when you need them:
+  `rigor effects explain` names them, including for an `exhaustive → not` row.
+  The lines a reviewer reads are `effects:` and `declared:`.
 - Trivial and synthesised entries are left out, as in the report. `--full`
   records everything, and produces a much larger and much noisier file.
 

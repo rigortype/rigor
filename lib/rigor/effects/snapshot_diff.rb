@@ -107,6 +107,7 @@ module Rigor
         @undischarged = undischarged
         @added_symbols = 0
         @removed_symbols = 0
+        @suppressed = 0
         @events = build_events.freeze
         freeze
       end
@@ -123,9 +124,16 @@ module Rigor
       end
 
       # Renames are a removal plus an addition and are never reported as a lost effect; the footer is
-      # where the reviewer sees that the two counts balance.
+      # where the reviewer sees that the two counts balance. `suppressed` is the per-symbol events a
+      # regeneration event withheld — zero on an ordinary comparison.
       def footer
-        { added_symbols: @added_symbols, removed_symbols: @removed_symbols }
+        { added_symbols: @added_symbols, removed_symbols: @removed_symbols, suppressed: @suppressed }
+      end
+
+      # Whether the two sides were computed under different rules (#434). The per-symbol comparison is
+      # then meaningless rather than merely noisy, which is why {#build_events} withholds it.
+      def regeneration?
+        @events.any? { |event| event.category == REGENERATION }
       end
 
       def events_for(table)
@@ -145,10 +153,25 @@ module Rigor
         ADDITIVE_CATEGORIES.include?(event.category)
       end
 
+      # A regeneration event withholds the per-symbol comparison rather than printing it (#434).
+      #
+      # The header says the record was written under different rules, so the two sides are not
+      # comparable — a claim this class already makes in its own documentation and then contradicted by
+      # emitting every row anyway. On redmine a moved `config_digest:` produced one regeneration line
+      # followed by 482 `-symbol` lines, none of which was a review signal: they say the recorded set was
+      # computed differently, which the header already said once.
+      #
+      # The table comparison still RUNS, because its per-symbol counters are what tell the reader the
+      # scale of what is withheld. Only the events are dropped.
       def build_events
         return [missing_snapshot_event] if @recorded.nil?
 
-        header_events + TABLES.flat_map { |table| table_events(table) }
+        header = header_events
+        table = TABLES.flat_map { |name| table_events(name) }
+        return table if header.empty?
+
+        @suppressed = table.length
+        header
       end
 
       def missing_snapshot_event

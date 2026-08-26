@@ -441,15 +441,17 @@ methods:
   "Reports::Nightly#perform":
     effects: ["io.db.read"]
     exhaustive: false
-    unresolved: ["dynamic-send"]
+    unresolved: 1
 reach:
   "OrdersController#create":
     effects: ["io.db.read", "io.net.http", "job.enqueue"]
 ```
 
-Per row: `effects:` is the proven lane, `declared:` the `≤` lane, `exhaustive:` the bit, and `unresolved:` why it is false. Both label lanes are read at **that table's** reading — `methods:` records the direct declared set, `reach:` the transitive one — and the rendering rule drops a declared label the row's own `effects:` already admits. A field the reader can default is omitted — `declared:` when empty, `exhaustive:` when true, `unresolved:` when there is nothing to say.
+Per row: `effects:` is the proven lane, `declared:` the `≤` lane, `exhaustive:` the bit, and `unresolved:` **how many** taint causes sit behind a false one. Both label lanes are read at **that table's** reading — `methods:` records the direct declared set, `reach:` the transitive one — and the rendering rule drops a declared label the row's own `effects:` already admits. A field the reader can default is omitted — `declared:` when empty, `exhaustive:` when true, `unresolved:` when there is nothing to say.
 
-`unresolved:` carries the **taint causes**, rendered `cause` or `cause(detail)`, not call names: the collector keeps causes, and for the causes that have a detail the detail already is the call name (`unresolved-self-call(save!)`).
+`unresolved:` is a **count**, and schema 2 is where it stopped being the causes themselves (#434). The causes are rendered `cause` or `cause(detail)`, not call names — the collector keeps causes, and for the causes that have a detail the detail already is the call name (`unresolved-self-call(save!)`) — but a record is the wrong place for them: on redmine they were 144,572 of the file's 326,964 bytes, on lines up to 821 characters, and they churn whenever an unrelated call moves. This document already makes that argument about origins ("a record keyed by them would churn on every refactor"); the causes are the same class of thing. What a reviewer ratchets against is the stable fact that the row is not exhaustive and by how much, which is the count; `rigor effects explain` names the causes on demand against the live table, including for an `exhaustive → not` drift row. Regenerating redmine's record under schema 2 took it from 326,964 to 197,968 bytes.
+
+A schema-1 record still **loads**: its cause list is read as its length, so the only difference the comparison reports is the `schema:` field itself — one regeneration event, which is the migration.
 
 ### Direct and reach
 

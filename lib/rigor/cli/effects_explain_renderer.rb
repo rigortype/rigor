@@ -22,8 +22,9 @@ module Rigor
     class EffectsExplainRenderer
       include Renderable
 
-      # One printed explanation. `path` is empty for a `methods:` row, whose explanation is the origin.
-      Row = Data.define(:table, :symbol, :label, :path, :origin)
+      # One printed explanation. `path` is empty for a `methods:` row, whose explanation is the origin;
+      # `causes` is non-empty only for an exhaustiveness row, which has neither (#435).
+      Row = Data.define(:table, :symbol, :label, :path, :origin, :causes)
 
       def initialize(out:)
         @out = out
@@ -44,6 +45,7 @@ module Rigor
       end
 
       def render_row(row)
+        return "#{row.symbol} stopped being exhaustive ← #{row.causes.join(', ')}" unless row.causes.empty?
         return "#{row.path.join(' → ')} [#{row.label}]" unless row.path.empty?
 
         origin = row.origin ? " ← #{row.origin}" : ""
@@ -58,7 +60,8 @@ module Rigor
                         "symbol" => row.symbol,
                         "label" => row.label,
                         "path" => row.path,
-                        "origin" => row.origin
+                        "origin" => row.origin,
+                        "causes" => row.causes
                       }
                     end
                   ))

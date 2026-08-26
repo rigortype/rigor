@@ -155,8 +155,9 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
       status, out, = run("check")
 
       expect(status).to eq(1)
-      expect(out).to include("methods:\n  Tracer::Loud#emit  + io.fs.read\n")
-      expect(out).to include("reach:\n  Tracer::Dispatcher#run  + io.fs.read\n")
+      # #435 — every drift row names the file the unit is defined in, project-relative.
+      expect(out).to include("methods:\n  Tracer::Loud#emit  + io.fs.read  (loud.rb)\n")
+      expect(out).to include("reach:\n  Tracer::Dispatcher#run  + io.fs.read  (overrides.rb)\n")
       expect(out).to end_with("Run `rigor effects explain` to see what caused this, and " \
                               "`rigor effects update` to accept it.\n")
     end
@@ -206,6 +207,78 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
 
       expect(status).to eq(1)
       expect(out).to include("Tracer::Loud#emit  exhaustive → not")
+    end
+
+    # #434 — a regeneration event says the two records were computed under different rules, so the
+    # per-symbol comparison between them is meaningless rather than merely noisy. On redmine one moved
+    # `config_digest:` printed 482 `-symbol` lines after the regeneration line; now it prints the line,
+    # the scale of what it withheld, and the counts.
+    describe "a regeneration event (#434)" do
+      # A `tolerated:` entry moves the `effects:` digest without touching a single analysed byte, which
+      # is exactly the shape the issue measured.
+      def move_the_config_digest
+        write_config(extra: "  tolerated: [\"nondet.time\"]\n")
+      end
+
+      # The redmine shape: the digest moved AND the analysed rows differ, which is what produced 482
+      # `-symbol` lines under one regeneration line.
+      it "prints the regeneration line and the counts, and withholds the per-symbol diff" do
+        run("update")
+        move_the_config_digest
+        add_filesystem_read_to_the_leaf
+        status, out, = run("check")
+
+        expect(status).to eq(1)
+        expect(out).to include("regeneration:\n  config_digest:")
+        expect(out).to match(/\d+ per-method differences are not shown/)
+        # The withheld half really was withheld.
+        expect(out).not_to include("io.fs.read")
+        expect(out).not_to include("methods:\n")
+      end
+
+      # The other branch: the header moved and the tables agree, so there is nothing to withhold and the
+      # line says so rather than reporting a count of zero.
+      it "says so plainly when the records agree on every method" do
+        run("update")
+        move_the_config_digest
+        _status, out, = run("check")
+
+        expect(out).to include("The two records are not comparable, so no per-method difference is shown.")
+      end
+
+      # `explain` answers "what caused this label to appear"; on a regeneration the answer is "a
+      # different set of rules", which it cannot expand and the report already said.
+      it "routes to update alone, not to explain" do
+        run("update")
+        move_the_config_digest
+        _status, out, = run("check")
+
+        expect(out).to end_with("Run `rigor effects update` to regenerate the record under the " \
+                                "current rules.\n")
+      end
+
+      # Non-vacuity for the pair above: the same fixture with the digest UNMOVED still prints the
+      # per-symbol diff, so "no -symbol lines" is a property of the regeneration and not of the fixture.
+      it "still prints the per-symbol diff when the records are comparable" do
+        run("update")
+        add_filesystem_read_to_the_leaf
+        _status, out, = run("check")
+
+        expect(out).to include("methods:\n")
+        expect(out).not_to include("per-method differences are not shown")
+      end
+
+      it "carries the withheld count and the regeneration flag under --format json" do
+        run("update")
+        move_the_config_digest
+        add_filesystem_read_to_the_leaf
+        _status, out, = run("check", "--format", "json")
+        payload = JSON.parse(out)
+
+        expect(payload.fetch("regeneration")).to be(true)
+        expect(payload.fetch("footer").fetch("suppressed")).to be_positive
+        expect(payload.fetch("events").map { |e| e.fetch("category") }).to eq(["regeneration"])
+      end
     end
 
     # #411 option (b) — a taint-only row carries no label in either lane, so the snapshot stops listing
@@ -265,7 +338,7 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
         status, out, = run("check")
 
         expect(status).to eq(0)
-        expect(out).to include("tolerated:\n  Tracer::Loud#emit  + io.fs.read  (methods)")
+        expect(out).to include("tolerated:\n  Tracer::Loud#emit  + io.fs.read  (loud.rb, methods)")
       end
 
       it "fails on it under --strict-tolerated" do
@@ -292,7 +365,7 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
         "category" => "label-added", "symbol" => "Tracer::Loud#emit", "table" => "methods",
         "tolerated" => false, "label" => "io.fs.read"
       )
-      expect(payload.fetch("footer")).to eq("added_symbols" => 0, "removed_symbols" => 0)
+      expect(payload.fetch("footer")).to eq("added_symbols" => 0, "removed_symbols" => 0, "suppressed" => 0)
       expect(payload.dig("header", "current", "rigor")).to eq(Rigor::VERSION)
     end
   end
@@ -339,6 +412,30 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
       expect(err).to include("did you mean Tracer::Dispatcher#run?")
     end
 
+    # #435 — `exhaustive → not` is the drift row a reader is least equipped to interpret, and it was the
+    # one row `explain` could not expand: it carries no label, so the event produced no explanation at
+    # all. What explains it is the taint causes, which is the detail the record stopped keeping per row
+    # (#434) — the two halves meet here.
+    it "expands an exhaustive → not transition, naming the call that lost it" do
+      run("update")
+      add_unresolved_call_to_the_leaf
+      status, out, = run("explain")
+
+      expect(status).to eq(0)
+      expect(out).to include("Tracer::Loud#emit stopped being exhaustive ← ")
+      expect(out).to include("no_such_helper")
+    end
+
+    # Non-vacuity: with the leaf still exhaustive the same invocation says nothing about exhaustiveness,
+    # so the line above is the transition and not a fixture constant.
+    it "says nothing about exhaustiveness when the leaf is still exhaustive" do
+      run("update")
+      add_filesystem_read_to_the_leaf
+      _status, out, = run("explain")
+
+      expect(out).not_to include("stopped being exhaustive")
+    end
+
     it "carries the paths under --format json" do
       run("update")
       add_filesystem_read_to_the_leaf
@@ -346,7 +443,8 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
 
       expect(JSON.parse(out).fetch("paths")).to include(
         "table" => "reach", "symbol" => "Tracer::Dispatcher#run", "label" => "io.fs.read",
-        "path" => ["Tracer::Dispatcher#run", "Tracer::Loud#emit", "File.read"], "origin" => "File.read"
+        "path" => ["Tracer::Dispatcher#run", "Tracer::Loud#emit", "File.read"], "origin" => "File.read",
+        "causes" => []
       )
     end
   end

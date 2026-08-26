@@ -140,7 +140,7 @@ Four sections, needing four different decisions:
 
 | Section | What it means | What to do |
 | --- | --- | --- |
-| **Reachable only from test code** | Live test, no production caller | Work these first |
+| **Reachable only from test code** | Live test, no production caller Rigor can see or suspect | Work these first |
 | **Candidates** | Nothing reachable names it | Adjudicate — most are still live |
 | **Cannot decide** | Something can name it at runtime | Read the reason; do not delete from here |
 | **Namespace-only** | A module wrapping live code | Excluded from candidates; count only |
@@ -209,13 +209,22 @@ skip most of a list quickly:
 
 ### Cannot decide: read the reason, do not delete
 
-These were demoted out of `candidates` because something can name the
-class at runtime. Each row says what:
+These were demoted because something can name the class at runtime —
+out of `candidates`, or out of **reachable only from test code**. Each
+row says what:
 
 ```
   1  Handlers::Alpha                     lib/handlers.rb:2
        constantize on an interpolated string (lib/dispatch.rb:14)
 ```
+
+A row demoted out of the test-only section is the second kind, and it
+is the one worth knowing about: a class your specs reference and a
+data file also names — a job in `config/recurring.yml`, a class named
+from a YAML setting — is not a dead production path, because the
+configuration may well be what drives it. The test-only section makes
+a claim about production, so a row Rigor holds evidence against
+belongs here instead, with the file named.
 
 `"Foo".constantize` names `Foo` exactly, so it counts as an ordinary
 reference and never reaches this section. `"Foo::#{key}".constantize`

@@ -33,10 +33,26 @@ module Rigor
 
         # ADR-102 WD4 — a site where a constant is reached by a mechanism the static reading cannot follow.
         # `name` is the exact constant when the argument is a literal (`"Foo".constantize`), in which case this
-        # is as good as a reference. `prefix` is the namespace a dynamic construction can reach into
-        # (`"Foo::#{k}".constantize` → `"Foo"`, and `nil` when even that is unknown), which taints every
-        # declaration at or below it rather than proving any single one used.
-        DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line)
+        # is as good as a reference. `prefix` is what a dynamic construction can reach, and `scope` says how
+        # far — the two kinds of weak evidence are not the same shape:
+        #
+        # - `:namespace` — `"Foo::#{k}".constantize` can construct ANY name under `Foo`, so it taints `Foo`
+        #   and every declaration beneath it. This is the default and the original meaning of `prefix`.
+        # - `:exact` — a data-file or template match names ONE declaration and says nothing about its
+        #   children (#370). `config/recurring.yml` mentioning `Admin` is not evidence about
+        #   `Admin::CollectionPolicy`; treating it as such demoted 18 unrelated Mastodon rows off one
+        #   Afrikaans word ("Administrasie" contains "Admin").
+        DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line, :scope) do
+          def initialize(scope: :namespace, **) = super
+
+          # Whether this site's evidence reaches `fqn`.
+          def taints?(fqn)
+            return false if prefix.nil?
+            return fqn == prefix if scope == :exact
+
+            fqn == prefix || fqn.start_with?("#{prefix}::")
+          end
+        end
 
         Result = Data.define(:declarations, :references, :dynamic_uses)
 

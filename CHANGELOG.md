@@ -35,6 +35,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[rbs]** `date.to_time(:utc)` and eleven other ordinary ActiveSupport calls — `String#dasherize`, `Object#in?`, `Time#all_day`, `ERB::Util.html_escape_once` among them — no longer draw a false diagnostic on a project that locks `activesupport` without opting into the `rigor-activesupport-core-ext` plugin ([#449](https://github.com/rigortype/rigor/issues/449)).
+
 - **[effects]** An effect annotation written in any of RBS's other bracket spellings — `%a(pure)`, `%a[rigor:v1:effect …]`, `%a|…|`, `%a<…>` — was invisible to the warm-run cache probe and to the annotations-unchecked notice, so its envelope was judged on cold runs and silently skipped on every cache hit; all five spellings now route identically, and a signature file with no effect annotation is no longer parsed by the envelope reader at all.
 
 - **[cli]** Every dispatched command now arms the deferred YJIT deadline, not just `check` and `coverage` — a cold `rigor effects` over Mastodon previously ran its whole 21 s interpreted where the identical analysis under `check` took 14.8 s; both now finish together, and commands that finish inside the deadline still never pay JIT compile cost.

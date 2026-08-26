@@ -4,7 +4,7 @@ A plugin teaches Rigor about a framework, a gem, or an
 application DSL that plain inference cannot see — Rails route
 helpers, RSpec `let` bindings, dry-rb struct attributes, and
 so on. This page is about *activating* plugins. Writing one is
-covered by [`examples/`](../../examples/README.md) and the
+covered by [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
 [`rigor-plugin-author` skill](08-skills.md).
 
 ## Activating a plugin
@@ -33,7 +33,7 @@ plugins:
 ## Available plugins
 
 Rigor ships a catalogue of production plugins under
-[`plugins/`](../../plugins/README.md). The set grows between
+[`plugins/`](https://github.com/rigortype/rigor/blob/master/plugins/README.md). The set grows between
 releases — consult that directory for the current list and
 each plugin's options — but the families today are:
 
@@ -43,7 +43,7 @@ each plugin's options — but the families today are:
   `rigor-activestorage`, `rigor-actioncable`. Enumerate the ones
   you want under `plugins:` — there is no umbrella entry that
   turns on the Rails set as a group
-  ([ADR-96](../adr/96-plugin-target-gems.md) WD3 proposes one).
+  ([ADR-96](https://github.com/rigortype/rigor/blob/master/docs/adr/96-plugin-target-gems.md) WD3 proposes one).
 - **Testing** — `rigor-rspec`, `rigor-rspec-rails`,
   `rigor-minitest`, `rigor-shoulda-matchers`,
   `rigor-factorybot`.
@@ -57,9 +57,9 @@ each plugin's options — but the families today are:
 
 ## `plugins/` versus `examples/`
 
-[`plugins/`](../../plugins/README.md) holds production plugins
+[`plugins/`](https://github.com/rigortype/rigor/blob/master/plugins/README.md) holds production plugins
 for real gems and frameworks — the ones you activate. The
-[`examples/`](../../examples/README.md) tree holds *tutorial*
+[`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) tree holds *tutorial*
 plugins over deliberately simplified DSLs; they are reading
 material for plugin authors, not for activation in a real
 project.

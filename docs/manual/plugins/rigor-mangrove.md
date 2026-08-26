@@ -67,7 +67,7 @@ Shape::Circle.new(1.5).inner.no_such_float_method # error: undefined for Float
 
 The carrier-generic instantiation, the `NestedClassTemplate`
 variant synthesis, and the relationship to `rigor-sorbet` are in
-the [plugin's README](../../../plugins/rigor-mangrove/README.md);
-the synthesis tier is [ADR-36](../../adr/36-mangrove-enum-nested-class-emission.md).
-To write a plugin, see [`examples/`](../../../examples/README.md)
+the [plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-mangrove/README.md);
+the synthesis tier is [ADR-36](https://github.com/rigortype/rigor/blob/master/docs/adr/36-mangrove-enum-nested-class-emission.md).
+To write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md)
 and the [`rigor-plugin-author`](../08-skills.md) skill.

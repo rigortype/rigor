@@ -5,7 +5,7 @@ class under `app/actions/**/*.rb` must define `#handle(request,
 response)`, and inside those bodies Rigor types the two parameters as
 `Hanami::Action::Request` / `Hanami::Action::Response` so misuse is
 caught precisely. It is the reference production consumer of the
-[ADR-28](../../adr/28-path-scoped-protocol-contracts.md) path-scoped
+[ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md) path-scoped
 method-protocol contract — Rigor *provides* the parameter types and the
 plugin *checks* the method shape. It reads source only, with no
 `hanami` runtime dependency (it ships RBS stubs for the Request /
@@ -78,6 +78,6 @@ parameter-type provision and the `#handle` check.
 
 The `ProtocolContract` declaration, the action checker, the RBS stubs,
 and the ADR-28 provide-and-check split are in the
-[plugin's README](../../../plugins/rigor-hanami/README.md). To write a
-plugin, see [`examples/`](../../../examples/README.md) and the
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-hanami/README.md). To write a
+plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

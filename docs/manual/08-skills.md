@@ -2,7 +2,7 @@
 
 Rigor bundles a set of **Agent Skills** — structured workflows an AI
 coding agent (Claude Code and compatible tools) can run on your behalf.
-They live in [`skills/`](../../skills/) and are auto-discovered when an
+They live in [`skills/`](https://github.com/rigortype/rigor/tree/master/skills) and are auto-discovered when an
 agent works inside a project that has Rigor available.
 
 Skills are optional. Everything they do, you can do by hand with the

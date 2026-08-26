@@ -73,6 +73,6 @@ plugin falls silent; the cross-check is opt-in.
 The describe-walker / matcher recogniser and the contract surfaces this
 plugin exercises (the optional `:model_index` consume, `NodeContext`
 ancestor resolution) are in the
-[plugin's README](../../../plugins/rigor-shoulda-matchers/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and the
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-shoulda-matchers/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

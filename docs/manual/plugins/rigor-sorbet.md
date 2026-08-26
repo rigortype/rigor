@@ -58,6 +58,6 @@ documents the full vocabulary and these edges.
 The slice-by-slice implementation (sig parsing, assertion
 lifting, the RBI tree walker, mixin-chain resolution, the
 dispatcher tier ordering), the source layout, and the demo are in
-the [plugin's README](../../../plugins/rigor-sorbet/README.md).
+the [plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-sorbet/README.md).
 The design rationale is
-[ADR-11](../../adr/11-sorbet-input-adapter.md).
+[ADR-11](https://github.com/rigortype/rigor/blob/master/docs/adr/11-sorbet-input-adapter.md).

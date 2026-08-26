@@ -9,7 +9,7 @@ recognise the corresponding Rigor surface immediately.
 
 This page is descriptive, not normative. When the formal language
 here disagrees with the [type
-specification](../type-specification/README.md), the spec binds.
+specification](https://github.com/rigortype/rigor/blob/master/docs/type-specification/README.md), the spec binds.
 
 ## Five-second pitch
 
@@ -60,8 +60,8 @@ assert_type("\"a\" | 1", n)
 # Mostly arises during refinement combinations
 ```
 
-Spec: [`docs/type-specification/value-lattice.md`](../type-specification/value-lattice.md),
-[`docs/type-specification/special-types.md`](../type-specification/special-types.md).
+Spec: [`docs/type-specification/value-lattice.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/value-lattice.md),
+[`docs/type-specification/special-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/special-types.md).
 
 ## Set-theoretic foundations of the lattice
 
@@ -125,7 +125,7 @@ still tractable.
 Rigor's lattice **is** set-theoretic in spirit:
 
 - `T | U`, `T & U`, `T - U` are present at the surface
-  ([`docs/type-specification/type-operators.md`](../type-specification/type-operators.md)).
+  ([`docs/type-specification/type-operators.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/type-operators.md)).
 - Top / Bot behave as the universal / empty sets.
 - The difference operator `T - U` is what lets occurrence typing
   express "in the `else` branch of `if x.is_a?(String)`, the type
@@ -147,7 +147,7 @@ system in the Castagna sense. Three reasons:
 3. **Implementation cost.** Castagna's decision procedure is
    theoretically elegant but operationally heavy for an analyser
    that walks an AST per file under a per-file budget
-   ([`inference-budgets.md`](../type-specification/inference-budgets.md)).
+   ([`inference-budgets.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/inference-budgets.md)).
 
 Rigor's `T | U` / `T & U` / `T - U` operators are best read
 with the set-theoretic interpretation in mind, even though
@@ -188,7 +188,7 @@ add_one("a")  # certainty: no — call.argument-type-mismatch fires
 add_one(JSON.parse(input))  # certainty: maybe — silent
 ```
 
-Spec: [`docs/type-specification/relations-and-certainty.md`](../type-specification/relations-and-certainty.md).
+Spec: [`docs/type-specification/relations-and-certainty.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/relations-and-certainty.md).
 
 ## Nominal vs structural typing
 
@@ -233,7 +233,7 @@ end
 ```
 
 Spec:
-[`docs/type-specification/structural-interfaces-and-object-shapes.md`](../type-specification/structural-interfaces-and-object-shapes.md).
+[`docs/type-specification/structural-interfaces-and-object-shapes.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/structural-interfaces-and-object-shapes.md).
 
 ## Polymorphism
 
@@ -262,7 +262,7 @@ total([1, 2.0, 3])    # ns: Array[Numeric]
 [1, 2] * 3  # Array overload
 ```
 
-Spec: [`docs/type-specification/rbs-compatible-types.md`](../type-specification/rbs-compatible-types.md).
+Spec: [`docs/type-specification/rbs-compatible-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-compatible-types.md).
 
 ## F-bounded polymorphism and self types
 
@@ -389,7 +389,7 @@ overwhelmingly reason in nominal classes rather than structural
 rows.
 
 The [Rigor-perspective review of the
-paper](../notes/20260518-matsumoto-2008-poly-records-rigor-review.md)
+paper](https://github.com/rigortype/rigor/blob/master/docs/notes/20260518-matsumoto-2008-poly-records-rigor-review.md)
 records the retrospective: the experiment *worked* but it
 **retroactively justified Rigor's nominal-first design** rather
 than recommending row variables as the primary modeling tool.
@@ -482,7 +482,7 @@ it has not landed at the user surface in v0.1.x:
 - **Inference cost.** Garrigue-kinded inference is decidable but
   more expensive than Rigor's local walker; the analyser's
   per-file budget (see
-  [`inference-budgets.md`](../type-specification/inference-budgets.md))
+  [`inference-budgets.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/inference-budgets.md))
   would have to accommodate global row-constraint solving.
 - **Readability.** The Matsumoto experiment found that inferred
   row-polymorphic types for everyday Ruby code are dense and hard
@@ -549,8 +549,8 @@ end
 This is the practical payoff of refinement subtyping without
 asking the user to author the refinement.
 
-Spec: [`docs/type-specification/imported-built-in-types.md`](../type-specification/imported-built-in-types.md),
-[`docs/type-specification/rigor-extensions.md`](../type-specification/rigor-extensions.md).
+Spec: [`docs/type-specification/imported-built-in-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/imported-built-in-types.md),
+[`docs/type-specification/rigor-extensions.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rigor-extensions.md).
 
 ## Occurrence typing (flow-sensitive narrowing)
 
@@ -591,8 +591,8 @@ def describe(x)
 end
 ```
 
-Spec: [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md),
-[`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md).
+Spec: [`docs/type-specification/control-flow-analysis.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/control-flow-analysis.md),
+[`docs/type-specification/rbs-extended.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-extended.md).
 
 ## Pattern matching and exhaustiveness
 
@@ -709,7 +709,7 @@ Rigor maps onto this as:
 | Dynamic type `?` | **`Dynamic[T]`** — a carrier that *wraps* a "best-guess" type `T` while marking the value as not-statically-verified. `Dynamic[top]` is the maximally-dynamic form. |
 | Consistency `~` | The `maybe` arm of the trinary certainty — `Dynamic[T] ~ U` holds whenever `T ~ U` does. |
 | Static/dynamic boundary | Per-method, per-file, per-plugin contribution — Rigor records *why* a value became `Dynamic[T]` in its dynamic-origin algebra. |
-| Casts | No in-source cast operator. The opt-in [`rigor-sorbet`](../../plugins/rigor-sorbet/) plugin reads `T.let` / `T.cast` / `T.must` as cast forms; `RBS::Extended` `assert_type` directives serve the same role from `.rbs`. |
+| Casts | No in-source cast operator. The opt-in [`rigor-sorbet`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sorbet) plugin reads `T.let` / `T.cast` / `T.must` as cast forms; `RBS::Extended` `assert_type` directives serve the same role from `.rbs`. |
 
 Two Rigor-specific extensions matter:
 
@@ -721,10 +721,10 @@ Two Rigor-specific extensions matter:
 2. **The robustness principle (Postel's law for types)** —
    parameters are accepted leniently (closer to `Dynamic[T]`),
    returns are reported strictly. See
-   [ADR-5](../adr/5-robustness-principle.md).
+   [ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md).
 
-Spec: [`docs/type-specification/special-types.md`](../type-specification/special-types.md),
-[`docs/type-specification/value-lattice.md`](../type-specification/value-lattice.md).
+Spec: [`docs/type-specification/special-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/special-types.md),
+[`docs/type-specification/value-lattice.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/value-lattice.md).
 
 ## Blame, the gradual guarantee, and trust boundaries
 
@@ -776,7 +776,7 @@ The **gradual guarantee** *is* a property Rigor can be measured
 against:
 
 - **In spirit**, the no-false-positives stance
-  ([ADR-5](../adr/5-robustness-principle.md)) is strictly
+  ([ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md)) is strictly
   stronger than the gradual guarantee. If Rigor was silent on a
   call site before an annotation was added, it remains silent
   after — unless the annotation provably contradicts the runtime
@@ -787,14 +787,14 @@ against:
 - **In practice**, the gradual guarantee in Rigor reads as: a
   project's baseline of "passes without annotation" should never
   regress when an RBS file is added. This is exactly the property
-  the [PHPStan-shaped baseline mechanism](../adr/22-baseline-and-project-onboarding.md)
+  the [PHPStan-shaped baseline mechanism](https://github.com/rigortype/rigor/blob/master/docs/adr/22-baseline-and-project-onboarding.md)
   enforces — adding annotations shrinks the baseline; it never
   grows it on un-annotated code.
 
 ### What Rigor explicitly does NOT do
 
 - **Runtime contract insertion at the static / dynamic boundary.**
-  The opt-in [`rigor-sorbet`](../../plugins/rigor-sorbet/) plugin
+  The opt-in [`rigor-sorbet`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sorbet) plugin
   reads Sorbet's `T.let` / `T.cast` / `T.must` as cast forms, but
   the contract *enforcement* is `sorbet-runtime`'s job, not
   Rigor's. Rigor's static analysis uses the cast as a hint, not
@@ -837,7 +837,7 @@ inferred from the AST walk and consulted by the narrowing logic.
 Future plugin / annotation extensions to surface effects at the
 user level are tracked in the spec corpus but not part of v0.1.x.
 
-Spec: [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md)
+Spec: [`docs/type-specification/control-flow-analysis.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/control-flow-analysis.md)
 ("Mutation effects" subsection).
 
 ## Soundness, completeness, and the no-false-positives stance
@@ -863,7 +863,7 @@ This is a deliberate design choice grounded in the project's
 audience: Ruby programmers who would otherwise not run a type
 checker at all. A noisy false-positive on the first day kills
 adoption faster than a missed bug on day 30. The robustness
-principle ([ADR-5](../adr/5-robustness-principle.md)) is the
+principle ([ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md)) is the
 formal expression of this stance: lenient on parameters
 ("anyone could call this with anything"), strict on returns
 ("we will commit to what we actually return").
@@ -1101,7 +1101,7 @@ Rigor's walker performs the two modes without naming them:
 | Inferring `HashShape` for a hash literal | Synthesis |
 | Inferring `Tuple` for an array literal | Synthesis |
 | Walking the `then` / `else` branches of an `if` under a narrowed environment | Synthesis under each branch + join (no expected-type checking) |
-| Verifying a plugin protocol contract ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)) — method exists + return-type matches | Checking |
+| Verifying a plugin protocol contract ([ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md)) — method exists + return-type matches | Checking |
 | Honouring an `RBS::Extended` `assert_type` directive | Checking |
 
 What Rigor does NOT do that a fully formalised bidirectional
@@ -1173,7 +1173,7 @@ problem, distinct from the decidability problem:
 | Problem class | Example | Rigor's response |
 | --- | --- | --- |
 | Theoretical undecidability of inference | Rank-3 polymorphism; subtyping + intersection | The trinary `maybe` |
-| Reach — the AST does not contain the semantics | `define_method`, Rails DSL, `attr_*` | Plugin contributions + `RBS::Extended` + the [ADR-16](../adr/16-macro-expansion.md) macro substrate |
+| Reach — the AST does not contain the semantics | `define_method`, Rails DSL, `attr_*` | Plugin contributions + `RBS::Extended` + the [ADR-16](https://github.com/rigortype/rigor/blob/master/docs/adr/16-macro-expansion.md) macro substrate |
 | Genuine runtime opacity | `eval(user_input)` | `Dynamic[top]`, then `maybe` at use sites |
 
 Plugins are written in Ruby because the reach problem cannot be
@@ -1181,10 +1181,10 @@ solved in the type language alone — it needs a Ruby-side
 recogniser that walks the AST, decides "this `has_many :posts`
 declares an accessor returning `Relation[Post]`," and contributes
 that fact to the walker's worldview.
-[ADR-2](../adr/2-extension-api.md),
-[ADR-16](../adr/16-macro-expansion.md),
-[ADR-25](../adr/25-plugin-contributed-rbs.md), and
-[ADR-28](../adr/28-path-scoped-protocol-contracts.md) define the
+[ADR-2](https://github.com/rigortype/rigor/blob/master/docs/adr/2-extension-api.md),
+[ADR-16](https://github.com/rigortype/rigor/blob/master/docs/adr/16-macro-expansion.md),
+[ADR-25](https://github.com/rigortype/rigor/blob/master/docs/adr/25-plugin-contributed-rbs.md), and
+[ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md) define the
 structured extension points where this knowledge enters.
 
 ### Precision: naive inference produces useless joins
@@ -1198,7 +1198,7 @@ produce types so wide they tell the user nothing useful:
 | `{user: u, count: 3, msg: "ok"}` | `Hash[Symbol, User \| Integer \| String]` | `HashShape{user: User, count: Integer, msg: String}` | `HashShape` carrier (built-in for hash literals) |
 | `[1, "a", :sym]` | `Array[Integer \| String \| Symbol]` | `Tuple[Integer, String, Symbol]` | `Tuple` carrier (built-in for array literals) |
 | A provably-constant value (e.g. `42`, `"ok"`) | `Integer`, `String` | `Constant<42>`, `Constant<"ok">` | `Constant<T>` carrier |
-| `JSON.parse(input)` | `Hash[String, untyped] \| Array[untyped] \| String \| Integer \| Float \| true \| false \| nil` | `App[json::value, K]` per option `K` | [ADR-20](../adr/20-lightweight-hkt.md) Lightweight HKT + `METHOD_RETURN_OVERRIDES` |
+| `JSON.parse(input)` | `Hash[String, untyped] \| Array[untyped] \| String \| Integer \| Float \| true \| false \| nil` | `App[json::value, K]` per option `K` | [ADR-20](https://github.com/rigortype/rigor/blob/master/docs/adr/20-lightweight-hkt.md) Lightweight HKT + `METHOD_RETURN_OVERRIDES` |
 | A method whose return depends on its arguments | A wide union of every observed exit | A per-call-site discriminated return | `RBS::Extended` `return_override` directive |
 | A DSL-managed accessor (`has_many`, `attribute`) | `Dynamic[top]` | `Relation[Model]`, a model-specific shape | Plugin `dynamic_return` + macro substrate |
 
@@ -1211,7 +1211,7 @@ anything with it without narrowing first; the union has erased
 exactly the information the type system existed to carry.
 
 The shared design principle is **strictness on returns** — the
-robustness principle ([ADR-5](../adr/5-robustness-principle.md))
+robustness principle ([ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md))
 treats "the most specific type the analysis can justify" as the
 goal, not "the smallest type that covers every observed exit."
 Naive join-widening fails that test in nearly every case where
@@ -1269,19 +1269,19 @@ trades safety for flexibility.
 
 ### Rigor's plugin contract as the tool-side answer
 
-Rigor's plugin substrate ([ADR-2](../adr/2-extension-api.md),
-[ADR-16](../adr/16-macro-expansion.md),
-[ADR-25](../adr/25-plugin-contributed-rbs.md),
-[ADR-28](../adr/28-path-scoped-protocol-contracts.md), …) solves
+Rigor's plugin substrate ([ADR-2](https://github.com/rigortype/rigor/blob/master/docs/adr/2-extension-api.md),
+[ADR-16](https://github.com/rigortype/rigor/blob/master/docs/adr/16-macro-expansion.md),
+[ADR-25](https://github.com/rigortype/rigor/blob/master/docs/adr/25-plugin-contributed-rbs.md),
+[ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md), …) solves
 the **tool-level** version of the same problem:
 
 - **Adding new type knowledge** the engine can act on — new RBS
   bundles, new structural shapes via `signature_paths:`, new
-  TypeNode resolvers ([ADR-13](../adr/13-typenode-resolver-plugin.md))
+  TypeNode resolvers ([ADR-13](https://github.com/rigortype/rigor/blob/master/docs/adr/13-typenode-resolver-plugin.md))
   — **without modifying the engine**.
 - **Adding new analyses / operations** over existing types — new
   diagnostic rules, new flow contributions, new protocol
-  contracts ([ADR-28](../adr/28-path-scoped-protocol-contracts.md))
+  contracts ([ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md))
   — **without modifying the type language**.
 
 The plugin contract is therefore the **expression problem solved
@@ -1296,11 +1296,11 @@ A worked example:
 - `rigor-web` adds a *new analysis* over existing classes
   (every class under `lib/controller/` must define
   `#get(Rack::Request) -> Rack::Response`) — operation-extension
-  axis ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)).
+  axis ([ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md)).
 
 Neither plugin requires modifying the Rigor engine, and they
 *compose* — a single plugin can do both axes ([ADR-12 dry-rb
-packaging](../adr/12-dry-rb-packaging.md) discusses the
+packaging](https://github.com/rigortype/rigor/blob/master/docs/adr/12-dry-rb-packaging.md) discusses the
 production examples).
 
 ### Connection to earlier appendix sections
@@ -1314,13 +1314,13 @@ This framing also retroactively explains several design choices:
   to. The expression problem framing prefers explicit `class`
   declarations precisely because the name is the extension
   handle.
-- **The macro substrate** ([ADR-16](../adr/16-macro-expansion.md)):
+- **The macro substrate** ([ADR-16](https://github.com/rigortype/rigor/blob/master/docs/adr/16-macro-expansion.md)):
   each tier (A: block-as-method, B: trait-inlining, C: heredoc
   template, D: external-file inclusion) is a different way to
   add knowledge about a class's behaviour without modifying the
   class — the type-extension axis made plural.
 - **Path-scoped protocol contracts**
-  ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)): a
+  ([ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md)): a
   plugin can declare a behavioural contract for an entire
   directory of user-authored classes without the classes
   opting in — the operation-extension axis made tool-side.
@@ -1413,7 +1413,7 @@ On a concretely-typed receiver (e.g. `String`), Rigor uses the
 **closed-world** assumption — the RBS signature is taken as the
 authoritative method set, and an unknown method fires
 `call.undefined-method` (subject to the
-[ADR-26 `open_receivers:`](../adr/26-activerecord-relation-typing.md)
+[ADR-26 `open_receivers:`](https://github.com/rigortype/rigor/blob/master/docs/adr/26-activerecord-relation-typing.md)
 exemption for receivers whose method set is provably open at
 runtime, like `ActiveRecord::Relation`).
 
@@ -1506,7 +1506,7 @@ here so you can stop looking:
   enforcement.
 - **Session types, capabilities-as-types.** Out of scope.
 - **Mechanised soundness proof.** Deliberately deferred; see the
-  [Matsumoto & Minamide 2010 review](../notes/20260518-matsumoto-2010-cfa-rigor-review.md)
+  [Matsumoto & Minamide 2010 review](https://github.com/rigortype/rigor/blob/master/docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md)
   for the upstream "prove soundness on a tiny core" approach
   Rigor has not yet adopted.
 
@@ -1629,13 +1629,13 @@ they map to the sections of this appendix:
   その健全性の証明." *IPSJ TPRO Vol.3 No.2*, 2010. The
   upstream Ruby-CFA soundness proof; Rigor-perspective review
   at
-  [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md).
+  [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](https://github.com/rigortype/rigor/blob/master/docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md).
 - Matsumoto & Minamide. "多相レコード型に基づくRubyプログラム
   の型推論." *IPSJ TPRO Vol.49 No.SIG 3*, 2008. The
   Garrigue-kinded polymorphic-record experiment that
   retroactively justifies Rigor's nominal-first carrier choice;
   Rigor-perspective review at
-  [`docs/notes/20260518-matsumoto-2008-poly-records-rigor-review.md`](../notes/20260518-matsumoto-2008-poly-records-rigor-review.md).
+  [`docs/notes/20260518-matsumoto-2008-poly-records-rigor-review.md`](https://github.com/rigortype/rigor/blob/master/docs/notes/20260518-matsumoto-2008-poly-records-rigor-review.md).
 
 ## What's next
 

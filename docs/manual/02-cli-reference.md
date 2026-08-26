@@ -241,7 +241,7 @@ row behind each declared label, which are collapsed to a count
 by default. The report closes with a footer counting the two
 lanes apart, because they have different powers: a proven label
 can fail a build and a declared one cannot
-([ADR-103](../adr/103-effect-labels.md) § WD17).
+([ADR-103](https://github.com/rigortype/rigor/blob/master/docs/adr/103-effect-labels.md) § WD17).
 
 A `PATH` argument selects which methods are **printed**, never
 which are analysed: Rigor analyses your configured `paths:`
@@ -259,7 +259,7 @@ subcommands and does nothing here: the report is an
 observation, and observations are undischarged.
 
 What is collected and how it propagates is
-[the effect-summaries internal spec](../internal-spec/effect-summaries.md).
+[the effect-summaries internal spec](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/effect-summaries.md).
 `--list-labels` prints the vocabulary this project can name —
 every shipped label with its root's meaning, plus whatever your
 plugins and your `effects.labels:` opened — and exits without
@@ -818,7 +818,7 @@ Without `--strict` the command always exits `0`; with
 gate).
 
 `--capabilities` switches to the **extension-protocol
-catalogue** ([ADR-37](../adr/37-plugin-interface-segregation.md)):
+catalogue** ([ADR-37](https://github.com/rigortype/rigor/blob/master/docs/adr/37-plugin-interface-segregation.md)):
 a focused, machine-readable map of what each loaded plugin
 contributes — the AST node types its `node_rule`s match, the
 receiver classes its `dynamic_return`s gate on, the methods its
@@ -920,7 +920,7 @@ they now read as an unknown skill. Use the forms above.
 Top-level alias for [`rigor skill describe`](#rigor-skill) — the
 onboarding entry point that recommends the next skill for this project.
 A bare `rigor describe` is the intuitive guess most users reach for
-first, so it is surfaced as its own command ([ADR-73](../adr/73-skill-driven-user-experience.md)
+first, so it is surfaced as its own command ([ADR-73](https://github.com/rigortype/rigor/blob/master/docs/adr/73-skill-driven-user-experience.md)
 § WD2).
 
 ```sh
@@ -941,7 +941,7 @@ check first — slow, and it writes the cache.
 Print the documentation bundled inside the `rigortype` gem
 **offline**, so once Rigor is installed an AI coding agent (or you) can
 read the drive-Rigor guidance the SKILL-driven UX routes to without the
-network ([ADR-74](../adr/74-offline-doc-access-and-llms-txt.md)). It is
+network ([ADR-74](https://github.com/rigortype/rigor/blob/master/docs/adr/74-offline-doc-access-and-llms-txt.md)). It is
 the doc twin of [`rigor skill`](#rigor-skill): the gem ships
 `docs/install.md`, `docs/llms.txt`, and the full user-facing
 [manual](README.md) and [handbook](../handbook/README.md); the
@@ -971,7 +971,7 @@ pages from the installed gem with no HTTP request.
 ## `rigor show-bleedingedge`
 
 Print the **bleeding-edge overlay** — the Rigor-maintained set of
-the next major's queued changes ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
+the next major's queued changes ([ADR-50](https://github.com/rigortype/rigor/blob/master/docs/adr/50-release-engineering-and-stability-strategy.md)
 § WD2) — and report which of them the project's
 [`bleeding_edge:`](03-configuration.md) configuration adopts. Read-only:
 it loads `.rigor.yml` to resolve the active selection but runs no
@@ -991,7 +991,7 @@ or `behaviour` — and whether your configuration adopts it. A `severity`
 feature also prints the rule → severity diff it imposes; a `behaviour`
 feature changes a measurement, an algorithm, or a default without moving
 any rule's severity, so it has no such diff and its summary is the whole
-description. See [`docs/compatibility.md`](../compatibility.md) for how
+description. See [`docs/compatibility.md`](https://github.com/rigortype/rigor/blob/master/docs/compatibility.md) for how
 bleeding-edge fits the stability model.
 
 Queued today:
@@ -1002,10 +1002,10 @@ Queued today:
 | `use-of-void-value` | severity | Using a value recovered from an author-declared `-> void` return in value context is reported as `static.value-use.void` (`warning`). |
 | `discovery-seeded-mutation-sites` | behaviour | [`rigor coverage --protection --mutation`](15-type-protection-coverage.md) measures against the same cross-file project discovery Tier 1 already uses — both when picking the sites and when deciding whether a breakage was caught — so a call on a project class declared in a *sibling* file is measured instead of dropped, and a breakage there can actually be caught. **Adds sites to the denominator, so the reported effectiveness ratio moves** — check it against any `--threshold` you pin in CI before adopting. |
 | `dependent-closure-kill-oracle` | behaviour | [`rigor coverage --protection --mutation`](15-type-protection-coverage.md) counts a breakage as caught when the diagnostic appears anywhere in the mutated file **or the files that depend on it**, instead of in the mutated file alone — so changing what a method returns counts as caught when the error lands in its callers. Can only **add** kills, so the ratio moves up or not at all; it costs about a third more wall time per mutant, and a ratio measured under it is not comparable with one measured without it. |
-| `effects-on-by-default` | behaviour | A project whose `.rigor.yml` carries no [`effects:`](03-configuration.md#effect-labels) key at all is treated as if it had written `effects: {}` — [effect collection](03-configuration.md#effect-labels), the `rigor effects` verbs' cache sharing, and `effects.check` all turn on with every sub-key at its default. Writing `effects: false` explicitly still opts out. **Scheduled to graduate at v0.4.0** ([ADR-103](../adr/103-effect-labels.md) § WD15) rather than at the next major — an owner ruling specific to this feature, ahead of the general v1.0.0 majors-only cadence below. |
+| `effects-on-by-default` | behaviour | A project whose `.rigor.yml` carries no [`effects:`](03-configuration.md#effect-labels) key at all is treated as if it had written `effects: {}` — [effect collection](03-configuration.md#effect-labels), the `rigor effects` verbs' cache sharing, and `effects.check` all turn on with every sub-key at its default. Writing `effects: false` explicitly still opts out. **Scheduled to graduate at v0.4.0** ([ADR-103](https://github.com/rigortype/rigor/blob/master/docs/adr/103-effect-labels.md) § WD15) rather than at the next major — an owner ruling specific to this feature, ahead of the general v1.0.0 majors-only cadence below. |
 
 Once a feature **graduates** — it becomes the default at a major
-([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD7)
+([ADR-50](https://github.com/rigortype/rigor/blob/master/docs/adr/50-release-engineering-and-stability-strategy.md) § WD7)
 — it leaves the queued list and appears under `Graduated`, an
 acknowledgement that naming it in `bleeding_edge:` no longer does
 anything: the behaviour is on for everyone. The section is absent while
@@ -1016,7 +1016,7 @@ its `kind`), `active`, and `unknown_selected`.
 ## `rigor doctor`
 
 Classify setup problems vs a clean run with routed next actions
-([ADR-77](../adr/77-doctor-and-upgrade-commands.md) WD1).
+([ADR-77](https://github.com/rigortype/rigor/blob/master/docs/adr/77-doctor-and-upgrade-commands.md) WD1).
 
 ```sh
 rigor doctor [--config PATH] [--format text|json]
@@ -1068,7 +1068,7 @@ Exits `1` when any check fails, `0` when all pass.
 
 ## `rigor upgrade`
 
-Migration command skeleton ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
+Migration command skeleton ([ADR-50](https://github.com/rigortype/rigor/blob/master/docs/adr/50-release-engineering-and-stability-strategy.md)
 WD7). The real body lands when a concrete backwards-compatibility
 break gives it a target (e.g. re-running `baseline regenerate`
 against a strengthened default profile, surfacing renamed
@@ -1091,7 +1091,7 @@ operational knobs read the environment instead.
 | `NO_COLOR` | Disable coloured output (honoured by `rigor annotate`; `--no-color` does the same). |
 | `RIGOR_CI_DETECT=0` | Turn off CI auto-detection — the same as `--no-ci-detect`. See [Running Rigor in CI § auto-detection](11-ci.md). |
 | `RIGOR_RACTOR_WORKERS=N` | Worker count for parallel analysis. Sits between the CLI flag and the config key in precedence: `--workers=N` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > `0` (sequential). |
-| `RIGOR_POOL_BACKEND=ractor` | Opt back into the (off-by-default) Ractor worker pool instead of the active fork-based pool ([ADR-15](../adr/15-ractor-concurrency.md)). Only relevant with a non-zero worker count; the fork pool is the supported backend. |
+| `RIGOR_POOL_BACKEND=ractor` | Opt back into the (off-by-default) Ractor worker pool instead of the active fork-based pool ([ADR-15](https://github.com/rigortype/rigor/blob/master/docs/adr/15-ractor-concurrency.md)). Only relevant with a non-zero worker count; the fork pool is the supported backend. |
 | `RIGOR_PLUGIN_ISOLATION=none\|process\|ruby_box` | How a plugin's direct calls into its target library are isolated. Default `process`. See [Using plugins § Isolation strategy](07-plugins.md). `RIGOR_BOX` is a legacy alias for `ruby_box`. |
 | `RIGOR_STRICT_VALIDATION=1` | Force full-content cache validation for one run (the same as `cache.validation: digest`, and winning over it) — re-hash every file's content instead of trusting its stat metadata. Use it if a filesystem's timestamps or inode numbers cannot be trusted. See [Caching § How a file is checked for changes](12-caching.md#how-a-file-is-checked-for-changes). |
 | `RIGOR_DISABLE_YJIT=1` | Opt out of Rigor's deferred YJIT enablement. Rigor turns YJIT on partway through a long `check` / `coverage` run so short runs never pay the JIT warm-up; this variable leaves it off entirely. Diagnostics and allocations are identical either way — the effect is wall-time only. |

@@ -89,6 +89,6 @@ diagnostics for them. The README covers that boundary in detail.
 The scope-walker / analyzer layout, how to run the demo, the
 contract surfaces this plugin exercises, and the future-direction
 slices are in the
-[plugin's README](../../../plugins/rigor-rspec/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md)
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-rspec/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md)
 and the [`rigor-plugin-author`](../08-skills.md) skill.

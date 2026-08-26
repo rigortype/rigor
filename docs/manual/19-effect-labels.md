@@ -644,7 +644,7 @@ observed state rather than a declared policy — which is why `effects.snapshot.
 exists, and why this chapter puts the snapshot before this section.
 
 The rule and the evidence behind it are
-[ADR-103](../adr/103-effect-labels.md) § WD17.
+[ADR-103](https://github.com/rigortype/rigor/blob/master/docs/adr/103-effect-labels.md) § WD17.
 
 ## The diagnostics
 

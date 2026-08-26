@@ -85,7 +85,7 @@ configurable union budget, when an unknown-shape array is
 concatenated to it, or when it crosses an RBS-declared
 parameter typed as `Array[T]`. The widening is deterministic
 and documented in
-[`docs/type-specification/inference-budgets.md`](../type-specification/inference-budgets.md).
+[`docs/type-specification/inference-budgets.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/inference-budgets.md).
 
 Widening is safe (`Array[T]` is a strictly less precise view
 of the same value), but you lose the per-position information.
@@ -275,7 +275,7 @@ the underlying RBS sig advertises.
 
 If you prefer the TS spellings (`Pick<T, K>` etc.) in
 directives, opt into the
-[`rigor-typescript-utility-types`](../../plugins/rigor-typescript-utility-types/)
+[`rigor-typescript-utility-types`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-typescript-utility-types)
 plugin. The plugin registers a `Plugin::TypeNodeResolver` that
 translates each TS name onto the canonical projection:
 
@@ -301,7 +301,7 @@ information (`HashShape` and, for `pick_of` / `omit_of`,
 `Tuple`). Applying them to a plain `Hash[K, V]` or any other
 non-shape input is **lossy** — the projection silently
 degrades to the input type and Rigor records a
-[`dynamic.shape.lossy-projection`](../type-specification/diagnostic-policy.md)
+[`dynamic.shape.lossy-projection`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/diagnostic-policy.md)
 `:info` diagnostic so you can audit the call site.
 
 ```rbs

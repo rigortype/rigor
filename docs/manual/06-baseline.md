@@ -7,7 +7,7 @@ on an existing codebase: you do not have to reach zero
 diagnostics before the check becomes useful in CI. It is also
 what the [`rigor-project-init` skill](08-skills.md) snapshots
 for you at onboarding
-([ADR-22](../adr/22-baseline-and-project-onboarding.md) is the
+([ADR-22](https://github.com/rigortype/rigor/blob/master/docs/adr/22-baseline-and-project-onboarding.md) is the
 design).
 
 ## The baseline file

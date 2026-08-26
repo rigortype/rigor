@@ -106,6 +106,6 @@ view templates containing lazy `t('.key')` calls.
 
 The locale loader / index, the cached `:locale_index` producer,
 the demo, and the contract surfaces this plugin exercises are in
-the [plugin's README](../../../plugins/rigor-rails-i18n/README.md).
-To write a plugin, see [`examples/`](../../../examples/README.md)
+the [plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-rails-i18n/README.md).
+To write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md)
 and the [`rigor-plugin-author`](../08-skills.md) skill.

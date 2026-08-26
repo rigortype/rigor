@@ -112,7 +112,7 @@ Rigor's analogue is a plugin's `narrowing_facts` / `dynamic_return` and
 | `DynamicFunctionReturnTypeExtension` | Same, for module-level methods |
 
 The plugin contract pinned at
-[`docs/internal-spec/plugin.md`](../internal-spec/plugin.md)
+[`docs/internal-spec/plugin.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin.md)
 gives every shape PHPStan's extension API covers, with
 analogous lifecycle (manifest declaration, per-call dispatch,
 fact emission). Chapter 9 has the high-level orientation; the

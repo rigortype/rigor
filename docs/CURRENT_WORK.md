@@ -27,9 +27,15 @@ options; the line costs the whole-project parse ADR-104 just removed, so the rec
 users will meet on their next `rigor effects check`. **No autonomous version bumps** — this needs
 an explicit ask. The release note must mention the one-line snapshot migration.
 
-Also open and independent: **#449** (`Date#to_time` overlay gap), **#427** (warm==cold gate blind
-on gem-bump PRs), **#430** / **#431** (design calls), **#476** (synthetic Tier B dead — needs a
-design call), **#460** (parked deliberately — v0.4.x), **#454** (decide before the #409 flip).
+**#449 closed** (#485): it was not one missing row but **twelve**, all in the same direction — the
+ADR-72 overlay had drifted from its plugin twin since #437, and every gap is a false positive on the
+population that never opted into the plugin. A parity spec now pins the two surfaces; it parses with
+RBS, because a regex over `def` lines cannot see nesting and reported parity while `ERB::Util` was
+still missing.
+
+Also open and independent: **#427** (warm==cold gate blind on gem-bump PRs — the issue carries a
+concrete fix), **#430** / **#431** (design calls), **#476** (synthetic Tier B dead — needs a design
+call), **#460** (parked deliberately — v0.4.x), **#454** (decide before the #409 flip).
 
 ## What the 2026-08-25 session shipped (all merged, master verified green after integration)
 

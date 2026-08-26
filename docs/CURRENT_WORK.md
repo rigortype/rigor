@@ -33,9 +33,15 @@ population that never opted into the plugin. A parity spec now pins the two surf
 RBS, because a regex over `def` lines cannot see nesting and reported parity while `ERB::Util` was
 still missing.
 
-Also open and independent: **#427** (warm==cold gate blind on gem-bump PRs — the issue carries a
-concrete fix), **#430** / **#431** (design calls), **#476** (synthetic Tier B dead — needs a design
-call), **#460** (parked deliberately — v0.4.x), **#454** (decide before the #409 flip).
+**#427 closed** (#486), and its diagnosis needed correcting: the lockfile blindness was real, but a
+FULLY warm arm never loads `rbs.environment` either — with the whole-run slot populated the check is
+served from it and no analysis happens, so the issue's own priming proposal would have moved the arm
+from one blind state to another. The arm now primes *and drops the whole-run slot*, and
+`tool/warm_cache_assertion.rb` asserts `rbs.environment` was served.
+
+Also open and independent: **#430** / **#431** (design calls), **#476** (synthetic Tier B dead —
+needs a design call), **#460** (parked deliberately — v0.4.x), **#454** (decide before the #409
+flip), **#435** (only the `file:line` half of item 3, which is a decision — see its comment).
 
 ## What the 2026-08-25 session shipped (all merged, master verified green after integration)
 
@@ -44,24 +50,20 @@ NON-check surfaces cost warm? Note: `docs/notes/20260825-feature-warm-cold-corpu
 harness preserved on branch `perfbench-harness-20260825`; memory
 `project_feature_warm_perf_campaign_20260825`.
 
-- **#473** — `rigor unused` reuses the analysis cache (env restore + plugin producers) and scans
-  templates against capital-bearing identifier runs only. Mastodon 8.3 → 2.5 s, byte-identical.
-- **#474** — `%a(pure)` / any non-brace annotation spelling was invisible to `ANNOTATION_HINT`, so
-  the probe served the fast path while a bound existed (the #428 family through an orthography).
-  All five RBS bracket pairs route now, and `EnvelopeScanner.scan` finally implements the
-  documented regex pre-filter.
-- **#475** — the whole-run effects entry stores `[collections, table]`; a warm hit re-runs neither
+- **#473 / #481** — `rigor unused` now reuses the analysis cache (env + plugin producers), scans
+  templates against capital-bearing identifier runs only, and caches its per-file scans in a
+  self-validating stat-signed bundle. Mastodon 8.4 → ~1.1 s warm (7.8×), byte-identical.
+- **#474** — `%a(pure)` / any non-brace spelling was invisible to `ANNOTATION_HINT`, so the probe
+  served the fast path while a bound existed (the #428 family through an orthography). All five RBS
+  bracket pairs route, and `EnvelopeScanner.scan` finally implements the documented pre-filter.
+- **#475** — the whole-run effects entry stores the propagated table; a warm hit re-runs neither
   merge nor fixpoint. `internal-spec/effect-summaries.md` § Caching updated in the same commit.
 - **#477** — the synthetic scan short-circuits when only trait registries contribute and the
-  environment is nil (it built a provably empty index from a 3,229-file parse per run).
-- **#478** — per-run validation-stat memo; recording side (`pack_stat`, `GlobEntry`) deliberately
-  un-memoised.
-- **#480** (continuation) — the sweep's odd cold cell (`effects` +41 % over `check`, same
-  analysis) was YJIT: only check/coverage armed the deadline. Proven by perturbing both directions;
-  `CLI#dispatch` now arms it for every command. Cold effects at check parity.
-- **#481** (continuation) — `Reachability::ScanCache`: one self-validating stat-signed bundle for
-  `unused`'s per-file scan + template extraction (the #473 narrowing had moved the bottleneck into
-  extraction). Mastodon unused warm 2.7 → 1.1 s; campaign total 8.4 → ~1.1 s (7.8×).
+  environment is nil (a provably empty index from a 3,229-file parse per run).
+- **#478** — per-run validation-stat memo; the recording side is deliberately un-memoised.
+- **#480** — the sweep's odd cold cell (`effects` +41 % over `check`) was YJIT: only check/coverage
+  armed the deadline. Proven by perturbing both directions; `CLI#dispatch` arms it for every
+  command now.
 - **#484** — the snapshot surface: a regeneration event withholds the per-symbol diff it was
   documented as being unable to compare (482 unreadable lines on redmine); `unresolved:` became a
   count at **schema 2** (redmine's record 326,964 → 197,968 bytes, −39 %) with a schema-1 file

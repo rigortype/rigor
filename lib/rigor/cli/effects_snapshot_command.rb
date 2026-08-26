@@ -113,7 +113,8 @@ module Rigor
         )
         return explain(diff, options) if @verb == "explain"
 
-        EffectsDiffRenderer.new(out: @out, path: path).render(diff, format: options.fetch(:format))
+        EffectsDiffRenderer.new(out: @out, path: path, sources: @sources)
+                           .render(diff, format: options.fetch(:format))
         @verb == "check" && diff.drift? ? 1 : 0
       end
 
@@ -165,6 +166,9 @@ module Rigor
       # `methods:` change gets the origin in the method's own body.
       def rows_for_changes(diff)
         diff.events.flat_map do |event|
+          next exhaustiveness_rows(event) if
+            event.category == Effects::SnapshotDiff::EXHAUSTIVE_LOST
+
           labels = labels_of(event)
           next [] if labels.empty?
 
@@ -180,13 +184,29 @@ module Rigor
         entry ? entry.proven.to_a : []
       end
 
+      # `exhaustive → not` is the drift row a reader is least equipped to interpret, and it was the one
+      # row `explain` could not expand (#435): it carries no label, so {#labels_of} answered with nothing
+      # and the event produced no explanation at all. What explains it is the taint causes — the calls
+      # the analyzer could not follow — which is the detail the snapshot stopped recording per row
+      # (#434). The two halves meet here: the record keeps the stable count, and this names them.
+      def exhaustiveness_rows(event)
+        entry = @table[event.symbol]
+        return [] if entry.nil?
+
+        causes = Effects::Snapshot.render_causes(entry.causes)
+        return [] if causes.empty?
+
+        [EffectsExplainRenderer::Row.new(table: event.table, symbol: event.symbol, label: nil,
+                                         path: [].freeze, origin: nil, causes: causes)]
+      end
+
       def reach_rows(symbol, labels)
         labels.filter_map do |label|
           path = Effects::PathFinder.shortest(@table, symbol: symbol, label: label)
           next if path.nil?
 
           EffectsExplainRenderer::Row.new(table: "reach", symbol: symbol, label: label,
-                                          path: path.to_a, origin: path.origin)
+                                          path: path.to_a, origin: path.origin, causes: [].freeze)
         end
       end
 
@@ -199,7 +219,7 @@ module Rigor
           next if origin.nil?
 
           EffectsExplainRenderer::Row.new(table: "methods", symbol: symbol, label: label,
-                                          path: [].freeze, origin: origin.to_s)
+                                          path: [].freeze, origin: origin.to_s, causes: [].freeze)
         end
       end
 
@@ -241,6 +261,7 @@ module Rigor
       # cannot drift in how they are assembled.
       def snapshot_from(configuration, full, served)
         @table = served.table
+        @sources = served.sources
         Effects::Snapshot.build(
           table: @table, configuration: configuration, sources: served.sources, full: full,
           registry: served.registry

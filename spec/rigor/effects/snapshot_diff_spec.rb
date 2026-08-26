@@ -89,7 +89,7 @@ RSpec.describe Rigor::Effects::SnapshotDiff do
       diff = compare(snapshot, snapshot(methods: { "A#m" => entry("A#m", effects: ["io"]) }))
 
       expect(categories(diff)).to eq([described_class::SYMBOL_ADDED])
-      expect(diff.footer).to eq(added_symbols: 1, removed_symbols: 0)
+      expect(diff.footer).to eq(added_symbols: 1, removed_symbols: 0, suppressed: 0)
     end
 
     # A rename is a removal plus an addition and is never reported as a lost effect; the footer is where
@@ -98,7 +98,7 @@ RSpec.describe Rigor::Effects::SnapshotDiff do
       diff = compare(snapshot(methods: { "A#old" => entry("A#old", effects: ["io"]) }),
                      snapshot(methods: { "A#new" => entry("A#new", effects: ["io"]) }))
 
-      expect(diff.footer).to eq(added_symbols: 1, removed_symbols: 1)
+      expect(diff.footer).to eq(added_symbols: 1, removed_symbols: 1, suppressed: 0)
       expect(categories(diff)).to contain_exactly(described_class::SYMBOL_ADDED,
                                                   described_class::SYMBOL_REMOVED)
     end
@@ -109,7 +109,7 @@ RSpec.describe Rigor::Effects::SnapshotDiff do
       diff = compare(snapshot, snapshot(methods: { "A#m" => entry("A#m") }))
 
       expect(diff.events).to be_empty
-      expect(diff.footer).to eq(added_symbols: 1, removed_symbols: 0)
+      expect(diff.footer).to eq(added_symbols: 1, removed_symbols: 0, suppressed: 0)
     end
   end
 

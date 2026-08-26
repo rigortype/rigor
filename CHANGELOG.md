@@ -14,6 +14,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[effects]** `rigor effects update` records how *many* calls made a method non-exhaustive instead of listing them, which takes the committed snapshot on a mid-size Rails application from 326,964 to 197,968 bytes and stops it churning when an unrelated call moves; `rigor effects explain` names the calls on demand, including for an `exhaustive → not` drift row it previously could not expand ([#434](https://github.com/rigortype/rigor/issues/434), [#435](https://github.com/rigortype/rigor/issues/435)).
+  - Your committed snapshot will report one `regeneration: schema: 1 → 2` line on the next `rigor effects check`; run `rigor effects update` once to adopt the new form.
+
+- **[effects]** A `rigor effects check` whose two records were computed under different rules now prints the regeneration line and the size of the difference instead of every method in it — previously one moved `config_digest:` printed 482 unreadable `-symbol` lines — and every drift row names the file the method is defined in ([#434](https://github.com/rigortype/rigor/issues/434), [#435](https://github.com/rigortype/rigor/issues/435)).
+
 - **[effects]** A warm `rigor effects` and `rigor effects check` now answer without loading the analysis engine at all — they read the propagated table straight from the cache the analysing run left behind — and the whole-run effects cache no longer loads the per-file collections a warm run never reads. Both are 26–38 % faster on the measured corpus, with byte-identical output including `--full --why`, `--format json` and `explain` ([ADR-104](docs/adr/104-effects-boot-slim-probe.md), [#482](https://github.com/rigortype/rigor/issues/482)).
 
 - **[cli]** `rigor unused` now reuses the analysis cache for its RBS environment and its plugins' prepare work, and scans templates for class names against only the identifier-bearing fraction of each file — the report is byte-identical and 1.4–3.3× faster on the measured corpus (8.3 s → 2.5 s warm on Mastodon).

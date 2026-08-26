@@ -68,7 +68,10 @@ RSpec.describe Rigor::Effects::Snapshot do
       expect(snapshot.methods.keys).to eq(["A#rename"])
     end
 
-    it "records the exhaustiveness bit and the causes behind it, omitting both when exhaustive" do
+    # #434 — the count, not the causes. The record keeps the stable fact ("not exhaustive, by this
+    # much"); `rigor effects explain` names the causes on demand, so nothing is lost and the file stops
+    # churning when an unrelated call moves.
+    it "records the exhaustiveness bit and how many causes sit behind it, omitting both when exhaustive" do
       snapshot = build(
         { "A#clean" => summary("io"),
           "A#tainted" => summary("io", exhaustive: false, causes: [["unresolved-self-call", "save!"]]) }
@@ -76,7 +79,7 @@ RSpec.describe Rigor::Effects::Snapshot do
 
       expect(snapshot.methods.fetch("A#clean").to_h).to eq("effects" => ["io"])
       expect(snapshot.methods.fetch("A#tainted").to_h).to eq(
-        "effects" => ["io"], "exhaustive" => false, "unresolved" => ["unresolved-self-call(save!)"]
+        "effects" => ["io"], "exhaustive" => false, "unresolved" => 1
       )
     end
   end
@@ -195,6 +198,27 @@ RSpec.describe Rigor::Effects::Snapshot do
 
       expect(described_class.expand_reach(["lib/**/*.rb", "rails-actions"]))
         .to eq(["app/controllers/**/*.rb", "lib/**/*.rb"])
+    end
+  end
+
+  # #434 — schema 2. A schema-1 file recorded `unresolved:` as the cause list; it must still LOAD, so
+  # the header's own mismatch can be reported as the one regeneration event it is. Refusing to parse it
+  # would turn a migration into an error, and a reader would see a backtrace where they should see one
+  # line telling them to regenerate.
+  describe "loading a schema-1 record" do
+    it "reads the old cause list as its count, so the file parses and only the schema differs" do
+      entry = described_class::Entry.from_h(
+        "A#m", "effects" => ["io"], "exhaustive" => false,
+               "unresolved" => ["dynamic-send", "unresolved-self-call(save!)"]
+      )
+
+      expect(entry.unresolved).to eq(2)
+      expect(entry.to_h).to eq("effects" => ["io"], "exhaustive" => false, "unresolved" => 2)
+    end
+
+    it "refuses a value that is neither a count nor the old list" do
+      expect { described_class::Entry.from_h("A#m", "effects" => [], "unresolved" => "two") }
+        .to raise_error(described_class::ParseError, /expected a count/)
     end
   end
 end

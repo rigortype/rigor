@@ -35,6 +35,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** `rigor unused` no longer reports a class as having no production caller when a data file also names it — a job listed in `config/recurring.yml` and referenced from its spec was landing under "live test, dead production path" while it ran every three minutes. A data-file mention now also demotes to *cannot decide*, and it demotes only the name it matched rather than everything beneath it: the word "Administrasie" in a locale file was demoting 18 unrelated `Admin::*` rows ([#370](https://github.com/rigortype/rigor/issues/370)).
+
 - **[cli]** Every diagnostic's text output now ends with its rule identifier in brackets — `[call.undefined-method]` — so the ID you need for `# rigor:disable`, `disable:` and `severity_profile:` is the one you are already looking at, and a run can be grepped for a rule. Previously only plugin and RBS-sourced diagnostics carried it, which was exactly the wrong half: built-in rules are the ones the manual tells you to configure by ID ([#431](https://github.com/rigortype/rigor/issues/431)).
 
 - **[rbs]** `date.to_time(:utc)` and eleven other ordinary ActiveSupport calls — `String#dasherize`, `Object#in?`, `Time#all_day`, `ERB::Util.html_escape_once` among them — no longer draw a false diagnostic on a project that locks `activesupport` without opting into the `rigor-activesupport-core-ext` plugin ([#449](https://github.com/rigortype/rigor/issues/449)).

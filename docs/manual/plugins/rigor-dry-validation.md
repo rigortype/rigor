@@ -42,7 +42,7 @@ result.to_h                                # Hash[Symbol, untyped]
 The plugin bundles an RBS overlay (`sig/dry_validation.rbs`) that
 types the result API above, and **contributes it automatically** —
 the plugin's manifest declares `signature_paths: ["sig"]`
-([ADR-25](../../adr/25-plugin-contributed-rbs.md)), so activating
+([ADR-25](https://github.com/rigortype/rigor/blob/master/docs/adr/25-plugin-contributed-rbs.md)), so activating
 `rigor-dry-validation` is enough; no project-side `signature_paths:`
 wiring is required.
 
@@ -57,6 +57,6 @@ and per-contract `rule`-key diagnostics.)
 
 The `prepare(services)` scan, the `:dry_validation_contracts` fact,
 the RBS overlay, and the slice floor/ceiling are documented in the
-[plugin's README](../../../plugins/rigor-dry-validation/README.md).
-To write a plugin, see [`examples/`](../../../examples/README.md)
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-dry-validation/README.md).
+To write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md)
 and the [`rigor-plugin-author`](../08-skills.md) skill.

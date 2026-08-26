@@ -46,7 +46,7 @@ arguments pass through silently.
 
 ## `#receive(data)` parameter typing
 
-The plugin also carries an [ADR-28](../../adr/28-path-scoped-protocol-contracts.md)
+The plugin also carries an [ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md)
 path-scoped protocol contract: inside any `#receive(data)` defined
 under `channel_search_paths`, `data` types as `Hash` instead of
 `Dynamic[Top]`. `#receive` is ActionCable's framework-dispatched
@@ -105,6 +105,6 @@ default.
 
 The channel discoverer / index and the contract surfaces this plugin
 exercises are in the
-[plugin's README](../../../plugins/rigor-actioncable/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and the
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-actioncable/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

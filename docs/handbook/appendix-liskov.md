@@ -22,7 +22,7 @@ SOLID, and the same one a careful duck-typer follows by instinct.
 
 > **A note on the acronym.** Everywhere else in this repository
 > "LSP" means the **Language Server Protocol**
-> ([ADR-19](../adr/19-language-server-packaging.md), `rigor lsp`).
+> ([ADR-19](https://github.com/rigortype/rigor/blob/master/docs/adr/19-language-server-packaging.md), `rigor lsp`).
 > On *this* page, and only this page, "LSP" means the **Liskov
 > Substitution Principle**. The collision is unfortunate and
 > entirely conventional; the rest of the corpus keeps the
@@ -30,14 +30,14 @@ SOLID, and the same one a careful duck-typer follows by instinct.
 
 This page is descriptive, not normative. When the language here
 disagrees with the [type
-specification](../type-specification/README.md), the spec binds.
+specification](https://github.com/rigortype/rigor/blob/master/docs/type-specification/README.md), the spec binds.
 
 ## Five-second pitch
 
 | LSP obligation | Ruby idiom that already honours it | Rigor surface |
 | --- | --- | --- |
 | A subtype may be substituted wherever the supertype is expected | Duck typing — "if it responds to the messages I send, I can use it" | Nominal-first typing + structural facets + capability roles |
-| **Signature rule** — parameters contravariant, returns covariant | "Accept the widest thing you can use; return the most specific thing you can promise" | The **robustness principle** ([ADR-5](../adr/5-robustness-principle.md)) — lenient parameters (clause 2), strict returns (clause 1) |
+| **Signature rule** — parameters contravariant, returns covariant | "Accept the widest thing you can use; return the most specific thing you can promise" | The **robustness principle** ([ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md)) — lenient parameters (clause 2), strict returns (clause 1) |
 | **Preconditions may not be strengthened** in a subtype | An override should not reject inputs the parent accepted | Clause 2: parameters widened to the largest correctness-preserving carrier |
 | **Postconditions may not be weakened** in a subtype | An override should not return something less specific than the parent promised | Clause 1: returns tightened to the smallest correctness-preserving carrier; `def.return-type-mismatch` |
 | **Invariants must be preserved**; **history constraint** | Don't add state transitions that break the parent's invariants; respect `freeze` | Mutation-effect model + fact stability + `frozen?` narrowing (partial; see § "Invariants") |
@@ -179,7 +179,7 @@ the result as a `T`, so `S`'s method must return something every
 
 **Rigor's derivation is bottom-up.** ADR-5 starts from a Ruby-
 adoption problem, not a substitutability proof
-([`robustness-principle.md`](../type-specification/robustness-principle.md)):
+([`robustness-principle.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/robustness-principle.md)):
 
 - An over-strict **parameter** type forces callers to paste
   defensive coercions (`x.to_s`, `x || ""`, `Array(x)`) at every
@@ -299,14 +299,14 @@ manufacture a precondition ("this exact class") the runtime never
 required. Strengthening the precondition would mean firing a false
 positive on working duck-typed code — which collides head-on with
 the project's [false-positive
-discipline](../adr/8-steep-inspired-improvements.md). LSP and "never
+discipline](https://github.com/rigortype/rigor/blob/master/docs/adr/8-steep-inspired-improvements.md). LSP and "never
 frighten working code" point the same way.
 
 ## Postconditions: covariant returns and `self` types
 
 "**Postconditions may not be weakened**" is clause 1, and it has a
 concrete enforcement surface: **`def.return-type-mismatch`**
-([ADR-8](../adr/8-steep-inspired-improvements.md)). When a method
+([ADR-8](https://github.com/rigortype/rigor/blob/master/docs/adr/8-steep-inspired-improvements.md)). When a method
 carries a declared RBS return type and the body's inferred type
 *cannot satisfy* it, Rigor emits an error:
 
@@ -428,7 +428,7 @@ end
 ```
 
 A *sound* checker would flag the override. Rigor, by its
-[no-false-positives stance](../adr/8-steep-inspired-improvements.md),
+[no-false-positives stance](https://github.com/rigortype/rigor/blob/master/docs/adr/8-steep-inspired-improvements.md),
 does **not** bark at every override — because in Ruby, overriding
 with a changed shape is frequently *intentional and correct*
 (template-method refinements, `method_missing`, DSL-driven
@@ -459,7 +459,7 @@ its defaults rather than policing it through diagnostics.
 
 ## Cross-hierarchy override compatibility
 
-Since v0.1.15 ([ADR-35](../adr/35-override-signature-compatibility.md)),
+Since v0.1.15 ([ADR-35](https://github.com/rigortype/rigor/blob/master/docs/adr/35-override-signature-compatibility.md)),
 Rigor *does* compare an override against the contract it inherits —
 the signature rule applied across a project-defined class/module
 hierarchy. Three rules make up the `def.override-*` family:
@@ -504,7 +504,7 @@ enforce in v0.1.x — named here so you can stop looking:
   The shipped `def.override-*` family (§ "Cross-hierarchy override
   compatibility" above) gates on *both sides carrying an authored
   signature*. The complementary case — checking a child's *inferred*
-  return against an authored parent return ([ADR-35](../adr/35-override-signature-compatibility.md)
+  return against an authored parent return ([ADR-35](https://github.com/rigortype/rigor/blob/master/docs/adr/35-override-signature-compatibility.md)
   slice 5) — plus RBS-only-ancestor reach and singleton (`def self.`)
   method coverage remain deferred (demand-driven, higher
   false-positive surface).
@@ -554,8 +554,8 @@ model"](appendix-type-theory.md#what-rigor-does-not-model) records.
   "L" in SOLID — substitutability as a practical design test,
   no type theory required.
 - See also the companion [§ "Robustness principle (Postel's law for
-  types)"](../type-specification/robustness-principle.md) (normative)
-  and [ADR-5](../adr/5-robustness-principle.md) (rationale) — the
+  types)"](https://github.com/rigortype/rigor/blob/master/docs/type-specification/robustness-principle.md) (normative)
+  and [ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md) (rationale) — the
   Rigor surface this page maps LSP onto.
 
 ## What's next

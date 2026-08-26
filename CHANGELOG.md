@@ -35,6 +35,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[docs]** Relative links from the shipped manual and handbook into documents the gem does not package — ADRs, the type specification, the internal spec, `examples/`, plugin READMEs — were dead for everyone who installed Rigor rather than cloning it. All 284 of them now name their canonical URL, and `rigor help` no longer cites ADRs a reader cannot open ([#430](https://github.com/rigortype/rigor/issues/430)).
+
 - **[cli]** `rigor unused` no longer reports a class as having no production caller when a data file also names it — a job listed in `config/recurring.yml` and referenced from its spec was landing under "live test, dead production path" while it ran every three minutes. A data-file mention now also demotes to *cannot decide*, and it demotes only the name it matched rather than everything beneath it: the word "Administrasie" in a locale file was demoting 18 unrelated `Admin::*` rows ([#370](https://github.com/rigortype/rigor/issues/370)).
 
 - **[docs]** The plugin manual pages now show what the plugins actually print. Every example block had drifted — the `[plugin.<id>.<rule>]` identifier was missing from all of them, line numbers pointed at where the demo code used to be, and one page cited the wrong file entirely ([#488](https://github.com/rigortype/rigor/issues/488)).

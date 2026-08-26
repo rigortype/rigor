@@ -70,6 +70,6 @@ Renaming these adapts the plugin to a different state-machine DSL
 collects the declared states once, and a `node_rule` validates each
 `transition_to` over the engine-owned walk. The layout, demo, and
 contract surfaces are in the
-[plugin's README](../../../plugins/rigor-statesman/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-statesman/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and
 the [`rigor-plugin-author`](../08-skills.md) skill.

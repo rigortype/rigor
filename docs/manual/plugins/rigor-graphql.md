@@ -4,7 +4,7 @@ Recognises GraphQL-Ruby schema classes — `Schema::Object`,
 `Schema::Enum`, `Schema::InputObject`, `Schema::Mutation` subclasses —
 and walks their `field` / `value` / `argument` DSL declarations,
 publishing the resulting type tables as
-[ADR-9](../../adr/9-cross-plugin-api.md) cross-plugin facts that
+[ADR-9](https://github.com/rigortype/rigor/blob/master/docs/adr/9-cross-plugin-api.md) cross-plugin facts that
 downstream plugins can consume. graphql-ruby's `field` DSL is a pure
 metadata recorder (it synthesises no Ruby methods), so Rigor's value
 here is a static type table rather than method synthesis. It reads
@@ -84,6 +84,6 @@ walks every `paths:` entry's `.rb` files for the schema-class shapes.
 ## Plugin internals
 
 The type scanner and the contract surfaces this plugin exercises are in
-the [plugin's README](../../../plugins/rigor-graphql/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and the
+the [plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-graphql/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

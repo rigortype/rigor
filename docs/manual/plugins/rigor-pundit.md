@@ -93,6 +93,6 @@ candidate rather than being guessed at.
 
 The policy discoverer / index and the contract surfaces this plugin
 exercises are in the
-[plugin's README](../../../plugins/rigor-pundit/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-pundit/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and
 the [`rigor-plugin-author`](../08-skills.md) skill.

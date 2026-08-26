@@ -257,7 +257,7 @@ will need them:
    `.rigor.dist.yml` and Rigor will walk its `lib/` the same way
    it walks project source. Returns are wrapped in
    `Dynamic[T]` so the call site retains the provenance.
-   See [ADR-10](../adr/10-dependency-source-inference.md)
+   See [ADR-10](https://github.com/rigortype/rigor/blob/master/docs/adr/10-dependency-source-inference.md)
    for the trade-offs (per-gem opt-in by design — broad
    defaults would inflate budgets and make `bundle update`
    noisy).

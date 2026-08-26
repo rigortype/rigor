@@ -380,13 +380,13 @@ module Rigor
           trace      Replay how the engine typed FILE as a terminal animation
           type-scan  Report Scope#type_of coverage across PATHs
           effects    Report each method's effect labels, and the committed effect snapshot
-                     (ADR-103, opt-in; effects update/check/diff/explain)
+                     (opt-in; effects update/check/diff/explain)
           explain    Print the description of one or all CheckRules
           diff       Compare current diagnostics to a saved baseline JSON
-          sig-gen    Emit RBS skeletons inferred from .rb sources (ADR-14)
+          sig-gen    Emit RBS skeletons inferred from .rb sources
           lsp        Run the Rigor Language Server (LSP) over stdio
-          mcp        Run the Rigor MCP server over stdio (ADR-33)
-          triage     Summarise diagnostics: distribution, hotspots, hints (ADR-23)
+          mcp        Run the Rigor MCP server over stdio
+          triage     Summarise diagnostics: distribution, hotspots, hints
           coverage   Report type-precision coverage (precise vs Dynamic ratio)
           plugins    Report activation status of every configured plugin
           plugin     Browse bundled plugin source as worked examples (list/path/print/root)
@@ -394,9 +394,9 @@ module Rigor
           describe   Recommend the next skill for this project (alias for `skill describe`)
           skill      Recommend the next skill + list/print bundled Agent Skills (skill describe, skill <name>)
           docs       Print the bundled docs offline (docs <name>, docs --list)
-          show-bleedingedge  Show the bleeding-edge overlay + what your config adopts (ADR-50)
-          doctor     Classify setup problems vs clean run with routed next actions (ADR-77)
-          upgrade    Migration command skeleton (ADR-50 WD7, queued)
+          show-bleedingedge  Show the bleeding-edge overlay + what your config adopts
+          doctor     Classify setup problems vs clean run with routed next actions
+          upgrade    Migration command skeleton (queued)
           version    Print the Rigor version
           help       Print this help
       HELP

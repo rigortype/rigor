@@ -53,7 +53,7 @@ Some `protected` sites are typed only through call-site
 — an undeclared parameter seeded from what its callers pass)
 rather than a declaration — a lower bound that can only widen, so
 none of Rigor's negative rules fire against it yet
-([ADR-67](../adr/67-parameter-type-inference.md) WD6b). The text
+([ADR-67](https://github.com/rigortype/rigor/blob/master/docs/adr/67-parameter-type-inference.md) WD6b). The text
 report calls these out as "lower-bound-typed" when there are any,
 and the JSON form always carries the count as `lower_bound_typed`.
 It is a sub-count *within* `protected`, never subtracted from it —

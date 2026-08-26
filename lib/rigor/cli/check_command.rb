@@ -492,46 +492,46 @@ module Rigor
           end
           Options.add_editor_mode(opts, options)
           opts.on("--baseline=PATH",
-                  "ADR-22: load baseline from PATH (overrides .rigor.yml `baseline:`)") do |value|
+                  "load baseline from PATH (overrides .rigor.yml `baseline:`)") do |value|
             options[:baseline] = value
           end
           opts.on("--no-baseline",
-                  "ADR-22: ignore any configured baseline for this run") do
+                  "ignore any configured baseline for this run") do
             options[:baseline] = false
           end
           opts.on("--baseline-strict",
-                  "ADR-22: fail the run on any baseline drift (CI gate)") do
+                  "fail the run on any baseline drift (CI gate)") do
             options[:baseline_strict] = true
           end
           opts.on("--treat-all-as-inline-rbs",
-                  "ADR-32: force-load rigor-rbs-inline with require_magic_comment: false") do
+                  "force-load rigor-rbs-inline with require_magic_comment: false") do
             options[:treat_all_as_inline_rbs] = true
           end
           opts.on("--verify-incremental",
-                  "ADR-46: assert incremental analysis matches a full run, then exit") do
+                  "assert incremental analysis matches a full run, then exit") do
             options[:verify_incremental] = true
           end
           opts.on("--incremental",
-                  "ADR-46: re-analyze only files changed since the last run (cross-process cache)") do
+                  "re-analyze only files changed since the last run (cross-process cache)") do
             options[:incremental] = true
           end
           opts.on("--no-ci-detect",
-                  "ADR-51: do not auto-emit CI-native output when a CI environment is detected") do
+                  "do not auto-emit CI-native output when a CI environment is detected") do
             options[:ci_detect] = false
           end
           # ADR-50 § WD2 — `=[LIST]` (not ` [LIST]`) so a bare `--bleeding-edge` never swallows a following positional
           # path: `rigor check --bleeding-edge lib` adopts the whole overlay and checks `lib`.
           opts.on("--bleeding-edge=[LIST]",
-                  "ADR-50: adopt the bleeding-edge overlay for this run " \
+                  "adopt the bleeding-edge overlay for this run " \
                   "(all features, or a comma-separated feature-id list)") do |value|
             options[:bleeding_edge] = value.nil? || value.split(",").map(&:strip).reject(&:empty?)
           end
           opts.on("--no-bleeding-edge",
-                  "ADR-50: ignore any configured bleeding_edge: selection for this run") do
+                  "ignore any configured bleeding_edge: selection for this run") do
             options[:bleeding_edge] = false
           end
           opts.on("--no-tolerated-effects",
-                  "ADR-103: check effect envelopes as if effects.tolerated: were empty") do
+                  "check effect envelopes as if effects.tolerated: were empty") do
             options[:no_tolerated_effects] = true
           end
         end

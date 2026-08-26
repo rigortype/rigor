@@ -10,7 +10,7 @@ That instinct is right, but the *word* is a trap in Rigor. Rigor's
 structural-typing feature is not called "protocol" — it is the RBS
 **`interface`**. Meanwhile "protocol" *does* appear in Rigor, naming
 a **different** feature: a framework's path-scoped *behavioural
-contract* ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)).
+contract* ([ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md)).
 This appendix untangles the two so you reach for the right one.
 
 > **The one-line version.** Rigor's `interface` is **structural** —
@@ -64,7 +64,7 @@ end
 A class that defines `close` with a compatible signature satisfies
 the interface **with no `include`, no superclass, and no runtime
 marker** — the match is structural. From the normative spec
-([`structural-interfaces-and-object-shapes.md`](../type-specification/structural-interfaces-and-object-shapes.md)):
+([`structural-interfaces-and-object-shapes.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/structural-interfaces-and-object-shapes.md)):
 
 > An RBS interface type … is a *named structural contract*. A
 > nominal type or object shape is assignable to an interface when
@@ -228,8 +228,8 @@ author):
 - The `missing-protocol-method` / `protocol-return-mismatch`
   diagnostics are **plugin diagnostics**, emitted under the
   plugin's `plugin.<id>.` provenance — not core Rigor rules. The
-  worked references are [`examples/rigor-web/`](../../examples/rigor-web/)
-  (the minimal tutorial) and [`plugins/rigor-hanami/`](../../plugins/rigor-hanami/)
+  worked references are [`examples/rigor-web/`](https://github.com/rigortype/rigor/tree/master/examples/rigor-web)
+  (the minimal tutorial) and [`plugins/rigor-hanami/`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-hanami)
   (production Hanami 2 actions).
 
 ## Interface vs protocol contract
@@ -262,8 +262,8 @@ contract*, while Python's `typing.Protocol` reused the word for the
 - You want to **enforce that every class in a directory implements
   a framework method with given parameter/return types** → that is
   a **protocol contract**, and it is a *plugin-authoring* feature.
-  See [ADR-28](../adr/28-path-scoped-protocol-contracts.md) and the
-  [`examples/`](../../examples/README.md) walkthroughs.
+  See [ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md) and the
+  [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) walkthroughs.
 - You are an **application developer** using such a framework → you
   do neither explicitly. Write idiomatic Ruby; the framework's
   plugin supplies the contract, and Rigor checks your actions
@@ -276,12 +276,12 @@ contract*, while Python's `typing.Protocol` reused the word for the
 - [Chapter 7 — RBS and RBS::Extended](07-rbs-and-extended.md) — how
   to write the `.rbs` an interface lives in.
 - [Chapter 9 — Plugins](09-plugins.md) and the
-  [examples/ landing page](../../examples/README.md) — where
+  [examples/ landing page](https://github.com/rigortype/rigor/blob/master/examples/README.md) — where
   protocol contracts are authored.
-- [`docs/type-specification/structural-interfaces-and-object-shapes.md`](../type-specification/structural-interfaces-and-object-shapes.md)
+- [`docs/type-specification/structural-interfaces-and-object-shapes.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/structural-interfaces-and-object-shapes.md)
   — the normative spec for interfaces, object shapes, and
   capability roles.
-- [ADR-28](../adr/28-path-scoped-protocol-contracts.md) — the
+- [ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md) — the
   protocol-contract design decision and its rejected alternatives
   (including *why* an RBS interface bound by directory was not the
   route).

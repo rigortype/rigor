@@ -1,7 +1,7 @@
 # Coexisting with Sorbet
 
 If your project already uses [Sorbet](https://sorbet.org/),
-the [`rigor-sorbet`](../../plugins/rigor-sorbet/) plugin
+the [`rigor-sorbet`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sorbet) plugin
 lets Rigor read your existing `sig` blocks, RBI files, and
 `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions as type
 sources. You do not have to rewrite anything in RBS to start
@@ -290,7 +290,7 @@ wins. Sorbet sigs sit at Rigor's plugin tier:
 5. **User-class fallback** (`Object` / `Class` ancestors).
 
 The contribution merger (a v0.1.0 substrate documented in
-[`docs/internal-spec/flow-contribution-merger.md`](../internal-spec/flow-contribution-merger.md))
+[`docs/internal-spec/flow-contribution-merger.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/flow-contribution-merger.md))
 keeps RBS authoritative on conflict — the Sorbet sig is
 allowed to refine but not contradict it. Users who want
 their Sorbet sig to override should remove the conflicting
@@ -337,11 +337,11 @@ unit tests).
 ## Where to go next
 
 - The full feature matrix and architectural surface live in
-  [`plugins/rigor-sorbet/README.md`](../../plugins/rigor-sorbet/README.md).
+  [`plugins/rigor-sorbet/README.md`](https://github.com/rigortype/rigor/blob/master/plugins/rigor-sorbet/README.md).
 - The design rationale + slice plan is at
-  [`docs/adr/11-sorbet-input-adapter.md`](../adr/11-sorbet-input-adapter.md).
+  [`docs/adr/11-sorbet-input-adapter.md`](https://github.com/rigortype/rigor/blob/master/docs/adr/11-sorbet-input-adapter.md).
 - The cross-checker triage report at
-  [`docs/notes/20260503-steep-cross-check-triage.md`](../notes/20260503-steep-cross-check-triage.md)
+  [`docs/notes/20260503-steep-cross-check-triage.md`](https://github.com/rigortype/rigor/blob/master/docs/notes/20260503-steep-cross-check-triage.md)
   shows how Rigor's analyzer routinely surfaces sig drift
   that other static checkers miss — useful when comparing
   what each tool finds in practice.

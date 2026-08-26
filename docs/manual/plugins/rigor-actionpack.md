@@ -75,6 +75,6 @@ plugins:
 The cross-plugin fact contract (`:helper_table` / `:model_index`),
 the controller/view discovery producers, the demo, and the
 contract surfaces this plugin exercises are in the
-[plugin's README](../../../plugins/rigor-actionpack/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-actionpack/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and
 the [`rigor-plugin-author`](../08-skills.md) skill.

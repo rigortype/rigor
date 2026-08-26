@@ -41,7 +41,7 @@ The accepted status symbols come from the **real**
 `Rack::Utils::SYMBOL_TO_STATUS_CODE` read at analysis time (the same
 authority `have_http_status` itself uses), not a vendored snapshot — so
 a newly-added Rack symbol is never mistaken for a typo
-([ADR-39](../../adr/39-plugin-target-library-invocation.md)). When Rack
+([ADR-39](https://github.com/rigortype/rigor/blob/master/docs/adr/39-plugin-target-library-invocation.md)). When Rack
 can't be loaded the plugin **declines** to flag any symbol (reduced
 coverage, never a false positive). The eight Rails status-group aliases
 (`:success`, `:successful`, `:missing`, `:redirect`, `:error`,
@@ -72,6 +72,6 @@ The plugin has no configuration knobs.
 
 The matcher recogniser, the Rack-table lookup, and the contract
 surfaces this plugin exercises are in the
-[plugin's README](../../../plugins/rigor-rspec-rails/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and the
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-rspec-rails/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

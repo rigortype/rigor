@@ -18,7 +18,7 @@ on `nil` more than once, and you want to know:
 
 The handbook answers those questions. It does **not** try to
 replace the [normative type
-specification](../type-specification/README.md) — that lives
+specification](https://github.com/rigortype/rigor/blob/master/docs/type-specification/README.md) — that lives
 in `docs/type-specification/` and is the binding source when
 this handbook disagrees.
 
@@ -62,11 +62,11 @@ up the flag, key, or command that *acts* on it.
    The catalogue itself is
    [manual — Diagnostics](../manual/04-diagnostics.md).
 9. [**Plugins**](09-plugins.md) — when to author one,
-   pointer to the [examples/](../../examples/README.md)
+   pointer to the [examples/](https://github.com/rigortype/rigor/blob/master/examples/README.md)
    landing page.
 10. [**Coexisting with Sorbet**](10-sorbet.md) — for users
     arriving from a Sorbet-using project: the
-    [`rigor-sorbet`](../../plugins/rigor-sorbet/) adapter
+    [`rigor-sorbet`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sorbet) adapter
     reads `sig { ... }` blocks, RBI files, and
     `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions
     as type sources without rewriting in RBS.
@@ -78,7 +78,7 @@ up the flag, key, or command that *acts* on it.
     trade-off, RSpec-aware observations.
 12. [**Lightweight HKT (JSON.parse and friends)**](12-lightweight-hkt.md)
     — Rigor's defunctionalised higher-kinded type encoding
-    ([ADR-20](../adr/20-lightweight-hkt.md), Yallop & White
+    ([ADR-20](https://github.com/rigortype/rigor/blob/master/docs/adr/20-lightweight-hkt.md), Yallop & White
     2014 / fp-ts shape). Covers the bundled `json::value`
     registration backing `JSON.parse` / `YAML.safe_load`,
     the `symbolize_names: true` + `permitted_classes: [...]`
@@ -154,7 +154,7 @@ choices.
   success-typing / no-false-positives stance shared with
   Dialyzer. Covers pattern matching + guards ↔ narrowing (the
   `flow.unreachable-clause` rule was modelled on Elixir's
-  clause-reachability work, [ADR-47](../adr/47-narrowing-driven-clause-reachability.md)),
+  clause-reachability work, [ADR-47](https://github.com/rigortype/rigor/blob/master/docs/adr/47-narrowing-driven-clause-reachability.md)),
   set-theoretic types ↔ Rigor's unions + `~T` / `T - U`
   operators, atoms ↔ symbols, and protocols / behaviours ↔
   structural interfaces.
@@ -173,7 +173,7 @@ contract) — so you reach for the right one.
   — RBS `interface` ↔ `typing.Protocol`, inferred object
   shapes and capability roles, and how all of that differs
   from the plugin-declared, path-scoped protocol contracts of
-  [ADR-28](../adr/28-path-scoped-protocol-contracts.md).
+  [ADR-28](https://github.com/rigortype/rigor/blob/master/docs/adr/28-path-scoped-protocol-contracts.md).
   Includes the side-by-side "interface vs protocol contract"
   table and a "which one do I want?" guide.
 
@@ -249,13 +249,13 @@ When a chapter references a more formal document, the link
 takes you out of the handbook into the binding spec corpus or
 ADRs:
 
-- [`docs/types.md`](../types.md) — one-page mental model.
-- [`docs/type-specification/`](../type-specification/README.md)
+- [`docs/types.md`](https://github.com/rigortype/rigor/blob/master/docs/types.md) — one-page mental model.
+- [`docs/type-specification/`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/README.md)
   — normative spec corpus.
-- [`docs/internal-spec/`](../internal-spec/README.md) —
+- [`docs/internal-spec/`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/README.md) —
   analyzer-internal contracts (engine surface, type-object
   public API).
-- [`docs/adr/`](../adr/) — architecture decision records.
+- [`docs/adr/`](https://github.com/rigortype/rigor/tree/master/docs/adr) — architecture decision records.
 
 ## Non-goals
 
@@ -268,9 +268,9 @@ hours. To keep it short:
   the spec corpus.
 - It does **not** discuss internal contracts (engine surface,
   type-object public API). Those live in
-  [`docs/internal-spec/`](../internal-spec/README.md).
+  [`docs/internal-spec/`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/README.md).
 - It does **not** cover plugin **authoring** — that is the
-  job of [examples/](../../examples/README.md). Chapter 9 is
+  job of [examples/](https://github.com/rigortype/rigor/blob/master/examples/README.md). Chapter 9 is
   a one-page pointer.
 
 If a topic comes up that the handbook does not explain, the

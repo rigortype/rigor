@@ -56,6 +56,6 @@ is fixed in the manifest).
 
 The declarative `BlockAsMethod` manifest and the macro-substrate
 `self`-narrowing it rides on are documented in the
-[plugin's README](../../../plugins/rigor-sinatra/README.md). To
-write a plugin, see [`examples/`](../../../examples/README.md) and
+[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-sinatra/README.md). To
+write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and
 the [`rigor-plugin-author`](../08-skills.md) skill.

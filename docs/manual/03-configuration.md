@@ -62,7 +62,7 @@ cache:
 | `exclude` | Array | `[]` | Glob patterns to skip. `vendor/bundle`, `.bundle`, and `node_modules` are always excluded. |
 | `includes` | Array | `[]` | Other config files to layer underneath this one. |
 | `fold_platform_specific_paths` | Boolean | `false` | Resolve Ruby-version-conditional load paths when discovering sources. |
-| `parameter_inference` | Boolean | `false` | Opt-in call-site parameter type inference on the `check` walk ([ADR-67](../adr/67-parameter-type-inference.md) WD6). When `true`, an undeclared `def` / `initialize` / setter parameter is typed to the union of its resolved call-site argument types, sharpening downstream ivar reads, folds, and protection coverage. Precision-additive only — the negative rules never fire against an inferred parameter. Cannot be combined with `--incremental`. |
+| `parameter_inference` | Boolean | `false` | Opt-in call-site parameter type inference on the `check` walk ([ADR-67](https://github.com/rigortype/rigor/blob/master/docs/adr/67-parameter-type-inference.md) WD6). When `true`, an undeclared `def` / `initialize` / setter parameter is typed to the union of its resolved call-site argument types, sharpening downstream ivar reads, folds, and protection coverage. Precision-additive only — the negative rules never fire against an inferred parameter. Cannot be combined with `--incremental`. |
 
 ### Type sources
 
@@ -116,7 +116,7 @@ statically and may resolve at run time. The same findings appear in the
 | `severity_profile` | String | `"balanced"` | `lenient`, `balanced`, or `strict` — see [Diagnostics](04-diagnostics.md). |
 | `severity_overrides` | Hash | `{}` | Per-rule / per-family severity, e.g. `{ call: warning, flow.always-truthy-condition: off }`. |
 | `baseline` | String / `false` | `nil` | Path to a `.rigor-baseline.yml`, or `false` to disable an inherited one. See [Baselines](06-baseline.md). |
-| `bleeding_edge` | Boolean / Array / Hash | `false` | Adopt the next major's queued changes early ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD2). `false` adopts none; `true` adopts the whole overlay; a list of feature ids adopts only those; `{ all: true, except: [ids] }` adopts all but the named. Orthogonal to `severity_profile`. Override it for a single run with [`rigor check --bleeding-edge[=ids]`](02-cli-reference.md#rigor-check) / `--no-bleeding-edge`. Inspect with [`rigor show-bleedingedge`](02-cli-reference.md#rigor-show-bleedingedge). |
+| `bleeding_edge` | Boolean / Array / Hash | `false` | Adopt the next major's queued changes early ([ADR-50](https://github.com/rigortype/rigor/blob/master/docs/adr/50-release-engineering-and-stability-strategy.md) § WD2). `false` adopts none; `true` adopts the whole overlay; a list of feature ids adopts only those; `{ all: true, except: [ids] }` adopts all but the named. Orthogonal to `severity_profile`. Override it for a single run with [`rigor check --bleeding-edge[=ids]`](02-cli-reference.md#rigor-check) / `--no-bleeding-edge`. Inspect with [`rigor show-bleedingedge`](02-cli-reference.md#rigor-show-bleedingedge). |
 
 A queued feature is one of two kinds, and `bleeding_edge:` selects both the
 same way:
@@ -151,7 +151,7 @@ It deliberately does **not** read `BUNDLE_PATH` from rigor's own
 environment, and it cannot reach gems installed at the *default* shared
 location (the active Ruby's `GEM_HOME`, when no `path` is configured):
 rigor runs in its own isolated Ruby and reads your project as data
-([ADR-27](../adr/27-tool-distribution-model.md)), so it does not know the
+([ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)), so it does not know the
 project Ruby's gem home without running your toolchain. If `rigor check`'s
 `--stats` shows gems whose RBS it could not find, point it at the bundle
 explicitly with `bundler.bundle_path:`, or supply signatures another way:
@@ -181,7 +181,7 @@ snapshot, the CI gate — is [Effect labels](19-effect-labels.md).
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `effects` | Hash | absent | **Opt-in to effect labels ([ADR-103](../adr/103-effect-labels.md)).** The *presence* of this block is the switch — `effects: {}` enables collection with every sub-key at its default, and leaving it out keeps `rigor check` byte-identical and free. Nothing else turns collection on: an `%a{pure}` or `%a{rigor:v1:effect …}` annotation in your RBS does not, because an annotation must not silently make every run more expensive — such a project gets one `effect.annotations-unchecked` `:info` per run instead, saying the annotations are inert. `rigor effects` runs under an implicit empty block when the key is absent, so you can try the report before configuring anything. Effect summaries are cached under their own identity (Rigor's effect vocabulary, its built-in catalogue and this block), so `rigor effects` after `rigor check` in the same job is a cache hit plus the propagation, and turning this block on or off does not invalidate your diagnostics cache. The sub-keys are below. `views` is declared in the schema and reserved: accepted and **not yet read**. See [`rigor effects`](02-cli-reference.md#rigor-effects). |
+| `effects` | Hash | absent | **Opt-in to effect labels ([ADR-103](https://github.com/rigortype/rigor/blob/master/docs/adr/103-effect-labels.md)).** The *presence* of this block is the switch — `effects: {}` enables collection with every sub-key at its default, and leaving it out keeps `rigor check` byte-identical and free. Nothing else turns collection on: an `%a{pure}` or `%a{rigor:v1:effect …}` annotation in your RBS does not, because an annotation must not silently make every run more expensive — such a project gets one `effect.annotations-unchecked` `:info` per run instead, saying the annotations are inert. `rigor effects` runs under an implicit empty block when the key is absent, so you can try the report before configuring anything. Effect summaries are cached under their own identity (Rigor's effect vocabulary, its built-in catalogue and this block), so `rigor effects` after `rigor check` in the same job is a cache hit plus the propagation, and turning this block on or off does not invalidate your diagnostics cache. The sub-keys are below. `views` is declared in the schema and reserved: accepted and **not yet read**. See [`rigor effects`](02-cli-reference.md#rigor-effects). |
 | `effects.check` | Boolean | `true` | Whether the envelopes you declared — `%a{pure}` and `%a{rigor:v1:effect …}` in RBS, and the `effects.envelopes:` stanzas below — are checked against what Rigor proved, surfacing `effect.envelope-exceeded` and, for a label the vocabulary does not recognise, `effect.unknown-label`. Set it to `false` to keep the report and the snapshot while silencing both. Never on without an `effects:` block. |
 | `effects.snapshot.path` | String | `.rigor-effects.yml` | Where `rigor effects update` writes the committed record. |
 | `effects.snapshot.reach` | Array | `[]` | Entry points whose **transitive** footprint the snapshot records under `reach:`. The default is empty **deliberately**: Rigor could infer `[rails]` from your plugin list, but a snapshot is a record you agree to and review the diff of, and one whose contents moved because your plugin list moved would be the worse artefact. `rigor effects update` names the presets your plugins registered and leaves the same hint in the written file. Each entry is a project-relative file glob (the `unused --entry-point` semantics — `**` is the only way across a directory boundary) or the name of an entry-point **preset** a plugin registered. On a Rails app, `reach: [rails]` is the one you want — see below. A name nothing registered is an error when the snapshot is built (not when the configuration loads, because the plugins that name presets load *from* that configuration); the error lists the presets your plugins did register, so it names the fix. |
@@ -199,7 +199,7 @@ config with no `effects:` key at all behave as `effects: {}` — collection,
 defaults. It only fills an *absence*: write `effects: false` and you stay
 opted out regardless, and any `effects:` block you do write is left exactly
 as written. It previews what becomes the default at **v0.4.0**
-([ADR-103](../adr/103-effect-labels.md) § WD15).
+([ADR-103](https://github.com/rigortype/rigor/blob/master/docs/adr/103-effect-labels.md) § WD15).
 
 #### Entry-point presets
 
@@ -269,7 +269,7 @@ plugin modelling a framework Rigor did not read, and a claim about unread code m
 fail your build. The enforcement path for that half is the committed snapshot, whose `rigor effects
 check` marks a declared-lane addition with `≤+` — [Effect labels § What a bound can and cannot
 see](19-effect-labels.md#what-a-bound-can-and-cannot-see), and
-[ADR-103](../adr/103-effect-labels.md) § WD17 for why.
+[ADR-103](https://github.com/rigortype/rigor/blob/master/docs/adr/103-effect-labels.md) § WD17 for why.
 
 If a layer is not ready for a bound yet, leave `envelopes:` out and start with the committed snapshot
 ([`rigor effects update`](02-cli-reference.md#the-effect-snapshot)) — it needs no declaration at all,

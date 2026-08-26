@@ -111,9 +111,9 @@ sym = "foo".to_sym        #=> dump_type: Constant<:foo>
 Folding extends to a long list of "pure" methods on Numeric,
 String, Symbol, Array, and Hash. The list is not in this
 handbook (it would fill several pages); see
-[`docs/types.md`](../types.md) and the per-class catalogues
+[`docs/types.md`](https://github.com/rigortype/rigor/blob/master/docs/types.md) and the per-class catalogues
 under
-[`data/builtins/ruby_core/`](../../data/builtins/ruby_core/).
+[`data/builtins/ruby_core/`](https://github.com/rigortype/rigor/tree/master/data/builtins/ruby_core).
 
 When folding is **not** safe (because a method has side
 effects, depends on the environment, or is not in a

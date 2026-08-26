@@ -47,7 +47,7 @@ s.lenght
 
 ```shell-session
 $ rigor check demo.rb
-demo.rb:7:3: error: undefined method `lenght' for "hello-world"
+demo.rb:7:3: error: undefined method `lenght' for "hello-world" [call.undefined-method]
 ```
 
 Note what the error says: not ``undefined method `lenght' for String``

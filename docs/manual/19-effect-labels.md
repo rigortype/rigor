@@ -520,7 +520,7 @@ A method that exceeds its bound gets one diagnostic per (method, label) pair, at
 its `def`, naming the route:
 
 ```
-app/helpers/application_helper.rb:59:1: warning: Method ApplicationHelper#link_to_principal performs io.fs.read (Dir.glob via IconsHelper#principal_icon → IconsHelper#sprite_icon → IconsHelper#sprite_source → Redmine::Themes::Helper#current_theme → Redmine::Themes.theme → Redmine::Themes.themes → Redmine::Themes.scan_themes), but is declared effect: [] at .rigor.yml effects.envelopes[0], so io.fs.read exceeds the envelope.
+app/helpers/application_helper.rb:59:1: warning: Method ApplicationHelper#link_to_principal performs io.fs.read (Dir.glob via IconsHelper#principal_icon → IconsHelper#sprite_icon → IconsHelper#sprite_source → Redmine::Themes::Helper#current_theme → Redmine::Themes.theme → Redmine::Themes.themes → Redmine::Themes.scan_themes), but is declared effect: [] at .rigor.yml effects.envelopes[0], so io.fs.read exceeds the envelope. [effect.envelope-exceeded]
 ```
 
 **Budget for a big first number.** That one stanza, on Redmine, is **343
@@ -610,7 +610,7 @@ app/serializers/rest/v1/instance_serializer.rb:89:1: warning: Method
   REST::V1::InstanceSerializer#invites_enabled performs mutate.self
   (receiver-mutation via UserRole.everyone → UserRole.create! → UserRole#set_position),
   but is declared effect: [] at .rigor.yml effects.envelopes[0], so mutate.self
-  exceeds the envelope.
+  exceeds the envelope. [effect.envelope-exceeded]
 ```
 
 Rigor walked *through* the database write and reported the ivar assignment beyond

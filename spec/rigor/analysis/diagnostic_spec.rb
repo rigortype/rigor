@@ -80,7 +80,25 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       diagnostic = described_class.new(
         path: "f.rb", line: 1, column: 2, message: "boom", rule: "call.undefined-method"
       )
-      expect(diagnostic.to_s).to eq("f.rb:1:2: error: boom")
+      expect(diagnostic.to_s).to eq("f.rb:1:2: error: boom [call.undefined-method]")
+    end
+
+    # #431 — the identifier is what `# rigor:disable <id>` and `severity_profile:` are keyed on, and the
+    # default output was the one place it could not be read. A builtin rule now carries it like every
+    # other family; slice 5's exception for builtins was a layout call, not a judgment that it is noise.
+    it "appends the bare rule for a builtin diagnostic" do
+      diagnostic = described_class.new(
+        path: "f.rb", line: 1, column: 2, message: "boom", severity: :warning, rule: "flow.always-raises"
+      )
+      expect(diagnostic.to_s).to eq("f.rb:1:2: warning: boom [flow.always-raises]")
+    end
+
+    # The other half, and the reason `rule` is allowed to be nil: a parse error, a path error or an
+    # internal analyzer error is produced by no rule, so there is nothing to suppress or configure and
+    # nothing to print.
+    it "leaves a rule-less diagnostic unsuffixed" do
+      diagnostic = described_class.new(path: "f.rb", line: 1, column: 2, message: "cannot parse")
+      expect(diagnostic.to_s).to eq("f.rb:1:2: error: cannot parse")
     end
 
     it "appends the qualified rule for non-builtin source families" do

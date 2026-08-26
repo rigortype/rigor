@@ -16,69 +16,76 @@ Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning 
 (`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
 this file is the one that is wrong.
 
-## Next session: consider cutting v0.3.6
+## Next session: cut v0.3.6
 
-The snapshot surface is **done** — #434 is closed and #435 is open only for the `file:line` half of
-its item 3, which is a decision rather than work (the comment on the issue lays out the three
-options; the line costs the whole-project parse ADR-104 just removed, so the recommendation is
-#479's lazy shape or nothing).
+`[Unreleased]` carries **16 entries** across Changed and Fixed. **No autonomous version bumps** — this
+needs an explicit ask. Two things the release note must say, because a user meets both without asking:
 
-`[Unreleased]` carries **11 entries**, including the `%a(pure)` silent-lane fix and a schema bump
-users will meet on their next `rigor effects check`. **No autonomous version bumps** — this needs
-an explicit ask. The release note must mention the one-line snapshot migration.
+- the effect **snapshot schema moved 1 → 2**, so a committed `.rigor-effects.yml` reports one
+  `regeneration: schema: 1 → 2` line on the next `rigor effects check` and needs one `update`;
+- **every diagnostic line now ends with its rule identifier** in brackets, which changes what CI logs
+  and screenshots look like even though nothing about the analysis moved.
 
-**#449 closed** (#485): it was not one missing row but **twelve**, all in the same direction — the
-ADR-72 overlay had drifted from its plugin twin since #437, and every gap is a false positive on the
-population that never opted into the plugin. A parity spec now pins the two surfaces; it parses with
-RBS, because a regex over `def` lines cannot see nesting and reported parity while `ERB::Util` was
-still missing.
+## The pre-release issue sweep (2026-08-26/27) — six closed, all measured
 
-**#427 closed** (#486), and its diagnosis needed correcting: the lockfile blindness was real, but a
-FULLY warm arm never loads `rbs.environment` either — with the whole-run slot populated the check is
-served from it and no analysis happens, so the issue's own priming proposal would have moved the arm
-from one blind state to another. The arm now primes *and drops the whole-run slot*, and
-`tool/warm_cache_assertion.rb` asserts `rbs.environment` was served.
+Every one of these turned out to be something other than what its issue said, which is the reusable
+part: **the issue's own diagnosis was wrong or incomplete in five of six cases.**
 
-**#431 closed** (#487): the formatter was never id-less — it has appended `[qualified.rule]` since
-v0.1.0 slice 5 for every family EXCEPT builtin, so the fix was removing an exception, not adopting a
-convention. Decision recorded on the issue with the cost measured first (Redmine: 13 distinct ids
-across the project, +14 chars on a 165-char median line). Spun off **#488** — the plugin manual
-pages' example blocks are stale in both line numbers and the id, with a different cause.
+- **#449** (#485) — not one missing overlay row but **twelve**: the ADR-72 overlay had drifted from its
+  plugin twin since #437. A parity spec pins the two surfaces, parsing with RBS because a regex over
+  `def` lines cannot see nesting and reported parity while `ERB::Util` was missing.
+- **#427** (#486) — the lockfile blindness was real, but a FULLY warm arm never loads
+  `rbs.environment` either, so the issue's own priming proposal would have moved the arm from one
+  blind state to another. It now primes *and drops the whole-run slot*;
+  `tool/warm_cache_assertion.rb` asserts the environment was served.
+- **#431** (#487) — the formatter was never id-less; it has carried `[qualified.rule]` for every
+  family EXCEPT builtin since v0.1.0, so the fix removed an exception rather than adopting a
+  convention. Cost measured first: 13 distinct ids on redmine, +14 chars on a 165-char median line.
+- **#370** (#489) — the "design question this needs answered first" was already answered by the tier
+  contract in internal-spec. Applying it alone would have shipped a regression (80 spurious rows on
+  mastodon): a data-file mention and an interpolated `constantize` shared one carrier shape, so
+  "Administrasie" in a locale file demoted 18 `Admin::*` rows. `DynamicUse` carries a `scope` now,
+  which also fixed a live defect nobody had filed — "Redmine" in a YAML was demoting 47 rows out of
+  `candidates`.
+- **#488** (#490) — all five plugin pages' example blocks were stale in three ways at once, one of
+  them never accurate. Rewritten from each plugin's own `demo/`, matched on message text. The guard is
+  static by a **measured** choice: the execution version costs 6.3 s on `make verify` against a
+  monthly drift rate.
+- **#430** (#491) — **284** dead links across 66 shipped docs, an order of magnitude over the
+  estimate, and that number picked the option: shipping the specs is +30 % gem size and still leaves
+  128, replacing each pointer is a docs rewrite. All now name canonical URLs, with a gate that
+  resolves against the **packaged** file list and a second assertion restoring the coverage the
+  rewrite would have removed.
+- **#420** (#492) — adjudicated silent, no behaviour change. `Object.new` and a `() -> Object`
+  declared method carry the identical `Object`, so convergence fires on correct code. The corpus gate
+  ran and is recorded as **unable to decide** (0/2/0/0 baseline, +0) rather than as a clearance.
 
-Also open and independent: **#430** (design call), **#476** (synthetic Tier B is dead in production —
+Still open and independent: **#476** (synthetic Tier B is dead in production —
 `project_pre_passes` passes `environment: nil` while the env consumes the scanner's output; two-phase
 env, lazy resolution, or retire the tier, and whichever lands removes #477's gate), **#460** (parked
-— v0.4.x), **#454** (decide before the #409 flip), **#435** (the `file:line` half of item 3 only —
-a decision, see its comment), **#488**.
+— v0.4.x), **#454** (decide before the #409 flip), **#435** (the `file:line` half of item 3 only — a
+decision, and its comment carries the three options plus why the line costs the warm probe).
 
-## What the 2026-08-25 session shipped (all merged, master verified green after integration)
+## The 2026-08-25 warm/cold perf campaign (all merged, master green after integration)
 
-Feature-level warm/cold corpus campaign — the question the v0.3.0 cycle never asked: what do the
-NON-check surfaces cost warm? Note: `docs/notes/20260825-feature-warm-cold-corpus-perf.md`;
-harness preserved on branch `perfbench-harness-20260825`; memory
-`project_feature_warm_perf_campaign_20260825`.
+What do the NON-check surfaces cost warm? Note:
+`docs/notes/20260825-feature-warm-cold-corpus-perf.md`; harness on branch
+`perfbench-harness-20260825`; memory `project_feature_warm_perf_campaign_20260825`.
 
-- **#473 / #481** — `rigor unused` now reuses the analysis cache (env + plugin producers), scans
-  templates against capital-bearing identifier runs only, and caches its per-file scans in a
-  self-validating stat-signed bundle. Mastodon 8.4 → ~1.1 s warm (7.8×), byte-identical.
-- **#474** — `%a(pure)` / any non-brace spelling was invisible to `ANNOTATION_HINT`, so the probe
-  served the fast path while a bound existed (the #428 family through an orthography). All five RBS
-  bracket pairs route, and `EnvelopeScanner.scan` implements the documented pre-filter at last.
-- **#475 / #477 / #478 / #480** — the effects entry stores the propagated table (no warm re-fixpoint);
-  the synthetic scan short-circuits when trait registries cannot emit (a 3,229-file parse for a
-  provably empty index); a per-run validation-stat memo, recording side deliberately un-memoised;
-  and the cold `effects` +41 % cell was YJIT — only check/coverage armed the deadline, `CLI#dispatch`
-  arms it for every command now.
-- **#484** — the snapshot surface: a regeneration event withholds the per-symbol diff it was
-  documented as being unable to compare (482 unreadable lines on redmine); `unresolved:` became a
-  count at **schema 2** (redmine's record 326,964 → 197,968 bytes, −39 %) with a schema-1 file
-  still loading so the migration is one line; `explain` expands `exhaustive → not` by naming the
-  causes the record stopped keeping — the two halves meet there. Drift rows name the file.
-- **#483 / ADR-104 (Accepted, implemented)** — `Analysis::EffectsCacheProbe` serves `rigor
-  effects` and the four snapshot verbs from the summary entry with **zero** engine features in
-  `$LOADED_FEATURES`; **#482**'s two-entry split landed inside the same slice (the probe reads
-  exactly that payload). Interleaved A/B ×3: effects redmine 0.76 → 0.50 s, mastodon
-  0.93 → 0.58 s; check −26 % / −38 %; byte-identical incl. `--full --why`, JSON, `explain`.
+`rigor unused` 8.4 → ~1.1 s on mastodon (#473 cache reuse + narrowed template scan, #481
+`Reachability::ScanCache`). Effects: the whole-run entry stores the propagated table (#475), the
+synthetic scan short-circuits when trait registries cannot emit (#477), a per-run validation-stat memo
+(#478), and the cold `effects` +41 % cell was YJIT — only check/coverage armed the deadline, now every
+command does (#480). **#474** was the one correctness find: `%a(pure)` and every other non-brace RBS
+spelling was invisible to `ANNOTATION_HINT`, so the probe served the fast path while a bound existed —
+the #428 family reached through an orthography.
+
+**#483 / ADR-104 (Accepted, implemented)** — `Analysis::EffectsCacheProbe` serves `rigor effects` and
+the four snapshot verbs with **zero** engine features in `$LOADED_FEATURES`; #482's two-entry split
+landed in the same slice. Interleaved A/B ×3: effects redmine 0.76 → 0.50 s, mastodon 0.93 → 0.58 s.
+**#484** — the snapshot surface: a regeneration event withholds the per-symbol diff it was documented
+as unable to compare, `unresolved:` became a count at schema 2 (redmine 326,964 → 197,968 bytes), and
+`explain` expands `exhaustive → not` by naming the causes the record stopped keeping.
 
 ## Next perf levers, evidence-ranked (do not re-derive; the note has the numbers)
 
@@ -94,25 +101,20 @@ redmine check 0.31 / effects 0.47 / effects check 0.46 / unused 0.72 s; mastodon
 3. **`unused`'s residue** is now graph + plugin roots + boot, all sub-100 ms on the corpus; the
    per-file work is cached. Nothing here is worth a slice on its own.
 
-## Pitfalls this session paid for
+## Pitfalls that still bind
 
-- **A config's relative `paths:` resolve against the CONFIG file's directory.** The first sweep
-  measured an empty analysis for every non-check feature; only explicit-path `check` was real.
-  Zero-work guards (units > 0, declarations > 0) are now part of the harness.
-- **An `effects.envelopes[].match:` glob must be relative** — unit sources are cwd-relativised,
-  so an absolute glob selects nothing and the envelope judgment is vacuously green.
-- **Keep a Changelog section order is Added, Changed, …, Fixed** — a rebase-conflict resolution
-  put Fixed first and CI caught it; the conformance spec must run after the LAST changelog edit,
-  including merge resolutions.
-- **`String#scan(...).uniq!` returns nil when nothing was removed** — use `.uniq`.
-- Wall on this host moved ±0.3 s between same-arm blocks; every landed claim rests on
-  byte-identity plus a phase-probe mechanism, not a wall delta alone.
-- **After an engine-moving merge, re-prime the diagnostics slot with a `check` run** — `unused`
-  never writes it, so the next "warm check" measurement is silently a cold one (it was, twice).
-- **The gate call and the commit must never share one `&&` chain** — the piped-exit trap fired
-  again (changelog conformance red behind `| tail`, pushed, force-amended). Gate in its own call,
-  read `$?`, then commit.
-- **A PHASED A/B is not a control, and it inverted a sign.** "All of master, then all of the
-  branch" reported a 45 % redmine *regression* that did not exist; alternating the arms rep by
-  rep (separate cache dir each) showed −34 %. The phase boundary is confounded with the
-  treatment on a drifting host. `tool/perfbench/ab_probe_interleaved.sh` is the template.
+- **Read a gate's exit code in its own call.** `make docs-check | tail` returns tail's 0; the
+  changelog conformance spec is not in `docs-check`, so run the gate after the LAST edit, merge
+  resolutions included.
+- **A PHASED A/B is not a control.** "All of master, then all of the branch" reported a 45 % redmine
+  regression that did not exist; alternating arms rep by rep showed −34 %.
+  `tool/perfbench/ab_probe_interleaved.sh` is the template.
+- **A corpus that never fires cannot clear a widening.** #420's gate added zero firings because the
+  shape is absent from the corpus, not because the change was safe. Say which one it is.
+- **After an engine-moving merge, re-prime the diagnostics slot with a `check` run** — `unused` never
+  writes it, so the next "warm check" measurement is silently a cold one.
+- **A config's relative `paths:` resolve against the CONFIG file's directory**, and an
+  `effects.envelopes[].match:` glob must be RELATIVE — both make a measurement vacuously green.
+- **GitHub Actions can wedge a run before it is queued** (2026-08-26): `updated_at` never moves, the
+  cancel API answers 409 "not been queued yet" while `status` reads `queued`, and a force-push creates
+  no new run because the concurrency group is held. Check githubstatus before debugging the workflow.

@@ -39,9 +39,17 @@ served from it and no analysis happens, so the issue's own priming proposal woul
 from one blind state to another. The arm now primes *and drops the whole-run slot*, and
 `tool/warm_cache_assertion.rb` asserts `rbs.environment` was served.
 
-Also open and independent: **#430** / **#431** (design calls), **#476** (synthetic Tier B dead —
-needs a design call), **#460** (parked deliberately — v0.4.x), **#454** (decide before the #409
-flip), **#435** (only the `file:line` half of item 3, which is a decision — see its comment).
+**#431 closed** (#487): the formatter was never id-less — it has appended `[qualified.rule]` since
+v0.1.0 slice 5 for every family EXCEPT builtin, so the fix was removing an exception, not adopting a
+convention. Decision recorded on the issue with the cost measured first (Redmine: 13 distinct ids
+across the project, +14 chars on a 165-char median line). Spun off **#488** — the plugin manual
+pages' example blocks are stale in both line numbers and the id, with a different cause.
+
+Also open and independent: **#430** (design call), **#476** (synthetic Tier B is dead in production —
+`project_pre_passes` passes `environment: nil` while the env consumes the scanner's output; two-phase
+env, lazy resolution, or retire the tier, and whichever lands removes #477's gate), **#460** (parked
+— v0.4.x), **#454** (decide before the #409 flip), **#435** (the `file:line` half of item 3 only —
+a decision, see its comment), **#488**.
 
 ## What the 2026-08-25 session shipped (all merged, master verified green after integration)
 
@@ -55,15 +63,12 @@ harness preserved on branch `perfbench-harness-20260825`; memory
   self-validating stat-signed bundle. Mastodon 8.4 → ~1.1 s warm (7.8×), byte-identical.
 - **#474** — `%a(pure)` / any non-brace spelling was invisible to `ANNOTATION_HINT`, so the probe
   served the fast path while a bound existed (the #428 family through an orthography). All five RBS
-  bracket pairs route, and `EnvelopeScanner.scan` finally implements the documented pre-filter.
-- **#475** — the whole-run effects entry stores the propagated table; a warm hit re-runs neither
-  merge nor fixpoint. `internal-spec/effect-summaries.md` § Caching updated in the same commit.
-- **#477** — the synthetic scan short-circuits when only trait registries contribute and the
-  environment is nil (a provably empty index from a 3,229-file parse per run).
-- **#478** — per-run validation-stat memo; the recording side is deliberately un-memoised.
-- **#480** — the sweep's odd cold cell (`effects` +41 % over `check`) was YJIT: only check/coverage
-  armed the deadline. Proven by perturbing both directions; `CLI#dispatch` arms it for every
-  command now.
+  bracket pairs route, and `EnvelopeScanner.scan` implements the documented pre-filter at last.
+- **#475 / #477 / #478 / #480** — the effects entry stores the propagated table (no warm re-fixpoint);
+  the synthetic scan short-circuits when trait registries cannot emit (a 3,229-file parse for a
+  provably empty index); a per-run validation-stat memo, recording side deliberately un-memoised;
+  and the cold `effects` +41 % cell was YJIT — only check/coverage armed the deadline, `CLI#dispatch`
+  arms it for every command now.
 - **#484** — the snapshot surface: a regeneration event withholds the per-symbol diff it was
   documented as being unable to compare (482 unreadable lines on redmine); `unresolved:` became a
   count at **schema 2** (redmine's record 326,964 → 197,968 bytes, −39 %) with a schema-1 file
@@ -74,11 +79,6 @@ harness preserved on branch `perfbench-harness-20260825`; memory
   `$LOADED_FEATURES`; **#482**'s two-entry split landed inside the same slice (the probe reads
   exactly that payload). Interleaved A/B ×3: effects redmine 0.76 → 0.50 s, mastodon
   0.93 → 0.58 s; check −26 % / −38 %; byte-identical incl. `--full --why`, JSON, `explain`.
-
-**#476 (filed, needs a human design call):** synthetic Tier B is dead in production —
-`project_pre_passes` passes `environment: nil` and every trait entry needs the env to explode
-module methods, while `Environment.for_project` consumes the scanner's output. Two-phase env,
-lazy dispatch-time resolution, or retire the tier; whichever lands removes #477's gate.
 
 ## Next perf levers, evidence-ranked (do not re-derive; the note has the numbers)
 

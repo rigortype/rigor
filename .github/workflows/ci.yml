@@ -282,12 +282,39 @@ jobs:
       # the gem-without-rbs count diverge between warm and cold, failing
       # the warm==cold diff gate even when the analysis is correct.
       - name: Restore Rigor analysis cache
+        id: restore-cache
         if: matrix.cache == 'warm'
         uses: actions/cache@v6
         with:
           path: .rigor/cache
           key: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml') }}
           restore-keys: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-
+
+      # Issue #427 — put the warm arm in the ONE state that exercises what this gate exists to catch,
+      # instead of leaving it to whatever the restore happened to produce.
+      #
+      # The hazard is the rbs `TypeName#hash` memoisation riding into the Marshal'd `rbs.environment`
+      # blob and coming back wrong in a fresh process.  Catching it needs a cross-process restore of
+      # that blob AND a real analysis against it.  The arm failed to meet that on two counts:
+      #
+      #   1. A lockfile change leaves nothing restorable — both keys are scoped to the Gemfile.lock
+      #      hash (deliberately; see the note above), so a gem bump starts the arm empty and the diff
+      #      compares two cold runs.  Observed green against nothing on #412.
+      #   2. Even a FULLY warm arm never loads the environment: measured, with the whole-run
+      #      `analysis.run-diagnostics` slot populated, `rigor check` is served straight from it and
+      #      `rbs.environment` is consulted zero times.  No analysis, so no hazard on show.
+      #
+      # So: prime when nothing exact was restored, then drop the whole-run slot.  What remains is the
+      # RBS slices, restored across a process boundary, with a real analysis on top — which is the
+      # comparison the job's name claims.  `cache-hit` is 'true' only on an exact key match, so a
+      # restore-key (prefix) match still primes, where priming is itself warm and costs a second.
+      - name: Prime the analysis cache when the restore missed
+        if: matrix.cache == 'warm' && steps.restore-cache.outputs.cache-hit != 'true'
+        run: bundle exec exe/rigor check lib > /dev/null || true
+
+      - name: Drop the whole-run slot so the warm arm actually analyses
+        if: matrix.cache == 'warm'
+        run: rm -rf .rigor/cache/analysis.run-diagnostics
 
       # Run once with --format json so we get both structured output for
       # the warm-vs-cold diff and a human-readable summary in the CI log.
@@ -309,6 +336,15 @@ jobs:
               | sort_by(.path, .line, .column, .rule)' \
             rigor-raw.json > rigor-diagnostics-${{ matrix.cache }}.json || true
           exit $rigor_exit
+
+      # Issue #427 — the anti-vacuity assertion, the shape `make check-mutation-cache` already uses on
+      # its own warm arm.  It asserts `rbs.environment` was SERVED this run, which is the difference
+      # between "a cache was read" and "the cache that can be wrong was read".  Runs after the
+      # self-check; it re-establishes the measured run's cache state itself, because that run writes the
+      # whole-run slot back.
+      - name: Assert the warm arm was served from cache
+        if: matrix.cache == 'warm'
+        run: bundle exec ruby tool/warm_cache_assertion.rb lib
 
       # Upload even when the check found errors so the diff job always
       # has both artifacts to compare.

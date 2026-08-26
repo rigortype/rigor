@@ -20,7 +20,7 @@ argument (arity `1..2`):
 ```text
 demo.rb:6:1:  info:  `WelcomeEmailJob.perform_later` matches `#perform` (arity 1..2)
 demo.rb:9:1:  error: `WelcomeEmailJob.perform_later` expects 1..2 argument(s), got 0
-demo.rb:12:1: error: `WelcomeEmailJob.perform_later` expects 1..2 argument(s), got 3
+errors_demo.rb:14:1: error: `WelcomeEmailJob.perform_later` expects 1..2 argument(s), got 3 [plugin.activejob.wrong-arity]
 ```
 
 A `*rest` parameter yields an unbounded upper bound (`arity 0+`).

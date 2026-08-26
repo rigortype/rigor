@@ -19,8 +19,8 @@ plugins:
 ```text
 demo.rb:7:1:  info:  `UserMailer.welcome` matches mailer action (arity 1..2)
 errors_demo.rb:7:1:  error: `UserMailer.welcome` expects 1..2 argument(s), got 0
-errors_demo.rb:15:1: error: `UserMailer.does_not_exist` is not a defined mailer action (known actions: digest, reset_password, welcome)
-app/mailers/user_mailer.rb:14:7: warning: `UserMailer#digest` has no view template under `app/views/user_mailer/`
+errors_demo.rb:18:1: error: `UserMailer.does_not_exist` is not a defined mailer action (known actions: digest, reset_password, welcome) [plugin.actionmailer.unknown-action]
+app/mailers/user_mailer.rb:26:7: warning: `UserMailer#digest` has no view template under `app/views/user_mailer/` [plugin.actionmailer.missing-view]
 ```
 
 1. **Action existence** — `Mailer.unknown_action(...)` →

@@ -18,11 +18,11 @@ plugins:
 ## What it checks
 
 ```text
-demo.rb:20:1: info: `User.find` returns User (table: `users`) [plugin.activerecord.model-call]
-demo.rb:23:1: info: `User.where` (:admin) on table `users` [plugin.activerecord.model-call]
+demo.rb:18:1: info: `User.find` returns User (table: `users`) [plugin.activerecord.model-call]
+demo.rb:21:1: info: `User.where` (:admin) on table `users` [plugin.activerecord.model-call]
 
-errors_demo.rb:13:1: error: `User.where(emial: ...)` references unknown column `emial` on table `users` (did you mean `:email`?) [plugin.activerecord.unknown-column]
-errors_demo.rb:25:1: error: `User.find` expects at least 1 argument, got 0 [plugin.activerecord.wrong-arity]
+errors_demo.rb:12:1: error: `User.where(emial: ...)` references unknown column `emial` on table `users` (did you mean `:email`?) [plugin.activerecord.unknown-column]
+errors_demo.rb:24:1: error: `User.find` expects at least 1 argument, got 0 [plugin.activerecord.wrong-arity]
 ```
 
 | Diagnostic | Severity | Rule |

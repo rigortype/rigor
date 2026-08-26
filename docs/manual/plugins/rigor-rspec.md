@@ -29,9 +29,13 @@ RSpec.describe "User" do
 end
 ```
 
+The snippet above is condensed for reading; the output below is what
+Rigor actually prints for the plugin's own demo
+(`plugins/rigor-rspec/demo/`), so the line numbers are that file's:
+
 ```text
-spec/user_spec.rb:5:3: warning: duplicate `let(:user)` in this scope (first declared at line 4); the last declaration wins at runtime
-spec/user_spec.rb:7:3: error:   `let(:tags)` references its own name `tags` — this will infinite-loop at runtime
+spec/errors_spec.rb:23:3: warning: duplicate `let(:user)` in this scope (first declared at line 22); the last declaration wins at runtime [plugin.rspec.duplicate-let]
+spec/errors_spec.rb:27:3: error: `let(:tags)` references its own name `tags` — this will infinite-loop at runtime [plugin.rspec.self-reference]
 ```
 
 1. **Duplicate `let` / `subject` declarations** within the same

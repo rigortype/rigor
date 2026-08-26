@@ -19,11 +19,11 @@ Against a locale catalogue, every statically-resolvable call site
 is validated:
 
 ```text
-demo.rb:14:1: info:    `t('users.welcome')` resolves in en, ja
-errors_demo.rb:12:1: error:   missing translation key `users.welcom` in any locale (did you mean `users.welcome`?)
-errors_demo.rb:16:1: error:   `t('users.welcome')` expects interpolation `name`, got (none)
-errors_demo.rb:20:1: warning: `t('users.welcome')` does not use interpolation `extra` (known placeholders: `name`)
-errors_demo.rb:25:1: warning: `t('errors.messages.blank')` is missing from locale(s) ja
+demo.rb:12:1: info: `t('users.welcome')` resolves in en, ja [plugin.rails-i18n.translation-call]
+errors_demo.rb:10:1: error: missing translation key `users.welcom` in any locale (did you mean `users.welcome`?) [plugin.rails-i18n.unknown-key]
+errors_demo.rb:14:1: error: `t('users.welcome')` expects interpolation `name`, got (none) [plugin.rails-i18n.wrong-interpolation]
+errors_demo.rb:18:1: warning: `t('users.welcome')` does not use interpolation `extra` (known placeholders: `name`) [plugin.rails-i18n.extra-interpolation]
+errors_demo.rb:23:1: warning: `t('errors.messages.blank')` is missing from locale(s) ja [plugin.rails-i18n.missing-locale]
 ```
 
 1. **Key existence** — a key absent from every locale is flagged,

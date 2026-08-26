@@ -35,6 +35,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[docs]** The plugin manual pages now show what the plugins actually print. Every example block had drifted — the `[plugin.<id>.<rule>]` identifier was missing from all of them, line numbers pointed at where the demo code used to be, and one page cited the wrong file entirely ([#488](https://github.com/rigortype/rigor/issues/488)).
+
 - **[cli]** Every diagnostic's text output now ends with its rule identifier in brackets — `[call.undefined-method]` — so the ID you need for `# rigor:disable`, `disable:` and `severity_profile:` is the one you are already looking at, and a run can be grepped for a rule. Previously only plugin and RBS-sourced diagnostics carried it, which was exactly the wrong half: built-in rules are the ones the manual tells you to configure by ID ([#431](https://github.com/rigortype/rigor/issues/431)).
 
 - **[rbs]** `date.to_time(:utc)` and eleven other ordinary ActiveSupport calls — `String#dasherize`, `Object#in?`, `Time#all_day`, `ERB::Util.html_escape_once` among them — no longer draw a false diagnostic on a project that locks `activesupport` without opting into the `rigor-activesupport-core-ext` plugin ([#449](https://github.com/rigortype/rigor/issues/449)).

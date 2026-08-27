@@ -546,6 +546,41 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  # #493 — the contract the fix protects, asserted across the surface rather than only where the bug
+  # was. `--format json` means stdout is a document; a command that also has something to say must say
+  # it on stderr. A sweep found `check --cache-stats` to be the only violator, and this is what keeps
+  # that true as commands gain side outputs.
+  describe "machine-readable stdout is a document, whatever else the command reports" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def json_stdout(*argv)
+      Dir.chdir(tmpdir) do
+        File.write("a.rb", "class Demo\n  def run = 1\nend\n")
+        _status, out, = run_cli(*argv, "--format", "json")
+        out
+      end
+    end
+
+    # `check --cache-stats` is the regression case; the rest are the neighbours a future side output
+    # would most likely land in, so the sweep is pinned rather than remembered.
+    {
+      "check --cache-stats" => %w[check --cache-stats a.rb],
+      "check --clear-cache" => %w[check --clear-cache a.rb],
+      "check --explain" => %w[check --explain a.rb],
+      "triage" => %w[triage a.rb],
+      "type-scan" => %w[type-scan a.rb]
+    }.each do |label, argv|
+      it "keeps stdout parseable for `#{label}`" do
+        out = json_stdout(*argv)
+
+        expect(out).not_to be_empty
+        expect { JSON.parse(out) }.not_to raise_error
+      end
+    end
+  end
+
   describe "check --cache-stats / --clear-cache" do
     let(:tmpdir) { Dir.mktmpdir }
 
@@ -556,6 +591,33 @@ RSpec.describe Rigor::CLI do
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, contents)
       path
+    end
+
+    # #493 — `--format` other than text is a machine contract, and a human-readable block appended to it
+    # produces a document the consumer rejects. All seven non-text formats were corrupted; JSON, SARIF
+    # and GitLab Code Quality failed to parse outright, and the XML pair grew prose after the closing
+    # tag. The stats are not dropped — the user asked for them — they move to stderr, where this command
+    # already puts everything it says about a run rather than about the code.
+    %w[json sarif gitlab].each do |format|
+      it "keeps stdout a parseable document under --format #{format} --cache-stats" do
+        write_check_fixture("a.rb", "1\n")
+        Dir.chdir(tmpdir) do
+          _status, out, err = run_cli("check", "--cache-stats", "--format", format, "a.rb")
+
+          expect { JSON.parse(out) }.not_to raise_error
+          # Non-vacuity: the block the user asked for really was emitted, just not onto the contract.
+          expect(err).to include("Cache (root:")
+        end
+      end
+    end
+
+    it "still prints the stats on stdout under the text format" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        _status, out, _err = run_cli("check", "--cache-stats", "a.rb")
+
+        expect(out).to include("Cache (root:")
+      end
     end
 
     it "prints '(empty)' under --cache-stats when no cache directory exists" do

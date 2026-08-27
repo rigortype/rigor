@@ -35,6 +35,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** `rigor check --cache-stats` no longer corrupts machine-readable output. The cache block was appended to stdout after the document, so `--format json`, `sarif` and `gitlab` failed to parse and the XML formats grew prose after the closing tag — a SARIF upload to code scanning would reject the artifact while the run itself looked fine. The block now goes to stderr for every format but `text`, as do `--clear-cache`'s and `--verify-incremental`'s notes ([#493](https://github.com/rigortype/rigor/issues/493)).
+
 - **[docs]** Relative links from the shipped manual and handbook into documents the gem does not package — ADRs, the type specification, the internal spec, `examples/`, plugin READMEs — were dead for everyone who installed Rigor rather than cloning it. All 284 of them now name their canonical URL, and `rigor help` no longer cites ADRs a reader cannot open ([#430](https://github.com/rigortype/rigor/issues/430)).
 
 - **[cli]** `rigor unused` no longer reports a class as having no production caller when a data file also names it — a job listed in `config/recurring.yml` and referenced from its spec was landing under "live test, dead production path" while it ran every three minutes. A data-file mention now also demotes to *cannot decide*, and it demotes only the name it matched rather than everything beneath it: the word "Administrasie" in a locale file was demoting 18 unrelated `Admin::*` rows ([#370](https://github.com/rigortype/rigor/issues/370)).

@@ -47,7 +47,7 @@ module Rigor
         configuration = apply_bleeding_edge_override(configuration, options)
         config_warnings = warn_unresolved_config(configuration)
         cache_root = configuration.cache_path
-        handle_clear_cache(cache_root) if options.fetch(:clear_cache)
+        handle_clear_cache(cache_root, options.fetch(:format)) if options.fetch(:clear_cache)
 
         # ADR-87 WD4 — try to serve the whole run from the ADR-45 cache before booting the engine. A hit boots
         # only CLI + config + cache + digest code (no `rigor/inference`), skipping the plugin prepass + env
@@ -73,7 +73,7 @@ module Rigor
         write_run_stats(result.stats) if result.stats
         write_trace_appendices
         runner.cache_store&.evict!
-        write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
+        write_cache_stats(cache_root, runner.cache_store, options.fetch(:format)) if options.fetch(:cache_stats)
 
         exit_code = result.success? ? 0 : 1
         exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
@@ -192,7 +192,8 @@ module Rigor
         incremental = normalize_diagnostics(session.reanalyze_subset(subset))
         full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
 
-        report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size)
+        report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
+                                                     format: options.fetch(:format))
       end
 
       # ADR-46 — cross-process incremental analysis (`--incremental`). Derives the global fingerprint cheaply (no RBS
@@ -227,7 +228,8 @@ module Rigor
         @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
                   "(#{session.analyzed_files.size} files)")
         emit_incremental_fact_surface_notes(session)
-        write_incremental_cache_stats(session, cache_root, store) if options.fetch(:cache_stats)
+        write_incremental_cache_stats(session, cache_root, store, options.fetch(:format)) if
+          options.fetch(:cache_stats)
 
         result = apply_baseline_filter(Analysis::Result.new(diagnostics: diagnostics, stats: nil), configuration,
                                        options)
@@ -283,8 +285,8 @@ module Rigor
       # does) plus the fact-surface status line, so an operator can see whether a full run was fact-surface
       # driven. The plain `check` cache-stats path is bypassed by the incremental short-circuit, so it is
       # emitted here.
-      def write_incremental_cache_stats(session, cache_root, store)
-        write_cache_stats(cache_root, store)
+      def write_incremental_cache_stats(session, cache_root, store, format)
+        write_cache_stats(cache_root, store, format)
         status =
           if !session.opaque_plugin_ids.empty?
             "opaque (#{session.opaque_plugin_ids.sort.join(', ')})"
@@ -293,7 +295,7 @@ module Rigor
           else
             "unchanged"
           end
-        @out.puts("  plugin fact surface: #{status}")
+        side_output(format).puts("  plugin fact surface: #{status}")
       end
 
       def verify_full_diagnostics(configuration, paths)
@@ -307,11 +309,14 @@ module Rigor
         end
       end
 
-      def report_verify_incremental(incremental, full, subset_size:, total:)
+      # The OK line follows the same rule as the other side outputs (#493) — stdout under `text`, stderr
+      # under a machine format. The FAILED branch below has always gone to stderr: it is a failure
+      # report, and a run that produced one has no valid document to protect anyway.
+      def report_verify_incremental(incremental, full, subset_size:, total:, format: "text")
         if incremental == full
-          @out.puts("rigor: --verify-incremental OK — incremental " \
-                    "(#{subset_size}/#{total} files re-analyzed, rest from cache) " \
-                    "matches full (#{full.size} diagnostics)")
+          side_output(format).puts("rigor: --verify-incremental OK — incremental " \
+                                   "(#{subset_size}/#{total} files re-analyzed, rest from cache) " \
+                                   "matches full (#{full.size} diagnostics)")
           return 0
         end
 
@@ -596,12 +601,13 @@ module Rigor
         }]
       end
 
-      def handle_clear_cache(cache_root)
+      def handle_clear_cache(cache_root, format)
+        out = side_output(format)
         if File.directory?(cache_root)
           FileUtils.rm_rf(cache_root)
-          @out.puts("Cleared cache: #{cache_root}")
+          out.puts("Cleared cache: #{cache_root}")
         else
-          @out.puts("Cache already empty: #{cache_root}")
+          out.puts("Cache already empty: #{cache_root}")
         end
       end
 
@@ -769,42 +775,43 @@ module Rigor
         Kernel.format("%.1f MB", bytes / 1_048_576.0)
       end
 
-      def write_cache_stats(cache_root, runtime_store)
+      def write_cache_stats(cache_root, runtime_store, format)
         inv = Cache::Store.disk_inventory(root: cache_root)
+        out = side_output(format)
 
-        @out.puts("")
-        @out.puts("Cache (root: #{inv.fetch(:root)})")
+        out.puts("")
+        out.puts("Cache (root: #{inv.fetch(:root)})")
         schema = inv.fetch(:schema_version)
-        @out.puts("  schema_version: #{schema.nil? ? 'absent' : schema}")
-        write_disk_inventory(inv)
-        write_runtime_stats(runtime_store) if runtime_store
+        out.puts("  schema_version: #{schema.nil? ? 'absent' : schema}")
+        write_disk_inventory(inv, out)
+        write_runtime_stats(runtime_store, out) if runtime_store
       end
 
-      def write_disk_inventory(inv)
+      def write_disk_inventory(inv, out)
         if inv.fetch(:total_entries).zero?
-          @out.puts("  (empty)")
+          out.puts("  (empty)")
           return
         end
 
-        @out.puts("  #{inv.fetch(:total_entries)} entries, #{format_bytes(inv.fetch(:total_bytes))}")
+        out.puts("  #{inv.fetch(:total_entries)} entries, #{format_bytes(inv.fetch(:total_bytes))}")
         inv.fetch(:producers).each do |producer|
           bytes = format_bytes(producer.fetch(:bytes))
-          @out.puts("    #{producer.fetch(:id)}: #{producer.fetch(:entries)} entries, #{bytes}")
+          out.puts("    #{producer.fetch(:id)}: #{producer.fetch(:entries)} entries, #{bytes}")
         end
       end
 
-      def write_runtime_stats(store)
+      def write_runtime_stats(store, out)
         stats = store.stats
         hits = stats.fetch(:hits)
         misses = stats.fetch(:misses)
         writes = stats.fetch(:writes)
-        @out.puts("  this run: #{hits} #{plural(hits, 'hit')}, " \
-                  "#{misses} #{plural(misses, 'miss', 'misses')}, " \
-                  "#{writes} #{plural(writes, 'write')}")
+        out.puts("  this run: #{hits} #{plural(hits, 'hit')}, " \
+                 "#{misses} #{plural(misses, 'miss', 'misses')}, " \
+                 "#{writes} #{plural(writes, 'write')}")
         stats.fetch(:by_producer).each do |id, counts|
-          @out.puts("    #{id}: #{counts.fetch(:hits)} #{plural(counts.fetch(:hits), 'hit')}, " \
-                    "#{counts.fetch(:misses)} #{plural(counts.fetch(:misses), 'miss', 'misses')}, " \
-                    "#{counts.fetch(:writes)} #{plural(counts.fetch(:writes), 'write')}")
+          out.puts("    #{id}: #{counts.fetch(:hits)} #{plural(counts.fetch(:hits), 'hit')}, " \
+                   "#{counts.fetch(:misses)} #{plural(counts.fetch(:misses), 'miss', 'misses')}, " \
+                   "#{counts.fetch(:writes)} #{plural(counts.fetch(:writes), 'write')}")
         end
       end
 
@@ -817,6 +824,21 @@ module Rigor
         return format("%.1f KiB", bytes / 1024.0) if bytes < 1024 * 1024
 
         format("%.1f MiB", bytes / (1024.0 * 1024.0))
+      end
+
+      # Where a human-readable side output goes (#493).
+      #
+      # `--format text` is prose already, so an extra block after the diagnostics is just more prose. Every
+      # other format is a machine contract — a SARIF document a code-scanning upload parses, a Checkstyle
+      # or JUnit XML tree, a GitLab Code Quality array — and appending `Cache (root: …)` to it produces a
+      # document the consumer rejects. Measured: all seven non-text formats were corrupted by
+      # `--cache-stats`, and JSON / SARIF / GitLab failed to parse at all.
+      #
+      # The information is not dropped, because it is what the user asked for by passing the flag; it moves
+      # to stderr, which is where this command already routes everything it says about a run rather than
+      # about the code.
+      def side_output(format)
+        format == "text" ? @out : @err
       end
 
       def write_result(result, format, coverage: nil, config_warnings: [])

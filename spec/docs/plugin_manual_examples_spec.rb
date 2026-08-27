@@ -21,8 +21,14 @@ require "spec_helper"
 # What they deliberately do NOT catch: a line number that drifted but still exists in the file. That half
 # needs execution, and #488 records the measurement behind leaving it out.
 RSpec.describe "plugin manual example blocks" do
+  # The separators are `\s+`, not a single literal space, because a page may COLUMN-ALIGN its block.
+  # Requiring exactly one space did not make an aligned line fail a check — it made the line invisible to
+  # every check, `examples_in` never yielding it. That is the failure mode this guard is least able to
+  # report, and it was live: of the 18 example diagnostics on the five pages, the 4 that two pages had
+  # aligned were exactly the 4 still carrying the pre-#431 shape, so the suite reported green on the
+  # drift it exists to catch. A tolerant separator is what lets the assertions see the whole block.
   def diagnostic_line
-    %r{^(?<path>[A-Za-z0-9_/.-]+\.rb):(?<line>\d+):\d+: (?:error|warning|info): (?<rest>.*)$}
+    %r{^(?<path>[A-Za-z0-9_/.-]+\.rb):(?<line>\d+):\d+:\s+(?:error|warning|info):\s+(?<rest>.*)$}
   end
 
   def pages
@@ -43,7 +49,7 @@ RSpec.describe "plugin manual example blocks" do
   it "shows at least one example block, so these checks are not vacuous" do
     total = pages.sum { |page| examples_in(page).length }
 
-    expect(total).to be >= 14
+    expect(total).to be >= 18
   end
 
   it "carries the rule identifier on every example diagnostic" do

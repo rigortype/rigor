@@ -558,6 +558,33 @@ RSpec.describe Rigor::CLI do
       path
     end
 
+    # #493 — `--format` other than text is a machine contract, and a human-readable block appended to it
+    # produces a document the consumer rejects. All seven non-text formats were corrupted; JSON, SARIF
+    # and GitLab Code Quality failed to parse outright, and the XML pair grew prose after the closing
+    # tag. The stats are not dropped — the user asked for them — they move to stderr, where this command
+    # already puts everything it says about a run rather than about the code.
+    %w[json sarif gitlab].each do |format|
+      it "keeps stdout a parseable document under --format #{format} --cache-stats" do
+        write_check_fixture("a.rb", "1\n")
+        Dir.chdir(tmpdir) do
+          _status, out, err = run_cli("check", "--cache-stats", "--format", format, "a.rb")
+
+          expect { JSON.parse(out) }.not_to raise_error
+          # Non-vacuity: the block the user asked for really was emitted, just not onto the contract.
+          expect(err).to include("Cache (root:")
+        end
+      end
+    end
+
+    it "still prints the stats on stdout under the text format" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        _status, out, _err = run_cli("check", "--cache-stats", "a.rb")
+
+        expect(out).to include("Cache (root:")
+      end
+    end
+
     it "prints '(empty)' under --cache-stats when no cache directory exists" do
       write_check_fixture("a.rb", "1\n")
       Dir.chdir(tmpdir) do

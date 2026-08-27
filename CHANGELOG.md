@@ -51,6 +51,14 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[cli]** Every dispatched command now arms the deferred YJIT deadline, not just `check` and `coverage` — a cold `rigor effects` over Mastodon previously ran its whole 21 s interpreted where the identical analysis under `check` took 14.8 s; both now finish together, and commands that finish inside the deadline still never pay JIT compile cost.
 
+- **[docs]** The committed-snapshot examples in the CLI reference and the effect-labels chapter showed the schema-1 file — `schema: 1`, and `unresolved:` as a list of causes — which `rigor effects update` stopped writing when the field became a count; both now show the file the command actually produces, and the effect-labels example no longer contradicts the paragraph below it explaining that `unresolved:` is a count.
+
+- **[docs]** The `rigor-actionmailer` and `rigor-activejob` manual pages showed four example diagnostics without the `[plugin.<id>.<rule>]` identifier every plugin diagnostic prints, two of them naming a line the call had moved from and one naming the wrong file entirely; both blocks are regenerated from the plugins' own `demo/` output. The [#488](https://github.com/rigortype/rigor/issues/488) drift guard could not see these four lines — it required a single space where the two pages column-aligned their blocks — so it reported green on exactly the drift it exists to catch.
+
+- **[docs]** The `RIGOR_DISABLE_YJIT` entry no longer describes deferred YJIT as something that happens during a `check` or `coverage` run: every dispatched command arms the deadline, so the opt-out applies to all of them.
+
+- **[docs]** `rigor check --cache-stats` now documents the stream it writes to — stdout under `--format text`, stderr under every other format — and `RIGOR_LSP_POOL_MIN_BATCH`, the batch size at which `rigor lsp` dispatches to its worker pool, is documented alongside the other operational environment variables.
+
 ## [0.3.5] - 2026-08-25
 
 v0.3.5 is about making the effect system usable rather than merely present. The `rigor effects` report went from 31,191 lines on a mid-size Rails application to 2,733 with nothing lost, gained `--label`, `--pure` and `--limit` so it can be asked a question, and can now print the label vocabulary itself. A larger group of fixes is about what the report *sees*: an optional receiver, a module a worker includes, a base class from a gem, a `super`, and a class-level annotation were each contributing nothing, several of them while the method still read as exhaustive. The manual gained a [chapter on effect labels](docs/manual/19-effect-labels.md), and [ADR-103](docs/adr/103-effect-labels.md) § WD17 records which labels a declared bound can actually fail on and where to enforce the rest.

@@ -137,7 +137,7 @@ CI detection that `auto` relies on.
 | --- | --- |
 | `rigor check --no-cache` | Run without reading or writing the persistent cache. |
 | `rigor check --clear-cache` | Delete the cache directory, then run. |
-| `rigor check --cache-stats` | Print the on-disk cache inventory when the run finishes. |
+| `rigor check --cache-stats` | Print the on-disk cache inventory when the run finishes (on stderr under every `--format` but `text`, so the document on stdout stays parseable). |
 | `rigor check --incremental` | Re-analyse only what changed; serve the rest from the incremental snapshot (see below). |
 
 There is no config key to disable caching permanently — the

@@ -18,8 +18,8 @@ Given a job whose `#perform` takes one required and one optional
 argument (arity `1..2`):
 
 ```text
-demo.rb:6:1:  info:  `WelcomeEmailJob.perform_later` matches `#perform` (arity 1..2)
-demo.rb:9:1:  error: `WelcomeEmailJob.perform_later` expects 1..2 argument(s), got 0
+demo.rb:8:1: info: `WelcomeEmailJob.perform_later` matches `#perform` (arity 1..2) [plugin.activejob.job-call]
+errors_demo.rb:10:1: error: `WelcomeEmailJob.perform_later` expects 1..2 argument(s), got 0 [plugin.activejob.wrong-arity]
 errors_demo.rb:14:1: error: `WelcomeEmailJob.perform_later` expects 1..2 argument(s), got 3 [plugin.activejob.wrong-arity]
 ```
 

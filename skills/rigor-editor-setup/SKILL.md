@@ -24,7 +24,7 @@ rigor docs editor-integration
 ```
 
 (Web fallback, only before Rigor is installed:
-**[Rigor LSP — Editor Integration](https://github.com/rigortype/rigor/blob/master/docs/manual/09-editor-integration.md)**.)
+**[Rigor LSP — Editor Integration](../../docs/manual/09-editor-integration.md)**.)
 This skill is the *workflow* around it (identify the editor → apply the
 manual's snippet → verify), so it does not duplicate (and cannot
 stale-out) the config details.
@@ -62,7 +62,7 @@ Every editor snippet simply launches **`rigor lsp`** (stdio) and needs
 **`rigor` on the editor's `PATH`** — the same executable `rigor check`
 uses. For GUI editors that do not inherit your shell, the `mise` shim
 path is the most reliable channel (see `rigor docs install`, or
-[Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/install.md)
+[Installing Rigor](../../docs/install.md)
 on the web). Do **not** add `rigortype` to the project's `Gemfile` — it
 is a tool, not a library.
 

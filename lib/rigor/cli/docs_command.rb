@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "command"
+require_relative "doc_links"
 
 module Rigor
   class CLI
@@ -118,7 +119,7 @@ module Rigor
         # a UTF-8 header would set the output buffer to UTF-8 and clash with the body.
         @out.puts("<!-- rigor docs #{doc.fetch(:name)} (rigortype #{Rigor::VERSION}, offline) -->")
         @out.puts
-        @out.write(File.read(doc.fetch(:path)))
+        @out.write(DocLinks.rewrite(File.read(doc.fetch(:path)), from: doc.fetch(:path)))
         0
       end
 
@@ -138,6 +139,10 @@ module Rigor
       # @return [Hash, Integer] the doc entry, or an error exit status
       #   after the error has been written to `@err`.
       def resolve_doc(query)
+        # A key printed by a rendered page may carry the section it pointed at; resolve the page and say
+        # where to look inside it, rather than refusing a key this command handed out.
+        query, anchor = DocLinks.split_anchor(query)
+        @err.puts("rigor: (section `#{anchor}`)") if anchor && !anchor.empty?
         docs = discover_docs
 
         exact = docs.find { |doc| doc.fetch(:exact_aliases).include?(query) }
@@ -146,9 +151,34 @@ module Rigor
         short = docs.select { |doc| doc.fetch(:short_name) == query }
         case short.size
         when 1 then short.first
-        when 0 then name_error(query)
+        when 0 then unpackaged_doc(query) || name_error(query)
         else ambiguous_error(query, short)
         end
+      end
+
+      # A key the rendered pages hand out for a document the gem does not carry (ADR-74 ships the manual and
+      # handbook; the ADR / specification / notes corpus and the repository trees stay out). The key is
+      # still answerable — it names a real path — so this routes rather than failing: a reader who followed
+      # `[ADR-103][adr/103-effect-labels]` out of `rigor docs` gets told where that document is, which is the
+      # whole point of handing them the key instead of a dead relative path or a `master` URL.
+      # Categories this command serves itself. A name that fails to resolve inside one of them is a typo,
+      # not an unpackaged document, and must reach the did-you-mean listing rather than be routed to a
+      # repository path that does not exist — `rigor docs list` and `rigor docs pathh` are the cases
+      # that found this.
+      PACKAGED_CATEGORIES = %w[manual handbook].freeze
+      private_constant :PACKAGED_CATEGORIES
+
+      def unpackaged_doc(query)
+        return nil unless query.include?("/")
+        return nil if PACKAGED_CATEGORIES.include?(query.split("/").first)
+
+        path = DocLinks.repository_path(query)
+        return nil if path.nil?
+
+        @err.puts("rigor: `#{query}` is not packaged with this gem — the manual and handbook are, the " \
+                  "design records are not.")
+        @err.puts("rigor: it is `#{path}` in the Rigor repository (#{DocLinks::REPOSITORY}).")
+        1
       end
 
       # Every bundled doc, each carrying the aliases `rigor docs <name>` accepts and the category used by `--list`.

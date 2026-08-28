@@ -11,7 +11,7 @@ prove will fail; so does Rigor. That instinct (never frighten
 working code) is shared DNA, not coincidence.
 
 There is even a direct lineage: Rigor's clause-reachability rule
-([ADR-47](https://github.com/rigortype/rigor/blob/master/docs/adr/47-narrowing-driven-clause-reachability.md)) was
+([ADR-47](../adr/47-narrowing-driven-clause-reachability.md)) was
 modelled on Elixir's own work on detecting impossible `case`
 clauses. You are coming from one of Rigor's design influences.
 
@@ -90,7 +90,7 @@ And the lineage runs the other way too: Rigor's
 `flow.unreachable-clause` rule — which flags a `case`/`in` clause
 that can never match because earlier clauses already covered its
 type — was modelled directly on Elixir's clause-reachability
-work ([ADR-47](https://github.com/rigortype/rigor/blob/master/docs/adr/47-narrowing-driven-clause-reachability.md)).
+work ([ADR-47](../adr/47-narrowing-driven-clause-reachability.md)).
 It is the feature you may know from Elixir warning you about an
 impossible `case` clause, brought to Ruby.
 
@@ -100,7 +100,7 @@ Elixir's type system is *set-theoretic*: types are sets of
 values, and you compose them with union, intersection, and
 negation, with a `dynamic()` type marking the gradual boundary.
 Rigor is built on the same union-of-values intuition (the
-[value lattice](https://github.com/rigortype/rigor/blob/master/docs/type-specification/value-lattice.md)) and has
+[value lattice](../type-specification/value-lattice.md)) and has
 the operator vocabulary to match the common cases:
 
 | Elixir | Rigor |

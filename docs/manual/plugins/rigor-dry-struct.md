@@ -55,6 +55,6 @@ attribute-reader calls type-check.
 The declarative `HeredocTemplate` manifest, the
 `returns_from_arg` precision path (ADR-18), and the
 synthetic-method substrate it rides on are documented in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-dry-struct/README.md). To
-write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and
+[plugin's README](../../../plugins/rigor-dry-struct/README.md). To
+write a plugin, see [`examples/`](../../../examples/README.md) and
 the [`rigor-plugin-author`](../08-skills.md) skill.

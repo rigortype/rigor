@@ -296,7 +296,7 @@ draws the distinction in full.
   Pyright's "type alias narrowing" and mypy's overload stacks
   cover some cases; Rigor's plugin contract gives you full
   Ruby code at the dispatch point. The
-  [`rigor-lisp-eval`](https://github.com/rigortype/rigor/tree/master/examples/rigor-lisp-eval) example
+  [`rigor-lisp-eval`](../../examples/rigor-lisp-eval) example
   is the canonical demo — `Lisp.eval([:+, 1, 2])` returns
   `Integer`, `Lisp.eval([:<, 1, 2])` returns `bool`.
 

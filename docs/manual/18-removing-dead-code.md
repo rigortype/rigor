@@ -331,5 +331,5 @@ Running it as a **reporting** job is fine, and is the intended way to
 notice the drift described above: run it on a schedule, publish the
 JSON, and let a person read the trend.
 
-[adr-102]: https://github.com/rigortype/rigor/blob/master/docs/adr/102-unused-code-reachability-report.md
+[adr-102]: ../adr/102-unused-code-reachability-report.md
 [issue-363]: https://github.com/rigortype/rigor/issues/363

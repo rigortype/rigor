@@ -1,7 +1,7 @@
 # Rigor
 
 [![Gem Version](https://badge.fury.io/rb/rigortype.svg?icon=si%3Arubygems)](https://badge.fury.io/rb/rigortype)
-[![GitHub License](https://img.shields.io/github/license/rigortype/rigor)](https://github.com/rigortype/rigor/blob/master/LICENSE)
+[![GitHub License](https://img.shields.io/github/license/rigortype/rigor)](LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rigortype/rigor)
 
 **Type-aware bug finding for Ruby — no annotations required, and a
@@ -183,11 +183,11 @@ plugins:
   - rigor-rspec
 ```
 
-The full catalogue is in [`plugins/README.md`](https://github.com/rigortype/rigor/blob/master/plugins/README.md); the
+The full catalogue is in [`plugins/README.md`](plugins/README.md); the
 `rigor-project-init` Skill picks the right set for you. To teach Rigor
-your own DSL, the [`rigor-plugin-author`](https://github.com/rigortype/rigor/tree/master/skills/rigor-plugin-author)
+your own DSL, the [`rigor-plugin-author`](skills/rigor-plugin-author)
 Skill authors a plugin step-by-step, and
-[`rigor-baseline-reduce`](https://github.com/rigortype/rigor/tree/master/skills/rigor-baseline-reduce) drives the
+[`rigor-baseline-reduce`](skills/rigor-baseline-reduce) drives the
 baseline down once you are running.
 
 ## Going deeper
@@ -234,18 +234,18 @@ rigor docs --list                 # list every bundled page
 Current release: **`v0.3.5`** (2026-08-25) — on the
 `0.3.x` line, continuing the evaluation era opened by `v0.2.0`, the first
 publicly-announced (general / evaluation) release. The line publishes
-an enumerated [compatibility surface](https://github.com/rigortype/rigor/blob/master/docs/compatibility.md) as a
+an enumerated [compatibility surface](docs/compatibility.md) as a
 minor-non-break trial, rehearsing the contract that hard-freezes at
 `v1.0.0`. Rigor analyses real Ruby today: it has been hardened against
 Mastodon, Redmine, and GitLab FOSS, and the deliberately conservative
 rule catalogue grows only as fast as the zero-false-positive bar
-allows. Release history: [`CHANGELOG.md`](https://github.com/rigortype/rigor/blob/master/CHANGELOG.md) ·
+allows. Release history: [`CHANGELOG.md`](CHANGELOG.md) ·
 forward-looking commitments:
 [Roadmap](https://github.com/rigortype/rigor/milestones).
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](https://github.com/rigortype/rigor/blob/master/CONTRIBUTING.md) for the `git clone` →
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the `git clone` →
 green-tests path and a map of the spec / ADR / skill documentation
 contributors should read.
 

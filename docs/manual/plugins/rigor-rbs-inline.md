@@ -7,7 +7,7 @@ synthesised RBS into the analysis environment — so a `# @rbs`
 annotation Rigor would otherwise ignore becomes an enforced contract
 that fires the same `argument-type-mismatch` diagnostics as a
 hand-written `.rbs` file. The design is recorded in
-[ADR-32](https://github.com/rigortype/rigor/blob/master/docs/adr/32-rbs-inline-comment-ingestion.md).
+[ADR-32](../../adr/32-rbs-inline-comment-ingestion.md).
 
 It ships bundled in `rigortype`. Activate it under `plugins:`:
 
@@ -52,7 +52,7 @@ plugin id/version + config), so an unchanged second run skips the parse.
 There are two implementations of inline RBS: the
 [`rbs-inline` gem](https://github.com/soutaro/rbs-inline), which this plugin
 runs, and the `RBS::InlineParser` built into `rbs` 4.x. **Rigor reads the
-gem's dialect** ([ADR-32](https://github.com/rigortype/rigor/blob/master/docs/adr/32-rbs-inline-comment-ingestion.md) WD11).
+gem's dialect** ([ADR-32](../../adr/32-rbs-inline-comment-ingestion.md) WD11).
 They overlap almost entirely — `#:`, `@rbs` method types, `def self.`,
 instance-variable annotations, `@rbs skip` all behave identically — but they
 are not the same grammar, and one difference bites in practice:
@@ -81,7 +81,7 @@ plugins:
   carrying `# rbs_inline: enabled` are processed. Set `false` to treat
   every file as if it carried the magic comment — useful only when you
   own the whole analysis scope (a single-file CI run or the hosted
-  [browser playground](https://github.com/rigortype/rigor/blob/master/docs/adr/29-browser-playground.md), which sets
+  [browser playground](../../adr/29-browser-playground.md), which sets
   it so pasted snippets analyse without the magic line).
 
 ## Limitations
@@ -100,6 +100,6 @@ plugins:
 
 The synthesizer, the `source_rbs_synthesizer:` manifest hook, and the
 caching wiring are in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-rbs-inline/README.md). To write
-a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
+[plugin's README](../../../plugins/rigor-rbs-inline/README.md). To write
+a plugin, see [`examples/`](../../../examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

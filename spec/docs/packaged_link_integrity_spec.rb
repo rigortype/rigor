@@ -1,21 +1,24 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "rigor/cli/doc_links"
 
-# Issue #430 — link integrity against the PACKAGED file list, not the repository tree.
+# Issue #430 — every link in the shipped documentation must reach the reader who has only the gem.
 #
-# `spec/docs/link_integrity_spec.rb` checks that every relative link resolves in the checkout, where
-# every target exists. An installed gem is a different file set: `rigortype.gemspec` ships
-# `docs/manual/**` and `docs/handbook/**` and not `docs/adr/`, `docs/type-specification/`,
-# `docs/internal-spec/`, `examples/`, `plugins/*/README.md` or `docs/notes/`. A relative link from a
-# shipped page into any of those is dead for every reader who installed Rigor rather than cloning it —
-# which is all of them — and invisible in-repo. There were 284 such links across 66 shipped documents.
+# `spec/docs/link_integrity_spec.rb` checks that relative links resolve in the CHECKOUT, where every
+# target exists. An installed gem is a smaller tree: `rigortype.gemspec` ships `docs/manual/**` and
+# `docs/handbook/**` and not `docs/adr/`, `docs/type-specification/`, `docs/internal-spec/`,
+# `examples/`, `plugins/*/README.md` or `docs/notes/`. 284 links point into those.
 #
-# So the rule is: a shipped document may link relatively only to another shipped document. Anything
-# outside the package is named by its canonical URL, which resolves for a reader who has the gem and for
-# one who has the repository. Shipping the missing trees was measured and rejected: `docs/adr/` alone is
-# 2.1 MB against a 7.1 MB gem, and it would still leave the 128 links that point at `examples/`,
-# `plugins/*/README.md`, `docs/notes/` and the like.
+# The links stay. They are the coupling between documents — which one explains what — and both of the
+# other repairs cost more than they fixed: rewriting them to `blob/master` URLs put a host, an
+# organisation and a branch into 297 places and sent a v0.3.5 reader to a document that had moved on,
+# while deleting the markup severed the coupling and left a bare `ADR-103` going nowhere.
+#
+# Instead `rigor docs` rewrites them on the way out ({Rigor::CLI::DocLinks}), into keys it can answer:
+# a packaged page prints, an unpackaged one is routed to its repository path. So what this file checks
+# is not "no link points outside the package" but the property that makes that safe — **every link a
+# shipped page carries turns into a key `rigor docs` resolves**, whether by printing or by routing.
 RSpec.describe "packaged documentation links" do
   def packaged
     @packaged ||= Gem::Specification.load(File.expand_path("../../rigortype.gemspec", __dir__)).files.to_set
@@ -25,60 +28,65 @@ RSpec.describe "packaged documentation links" do
     @repo_root ||= File.expand_path("../..", __dir__)
   end
 
-  # `](target)` and `](target#anchor)`, skipping absolute URLs and bare anchors.
-  def relative_links(doc)
-    File.read(File.join(repo_root, doc))
-        .scan(/\]\(([^)#\s]+)(?:#[^)\s]*)?\)/)
-        .flatten
-        .reject { |target| target.start_with?("http://", "https://", "mailto:") }
-  end
-
-  def resolve(doc, target)
-    File.expand_path(target, File.dirname(File.join(repo_root, doc))).sub("#{repo_root}/", "")
-  end
-
   def shipped_docs
-    packaged.select { |file| file.end_with?(".md") }.sort
+    packaged.select { |file| file.end_with?(".md") && file.start_with?("docs/") }.sort
   end
 
-  it "packages a plausible number of documents, so these checks are not vacuous" do
-    expect(shipped_docs.length).to be >= 100
-    expect(shipped_docs).to include("docs/manual/04-diagnostics.md", "docs/handbook/01-getting-started.md")
-  end
-
-  # The other half of the same rule, and the coverage this change would otherwise have removed. A
-  # relative link into `docs/adr/` was at least validated in-repo by `link_integrity_spec`; rewriting it
-  # to a URL takes it out of that spec's reach, so a rename would rot it silently. The target is a path
-  # in THIS repository, so it can be checked without a network call.
-  it "points every canonical repository URL at a path that exists" do
-    prefix = %r{\Ahttps://github\.com/rigortype/rigor/(?:blob|tree)/master/}
-    offenders = shipped_docs.flat_map do |doc|
+  # Every relative link a shipped page carries, as `[document, target]`.
+  def relative_links
+    shipped_docs.flat_map do |doc|
       File.read(File.join(repo_root, doc))
-          .scan(%r{\]\((https://github\.com/rigortype/rigor/(?:blob|tree)/master/[^)#\s]+)(?:#[^)\s]*)?\)})
+          .scan(/\]\((?!https?:|mailto:|#)([^)#\s]+)(?:#[^)\s]*)?\)/)
           .flatten
-          .reject { |url| File.exist?(File.join(repo_root, url.sub(prefix, ""))) }
-          .map { |url| "#{doc} → #{url}" }
+          .map { |target| [doc, target] }
     end
-
-    expect(offenders).to be_empty, "these URLs name a path this repository does not have:\n  " \
-                                   "#{offenders.first(20).join("\n  ")}"
   end
 
-  it "never links relatively from a shipped document to an unshipped one" do
-    offenders = shipped_docs.flat_map do |doc|
-      relative_links(doc).filter_map do |target|
-        resolved = resolve(doc, target)
-        next if packaged.include?(resolved)
+  it "carries a plausible number of links, so these checks are not vacuous" do
+    expect(shipped_docs.length).to be >= 70
+    expect(relative_links.length).to be >= 200
+  end
 
-        reason = File.exist?(File.join(repo_root, resolved)) ? "not packaged" : "does not exist"
-        "#{doc} → #{target} (#{reason})"
-      end
+  # The one that would have caught the original bug, stated as the property rather than the symptom.
+  it "renders every link as a key `rigor docs` can answer" do
+    unanswerable = relative_links.filter_map do |doc, target|
+      key = Rigor::CLI::DocLinks.key_for(target, File.dirname(File.join(repo_root, doc)))
+      next "#{doc} → #{target} (points outside the repository)" if key.nil?
+      # Answerable one of two ways: the page is packaged and prints, or the key names a path that
+      # exists and the reader is routed to it.
+      next if packaged.include?("docs/#{key}.md")
+
+      path = Rigor::CLI::DocLinks.repository_path(key)
+      next if path && File.exist?(File.join(repo_root, path))
+
+      "#{doc} → #{target} (key `#{key}` names nothing)"
     end
 
-    expect(offenders).to be_empty, lambda {
-      "a reader who installed the gem cannot follow these; name the target by its canonical URL " \
-        "(https://github.com/rigortype/rigor/blob/master/…) instead:\n  #{offenders.first(40).join("\n  ")}" \
-        "#{"\n  … and #{offenders.length - 40} more" if offenders.length > 40}"
+    expect(unanswerable).to be_empty,
+                            "`rigor docs` hands these keys to a reader and cannot answer them:\n  " \
+                            "#{unanswerable.first(20).join("\n  ")}"
+  end
+
+  # The scheme's whole benefit is that the source needs no host in it. One pointer per README is the
+  # allowance; everything else routes through `DocLinks::REPOSITORY`.
+  def repo_url_allowed
+    {
+      "docs/manual/README.md" => "one pointer saying where the unpackaged documents live",
+      "docs/handbook/README.md" => "the same pointer for the handbook",
+      "docs/manual/03-configuration.md" => "a `$schema` URL an editor fetches, not a citation",
+      "docs/manual/08-skills.md" => "the argument of an `npx skills add` command the reader runs"
     }
+  end
+
+  it "keeps the repository host out of the documentation body" do
+    offenders = shipped_docs.reject { |doc| repo_url_allowed.key?(doc) }.filter_map do |doc|
+      hits = File.read(File.join(repo_root, doc))
+                 .scan(%r{https://github\.com/rigortype/rigor/(?:blob|tree|raw)/master/[^)>\s]+})
+      "#{doc}: #{hits.length} (#{hits.first})" unless hits.empty?
+    end
+
+    expect(offenders).to be_empty, "link the document relatively and let `rigor docs` route it — a " \
+                                   "`master` URL pins a host, a branch, and the wrong version:\n  " \
+                                   "#{offenders.join("\n  ")}"
   end
 end

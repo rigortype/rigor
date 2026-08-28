@@ -26,7 +26,7 @@ rigor docs mcp-server
 ```
 
 (Web fallback, only before Rigor is installed:
-**[Rigor MCP Server — AI Agent Integration](https://github.com/rigortype/rigor/blob/master/docs/manual/10-mcp-server.md)**.)
+**[Rigor MCP Server — AI Agent Integration](../../docs/manual/10-mcp-server.md)**.)
 This skill is the *workflow* around it (identify the client → apply the
 manual's snippet → verify the handshake), so it does not duplicate (and
 cannot stale-out) the config details.
@@ -70,7 +70,7 @@ Every client config simply launches **`rigor mcp`** (stdio) and needs
 **`rigor` on the agent's `PATH`** — the same executable `rigor check`
 uses. For agents that do not inherit your shell, the `mise` shim path is
 the most reliable channel (see `rigor docs install`, or
-[Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/install.md)
+[Installing Rigor](../../docs/install.md)
 on the web). Do **not** add `rigortype` to the project's `Gemfile` — it
 is a tool, not a library.
 

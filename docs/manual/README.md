@@ -80,7 +80,7 @@ flag, key, or command that *acts* on it.
     Cline, …) via `rigor mcp`.
 11. [Running Rigor in CI](11-ci.md) — a clean CI job, inline
     PR/MR diagnostics (SARIF / GitHub Actions / GitLab Code
-    Quality), copy-paste [templates](https://github.com/rigortype/rigor/tree/master/docs/manual/ci-templates), and
+    Quality), copy-paste [templates](ci-templates), and
     version pinning.
 12. [Caching](12-caching.md) — where the cache lives, what
     invalidates it, and how to clear it.
@@ -91,7 +91,7 @@ flag, key, or command that *acts* on it.
 
 - [The Rigor Handbook](../handbook/README.md) — the type-model
   walkthrough.
-- [`docs/types.md`](https://github.com/rigortype/rigor/blob/master/docs/types.md) — one-page type-system guide.
-- [`docs/type-specification/`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/README.md)
+- [`docs/types.md`](../types.md) — one-page type-system guide.
+- [`docs/type-specification/`](../type-specification/README.md)
   — the normative spec corpus.
-- [`docs/adr/`](https://github.com/rigortype/rigor/tree/master/docs/adr) — architecture decision records.
+- [`docs/adr/`](../adr) — architecture decision records.

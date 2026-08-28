@@ -53,7 +53,7 @@ Some `protected` sites are typed only through call-site
 — an undeclared parameter seeded from what its callers pass)
 rather than a declaration — a lower bound that can only widen, so
 none of Rigor's negative rules fire against it yet
-([ADR-67](https://github.com/rigortype/rigor/blob/master/docs/adr/67-parameter-type-inference.md) WD6b). The text
+([ADR-67](../adr/67-parameter-type-inference.md) WD6b). The text
 report calls these out as "lower-bound-typed" when there are any,
 and the JSON form always carries the count as `lower_bound_typed`.
 It is a sub-count *within* `protected`, never subtracted from it —
@@ -333,7 +333,7 @@ ones a type actually catches.
 > [Configuration](03-configuration.md)). A project whose gems live in
 > the active Ruby's default gem home — the common `rbenv` / `mise`
 > case with no `--path` set — is invisible to the isolated analyzer by
-> design ([ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)):
+> design ([ADR-27](../adr/27-tool-distribution-model.md)):
 > point Rigor at it with `bundler.bundle_path:`. Until you do, these
 > holes keep the generic `engine_gap` cause instead of `add_rbs` —
 > the label is missing, never wrong.

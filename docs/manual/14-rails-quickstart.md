@@ -210,7 +210,7 @@ value in your `Gemfile` or `.ruby-version`) and trim the
 > **ActiveSupport core_ext is covered automatically.** When
 > `activesupport` is in your `Gemfile.lock` but ships no RBS,
 > Rigor auto-loads a bundled core-ext RBS overlay
-> ([ADR-72](https://github.com/rigortype/rigor/blob/master/docs/adr/72-gemfile-lock-gated-rbs-overlays.md)), so
+> ([ADR-72](../adr/72-gemfile-lock-gated-rbs-overlays.md)), so
 > extension calls (`3.days`, `"x".squish`, `Time.current`, …)
 > resolve without any plugin or config — on a real Rails app this
 > is reliably the single largest false-positive cluster (a
@@ -234,7 +234,7 @@ Other plugins to consider depending on your stack:
 | `rigor-shoulda-matchers` | shoulda-matchers |
 | `rigor-minitest` | Minitest / Test::Unit |
 
-See [`plugins/README.md`](https://github.com/rigortype/rigor/blob/master/plugins/README.md) for the full
+See [`plugins/README.md`](../../plugins/README.md) for the full
 catalogue.
 
 Add the cache directory to `.gitignore`:
@@ -331,4 +331,4 @@ exact same tools without any project `Gemfile` changes.
   [Baselines](06-baseline.md).
 - **Plugins** — each plugin's documentation describes its config
   options in detail: [Using plugins](07-plugins.md) and
-  [`plugins/`](https://github.com/rigortype/rigor/blob/master/plugins/README.md).
+  [`plugins/`](../../plugins/README.md).

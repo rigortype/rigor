@@ -20,7 +20,7 @@ assert_type(
 
 The mechanism behind this — and the one that lets you wire the
 same shape for your own DSL or stdlib method — is **Lightweight
-HKT** ([ADR-20](https://github.com/rigortype/rigor/blob/master/docs/adr/20-lightweight-hkt.md)), Rigor's
+HKT** ([ADR-20](../adr/20-lightweight-hkt.md)), Rigor's
 defunctionalised encoding of higher-kinded types in the
 [Yallop & White 2014](https://www.cl.cam.ac.uk/~jdy22/papers/lightweight-higher-kinded-polymorphism.pdf) /
 [fp-ts `URItoKind`](https://github.com/gcanti/fp-ts/blob/master/src/HKT.ts)
@@ -326,7 +326,7 @@ machinery:
 
 If you want to author your own overlay end-to-end, the
 worked example in
-[`spec/rigor/environment_spec.rb`](https://github.com/rigortype/rigor/blob/master/spec/rigor/environment_spec.rb)
+[`spec/rigor/environment_spec.rb`](../../spec/rigor/environment_spec.rb)
 ("ADR-20 HKT registry scan" context) is the smallest viable
 reference — a fixture `.rbs` file with the directive pair, a
 class declaration to anchor them on, and an `Environment.for_project`

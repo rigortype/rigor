@@ -91,7 +91,7 @@ The reflex to drop is `unwrap()`. In Rust you reach for
 `.unwrap()` / `.expect()` when you *know* it is `Some`. Rigor
 has no in-source assertion that lies to the checker; the
 equivalents are a `nil?` guard (checked, not asserted) or
-`T.must` via the [`rigor-sorbet`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sorbet)
+`T.must` via the [`rigor-sorbet`](../../plugins/rigor-sorbet)
 plugin (see [Chapter 10](10-sorbet.md)).
 
 **`Result<T, E>` ↔ exceptions.** Here the models diverge. Ruby
@@ -175,7 +175,7 @@ end
 ```
 
 The crucial difference is *direction*.
-[ADR-47](https://github.com/rigortype/rigor/blob/master/docs/adr/47-narrowing-driven-clause-reachability.md)'s
+[ADR-47](../adr/47-narrowing-driven-clause-reachability.md)'s
 `flow.unreachable-clause` rule fires when a clause is provably
 *dead* — its subject already narrowed to `Bot` by prior clauses
 or prior exhaustion:
@@ -203,7 +203,7 @@ of Rust's `_ => unreachable!()`.
 
 A Rust `struct` maps onto Ruby's `Data.define` — an immutable,
 value-equal, member-shaped aggregate. Rigor models it natively
-([ADR-48](https://github.com/rigortype/rigor/blob/master/docs/adr/48-data-struct-value-folding.md)).
+([ADR-48](../adr/48-data-struct-value-folding.md)).
 
 ```rust
 struct Point { x: i32, y: i32 }

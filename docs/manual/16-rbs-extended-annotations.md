@@ -38,13 +38,13 @@ end
 
 This needs the `rbs-inline` library installed; Rigor ingests
 inline annotations by default when it is
-([ADR-93](https://github.com/rigortype/rigor/blob/master/docs/adr/93-default-rbs-inline-ingestion.md)). There is
+([ADR-93](../adr/93-default-rbs-inline-ingestion.md)). There is
 no Rigor-only comment dialect: `# rigor:` comments remain
 suppression-only.
 This page is the *operational* reference — the directives you can
 write and their syntax. For the normative rules (conflict
 handling, merging, provenance) see
-[`docs/type-specification/rbs-extended.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-extended.md);
+[`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md);
 for the type-model walkthrough see
 [handbook chapter 7](../handbook/07-rbs-and-extended.md).
 
@@ -117,7 +117,7 @@ The right-hand side of `return:`, `param:`, `assert*`, and
 - an **RBS class name** — `String`, `::Foo::Bar`; or
 - a **refinement payload** — a kebab-case name from the
   imported-built-in catalogue
-  ([`imported-built-in-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/imported-built-in-types.md)),
+  ([`imported-built-in-types.md`](../type-specification/imported-built-in-types.md)),
   such as `non-empty-string` or `positive-int`.
 
 Refinement payloads support the parameterised forms
@@ -131,7 +131,7 @@ Negation with `~T` is allowed on **class-name** payloads (it is
 how the false branch of a predicate is usually written); it is
 **not** yet accepted on refinement-form payloads. For an explicit
 user-authored difference type, prefer `T - U` (see
-[type-operators.md](https://github.com/rigortype/rigor/blob/master/docs/type-specification/type-operators.md)).
+[type-operators.md](../type-specification/type-operators.md)).
 
 ## `conforms-to` — a checked structural contract
 
@@ -229,7 +229,7 @@ these annotations draw from.
 
 Two declaration-level directives register and define the
 defunctionalised type constructors behind Rigor's lightweight HKT
-mechanism ([ADR-20](https://github.com/rigortype/rigor/blob/master/docs/adr/20-lightweight-hkt.md)). Unlike the
+mechanism ([ADR-20](../adr/20-lightweight-hkt.md)). Unlike the
 per-method directives they attach to a `class` / `module` and
 take **space-separated `key=value` pairs** (RBS's annotation
 grammar does not accept nested punctuation):
@@ -264,14 +264,14 @@ This is an advanced authoring surface; the worked walkthrough is
   reported as diagnostics — Rigor never silently picks a winner.
 - Annotations under unrelated keys belong to other tools; Rigor
   preserves them untouched. Conversely, exported plain RBS
-  ([RBS erasure](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-erasure.md)) drops
+  ([RBS erasure](../type-specification/rbs-erasure.md)) drops
   Rigor-only annotations unless you ask to keep them.
 
 ## See also
 
-- [`docs/type-specification/rbs-extended.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-extended.md)
+- [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md)
   — the normative grammar and merging rules.
-- [`imported-built-in-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/imported-built-in-types.md)
+- [`imported-built-in-types.md`](../type-specification/imported-built-in-types.md)
   — the reserved refinement-name catalogue.
 - [handbook chapter 7](../handbook/07-rbs-and-extended.md) — the
   type-model walkthrough.

@@ -80,14 +80,14 @@ rigor plugin path  rigor-<id>     # its directory, to browse
 The **authoritative** authoring surface — the one this review scores
 against — is the internal spec, not this file:
 
-- [`docs/internal-spec/plugin.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin.md)
+- [`docs/internal-spec/plugin.md`](../../docs/internal-spec/plugin.md)
   — manifest, `node_rule` / `node_file_context`, `dynamic_return` /
   `narrowing_facts`, the `#diagnostic` / `#diagnostics_for` / `.suggest`
   / `#read_fact` author helpers, `config_schema` `{kind:, default:}`.
-- [`docs/internal-spec/plugin-cache-producers.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin-cache-producers.md)
+- [`docs/internal-spec/plugin-cache-producers.md`](../../docs/internal-spec/plugin-cache-producers.md)
   — `producer` / `#cache_for` / `#producer_value` / `#producer_error`,
   ADR-60 WD3 record-and-validate.
-- [`docs/internal-spec/plugin-trust.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin-trust.md)
+- [`docs/internal-spec/plugin-trust.md`](../../docs/internal-spec/plugin-trust.md)
   — `TrustPolicy` / `IoBoundary`.
 
 When the checklist below and the spec disagree, **the spec binds** —

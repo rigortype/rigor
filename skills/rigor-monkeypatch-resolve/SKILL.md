@@ -14,7 +14,7 @@ When a project adds methods to existing classes in its own files — the
 classic `lib/core_ext/*.rb` `class String; def squish; …; end` pattern —
 Rigor does not see them unless told to, so every call to the added method
 fires `call.undefined-method` (or `call.unresolved-toplevel` for a
-top-level helper). `pre_eval:` ([ADR-17](https://github.com/rigortype/rigor/blob/master/docs/adr/17-monkey-patch-pre-evaluation.md))
+top-level helper). `pre_eval:` ([ADR-17](../../docs/adr/17-monkey-patch-pre-evaluation.md))
 fixes this: it pre-evaluates the listed project files and registers every
 method they define with a **literal** `def` / `def self.`.
 

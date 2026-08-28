@@ -103,7 +103,7 @@ never surfaces a false `call.undefined-method`.
 Architecture (the cached schema-parser → model-index → analyzer
 chain), the source layout, how to run the demo, and the plugin
 contract surfaces this plugin exercises are documented in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-activerecord/README.md).
+[plugin's README](../../../plugins/rigor-activerecord/README.md).
 To write a plugin of your own, see the
-[`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) walkthroughs and the
+[`examples/`](../../../examples/README.md) walkthroughs and the
 [`rigor-plugin-author`](../08-skills.md) skill.

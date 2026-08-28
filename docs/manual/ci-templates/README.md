@@ -4,7 +4,7 @@ Copy-paste CI configuration for running Rigor in your project's pipeline.
 Each runs Rigor in its **own isolated job** on Ruby 4.0 (see
 [chapter 11, "Running Rigor in CI"](../11-ci.md) for why isolation is
 required) and surfaces diagnostics inline on the pull / merge request via a
-CI-native output format ([ADR-51](https://github.com/rigortype/rigor/blob/master/docs/adr/51-ci-diagnostic-output-formats.md)).
+CI-native output format ([ADR-51](../../adr/51-ci-diagnostic-output-formats.md)).
 
 `ruby/setup-ruby` provides **prebuilt** Ruby 4.0.x binaries for
 `ubuntu-latest` — setup is fast (~0.3 s), not a compile-from-source
@@ -13,10 +13,10 @@ to Ruby 4.0.5 from the runner tool cache.
 
 | File | Copy it to | What it does |
 | --- | --- | --- |
-| [`github-actions-annotations.yml`](https://github.com/rigortype/rigor/blob/master/docs/manual/ci-templates/github-actions-annotations.yml) | `.github/workflows/rigor.yml` | **The default.** Workflow commands → inline PR annotations. No upload step, no permissions, works on every repo. |
-| [`github-actions-sarif.yml`](https://github.com/rigortype/rigor/blob/master/docs/manual/ci-templates/github-actions-sarif.yml) | `.github/workflows/rigor.yml` | SARIF 2.1.0 → GitHub code scanning (Security tab + PR alerts). Needs code scanning — public repo, or private with GitHub Advanced Security. |
-| [`github-actions-reviewdog.yml`](https://github.com/rigortype/rigor/blob/master/docs/manual/ci-templates/github-actions-reviewdog.yml) | `.github/workflows/rigor.yml` | reviewdog → inline PR **review comments**. Needs `pull-requests: write`. |
-| [`gitlab-ci.yml`](https://github.com/rigortype/rigor/blob/master/docs/manual/ci-templates/gitlab-ci.yml) | `.gitlab-ci.yml` (or `include:` it) | GitLab Code Quality report → the merge-request widget. |
+| [`github-actions-annotations.yml`](github-actions-annotations.yml) | `.github/workflows/rigor.yml` | **The default.** Workflow commands → inline PR annotations. No upload step, no permissions, works on every repo. |
+| [`github-actions-sarif.yml`](github-actions-sarif.yml) | `.github/workflows/rigor.yml` | SARIF 2.1.0 → GitHub code scanning (Security tab + PR alerts). Needs code scanning — public repo, or private with GitHub Advanced Security. |
+| [`github-actions-reviewdog.yml`](github-actions-reviewdog.yml) | `.github/workflows/rigor.yml` | reviewdog → inline PR **review comments**. Needs `pull-requests: write`. |
+| [`gitlab-ci.yml`](gitlab-ci.yml) | `.gitlab-ci.yml` (or `include:` it) | GitLab Code Quality report → the merge-request widget. |
 
 Pick **one** GitHub template. **Default to annotations** — it is the only
 one that works on every repository with zero setup. Use SARIF when code

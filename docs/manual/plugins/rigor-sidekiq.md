@@ -127,6 +127,6 @@ added it is 100.
 
 The worker discoverer / index and the contract surfaces this plugin
 exercises are in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-sidekiq/README.md). To write a
-plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
+[plugin's README](../../../plugins/rigor-sidekiq/README.md). To write a
+plugin, see [`examples/`](../../../examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

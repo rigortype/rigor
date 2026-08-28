@@ -4,12 +4,12 @@ User-facing documentation for each bundled Rigor plugin — what
 it checks, its configuration keys, what it infers, and its
 limitations. For *activating* plugins in general, see
 [Using plugins](../07-plugins.md); to *write* one, see the
-[examples/](https://github.com/rigortype/rigor/blob/master/examples/README.md) walkthroughs and the
+[examples/](../../../examples/README.md) walkthroughs and the
 [`rigor-plugin-author` skill](../08-skills.md).
 
 All plugins ship bundled in `rigortype` — no separate install.
 The full catalogue, with a one-line scope for every plugin, is
-[plugins/README.md](https://github.com/rigortype/rigor/blob/master/plugins/README.md).
+[plugins/README.md](../../../plugins/README.md).
 
 ## Available pages
 
@@ -78,9 +78,9 @@ The full catalogue, with a one-line scope for every plugin, is
 The browser **playground** (`rigor playground`) is infrastructure, not
 a checker plugin — it has no page here; see the
 [CLI reference](../02-cli-reference.md) and
-[ADR-29](https://github.com/rigortype/rigor/blob/master/docs/adr/29-browser-playground.md).
+[ADR-29](../../adr/29-browser-playground.md).
 
 _Every bundled checker plugin has a page above; each plugin's in-tree
-[`README.md`](https://github.com/rigortype/rigor/blob/master/plugins/README.md) now covers its internals
+[`README.md`](../../../plugins/README.md) now covers its internals
 (layout, architecture, the contract surfaces it exercises) and links
 back up to its page here._

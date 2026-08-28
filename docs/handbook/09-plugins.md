@@ -6,10 +6,10 @@ RBS sig can express. This chapter helps you decide when that
 is worth a plugin, and when it is not.
 
 It does **not** teach plugin *authoring*. That lives in
-[`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) — six tutorial
+[`examples/`](../../examples/README.md) — six tutorial
 walkthroughs, each spotlighting one extension surface.
 Ready-to-install gems for real frameworks live in
-[`plugins/`](https://github.com/rigortype/rigor/blob/master/plugins/README.md), and activating one is
+[`plugins/`](../../plugins/README.md), and activating one is
 [manual — Using plugins](../manual/07-plugins.md). Read on to
 decide whether you need a plugin; go to `examples/` once you
 want to write one.
@@ -45,8 +45,8 @@ Other shapes that fit the plugin niche:
   lint time.
 
 Each of these has a worked example in
-[`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md). The
-[`examples/README.md`](https://github.com/rigortype/rigor/blob/master/examples/README.md) page
+[`examples/`](../../examples/README.md). The
+[`examples/README.md`](../../examples/README.md) page
 compares the six worked examples on architectural axes
 (config schema, file I/O, cache producers,
 engine-collaboration via `Scope#type_of`, cross-plugin facts,
@@ -66,7 +66,7 @@ authoring paths your DSL falls into.
 symbol arguments — a Rails-style `has_one_attached`, a
 dry-struct `attribute`, a Devise `devise :strategy`, a Sinatra
 `get "/foo" do … end` — the **macro-expansion substrate**
-([ADR-16](https://github.com/rigortype/rigor/blob/master/docs/adr/16-macro-expansion.md)) already knows that
+([ADR-16](../adr/16-macro-expansion.md)) already knows that
 shape. You write a manifest entry describing the call, and the
 substrate does the literal-symbol extraction, the name
 interpolation and the per-method synthesis. The three bundled
@@ -91,19 +91,19 @@ The two paths coexist — one plugin can declare substrate
 entries *and* walk files — and where you go next depends on
 which of them you need:
 
-- [`examples/README.md`](https://github.com/rigortype/rigor/blob/master/examples/README.md) — the six
+- [`examples/README.md`](../../examples/README.md) — the six
   walkthroughs, each spotlighting one contract surface, with a
   map of which example demonstrates which one.
-- [`docs/internal-spec/plugin.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin.md)
+- [`docs/internal-spec/plugin.md`](../internal-spec/plugin.md)
   — the binding plugin contract: manifest, hooks, services,
   registry, load order. Its siblings
-  [`plugin-trust.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin-trust.md) and
-  [`plugin-cache-producers.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin-cache-producers.md)
+  [`plugin-trust.md`](../internal-spec/plugin-trust.md) and
+  [`plugin-cache-producers.md`](../internal-spec/plugin-cache-producers.md)
   cover the I/O and caching surfaces.
-- [`docs/internal-spec/macro-substrate.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/macro-substrate.md)
+- [`docs/internal-spec/macro-substrate.md`](../internal-spec/macro-substrate.md)
   — the substrate's tiers, the manifest field each one
   declares, and how much return-type precision each recovers.
-- [The macro-expansion library survey](https://github.com/rigortype/rigor/blob/master/docs/notes/20260515-macro-expansion-library-survey.md)
+- [The macro-expansion library survey](../notes/20260515-macro-expansion-library-survey.md)
   — which real Ruby libraries fit which tier, and which fall
   outside the substrate entirely.
 
@@ -120,9 +120,9 @@ Reach for a plugin only when:
 - The team can read the plugin's source — it is not a black
   box anyone can ignore.
 
-If those are true, [`examples/README.md`](https://github.com/rigortype/rigor/blob/master/examples/README.md)
+If those are true, [`examples/README.md`](../../examples/README.md)
 is your starting point. The
-[`rigor-deprecations`](https://github.com/rigortype/rigor/tree/master/examples/rigor-deprecations)
+[`rigor-deprecations`](../../examples/rigor-deprecations)
 example is the smallest fully-shaped plugin — manifest +
 single per-file walk + a couple of diagnostic emissions —
 and is the recommended template for "I want to author my
@@ -144,10 +144,10 @@ From here:
   return to specific chapters as questions arise.
 - The [Handbook index](README.md) has the cross-references
   to deeper material in
-  [`docs/type-specification/`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/README.md),
-  [`docs/internal-spec/`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/README.md), and
-  [`docs/adr/`](https://github.com/rigortype/rigor/tree/master/docs/adr).
-- The [`CHANGELOG.md`](https://github.com/rigortype/rigor/blob/master/CHANGELOG.md) is the per-release
+  [`docs/type-specification/`](../type-specification/README.md),
+  [`docs/internal-spec/`](../internal-spec/README.md), and
+  [`docs/adr/`](../adr).
+- The [`CHANGELOG.md`](../../CHANGELOG.md) is the per-release
   truth for what shipped when.
 
 Welcome to the small, growing community of static-Ruby

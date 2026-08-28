@@ -63,10 +63,10 @@ whatever class includes the concern.
 The macro manifest (the trait registry mapping each strategy to its
 module), the concern re-targeting walk, the demo, and the
 contract surfaces this plugin exercises are in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-devise/README.md);
-[`docs/internal-spec/macro-substrate.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/macro-substrate.md)
+[plugin's README](../../../plugins/rigor-devise/README.md);
+[`docs/internal-spec/macro-substrate.md`](../../internal-spec/macro-substrate.md)
 specifies the Tier B trait registry generally, and
 [handbook chapter 9](../../handbook/09-plugins.md) is the
 orientation. To write a plugin, see
-[`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
+[`examples/`](../../../examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

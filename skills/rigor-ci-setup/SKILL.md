@@ -168,9 +168,9 @@ The exact recipe (the `BUNDLE_GEMFILE` wiring, the Dependabot entry) is in
   `rigor docs ci` (ready files: `rigor docs --list manual | grep
   ci-templates`). Web fallback, before Rigor is installed:
   <https://github.com/rigortype/rigor/blob/master/docs/manual/11-ci.md>.
-- [ADR-51](https://github.com/rigortype/rigor/blob/master/docs/adr/51-ci-diagnostic-output-formats.md)
+- [ADR-51](../../docs/adr/51-ci-diagnostic-output-formats.md)
   — the output-format surface (the severity / identifier contract).
-- [ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)
+- [ADR-27](../../docs/adr/27-tool-distribution-model.md)
   — why Rigor installs standalone and runs in its own job.
 - [reviewdog](https://github.com/reviewdog/reviewdog) /
   [action-setup](https://github.com/reviewdog/action-setup).

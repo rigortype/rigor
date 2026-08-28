@@ -81,6 +81,6 @@ matches.
 The assertion recogniser and the contract surfaces this plugin
 exercises — the ADR-37 `narrowing_facts` narrowing gate and the ADR-38
 `additional_initializers` for `setup` — are in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-minitest/README.md). To write a
-plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
+[plugin's README](../../../plugins/rigor-minitest/README.md). To write a
+plugin, see [`examples/`](../../../examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

@@ -83,7 +83,7 @@ expectation even if Rigor knows the result is
 `non-empty-lowercase-string` internally.
 
 This erasure contract is documented at
-[`docs/type-specification/rbs-erasure.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-erasure.md).
+[`docs/type-specification/rbs-erasure.md`](../type-specification/rbs-erasure.md).
 
 ## Annotations in `.rb` source
 
@@ -164,7 +164,7 @@ A practical implication: a project that runs both Steep and
 Rigor will see overlapping diagnostics on shape errors and
 complementary diagnostics on the things each tool catches that
 the other does not. The
-[`docs/notes/20260503-steep-cross-check-triage.md`](https://github.com/rigortype/rigor/blob/master/docs/notes/20260503-steep-cross-check-triage.md)
+[`docs/notes/20260503-steep-cross-check-triage.md`](../notes/20260503-steep-cross-check-triage.md)
 note is a worked example — Steep and Rigor were run against
 the same project and the diagnostic streams categorised.
 
@@ -325,7 +325,7 @@ section sequentially. Three useful pointers:
   [manual — Diagnostics](../manual/04-diagnostics.md) for the
   rule catalogue and severity profiles — the analogue to
   Steep's diagnostic config.
-- [`docs/notes/20260503-steep-cross-check-triage.md`](https://github.com/rigortype/rigor/blob/master/docs/notes/20260503-steep-cross-check-triage.md)
+- [`docs/notes/20260503-steep-cross-check-triage.md`](../notes/20260503-steep-cross-check-triage.md)
   for a worked side-by-side run of Steep and Rigor on the
   same project (the project itself).
 

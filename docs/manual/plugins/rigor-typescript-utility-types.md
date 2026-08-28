@@ -4,7 +4,7 @@ Maps the TypeScript-canonical utility-type spellings onto Rigor's own
 shape-projection type functions, so a codebase migrating from
 TypeScript / Sorbet RBI can write the familiar names inside
 `RBS::Extended` annotations. It registers five
-[ADR-13](https://github.com/rigortype/rigor/blob/master/docs/adr/13-typenode-resolver-plugin.md) `TypeNodeResolver`s
+[ADR-13](../../adr/13-typenode-resolver-plugin.md) `TypeNodeResolver`s
 as a pure translation layer; the shape *semantics* live in core, where
 they have one spec-owned definition shared by every consumer.
 
@@ -66,6 +66,6 @@ registered at class load.
 
 The five resolver classes, the recursive resolution mechanism, and the
 ADR-13 `TypeNodeResolver` contract are in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-typescript-utility-types/README.md).
-To write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
+[plugin's README](../../../plugins/rigor-typescript-utility-types/README.md).
+To write a plugin, see [`examples/`](../../../examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

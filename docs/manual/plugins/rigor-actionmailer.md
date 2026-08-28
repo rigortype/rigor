@@ -74,6 +74,6 @@ plugins:
 
 The mailer/concern discoverer, the cached `:mailer_index` producer,
 the demo, and the contract surfaces this plugin exercises are in
-the [plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-actionmailer/README.md).
-To write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md)
+the [plugin's README](../../../plugins/rigor-actionmailer/README.md).
+To write a plugin, see [`examples/`](../../../examples/README.md)
 and the [`rigor-plugin-author`](../08-skills.md) skill.

@@ -115,14 +115,14 @@ payloads, the parameterised and bounded forms, and where `~T`
 negation is and is not allowed) — is
 [manual — RBS::Extended annotations](../manual/16-rbs-extended-annotations.md#per-method-directives);
 the normative rules for conflicts, merging and provenance are
-[`docs/type-specification/rbs-extended.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-extended.md).
+[`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md).
 The rest of this chapter works through the directives one
 example at a time.
 
 ## Refinement names
 
 The full catalogue is in
-[`docs/type-specification/imported-built-in-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/imported-built-in-types.md).
+[`docs/type-specification/imported-built-in-types.md`](../type-specification/imported-built-in-types.md).
 A short reference:
 
 | Family | Names |
@@ -191,7 +191,7 @@ objects the method itself allocated and never let out, so a
 The payload is a comma-separated list of bare labels
 (`%a{rigor:v1:effect io.db, nondet.time}`), from the vocabulary
 in
-[effect-labels.md](https://github.com/rigortype/rigor/blob/master/docs/type-specification/effect-labels.md).
+[effect-labels.md](../type-specification/effect-labels.md).
 Write the annotation on a `class` or `module` declaration
 instead and it applies to every method of that class —
 reopenings and `attr_writer`-generated methods included, but
@@ -235,7 +235,7 @@ you may be opening a root of your own.
 
 The whole feature — the label vocabulary, the committed effect
 snapshot, and `rigor effects` itself — is
-[ADR-103](https://github.com/rigortype/rigor/blob/master/docs/adr/103-effect-labels.md); start with
+[ADR-103](../adr/103-effect-labels.md); start with
 [`rigor effects`](../manual/02-cli-reference.md#rigor-effects).
 
 ## Worked example: an assertion gate
@@ -396,13 +396,13 @@ annotation object whichever buffer it arrived in — the effect
 envelopes above (`%a{pure}`, `%a{rigor:v1:effect …}`) included.
 Reading them requires the rbs-inline library, which Rigor
 ingests by default when it is installed
-([ADR-93](https://github.com/rigortype/rigor/blob/master/docs/adr/93-default-rbs-inline-ingestion.md)).
+([ADR-93](../adr/93-default-rbs-inline-ingestion.md)).
 
 What Rigor does **not** offer is a Rigor-only comment dialect —
 there is no `# rigor:effect` directive and no file pragma. The
 `# rigor:` comment family stays suppression-only (`disable`,
 `disable-file`). Application code never has to carry
-Rigor-specific syntax ([ADR-0](https://github.com/rigortype/rigor/blob/master/docs/adr/0-concept.md)); an
+Rigor-specific syntax ([ADR-0](../adr/0-concept.md)); an
 upstream annotation form you may use if you want one is a
 different thing from a requirement.
 
@@ -469,7 +469,7 @@ Notes:
 Full plugin documentation, configuration options (including
 the `require_magic_comment: false` host-context override the
 browser playground uses), and the caching contract:
-[`plugins/rigor-rbs-inline/README.md`](https://github.com/rigortype/rigor/blob/master/plugins/rigor-rbs-inline/README.md).
+[`plugins/rigor-rbs-inline/README.md`](../../plugins/rigor-rbs-inline/README.md).
 
 ## Falling back to `untyped`
 
@@ -494,7 +494,7 @@ arguments at runtime** (`Lisp.eval([:+, 1, 2])` returns
 Integer, but `Lisp.eval([:<, 1, 2])` returns bool), no RBS sig
 can express the relationship. That is what plugins are for —
 see [Chapter 9](09-plugins.md) and the
-[examples/](https://github.com/rigortype/rigor/blob/master/examples/README.md) directory.
+[examples/](../../examples/README.md) directory.
 
 ## What's next
 

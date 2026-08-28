@@ -11,7 +11,7 @@ sees what Rigor sees.
 This chapter is a walkthrough of the command's UX, the
 classification model, the three output modes, and the
 `--params` policy trade-off that comes straight out of
-[ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md)'s asymmetric
+[ADR-5](../adr/5-robustness-principle.md)'s asymmetric
 "strict on returns, lenient on parameters" rule.
 
 ## When to reach for it
@@ -166,7 +166,7 @@ two are wired today, one is reserved.
 | `observed-strict` | Reserved. Will additionally widen to capability roles (`_ToStr`, `_ToS`, …) once the role catalog ships. Currently rejected with a usage error. |
 
 The default deliberately favours `untyped` because of
-[ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md)'s clause 2: a
+[ADR-5](../adr/5-robustness-principle.md)'s clause 2: a
 method's parameter contract should be the **most permissive**
 shape the body's logic justifies, not the most specific
 shape the current callers happen to use. Locking in
@@ -319,4 +319,4 @@ inference, not a separate analysis.
   *inside* a touched declaration's range.
 
 These are the ADR-14 deferred items; the design rationale
-is in [`docs/adr/14-rbs-sig-generation.md`](https://github.com/rigortype/rigor/blob/master/docs/adr/14-rbs-sig-generation.md).
+is in [`docs/adr/14-rbs-sig-generation.md`](../adr/14-rbs-sig-generation.md).

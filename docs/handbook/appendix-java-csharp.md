@@ -58,7 +58,7 @@ advisor that only speaks when it is sure.
 | `Set<T>` | `HashSet<T>` / `ISet<T>` | `Set[T]` | |
 | `record Point(int x, int y)` | `record Point(int X, int Y)` | `Point = Data.define(:x, :y)` | See [Records ↔ Data.define](#records--datadefine). |
 | `Optional<T>` | `T?` (nullable reference type) | `T?` (i.e. `T \| nil`) | Java models it as a *container*; C# as a *type modifier*. See [Nullability](#nullability). |
-| `enum Color { RED, GREEN }` | `enum Color { Red, Green }` | `Constant<:red> \| Constant<:green>` (Symbol union) | Ruby has no native enum; the [`rigor-mangrove`](https://github.com/rigortype/rigor/tree/master/plugins) plugin types richer enum DSLs. |
+| `enum Color { RED, GREEN }` | `enum Color { Red, Green }` | `Constant<:red> \| Constant<:green>` (Symbol union) | Ruby has no native enum; the [`rigor-mangrove`](../../plugins) plugin types richer enum DSLs. |
 | `sealed interface Shape permits …` | `abstract` base + sealed hierarchy | union of the subtypes | See [Sealed types & exhaustiveness](#sealed-types-and-exhaustiveness). |
 | `<T>` (generic) | `<T>` (generic) | RBS `[T]` type parameter | |
 | `? extends T` (use-site) | `out T` (declaration-site) | covariant type parameter | See [Generics & variance](#generics-and-variance). |
@@ -107,7 +107,7 @@ When you DO need to write a sig — at a public boundary, when a
 body is too dynamic, when you want to *enforce* a parameter
 shape rather than observe it — it goes into `sig/<file>.rbs`,
 never into the `.rb` source. That separation is deliberate (see
-[ADR-1](https://github.com/rigortype/rigor/blob/master/docs/adr/1-types.md) and [ADR-5](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md));
+[ADR-1](../adr/1-types.md) and [ADR-5](../adr/5-robustness-principle.md));
 it is the analogue of keeping declarations out of your method
 bodies, except Rigor keeps them out of the *file*.
 
@@ -124,7 +124,7 @@ behaviour matches.
 | `x instanceof String` | `x is string` | `x.is_a?(String)` |
 | `x instanceof String s` (binding) | `x is string s` (binding) | `case x; in String => s` |
 | `switch (x) { case Foo f -> … }` | `switch (x) { case Foo f => … }` | `case x; in Foo => f` |
-| `(Foo) x` (cast) | `(Foo)x` (cast) | (no in-source cast) — `is_a?` guard, or `T.cast` via [`rigor-sorbet`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sorbet) |
+| `(Foo) x` (cast) | `(Foo)x` (cast) | (no in-source cast) — `is_a?` guard, or `T.cast` via [`rigor-sorbet`](../../plugins/rigor-sorbet) |
 | `Objects.requireNonNull(x)` | `x!` (null-forgiving) | (no in-source assertion) — `unless x.nil?`, or `T.must` via `rigor-sorbet` |
 | user method returning `boolean` | user method returning `bool` | `%a{rigor:v1:predicate-if-true x is Foo}` directive on the predicate |
 
@@ -146,7 +146,7 @@ equivalents are:
 A Java `record` or a C# positional `record` maps almost exactly
 onto Ruby's `Data.define` — an immutable, value-equal, member-
 shaped aggregate. Rigor models it natively
-([ADR-48](https://github.com/rigortype/rigor/blob/master/docs/adr/48-data-struct-value-folding.md)).
+([ADR-48](../adr/48-data-struct-value-folding.md)).
 
 ```java
 // Java 21
@@ -258,7 +258,7 @@ it is not. Rigor approaches the same shape from the other side.
 
 A closed set of subtypes is a union in Rigor, and the flow
 engine tracks which `case`/`when` and `case`/`in` clauses can
-still match. [ADR-47](https://github.com/rigortype/rigor/blob/master/docs/adr/47-narrowing-driven-clause-reachability.md)'s
+still match. [ADR-47](../adr/47-narrowing-driven-clause-reachability.md)'s
 `flow.unreachable-clause` rule fires when a clause is provably
 dead — its subject has already been narrowed to `Bot` by the
 prior clauses (per-clause disjointness) or by prior exhaustion:

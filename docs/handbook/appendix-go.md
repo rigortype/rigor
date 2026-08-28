@@ -105,7 +105,7 @@ type switches. Rigor has direct analogues.
 | `if x != nil` | `if x` (strips `nil`), or `unless x.nil?` |
 | `v, ok := x.(string)` (comma-ok assertion) | `x.is_a?(String)` narrowing in an `if` |
 | `switch v := x.(type) { case string: … }` | `case x; in String => v` |
-| `x.(T)` (assertion, panics on fail) | (no panicking assertion) — `is_a?` guard, or `T.cast` via [`rigor-sorbet`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sorbet) |
+| `x.(T)` (assertion, panics on fail) | (no panicking assertion) — `is_a?` guard, or `T.cast` via [`rigor-sorbet`](../../plugins/rigor-sorbet) |
 | user func returning `bool` | `%a{rigor:v1:predicate-if-true x is Foo}` directive |
 
 Go's type switch is *not* exhaustive — you can omit cases and
@@ -114,7 +114,7 @@ report what they can prove, not what you forgot. (Where Rigor
 adds value is the dual: if a `case`/`in` clause can *never*
 match because earlier clauses already covered its type, the
 `flow.unreachable-clause` rule from
-[ADR-47](https://github.com/rigortype/rigor/blob/master/docs/adr/47-narrowing-driven-clause-reachability.md) says
+[ADR-47](../adr/47-narrowing-driven-clause-reachability.md) says
 so.)
 
 ## Errors as values vs raising
@@ -173,7 +173,7 @@ non-nil branch exactly as you would expect.
 
 A Go `struct` used as an immutable value maps onto Ruby's
 `Data.define` — value-equal, member-shaped, frozen. Rigor models
-it natively ([ADR-48](https://github.com/rigortype/rigor/blob/master/docs/adr/48-data-struct-value-folding.md)).
+it natively ([ADR-48](../adr/48-data-struct-value-folding.md)).
 
 ```go
 type Point struct{ X, Y int }

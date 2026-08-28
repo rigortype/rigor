@@ -87,6 +87,6 @@ that finding.
 The factory discoverer / index, the cached producer, the
 `:model_index` consumption, the demo, and the contract surfaces
 this plugin exercises are in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-factorybot/README.md). To
-write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and
+[plugin's README](../../../plugins/rigor-factorybot/README.md). To
+write a plugin, see [`examples/`](../../../examples/README.md) and
 the [`rigor-plugin-author`](../08-skills.md) skill.

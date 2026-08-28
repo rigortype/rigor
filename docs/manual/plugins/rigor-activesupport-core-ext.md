@@ -19,11 +19,11 @@ plugins:
 ```
 
 That is the whole setup — Rigor resolves the bundled `sig/`
-automatically ([ADR-25](https://github.com/rigortype/rigor/blob/master/docs/adr/25-plugin-contributed-rbs.md)); no
+automatically ([ADR-25](../../adr/25-plugin-contributed-rbs.md)); no
 path, no vendoring, no `signature_paths:` wiring.
 
 > **You may not need this plugin.** As of
-> [ADR-72](https://github.com/rigortype/rigor/blob/master/docs/adr/72-gemfile-lock-gated-rbs-overlays.md), Rigor
+> [ADR-72](../../adr/72-gemfile-lock-gated-rbs-overlays.md), Rigor
 > auto-loads a bundled core-ext RBS overlay whenever `activesupport` is
 > in your `Gemfile.lock` but ships no RBS — so the most common
 > ActiveSupport false positives are already suppressed with zero config.
@@ -73,7 +73,7 @@ listed under `plugins:`.
   return `untyped`.
 - **Project-private monkey-patches are not covered** — only real
   ActiveSupport extensions. For your own core-class patches see the
-  `pre_eval:` mechanism ([ADR-17](https://github.com/rigortype/rigor/blob/master/docs/adr/17-monkey-patch-pre-evaluation.md)).
+  `pre_eval:` mechanism ([ADR-17](../../adr/17-monkey-patch-pre-evaluation.md)).
 - **Top ~40 selectors, not exhaustive.** ActiveSupport ships hundreds of
   extensions; this covers the head of the real-world distribution.
 
@@ -81,6 +81,6 @@ listed under `plugins:`.
 
 The RBS layout, the per-class coverage, and the survey that picked the
 selectors are in the
-[plugin's README](https://github.com/rigortype/rigor/blob/master/plugins/rigor-activesupport-core-ext/README.md).
-To write a plugin, see [`examples/`](https://github.com/rigortype/rigor/blob/master/examples/README.md) and the
+[plugin's README](../../../plugins/rigor-activesupport-core-ext/README.md).
+To write a plugin, see [`examples/`](../../../examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

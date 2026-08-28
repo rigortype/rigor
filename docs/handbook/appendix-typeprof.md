@@ -92,7 +92,7 @@ keeps a richer carrier and only erases at the boundary.
 The practical upshot: feed the same file to both, and
 TypeProf's RBS and `rigor sig-gen`'s RBS will usually agree at
 the *declaration* level, because Rigor's
-[RBS erasure](https://github.com/rigortype/rigor/blob/master/docs/type-specification/rbs-erasure.md) deliberately
+[RBS erasure](../type-specification/rbs-erasure.md) deliberately
 discards exactly the extra precision (`Constant`, `Refined`,
 `IntegerRange`) that TypeProf never tracked. Inside the
 analyzer, Rigor is carrying more — which is what powers its
@@ -131,7 +131,7 @@ resolve become `Dynamic[top]` and stop there. This is less
 precise than TypeProf on a self-contained toy program — Rigor
 will not deduce a parameter type from a single call site the
 way TypeProf can — but it is bounded by
-[inference budgets](https://github.com/rigortype/rigor/blob/master/docs/type-specification/inference-budgets.md)
+[inference budgets](../type-specification/inference-budgets.md)
 and backed by per-file caching (ADR-6), so it stays usable on
 a whole codebase and across runs.
 
@@ -242,7 +242,7 @@ more. The tools split on what to do about that.
 - **TypeProf emits the observed-narrow parameter** — its job
   is to report what the type-level run saw.
 - **Rigor refuses to make that the default.** Under the
-  [robustness principle](https://github.com/rigortype/rigor/blob/master/docs/type-specification/robustness-principle.md)
+  [robustness principle](../type-specification/robustness-principle.md)
   (strict returns, lenient parameters), `--params=observed` is
   a deliberate opt-in and its output is a *suggestion to
   review*, not a frozen contract. The default `untyped` is the
@@ -404,7 +404,7 @@ section sequentially. Three useful pointers:
 - [Chapter 8 — Understanding errors](08-understanding-errors.md)
   for the diagnostic gate that is Rigor's product, the thing
   TypeProf does not set out to be.
-- [`docs/type-specification/inference-budgets.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/inference-budgets.md)
+- [`docs/type-specification/inference-budgets.md`](../type-specification/inference-budgets.md)
   for the budget model that lets local inference scale where
   whole-program interpretation does not.
 

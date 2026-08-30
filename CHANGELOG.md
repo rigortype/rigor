@@ -12,6 +12,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[engine]** A collection filled through `h[k] ||= v`, `h[k] &&= v` or `h[k] += v` is no longer read as still carrying the literal shape it was initialized with, so `empty?` and `size` on it stop folding to a constant and a guard like `return nil if x.nil? || @rows.empty?` stops drawing a false "condition is always truthy" ([#504](https://github.com/rigortype/rigor/pull/504), [#501](https://github.com/rigortype/rigor/issues/501)).
+
 ## [0.3.6] - 2026-08-30
 
 v0.3.6 is a performance release for the commands you run repeatedly: a warm `rigor unused` is several times faster, and a warm `rigor effects` or `rigor effects check` now answers without loading the analysis engine at all ([ADR-104](docs/adr/104-effects-boot-slim-probe.md)). The effect snapshot is sized for an application rather than a fixture, so the committed file shrank by a third, stopped churning when an unrelated call moves, and a drift report now names where each method is defined instead of listing everything behind it. Machine-readable output is a valid document again under `--cache-stats`, and every diagnostic's text output carries the rule identifier you need to configure it. The documentation the gem ships also gained links that resolve for a reader who installed Rigor rather than cloning it.

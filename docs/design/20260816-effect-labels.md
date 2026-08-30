@@ -222,9 +222,11 @@ freshly allocated, not escaped, not passed to a call that may store it):
 | class-level state: `@@cv`, ivars in singleton context, `const_set`, `define_method`, object-model calls | `mutate.static` |
 | anything else — a call result, an ivar of another object, unclassifiable | `mutate` (bare, conservative parent) |
 
-`mutate.self` / `mutate.arg` / `mutate.static` are Ruby's proposed leaves; Steins ADR-0055 reserves
-`mutate.self` / `mutate.instance` / `mutate.static`, so the names should be reconciled before
-either ships (§ 13). They earn their place twice over: `pure` needs only the `mutate.local`
+`mutate.self` / `mutate.arg` / `mutate.static` were Ruby's proposed leaves; **the reconciliation
+landed on Steins ADR-0055's `mutate.self` / `mutate.instance` / `mutate.static`** (ADR-103 WD14), so
+the table's `mutate.arg` row ships as `mutate.instance` — widened to any receiver that is neither
+self nor frame-owned — and an unproven ownership taints rather than producing a bare `mutate`
+(§ 11.1, § 13). They earn their place twice over: `pure` needs only the `mutate.local`
 carve-out, but the fact store's invalidation buckets (local-binding, object-content,
 global-storage — control-flow-analysis.md § Scope snapshots) map one-to-one onto them, which is
 the § 8 "invalidation keys" consumer. Rigor already computes the `mutate.arg` half per method
@@ -804,12 +806,28 @@ opt-in), no new files, the same cache identity, byte-identical output; `rigor do
 
 ### 11.1 The shared registry
 
+> **Outcome (2026-08-22).** Read against Steins, the three alignment items below resolved
+> differently from how this section proposed them; [ADR-103](../adr/103-effect-labels.md) WD16 and
+> [#378](https://github.com/rigortype/rigor/issues/378) record the ruling, and the shipped
+> `data/effects/registry.yml` follows it rather than this text. In short: the `mutate` leaves
+> already agree, the `io.db` leaves are Rigor's alone and are now proposed upstream as
+> [rigortype/steins#468](https://github.com/rigortype/steins/issues/468), and the
+> application-meaning roots are **Rigor-owned rather than shared** — the divergence there is
+> architectural, not lexical, and is asked upstream as
+> [rigortype/steins#469](https://github.com/rigortype/steins/issues/469). Each bullet carries its
+> own outcome line. Alignment is not a gate in either direction: a spelling Steins later insists
+> on lands through `retired:` plus a vocabulary bump.
+
 The registry is Steins' v1 set verbatim — `exit ffi global.read global.write io io.db io.fs
 io.fs.read io.fs.write io.input io.ipc io.net io.net.http io.output io.output.buffer
 io.output.header io.output.stdout io.output.stderr io.process io.signal mutate mutate.local nondet
-nondet.random nondet.time` — plus Ruby's proposed leaves `mutate.self mutate.arg mutate.static`.
-`io.output.buffer` / `io.output.header` stay registered but unproduced (Ruby has no output-buffer
-layer; the nearest analogue, `$stdout` reassignment, is a future masking question).
+nondet.random nondet.time` — plus Ruby's leaves `mutate.self mutate.instance mutate.static`, which
+are Steins ADR-0055's reserved names rather than a Rigor proposal (WD14; Steins has not implemented
+them yet, so the coarse `mutate` parent is what it produces there today). `io.output.buffer` /
+`io.output.header` stay registered but unproduced (Ruby has no output-buffer layer; the nearest
+analogue, `$stdout` reassignment, is a future masking question), and so does Steins' `failure` /
+`failure.environment` / `failure.input` / `failure.resource` family (its ADR-0042) — recognised so
+a policy written against Steins parses here, never produced by Rigor.
 
 Three layers sit on top of it, following Steins' "transport facts and semantic facts" (`io.net.http`
 records the mechanism, `sendgrid.mail.send` the provider operation, `email.send` the application
@@ -820,12 +838,19 @@ meaning — "these labels coexist"):
   `io.db.transaction` (a `SELECT` through PDO / ActiveRecord is a read whichever language issued
   it; a migration or `INSERT` is a write; `BEGIN`/`COMMIT` is neither). Adding leaves is
   evolution-safe by the § 4 rule — a declared `io.db` admits all three.
+  **Outcome:** Steins' builtin set stops at `io.db`, so these stay Rigor-owned and the registry
+  table says so; raised as steins#468, which either side can adopt at any time precisely because
+  the addition cannot change what a recognised bound admits.
 - **Application-meaning roots, small and shared**: `telemetry` (loggers, error reporters,
   instrumentation), `email.send`, `job.enqueue`, `cache.read` / `cache.write`. These are the
   labels a policy actually names ("presenters do not enqueue jobs") and the ones the discharge
-  policy grips (`tolerated: [telemetry]`), so they must spell the same in Steins and Rigor. Today
-  Steins treats `email.send` as an example of a *project* label; promoting a handful to the shared
-  registry is a proposal to raise there.
+  policy grips (`tolerated: [telemetry]`).
+  **Outcome:** *not* shared, and the "must spell the same" this bullet asserted had no agreement
+  behind it. Steins holds that ecosystem labels (`io.redis`, `email.send`) are **not builtin** and
+  reach it through a package's own `steins-plugin.json` manifest. Rigor keeps them as builtin rows
+  — a project must not need a plugin installed before it can write its first policy — so the
+  registry table reads Rigor-owned and proposed upstream, and steins#469 asks where the layer
+  belongs.
 - **Framework roots, owned by the plugin that models the framework**: `rails.*` for rigor-rails,
   by the Steins ADR-0068 root-ownership rule adapted to Rigor's plugin ids (a first-party plugin
   opens the root of the framework it models; a third-party plugin opens a root equal to its

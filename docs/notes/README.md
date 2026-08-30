@@ -49,6 +49,7 @@ comparison) appears nowhere else in this index.
 | 2026-05-23 | [Date / Time / DateTime method coverage audit](20260523-date-time-method-coverage.md) |
 | 2026-05-23 | [Struct / Encoding coverage audit](20260523-struct-encoding-coverage.md) |
 | 2026-06-01 | [textbringer type-coverage survey — invalid bundled `sig/`, namespace-synthesis fix](20260601-textbringer-coverage-survey.md) |
+| 2026-08-31 | [Self-check type-coverage audit — where Rigor's own `lib` stays untyped](20260831-self-check-type-coverage-audit.md) |
 
 ## Regression sweeps & real-project triage
 

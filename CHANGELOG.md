@@ -12,6 +12,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[cli]** `rigor coverage` and `rigor check --coverage` report the type precision the engine actually reaches rather than what a file-at-a-time walk can see on its own — a class defined in a sibling file now counts as typed, which is worth 1.4 points on Rigor's own `lib`, and turning `parameter_inference:` on is worth 3.4 more ([#505](https://github.com/rigortype/rigor/pull/505), [#502](https://github.com/rigortype/rigor/issues/502)).
+
 ## [0.3.6] - 2026-08-30
 
 v0.3.6 is a performance release for the commands you run repeatedly: a warm `rigor unused` is several times faster, and a warm `rigor effects` or `rigor effects check` now answers without loading the analysis engine at all ([ADR-104](docs/adr/104-effects-boot-slim-probe.md)). The effect snapshot is sized for an application rather than a fixture, so the committed file shrank by a third, stopped churning when an unrelated call moves, and a drift report now names where each method is defined instead of listing everything behind it. Machine-readable output is a valid document again under `--cache-stats`, and every diagnostic's text output carries the rule identifier you need to configure it. The documentation the gem ships also gained links that resolve for a reader who installed Rigor rather than cloning it.

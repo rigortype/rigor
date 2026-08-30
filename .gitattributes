@@ -1,0 +1,11 @@
+# `## [Unreleased]` is a single hot region that nearly every branch appends to: across v0.3.4-v0.3.6,
+# 18-29 of each cycle's commits touched this file. Two branches adding an entry therefore conflict on
+# insertion order alone, and the only correct resolution has always been "keep both" — 22 such
+# resolutions sit in the history, the largest of them parallel-agent worktree merges. `union` applies
+# that resolution automatically. See AGENTS.md § "Release Cadence".
+#
+# Residual risk: when both sides open the SAME `###` heading, union keeps both copies and merges
+# without complaint. `spec/docs/changelog_conformance_spec.rb` gates exactly that ("declares each
+# section at most once per release") and it covers `[Unreleased]`, so the artefact fails the suite
+# instead of reaching a release. Merging the two headings is the whole fix.
+CHANGELOG.md merge=union

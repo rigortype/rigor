@@ -12,52 +12,70 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-08-30
+
+v0.3.6 is a performance release for the commands you run repeatedly: a warm `rigor unused` is several times faster, and a warm `rigor effects` or `rigor effects check` now answers without loading the analysis engine at all ([ADR-104](docs/adr/104-effects-boot-slim-probe.md)). The effect snapshot is sized for an application rather than a fixture, so the committed file shrank by a third, stopped churning when an unrelated call moves, and a drift report now names where each method is defined instead of listing everything behind it. Machine-readable output is a valid document again under `--cache-stats`, and every diagnostic's text output carries the rule identifier you need to configure it. The documentation the gem ships also gained links that resolve for a reader who installed Rigor rather than cloning it.
+
 ### Changed
 
-- **[effects]** `rigor effects update` records how *many* calls made a method non-exhaustive instead of listing them, which takes the committed snapshot on a mid-size Rails application from 326,964 to 197,968 bytes and stops it churning when an unrelated call moves; `rigor effects explain` names the calls on demand, including for an `exhaustive → not` drift row it previously could not expand ([#434](https://github.com/rigortype/rigor/issues/434), [#435](https://github.com/rigortype/rigor/issues/435)).
+- **[cli]** A warm `rigor unused` is several times faster with a byte-identical report, taking the run on Mastodon from 8.3 s to 1.1 s.
+  - It reuses the analysis cache for its RBS environment and its plugins' prepare work, and scans templates for class names against only the identifier-bearing fraction of each file ([#473](https://github.com/rigortype/rigor/pull/473)).
+  - Its per-file work — the reachability scan of every Ruby file and the template extraction — is cached in one self-validating bundle under the cache directory, so a repeat run re-reads only the files that changed (Mastodon 2.7 s → 1.1 s, Redmine 1.5 s → 0.8 s) ([#481](https://github.com/rigortype/rigor/pull/481)).
+
+- **[effects]** A warm `rigor effects` and `rigor effects check` answer without loading the analysis engine at all, 26–38 % faster on the measured corpus, with byte-identical output including `--full --why`, `--format json` and `explain` ([ADR-104](docs/adr/104-effects-boot-slim-probe.md), [#483](https://github.com/rigortype/rigor/pull/483), [#482](https://github.com/rigortype/rigor/issues/482)).
+  - They read the propagated effect table straight from the cache the analysing run left behind, and the whole-run effects cache no longer loads the per-file collections a warm run never reads.
+  - That table now rides the whole-run cache entry beside the per-file collections under the same identities, so a cache hit adopts it whole instead of re-running the effect fixpoint — the step that took Redmine's warm `rigor effects` from 0.75 s to 0.61 s before the engine-free path landed on top of it ([#475](https://github.com/rigortype/rigor/pull/475)).
+
+- **[effects]** `rigor effects update` records how *many* calls made a method non-exhaustive instead of listing them, which takes the committed snapshot on a mid-size Rails application from 326,964 to 197,968 bytes and stops it churning when an unrelated call moves ([#484](https://github.com/rigortype/rigor/pull/484), [#434](https://github.com/rigortype/rigor/issues/434)).
+  - `rigor effects explain` names those calls on demand, including for an `exhaustive → not` drift row it previously could not expand ([#435](https://github.com/rigortype/rigor/issues/435)).
   - Your committed snapshot will report one `regeneration: schema: 1 → 2` line on the next `rigor effects check`; run `rigor effects update` once to adopt the new form.
 
-- **[effects]** A `rigor effects check` whose two records were computed under different rules now prints the regeneration line and the size of the difference instead of every method in it — previously one moved `config_digest:` printed 482 unreadable `-symbol` lines — and every drift row now names where the method is defined, `(app/models/change.rb:41)` in the report and a `sources` entry under `--format json`, so a reviewer reads the failure instead of searching for the method ([#434](https://github.com/rigortype/rigor/issues/434), [#435](https://github.com/rigortype/rigor/issues/435)).
+- **[effects]** A `rigor effects check` failure is written to be read: it names where each drifted method is defined and how large a rules change was, instead of printing every method behind it ([#497](https://github.com/rigortype/rigor/pull/497), [#484](https://github.com/rigortype/rigor/pull/484), [#435](https://github.com/rigortype/rigor/issues/435)).
+  - Every drift row carries the definition site, `(app/models/change.rb:41)` in the report and a `sources` entry under `--format json`, so a reviewer reads the failure instead of searching for the method ([#497](https://github.com/rigortype/rigor/pull/497)).
+  - A check whose two records were computed under different rules prints the regeneration line and the size of the difference; one moved `config_digest:` previously produced 482 unreadable `-symbol` lines ([#484](https://github.com/rigortype/rigor/pull/484)).
 
-- **[effects]** A warm `rigor effects` and `rigor effects check` now answer without loading the analysis engine at all — they read the propagated table straight from the cache the analysing run left behind — and the whole-run effects cache no longer loads the per-file collections a warm run never reads. Both are 26–38 % faster on the measured corpus, with byte-identical output including `--full --why`, `--format json` and `explain` ([ADR-104](docs/adr/104-effects-boot-slim-probe.md), [#482](https://github.com/rigortype/rigor/issues/482)).
+- **[cli]** Every dispatched command now arms the deferred YJIT deadline, not just `check` and `coverage`, so a cold `rigor effects` over Mastodon finishes alongside the identical analysis under `check` rather than running its whole 21 s interpreted ([#480](https://github.com/rigortype/rigor/pull/480)).
+  - Commands that finish inside the deadline still never pay JIT compile cost.
 
-- **[cli]** `rigor unused` now reuses the analysis cache for its RBS environment and its plugins' prepare work, and scans templates for class names against only the identifier-bearing fraction of each file — the report is byte-identical and 1.4–3.3× faster on the measured corpus (8.3 s → 2.5 s warm on Mastodon).
+- **[effects]** An envelope judgment that finds nothing no longer pays the whole-project discovery parse, so a clean `rigor check` under `effects.envelopes:` skips it entirely (mail 1.03 s → 0.46 s warm) ([#479](https://github.com/rigortype/rigor/pull/479)).
 
-- **[cli]** `rigor unused` also caches its per-file work — the reachability scan of every Ruby file and the template extraction — in one self-validating bundle under the cache directory, so a repeat run re-reads only the files that changed: warm runs are a further 1.9–2.6× faster on the mid-size corpus (Mastodon 2.7 s → 1.1 s, Redmine 1.5 s → 0.8 s) with a byte-identical report.
+- **[engine]** A run whose only synthetic-method contributor registers trait registries no longer parses the whole project to build a provably empty index ([#477](https://github.com/rigortype/rigor/pull/477), [#476](https://github.com/rigortype/rigor/issues/476)).
+  - `rigor-devise` on a Rails application is the case; the scan short-circuits before any I/O until the trait tier's environment threading is fixed (Mastodon `rigor effects` warm 1.12 s → 0.90 s).
 
-- **[effects]** A warm `rigor effects` / `rigor effects check` / envelope-checked `rigor check` no longer re-runs the effect fixpoint: the propagated table rides the whole-run effects cache entry beside the per-file collections, under the same identities, so a cache hit adopts it whole (Redmine `rigor effects` warm 0.75 s → 0.61 s, output byte-identical cold vs warm).
-
-- **[engine]** A run whose only synthetic-method contributor registers trait registries (rigor-devise on a Rails app) no longer parses the whole project to build a provably empty index — the scan short-circuits before any I/O until the trait tier's environment threading is fixed ([#476](https://github.com/rigortype/rigor/issues/476); Mastodon `rigor effects` warm 1.12 s → 0.90 s).
-
-- **[cache]** Warm-run cache validation stats each dependency file once per run instead of once per cache slot — a collecting run validated the effects entry and the diagnostics entry against the same multi-thousand-file descriptor twice.
-
-- **[effects]** An envelope judgment that finds nothing no longer pays the whole-project discovery parse: the `def`-position tables are built on the first finding instead of up front, so a clean `rigor check` under `effects.envelopes:` skips them entirely (mail 1.03 s → 0.46 s warm).
+- **[cache]** Warm-run cache validation stats each dependency file once per run instead of once per cache slot ([#478](https://github.com/rigortype/rigor/pull/478)).
+  - A collecting run validated the effects entry and the diagnostics entry against the same multi-thousand-file descriptor twice.
 
 ### Fixed
 
-- **[cli]** `rigor check --cache-stats` no longer corrupts machine-readable output. The cache block was appended to stdout after the document, so `--format json`, `sarif` and `gitlab` failed to parse and the XML formats grew prose after the closing tag — a SARIF upload to code scanning would reject the artifact while the run itself looked fine. The block now goes to stderr for every format but `text`, as do `--clear-cache`'s and `--verify-incremental`'s notes ([#493](https://github.com/rigortype/rigor/issues/493)).
+- **[cli]** `rigor check --cache-stats` no longer corrupts machine-readable output ([#494](https://github.com/rigortype/rigor/pull/494), [#493](https://github.com/rigortype/rigor/issues/493)).
+  - The cache block was appended to stdout after the document, so `--format json`, `sarif` and `gitlab` failed to parse and the XML formats grew prose after the closing tag — a SARIF upload to code scanning would reject the artifact while the run itself looked fine.
+  - The block now goes to stderr for every format but `text`, as do `--clear-cache`'s and `--verify-incremental`'s notes.
 
-- **[docs]** `rigor docs` now renders the documentation's own links as keys you can run. A page that says `[Caching](12-caching.md)` prints `[Caching][manual/12-caching]`, and `rigor docs manual/12-caching` opens it; a link into the design records — the ADRs, the type specification, the internal spec, `examples/`, plugin READMEs, none of which the gem packages — resolves to a message naming that document's path in the repository instead of failing. Those 284 links were dead for everyone who installed Rigor rather than cloning it ([#430](https://github.com/rigortype/rigor/issues/430)).
+- **[cli]** Every diagnostic's text output now ends with its rule identifier in brackets (`[call.undefined-method]`), so the ID you need for `# rigor:disable`, `disable:` and `severity_profile:` is the one you are already looking at ([#487](https://github.com/rigortype/rigor/pull/487), [#431](https://github.com/rigortype/rigor/issues/431)).
+  - Previously only plugin and RBS-sourced diagnostics carried it, which was exactly the wrong half: built-in rules are the ones the manual tells you to configure by ID, and a run can now be grepped for a rule.
 
-- **[cli]** `rigor unused` no longer reports a class as having no production caller when a data file also names it — a job listed in `config/recurring.yml` and referenced from its spec was landing under "live test, dead production path" while it ran every three minutes. A data-file mention now also demotes to *cannot decide*, and it demotes only the name it matched rather than everything beneath it: the word "Administrasie" in a locale file was demoting 18 unrelated `Admin::*` rows ([#370](https://github.com/rigortype/rigor/issues/370)).
+- **[cli]** `rigor unused` no longer reports a class as having no production caller when a data file also names it ([#489](https://github.com/rigortype/rigor/pull/489), [#370](https://github.com/rigortype/rigor/issues/370)).
+  - A job listed in `config/recurring.yml` and referenced from its spec was landing under "live test, dead production path" while it ran every three minutes; a data-file mention now also demotes to *cannot decide*.
+  - The demotion applies only to the name it matched rather than everything beneath it: the word "Administrasie" in a locale file was demoting 18 unrelated `Admin::*` rows.
 
-- **[docs]** The plugin manual pages now show what the plugins actually print. Every example block had drifted — the `[plugin.<id>.<rule>]` identifier was missing from all of them, line numbers pointed at where the demo code used to be, and one page cited the wrong file entirely ([#488](https://github.com/rigortype/rigor/issues/488)).
+- **[rbs]** `date.to_time(:utc)` and eleven other ordinary ActiveSupport calls no longer draw a false diagnostic on a project that locks `activesupport` without opting into the `rigor-activesupport-core-ext` plugin ([#485](https://github.com/rigortype/rigor/pull/485), [#449](https://github.com/rigortype/rigor/issues/449)).
+  - `String#dasherize`, `Object#in?`, `Time#all_day` and `ERB::Util.html_escape_once` are among the twelve.
 
-- **[cli]** Every diagnostic's text output now ends with its rule identifier in brackets — `[call.undefined-method]` — so the ID you need for `# rigor:disable`, `disable:` and `severity_profile:` is the one you are already looking at, and a run can be grepped for a rule. Previously only plugin and RBS-sourced diagnostics carried it, which was exactly the wrong half: built-in rules are the ones the manual tells you to configure by ID ([#431](https://github.com/rigortype/rigor/issues/431)).
+- **[effects]** An effect annotation written in any of RBS's other bracket spellings (`%a(pure)`, `%a[rigor:v1:effect …]`, `%a|…|`, `%a<…>`) is now read exactly like the brace form ([#474](https://github.com/rigortype/rigor/pull/474)).
+  - All four were invisible to the warm-run cache probe and to the annotations-unchecked notice, so an envelope written that way was judged on cold runs and silently skipped on every cache hit.
+  - A signature file carrying no effect annotation at all is no longer parsed by the envelope reader.
 
-- **[rbs]** `date.to_time(:utc)` and eleven other ordinary ActiveSupport calls — `String#dasherize`, `Object#in?`, `Time#all_day`, `ERB::Util.html_escape_once` among them — no longer draw a false diagnostic on a project that locks `activesupport` without opting into the `rigor-activesupport-core-ext` plugin ([#449](https://github.com/rigortype/rigor/issues/449)).
+- **[docs]** `rigor docs` now renders the documentation's own links as keys you can run ([#496](https://github.com/rigortype/rigor/pull/496), [#430](https://github.com/rigortype/rigor/issues/430)).
+  - A page that says `[Caching](12-caching.md)` prints `[Caching][manual/12-caching]`, and `rigor docs manual/12-caching` opens it.
+  - A link into the design records — the ADRs, the type specification, the internal spec, `examples/`, plugin READMEs, none of which the gem packages — resolves to a message naming that document's path in the repository instead of failing. Those 284 links were dead for everyone who installed Rigor rather than cloning it.
 
-- **[effects]** An effect annotation written in any of RBS's other bracket spellings — `%a(pure)`, `%a[rigor:v1:effect …]`, `%a|…|`, `%a<…>` — was invisible to the warm-run cache probe and to the annotations-unchecked notice, so its envelope was judged on cold runs and silently skipped on every cache hit; all five spellings now route identically, and a signature file with no effect annotation is no longer parsed by the envelope reader at all.
+- **[docs]** The plugin manual pages now show what the plugins actually print ([#490](https://github.com/rigortype/rigor/pull/490), [#495](https://github.com/rigortype/rigor/pull/495), [#488](https://github.com/rigortype/rigor/issues/488)).
+  - Every example block had drifted: the `[plugin.<id>.<rule>]` identifier was missing from all of them, line numbers pointed at where the demo code used to be, and one page cited the wrong file entirely ([#490](https://github.com/rigortype/rigor/pull/490)).
+  - Four more lines, on the `rigor-actionmailer` and `rigor-activejob` pages, were invisible to the drift guard because it required a single space where those two pages column-align their blocks, so it reported green on exactly the drift it exists to catch ([#495](https://github.com/rigortype/rigor/pull/495)).
 
-- **[cli]** Every dispatched command now arms the deferred YJIT deadline, not just `check` and `coverage` — a cold `rigor effects` over Mastodon previously ran its whole 21 s interpreted where the identical analysis under `check` took 14.8 s; both now finish together, and commands that finish inside the deadline still never pay JIT compile cost.
-
-- **[docs]** The committed-snapshot examples in the CLI reference and the effect-labels chapter showed the schema-1 file — `schema: 1`, and `unresolved:` as a list of causes — which `rigor effects update` stopped writing when the field became a count; both now show the file the command actually produces, and the effect-labels example no longer contradicts the paragraph below it explaining that `unresolved:` is a count.
-
-- **[docs]** The `rigor-actionmailer` and `rigor-activejob` manual pages showed four example diagnostics without the `[plugin.<id>.<rule>]` identifier every plugin diagnostic prints, two of them naming a line the call had moved from and one naming the wrong file entirely; both blocks are regenerated from the plugins' own `demo/` output. The [#488](https://github.com/rigortype/rigor/issues/488) drift guard could not see these four lines — it required a single space where the two pages column-aligned their blocks — so it reported green on exactly the drift it exists to catch.
-
-- **[docs]** The `RIGOR_DISABLE_YJIT` entry no longer describes deferred YJIT as something that happens during a `check` or `coverage` run: every dispatched command arms the deadline, so the opt-out applies to all of them.
-
-- **[docs]** `rigor check --cache-stats` now documents the stream it writes to — stdout under `--format text`, stderr under every other format — and `RIGOR_LSP_POOL_MIN_BATCH`, the batch size at which `rigor lsp` dispatches to its worker pool, is documented alongside the other operational environment variables.
+- **[docs]** Manual statements that had drifted from the implementation are corrected ([#495](https://github.com/rigortype/rigor/pull/495)).
+  - The committed-snapshot examples in the CLI reference and the effect-labels chapter showed the schema-1 file, which `rigor effects update` stopped writing when `unresolved:` became a count, and the effect-labels example contradicted the paragraph below it.
+  - The `RIGOR_DISABLE_YJIT` entry no longer describes deferred YJIT as something that happens only during a `check` or `coverage` run, `rigor check --cache-stats` documents the stream it writes to, and `RIGOR_LSP_POOL_MIN_BATCH` is documented alongside the other operational environment variables.
 
 ## [0.3.5] - 2026-08-25
 
@@ -577,7 +595,8 @@ This release is dominated by a performance arc that makes repeat and incremental
 - **[plugin]** The plugin isolation worker no longer dies with an opaque `Inflector::Unavailable: process isolation worker failed (EOFError)` when a target library cannot be loaded ([#109](https://github.com/rigortype/rigor/pull/109)).
   - `Rigor::Plugin::LoadError` lexically shadowed the global `LoadError`, so the worker loop's bare `rescue` matched the wrong class and the real `::LoadError` killed the forked worker; the rescues are now `::`-qualified. The same shadowing bug is fixed in `rigor-rspec-rails`'s Rack status-table loader.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/rigortype/rigor/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/rigortype/rigor/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/rigortype/rigor/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/rigortype/rigor/compare/v0.3.2...v0.3.3

@@ -492,6 +492,16 @@ The gate reads those categories. `symmetric` (default) fails on any event; `addi
 
 The snapshot commands run the same analysis the report runs, and neither emits a diagnostic nor enters `rigor check`'s stream.
 
+### Positions on a drift row
+
+Every row that names a symbol names where that symbol is defined: `Change#init_path  + io.fs.write  (app/models/change.rb:41)`, one parenthetical carrying the position and — under `tolerated:`, which pools both tables — the event's own table. The `--format json` events carry the same thing as a `sources` array of `{path, line}`, because a bot annotating a pull request is the consumer with the most use for a position and the least ability to find one itself.
+
+The two halves come from different places, and that is the whole design. The **file** is `Runner#effect_sources`, which rides the cached summary entry and costs nothing. The **line** is in no value these commands hold: the `def`-position tables `EnvelopeCheck::Positions` reads are built by one Prism parse of every project file, which is exactly what [ADR-104](../adr/104-effects-boot-slim-probe.md) removed from this path — a warm `rigor effects check` is fast *because* it never parses the project. So `Effects::DefinitionLines` parses the drift's own files and nothing else, indexing a file the first time a printed row asks about it: a fresh report parses nothing, and the cost is proportional to the drift rather than to the project. That is [#479](https://github.com/rigortype/rigor/pull/479)'s `DeferredPositions` shape one layer up, and it can be one layer up because the caller already knows the file.
+
+A served run and an analysing one name the same line for the same reason the served table is trusted at all: the entry is validated against its dependency files' digests, so a source file that moved since the recorded run is a decline, not a stale position.
+
+Three answers are deliberately absent, and each keeps the file rather than inventing a line: a method with no Ruby `def` (a synthesized accessor — the same degradation `Positions` makes when it falls back to the class's own source), a key the file's constant nesting cannot spell without the resolution an engine-free path does not have, and a file that does not parse. **A `symbol-removed` row carries no position at all**, and cannot: `effect_sources` is the current run's, and a method the run no longer sees was never defined by it. Recording positions into the document would answer that one row, at the cost of making the record a function of where code sits — the property [§ Origins](#origins) keeps it free of, and the one [#434](https://github.com/rigortype/rigor/issues/434) shrank the file by 39 % to protect.
+
 ## Failure isolation
 
 The collector and the propagator are fail-soft at three levels, and none of them may alter or fail a check:

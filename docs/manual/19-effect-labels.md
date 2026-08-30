@@ -400,17 +400,22 @@ CI runs `rigor effects check` and fails, exit 1:
 Effect drift against .rigor-effects.yml:
 
 methods:
-  Change#init_path  + io.fs.write
-  Change#init_path  + nondet.time
-  Change#init_path  exhaustive → not
+  Change#init_path  + io.fs.write  (app/models/change.rb:41)
+  Change#init_path  + nondet.time  (app/models/change.rb:41)
+  Change#init_path  exhaustive → not  (app/models/change.rb:41)
 
-Run `rigor effects update` and commit the result if this change is intended.
+Run `rigor effects explain` to see what caused this, and `rigor effects update` to accept it.
 ```
 
 `+ label` and `- label` are the proven lane; `≤+` / `≤-` the declared one;
 `materialised` means a declared label became proven; `exhaustive → not` means
 someone introduced a call Rigor cannot follow; `+symbol` / `-symbol` are methods
 that appeared or vanished, and a rename is one of each.
+
+The parenthetical is where the method is defined — the file, and the `def`'s own
+line when the file has one. A method defined by a reopening spans several files
+and the row names them all; a `-symbol` row carries no position, because a method
+this run no longer sees is one it cannot locate.
 
 Before regenerating, ask why:
 

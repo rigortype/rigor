@@ -2,6 +2,7 @@
 
 require "json"
 
+require_relative "../effects/definition_lines"
 require_relative "../effects/snapshot"
 require_relative "../effects/snapshot_diff"
 require_relative "renderable"
@@ -17,8 +18,9 @@ module Rigor
     # the one line the whole workflow turns on: intent is expressed by regenerating and committing the
     # file, not by annotating the code.
     #
-    # It is deliberately not a diagnostic format: no severities, no positions, no exit-code weight of its
-    # own. The exit code comes from the gate.
+    # It is deliberately not a diagnostic format: no severities and no exit-code weight of its own — the
+    # exit code comes from the gate. A row carries a position for a reader to jump to, never one a
+    # `# rigor:disable` or a baseline could act on.
     class EffectsDiffRenderer
       include Renderable
 
@@ -49,13 +51,16 @@ module Rigor
                                   "rules."
 
       # @param sources [Hash{String=>Array<String>}] `Runner#effect_sources` — where each unit is defined.
-      #   A drift row names the file so a reviewer does not have to search for the method (#435); it is
-      #   the file and not `file:line` because a line would cost a whole-project parse this command no
-      #   longer does (ADR-104), and the method key already locates the definition within the file.
-      def initialize(out:, path:, sources: nil)
+      #   A drift row names `file:line` so a reviewer does not have to search for the method (#435). The
+      #   file rides the cached summary entry and is free; the line is resolved by parsing the row's own
+      #   file ({Effects::DefinitionLines}), which is why a fresh report — no rows — still parses nothing
+      #   and the whole-project parse ADR-104 removed from this command stays removed.
+      # @param lines [Effects::DefinitionLines] seam for the specs; the default parses on demand.
+      def initialize(out:, path:, sources: nil, lines: Effects::DefinitionLines.new)
         @out = out
         @path = path
         @sources = sources || {}
+        @lines = lines
       end
 
       private
@@ -97,16 +102,31 @@ module Rigor
         "#{event.symbol}  #{marker}#{annotation(event, qualified)}"
       end
 
-      # One parenthetical, never two: the file the unit is defined in, and — under `tolerated:`, which
-      # pools both tables — which table the event came from. A row with no known source under
-      # `tolerated:` renders exactly as it did before this suffix existed.
+      # One parenthetical, never two: where the unit is defined, and — under `tolerated:`, which pools
+      # both tables — which table the event came from. A row with no known source under `tolerated:`
+      # renders exactly as it did before this suffix existed.
       #
       # A unit defined by a reopening spans several files and the row names them all rather than picking
       # one; which of them a reviewer wants is exactly what the row cannot know.
       def annotation(event, qualified)
-        parts = Array(@sources[event.symbol]).map { |path| Effects::Snapshot.relativize(path, Dir.pwd) }
+        parts = sources_of(event.symbol).map { |path, line| line ? "#{path}:#{line}" : path }
         parts << event.table if qualified
         parts.empty? ? "" : "  (#{parts.join(', ')})"
+      end
+
+      # Where a symbol is defined, as the two renderings share it — one implementation, so the text form
+      # and the JSON one cannot disagree about a position (WD3's rule).
+      #
+      # **A removed symbol has no entry here at all**, and cannot: `sources` is the CURRENT run's, and a
+      # method that no longer exists was not defined by it. Such a row renders exactly as it did before
+      # this suffix existed.
+      #
+      # @return [Array<Array(String, Integer)>] `[relative path, line]` per file, the line nil when that
+      #   file spells the key with no `def` — an accessor, or a definition the nesting cannot name.
+      def sources_of(symbol)
+        Array(@sources[symbol]).map do |path|
+          [Effects::Snapshot.relativize(path, Dir.pwd), @lines.for(key: symbol, path: path)]
+        end
       end
 
       def marker_for(event)
@@ -141,10 +161,23 @@ module Rigor
         "The two records were computed under different rules and are not comparable, so #{noun} not shown."
       end
 
+      # The machine form carries the same position the text one prints (#435): a bot that annotates a pull
+      # request is the consumer with the most use for a line and the least ability to find one itself.
+      # `sources` is omitted rather than emitted empty when the row names nothing — a removed symbol.
+      def event_json(event)
+        row = event.to_h
+        sources = sources_of(event.symbol)
+        return row if sources.empty?
+
+        row.merge("sources" => sources.map do |path, line|
+          line ? { "path" => path, "line" => line } : { "path" => path }
+        end)
+      end
+
       def render_json(diff)
         @out.puts(JSON.pretty_generate(
                     "fresh" => diff.fresh?,
-                    "events" => diff.events.map(&:to_h),
+                    "events" => diff.events.map { |event| event_json(event) },
                     "footer" => {
                       "added_symbols" => diff.footer[:added_symbols],
                       "removed_symbols" => diff.footer[:removed_symbols],

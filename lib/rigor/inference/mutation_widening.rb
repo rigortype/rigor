@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "prism"
+
 require_relative "../type"
 require_relative "../source/node_children"
 require_relative "receiver_alias"
@@ -117,11 +119,15 @@ module Rigor
       def widen_after_call(call_node:, current_scope:)
         return current_scope if pure_self_returner?(call_node.name)
 
-        receiver = call_node.receiver
+        widen_receiver_aliases(call_node.receiver, call_node.name, current_scope)
+      end
+
+      # Widens every variable `receiver` can evaluate to, against `method_name`'s mutator table.
+      def widen_receiver_aliases(receiver, method_name, current_scope)
         return current_scope if receiver.nil?
 
         ReceiverAlias.candidates(receiver).reduce(current_scope) do |acc, read|
-          widen_alias_read(call_node.name, read, acc)
+          widen_alias_read(method_name, read, acc)
         end
       end
 

@@ -1,0 +1,8 @@
+---
+locals:
+  local_array: Array[Dynamic[top]]
+  local_array_empty: bool
+  local_op: Hash[Dynamic[top], Dynamic[top]]
+  local_op_empty: bool
+  local_or: Hash[Dynamic[top], Dynamic[top]]
+  local_or_empty: bool

@@ -136,13 +136,21 @@ Procedure — the enumeration is what makes the rewrite un-skippable, so do not
 shortcut it:
 
 1. **Pull the cycle's merged PRs up front**, so linking is a lookup rather than
-   a recall. Take the previous release's date from its `## [x.y.z] - DATE`
-   heading:
+   a recall. Derive the range from the previous release's **tag**, never from
+   its `## [x.y.z] - DATE` heading:
 
    ```sh
-   gh pr list --state merged --limit 200 --search "merged:>=<prev-release-date>" \
-     --json number,title,mergedAt --jq 'sort_by(.mergedAt) | .[] | "#\(.number)  \(.title)"'
+   git log --oneline --merges vX.Y.Z..HEAD | grep -oE '#[0-9]+'
    ```
+
+   **The heading date is a trap.** It is a local-time date, and
+   `gh pr list --search "merged:>=DATE"` filters in UTC, so every PR merged
+   between the tag and local midnight falls outside the query. At v0.3.6 the
+   tag was `2026-08-25 03:06 +0900` = `2026-08-24T18:06Z`, and the resulting
+   blind window hid six merged PRs — #473, #474, #475, #477, #478, #479 — from
+   a query written exactly as this step used to prescribe. They were recovered
+   only by cross-checking `git log vX.Y.Z..HEAD`. The tag range is exact,
+   offline, and has no timezone to get wrong.
 
    Keep the list beside you for step 4. It is also a **completeness check**: a
    PR in it with no entry anywhere is either a user-facing change nobody wrote
@@ -152,7 +160,10 @@ shortcut it:
 3. Rewrite every commit-style bullet — lead sentence to one clause, move the
    "why / how it works / measured numbers" into a child item, delete internal
    detail outright.
-4. **Link each bullet to the PR that landed it**, from the step-1 list. Match on
+4. **Check every bullet already carries its PR link**, against the step-1 list.
+   `AGENTS.md` requires the link at landing, so this is verification, not
+   authoring: a bullet missing one means the landing rule was skipped, and you
+   are now paying the reconstruction cost this step exists to avoid. Match on
    the change, not the title wording — a bullet that consolidates several PRs
    links each on the child item it belongs to. Leave a bullet unlinked only when
    its change genuinely had no PR (a Markdown-only push to `master`).
@@ -323,6 +334,23 @@ nix --extra-experimental-features 'nix-command flakes' develop --command git dif
 `make verify` runs `make test`, `make lint`, and `make check` in sequence —
 the same set CI runs. `git diff --check` catches whitespace mistakes in the
 release diff.
+
+**Overlap it with the sealing rather than queueing behind it.** `make verify` is
+~170 s of wall time that the prose work does not depend on, and the release
+commit touches no `lib/`. Land the code-affecting edits first — `version.rb`,
+then `bundle install` — start `make verify` in the background, and seal the
+`[Unreleased]` entries while it runs. **The gate must still see the last edit**:
+a `CHANGELOG.md` tweak made after a green verify has gone red on CI twice, and
+`make docs-check` does not cover the changelog conformance spec. So after the
+final edit, re-run the two cheap gates that the prose can actually break:
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command \
+  bundle exec rspec spec/docs/changelog_conformance_spec.rb
+nix --extra-experimental-features 'nix-command flakes' develop --command make docs-check
+```
+
+That preserves the after-the-last-edit invariant at a fraction of a full rerun.
 
 Also build the gem to confirm the gemspec is still valid for the bumped
 version:

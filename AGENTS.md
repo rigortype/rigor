@@ -86,8 +86,12 @@ flow is the `rigor-release-prep` skill.
 - **Never run `bundle exec rake release`** without explicit authorisation — it tags, pushes, and
   publishes to RubyGems.
 - Write each `## [Unreleased]` entry **user-facing at landing**, as if release notes were cut that day:
-  one self-contained sentence under a `**[subsystem]**` label, no internal implementation detail. The
-  commit body is where the engineering record goes. Full entry rules: the `rigor-release-prep` skill.
+  one self-contained sentence under a `**[subsystem]**` label, no internal implementation detail, and
+  the full markdown link to the PR that lands it. The commit body is where the engineering record goes.
+  Full entry rules: the `rigor-release-prep` skill.
+  - **The link is the half that gets more expensive to add later.** You know your own PR number now;
+    recovering it at the cut costs a cycle-wide enumeration plus a per-entry match against it. v0.3.6
+    reached its release with 21 entries and zero links, and reconstructing the 18 dominated the prep.
 - **Running agents in parallel: only the orchestrator writes `CHANGELOG.md`.** Tell each agent to skip
   its `[Unreleased]` entry and to report instead what its change means for a user; write the entries
   yourself once the branches are merged, in that same session. Otherwise every branch edits the same few

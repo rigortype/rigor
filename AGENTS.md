@@ -92,11 +92,17 @@ flow is the `rigor-release-prep` skill.
   - **The link is the half that gets more expensive to add later.** You know your own PR number now;
     recovering it at the cut costs a cycle-wide enumeration plus a per-entry match against it. v0.3.6
     reached its release with 21 entries and zero links, and reconstructing the 18 dominated the prep.
-- **Running agents in parallel: only the orchestrator writes `CHANGELOG.md`.** Tell each agent to skip
-  its `[Unreleased]` entry and to report instead what its change means for a user; write the entries
-  yourself once the branches are merged, in that same session. Otherwise every branch edits the same few
-  lines, and every PR after the first needs a hand-resolved conflict in the one file whose wording you
-  were going to review anyway.
+- **Parallel agents each write their own entry; `CHANGELOG.md` merges by union.** `.gitattributes`
+  marks the file `merge=union`, so two branches appending to `## [Unreleased]` no longer conflict on
+  insertion order. That resolution was always "keep both" — git now applies it instead of stopping to
+  ask. Do **not** tell agents to skip their entry: the link is cheapest at landing (above), and a
+  deferred entry is one somebody has to reconstruct.
+  - The one artefact union can produce is a **duplicated `###` heading**, when two branches each open a
+    section `[Unreleased]` did not have. It merges silently, so it is gated instead:
+    `spec/docs/changelog_conformance_spec.rb` fails on a section declared twice in a release, and
+    merging the two headings is the whole fix. Prefer adding under a heading that already exists.
+  - Reviewing the wording is still yours, but it belongs **at the cut**, where release prep consolidates
+    across the whole cycle anyway — not serialised through one session while branches wait.
 
 ## Implementation Guidelines
 

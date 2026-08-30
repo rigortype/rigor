@@ -169,7 +169,12 @@ shortcut it:
    its change genuinely had no PR (a Markdown-only push to `master`).
 5. Watch for **merge artefacts**: two entries accidentally glued into one
    bullet (a stray second `**[label]**` mid-sentence, an env-var description
-   hanging off an unrelated entry). Split them.
+   hanging off an unrelated entry). Split them. `CHANGELOG.md` is `merge=union`
+   (`.gitattributes`), which trades insertion-order conflicts for one artefact
+   you must look for here: a **duplicated `###` heading**, where two branches
+   each opened the same section. Merge the two, keeping Keep a Changelog's
+   order. `spec/docs/changelog_conformance_spec.rb` fails on it, so a missed one
+   is caught rather than shipped — but catching it at the cut is cheaper.
 6. Re-read the sealed section top-to-bottom as a user would. If any top-level
    bullet still has two sentences or an em-dash clause, it is not done.
 
@@ -458,7 +463,11 @@ gh pr merge <pr> --rebase --delete-branch
   explained.
 - **Rebase- or merge-commit, never squash.** Keep the `Bump up version to
   x.y.z` commit intact so the tag in "Publish" lands on it. If `master`
-  advanced, rebase the branch first and re-push.
+  advanced, rebase the branch first and re-push — and **re-read the sealed
+  section afterwards**. `merge=union` means a `[Unreleased]` entry that landed
+  on `master` during release prep is folded in silently rather than raising a
+  conflict, so it can arrive under the wrong heading or after the section was
+  already sealed.
 - The PR merge **is** the merge-back to `master`; publish runs from `master`
   afterward, so there is no separate merge-back step.
 

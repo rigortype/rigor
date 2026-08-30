@@ -155,9 +155,10 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
       status, out, = run("check")
 
       expect(status).to eq(1)
-      # #435 — every drift row names the file the unit is defined in, project-relative.
-      expect(out).to include("methods:\n  Tracer::Loud#emit  + io.fs.read  (loud.rb)\n")
-      expect(out).to include("reach:\n  Tracer::Dispatcher#run  + io.fs.read  (overrides.rb)\n")
+      # #435 — every drift row names where the unit is defined, project-relative and with the `def`'s
+      # own line, which is resolved by parsing the row's file rather than the project's.
+      expect(out).to include("methods:\n  Tracer::Loud#emit  + io.fs.read  (loud.rb:8)\n")
+      expect(out).to include("reach:\n  Tracer::Dispatcher#run  + io.fs.read  (overrides.rb:15)\n")
       expect(out).to end_with("Run `rigor effects explain` to see what caused this, and " \
                               "`rigor effects update` to accept it.\n")
     end
@@ -338,7 +339,7 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
         status, out, = run("check")
 
         expect(status).to eq(0)
-        expect(out).to include("tolerated:\n  Tracer::Loud#emit  + io.fs.read  (loud.rb, methods)")
+        expect(out).to include("tolerated:\n  Tracer::Loud#emit  + io.fs.read  (loud.rb:8, methods)")
       end
 
       it "fails on it under --strict-tolerated" do
@@ -361,9 +362,11 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
 
       expect(status).to eq(1)
       expect(payload.fetch("fresh")).to be(false)
+      # The machine form carries the same position the text one prints (#435).
       expect(payload.fetch("events")).to include(
         "category" => "label-added", "symbol" => "Tracer::Loud#emit", "table" => "methods",
-        "tolerated" => false, "label" => "io.fs.read"
+        "tolerated" => false, "label" => "io.fs.read",
+        "sources" => [{ "path" => "loud.rb", "line" => 8 }]
       )
       expect(payload.fetch("footer")).to eq("added_symbols" => 0, "removed_symbols" => 0, "suppressed" => 0)
       expect(payload.dig("header", "current", "rigor")).to eq(Rigor::VERSION)

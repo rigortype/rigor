@@ -376,13 +376,16 @@ spelled out:
 Effect drift against .rigor-effects.yml:
 
 methods:
-  PaymentGateway#charge  + io.net.http
+  PaymentGateway#charge  + io.net.http  (app/services/payment_gateway.rb:18)
 
 reach:
-  OrdersController#create  + io.net.http
+  OrdersController#create  + io.net.http  (app/controllers/orders_controller.rb:7)
 
-Run `rigor effects update` and commit the result if this change is intended.
+Run `rigor effects explain` to see what caused this, and `rigor effects update` to accept it.
 ```
+
+Each row names where the method is defined, so the reviewer reads the report
+rather than searching for the method.
 
 The author runs `rigor effects explain` to see the route —
 

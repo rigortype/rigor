@@ -110,6 +110,22 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/universal_object_methods.rb — receiver-independent Object/Kernel selectors" do
+    let(:harness) { harness_for("universal_object_methods") }
+
+    # Every `assert_type` in the fixture — the predicates on an untyped receiver, the Object contract methods, and
+    # the three deliberate exclusions (`class`, `==`, `to_s`), which must still read `untyped`.
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "still folds through a receiver the dispatcher can name" do
+      expect(harness.local(:folded_nil)).to eq(constant(true))
+      expect(harness.local(:folded_inspect)).to eq(constant(":sym"))
+    end
+  end
+
   describe "fixtures/index_write_mutation_widening.rb — `h[k] ||= v` and siblings widen like `h[k] = v`" do
     let(:harness) { harness_for("index_write_mutation_widening") }
 

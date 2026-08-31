@@ -14,7 +14,7 @@ inside the Nix Flake, against a two-class scratch project.
 alternative to monadic effect systems.
 **Primary sources:** the [Scala 3 nightly reference — Capture Checking](https://nightly.scala-lang.org/docs/reference/experimental/capture-checking/index.html)
 (the source of record for CC behaviour; the section pages `overview.html`, `basics.html`,
-`polymorphism.html`, `how-to-use.html` are cited individually below);
+`polymorphism.html`, `how-to-use.html`, `separation-checking.html` are cited individually below);
 [tanishiking, *Introduction to Scala 3's Capture Checking and Separation Checking*](https://tanishiking.github.io/posts/introduction-to-scala-3s-capture-checking-and-separation-checking/)
 (secondary, covers Separation Checking); Boruch-Gruszecki, Odersky, Lee, Lhoták, Brachthäuser,
 [*Capturing Types*](https://dl.acm.org/doi/10.1145/3618003), TOPLAS 45(4), 2023 (the CC<:□ calculus
@@ -73,11 +73,24 @@ The moving parts, per the reference docs:
   Note that capability f cannot be included in outer capture set 's3.
   ```
 
-- **Separation Checking** (newer, layered on CC) splits capabilities into exclusive and shared,
-  gives mutable classes `update` methods and read-only views (`Ref` expands to `Ref^{any.rd}`,
-  `Ref^` to full access), checks disjointness of the capture sets of parallel arguments, and adds
-  `consume` parameters / hiding for move-like semantics (tanishiking post; reference
-  `separation-checking.html`).
+- **Separation Checking** (newer, layered on CC; its own opt-in
+  `import language.experimental.separationChecking` on top of the `captureChecking` one) extends
+  the model to mutation and aliasing
+  ([separation-checking](https://nightly.scala-lang.org/docs/reference/experimental/capture-checking/separation-checking.html);
+  the tanishiking post walks the same ground with examples). A mutable class extends the `Mutable`
+  trait and marks its mutators with an `update` modifier; every capability is exclusive unless its
+  type extends `SharedCapability`, and each exclusive capability `x` has a read-only version
+  `x.rd` (`Ref^` expands to `Ref^{any}`, a bare `Ref` in the relevant positions to the read-only
+  `Ref^{any.rd}`). The check itself is an interference rule: two capture sets interfere when one
+  holds an exclusive capability `x` and the other mentions `x` or its read-only `x.rd`; sets are
+  separated when their transitive capture sets do not interfere. The checker demands separation
+  between a call's arguments (each argument's hidden set against the other arguments' capture
+  sets, the function prefix, and the result) and, in statement sequences, between a used
+  capability and the hidden sets of previous definitions — with an escape hatch when a formal
+  parameter's capture set explicitly names the conflicting parameter. `consume` parameters give
+  move semantics: the passed capability is reserved beyond the call and the original reference is
+  unusable afterwards. The reference page itself flags this layer as less mature than capture
+  checking proper — the balance of safety and expressivity is still in question.
 
 ### 2.2 Effect polymorphism falls out of term passing
 
@@ -91,8 +104,9 @@ listener registries — and the docs say to prefer the implicit route.
 
 ### 2.3 The user-facing surface
 
-- **Opt-in per file**: `import language.experimental.captureChecking` on a Scala 3 nightly
-  (Separation Checking via its own import, which implies CC)
+- **Opt-in per file**: `import language.experimental.captureChecking` on a Scala 3 nightly, with
+  Separation Checking behind its own `separationChecking` import on top — kept separate, per its
+  page, precisely because that layer is the less mature one
   ([how-to-use](https://nightly.scala-lang.org/docs/reference/experimental/capture-checking/how-to-use.html)).
 - **Users annotate boundaries, the compiler infers the middle**: parameter types get capability
   markers (`FileOutputStream^`); capture sets of closures and results are inferred and can be
@@ -314,11 +328,16 @@ thing to converge on even if it were semantically transferable.
    summary as a separate labelled line (`effects: [io.fs.write] …?`) without touching the type —
    honest, because it labels the call, not the value. It needs the effect table as a new consumer
    of a `type-of` run (cache identity per WD13), and no adjudication covers it either way.
-2. **Separation Checking's read/write split.** `m.rd` vs `m` and `consume`/hiding rhyme faintly
-   with `mutate.local`'s fresh-and-unescaped ownership analysis (`effect-summaries.md:94-99`).
-   Nothing actionable — Rigor's ownership is syntactic and deliberately conservative — but if
-   Separation Checking stabilizes it becomes the more interesting comparison, being about aliasing
-   rather than authority.
+2. **Separation Checking's read/write split.** The official page's model (§ 2.1) is a
+   receiver-side ownership discipline, and it rhymes with Rigor's `mutate.*` family more closely
+   than plain CC does: the `update` modifier classifies methods by whether they mutate their
+   receiver, which is the same cut as `mutate.self` vs the rest of the receiver-ownership
+   taxonomy; exclusive-vs-`x.rd` is a checked version of the read/write distinction Rigor's
+   catalogue encodes per row; and `consume`'s reserved-beyond-the-call is the enforcement-flavoured
+   cousin of `mutate.local`'s fresh-and-unescaped ownership analysis (`effect-summaries.md:94-99`).
+   Nothing actionable — Rigor's ownership is syntactic and deliberately conservative, and the page
+   itself flags the layer as immature — but if Separation Checking stabilizes it becomes the more
+   interesting comparison, being about aliasing rather than authority.
 3. **Verified plugin rows.** #454's declined option 3 (a plugin row *verified* against a source the
    analyzer read) is the one future in which a bound-flavoured presentation could show `io.db.*` in
    a lane a diagnostic reads. The ruling says reconsider only if that contribution kind exists; a

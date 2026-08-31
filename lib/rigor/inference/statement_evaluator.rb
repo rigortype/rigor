@@ -1444,6 +1444,10 @@ module Rigor
         # whose body we cannot prove match-free). A call provably match-free on a known receiver — `$3.to_i`, `year <
         # 50` — does NOT clobber, so the multi-statement `m = /…/ =~ s; …; use($2)` stdlib idiom keeps its precision
         # while a genuinely interposed match still invalidates.
+        # The chain above is Scope-total by construction (every helper returns its input scope or a
+        # combinator result); the `||=` is a runtime no-op that pins the INFERRED type back to Scope for
+        # the negative rules when a helper's return widens to `Scope?` under call-site binding (#524).
+        post_scope ||= scope
         post_scope = post_scope.forget_match_globals if match_capable_call?(node)
         [call_type, post_scope]
       end
@@ -1482,12 +1486,14 @@ module Rigor
         seed = current_scope.class_ivars_for(class_name)
         return current_scope if seed.empty?
 
-        seed.reduce(current_scope) do |acc, (ivar_name, seed_type)|
+        widened = current_scope
+        seed.each do |ivar_name, seed_type|
           local_type = current_scope.ivar(ivar_name)
-          next acc if local_type.nil? || local_type == seed_type
+          next if local_type.nil? || local_type == seed_type
 
-          acc.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
+          widened = widened.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
         end
+        widened
       end
 
       def intervening_call_candidate?(call_node)

@@ -67,8 +67,9 @@ Rigor is for.
   post-#508 tree (`def` parameters 17,246 + block parameters 3,490 of 68,336 opaque expressions),
   and both levers on them are the closed ones above. Re-measure against the note's attribution
   before proposing anything here.
-- **`make check-coverage --threshold 0.43`** now gates a different number: `lib` reads 58.98% and the
-  two corpus applications 47.8% / 48.9%. Whether to tighten it is an open, self-contained decision.
+- ~~The precision gate's threshold~~ — done 2026-08-31: `make coverage` moved 0.43 → 0.57, calibrated
+  on the measured drift (0.94 points across the whole 0.3.x line under a fixed analyzer), not on the
+  headroom. The two corpus applications read 47.8% / 48.9%, so the gate stays a `lib`-only number.
 - **A larger population the ivar census surfaced**: 13–15% of all instance-variable reads are of an
   ivar with **no static write anywhere in the scanned tree** (380 / 394 / 635 across the three).
   `attr_writer`, `instance_variable_set`, framework assignment, or a write outside `paths:`. Bigger

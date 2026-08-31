@@ -84,7 +84,7 @@ was never applied to the precision path.**
 | + `param_inferred_types` (1,338) | 99,607 | 0.6007 | +4.87pp / +8,071 sites |
 
 The ratio is user-facing — `rigor coverage`, `rigor check --coverage`, and the
-`make check-coverage --threshold 0.43` gate all report it. The consequence for anyone measuring:
+`make coverage` threshold gate all report it. The consequence for anyone measuring:
 **a precision ratio and a protection ratio from the same run describe two different engines and
 must not be compared.**
 

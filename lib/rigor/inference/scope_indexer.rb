@@ -79,7 +79,14 @@ module Rigor
         # Slice 7 phase 6. Same pre-pass shape for cvars (per class) and globals (program-wide). Globals are also
         # materialised into the top-level scope's `globals` map so reads at the top level (and in CLI probes that do not
         # enter a method body) observe the precise type without consulting the accumulator on every lookup.
-        class_cvars = build_class_cvar_index(root, seeded_scope)
+        # Issue #540 — a literal-shape carrier assigned to a constant or class variable is only as good as
+        # the file's OWN mutations of it: `ISPELL_STATUS = {}` with a sibling method writing
+        # `ISPELL_STATUS[:key] = param` must not fold reads through the closed empty shape. One census walk
+        # collects the mutated names; the two accumulators below widen their entries to the Dynamic-wrapped
+        # form so reads stay honest without licensing the negative rules.
+        literal_mutations = collect_literal_receiver_mutations(root)
+
+        class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope), literal_mutations[:cvars])
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
         program_globals = build_program_global_index(root, seeded_scope)
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(program_globals: program_globals))
@@ -93,7 +100,9 @@ module Rigor
         # `pre_eval:` constant seed `Runner#project_scope_seed_tables` applies). Same-file declarations are the
         # most specific authority, exactly as `merged_classes` above resolves the same collision. Without the
         # merge, the assignment below would silently drop the project seed on every file.
-        in_source_constants = build_in_source_constants(root, seeded_scope)
+        in_source_constants = widen_mutated_constants(
+          build_in_source_constants(root, seeded_scope), literal_mutations[:constants]
+        )
         merged_constants = merge_seeded_constants(default_scope.in_source_constants, in_source_constants)
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(in_source_constants: merged_constants))
 
@@ -1349,6 +1358,111 @@ module Rigor
         accumulator = {}
         walk_constant_writes(root, [], default_scope, accumulator)
         accumulator.freeze
+      end
+
+      # Issue #540 — the mutation census behind the two wideners. Walks the whole tree once, tracking the
+      # lexical class/module prefix, and records every node that MUTATES a constant-read or
+      # class-variable-read receiver: the `Index{Or,And,Operator}Write` family, and a CallNode whose name
+      # is a known in-place mutator (`MutationWidening`'s tables) or a plain attribute/index writer
+      # (`name=` / `[]=`). Non-mutating reads never register, so `VERSION`-style constants keep their fold.
+      #
+      # @return [Hash{Symbol => Object}] `:constants` — a Set of candidate qualified names (each mutation
+      #   contributes every lexical-resolution candidate, `A::B::C` outward to bare `C`, mirroring how the
+      #   reads resolve); `:cvars` — `{class_name => Set[Symbol]}`.
+      def collect_literal_receiver_mutations(root)
+        census = { constants: Set.new, cvars: Hash.new { |h, k| h[k] = Set.new } }
+        walk_literal_receiver_mutations(root, [], census)
+        census
+      end
+
+      def walk_literal_receiver_mutations(node, qualified_prefix, census)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = Source::ConstantPath.qualified_name(node.constant_path)
+          if name
+            walk_literal_receiver_mutations(node.body, qualified_prefix + [name], census) if node.body
+            return
+          end
+        else
+          record_literal_receiver_mutation(node, qualified_prefix, census)
+        end
+
+        node.rigor_each_child { |child| walk_literal_receiver_mutations(child, qualified_prefix, census) }
+      end
+
+      def record_literal_receiver_mutation(node, qualified_prefix, census)
+        receiver = mutating_receiver_of(node)
+        return if receiver.nil?
+
+        case receiver
+        when Prism::ConstantReadNode
+          constant_mutation_candidates(receiver.name.to_s, qualified_prefix, census[:constants])
+        when Prism::ConstantPathNode
+          full = Source::ConstantPath.qualified_name_or_nil(receiver)
+          census[:constants] << full if full
+        when Prism::ClassVariableReadNode
+          census[:cvars][qualified_prefix.join("::")] << receiver.name unless qualified_prefix.empty?
+        end
+      end
+
+      # The receiver a node mutates, or nil when the node is not a mutation.
+      def mutating_receiver_of(node)
+        case node
+        when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode
+          node.receiver
+        when Prism::CallNode
+          return nil if node.receiver.nil?
+          return node.receiver if node.attribute_write?
+          return node.receiver if MutationWidening::ARRAY_MUTATORS.include?(node.name) ||
+                                  MutationWidening::HASH_MUTATORS.include?(node.name)
+
+          nil
+        end
+      end
+
+      # Every lexical-resolution candidate for a bare constant name under `qualified_prefix`, outermost
+      # last — `[A, B]` + `C` yields `A::B::C`, `A::C`, `C` — so the widener matches whichever form the
+      # write accumulator recorded.
+      def constant_mutation_candidates(base_name, qualified_prefix, into)
+        (0..qualified_prefix.size).each do |keep|
+          prefix = qualified_prefix.first(qualified_prefix.size - keep)
+          into << (prefix.empty? ? base_name : "#{prefix.join('::')}::#{base_name}")
+        end
+      end
+
+      def widen_mutated_constants(accumulator, mutated_names)
+        return accumulator if mutated_names.empty?
+
+        widened = accumulator.dup
+        mutated_names.each do |name|
+          existing = widened[name]
+          next if existing.nil? || existing.is_a?(Type::Dynamic)
+
+          widened[name] = Type::Combinator.dynamic(existing)
+        end
+        widened.freeze
+      end
+
+      def widen_mutated_cvars(accumulator, mutated_by_class)
+        return accumulator if mutated_by_class.empty?
+
+        widened = accumulator.dup
+        mutated_by_class.each do |class_name, names|
+          table = widened[class_name]
+          next if table.nil?
+
+          updated = table.dup
+          names.each do |cvar|
+            existing = updated[cvar]
+            next if existing.nil? || existing.is_a?(Type::Dynamic)
+
+            updated[cvar] = Type::Combinator.dynamic(existing)
+          end
+          widened[class_name] = updated.freeze
+        end
+        widened.freeze
       end
 
       # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table. Returns the

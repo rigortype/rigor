@@ -18,16 +18,16 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 The 2026-09-01 session ran the 25-target corpus opacity sweep, filed the mechanism backlog
-(#518–#534, #539–#545, #553), and landed waves 0–3 of the fixes as **19 PRs** (one merged, eighteen
+(#518–#534, #539–#545, #553), and landed waves 0–3 of the fixes as **20 PRs** (one merged, nineteen
 green and waiting). Synthesis: [`docs/notes/20260901-corpus-opacity-attribution.md`](notes/20260901-corpus-opacity-attribution.md);
 harness + per-target reports on branch `opacity-sweep-harness-20260901`.
 
-## FIRST: eighteen green PRs wait on merge (the classifier blocks `gh pr merge` for agents)
+## FIRST: nineteen green PRs wait on merge (the classifier blocks `gh pr merge` for agents)
 
 Every PR was verified standalone AND on a local all-in integration (all gates green; corpus below).
 Merge order:
 
-1. **[#536](https://github.com/rigortype/rigor/pull/536) #537 #545 #546 #547 #548 #549 #550 #551 #552 #554 #555 #556** — independent, any order.
+1. **[#536](https://github.com/rigortype/rigor/pull/536) #537 #545 #546 #547 #548 #549 #550 #551 #552 #554 #555 #556 #559** — independent, any order.
 2. Two stacks, same discipline — merge the base, `gh pr edit <top> --base master`, wait for CI,
    merge; do not let the auto-retarget race you (the stacked-PR trap):
    **[#538](https://github.com/rigortype/rigor/pull/538)** then **[#543](https://github.com/rigortype/rigor/pull/543)**;
@@ -44,17 +44,19 @@ Merge order:
    `join_candidate_returns` and thread #556's `alias_expander: environment.rbs_loader` into it as a
    kwarg it passes to the translator); and #537 vs #558 in `overload_selector.rb` (keep #537's
    array-valued passes, adopt #558's hash-bundle `run_selection_passes(overloads, shared)` signature
-   with `alias_expander:` in the bundle). After all eighteen: `make verify` on the integrated master
+   with `alias_expander:` in the bundle). After all nineteen: `make verify` on the integrated master
    and re-prime the diagnostics slot with a `check` run.
    Note #554 bumps the cache `SCHEMA_VERSION` (6 → 7), so the first post-merge run is cold.
    #556 costs ~+5.5% lib cold self-check wall (after its expansion-memo commit; rest is inherent).
 
-**Integrated corpus (11 targets vs pre-session master, all adjudicated in the PR bodies): +41 / −70**
-(re-collected three times as #555, #556+memo, then #557 landed — byte-identical every time).
-The 41: **11 true-positive bug finds** (mastodon `quote_request.rb` nil-deref ×8 with the code's own
+**Integrated corpus (11 targets vs pre-session master, all adjudicated in the PR bodies): +40 / −70**
+(re-collected after each late PR; byte-identical through #558, then #559 killed exactly one finding:
+mail `chars.rb:240` — the #553 phantom-Hash `.pack` FP, the one FP #554's tally carried).
+The 40: **11 true-positive bug finds** (mastodon `quote_request.rb` nil-deref ×8 with the code's own
 "TODO: raise if status is nil"; textbringer LSP `stderr` crash paths ×2; redmine `diff_table.rb:153`
 `=` for `==`), 22 `def.return-type-mismatch` warnings against textbringer's own drifting sig (the
-contradiction rule's job), 4 worst-case-sound `String?` reads, 3 FPs filed (#542, #553), 1 borderline.
+contradiction rule's job), 4 worst-case-sound `String?` reads, 2 FPs filed as #542, 1 borderline (#553's FP is FIXED by #559,
+which closes that issue on merge).
 The 70 removed are all false positives (39 of them undefined-method FPs the #554 extend fold clears).
 Integrated `lib` precision, measured same-day paired: master 59.8% → **61.3%**
 (`make coverage` gate re-pinned 0.57 → 0.58 in #535; #556 alone is +1.0pp of the gap); mastodon coverage +1.16pp from #551 alone,

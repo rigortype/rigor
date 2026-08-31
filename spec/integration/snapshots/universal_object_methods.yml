@@ -1,0 +1,4 @@
+---
+locals:
+  folded_inspect: '":sym"'
+  folded_nil: 'true'

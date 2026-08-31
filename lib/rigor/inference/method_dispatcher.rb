@@ -30,6 +30,7 @@ require_relative "method_dispatcher/cgi_folding"
 require_relative "method_dispatcher/uri_folding"
 require_relative "method_dispatcher/set_folding"
 require_relative "method_dispatcher/kernel_dispatch"
+require_relative "method_dispatcher/universal_object_dispatch"
 require_relative "method_dispatcher/method_folding"
 
 module Rigor
@@ -217,6 +218,15 @@ module Rigor
         # tier. Sits below every real resolution tier so a genuine signature always wins.
         stub_result = try_synthesized_stub_type(receiver_type, environment)
         return stub_result if stub_result
+
+        # The receiver-independent `BasicObject` / `Object` / `Kernel` selectors, for a receiver no tier
+        # above could name. `x.nil?` is `bool` whatever `x` is; without this tier it was `Dynamic[Top]`
+        # like every other call on an untyped receiver. Sits here, below every real resolution tier, so a
+        # nameable receiver always answers from its own signature first — this only ever replaces a
+        # `Dynamic[Top]` the typer was about to produce. See {UniversalObjectDispatch} for the table and
+        # for the selectors deliberately left out of it.
+        universal_result = UniversalObjectDispatch.try_dispatch(context)
+        return universal_result if universal_result
 
         # Slice 7 phase 10 — user-class ancestor fallback. When the receiver is `Nominal[T]` or
         # `Singleton[T]` for a class not in the RBS environment (typically a user-defined class),

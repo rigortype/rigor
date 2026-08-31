@@ -69,15 +69,17 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
   # service-object `#call` carried the wrong label.
   it "routes a chain behind an unresolved call with a discovered project def to inferred_return_untyped" do
     # `call`'s own receiver is concrete (protected — not a site); the label shows on the DOWNSTREAM
-    # dispatch whose Dynamic receiver inherits the call node's provenance via ADR-82 WD6.
+    # dispatch whose Dynamic receiver inherits the call node's provenance via ADR-82 WD6. The def uses a
+    # trailing post parameter — the one shape the #524 per-parameter binder still declines — so the
+    # fixture keeps exercising the decline path on the integrated tree too.
     result = scan(<<~RUBY)
       class Service
-        def call(*args)
-          args
+        def call(first, *rest, last)
+          rest
         end
       end
 
-      Service.new.call(1).foo
+      Service.new.call(1, 2, 3).foo
     RUBY
     site = result.sites.find { |s| s.method_name == "foo" }
     expect(site).not_to be_nil

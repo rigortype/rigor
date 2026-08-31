@@ -1326,8 +1326,20 @@ module Rigor
         end
       end
 
+      # #525 — instance-side user-method inference accepts the named ADR-48 member carriers alongside
+      # plain nominals: a `Line = Struct.new(...) do ... end` value is a StructInstance whose block defs
+      # live under "Line", and the carrier itself is the right `self` for the body (member reads inside
+      # the def project through it).
+      def user_inference_receiver?(receiver)
+        case receiver
+        when Type::Nominal then true
+        when Type::StructInstance, Type::DataInstance then !receiver.class_name.nil?
+        else false
+        end
+      end
+
       def try_user_method_inference(receiver, call_node, arg_types)
-        return nil unless receiver.is_a?(Type::Nominal)
+        return nil unless user_inference_receiver?(receiver)
 
         def_node, owner = resolve_user_def_with_owner(receiver.class_name, call_node.name)
         return nil if def_node.nil?

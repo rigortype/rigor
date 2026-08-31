@@ -22,6 +22,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** Calling your own method with optional, keyword, rest, or block parameters no longer loses its inferred return type — the call-site binder binds each parameter it can identify (defaults included, `options = {}` too) instead of giving up on the whole signature, which also surfaced a real crash path in a survey app the code's own TODO had flagged ([#547](https://github.com/rigortype/rigor/pull/547), [#524](https://github.com/rigortype/rigor/issues/524)).
+
+- **[engine]** `File.read(path)` and `IO.read(path)` without a length now type as `String` instead of `String?` — the no-length form never returns nil, so guards on whole-file reads stop flagging impossible nils ([#547](https://github.com/rigortype/rigor/pull/547)).
+
 - **[cli]** `rigor coverage` and `rigor check --coverage` now measure the same engine `rigor check` runs: the precision ratio sees your project's cross-file methods, ancestry, and plugin-contributed types instead of under-reporting them as untyped, and precisely-folded `Data` / `Struct` values count as typed ([#535](https://github.com/rigortype/rigor/pull/535), [#513](https://github.com/rigortype/rigor/issues/513), [#523](https://github.com/rigortype/rigor/issues/523)).
 
 - **[engine]** A collection handed out by one method and filled through that reference — `(bucket_for(entry)[key] ||= {})[name] = row` — is no longer read as still empty, so `empty?` and `size` on it stop folding to a constant in every other method of the class ([#507](https://github.com/rigortype/rigor/pull/507), [#506](https://github.com/rigortype/rigor/issues/506)).

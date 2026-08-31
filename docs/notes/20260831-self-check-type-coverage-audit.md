@@ -309,6 +309,56 @@ larger: **13–15% of all ivar reads are of an ivar with no static write anywher
 (380 / 394 / 635). Those are `attr_writer`, `instance_variable_set`, framework assignment, or a
 write outside the scanned paths — a harder problem than seeding, and unrelated to it.
 
+## Follow-up: where instance-variable opacity actually comes from
+
+The census above named a population — 13–15% of ivar reads are of an ivar with no static write in
+the scanned tree — and called it unscoped. Scoping it says something more useful than its own size.
+
+Asking the engine (rather than the AST) why each opaque ivar read is opaque, on `lib`: **2,104 of
+2,711 ivar reads are `Dynamic[Top]`**, and they split three ways.
+
+| bucket | count | share | what it is |
+| --- | --- | --- | --- |
+| **entry-opaque** | 1,656 | 78.7% | the class-ivar accumulator HAS an entry, and it is `Dynamic` — a write exists whose own rvalue did not type |
+| no-entry | 413 | 19.6% | nothing wrote the name where the accumulator looks |
+| singleton-body | 35 | 1.7% | read inside a `def self.` / `class << self` body, which takes no ivar seed by design |
+
+**Four fifths of ivar opacity is a write whose rvalue is a parameter** — `def initialize(line);
+@line = line` — which is precisely the frontier [ADR-67](../adr/67-parameter-type-inference.md)
+names as its own (ADR-58 types concrete-write fields and cannot touch a param-sourced one). Ivars
+are not an independent lever; they are parameters seen from one hop downstream.
+
+The `no-entry` bucket has one clean sub-pattern, worth measuring because it looked structural: an
+ivar written at **class / module body level** (`@mutex = Mutex.new` beside a `module_function`) and
+read from a singleton-context method. Those are the same object's ivar at runtime, and the
+accumulator cannot help because it deliberately serves instance bodies only — seeding a class-level
+write into an instance body would be wrong (different object). The symmetric accumulator that would
+serve singleton bodies does not exist. Population:
+
+| | singleton-context ivar reads | with a class-level write |
+| --- | --- | --- |
+| this repo (`lib`) | 82 | 82 |
+| redmine (app+lib) | 63 | 63 |
+| mastodon (app+lib) | 5 | 5 |
+
+The mapping is perfect where it exists (every such read has a matching write) and the population is
+82 sites against the 1,656 in the bucket next door. **Not pursued**, on the same grounds as the
+cross-file question above.
+
+### The conclusion this thread reaches
+
+Three independent decompositions of the remaining opacity land on one place:
+
+- opaque **local reads** — 72% are `def` or block parameters;
+- opaque **calls** — ~91% have a receiver that is already `Dynamic`, so they are propagation;
+- opaque **ivar reads** — 79% are a write whose rvalue is a parameter.
+
+So precision work on this codebase is not blocked on finding a lever; it is blocked on the one lever
+everything routes to, and both approaches to it are closed by ADR-67 (WD2 by a design spike, WD3
+default-on by three re-evaluation triggers, one of which needs accumulated real-world usage). The
+useful form of that for a future session: **stop hunting for precision levers here until the ADR-67
+gate moves** — the search has been done three ways and returns the same answer.
+
 ## What this note does not claim
 
 The precision ratio is a *lens*, not a goal: a higher number is only worth having when it comes

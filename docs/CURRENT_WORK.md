@@ -70,10 +70,12 @@ Rigor is for.
 - ~~The precision gate's threshold~~ — done 2026-08-31: `make coverage` moved 0.43 → 0.57, calibrated
   on the measured drift (0.94 points across the whole 0.3.x line under a fixed analyzer), not on the
   headroom. The two corpus applications read 47.8% / 48.9%, so the gate stays a `lib`-only number.
-- **A larger population the ivar census surfaced**: 13–15% of all instance-variable reads are of an
-  ivar with **no static write anywhere in the scanned tree** (380 / 394 / 635 across the three).
-  `attr_writer`, `instance_variable_set`, framework assignment, or a write outside `paths:`. Bigger
-  than anything seeding could reach, and unscoped.
+- **Ivars are parameters one hop downstream, so they are not a separate lever.** Scoped 2026-08-31:
+  of `lib`'s 2,104 opaque ivar reads, **1,656 (79%) have a write whose own rvalue is `Dynamic`** —
+  ADR-67's frontier. The one structural sub-pattern (a class-body `@mutex = …` read from a
+  `module_function` body; the accumulator serves instance bodies only, by design) is 82 / 63 / 5
+  sites across the three codebases. Not pursued. **Three decompositions now land on parameters —
+  stop hunting precision levers here until the ADR-67 gate moves.**
 - Still open and independent: **#476** (synthetic Tier B dead in production), **#460** (parked,
   v0.4.x), **#454** (decide before the #409 flip), **#435** (the `file:line` half of item 3).
 - Perf: the 2026-08-25 campaign's named levers are spent; the surviving ranked list is in

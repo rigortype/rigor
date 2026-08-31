@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[engine]** Rails-style implicit namespaces now resolve: `Api` in `class Api::V1::AccountsController` types as the namespace module even though Zeitwerk means no `module Api` ever appears in source — worth +1.16 points of type precision on Mastodon ([#551](https://github.com/rigortype/rigor/pull/551), [#528](https://github.com/rigortype/rigor/issues/528)).
+
 - **[cli]** `rigor type-of` accepts several positions in one invocation and makes the column optional — `rigor type-of file.rb:42` lists up to 40 expressions on line 42 — so walking a chain of expressions costs one process instead of one each (five positions on a Rails application: 10.3 s → 2.1 s) ([#515](https://github.com/rigortype/rigor/pull/515)).
 
 - **[engine]** `Foo.instance` on a class that includes the stdlib `Singleton` mixin now types as `Foo` instead of untyped, so the methods you call on that instance are typed too ([#514](https://github.com/rigortype/rigor/pull/514)).

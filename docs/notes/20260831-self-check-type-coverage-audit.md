@@ -257,6 +257,58 @@ The general form is worth keeping: **a lever measured on this repository's own `
 against a type checker, not against the programs Rigor is for.** Finding 2's caveat said to read
 `lib` as an upper bound; that was right for the tier and backwards for the seed.
 
+## Follow-up: the `check` walk has no analogous seed gap (negative result)
+
+The corpus split above raised an obvious question. If the *lens* was under-seeded and that was worth
+4–6 points on a real application, does the **product** — the `check` walk — have the same kind of
+hole? Two passes answer it, and the answer is no.
+
+**Structurally.** `Analysis::Runner#project_scope_seed_tables` seeds every cross-file slot
+`Scope::DiscoveryIndex` has: `discovered_classes`, `discovered_methods`, the instance and singleton
+def-node and def-source tables, `discovered_method_visibilities`, `discovered_superclasses`,
+`discovered_includes`, the Data / Struct member layouts, `run_generation`, plus the two opt-in
+tables (`param_inferred_types`, `in_source_constants`) and `discovered_class_sources` under
+dependency recording. What it does *not* seed is the four tables `ScopeIndexer` builds **per file**
+by construction — `declared_types`, `class_ivars`, `class_cvars`, `program_globals`.
+
+`class_ivars` looked like a real gap, and reproduces:
+
+```ruby
+# a.rb
+class Foo
+  def initialize = @rows = []
+end
+
+# b.rb
+class Foo
+  def probe = @rows.empty?   # Dynamic[top]; the identical code in ONE file types `true`
+end
+```
+
+**Empirically, the population is near-empty.** A pure-AST census counting instance-variable reads
+that sit in a file which does not itself write that ivar for that class:
+
+| | reads of a written ivar | in a file that does not write it | classes affected |
+| --- | --- | --- | --- |
+| this repo (`lib`, 429 files) | 2,300 | **0** | 0 |
+| redmine (app+lib, 347 files) | 2,121 | **0** | 0 |
+| mastodon (app+lib, 1,325 files) | 4,270 | **17** (0.4%) | 1 |
+
+The same census over the other two per-file tables finds **zero** foreign reads of a written global
+or class variable on all three. So lifting `class_ivars` to a project-wide index — a substantial
+change, since the accumulator's `initialize` / read-before-write / dead-write guards are computed
+per class body — would buy 17 sites on the largest target and nothing on the other two.
+
+**Not pursued.** Recorded so it is not re-derived: the `discovered_classes` shape of finding does
+not repeat here, because Ruby codebases keep a class's ivar writes and reads in the same file even
+when they split the class across files (21 and 16 such classes in redmine and mastodon, none of them
+splitting an ivar).
+
+The census does surface a *different* population worth naming, since it is an order of magnitude
+larger: **13–15% of all ivar reads are of an ivar with no static write anywhere in the scanned tree**
+(380 / 394 / 635). Those are `attr_writer`, `instance_variable_set`, framework assignment, or a
+write outside the scanned paths — a harder problem than seeding, and unrelated to it.
+
 ## What this note does not claim
 
 The precision ratio is a *lens*, not a goal: a higher number is only worth having when it comes

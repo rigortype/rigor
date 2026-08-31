@@ -17,6 +17,12 @@ RSpec.describe "Rigor type construction (integration)" do
     Rigor::Type::Combinator.constant_of(value)
   end
 
+  # `bool` as the engine spells it — the `Constant[true] | Constant[false]` union
+  # `RbsTypeTranslator` folds RBS's `bool` to, not a `TrueClass | FalseClass` nominal pair.
+  def bool_type
+    Rigor::Type::Combinator.union(constant(true), constant(false))
+  end
+
   describe "fixtures/parity.rb — even/odd predicate" do
     let(:harness) { harness_for("parity") }
 
@@ -101,6 +107,27 @@ RSpec.describe "Rigor type construction (integration)" do
     it "records a per-slot narrowing keyed on `(receiver_kind, receiver_name, literal_key)`" do
       key = Rigor::Scope::IndexedKey.new(receiver_kind: :local, receiver_name: :params, key: :f)
       expect(harness.post_scope.indexed_narrowings).to have_key(key)
+    end
+  end
+
+  describe "fixtures/index_write_mutation_widening.rb — `h[k] ||= v` and siblings widen like `h[k] = v`" do
+    let(:harness) { harness_for("index_write_mutation_widening") }
+
+    it "is diagnostic-clean — the compound `x.nil? || @rows.empty?` guard no longer folds to a constant" do
+      messages = harness.diagnostics.map(&:message)
+      expect(messages.grep(/always-(truthy|falsey)|condition is always/)).to be_empty
+    end
+
+    it "widens a local through IndexOrWriteNode, so `empty?` stays undecided" do
+      expect(harness.local(:local_or_empty)).to eq(bool_type)
+    end
+
+    it "widens a local through IndexOperatorWriteNode" do
+      expect(harness.local(:local_op_empty)).to eq(bool_type)
+    end
+
+    it "widens an Array-receiver or-write, not only a Hash one" do
+      expect(harness.local(:local_array_empty)).to eq(bool_type)
     end
   end
 

@@ -2311,7 +2311,7 @@ module Rigor
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
-        accumulator.freeze
+        synthesize_namespace_prefixes(accumulator).freeze
       end
 
       # ADR-24 slice 2 — cross-file companion to `discovered_classes_for_paths`. Walks every project file once and
@@ -2917,7 +2917,32 @@ module Rigor
         identity_table = {}.compare_by_identity
         discovered = {}
         record_declarations(root, [], identity_table, discovered)
-        [identity_table.freeze, discovered.freeze]
+        [identity_table.freeze, synthesize_namespace_prefixes(discovered).freeze]
+      end
+
+      # Issue #528 — every proper prefix of a discovered COMPACT class name is a namespace module that
+      # provably exists at runtime, even when no `module X` declaration is anywhere in the source
+      # (Zeitwerk derives it from the directory: mastodon writes `class Api::V1::AccountsController`
+      # and never `module Api`). Registering the prefixes lets a bare `Api` read — and the inner
+      # ConstantReadNodes of every resolving constant path — type as the namespace singleton instead of
+      # falling to the unresolved fallback (~500 sites on mastodon). An explicitly-declared name always
+      # wins: prefixes never overwrite an existing entry.
+      def synthesize_namespace_prefixes(discovered)
+        additions = {}
+        discovered.each_key do |full|
+          next unless full.include?("::")
+
+          segments = full.split("::")
+          (1...segments.size).each do |keep|
+            prefix = segments.first(keep).join("::")
+            next if discovered.key?(prefix) || additions.key?(prefix)
+
+            additions[prefix] = Type::Combinator.singleton_of(prefix)
+          end
+        end
+        return discovered if additions.empty?
+
+        discovered.merge(additions)
       end
 
       def record_declarations(node, qualified_prefix, identity_table, discovered)

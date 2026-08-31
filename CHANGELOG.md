@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** A collection handed out by one method and filled through that reference — `(bucket_for(entry)[key] ||= {})[name] = row` — is no longer read as still empty, so `empty?` and `size` on it stop folding to a constant in every other method of the class ([#507](https://github.com/rigortype/rigor/pull/507), [#506](https://github.com/rigortype/rigor/issues/506)).
+
 - **[engine]** A collection filled through `h[k] ||= v`, `h[k] &&= v` or `h[k] += v` is no longer read as still carrying the literal shape it was initialized with, so `empty?` and `size` on it stop folding to a constant and a guard like `return nil if x.nil? || @rows.empty?` stops drawing a false "condition is always truthy" ([#504](https://github.com/rigortype/rigor/pull/504), [#501](https://github.com/rigortype/rigor/issues/501)).
 
 ## [0.3.6] - 2026-08-30

@@ -38,7 +38,11 @@ module Rigor
       # whose RBS dangles an interface or type-alias reference gets stubs where an older Rigor discarded the
       # whole batch and cached an env in which those signatures are inert. Same reasoning as v3: the
       # marshalled env is the cached value, so it MUST be rebuilt for the fix to take effect.
-      SCHEMA_VERSION = 6
+      # v7: #526 — the def-index seed bundles gain the `:extends` table (`extend M` / `extend self` /
+      # bare `module_function`), which `finalize_def_index` folds into the singleton-side method tables. A
+      # pre-7 bundle would silently contribute no extends for an unchanged file, so cached bundles must
+      # read as misses once and rebuild carrying the slot.
+      SCHEMA_VERSION = 7
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

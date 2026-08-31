@@ -2014,4 +2014,44 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
   end
+
+  # Issue #526 — `extend M` / `extend self` / bare `module_function` fold the module's instance defs
+  # onto the extender's singleton, so `C.helper` resolves (existence AND call-site return inference,
+  # with `self = Singleton[C]` exactly as Ruby binds).
+  describe "extend-family singleton fold" do
+    def last_statement_type(source)
+      program = parse(source)
+      idx = described_class.index(program, default_scope: default_scope)
+      node = program.statements.body.last
+      idx[node].type_of(node)
+    end
+
+    it "resolves a call through `extend M` with the module def's inferred return" do
+      source = "module Tools\n  def label\n    \"tool\"\n  end\nend\n" \
+               "module Registry\n  extend Tools\nend\n" \
+               "Registry.label\n"
+      expect(last_statement_type(source).describe).to eq('"tool"')
+    end
+
+    it "resolves `extend self` and the bare `module_function` toggle" do
+      extend_self = "module Host\n  extend self\n  def on_jruby?\n    false\n  end\nend\nHost.on_jruby?\n"
+      expect(last_statement_type(extend_self).describe).to eq("false")
+
+      module_function_toggle = "module Util\n  module_function\n\n  def message(text)\n    text\n  end\nend\n" \
+                               "Util.message(:hi)\n"
+      expect(last_statement_type(module_function_toggle).describe).to eq(":hi")
+    end
+
+    it "keeps a genuine `def self.` winning over the folded module def (control)" do
+      source = "module Tools\n  def label\n    \"tool\"\n  end\nend\n" \
+               "module Registry\n  extend Tools\n  def self.label\n    :own\n  end\nend\n" \
+               "Registry.label\n"
+      expect(last_statement_type(source).describe).to eq(":own")
+    end
+
+    it "contributes nothing for an extend target with no discovered defs (control)" do
+      source = "module Registry\n  extend SomeGemModule\nend\nRegistry.helper\n"
+      expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")
+    end
+  end
 end

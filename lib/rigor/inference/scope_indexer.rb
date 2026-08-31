@@ -180,8 +180,14 @@ module Rigor
         # authoritative).
         data_member_layouts, struct_member_layouts = merge_member_layouts(default_scope, root)
 
+        # #526 — this file's extends folded against the MERGED instance def-nodes (so `extend M` sees a
+        # sibling-file M through the cross-file seed). The project-wide fold in {#finalize_def_index}
+        # covers cross-file CONSUMERS; this covers the file that declares the extend.
+        methods_table = fold_per_file_extends(root, def_nodes, singleton_def_nodes, seeded_scope)
+
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
+            discovered_methods: methods_table,
             discovered_def_nodes: def_nodes,
             discovered_singleton_def_nodes: singleton_def_nodes,
             discovered_superclasses: superclasses,
@@ -191,6 +197,18 @@ module Rigor
             struct_member_layouts: struct_member_layouts
           )
         )
+      end
+
+      # The per-file half of the #526 fold: mutable copies of the merged tables take the extends, and the
+      # existence table (already seeded onto the scope) is rebuilt only when the fold touched it.
+      def fold_per_file_extends(root, def_nodes, singleton_def_nodes, seeded_scope)
+        extends = build_discovered_extends(root)
+        methods_table = seeded_scope.discovered_methods
+        return methods_table if extends.empty?
+
+        mutable_methods = methods_table.transform_values(&:dup)
+        fold_extends_into_singleton_tables(extends, def_nodes, singleton_def_nodes, mutable_methods)
+        mutable_methods
       end
 
       # ADR-48 — the per-file Data + Struct member-layout tables, each merged OVER the cross-file seed so a same-file
@@ -2049,6 +2067,78 @@ module Rigor
         end
       end
 
+      # Issue #526 — `extend M` / `extend self` / bare `module_function`, the singleton-side siblings of
+      # {#build_discovered_includes}. `extend self` and the bare `module_function` toggle both map the
+      # module's own instance defs onto its singleton (recorded as extending ITSELF); `module_function`
+      # with symbol arguments already resolves through the existing recording, and the toggle's
+      # order-sensitivity (only SUBSEQUENT defs become module functions) is deliberately over-approximated
+      # — the extra names only suppress `undefined-method` and enable inference on calls that raise at
+      # runtime, both the ADR-5-safe direction.
+      def build_discovered_extends(root)
+        accumulator = {}
+        walk_class_extends(root, [], nil, accumulator)
+        accumulator.transform_values { |mods| mods.uniq.freeze }.freeze
+      end
+
+      def walk_class_extends(node, qualified_prefix, current_class, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = Source::ConstantPath.qualified_name(node.constant_path)
+          if name
+            full = (qualified_prefix + [name]).join("::")
+            walk_class_extends(node.body, qualified_prefix + [name], full, accumulator) if node.body
+            return
+          end
+        when Prism::CallNode
+          record_extend_call(node, current_class, accumulator)
+        end
+
+        node.rigor_each_child do |child|
+          walk_class_extends(child, qualified_prefix, current_class, accumulator)
+        end
+      end
+
+      def record_extend_call(node, current_class, accumulator)
+        return unless current_class && node.receiver.nil?
+
+        case node.name
+        when :extend then record_extend_targets(node, current_class, accumulator)
+        when :module_function
+          (accumulator[current_class] ||= []) << current_class if node.arguments.nil?
+        end
+      end
+
+      def record_extend_targets(node, current_class, accumulator)
+        node.arguments&.arguments&.each do |arg|
+          target = arg.is_a?(Prism::SelfNode) ? current_class : Source::ConstantPath.qualified_name(arg)
+          (accumulator[current_class] ||= []) << target if target
+        end
+      end
+
+      # The materialization half of #526: for every `C extends M`, M's INSTANCE defs become C's
+      # SINGLETON defs — existence (so `C.helper` stops firing undefined-method) and def nodes (so
+      # call-site return inference runs with `self = Singleton[C]`, which is what Ruby binds). A name C
+      # already defines on its own singleton wins (`||=`); an extend target with no discovered defs
+      # contributes nothing (RBS-module extends stay on the dispatch tiers).
+      def fold_extends_into_singleton_tables(extends, def_nodes, singleton_def_nodes, methods)
+        extends.each do |class_name, mods|
+          mods.each do |mod_name|
+            source_defs = def_nodes[mod_name]
+            next if source_defs.nil?
+
+            # An inner table inherited unchanged from a frozen seed must be thawed before the fold writes.
+            target = singleton_def_nodes[class_name]
+            target = singleton_def_nodes[class_name] = (target ? target.dup : {}) if target.nil? || target.frozen?
+            source_defs.each do |method_name, def_node|
+              target[method_name] ||= def_node
+              record_method_kind(methods, class_name, method_name, :singleton)
+            end
+          end
+        end
+      end
+
       VISIBILITY_MODIFIERS = %i[public private protected].freeze
 
       # v0.1.2 — per-class method-visibility table for the `def.method-visibility-mismatch` CheckRule.
@@ -2634,10 +2724,16 @@ module Rigor
       # superclasses later-wins; includes / class_sources accumulate; member layouts later-wins.
       def fold_ancestry_tables(acc, file_index)
         acc[:superclasses].merge!(file_index[:superclasses])
-        file_index[:includes].each { |cn, mods| acc[:includes][cn] = ((acc[:includes][cn] || []) + mods).uniq }
+        accumulate_module_lists(acc[:includes], file_index[:includes])
+        accumulate_module_lists(acc[:extends], file_index[:extends] || {})
         file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
         acc[:data_member_layouts].merge!(file_index[:data_member_layouts])
         acc[:struct_member_layouts].merge!(file_index[:struct_member_layouts])
+      end
+
+      # Shared accumulate-and-dedupe fold for the class -> module-name-list tables (includes / extends).
+      def accumulate_module_lists(target, additions)
+        additions.each { |cn, mods| target[cn] = ((target[cn] || []) + mods).uniq }
       end
 
       # ADR-85 WD2 — converts a file's live single-file index + its class table into a Marshal-clean seed
@@ -2656,6 +2752,7 @@ module Rigor
           # value stored here equals the one a later recheck recomputes for an unchanged declaration.
           declaration_signature: declaration_signature(file_index),
           classes: file_classes,
+          extends: file_index[:extends],
           def_nodes: live_defs_to_bundle(file_index[:def_nodes]),
           singleton_def_nodes: live_defs_to_bundle(file_index[:singleton_def_nodes]),
           def_sources: file_index[:def_sources],
@@ -2683,6 +2780,8 @@ module Rigor
           singleton_def_sources: bundle[:singleton_def_sources] || {},
           superclasses: bundle[:superclasses],
           includes: bundle[:includes],
+          # #526 — pre-extends bundles lack the key; default `{}` keeps the fold total.
+          extends: bundle[:extends] || {},
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
@@ -2712,12 +2811,13 @@ module Rigor
       # The empty per-run accumulator the def-index passes fold each file into.
       def new_def_index_accumulator
         { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
-          superclasses: {}, includes: {}, method_visibilities: {}, methods: {}, class_sources: {},
+          superclasses: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {}, class_sources: {},
           data_member_layouts: {}, struct_member_layouts: {} }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
       def finalize_def_index(acc)
+        fold_extends_into_singleton_tables(acc[:extends], acc[:def_nodes], acc[:singleton_def_nodes], acc[:methods])
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
         # deliberately surfaces (fire + def-site annotation, nudging `pre_eval:`), so dropping the `def`-declared names
@@ -2767,9 +2867,8 @@ module Rigor
         superclasses = build_discovered_superclasses(root, path)
         includes = build_discovered_includes(root)
         acc[:superclasses].merge!(superclasses)
-        includes.each do |class_name, mods|
-          acc[:includes][class_name] = ((acc[:includes][class_name] || []) + mods).uniq
-        end
+        accumulate_module_lists(acc[:includes], includes)
+        accumulate_module_lists(acc[:extends], build_discovered_extends(root))
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes)
         merge_class_keyed_index_tables(acc, root, file_methods)
         merge_member_layout_tables(acc, root)

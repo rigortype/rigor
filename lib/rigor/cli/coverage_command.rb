@@ -217,20 +217,10 @@ module Rigor
       # class. Tier 1 seeds unconditionally because it only reclassifies sites it already counted; Tier 2 adds
       # sites to a denominator `--threshold` gates CI on, which is why only the latter is gated on a feature id.
       def scope_with_inferred_params(paths, configuration, environment, workers)
-        base = Scope.empty(environment: environment)
-        seed = {}
-
-        discovered = Inference::ScopeIndexer.discovered_classes_for_paths(paths)
-        seed[:discovered_classes] = discovered unless discovered.empty?
-
-        table = Inference::ParameterInferenceCollector.collect(
-          files: paths, environment: environment, target_ruby: configuration.target_ruby, workers: workers
+        CoverageScan.discovery_seeded_scope(
+          files: paths, configuration: configuration, environment: environment,
+          parameter_inference: true, workers: workers
         )
-        seed[:param_inferred_types] = table unless table.empty?
-
-        return base if seed.empty?
-
-        base.with_discovery(base.discovery.with(**seed))
       end
 
       def determine_protection_exit(report, options)

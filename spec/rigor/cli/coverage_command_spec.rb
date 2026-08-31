@@ -24,6 +24,44 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
   end
 
+  # The precision lens used to build a bare `Scope.empty` while `--protection` seeded `discovered_classes` +
+  # `param_inferred_types`, so the two surfaces reported on different engines and the precision ratio — the number
+  # `rigor coverage`, `rigor check --coverage` and the `check-coverage` gate all print — understated what the engine
+  # infers. Both build the same seed set now; the gating difference that remains is deliberate and pinned below.
+  describe "cross-file discovery seeding" do
+    it "types a class constant defined in a sibling file, instead of counting it opaque" do
+      File.write("account.rb", "class Account\nend\n")
+      File.write("use.rb", "Account\n")
+
+      status, out, = run(["--format", "json", "account.rb", "use.rb"])
+
+      expect(status).to eq(0)
+      use = JSON.parse(out).fetch("by_file").find { |f| f.fetch("file") == "use.rb" }
+      expect(use.fetch("dynamic_opaque_count")).to eq(0)
+      expect(use.fetch("precise_ratio")).to eq(1.0)
+    end
+
+    it "seeds inferred parameter types only when `parameter_inference:` is on, mirroring the check walk" do
+      File.write("app.rb", <<~RUBY)
+        class Greeter
+          def shout(word)
+            word.upcase
+          end
+        end
+
+        Greeter.new.shout("hi")
+      RUBY
+      File.write("off.yml", %(target_ruby: "4.0"\nparameter_inference: false\n))
+      File.write("on.yml", %(target_ruby: "4.0"\nparameter_inference: true\n))
+
+      _, off, = run(["--format", "json", "--config", "off.yml", "app.rb"])
+      _, on, = run(["--format", "json", "--config", "on.yml", "app.rb"])
+
+      expect(JSON.parse(on).dig("summary", "precise_count"))
+        .to be > JSON.parse(off).dig("summary", "precise_count")
+    end
+  end
+
   it "rejects --mutation without --protection (usage error)" do
     File.write("a.rb", "x = 1\n")
     status, _out, err = run(["--mutation", "a.rb"])

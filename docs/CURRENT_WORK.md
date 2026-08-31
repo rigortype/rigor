@@ -18,30 +18,33 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 The 2026-09-01 session ran the 25-target corpus opacity sweep, filed the mechanism backlog
-(#518–#534, #539–#545, #553), and landed waves 0–2 of the fixes as **16 PRs** (one merged, fifteen
+(#518–#534, #539–#545, #553), and landed waves 0–2 of the fixes as **17 PRs** (one merged, sixteen
 green and waiting). Synthesis: [`docs/notes/20260901-corpus-opacity-attribution.md`](notes/20260901-corpus-opacity-attribution.md);
 harness + per-target reports on branch `opacity-sweep-harness-20260901`.
 
-## FIRST: fifteen green PRs wait on merge (the classifier blocks `gh pr merge` for agents)
+## FIRST: sixteen green PRs wait on merge (the classifier blocks `gh pr merge` for agents)
 
 Every PR was verified standalone AND on a local all-in integration (all gates green; corpus below).
 Merge order:
 
-1. **[#536](https://github.com/rigortype/rigor/pull/536) #537 #545 #546 #547 #548 #549 #550 #551 #552 #554 #555** — independent, any order.
+1. **[#536](https://github.com/rigortype/rigor/pull/536) #537 #545 #546 #547 #548 #549 #550 #551 #552 #554 #555 #556** — independent, any order.
 2. **[#538](https://github.com/rigortype/rigor/pull/538)** then **[#543](https://github.com/rigortype/rigor/pull/543)** —
    #543 is STACKED on #538: after #538 merges, `gh pr edit 543 --base master`, wait for CI, merge.
    Do not let the auto-retarget race you (the stacked-PR trap).
 3. Expect textual merge conflicts where several branches appended to the same spec-file tail and to
    `expression_typer.rb` / `scope_indexer_spec.rb` — every one resolves as "keep both sides", BY
    HAND (diff3 shows the base). A mechanical both-sides concatenation duplicated shared context and
-   broke `expression_typer.rb` in this session's own integration check; where two branches touch the
-   SAME method (`try_user_method_inference`: #549's `method_name:` kwarg + #555's carrier gate), the
-   merged head keeps #549's signature with #555's gate line. After all fifteen: `make verify` on the
-   integrated master and re-prime the diagnostics slot with a `check` run.
+   broke `expression_typer.rb` in this session's own integration check. Two conflicts are NOT
+   keep-both: `try_user_method_inference` (#549's `method_name:` kwarg + #555's carrier gate — keep
+   #549's signature with #555's gate line), and #537 vs #556 in `rbs_dispatch.rb` (keep #537's
+   `join_candidate_returns` and thread #556's `alias_expander: environment.rbs_loader` into it as a
+   kwarg it passes to the translator). After all sixteen: `make verify` on the integrated master and
+   re-prime the diagnostics slot with a `check` run.
    Note #554 bumps the cache `SCHEMA_VERSION` (6 → 7), so the first post-merge run is cold.
+   #556 costs ~+8% lib cold self-check wall (alias expansion; memo headroom noted on #529).
 
 **Integrated corpus (11 targets vs pre-session master, all adjudicated in the PR bodies): +41 / −70**
-(re-collected with #555 in — byte-identical to the fourteen-PR sets; #555 is corpus-neutral).
+(re-collected with #555 and again with #556 in — byte-identical each time; both are corpus-neutral).
 The 41: **11 true-positive bug finds** (mastodon `quote_request.rb` nil-deref ×8 with the code's own
 "TODO: raise if status is nil"; textbringer LSP `stderr` crash paths ×2; redmine `diff_table.rb:153`
 `=` for `==`), 22 `def.return-type-mismatch` warnings against textbringer's own drifting sig (the
@@ -57,7 +60,9 @@ protection +0.30pp from #548. Perf: #547 costs ~+12% cold-check wall on redmine 
 - **[#527](https://github.com/rigortype/rigor/issues/527)** ancestor/include walk family
   (ready-for-human design pass) · **[#525](https://github.com/rigortype/rigor/issues/525)** Struct.new
   factories (block-def dispatch fixed by #555; in-body member reads + do-block `self` scoping remain,
-  residuals on the issue) · **[#529](https://github.com/rigortype/rigor/issues/529)** RBS Alias/Intersection ·
+  residuals on the issue) · **[#529](https://github.com/rigortype/rigor/issues/529)** RBS
+  Alias/Intersection (fixed by #556 — lib 59.8→60.8% alone; check-side wiring, selector threading,
+  and the expansion memo remain, noted on the issue) ·
   **[#530](https://github.com/rigortype/rigor/issues/530)** WD9 under-claiming ·
   **[#534](https://github.com/rigortype/rigor/issues/534)** remaining Rails surfaces (the
   `Parameters#[]` half needs a rules-level decision — its non-nil typing folded five working

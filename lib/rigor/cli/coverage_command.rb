@@ -244,11 +244,11 @@ module Rigor
 
       # The protection scan must see the same receiver types `rigor check` does — including plugin-contributed
       # `dynamic_return` types (a controller's `params` → `ActionController::Parameters`, a `Model.where` →
-      # `ActiveRecord::Relation[Model]`). The bare `CoverageScan.project_environment` carries only the RBS environment
-      # (no plugin registry), so every plugin-typed receiver reads `Dynamic` and its dispatch site is miscounted as
-      # *unprotected* — a systematic undercount of what Rigor actually types on a plugin-using project.
-      # `ProjectContext` builds the plugin-aware environment (registry materialised + the per-run prepare pass that
-      # primes producers like the controller / model index) exactly as the LSP and the runner do.
+      # `ActiveRecord::Relation[Model]`). A bare RBS environment carries no plugin registry, so every plugin-typed
+      # receiver reads `Dynamic` and its dispatch site is miscounted as *unprotected* — a systematic undercount of
+      # what Rigor actually types on a plugin-using project. `ProjectContext` builds the plugin-aware environment
+      # (registry materialised + the per-run prepare pass that primes producers like the controller / model index)
+      # exactly as the LSP, the runner, and — since #513 — the precision path all do.
       def plugin_aware_environment(configuration)
         LanguageServer::ProjectContext.new(configuration: configuration).environment
       end

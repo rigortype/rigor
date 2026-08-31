@@ -1603,6 +1603,7 @@ module Rigor
         return nil unless node.is_a?(Prism::ConstantWriteNode)
 
         rvalue = node.value
+        return nil unless rvalue.is_a?(Prism::CallNode)
         return nil unless data_define_call?(rvalue) ||
                           struct_new_call?(rvalue) ||
                           module_new_call?(rvalue) ||

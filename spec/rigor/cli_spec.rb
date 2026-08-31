@@ -246,6 +246,39 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("erased:  1")
     end
 
+    # `Foo.instance` for the stdlib Singleton mixin: Ruby grows it through an `included` hook and the
+    # upstream RBS leaves `Singleton::SingletonClassMethods` empty, so no other tier can answer it.
+    it "types `.instance` on a class that includes the Singleton mixin" do
+      path = write_fixture("registry.rb", <<~RUBY)
+        require "singleton"
+
+        class Registry
+          include Singleton
+
+          def label(key)
+            key.to_s
+          end
+        end
+
+        Registry.instance.label(:a)
+      RUBY
+
+      status, out, err = run_cli("type-of", "#{path}:11:10")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("type:    Registry")
+    end
+
+    it "leaves `.instance` alone on a class that does not include the mixin" do
+      path = write_fixture("plain.rb", "class Plain\nend\n\nPlain.instance\n")
+
+      status, out, _err = run_cli("type-of", "#{path}:4:7")
+
+      expect(status).to eq(0)
+      expect(out).to include("Dynamic[top]")
+    end
+
     it "accepts FILE LINE COL as separate arguments" do
       path = write_fixture("a.rb", "\"hi\"\n")
 

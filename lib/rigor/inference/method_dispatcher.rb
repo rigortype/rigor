@@ -31,6 +31,7 @@ require_relative "method_dispatcher/uri_folding"
 require_relative "method_dispatcher/set_folding"
 require_relative "method_dispatcher/kernel_dispatch"
 require_relative "method_dispatcher/universal_object_dispatch"
+require_relative "method_dispatcher/singleton_mixin_dispatch"
 require_relative "method_dispatcher/method_folding"
 
 module Rigor
@@ -144,6 +145,12 @@ module Rigor
         # lives in `Rigor::Builtins::StaticReturnRefinements::OVERRIDES`.
         static_refinement = try_static_refinement(receiver_type, method_name, arg_types)
         return static_refinement if static_refinement
+
+        # `Foo.instance` for a class that includes the stdlib `Singleton` mixin. Ruby grows that method through
+        # an `included` hook and the upstream RBS leaves `Singleton::SingletonClassMethods` empty, so nothing
+        # below can answer it. See {SingletonMixinDispatch} for why the value matters more than the site count.
+        singleton_mixin = SingletonMixinDispatch.try_dispatch(context)
+        return singleton_mixin if singleton_mixin
 
         rbs_result = RbsDispatch.try_dispatch(context)
         if rbs_result

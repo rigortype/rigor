@@ -4,8 +4,14 @@ Status: measurement note. Master `83aaad82` (v0.3.6), `lib` = 427 files / 165,82
 / 247,256 AST nodes. `make check` and `make check-plugins` were clean throughout; no repository file
 was modified to take any measurement here. Findings became
 [#501](https://github.com/rigortype/rigor/issues/501),
-[#502](https://github.com/rigortype/rigor/issues/502) and
-[#503](https://github.com/rigortype/rigor/issues/503).
+[#502](https://github.com/rigortype/rigor/issues/502),
+[#503](https://github.com/rigortype/rigor/issues/503) and
+[#506](https://github.com/rigortype/rigor/issues/506), all landed the same day (PRs
+[#504](https://github.com/rigortype/rigor/pull/504),
+[#505](https://github.com/rigortype/rigor/pull/505),
+[#507](https://github.com/rigortype/rigor/pull/507),
+[#508](https://github.com/rigortype/rigor/pull/508)); the § Ranking section carries the order and why
+it was that order.
 
 The question: run Rigor over Rigor, find where types do not attach, and rank what to fix next.
 
@@ -120,10 +126,16 @@ The diagnostics are the whole value of the spike, and each column says something
 - **`to_s`'s 7 are not the fold's fault** — they are `possible-nil-receiver` on
   `child.to_s.split("::")[0...-1]`, the RBS `Array#[](Range) -> Array[T]?` optional-return noise
   that the fold merely makes reachable.
-- **The first row's 4 are a pre-existing bug**, not a cost of the change — see Finding 3.
+- **The first row's 4 are pre-existing bugs**, not a cost of the change. One was Finding 3
+  (`@class_rows[k] ||= {}`); chasing the other three found a *second*, distinct mutation path the
+  shape machinery does not recognise — see Finding 4 below. Neither is caused by the fold; both are
+  unmasked by it.
 
 FP-free set: the eight predicates plus `inspect hash object_id`, **+2.11pp with zero new
-diagnostics**. Filed as [#503](https://github.com/rigortype/rigor/issues/503).
+diagnostics**. Filed as [#503](https://github.com/rigortype/rigor/issues/503), landed as
+[#508](https://github.com/rigortype/rigor/pull/508) — re-measured on the integrated tree at
+**56.71% → 58.98% (+2.27pp, +3,830 sites)**, with protection moving 45.6% → 45.8% as a side effect
+because a chained call on one of these results now has a receiver.
 
 One implementation detail cost a full measurement cycle and is worth recording: spelling `bool` as
 `Nominal[TrueClass] | Nominal[FalseClass]` instead of the canonical
@@ -157,17 +169,50 @@ readers with `return nil if x.nil? || @rows.empty?`. Those four are silent today
 left operand is `Dynamic` — which is exactly what Finding 2 would change. Filed as
 [#501](https://github.com/rigortype/rigor/issues/501).
 
+## Finding 4 — a second aliasing path: an ivar handed out by a sibling method
+
+Three of Finding 2's four diagnostics were not Finding 3. `plugin_facts.rb`'s `@self_rows`,
+`@path_rows` and `@result_rows` are each `{}` in `initialize`, handed out by `bucket_for(entry)`,
+and filled through `(bucket_for(entry)[entry.receiver] ||= {})[entry.method.to_s] = row`. The
+class-ivar pre-pass records a mutation only when its receiver is an `InstanceVariableReadNode`, so a
+mutation through the returned alias is invisible and the ivar keeps its empty `HashShape`. On master
+before the fix, `rigor type-of` read `@path_rows` as `{}` and `@path_rows.empty?` as `Constant[true]`
+on a hash that is never empty in a working program — a wrong type, provable without any of the
+changes above.
+
+Same family as Finding 3 — a mutation path the shape-invalidation machinery does not recognise —
+and the same latency: the bare guard stays silent, the compound one fires. Filed as
+[#506](https://github.com/rigortype/rigor/issues/506), landed as
+[#507](https://github.com/rigortype/rigor/pull/507). The fix stays narrow on purpose (self-call
+receiver, same-class callee, ivars in RETURN position only) because over-recording widens a shape
+carrier that nothing mutates and costs precision on every reader in the class.
+
+One thing worth keeping from writing it: `make check` rejected the first draft, and was right —
+`gather_aliased_mutations` read `node.receiver` behind a predicate that cannot narrow
+(`NODE_CLASSES.any? { |k| node.is_a?(k) }` reads as a call on `Prism::Node`), a latent
+`NoMethodError`. The engine found a real bug in the fix for its own false positive.
+
 ## Ranking
 
-1. **[#501](https://github.com/rigortype/rigor/issues/501)** — a live false positive, root cause
-   located, small fix, and a blocker for #503's clean measurement.
-2. **[#502](https://github.com/rigortype/rigor/issues/502)** — a few lines; corrects a user-facing
-   number by 4.87pp and produces the ADR-67 WD6 data point as a by-product.
-3. **[#503](https://github.com/rigortype/rigor/issues/503)** — +2.11pp for a fixed table, with the
-   exclusion boundary already measured rather than argued.
-4. **Parameters** — 27.8% of all opacity, the structural answer, and the ADR-67 WD2 (in-body
-   structural inference) territory that stays deferred. Size it again after 1-3 land; the
-   attribution above is the baseline to re-measure against.
+Findings 1, 3 and 4 landed the same day, in that dependency order; Finding 2 last, because both
+mutation bugs had to be gone before its measurement was clean.
+
+1. **[#501](https://github.com/rigortype/rigor/issues/501)** → [#504](https://github.com/rigortype/rigor/pull/504)
+   — index or/and/operator-writes bypassing `MutationWidening`.
+2. **[#506](https://github.com/rigortype/rigor/issues/506)** → [#507](https://github.com/rigortype/rigor/pull/507)
+   — an ivar mutated through the alias a sibling method returned.
+3. **[#502](https://github.com/rigortype/rigor/issues/502)** → [#505](https://github.com/rigortype/rigor/pull/505)
+   — the precision lens seeded like the protection lens; also the ADR-67 WD6 data point.
+4. **[#503](https://github.com/rigortype/rigor/issues/503)** → [#508](https://github.com/rigortype/rigor/pull/508)
+   — the receiver-independent selector table.
+5. **Parameters** — still open, and now the whole of what is left worth sizing: 27.8% of all opacity,
+   the ADR-67 WD2 (in-body structural inference) territory that stays deferred. The attribution above
+   is the baseline to re-measure against, on the post-#508 tree.
+
+The reusable part is the shape of the day rather than any single number: **a precision lever's value
+was 2.27 points, and its by-product was two live false-positive bugs neither the gate nor the corpus
+had surfaced.** A fold that types more expressions makes existing wrong types *reachable* by the
+diagnostic rules, which is why the diagnostic count belongs in the same table as the ratio.
 
 ## What this note does not claim
 

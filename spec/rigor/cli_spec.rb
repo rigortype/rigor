@@ -1050,6 +1050,22 @@ RSpec.describe Rigor::CLI do
       expect(status).to eq(0)
     end
 
+    # #502's third surface. Without the discovery seed a class declared in a SIBLING file reads
+    # `Dynamic`, so the scan counted it unrecognised and reported the engine as blinder than it is —
+    # the same undercount already fixed for `coverage` and `coverage --protection`.
+    it "recognises a class constant declared in a sibling file" do
+      write_fixture("account.rb", "class Account\nend\n")
+      use = write_fixture("use.rb", "Account\n")
+
+      status, out, _err = run_cli("type-scan", "--format=json", File.join(tmpdir, "account.rb"), use)
+
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      unrecognised_in_use = payload["events"].select { |e| e["file"] == use }
+      expect(unrecognised_in_use).to be_empty
+      expect(payload["by_class"].fetch("Prism::ConstantReadNode").fetch("unrecognized")).to eq(0)
+    end
+
     it "recurses into directories and aggregates files" do
       write_fixture("nested/one.rb", "1\n")
       write_fixture("nested/two.rb", "foo()\n")

@@ -12,6 +12,7 @@ require_relative "type_scan_renderer"
 require_relative "type_scan_report"
 require_relative "command"
 require_relative "probe_environment"
+require_relative "coverage_scan"
 
 module Rigor
   class CLI
@@ -70,7 +71,15 @@ module Rigor
 
       def scan_paths(paths, options)
         configuration = Configuration.load(options.fetch(:config))
-        scope = Scope.empty(environment: project_environment(configuration, paths))
+        # Same seed set as `rigor coverage` and `coverage --protection` (#502). Without it a cross-file class
+        # constant reads `Dynamic` and is counted as an unrecognised node, so the scan reports the engine as
+        # blinder than it is — on Mastodon that alone was most of a 14.7% unrecognised rate.
+        scope = CoverageScan.discovery_seeded_scope(
+          files: paths,
+          configuration: configuration,
+          environment: project_environment(configuration, paths),
+          parameter_inference: configuration.parameter_inference
+        )
         scanner = Inference::CoverageScanner.new(scope: scope)
         accumulator = ScanAccumulator.new
         paths.each { |path| scan_one(path, scanner, accumulator, configuration) }

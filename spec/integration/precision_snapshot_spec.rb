@@ -26,13 +26,20 @@ FIXTURE_DIR   = File.expand_path("fixtures",  __dir__)
 
 UPDATE_SNAPSHOTS = ENV.fetch("UPDATE_SNAPSHOTS", "0") == "1"
 
-# Enumerate fixture names: flat .rb files → name without extension, directory fixtures → directory name.
+# Enumerate fixture names: flat .rb files → name without extension, project fixtures → directory name.
+#
+# A directory qualifies only when it carries the harness entry file, because that is exactly what
+# `FixtureHarness#load_project` requires. `fixtures/` is a shared fixture root, not this spec's private one:
+# `fixtures/effects/` is a container of per-spec project trees (`effects/rails`, `effects/policy`, …) that the
+# effects specs address by absolute path, and neither it nor its children is loadable here. Discriminating on
+# the entry file keeps any future non-harness tree out of the gate without an exclusion list to maintain.
 SNAPSHOT_FIXTURE_NAMES = (
   Dir.children(FIXTURE_DIR).sort.filter_map do |entry|
     path = File.join(FIXTURE_DIR, entry)
     if File.file?(path) && entry.end_with?(".rb")
       entry.delete_suffix(".rb")
-    elsif File.directory?(path)
+    elsif File.directory?(path) &&
+          File.file?(File.join(path, Rigor::IntegrationSupport::FixtureHarness::DEFAULT_ENTRY))
       entry
     end
   end
@@ -51,14 +58,29 @@ end
 
 RSpec.describe "Precision snapshots (inference regression gate)" do
   if UPDATE_SNAPSHOTS
+    # One unloadable fixture MUST NOT cost the whole regeneration: every other snapshot is still written, and
+    # the failures are reported together at the end. Aborting on the first one leaves the tree half-regenerated
+    # and hides how many fixtures are actually broken.
     it "writes fresh snapshots for all fixtures" do
       FileUtils.mkdir_p(SNAPSHOTS_DIR)
-      SNAPSHOT_FIXTURE_NAMES.each do |name|
+
+      failures = SNAPSHOT_FIXTURE_NAMES.filter_map do |name|
         harness  = Rigor::IntegrationSupport::FixtureHarness.new(name)
         snapshot = build_snapshot(harness)
         File.write(snapshot_path(name), YAML.dump(snapshot))
+        nil
+      rescue StandardError => e
+        "  #{name}: #{e.class}: #{e.message}"
       end
-      expect(Dir.children(SNAPSHOTS_DIR).size).to eq(SNAPSHOT_FIXTURE_NAMES.size)
+
+      expect(failures).to be_empty,
+                          "#{failures.size} of #{SNAPSHOT_FIXTURE_NAMES.size} fixtures failed to regenerate " \
+                          "(the rest were written):\n#{failures.join("\n")}"
+
+      expected = SNAPSHOT_FIXTURE_NAMES.map { |name| File.basename(snapshot_path(name)) }
+      stale    = Dir.children(SNAPSHOTS_DIR) - expected
+      expect(stale).to be_empty,
+                       "Snapshot files with no matching fixture (delete them by hand):\n  #{stale.sort.join("\n  ")}"
     end
   else
     SNAPSHOT_FIXTURE_NAMES.each do |fixture_name|

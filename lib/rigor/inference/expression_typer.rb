@@ -1140,6 +1140,9 @@ module Rigor
         # asks nothing further of dispatch. Off (the default) this is one integer read.
         Effects::Collector.record_call(node, receiver, scope) if Effects::Collector.active?
 
+        literal_send = try_literal_send(node, receiver)
+        return literal_send if literal_send
+
         local_def_result = try_local_def_dispatch(node, receiver, arg_types)
         return local_def_result if local_def_result
 
@@ -1148,14 +1151,8 @@ module Rigor
         # the corresponding element bound to the block parameter and assemble the results into a
         # `Tuple[U_1..U_n]`. This sits ahead of `MethodDispatcher.dispatch` so the RBS tier does not re-widen
         # the answer back to `Array[union]`.
-        per_element = try_per_element_block_fold(node, receiver)
-        return per_element if per_element
-
-        inject_fold = try_block_inject_fold(node, receiver, arg_types)
-        return inject_fold if inject_fold
-
-        hash_transform = try_hash_shape_block_fold(node, receiver)
-        return hash_transform if hash_transform
+        block_fold = try_receiver_block_folds(node, receiver, arg_types)
+        return block_fold if block_fold
 
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,
@@ -1326,16 +1323,58 @@ module Rigor
         end
       end
 
-      def try_user_method_inference(receiver, call_node, arg_types)
+      # The three receiver-shaped block folds, in their historical order (extracted whole from
+      # `call_dispatch_type_for` for method-length budget).
+      def try_receiver_block_folds(node, receiver, arg_types)
+        per_element = try_per_element_block_fold(node, receiver)
+        return per_element if per_element
+
+        inject_fold = try_block_inject_fold(node, receiver, arg_types)
+        return inject_fold if inject_fold
+
+        try_hash_shape_block_fold(node, receiver)
+      end
+
+      # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:
+      # the private-boundary idiom (protobuf's `send(:get_file_descriptor)` at 84 sites) resolves through
+      # the same dispatch + project-inference tiers as the direct call would. `send` legitimately crosses
+      # visibility, so no public-only gate applies (`public_send` is treated identically — typing the
+      # success path of a call that would raise on a private method is ADR-5 optimism). Declines: a
+      # non-literal selector, a splat / forwarded tail (positional correspondence unknown), or a block at
+      # the call site (block forwarding is out of this slice).
+      LITERAL_SEND_SELECTORS = %i[send __send__ public_send].freeze
+      private_constant :LITERAL_SEND_SELECTORS
+
+      def try_literal_send(node, receiver)
+        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
+        return nil unless node.block.nil?
+
+        args = node.arguments&.arguments
+        return nil unless args && args.first.is_a?(Prism::SymbolNode)
+
+        rest = args[1..]
+        return nil if rest.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
+
+        inner_name = args.first.unescaped.to_sym
+        inner_args = rest.map { |a| type_of(a) }
+        MethodDispatcher.dispatch(
+          receiver_type: receiver, method_name: inner_name, arg_types: inner_args,
+          block_type: nil, environment: scope.environment, call_node: node, scope: scope
+        ) ||
+          try_user_method_inference(receiver, node, inner_args, method_name: inner_name) ||
+          try_project_singleton_inference(receiver, node, inner_args, method_name: inner_name)
+      end
+
+      def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name)
         return nil unless receiver.is_a?(Type::Nominal)
 
-        def_node, owner = resolve_user_def_with_owner(receiver.class_name, call_node.name)
+        def_node, owner = resolve_user_def_with_owner(receiver.class_name, method_name)
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types)
         return result if result.nil?
 
-        degrade_if_overridable(result, owner, call_node.name, :instance)
+        degrade_if_overridable(result, owner, method_name, :instance)
       rescue StandardError
         nil
       end
@@ -1350,16 +1389,16 @@ module Rigor
       # Resolution is OWN-class only: the singleton-ancestry chain (`extend`ed modules, inherited
       # class-method dispatch) is not walked at this slice. A miss degrades to today's `Dynamic[top]`, never
       # a false resolution (ADR-57 follow-up § module-singleton).
-      def try_singleton_method_inference(receiver, call_node, arg_types)
+      def try_singleton_method_inference(receiver, call_node, arg_types, method_name: call_node.name)
         return nil unless receiver.is_a?(Type::Singleton)
 
-        def_node = scope.singleton_def_for(receiver.class_name, call_node.name)
+        def_node = scope.singleton_def_for(receiver.class_name, method_name)
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types)
         return result if result.nil?
 
-        degrade_if_overridable(result, receiver.class_name, call_node.name, :singleton)
+        degrade_if_overridable(result, receiver.class_name, method_name, :singleton)
       rescue StandardError
         nil
       end
@@ -1368,9 +1407,9 @@ module Rigor
       # body the project itself wrote. Which of the two tiers applies is decided by the receiver carrier —
       # `Singleton[Foo]` when the constant names a class or module, `Nominal[…]` when it holds an ordinary
       # object (#320) — so the two are mutually exclusive and consulting both is one resolution attempt.
-      def try_project_singleton_inference(receiver, call_node, arg_types)
-        try_singleton_method_inference(receiver, call_node, arg_types) ||
-          try_singleton_object_constant_inference(receiver, call_node, arg_types)
+      def try_project_singleton_inference(receiver, call_node, arg_types, method_name: call_node.name)
+        try_singleton_method_inference(receiver, call_node, arg_types, method_name: method_name) ||
+          try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: method_name)
       end
 
       # #320 — resolves a call whose receiver is a constant holding an ordinary object with a `class << Const`
@@ -1378,10 +1417,10 @@ module Rigor
       # that object, so the receiver carrier is passed through unchanged. Own-constant only, and only for a
       # name the project actually recorded — a miss degrades to today's `Dynamic[top]`, never a false
       # resolution. `Singleton` receivers never reach here: {#try_singleton_method_inference} owns them.
-      def try_singleton_object_constant_inference(receiver, call_node, arg_types)
+      def try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: call_node.name)
         return nil unless receiver.is_a?(Type::Nominal)
 
-        def_node = SingletonObjectConstant.def_node_for(call_node, receiver, call_node.name, scope)
+        def_node = SingletonObjectConstant.def_node_for(call_node, receiver, method_name, scope)
         return nil if def_node.nil?
 
         infer_user_method_return(def_node, receiver, arg_types)

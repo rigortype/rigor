@@ -1532,7 +1532,21 @@ module Rigor
       def record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
         record_define_method(node, qualified_prefix, in_singleton_class, methods_acc) if node.name == :define_method
         record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc) if ATTR_MACROS.include?(node.name)
+        record_alias_method_call(node, qualified_prefix, in_singleton_class, methods_acc)
         AnonymousMetaClass.name_for(node, source_path)
+      end
+
+      # The `alias_method :new, :old` CallNode twin of {#record_alias_method} (#533): the NEW name joins
+      # the discovered-methods table so calls to it stop reading undefined, and
+      # {#apply_alias_def_nodes}'s map walk gives it the ORIGINAL def node for return inference.
+      def record_alias_method_call(call_node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty?
+
+        names = alias_method_call_names(call_node)
+        return if names.nil?
+
+        kind = in_singleton_class ? :singleton : :instance
+        record_method_kind(accumulator, qualified_prefix.join("::"), names.first, kind)
       end
 
       # #319 — walks a `Class.new do ... end` / `Module.new do ... end` / `Struct.new(*sym) do ... end` /
@@ -2223,10 +2237,34 @@ module Rigor
         when Prism::AliasMethodNode
           record_alias_map_entry(node, qualified_prefix, accumulator)
           return accumulator
+        when Prism::CallNode
+          # `alias_method :new, :old` — the CallNode twin of the `alias` keyword (#533; liquid's i18n
+          # `t` alias was the corpus case). Recorded, then the walk continues: unlike AliasMethodNode a
+          # call's children can carry further class bodies (`Class.new do … end`).
+          names = alias_method_call_names(node)
+          if names && !qualified_prefix.empty?
+            (accumulator[qualified_prefix.join("::")] ||= {})[names.first] =
+              names.last
+          end
         end
 
         node.rigor_each_child { |child| collect_class_alias_map(child, qualified_prefix, accumulator) }
         accumulator
+      end
+
+      # `[new_name, old_name]` for an implicit-self `alias_method` call with two literal symbol /
+      # string arguments, or nil. A variable-named alias is runtime data and stays unrecorded.
+      def alias_method_call_names(call_node)
+        return nil unless call_node.name == :alias_method && call_node.receiver.nil?
+
+        args = call_node.arguments&.arguments
+        return nil unless args && args.size == 2
+
+        new_name = literal_method_name(args[0])
+        old_name = literal_method_name(args[1])
+        return nil if new_name.nil? || old_name.nil?
+
+        [new_name, old_name]
       end
 
       def record_alias_map_entry(alias_node, qualified_prefix, accumulator)

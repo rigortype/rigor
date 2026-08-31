@@ -9,6 +9,7 @@ require_relative "../source/node_children"
 require_relative "../cache/file_digest"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
+require_relative "index_write_widening"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "statement_evaluator"
@@ -597,7 +598,7 @@ module Rigor
         # records — an unanalyzable multi-write means unknown, not nil).
         record_multi_write_ivars(node, scope, class_name, accumulator)
 
-        record_ivar_mutator_call(node, class_name, mutated_ivars) if mutated_ivars && node.is_a?(Prism::CallNode)
+        record_ivar_mutator_call(node, class_name, mutated_ivars) if mutated_ivars
 
         # Don't recurse into nested defs, classes, or modules; their ivars belong to their own enclosing class.
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
@@ -618,14 +619,29 @@ module Rigor
       # {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the widening primitive declines is
       # ignored at finalization.
       def record_ivar_mutator_call(node, class_name, mutated_ivars)
+        method_name = ivar_mutator_name(node)
+        return if method_name.nil?
+
         receiver = node.receiver
         return unless receiver.is_a?(Prism::InstanceVariableReadNode)
-        return unless MutationWidening::ARRAY_MUTATORS.include?(node.name) ||
-                      MutationWidening::HASH_MUTATORS.include?(node.name)
+        return unless MutationWidening::ARRAY_MUTATORS.include?(method_name) ||
+                      MutationWidening::HASH_MUTATORS.include?(method_name)
 
         per_class = (mutated_ivars[class_name] ||= {})
         per_ivar = (per_class[receiver.name] ||= Set.new)
-        per_ivar << node.name
+        per_ivar << method_name
+      end
+
+      # The mutator a node applies to its receiver, or nil when the node is not a mutator form.
+      # `@h[k] ||= v` and its `&&=` / `+=` siblings store through `[]=` but are not `[]=` CallNodes
+      # (`IndexWriteWidening`); missing them left an `@h = {}` mutated only
+      # that way carrying its empty `HashShape` into every sibling method, so `@h.empty?` folded to
+      # `Constant[true]` on a hash the class fills.
+      def ivar_mutator_name(node)
+        return node.name if node.is_a?(Prism::CallNode)
+        return IndexWriteWidening::MUTATOR if IndexWriteWidening.index_write?(node)
+
+        nil
       end
 
       # Walk an `IfNode` / `UnlessNode` so writes inside the THEN body that look like defensive ivar initialisation gain

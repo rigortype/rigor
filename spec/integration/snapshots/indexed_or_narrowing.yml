@@ -1,4 +1,4 @@
 ---
 locals:
-  indexed: "{}"
-  params: "{}"
+  indexed: Hash[Dynamic[top], Dynamic[top]]
+  params: Hash[Dynamic[top], Dynamic[top]]

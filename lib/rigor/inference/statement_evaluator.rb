@@ -16,6 +16,7 @@ require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "indexed_narrowing"
+require_relative "index_write_widening"
 require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
 require_relative "multi_target_binder"
@@ -76,6 +77,8 @@ module Rigor
         Prism::GlobalVariableAndWriteNode => :eval_global_and_write,
         Prism::GlobalVariableOperatorWriteNode => :eval_global_operator_write,
         Prism::IndexOrWriteNode => :eval_index_or_write,
+        Prism::IndexAndWriteNode => :eval_index_write,
+        Prism::IndexOperatorWriteNode => :eval_index_write,
         Prism::MultiWriteNode => :eval_multi_write,
         Prism::IfNode => :eval_if,
         Prism::UnlessNode => :eval_unless,
@@ -433,9 +436,22 @@ module Rigor
         key_node = first_index_argument(node)
         address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
         post = post_rhs
+        # Widen BEFORE recording the narrowing: rebinding the receiver drops the per-slot narrowings keyed on it, so
+        # the reverse order would trade this feature away for the widening. The two are complementary — the shape
+        # forgets that the collection is still empty, the narrowing remembers that THIS slot is now non-nil.
+        post = IndexWriteWidening.widen(node: node, current_scope: post)
         post = post.with_indexed_narrowing(*address, result_type) if address
 
         [result_type, post]
+      end
+
+      # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
+      # expression, scope untouched — and the receiver never widened. They store through `[]=` exactly as
+      # `eval_index_or_write` does, so they take the same widening; the value itself is still typed by the expression
+      # typer (`type_of_assignment_write`), which is what the default did.
+      def eval_index_write(node)
+        [scope.type_of(node, tracer: tracer),
+         IndexWriteWidening.widen(node: node, current_scope: scope)]
       end
 
       def first_index_argument(node)

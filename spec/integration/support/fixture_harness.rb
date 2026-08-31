@@ -20,9 +20,14 @@ module Rigor
     class FixtureHarness
       FIXTURES_ROOT = File.expand_path("../fixtures", __dir__)
 
+      # The entry file a project fixture MUST carry. A directory under `fixtures/` without it is not a
+      # project fixture at all — `fixtures/effects/` is a container of per-spec project trees — so callers
+      # that enumerate fixtures discriminate on this name rather than on "is a directory".
+      DEFAULT_ENTRY = "demo.rb"
+
       attr_reader :name, :source, :tree, :scope, :index
 
-      def initialize(name, entry: "demo.rb")
+      def initialize(name, entry: DEFAULT_ENTRY)
         @name = name
         @entry = entry
         load_fixture
@@ -91,6 +96,11 @@ module Rigor
 
       def load_project(dir)
         entry_path = File.join(dir, @entry)
+        unless File.file?(entry_path)
+          raise ArgumentError, "fixture #{@name} is a directory but carries no #{@entry} " \
+                               "(a project fixture MUST have one; #{dir}/ looks like a plain fixture tree)"
+        end
+
         @source = File.read(entry_path)
         # `for_project` auto-detects `<dir>/sig` so the fixture's sig files are merged with the bundled stdlib.
         env = Rigor::Environment.for_project(root: dir)

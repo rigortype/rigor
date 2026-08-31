@@ -22,6 +22,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** Safe navigation is no longer typed as a plain call: `x&.m` keeps the nil the skipped call produces and answers the non-nil arm's type instead of collapsing to untyped, a plain call on a `T | nil` receiver answers `T`'s type when the method would raise on nil, and a mutable literal constant (`CACHE = {}`) the same file mutates stops folding reads through its stale empty shape ([#543](https://github.com/rigortype/rigor/pull/543), [#518](https://github.com/rigortype/rigor/issues/518), [#519](https://github.com/rigortype/rigor/issues/519), [#540](https://github.com/rigortype/rigor/issues/540)).
+
 - **[engine]** An attribute or index assignment (`x.attr = v`, `h[k] = v`) now carries the assigned value's type, as Ruby defines, instead of the writer method's declared return — so `h[k] = true` no longer reads as untyped on an untyped hash ([#538](https://github.com/rigortype/rigor/pull/538), [#520](https://github.com/rigortype/rigor/issues/520)).
 
 - **[engine]** A collection handed out by one method and filled through that reference — `(bucket_for(entry)[key] ||= {})[name] = row` — is no longer read as still empty, so `empty?` and `size` on it stop folding to a constant in every other method of the class ([#507](https://github.com/rigortype/rigor/pull/507), [#506](https://github.com/rigortype/rigor/issues/506)).

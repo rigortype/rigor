@@ -180,8 +180,8 @@ module Rigor
           return nil unless node.is_a?(Prism::CallNode) && node.receiver.nil?
           return nil unless VISIBILITY_MACROS.include?(node.name)
 
-          args = node.arguments&.arguments
-          return nil unless args&.size == 1 && args.first.is_a?(Prism::DefNode)
+          args = node.arguments&.arguments || []
+          return nil unless args.size == 1 && args.first.is_a?(Prism::DefNode)
 
           args.first
         end

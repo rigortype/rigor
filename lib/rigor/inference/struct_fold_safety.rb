@@ -171,7 +171,9 @@ module Rigor
         return nil unless meta_constant?(call_node.receiver, :Struct)
 
         args = call_node.arguments&.arguments || []
-        positional = args.last.is_a?(Prism::KeywordHashNode) ? args[0..-2] : args
+        # `[0..-2]` cannot return nil for a start of 0, but `Array#[](Range) -> Array[T]?` says it can;
+        # the `|| []` keeps the read well-typed on that worst case.
+        positional = args.last.is_a?(Prism::KeywordHashNode) ? (args[0..-2] || []) : args
         positional = positional[1..] if positional.first.is_a?(Prism::StringNode)
         return nil if positional.nil? || positional.empty?
         return nil unless positional.all?(Prism::SymbolNode)

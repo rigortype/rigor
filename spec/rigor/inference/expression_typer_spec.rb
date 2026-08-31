@@ -1572,4 +1572,43 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.describe).to eq("1")
     end
   end
+
+  # Issues #518 / #519 — optional receivers. `&.` is not a plain call (the nil arm's method never runs,
+  # and the skip produces nil), and a plain call on `T | nil` must not lose T's answer to the nil arm's
+  # veto of the union dispatch.
+  describe "optional receivers and safe navigation" do
+    let(:project_scope) { Rigor::Scope.empty(environment: Rigor::Environment.for_project) }
+
+    def type_description(source)
+      project_scope.type_of(parse_expression(source)).describe(:short)
+    end
+
+    it "types `x&.m` by dispatching on the nil-stripped receiver and unioning the skip's nil back (#518)" do
+      # NilClass has no `upcase`, so the plain-call union dispatch declined this to Dynamic[top].
+      expect(type_description('(rand < 0.5 ? "abc" : nil)&.upcase')).to eq('"ABC"?')
+    end
+
+    it "does not fold the nil arm's own method as if `&.` called it (#518)" do
+      # As a plain call, NilClass#to_s -> "" joined the union and the runtime's nil was missing:
+      # the expression read `"" | "abc"` while `nil&.to_s` is nil.
+      expect(type_description('(rand < 0.5 ? "abc" : nil)&.to_s')).to eq('"abc"?')
+    end
+
+    it "types a call on a receiver that IS nil as the statically-skipped nil" do
+      expect(type_description("nil&.upcase")).to eq("nil")
+    end
+
+    it "adds no phantom nil when the receiver cannot be nil" do
+      expect(type_description('"a"&.upcase')).to eq('"A"')
+    end
+
+    it "retries a plain call on the non-nil fragment when the nil arm vetoed the union dispatch (#519)" do
+      # The value describes the path that returns; the nil path raising is possible-nil-receiver's job.
+      expect(type_description('(rand < 0.5 ? "abc" : nil).upcase')).to eq('"ABC"')
+    end
+
+    it "keeps full-union dispatch for a method every member defines (control)" do
+      expect(type_description('(rand < 0.5 ? "abc" : nil).to_s')).to eq('"" | "abc"')
+    end
+  end
 end

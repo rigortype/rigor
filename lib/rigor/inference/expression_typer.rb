@@ -1131,8 +1131,15 @@ module Rigor
       # 2026-09-01 corpus sweep. Safe-navigation writes stay on the dispatch result: `x&.attr = v` is
       # `v | nil`, which is #518's (safe-navigation) territory, not plain value semantics.
       def call_type_for(node)
-        result = call_dispatch_type_for(node)
-        return result unless node.attribute_write? && !node.safe_navigation?
+        return safe_navigation_call_type(node) if node.safe_navigation?
+
+        attribute_write_value(node, call_dispatch_type_for(node))
+      end
+
+      # The RHS-value override for plain attribute / index writes (#520); a non-write call keeps the
+      # dispatch result.
+      def attribute_write_value(node, result)
+        return result unless node.attribute_write?
 
         rhs = node.arguments&.arguments&.last
         return result if rhs.nil? || rhs.is_a?(Prism::SplatNode)
@@ -1140,15 +1147,49 @@ module Rigor
         type_of(rhs)
       end
 
+      # Issue #518 — `x&.m` is NOT a plain call: when `x` is nil the method never runs and the expression
+      # is nil. Typed as a plain call it inherited both defects of union dispatch — the nil arm's method
+      # was folded as if `&.` called it (`s&.to_s` on `String?` read `String`, missing the nil the runtime
+      # produces), and a method absent from NilClass declined the whole union to `Dynamic[top]` even when
+      # the non-nil arm is fully typed (herb's own sig declares `Token#value: String`; the `?` alone
+      # discarded it). The call is dispatched on the nil-stripped receiver and the nil the skip produces is
+      # unioned back in; a receiver that IS nil skips the call statically.
+      def safe_navigation_call_type(node)
+        # A literal `nil&.m` is the statically-skipped call and folds to nil. An INFERRED exactly-nil
+        # receiver deliberately does NOT fold: every corpus site with that shape traced to a wrong
+        # upstream nil (an `attr_writer`-backed ivar whose only static write is nil — #541 — or a mutated
+        # literal-shape constant — #540), and folding it turned those latent wrong types into
+        # `flow.always-truthy-condition` firings on working programs. Until those uplinks are honest,
+        # the inferred-nil receiver keeps the plain pipeline's Dynamic.
+        return Type::Combinator.constant_of(nil) if node.receiver.is_a?(Prism::NilNode)
+
+        receiver = type_of(node.receiver)
+        non_nil = Narrowing.narrow_non_nil(receiver)
+        # A Bot or Dynamic fragment cannot improve on the plain pipeline (Bot: the inferred-exactly-nil
+        # receivers trace to the #540 / #541 uplinks; Dynamic: the stripped dispatch re-answers Dynamic),
+        # so both keep the historical path and its flow bookkeeping.
+        return call_dispatch_type_for(node) if non_nil.is_a?(Type::Bot) || non_nil.is_a?(Type::Dynamic)
+
+        result = attribute_write_value(node, call_dispatch_type_for(node, receiver_override: non_nil))
+        # Structural equality: `narrow_non_nil` rebuilds a Union even when it removed nothing, and a
+        # receiver that cannot be nil must not have a phantom nil unioned into its result.
+        return result if non_nil == receiver
+
+        Type::Combinator.union(result, Type::Combinator.constant_of(nil))
+      end
+
       # Slice 2 routes call expressions through `MethodDispatcher`. The receiver and every argument are typed
       # first, then the dispatcher is asked for a result type. A nil result triggers the fail-soft fallback
       # for the CallNode itself (the inner type_of calls already record their own fallbacks for unrecognised
       # receivers/args, so the tracer captures both the immediate dispatch miss and the deeper cause).
-      def call_dispatch_type_for(node)
+      # `receiver_override` substitutes the receiver type for the whole pipeline (folds, dispatch, the
+      # inference tiers) without re-reading the receiver node — the safe-navigation path (#518) dispatches
+      # on the nil-stripped fragment, and the optional-receiver retry (#519) re-runs the pipeline on it.
+      def call_dispatch_type_for(node, receiver_override: nil)
         narrowed = indexed_narrowing_for(node)
         return narrowed if narrowed
 
-        receiver = call_receiver_type_for(node)
+        receiver = receiver_override || call_receiver_type_for(node)
         arg_types = call_arg_types(node)
         block_type = block_return_type_for(node, receiver, arg_types)
 
@@ -1185,6 +1226,12 @@ module Rigor
         )
         return result if result
 
+        dispatch_miss_result(node, receiver, arg_types)
+      end
+
+      # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
+      # order; extracted from {#call_dispatch_type_for} whole.
+      def dispatch_miss_result(node, receiver, arg_types)
         # v0.0.2 #5 — inter-procedural inference for user-defined methods. When dispatch misses but the
         # receiver is a user class with a `def` body, re-type the body with the call's argument types bound
         # and return the body's last-expression type.
@@ -1204,7 +1251,44 @@ module Rigor
         # semantic outcome, not a fail-soft compromise, so it MUST NOT record a tracer event.
         return inherit_receiver_origin(node) if receiver.is_a?(Type::Dynamic)
 
+        # Issue #519 — a `T | nil` receiver whose dispatch exhausted every tier: the nil arm vetoed the
+        # union (dispatch_union declines when ANY member declines, and the later tiers refuse unions), so
+        # `StringScanner?#scan` lost a type its RBS fully declares. Retry the whole pipeline on the
+        # non-nil fragment and answer its result: the nil path raises, which is `possible-nil-receiver`'s
+        # job (that rule reads the RECEIVER and is untouched); the value describes the path that returns
+        # (ADR-5 optimism, same polarity as the accessor-read nil-drop ADR-58 records). Unions whose
+        # non-nil members still decline fall through unchanged.
+        optional_retry = try_non_nil_receiver_retry(node, receiver)
+        return optional_retry if optional_retry
+
         unresolved_call_result(node, receiver)
+      end
+
+      def try_non_nil_receiver_retry(node, receiver)
+        return nil unless receiver.is_a?(Type::Union)
+        # When NilClass DEFINES the method (`nil?`, `to_s`, `==`, `inspect`, …), the nil arm is a live
+        # returner, not the veto — the union declined on some other member, and answering the stripped
+        # receiver's result would drop the nil arm's contribution (`(Journal | nil).nil?` must never
+        # answer the non-nil arm's constant-folded `false`). Retry only when the nil path raises.
+        return nil if nil_class_defines?(node.name)
+
+        non_nil = Narrowing.narrow_non_nil(receiver)
+        # Structural equality, not identity: `narrow_non_nil` rebuilds a Union even when it removed
+        # nothing, and an identity check would send a nil-free union that exhausts dispatch through the
+        # retry forever. A Dynamic fragment is excluded too: its retry can only re-answer Dynamic, and
+        # running the pipeline twice for that non-answer perturbs the flow bookkeeping for nothing.
+        return nil if non_nil.is_a?(Type::Bot) || non_nil.is_a?(Type::Dynamic) || non_nil == receiver
+
+        call_dispatch_type_for(node, receiver_override: non_nil)
+      end
+
+      # Conservative when NilClass's definition is unavailable: without the proof that the nil path
+      # raises, the retry stays off.
+      def nil_class_defines?(method_name)
+        definition = Rigor::Reflection.instance_definition("NilClass", scope: scope)
+        return true if definition.nil?
+
+        !definition.methods[method_name.to_sym].nil?
       end
 
       # The engine choke-point where a call has exhausted every resolution tier (RBS dispatch + user-class

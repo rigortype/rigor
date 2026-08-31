@@ -196,6 +196,49 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       end
     end
 
+    # Issue #521 — an untyped argument accepts every param indiscriminately, so neither the alias pass
+    # nor "first gradual match" may pin ONE overload: `[true] * n` with untyped `n` answered String (the
+    # `(string) -> String` arm, by declaration order), a wrong precise type the runtime contradicts.
+    describe "untyped discriminating argument (.select_candidates)" do
+      def select_candidates(class_name, method_name, arg_types)
+        definition = loader.instance_definition(class_name)
+        method = definition.methods[method_name]
+        instance_type = Rigor::Type::Combinator.nominal_of(class_name)
+        described_class.select_candidates(
+          method, arg_types: arg_types, self_type: instance_type, instance_type: instance_type
+        )
+      end
+
+      it "returns every gradual match for Array#* with an untyped argument" do
+        candidates = select_candidates("Array", :*, [Rigor::Type::Combinator.untyped])
+        param_names = candidates.map { |mt| mt.type.required_positionals.first.type.name.to_s }
+        expect(param_names).to contain_exactly("::string", "::int")
+      end
+
+      it "keeps a single candidate when the argument carries a real type" do
+        candidates = select_candidates("Array", :*, [Rigor::Type::Combinator.nominal_of("Integer")])
+        expect(candidates.size).to eq(1)
+        expect(candidates.first.type.required_positionals.first.type.name.to_s).to eq("::int")
+      end
+
+      it "answers a Dynamic-wrapped candidate union at the dispatch layer instead of pinning String" do
+        env = Rigor::Environment.for_project(libraries: [], signature_paths: [])
+        scope = Rigor::Scope.empty(environment: env)
+        root = Prism.parse("def f(n)\n  [true] * n\nend\n").value
+        index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+        call = nil
+        Rigor::Source::NodeWalker.each(root) { |n| call = n if n.is_a?(Prism::CallNode) && n.name == :* }
+        type = index[call].type_of(call)
+        # The Dynamic wrapper (not a bare union) is load-bearing: an untyped argument may satisfy
+        # constraints that exclude arms, so the bare union let the negative rules fire on arms the
+        # runtime never takes (three false positives on this repository's own lib).
+        expect(type).to be_a(Rigor::Type::Dynamic)
+        rendered = type.describe(:short)
+        expect(rendered).to include("String")
+        expect(rendered).to include("[true]")
+      end
+    end
+
     describe "receiver-affinity pre-sort (BigDecimal-coerce regression)" do
       # When the `bigdecimal` stdlib RBS is loaded, its reopen of `Integer#+` adds `(BigDecimal) -> BigDecimal` at the
       # FRONT of the overload list. Without the pre-sort the selector picks that arm for unknown / Integer args and

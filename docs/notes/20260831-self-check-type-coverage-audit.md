@@ -214,10 +214,54 @@ was 2.27 points, and its by-product was two live false-positive bugs neither the
 had surfaced.** A fold that types more expressions makes existing wrong types *reachable* by the
 diagnostic rules, which is why the diagnostic count belongs in the same table as the ratio.
 
+## Corpus validation (same day, after all four landed)
+
+The section above measures one codebase, and says so. Two real Rails applications from the survey
+corpus answer the two questions `lib` cannot: does any of this fire on code we did not write, and
+does the precision lift survive outside a type checker's own source?
+
+Method: the pre-audit tree (`83aaad82`) against merged master, each arm a `rigor check
+--no-cache --no-ci-detect --format=json` with cwd = the project, `BUNDLE_GEMFILE` = this repo's, and
+each project's committed config minus its `baseline:` stanza so nothing is suppressed. Diagnostic
+sets compared on `(path, line, column, rule, message)`. Deterministic counts, so a phased A/B is
+sound here — the interleaving discipline binds timings, not sets.
+
+| project | diagnostics | protection | precision |
+| --- | --- | --- | --- |
+| redmine (app+lib, 347 files) | 792 → 792, **0 added / 0 removed** | 34.9% → 35.0% (+43 sites) | 43.06% → 47.76% |
+| mastodon (app+lib, 1,325 files) | 2,341 → 2,341, **0 added / 0 removed** | 33.7% → 33.9% (+54 sites) | 42.08% → 48.90% |
+| this repo (`lib`, 427 files) | 0 → 0 | 45.6% → 45.8% (+81 sites) | 55.27% → 58.98% |
+
+**Zero diagnostic change on both applications** — the four changes are precision-additive on code we
+did not write, which is the property the exclusion analysis in Finding 2 was chosen for.
+
+### The attribution inverts what Finding 2 assumed
+
+Re-running the merged tree with `UniversalObjectDispatch.try_dispatch` neutralised splits the
+precision column:
+
+| | before → without the tier → with it | seeding + mutation fixes | the tier (#508) |
+| --- | --- | --- | --- |
+| redmine | 43.06 → 46.95 → 47.76 | **+3.89pp** | +0.81pp |
+| mastodon | 42.08 → 48.05 → 48.90 | **+5.97pp** | +0.85pp |
+| this repo | 55.27 → 56.71 → 58.98 | +1.44pp | **+2.27pp** |
+
+So the ranking this note published is wrong about which lever mattered, in both directions. **The
+tier's +2.27pp on our own `lib` was inflated by what our own `lib` does for a living** — a type
+checker predicates on types constantly, and `nil?` / `is_a?` density is nowhere near that in
+application code, where the tier is worth about a third as much. **The seeding fix, filed as a
+measurement correction and ranked below it, is worth 4–6 points on a real application** — a Rails
+app's cross-file class constants are most of what a file-at-a-time walk cannot see.
+
+The general form is worth keeping: **a lever measured on this repository's own `lib` is calibrated
+against a type checker, not against the programs Rigor is for.** Finding 2's caveat said to read
+`lib` as an upper bound; that was right for the tier and backwards for the seed.
+
 ## What this note does not claim
 
 The precision ratio is a *lens*, not a goal: a higher number is only worth having when it comes
-with no new false positives, which is why every row above carries its diagnostic count. Nothing
-here was measured on a corpus other than this repository's own `lib`, whose call graph is unusually
-self-contained; the parameter-inference figure in particular should be read as an upper bound for
-real applications.
+with no new false positives, which is why every row above carries its diagnostic count. The findings sections measure this
+repository's own `lib` alone, whose call graph is unusually self-contained; the corpus-validation
+section above is what checks them against real applications, and it corrects the ranking rather than
+confirming it. The parameter-inference figure has had no such check and should still be read as an
+upper bound.

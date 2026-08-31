@@ -18,35 +18,45 @@ this file is the one that is wrong.
 
 ## Where the cycle stands
 
-v0.3.6 shipped 2026-08-30. `[Unreleased]` carries **3 entries** (one Changed, two Fixed), all from
-the 2026-08-31 self-check audit below. **No autonomous version bumps** — the next cut needs an
-explicit ask.
+v0.3.6 shipped 2026-08-30. `[Unreleased]` carries **5 entries** (three Changed, two Fixed), all from
+the 2026-08-31 session. **No autonomous version bumps** — the next cut needs an explicit ask.
 
-## The 2026-08-31 self-check audit — what landed, and what the corpus corrected
+## What landed 2026-08-31 (eight PRs)
 
-Ran Rigor over its own `lib` to find where types do not attach. Full method, tables and caveats:
-[`docs/notes/20260831-self-check-type-coverage-audit.md`](notes/20260831-self-check-type-coverage-audit.md).
-Four PRs, same day, in dependency order: [#504](https://github.com/rigortype/rigor/pull/504) (#501),
-[#507](https://github.com/rigortype/rigor/pull/507) (#506),
-[#505](https://github.com/rigortype/rigor/pull/505) (#502),
-[#508](https://github.com/rigortype/rigor/pull/508) (#503). Integrated master: `lib` precision
-55.27% → 58.98%, protection 45.8%, `check` / `check-plugins` zero.
+The session started as "run Rigor over its own `lib` and find where types do not attach". Full
+method, tables and caveats: [`docs/notes/20260831-self-check-type-coverage-audit.md`](notes/20260831-self-check-type-coverage-audit.md).
 
-**The reusable finding is not any number: a fold that types more expressions makes existing WRONG
-types reachable by the diagnostic rules.** Prototyping the precision lever (#503) produced four
-diagnostics; none were caused by it. All four were live false positives in mutation-shape
-invalidation that neither the gate nor the corpus had found — `h[k] ||= v` bypassing
-`MutationWidening` (#501), and an ivar handed out by a sibling method and filled through that alias
-(#506). Put the diagnostic count in the same table as the precision ratio, and expect a precision
-lever to be gated on bugs it did not cause.
+Engine — two live false positives and two precision tiers:
+[#504](https://github.com/rigortype/rigor/pull/504) index `||=` / `&&=` / `+=` bypassing
+`MutationWidening` (#501) · [#507](https://github.com/rigortype/rigor/pull/507) an ivar handed out by
+a sibling method and filled through that alias (#506) ·
+[#508](https://github.com/rigortype/rigor/pull/508) receiver-independent `Object` selectors (#503) ·
+[#514](https://github.com/rigortype/rigor/pull/514) `Foo.instance` for the stdlib `Singleton` mixin.
 
-**The corpus inverted the ranking, so validate there before ranking anything.** Redmine 792 → 792 and
-mastodon 2,341 → 2,341 diagnostics: zero change, so all four are precision-additive on code we did
-not write. But neutralising the tier on the merged tree gives it **+0.81 / +0.85pp** on the two
-applications against +2.27 on our own `lib`, while the seeding fix — filed as a measurement
-correction and ranked *below* it — carries **+3.89 / +5.97pp** there against +1.44 here. A lever
-measured on this repository's `lib` is calibrated against a type checker, not against the programs
-Rigor is for.
+Measurement and tooling: [#505](https://github.com/rigortype/rigor/pull/505) the precision lens's
+discovery seed (#502) · [#511](https://github.com/rigortype/rigor/pull/511) the same for `type-scan` ·
+[#510](https://github.com/rigortype/rigor/pull/510) the precision gate recalibrated 0.43 → 0.57 ·
+[#515](https://github.com/rigortype/rigor/pull/515) `type-of` answers N positions per invocation and
+makes the column optional.
+
+Integrated master: `lib` precision 55.27% → 58.99%, `check` / `check-plugins` zero, and **redmine
+792 → 792 / mastodon 2,341 → 2,341 diagnostics — no application gained or lost one.**
+
+## Two findings worth more than the numbers
+
+**A fold that types more expressions makes existing WRONG types reachable by the diagnostic rules.**
+Prototyping #503 produced four diagnostics; none were caused by it. All four were live
+mutation-shape false positives (#501, #506) that neither the gate nor the corpus had found. Put the
+diagnostic count in the same table as the precision ratio, and expect a precision lever to be gated
+on bugs it did not cause.
+
+**A lever measured on this repository's own `lib` is calibrated against a type checker, not against
+the programs Rigor is for.** The corpus inverted this session's own ranking twice: #508 is worth
++2.27pp here and +0.81 / +0.85pp on the two applications, while #505 — filed as a measurement
+correction — carries +3.89 / +5.97pp there. And the cause mix is a different shape entirely:
+`inferred_return_untyped` is 56.6% of `lib`'s unprotected sites against 27–30% on the applications,
+where `unsupported_syntax` is 29.7% / 44.0% against 7.2% here. **Validate on the corpus before
+ranking anything.**
 
 ## Closed — do not re-open without evidence against the specific claim
 
@@ -54,43 +64,44 @@ Rigor is for.
   structural-interface carrier, a 23–29% ceiling, and a body-derived bound is circular for the
   protection metric. The spike's corpus already included `rigor-lib`.
 - **ADR-67 WD3 default-on** — needs **all three** of that ADR's re-evaluation triggers; one is
-  accumulated real-world opt-in usage, which no session can manufacture. Measured for reference:
-  `parameter_inference: true` takes `lib` opacity 41.09% → 37.81%.
-- **A `check`-walk analogue of the #502 seed gap** — there is none. The runner seeds every cross-file
-  `DiscoveryIndex` slot; the four it does not are per-file by construction, and a census over three
-  codebases found 0 / 0 / 17 cross-file ivar reads and zero cross-file global / cvar reads. The
-  note's § "Follow-up" has the table.
+  accumulated real-world opt-in usage, which no session can manufacture.
+- **A cross-file `class_ivars` index** — 0 / 0 / 17 foreign ivar reads across the three codebases,
+  and zero cross-file global / class-variable reads. The note's § "Follow-up" has the census.
+- **Ivars as a lever of their own** — 79% of `lib`'s opaque ivar reads have a write whose own rvalue
+  is a parameter. They are ADR-67's frontier seen one hop downstream.
 
-## What is actually left
+## What is open
 
-- **Parameters remain the whole of the remaining opacity worth sizing** — 30.3% of it on the
-  post-#508 tree (`def` parameters 17,246 + block parameters 3,490 of 68,336 opaque expressions),
-  and both levers on them are the closed ones above. Re-measure against the note's attribution
-  before proposing anything here.
-- ~~The precision gate's threshold~~ — done 2026-08-31: `make coverage` moved 0.43 → 0.57, calibrated
-  on the measured drift (0.94 points across the whole 0.3.x line under a fixed analyzer), not on the
-  headroom. The two corpus applications read 47.8% / 48.9%, so the gate stays a `lib`-only number.
-- **Ivars are parameters one hop downstream, so they are not a separate lever.** Scoped 2026-08-31:
-  of `lib`'s 2,104 opaque ivar reads, **1,656 (79%) have a write whose own rvalue is `Dynamic`** —
-  ADR-67's frontier. The one structural sub-pattern (a class-body `@mutex = …` read from a
-  `module_function` body; the accumulator serves instance bodies only, by design) is 82 / 63 / 5
-  sites across the three codebases. Not pursued. **Three decompositions now land on parameters —
-  stop hunting precision levers here until the ADR-67 gate moves.**
-- Still open and independent: **#476** (synthetic Tier B dead in production), **#460** (parked,
-  v0.4.x), **#454** (decide before the #409 flip), **#435** (the `file:line` half of item 3).
-- Perf: the 2026-08-25 campaign's named levers are spent; the surviving ranked list is in
-  [`docs/notes/20260825-feature-warm-cold-corpus-perf.md`](notes/20260825-feature-warm-cold-corpus-perf.md).
+- **[#513](https://github.com/rigortype/rigor/issues/513)** — the precision lens seeds 2 of the 11
+  discovery slots the check walk seeds, and `rigor coverage` builds a plugin-LESS environment while
+  `--protection` does not. Measured: +0.77pp (mastodon) from the tables, ~1.2pp (redmine) from the
+  environment. **This is why #514 moves `coverage` by +3 and the check walk by 365.** Re-check the
+  0.57 gate in the same change.
+- **[#512](https://github.com/rigortype/rigor/issues/512)** — `type-of` answers `Dynamic` for a
+  cross-file constant. The obvious fix works and costs 2× (1.1 → 2.1 s) and took `cli_spec` past ten
+  minutes, so it was withdrawn: it needs a cached seed, not a fresh whole-project parse.
+- **[#147](https://github.com/rigortype/rigor/issues/147)** — the disk-backed `ProjectScan` snapshot
+  cache. It is the shared answer to #512 and to the ~1.9 s floor #515 left, and the design pathway
+  already exists (`docs/design/20260518-cli-disk-snapshot-cache.md`).
+- The real remaining hole, from the corpus: **calls whose receiver the engine CAN name but whose
+  dispatch still falls to `Dynamic`** — 47.4% / 50.3% of all `CallNode`s on redmine / mastodon
+  against 9.8% on `lib`. Top pairs are `ActionController::Parameters#[]` (1,056), `Singleton[User]
+  #current` (494, resolves to an untyped chain), `Singleton[X]#table_name`, `Singleton[Rails]#…`,
+  `Constant#minutes`. Several are plugin territory rather than engine.
+- Still open and independent: **#476**, **#460** (parked, v0.4.x), **#454**, **#435**.
 
 ## Pitfalls that still bind
 
 - **Read a gate's exit code in its own call.** `make docs-check | tail` returns tail's 0. Run the
-  gate after the LAST edit, merge resolutions included — the changelog conformance spec is the only
-  net under `merge=union`, and two branches each opening a `###` section merge silently into a
-  duplicated heading.
+  gate after the LAST edit, merge resolutions included — two branches each opening a `###` section
+  merge silently into a duplicated heading, and the changelog conformance spec is the only net.
+- **When you add an output form to a CLI, verify the contract, not just the speed.** #515 shipped a
+  review round because the enumeration printed Prism's 0-based column where the command's contract is
+  1-based (and a spec pinned the wrong value), `group_by(&:file)` reordered results away from
+  argument order, mixing exact and line queries rendered as one block, and the 40-row cap truncated
+  silently. Run your own new form the way a user would before measuring how fast it is.
 - **A PHASED A/B is not a control** for timings; `tool/perfbench/ab_probe_interleaved.sh` is the
-  template. Deterministic counts (diagnostic sets, tier censuses) are exempt — say which you have.
-- **A corpus that never fires cannot clear a widening.** Say whether a gate added zero firings
-  because the change was safe or because the shape is absent.
+  template. Deterministic counts (diagnostic sets, censuses) are exempt — say which you have.
 - **A config's relative `paths:` resolve against the CONFIG file's directory**, and an
   `effects.envelopes[].match:` glob must be RELATIVE — both make a measurement vacuously green.
 - **Running against a survey project** needs cwd = the target AND `BUNDLE_GEMFILE` = this repo's

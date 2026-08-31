@@ -957,10 +957,10 @@ module Rigor
         end
       end
 
-      def fallback_for(node, family:)
+      def fallback_for(node, family:, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
         inner = dynamic_top
-        record_fallback(node, family: family, inner_type: inner, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
-        scope.record_dynamic_origin(node, DynamicOrigin::UNSUPPORTED_SYNTAX)
+        record_fallback(node, family: family, inner_type: inner, origin: origin)
+        scope.record_dynamic_origin(node, origin)
         inner
       end
 
@@ -1201,7 +1201,26 @@ module Rigor
         record_unresolved_self_call(node, receiver) if Analysis::SelfCallResolutionRecorder.active?
         Effects::Collector.record_unresolved(node, scope.source_path) if Effects::Collector.active?
 
-        fallback_for(node, family: :prism)
+        fallback_for(node, family: :prism, origin: unresolved_call_origin(receiver, node.name))
+      end
+
+      # Issue #522 — the honest cause for a call the tiers exhausted. When the receiver's class HAS a
+      # discovered project def for the method, the miss is a return the engine could not infer (the
+      # discovered-method tier deliberately declined in favor of body inference, which then declined too —
+      # `MethodDispatcher#try_discovered_method`'s decline arms), which is ADR-82's
+      # `INFERRED_RETURN_UNTYPED`, not "unsupported syntax". Without this, every service-object `#call`
+      # whose body defeats inference reports to `coverage --protection` as a syntax gap. The generic cause
+      # stays for genuinely unresolved names (framework DSL sends, methods no scanned file defines).
+      def unresolved_call_origin(receiver, method_name)
+        class_name, kind = case receiver
+                           when Type::Nominal then [receiver.class_name, :instance]
+                           when Type::Singleton then [receiver.class_name, :singleton]
+                           else [nil, nil]
+                           end
+        return DynamicOrigin::UNSUPPORTED_SYNTAX if class_name.nil?
+        return DynamicOrigin::UNSUPPORTED_SYNTAX unless scope.discovered_method?(class_name, method_name, kind)
+
+        DynamicOrigin::INFERRED_RETURN_UNTYPED
       end
 
       # ADR-82 WD6 — carry the receiver's provenance onto the call it produces (returning the unchanged

@@ -63,19 +63,31 @@ syntax-highlighted for a tty — through
 colorizer; `--no-color` (and the `NO_COLOR` environment
 variable) disable the colour.
 
-## `rigor type-of` — one position
+## `rigor type-of` — exact positions or a whole line
 
-When you only need one expression's type — typically while
-chasing down why a diagnostic did or did not fire — query a
-single position:
+When you need a few expression types — typically while chasing
+down why a diagnostic did or did not fire — query the exact
+positions together so Rigor loads the project and each source
+file once:
 
 ```sh
-rigor type-of lib/example.rb:12:8
+rigor type-of lib/example.rb:12:8 lib/example.rb:12:14
 ```
 
-`--format=json` emits a machine-readable result for tooling.
-This is the same query the editor integration answers on
-hover.
+Leave off the column to avoid counting it by hand. Rigor prints
+a table of the first 40 expressions starting on the line,
+outermost first at each 1-based column, and marks a truncated
+table:
+
+```sh
+rigor type-of lib/example.rb:12
+```
+
+`--format=json` emits a machine-readable result for tooling: one
+result stays a flat object, while several results use a `results`
+array. Line queries add `line_enumerations` metadata with the
+shown and total expression counts. An exact position is the same
+query the editor integration answers on hover.
 
 ## `rigor trace` — watch the inference happen
 

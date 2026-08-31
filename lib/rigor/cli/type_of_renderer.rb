@@ -20,7 +20,55 @@ module Rigor
 
       private
 
-      def render_text(result)
+      # Takes the whole result list: one invocation can now answer several positions, and a bare `FILE:LINE`
+      # answers up to 40 expressions on that line. A single exact result renders byte-identically to before.
+      def render_text(results)
+        list = Array(results)
+        index = 0
+        first = true
+        while index < list.length
+          @out.puts("") unless first
+          result = list[index]
+          enumeration = result.enumeration
+          if enumeration
+            finish = index + 1
+            finish += 1 while finish < list.length && list[finish].enumeration.equal?(enumeration)
+            render_enumeration(list[index...finish], enumeration)
+            index = finish
+          else
+            render_one_text(result)
+            index += 1
+          end
+          first = false
+        end
+      end
+
+      # A bare `FILE:LINE` asks "what are the types on this line", and the answer is a table: one row per
+      # expression, outermost first at each column, so a method chain reads top to bottom.
+      def render_enumeration(results, enumeration)
+        @out.puts("#{results.first.file}:#{results.first.line}")
+        render_enumeration_rows(results)
+        if enumeration.total > results.length
+          omitted = enumeration.total - results.length
+          @out.puts("  ... #{omitted} additional expressions omitted (limit #{results.length})")
+        end
+        # After the table, never interleaved with it: a `--trace` fallback list between two rows would break the
+        # column alignment the whole form exists for.
+        results.each { |result| render_text_fallbacks(result) }
+      end
+
+      def render_enumeration_rows(results)
+        width = results.map { |result| node_label(result).length }.max
+        results.each do |result|
+          @out.puts(format("  %4d  %-#{width}s  %s", result.column, node_label(result), result.type.describe))
+        end
+      end
+
+      def node_label(result)
+        result.node.class.name.to_s.delete_prefix("Prism::")
+      end
+
+      def render_one_text(result)
         @out.puts("#{result.file}:#{result.line}:#{result.column}")
         @out.puts("node:    #{result.node.class}")
         @out.puts("type:    #{result.type.describe}")
@@ -40,7 +88,28 @@ module Rigor
         end
       end
 
-      def render_json(result)
+      # A single result keeps the flat object it has always emitted, so existing consumers are untouched; a
+      # multi-position request wraps them in `results` rather than printing several documents to one stream.
+      def render_json(results)
+        list = Array(results)
+        payload = list.size == 1 ? result_to_h(list.first) : { results: list.map { |r| result_to_h(r) } }
+        enumerations = line_enumerations(list)
+        payload[:line_enumerations] = enumerations unless enumerations.empty?
+        @out.puts(JSON.pretty_generate(payload))
+      end
+
+      def line_enumerations(results)
+        seen = {}.compare_by_identity
+        results.filter_map do |result|
+          enumeration = result.enumeration
+          next if enumeration.nil? || seen.key?(enumeration)
+
+          seen[enumeration] = true
+          { file: result.file, line: result.line, shown: enumeration.shown, total: enumeration.total }
+        end
+      end
+
+      def result_to_h(result)
         payload = {
           file: result.file,
           line: result.line,
@@ -50,7 +119,7 @@ module Rigor
           erased: result.type.erase_to_rbs
         }
         payload[:fallbacks] = result.tracer.map { |event| fallback_to_h(event) } if result.tracer
-        @out.puts(JSON.pretty_generate(payload))
+        payload
       end
 
       def format_fallback_text(event, file)

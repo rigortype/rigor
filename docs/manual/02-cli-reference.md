@@ -114,16 +114,25 @@ missing file.
 
 ## `rigor type-of`
 
-Print the inferred type at one source position.
+Print inferred types at one or more source positions.
 
 ```sh
-rigor type-of FILE:LINE:COL
-rigor type-of FILE LINE COL
+rigor type-of [options] FILE:LINE[:COL] [FILE:LINE[:COL] ...]
+rigor type-of [options] FILE LINE COL
 ```
 
-Accepts the position as a single `file:line:col` triple or as
-three arguments. `--format=json` emits a machine-readable
-form; `--trace` records fail-soft fallbacks. The editor-mode
+The colon form is repeatable and keeps argument order while
+parsing and scope-indexing each file once. Omit `COL` to print a
+table of up to 40 expressions that start on that line, outermost
+first at each 1-based column; the table marks when further
+expressions were omitted. The legacy three-argument form accepts
+one exact position.
+
+`--format=json` keeps one result as the original flat object and
+wraps several results in a `results` array. Line queries add a
+`line_enumerations` array whose `shown` and `total` counts make
+truncation explicit. `--trace` records fail-soft fallbacks,
+after the rows of a line table in text output. The editor-mode
 `--tmp-file` / `--instead-of` pair is accepted as on `check`.
 
 ## `rigor trace`

@@ -22,6 +22,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** Overload selection now sees through alias-declared parameters — an alias expanding to a concrete class rejects a non-matching argument instead of gradually accepting everything and winning by list position ([#558](https://github.com/rigortype/rigor/pull/558), [#529](https://github.com/rigortype/rigor/issues/529)).
 - **[engine]** RBS type aliases and intersections now translate instead of collapsing to untyped — prism's `type node = Node & _Node` reads as `Prism::Node`, and aliased returns, parameters, and block parameters resolve through the alias table ([#556](https://github.com/rigortype/rigor/pull/556), [#529](https://github.com/rigortype/rigor/issues/529)).
 - **[cli]** `rigor coverage` and `rigor check --coverage` now measure the same engine `rigor check` runs: the precision ratio sees your project's cross-file methods, ancestry, and plugin-contributed types instead of under-reporting them as untyped, and precisely-folded `Data` / `Struct` values count as typed ([#535](https://github.com/rigortype/rigor/pull/535), [#513](https://github.com/rigortype/rigor/issues/513), [#523](https://github.com/rigortype/rigor/issues/523)).
 

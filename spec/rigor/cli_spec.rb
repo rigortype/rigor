@@ -246,6 +246,66 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("erased:  1")
     end
 
+    # Throughput: one invocation used to rebuild the plugin-aware environment and reparse the file for a
+    # single answer, so walking a method chain cost one process per position. On redmine, five positions went
+    # from 10.34 s (five processes) to 2.08 s.
+    it "answers several positions in one invocation" do
+      path = write_fixture("multi.rb", "a = 1\nb = \"s\"\nc = :sym\n")
+
+      status, out, err = run_cli("type-of", "#{path}:1:5", "#{path}:2:5", "#{path}:3:5")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("type:    1")
+      expect(out).to include('type:    "s"')
+      expect(out).to include("type:    :sym")
+    end
+
+    it "answers positions across several files in one invocation" do
+      one = write_fixture("one.rb", "1\n")
+      two = write_fixture("two.rb", ":two\n")
+
+      status, out, _err = run_cli("type-of", "#{one}:1:1", "#{two}:1:1")
+
+      expect(status).to eq(0)
+      expect(out).to include("type:    1")
+      expect(out).to include("type:    :two")
+    end
+
+    it "wraps a multi-position JSON payload in `results`, and keeps a single one flat" do
+      path = write_fixture("multi.rb", "a = 1\nb = :s\n")
+
+      _, multi, = run_cli("type-of", "--format=json", "#{path}:1:5", "#{path}:2:5")
+      _, single, = run_cli("type-of", "--format=json", "#{path}:1:5")
+
+      expect(JSON.parse(multi)["results"].map { |r| r["type"] }).to eq(%w[1 :s])
+      expect(JSON.parse(single)).to include("type" => "1")
+      expect(JSON.parse(single)).not_to have_key("results")
+    end
+
+    # The column is the most error-prone part of using this command by hand, so it is optional.
+    it "enumerates every expression on the line when the column is omitted" do
+      path = write_fixture("line.rb", "x = [1, 2].first\n")
+
+      status, out, err = run_cli("type-of", "#{path}:1")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("#{path}:1")
+      expect(out).to match(/\s+0\s+LocalVariableWriteNode/)
+      expect(out).to include("CallNode")
+      expect(out).to match(/ArrayNode|Tuple/)
+    end
+
+    it "reports a line with no expression on it" do
+      path = write_fixture("blank.rb", "x = 1\n\n")
+
+      status, _out, err = run_cli("type-of", "#{path}:2")
+
+      expect(status).to eq(1)
+      expect(err).to include("no expression found on")
+    end
+
     it "accepts FILE LINE COL as separate arguments" do
       path = write_fixture("a.rb", "\"hi\"\n")
 

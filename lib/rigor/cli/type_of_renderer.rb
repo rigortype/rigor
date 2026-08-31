@@ -20,7 +20,41 @@ module Rigor
 
       private
 
-      def render_text(result)
+      # Takes the whole result list: one invocation can now answer several positions, and a bare `FILE:LINE`
+      # answers every expression on that line. Blocks are separated by a blank line so a multi-result run stays
+      # readable; a single result renders byte-identically to before.
+      def render_text(results)
+        list = Array(results)
+        return render_enumeration(list) if list.any? && list.all?(&:enumerated)
+
+        list.each_with_index do |result, index|
+          @out.puts("") unless index.zero?
+          render_one_text(result)
+        end
+      end
+
+      # A bare `FILE:LINE` asks "what are the types on this line", and the answer is a table: one row per
+      # expression, outermost first at each column, so a method chain reads top to bottom.
+      def render_enumeration(results)
+        @out.puts("#{results.first.file}:#{results.first.line}")
+        render_enumeration_rows(results)
+        # After the table, never interleaved with it: a `--trace` fallback list between two rows would break the
+        # column alignment the whole form exists for.
+        results.each { |result| render_text_fallbacks(result) }
+      end
+
+      def render_enumeration_rows(results)
+        width = results.map { |result| node_label(result).length }.max
+        results.each do |result|
+          @out.puts(format("  %4d  %-#{width}s  %s", result.column, node_label(result), result.type.describe))
+        end
+      end
+
+      def node_label(result)
+        result.node.class.name.to_s.delete_prefix("Prism::")
+      end
+
+      def render_one_text(result)
         @out.puts("#{result.file}:#{result.line}:#{result.column}")
         @out.puts("node:    #{result.node.class}")
         @out.puts("type:    #{result.type.describe}")
@@ -40,7 +74,15 @@ module Rigor
         end
       end
 
-      def render_json(result)
+      # A single result keeps the flat object it has always emitted, so existing consumers are untouched; a
+      # multi-position request wraps them in `results` rather than printing several documents to one stream.
+      def render_json(results)
+        list = Array(results)
+        payload = list.size == 1 ? result_to_h(list.first) : { results: list.map { |r| result_to_h(r) } }
+        @out.puts(JSON.pretty_generate(payload))
+      end
+
+      def result_to_h(result)
         payload = {
           file: result.file,
           line: result.line,
@@ -50,7 +92,7 @@ module Rigor
           erased: result.type.erase_to_rbs
         }
         payload[:fallbacks] = result.tracer.map { |event| fallback_to_h(event) } if result.tracer
-        @out.puts(JSON.pretty_generate(payload))
+        payload
       end
 
       def format_fallback_text(event, file)

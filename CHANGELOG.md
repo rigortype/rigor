@@ -22,6 +22,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** `alias_method :new_name, :old_name` now resolves like the `alias` keyword — calls through the alias infer the original method's return — and `x.send(:selector)` with a literal symbol resolves as the direct call would, private methods included ([#549](https://github.com/rigortype/rigor/pull/549), [#533](https://github.com/rigortype/rigor/issues/533)).
+
 - **[cli]** `rigor coverage` and `rigor check --coverage` now measure the same engine `rigor check` runs: the precision ratio sees your project's cross-file methods, ancestry, and plugin-contributed types instead of under-reporting them as untyped, and precisely-folded `Data` / `Struct` values count as typed ([#535](https://github.com/rigortype/rigor/pull/535), [#513](https://github.com/rigortype/rigor/issues/513), [#523](https://github.com/rigortype/rigor/issues/523)).
 
 - **[engine]** A collection handed out by one method and filled through that reference — `(bucket_for(entry)[key] ||= {})[name] = row` — is no longer read as still empty, so `empty?` and `size` on it stop folding to a constant in every other method of the class ([#507](https://github.com/rigortype/rigor/pull/507), [#506](https://github.com/rigortype/rigor/issues/506)).

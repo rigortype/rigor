@@ -21,23 +21,37 @@ module Rigor
       private
 
       # Takes the whole result list: one invocation can now answer several positions, and a bare `FILE:LINE`
-      # answers every expression on that line. Blocks are separated by a blank line so a multi-result run stays
-      # readable; a single result renders byte-identically to before.
+      # answers up to 40 expressions on that line. A single exact result renders byte-identically to before.
       def render_text(results)
         list = Array(results)
-        return render_enumeration(list) if list.any? && list.all?(&:enumerated)
-
-        list.each_with_index do |result, index|
-          @out.puts("") unless index.zero?
-          render_one_text(result)
+        index = 0
+        first = true
+        while index < list.length
+          @out.puts("") unless first
+          result = list[index]
+          enumeration = result.enumeration
+          if enumeration
+            finish = index + 1
+            finish += 1 while finish < list.length && list[finish].enumeration.equal?(enumeration)
+            render_enumeration(list[index...finish], enumeration)
+            index = finish
+          else
+            render_one_text(result)
+            index += 1
+          end
+          first = false
         end
       end
 
       # A bare `FILE:LINE` asks "what are the types on this line", and the answer is a table: one row per
       # expression, outermost first at each column, so a method chain reads top to bottom.
-      def render_enumeration(results)
+      def render_enumeration(results, enumeration)
         @out.puts("#{results.first.file}:#{results.first.line}")
         render_enumeration_rows(results)
+        if enumeration.total > results.length
+          omitted = enumeration.total - results.length
+          @out.puts("  ... #{omitted} additional expressions omitted (limit #{results.length})")
+        end
         # After the table, never interleaved with it: a `--trace` fallback list between two rows would break the
         # column alignment the whole form exists for.
         results.each { |result| render_text_fallbacks(result) }
@@ -79,7 +93,20 @@ module Rigor
       def render_json(results)
         list = Array(results)
         payload = list.size == 1 ? result_to_h(list.first) : { results: list.map { |r| result_to_h(r) } }
+        enumerations = line_enumerations(list)
+        payload[:line_enumerations] = enumerations unless enumerations.empty?
         @out.puts(JSON.pretty_generate(payload))
+      end
+
+      def line_enumerations(results)
+        seen = {}.compare_by_identity
+        results.filter_map do |result|
+          enumeration = result.enumeration
+          next if enumeration.nil? || seen.key?(enumeration)
+
+          seen[enumeration] = true
+          { file: result.file, line: result.line, shown: enumeration.shown, total: enumeration.total }
+        end
       end
 
       def result_to_h(result)

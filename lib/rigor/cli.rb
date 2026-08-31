@@ -376,7 +376,7 @@ module Rigor
           check      Analyze Ruby source files
           init       Create a starter .rigor.yml
           annotate   Print FILE with each line's last-expression type
-          type-of    Print the inferred type at FILE:LINE:COL
+          type-of    Print inferred types at FILE:LINE[:COL] positions
           trace      Replay how the engine typed FILE as a terminal animation
           type-scan  Report Scope#type_of coverage across PATHs
           effects    Report each method's effect labels, and the committed effect snapshot

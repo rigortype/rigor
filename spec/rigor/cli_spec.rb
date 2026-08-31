@@ -305,6 +305,17 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("type:    :two")
     end
 
+    it "keeps positions in argument order while reusing each file's analysis" do
+      one = write_fixture("one.rb", "1\n\"last\"\n")
+      two = write_fixture("two.rb", ":two\n")
+
+      status, out, err = run_cli("type-of", "#{one}:1:1", "#{two}:1:1", "#{one}:2:1")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out.scan(/^.+:\d+:\d+$/)).to eq(["#{one}:1:1", "#{two}:1:1", "#{one}:2:1"])
+    end
+
     it "wraps a multi-position JSON payload in `results`, and keeps a single one flat" do
       path = write_fixture("multi.rb", "a = 1\nb = :s\n")
 
@@ -325,9 +336,57 @@ RSpec.describe Rigor::CLI do
       expect(err).to eq("")
       expect(status).to eq(0)
       expect(out).to include("#{path}:1")
-      expect(out).to match(/\s+0\s+LocalVariableWriteNode/)
+      expect(out).to match(/\s+1\s+LocalVariableWriteNode/)
       expect(out).to include("CallNode")
       expect(out).to match(/ArrayNode|Tuple/)
+    end
+
+    it "renders each line enumeration as its own table alongside exact positions" do
+      path = write_fixture("mixed.rb", "x = 1\ny = :two\n")
+
+      status, out, err = run_cli("type-of", "#{path}:1", "#{path}:2:5", "#{path}:2")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out.scan(/^#{Regexp.escape(path)}:\d+(?::\d+)?$/)).to eq(
+        ["#{path}:1", "#{path}:2:5", "#{path}:2"]
+      )
+    end
+
+    it "enumerates expressions inside defined? without evaluating them" do
+      path = write_fixture("defined.rb", "defined?(receiver.call)\n")
+
+      status, out, err = run_cli("type-of", "#{path}:1")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("DefinedNode")
+      expect(out).to include("CallNode")
+    end
+
+    it "marks a line enumeration that reaches the output cap" do
+      path = write_fixture("long.rb", Array.new(41, "1").join("; "))
+
+      status, out, err = run_cli("type-of", "#{path}:1")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out.scan("IntegerNode").size).to eq(40)
+      expect(out).to include("additional expressions omitted")
+    end
+
+    it "reports line-enumeration truncation in JSON" do
+      path = write_fixture("long.rb", Array.new(41, "1").join("; "))
+
+      status, out, err = run_cli("type-of", "--format=json", "#{path}:1")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      expect(payload.fetch("results").size).to eq(40)
+      expect(payload.fetch("line_enumerations")).to eq(
+        [{ "file" => path, "line" => 1, "shown" => 40, "total" => 41 }]
+      )
     end
 
     it "reports a line with no expression on it" do

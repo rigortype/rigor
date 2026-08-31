@@ -1176,6 +1176,94 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    describe "ivar escape through a self-call return" do
+      it "widens an ivar mutated through the alias a sibling method returned" do
+        program = parse(<<~RUBY)
+          class Rows
+            def initialize
+              @path_rows = {}
+            end
+
+            def bucket_for(kind)
+              return @path_rows if kind == :path
+
+              {}
+            end
+
+            def absorb(kind, key)
+              (bucket_for(kind)[key] ||= {})["m"] = 1
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        type = idx[program].class_ivars_for("Rows")[:@path_rows]
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Hash")
+      end
+
+      it "widens through a tail-position return, not only an explicit `return`" do
+        program = parse(<<~RUBY)
+          class Rows
+            def initialize
+              @rows = []
+            end
+
+            def bucket
+              @rows
+            end
+
+            def absorb(x)
+              bucket << x
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        type = idx[program].class_ivars_for("Rows")[:@rows]
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+      end
+
+      it "leaves the shape alone when the callee returns a VALUE from the ivar rather than the ivar" do
+        program = parse(<<~RUBY)
+          class Rows
+            def initialize
+              @rows = { a: 1 }
+            end
+
+            def at(key)
+              @rows[key]
+            end
+
+            def absorb(key)
+              at(key) << 1
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        expect(idx[program].class_ivars_for("Rows")[:@rows]).to be_a(Rigor::Type::HashShape)
+      end
+
+      it "leaves the shape alone when the mutation receiver is an explicit receiver, not self" do
+        program = parse(<<~RUBY)
+          class Rows
+            def initialize
+              @rows = { a: 1 }
+            end
+
+            def bucket
+              @rows
+            end
+
+            def absorb(other, key)
+              other.bucket[key] = 1
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        expect(idx[program].class_ivars_for("Rows")[:@rows]).to be_a(Rigor::Type::HashShape)
+      end
+    end
+
     describe "defensive ivar-init with falsey-Constant rvalue" do
       it "skips the seed for `@x = nil unless @x` so the predicate does not fold to Constant[nil]" do
         program = parse(<<~RUBY)

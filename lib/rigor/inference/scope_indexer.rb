@@ -221,6 +221,7 @@ module Rigor
         method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
+        record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         accumulator.transform_values(&:freeze).freeze
@@ -260,6 +261,119 @@ module Rigor
             per_class[ivar_name] = Type::Combinator.union(existing, nil_t)
           end
         end
+      end
+
+      # An ivar a method RETURNS leaves the object, and every mutation of the returned reference mutates the ivar:
+      # `(bucket_for(entry)[key] ||= {})[name] = row` fills whichever of `@self_rows` / `@path_rows` / `@result_rows`
+      # `bucket_for` handed back. {record_ivar_mutator_call} cannot see it — the mutation's receiver is a `CallNode`,
+      # not an `InstanceVariableReadNode` — so those ivars kept the empty `HashShape` their `initialize` gave them and
+      # `@path_rows.empty?` folded to `Constant[true]` on a hash the class fills. Rigor's own
+      # `lib/rigor/effects/plugin_facts.rb` is the worked site.
+      #
+      # Scope is deliberately narrow: the mutation receiver must be a SELF-call (an explicit receiver is a different
+      # object), the callee must be an instance method of the same class, and only ivars in the callee's RETURN
+      # position count — an ivar merely read in its body (`@rows[owner]` returns the value, not the hash) does not
+      # escape. Over-recording here would widen a shape carrier that nothing mutates, which costs precision on every
+      # reader in the class.
+      #
+      # Runs after the main walk so the returned-ivar summary is complete regardless of definition order, and gated on
+      # a class actually having a returning method — the common class contributes nothing and pays one `defs` lookup.
+      def record_aliased_ivar_mutations!(root, mutated_ivars)
+        defs = collect_class_method_defs(root)
+        returned = returned_ivars_by_method(defs)
+        return if returned.empty?
+
+        defs.each do |class_name, methods|
+          per_class = returned[class_name]
+          next if per_class.nil?
+
+          methods.each_value do |def_node|
+            gather_aliased_mutations(def_node.body, class_name, per_class, mutated_ivars)
+          end
+        end
+      end
+
+      # `{class_name => {method_name => Set<ivar name>}}` for methods that hand an ivar back, dropping the empty sets
+      # so the caller's `next if per_class.nil?` skips a whole class in one lookup.
+      def returned_ivars_by_method(defs)
+        defs.each_with_object({}) do |(class_name, methods), acc|
+          methods.each do |method_name, def_node|
+            ivars = returned_ivars(def_node)
+            (acc[class_name] ||= {})[method_name] = ivars unless ivars.empty?
+          end
+        end
+      end
+
+      # The ivars `def_node` can hand back: an explicit `return @x` anywhere in the body, and the body's tail
+      # expression when it is (or resolves through branch nodes to) a bare ivar read. A tail that computes something
+      # FROM an ivar (`@rows[k]`, `@rows.dup`) hands back a different object and is not an escape.
+      def returned_ivars(def_node)
+        body = def_node.body
+        return EMPTY_IVAR_SET if body.nil?
+
+        found = Set.new
+        collect_explicit_return_ivars(body, found)
+        tail_value_nodes(body).each { |node| found << node.name if node.is_a?(Prism::InstanceVariableReadNode) }
+        found
+      end
+
+      def collect_explicit_return_ivars(node, found)
+        return unless node.is_a?(Prism::Node)
+        return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        if node.is_a?(Prism::ReturnNode)
+          args = node.arguments&.arguments
+          found << args.first.name if args && args.size == 1 && args.first.is_a?(Prism::InstanceVariableReadNode)
+        end
+
+        node.rigor_each_child { |c| collect_explicit_return_ivars(c, found) }
+      end
+
+      # The expressions a body can evaluate to, resolving through the branch nodes whose value is a sub-expression.
+      # Depth-capped for the same reason every other walk here is: a pathologically nested tail is not worth unbounded
+      # recursion, and stopping early only under-collects (fewer escapes recorded, never more).
+      def tail_value_nodes(node, depth = 0)
+        return [] unless node.is_a?(Prism::Node)
+        return [] if depth >= TAIL_VALUE_DEPTH_CAP
+
+        children = tail_value_children(node)
+        return [node] if children.nil?
+
+        children.flat_map { |child| tail_value_nodes(child, depth + 1) }
+      end
+
+      # The children a node's own value comes from, or nil when the node IS the value. Split out from
+      # {tail_value_nodes} so the recursion stays one line and this stays a lookup table.
+      def tail_value_children(node)
+        case node
+        when Prism::StatementsNode then [node.body.last]
+        when Prism::ParenthesesNode then [node.body]
+        when Prism::BeginNode, Prism::ElseNode, Prism::WhenNode, Prism::InNode then [node.statements]
+        when Prism::IfNode then [node.statements, node.subsequent]
+        when Prism::UnlessNode then [node.statements, node.else_clause]
+        when Prism::CaseNode then node.conditions + [node.else_clause]
+        when Prism::OrNode, Prism::AndNode then [node.left, node.right]
+        end
+      end
+
+      # Records every mutation in `node` whose receiver is a self-call to one of `per_class`'s returning methods.
+      def gather_aliased_mutations(node, class_name, per_class, mutated_ivars)
+        return unless node.is_a?(Prism::Node)
+
+        mutator, receiver = mutation_target(node)
+        escaped_ivars_for_receiver(receiver, per_class)&.each do |ivar_name|
+          per_ivar = ((mutated_ivars[class_name] ||= {})[ivar_name] ||= Set.new)
+          per_ivar << mutator
+        end
+
+        node.rigor_each_child { |c| gather_aliased_mutations(c, class_name, per_class, mutated_ivars) }
+      end
+
+      # The ivars a mutation receiver can be, when the receiver is a same-class self-call. Nil for every other shape.
+      def escaped_ivars_for_receiver(receiver, per_class)
+        return nil unless receiver.is_a?(Prism::CallNode) && receiver.receiver.nil?
+
+        per_class[receiver.name]
       end
 
       # Walks the post-collected accumulator and widens any Tuple / HashShape entry for an ivar that observed a mutator
@@ -577,6 +691,14 @@ module Rigor
       private_constant :IVAR_BARRIER_NODES
 
       EMPTY_GUARDED_IVARS = Set.new.freeze
+
+      # Shared empty result for a def that returns no ivar — the overwhelmingly common case.
+      EMPTY_IVAR_SET = Set.new.freeze
+      private_constant :EMPTY_IVAR_SET
+
+      # Branch nesting a tail expression is followed through. Stopping early only UNDER-collects escapes.
+      TAIL_VALUE_DEPTH_CAP = 8
+      private_constant :TAIL_VALUE_DEPTH_CAP
       private_constant :EMPTY_GUARDED_IVARS
 
       def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS,
@@ -619,10 +741,8 @@ module Rigor
       # {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the widening primitive declines is
       # ignored at finalization.
       def record_ivar_mutator_call(node, class_name, mutated_ivars)
-        method_name = ivar_mutator_name(node)
+        method_name, receiver = mutation_target(node)
         return if method_name.nil?
-
-        receiver = node.receiver
         return unless receiver.is_a?(Prism::InstanceVariableReadNode)
         return unless MutationWidening::ARRAY_MUTATORS.include?(method_name) ||
                       MutationWidening::HASH_MUTATORS.include?(method_name)
@@ -632,14 +752,20 @@ module Rigor
         per_ivar << method_name
       end
 
-      # The mutator a node applies to its receiver, or nil when the node is not a mutator form.
-      # `@h[k] ||= v` and its `&&=` / `+=` siblings store through `[]=` but are not `[]=` CallNodes
-      # (`IndexWriteWidening`); missing them left an `@h = {}` mutated only
-      # that way carrying its empty `HashShape` into every sibling method, so `@h.empty?` folded to
-      # `Constant[true]` on a hash the class fills.
-      def ivar_mutator_name(node)
-        return node.name if node.is_a?(Prism::CallNode)
-        return IndexWriteWidening::MUTATOR if IndexWriteWidening.index_write?(node)
+      # `[mutator name, receiver node]` for a node that mutates its receiver, `nil` otherwise.
+      #
+      # `@h[k] ||= v` and its `&&=` / `+=` siblings store through `[]=` but are not `[]=` CallNodes; missing them left
+      # an `@h = {}` mutated only that way carrying its empty `HashShape` into every sibling method, so `@h.empty?`
+      # folded to `Constant[true]` on a hash the class fills. `IndexWriteWidening::NODE_CLASSES` owns that list; it is
+      # spelled out here as an explicit disjunction because that is what narrows `node` to something with a
+      # `#receiver` — `NODE_CLASSES.any? { … }` reads as a call on `Prism::Node` and Rigor rejects it, correctly.
+      def mutation_target(node)
+        return [node.name, node.receiver] if node.is_a?(Prism::CallNode)
+
+        if node.is_a?(Prism::IndexOrWriteNode) || node.is_a?(Prism::IndexAndWriteNode) ||
+           node.is_a?(Prism::IndexOperatorWriteNode)
+          return [IndexWriteWidening::MUTATOR, node.receiver]
+        end
 
         nil
       end

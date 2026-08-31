@@ -1,0 +1,39 @@
+{
+  "target": "rigor-lib",
+  "files": 430,
+  "exprs": 167079,
+  "precision": 0.5894,
+  "precision_fullseed": 0.5927,
+  "protection": 0.4573,
+  "cause_site_counts": {
+    "none": 5873,
+    "inferred_return_untyped": 9789,
+    "unsupported_syntax": 1234,
+    "explicit_untyped": 371,
+    "analyzer_budget_cutoff": 1
+  },
+  "tractability_summary": { "engine_gap": 11024, "add_rbs": 371 },
+  "opaque_split": { "local_reads": 28822, "calls": 24608, "ivars": 2111 },
+  "local_read_buckets": { "def_param": 17329, "assigned_local": 7766, "block_param": 3727 },
+  "call_receiver_tiers": { "dynamic_top": 16922, "implicit_self": 4220, "precise": 3466 },
+  "named_receiver_pairs": { "pairs": 1121, "sites": 3466, "sites_fullseed": 3330 },
+  "classifier_else_artifact_sites": {
+    "total": 810,
+    "DataInstance": 466, "DataClass": 297, "StructInstance": 27, "StructClass": 10, "BoundMethod": 10
+  },
+  "cases": [
+    { "key": "singleton(Data)#define", "sites": 160, "category": "G", "mechanism": "Type::DataClass falls to PrecisionScanner#classify's else branch and is counted dynamic_top; the ADR-48 fold itself works, block form included.", "fix_direction": "Add DataClass/DataInstance/StructClass/StructInstance/BoundMethod branches to classify (precision_scanner.rb:151-165); official coverage under-reports ~0.4-0.5pp." },
+    { "key": "Type::Constant#value (+Union#members, Nominal/Singleton#class_name, Tuple#elements, HashShape#pairs, Nominal#type_args)", "sites": 357, "category": "A", "mechanism": "attr_readers whose backing ivar is a bare initialize parameter; ADR-58 cannot type param-sourced fields.", "fix_direction": "closed - ADR-67 territory, count only" },
+    { "key": "singleton(Rigor::Type::Combinator)#union", "sites": 124, "category": "A", "mechanism": "Inferred return of the normalization pipeline is genuinely input-dependent; params are Dynamic.", "fix_direction": "closed - ADR-67 territory" },
+    { "key": "Hash#[] bare + Hash[Dynamic,Dynamic]#[]/[]=/fetch + {}#[] + Array#[] + tuple#min", "sites": 528, "category": "C", "mechanism": "Container-of-Dynamic propagation; receivers narrowed to bare Hash/Array by is_a? over YAML/parsed data, or shapes filled from params.", "fix_direction": "one hop downstream of ADR-67; no independent lever" },
+    { "key": "{}#[]= (index-write expression value)", "sites": 230, "category": "D", "mechanism": "h[k] = v types as the dispatch return instead of the rvalue; h[k] = true answers Dynamic despite Constant rvalue (verified t_kwargs.rb:37). Covers {}#[]= 66, Hash[D,D]#[]= 91, Hash#[]= 42, Thread#[]= 32.", "fix_direction": "Type []=/index-write expressions as the rvalue type - sound per Ruby assignment-expression semantics, cheap." },
+    { "key": "Prism::CallNode#receiver (+ConstantPathNode#parent, ArgumentsNode?#arguments, prism-attr tail)", "sites": 120, "category": "D", "mechanism": "RbsTypeTranslator maps RBS::Types::Alias AND Intersection to untyped (rbs_type_translator.rb:67-68); prism RBS types AST edges as alias `Prism::node = Node & _Node`, so every structural walk read collapses to Dynamic[top]?. Verified: narrowed CallNode .receiver -> Dynamic[top]?, .name -> Symbol.", "fix_direction": "Expand aliases via the RBS environment (recursion-guarded); translate class-&-interface intersections keeping the nominal carrier (Node & _Node ~= Nominal[Prism::Node])." },
+    { "key": "MethodCatalog.for_topic (+Reflection.instance_method_definition, Scope#type_of, RbsTypeTranslator.translate)", "sites": 59, "category": "D", "mechanism": "Any project method - singleton or instance - with an optional keyword parameter is never dispatched: callers answer Dynamic with or without the kwarg supplied, while the positional twin resolves (minimal repro t_kwargs.rb, same file, bare scope).", "fix_direction": "Def-node acceptance/arity gate for inferred-return dispatch must accept optional kwargs (bind supplied, default the rest)." },
+    { "key": "Thread#[]/[]= + JSON.pretty_generate + Marshal.load + Proc#call", "sites": 124, "category": "B", "mechanism": "Upstream RBS declares -> untyped (thread.rbs:229/243, json.rbs:1170); not closable by rigor-side signatures short of an overlay.", "fix_direction": "none / optional stdlib overlay" },
+    { "key": "RuleCatalog::Entry#new (+Data/Struct .new tail)", "sites": 31, "category": "G", "mechanism": "Type::DataInstance - fold succeeds under both lens and full seed; classifier's else counts it opaque.", "fix_direction": "same classify fix as case 1" },
+    { "key": "Prism::Node#rigor_each_child", "sites": 22, "category": "E", "mechanism": "Method defined only via class_eval string codegen (node_children.rb:97-101); statically invisible; metaprogramming is plugin-API territory by policy.", "fix_direction": "none (policy)" },
+    { "key": "lens-artifact pairs: ConstantPath.qualified_name/_or_nil, Options.add_config, FileDigest.hexdigest, SingletonFolding.constant_string, Incremental.invert", "sites": 91, "category": "G", "mechanism": "coverage lens seeds only discovered_classes (coverage_scan.rb:58-76); the check walk also seeds def-node/def-source/superclass/include/visibility/method/layout tables (runner.rb:1577-1604). Under the full seed these pairs dissolve and precision moves +0.33pp; the product types them fine.", "fix_direction": "Seed the full discovery tables in the coverage lens - residual of #502/#505; expect a larger delta on Rails-shaped corpora." },
+    { "key": "unsupported_syntax roots", "sites": 1234, "category": "F", "mechanism": "Root census: ConstantPathNode 1535 (incl. dynamic-base paths like collector.class::NODE_CLASSES), ConstantReadNode 389 (project constants whose values are not evaluated; in_source_constants is opt-in), CallOrWriteNode 8 (A::B.attr ||= v). The 19520 CallNode fallbacks are unresolved-dispatch propagation, not syntax; provenance smears down chains (ADR-82 WD6).", "fix_direction": "constant-value evaluation coverage + CallOrWriteNode modeling" },
+    { "key": "bot#class", "sites": 11, "category": "G", "mechanism": "Receiver is Bot inside raise-guard branches the engine proved unreachable; a call on Bot could soundly answer Bot.", "fix_direction": "optional: propagate Bot through calls" }
+  ]
+}

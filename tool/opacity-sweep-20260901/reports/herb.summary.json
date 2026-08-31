@@ -1,0 +1,32 @@
+{
+  "target": "herb",
+  "files": 42,
+  "exprs": 22027,
+  "precision": 0.6065,
+  "protection": 0.4813,
+  "cause_site_counts": {
+    "inferred_return_untyped": 841,
+    "none": 816,
+    "explicit_untyped": 190,
+    "unsupported_syntax": 172,
+    "external_gem_without_rbs": 6
+  },
+  "opaque_split": { "local_reads": 2779, "calls": 3457, "ivars": 320 },
+  "local_read_buckets": { "def_param": 1342, "block_param": 465, "assigned_local": 972 },
+  "call_receiver_tiers": { "implicit_self": 905, "dynamic_top": 2227, "precise": 325 },
+  "cases": [
+    { "key": "Herb::Token?#value / #location", "sites": 34, "category": "D", "mechanism": "optional receiver discards bundled-RBS declared types (sig declares value: String)", "fix_direction": "T? dispatch as join over T and NilClass" },
+    { "key": "safe-navigation chains (start/line/column cluster)", "sites": 103, "category": "D", "mechanism": "obj&.m answers Dynamic even with fully-typed non-nil arm (repro typeof_probe11)", "fix_direction": "&. should yield nil | T#m — the easy half of the T? fix" },
+    { "key": "hash-shape-union #[]=", "sites": 41, "category": "G", "mechanism": "[]= mirrors Dynamic RHS; shape-union receivers also refused", "fix_direction": "union dispatch join (secondary)" },
+    { "key": "Hash#[] bare / Dynamic-valued", "sites": 40, "category": "C", "mechanism": "render-call option hashes", "fix_direction": "upstream" },
+    { "key": "singleton(Herb::Configuration)#load", "sites": 6, "category": "D", "mechanism": "optional param disqualifies return inference", "fix_direction": "param-shape guard extension" },
+    { "key": "Array[String]?#first", "sites": 6, "category": "D", "mechanism": "optional-receiver refusal", "fix_direction": "T? dispatch join" },
+    { "key": "JSON-scalar-union #dig", "sites": 4, "category": "D", "mechanism": "wide union receiver refused instead of joining arms defining dig", "fix_direction": "union-arm dispatch" },
+    { "key": "singleton(Herb)#configuration", "sites": 4, "category": "A", "mechanism": "class-ivar memoization (closed)", "fix_direction": "closed" },
+    { "key": "singleton(FileUtils)#mkdir_p", "sites": 3, "category": "G", "mechanism": "void-returning stdlib call maps to top and counts opaque (56 top-tier exprs)", "fix_direction": "exclude/flag void-top in the opacity metric" },
+    { "key": "explicit_untyped in own sig/", "sites": 190, "category": "B", "mechanism": "herb's bundled RBS declares untyped members", "fix_direction": "tighten sig/ (add_rbs lane)" },
+    { "key": "dynamic-receiver calls", "sites": 2227, "category": "C", "mechanism": "propagation from config/JSON hashes and &. chains", "fix_direction": "cascades from T?/&. fix" },
+    { "key": "def/block param reads", "sites": 1807, "category": "A", "mechanism": "ADR-67 (closed)", "fix_direction": "closed" },
+    { "key": "ivar reads", "sites": 320, "category": "A", "mechanism": "ADR-58", "fix_direction": "ADR-58" }
+  ]
+}

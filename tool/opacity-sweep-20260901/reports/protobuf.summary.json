@@ -1,0 +1,21 @@
+{
+  "target": "protobuf",
+  "files": 24,
+  "exprs": 10071,
+  "precision": 0.5953,
+  "protection": 0.4974,
+  "cause_site_counts": {"unsupported_syntax": 388, "inferred_return_untyped": 272, "none": 209, "explicit_untyped": 2},
+  "opaque_split": {"local_reads": 1193, "calls": 1747, "ivars": 98},
+  "local_read_buckets": {"def_param": 565, "block_param": 118, "assigned_local": 510},
+  "call_receiver_tiers": {"dynamic_top": 749, "implicit_self": 471, "precise": 527},
+  "cases": [
+    {"key": "runtime message-class construction (Class.new(const_get(...)) do + define_method + class_eval reopenings)", "sites": 388, "category": "F", "mechanism": "Entire message classes built inside Class.new blocks (message.rb:39) with interpolated define_method accessors and method_missing aliasing; well_known_types reopens the generated classes via class_eval; all inner defs/sends have no static class.", "fix_direction": "Descriptor-consuming plugin, not engine work."},
+    {"key": "attach_function FFI DSL + generated FFI singleton methods", "sites": 260, "category": "E", "mechanism": "class FFI extend ::FFI::Library + 125 attach_function declarations generate the entire native API surface (create_arena, get_field_by_number, ...); upb C library beneath (B).", "fix_direction": "ffi plugin (rigor-ffi-plugin-author territory) interpreting attach_function signatures — names and arg/ret types are literal in the calls."},
+    {"key": "FFI struct/union surface (MessageValue#[], by_value/by_ref, Pointer null?/read*)", "sites": 180, "category": "E", "mechanism": "ffi gem has no RBS; struct member access via layout metaprogramming.", "fix_direction": "Same ffi plugin."},
+    {"key": "send with literal symbol (send(:get_file_descriptor), send(:key_type))", "sites": 84, "category": "D", "mechanism": "The codebase idiom for crossing private-method boundaries; symbol is literal at virtually every site yet all sends answer Dynamic.", "fix_direction": "Fold send/__send__/public_send with literal first arg into ordinary visibility-ignoring dispatch."},
+    {"key": "Method?#call", "sites": 6, "category": "D", "mechanism": "method(:literal) lookup and #call through an optional both decline.", "fix_direction": "Type method(:literal) as Method with the target signature; dispatch #call through T?."},
+    {"key": "memoized ivar returns (@options ||= ...)", "sites": 135, "category": "D", "mechanism": "Ivar-return propagation gap (proven in ox) where memoized value is well-typed; A-tainted where writes are param-sourced.", "fix_direction": "ADR-58 WD2/WD3."},
+    {"key": "def/block params", "sites": 683, "category": "A", "mechanism": "Parameter-sourced.", "fix_direction": "CLOSED (ADR-67)."},
+    {"key": "cascade + cross-file inferred-return boundary (convert_upb_to_ruby etc.)", "sites": 1259, "category": "C", "mechanism": "Seeded by cases 1-3 plus the no-cross-file-inferred-returns seed boundary (see rbnacl report).", "fix_direction": ""}
+  ]
+}

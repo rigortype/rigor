@@ -1,0 +1,25 @@
+{
+  "target": "parser",
+  "files": 56,
+  "exprs": 12831,
+  "precision": 0.5169,
+  "protection": 0.2918,
+  "cause_site_counts": {"inferred_return_untyped": 832, "none": 588, "unsupported_syntax": 117, "explicit_untyped": 16},
+  "opaque_split": {"local_reads": 2357, "calls": 2257, "ivars": 355},
+  "local_read_buckets": {"def_param": 1734, "block_param": 147, "assigned_local": 476},
+  "call_receiver_tiers": {"precise": 180, "dynamic_top": 1516, "implicit_self": 561},
+  "cases": [
+    {"key": "optional/keyword params defeat call-site binding", "sites": 400, "category": "D", "mechanism": "any optional positional or keyword parameter makes the call answer Dynamic even when the body returns a plainly bound positional arg; plain fixed-arity positional binding works and constant-propagates (3 verified controls)", "fix_direction": "per-parameter arg binding: bind present optionals, bind keywords by name, default-type the rest; fall back per-parameter not per-signature"},
+    {"key": "def_param local reads", "sites": 1881, "category": "A", "mechanism": "untyped token tuples passed through the builder API", "fix_direction": "ADR-67, closed"},
+    {"key": "param-fed tuple helpers loc/value/diagnostic", "sites": 237, "category": "A", "mechanism": "def loc(token); token[1]; helpers return elements of untyped params; diagnostic also has an optional trailing param hitting the binding bail", "fix_direction": "ADR-67 + the optional-param binder fix"},
+    {"key": "non-empty-string#!=", "sites": 13, "category": "D", "mechanism": "operator dispatch on a Refined receiver answers Dynamic (control: RUBY_VERSION != \"1.0\")", "fix_direction": "dispatch Refined through its underlying nominal when the refinement adds no methods"},
+    {"key": "Parser::Color.green/.yellow", "sites": 4, "category": "D", "mechanism": "def self with kwarg default; same binding bail", "fix_direction": "same as case 1"},
+    {"key": "class << self attr_accessor emit_*", "sites": 8, "category": "A", "mechanism": "class-level ivar read through singleton attr_accessor", "fix_direction": "ADR-58 family"},
+    {"key": "HashShape conditionally-populated key (family[:fusible])", "sites": 11, "category": "C", "mechanism": "literal-key read of a key absent from the inferred shape answers Dynamic", "fix_direction": "absent-key literal read as nil (FP-safe) or join across conditional inserts"},
+    {"key": "Array[Dynamic]?#any? (nilable receiver)", "sites": 3, "category": "D", "mechanism": "nilable-receiver dispatch collapse (repeat)", "fix_direction": "dispatch non-nil arms and join"},
+    {"key": "containers of Dynamic (max/last/pop/[]=)", "sites": 20, "category": "C", "mechanism": "element reads from Dynamic-parameterized containers", "fix_direction": "closes upstream"},
+    {"key": "bot#range", "sites": 3, "category": "G", "mechanism": "calls on an unreachable (bot) receiver counted opaque", "fix_direction": "metric artifact"},
+    {"key": "opaque ivar reads", "sites": 355, "category": "A", "mechanism": "ivar field typing", "fix_direction": "ADR-58, known"},
+    {"key": "unsupported_syntax causes", "sites": 117, "category": "F", "mechanism": "alias_method re-exports, instance_variable_get/send reflection (source/map.rb); diffuse", "fix_direction": "alias_method modeling would take the largest slice"}
+  ]
+}

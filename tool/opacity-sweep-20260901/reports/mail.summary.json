@@ -1,0 +1,24 @@
+{
+  "target": "mail",
+  "files": 111,
+  "exprs": 422090,
+  "exprs_note": "inflated by ~56k lines of ragel-generated parser tables (constant tier 407870)",
+  "precision": 0.9779,
+  "protection": 0.4842,
+  "cause_site_counts": {"inferred_return_untyped": 854, "none": 744, "external_gem_without_rbs": 18, "unsupported_syntax": 420, "explicit_untyped": 32},
+  "opaque_split": {"local_reads": 2879, "calls": 4129, "ivars": 155},
+  "local_read_buckets": {"def_param": 1268, "block_param": 288, "assigned_local": 1323},
+  "call_receiver_tiers": {"precise": 721, "implicit_self": 1180, "dynamic_top": 2228},
+  "cases": [
+    {"key": "extend-module methods invisible to singleton dispatch (ParserTools#chars)", "sites": 218, "category": "D", "mechanism": "extend M contributes nothing to singleton method resolution; verified in scratch (implicit-self AND explicit receiver Dynamic, sibling def self resolves).", "fix_direction": "Include extend ancestors in singleton dispatch (ADR-43 lane)."},
+    {"key": "cross-file reopened-module self-calls (Mail.register_autoload)", "sites": 110, "category": "G", "mechanism": "Lens artifact: coverage types cross-file user-method calls Dynamic, but rigor check resolves the identical reopened call (verified matrix).", "fix_direction": "coverage lens should consult project-wide summaries like check"},
+    {"key": "Struct factory constants (AddressStruct = Struct.new(...))", "sites": 39, "category": "D", "mechanism": "Struct.new(:syms) types Dynamic and the resulting constant's .new does not resolve, though the constant itself reads precise singleton.", "fix_direction": "Synthesize Struct subclass members/new from literal symbol args."},
+    {"key": "empty-array-literal index mutation ([]#[]= / []#[])", "sites": 117, "category": "D", "mechanism": "stack = []; stack[top] = cs keeps empty-tuple type; index ops answer Dynamic (ragel state machines).", "fix_direction": "Widen []-typed locals on index write / Array fallback for Tuple[] index ops. Generated-code weighted."},
+    {"key": "attr_accessor reads (singleton _trans_keys tables, instance settings)", "sites": 100, "category": "D", "mechanism": "Accessor resolves but backing-ivar summary missing; scratch: even @v = 7 in initialize reads Dynamic via .v. KNOWN-OPEN ADR-58 WD2/WD3 lane.", "fix_direction": "closed-pending (ADR-58); count only"},
+    {"key": "Hash | {} union receiver reads", "sites": 41, "category": "C", "mechanism": "Union dispatch works per-arm; the {} arm reads untyped by the open-HashShape policy (PR #249). Not a D.", "fix_direction": "policy; follows container roots"},
+    {"key": "registry/param-rooted singleton helpers (blank?, get_encoding, settings, u_unpack)", "sites": 170, "category": "A", "mechanism": "Param-sourced returns and class-ivar Hash registries.", "fix_direction": "closed (ADR-67/ADR-58)"},
+    {"key": "Singleton.instance (include Singleton)", "sites": 7, "category": "D", "mechanism": "Stdlib included-hook extend metaprogramming; same extend invisibility as case 1.", "fix_direction": "falls out of the extend fix + stdlib hook modeling"},
+    {"key": "external gems without RBS (mini_mime et al.)", "sites": 18, "category": "B", "mechanism": "external_gem_without_rbs cause.", "fix_direction": "add_rbs"},
+    {"key": "joins/mirrors", "sites": 1354, "category": "G", "mechanism": "If/Write/EmbeddedStatements/And/Begin/Or mirroring inner Dynamic.", "fix_direction": "metric artifact"}
+  ]
+}

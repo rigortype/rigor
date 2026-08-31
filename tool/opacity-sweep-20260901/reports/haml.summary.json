@@ -1,0 +1,32 @@
+{
+  "target": "haml",
+  "files": 51,
+  "exprs": 8525,
+  "precision": 0.5745,
+  "protection": 0.4384,
+  "cause_site_counts": {
+    "inferred_return_untyped": 427,
+    "none": 257,
+    "unsupported_syntax": 163,
+    "external_gem_without_rbs": 30,
+    "explicit_untyped": 25
+  },
+  "opaque_split": { "local_reads": 1198, "calls": 1438, "ivars": 108 },
+  "local_read_buckets": { "def_param": 713, "block_param": 146, "assigned_local": 339 },
+  "call_receiver_tiers": { "implicit_self": 294, "dynamic_top": 1011, "precise": 133 },
+  "cases": [
+    { "key": "ParseNode/Line Struct.new-with-block members", "sites": 145, "category": "D", "mechanism": "Struct.new(...) do..end defeats ADR-48 folding entirely: .new result, member accessors, and block methods all Dynamic (repro typeof_probe9; plain Struct.new folds)", "fix_direction": "extend Struct fold to block-carrying Struct.new; index the block as a class body" },
+    { "key": "{}#[]=", "sites": 12, "category": "G", "mechanism": "[]= mirrors Dynamic RHS", "fix_direction": "artifact" },
+    { "key": "Hash[...,Dynamic]#[]", "sites": 19, "category": "C", "mechanism": "Dynamic-valued option/attr hashes", "fix_direction": "upstream" },
+    { "key": "singleton(Haml::Util)#unescape_interpolation", "sites": 11, "category": "D", "mechanism": "optional param (escape_html = nil) disqualifies return inference", "fix_direction": "param-shape guard extension" },
+    { "key": "singleton(Haml::Util)#contains_interpolation?", "sites": 9, "category": "A", "mechanism": "param-sourced body", "fix_direction": "ADR-67 (closed)" },
+    { "key": "Temple/Tilt/Thor surface", "sites": 29, "category": "B", "mechanism": "gems without RBS, correctly labeled external_gem_without_rbs", "fix_direction": "add_rbs / plugin" },
+    { "key": "String?#size/[]/include?", "sites": 6, "category": "D", "mechanism": "optional-receiver refusal on core String methods", "fix_direction": "T? dispatch as join over T and NilClass" },
+    { "key": "Ripper.lex token chains", "sites": 28, "category": "B", "mechanism": "ripper signatures not loaded; token tuples untyped", "fix_direction": "add ripper to libraries or vendored sigs" },
+    { "key": "Haml::Error#line", "sites": 2, "category": "D", "mechanism": "inherited-RBS-ancestor gap + ivar field", "fix_direction": "MRO into RBS ancestors" },
+    { "key": "Temple DSL (use/register/filter)", "sites": 25, "category": "E", "mechanism": "Temple::Engine pipeline DSL builds classes at load time", "fix_direction": "plugin territory" },
+    { "key": "dynamic-receiver calls", "sites": 1011, "category": "C", "mechanism": "propagation, mostly ParseNode fields", "fix_direction": "cascades from Struct fix" },
+    { "key": "def/block param reads", "sites": 859, "category": "A", "mechanism": "ADR-67 (closed)", "fix_direction": "closed" },
+    { "key": "ivar reads", "sites": 108, "category": "A", "mechanism": "ADR-58", "fix_direction": "ADR-58" }
+  ]
+}

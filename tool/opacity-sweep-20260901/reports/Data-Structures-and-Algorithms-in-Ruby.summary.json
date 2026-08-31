@@ -1,0 +1,20 @@
+{
+  "target": "Data-Structures-and-Algorithms-in-Ruby",
+  "files": 113,
+  "exprs": 49743,
+  "precision": 0.612,
+  "protection": 0.4977,
+  "cause_site_counts": {"inferred_return_untyped": 4095, "none": 1454, "explicit_untyped": 386, "unsupported_syntax": 124, "analyzer_budget_cutoff": 7},
+  "opaque_split": {"local_reads": 7244, "calls": 8864, "ivars": 13},
+  "local_read_buckets": {"def_param": 5074, "assigned_local": 2074, "block_param": 96},
+  "call_receiver_tiers": {"dynamic_top": 6151, "precise": 2510, "implicit_self": 203},
+  "cases": [
+    {"key": "Array#[] / #[]= on bare Array from Array.new(n){0}", "sites": 439, "category": "D", "mechanism": "Array.new with Dynamic size discards the block/fill element type and yields unparameterized Array (verified bisect); []= additionally hits the attribute-write-result gap.", "fix_direction": "Degrade to Array[T_fill/T_block] when size is Dynamic; type attribute-writes as their RHS."},
+    {"key": "accessor-mediated state (Heap#arr/size, Graph#count/Adj, Tree#root, BTree#root, RBTree#NullNode)", "sites": 450, "category": "A", "mechanism": "Textbook style keeps all state behind attr_accessor + self.attr writes (only 13 raw opaque ivar reads); getters resolve via the discovered-method tier to Dynamic.", "fix_direction": "ADR-58 WD2/WD3 — and it must propagate through attr writer/reader pairs, not only literal @ivar reads."},
+    {"key": "user-method returns (Graph#addEdge etc.)", "sites": 184, "category": "A", "mechanism": "Returns are accessor/param-sourced; inferred_return_untyped is 4095 cause sites, the biggest bucket in the batch.", "fix_direction": "ADR-67/ADR-58 cascade — closed."},
+    {"key": "Queue#push (toplevel ::Queue)", "sites": 46, "category": "B", "mechanism": "Bundled rbs core declares ::Thread::Queue but not the toplevel ::Queue alias; the constant is stub-synthesized and all methods answer Dynamic/top. Same gap as SizedQueue in the Ruby corpus.", "fix_direction": "Builtin-import/overlay: Queue = Thread::Queue, SizedQueue = Thread::SizedQueue."},
+    {"key": "Array[Dynamic]#[]", "sites": 52, "category": "C", "mechanism": "Param-rooted container elements.", "fix_direction": "Closes with A roots."},
+    {"key": "CallOperatorWriteNode (self.size += 1)", "sites": 45, "category": "F", "mechanism": "The only genuinely unhandled node class across all four targets; attr op-writes fall to unsupported_syntax.", "fix_direction": "Desugar to read + op + attribute-write; the attribute-write-RHS rule then types it."},
+    {"key": "def params + arithmetic cascade", "sites": 11225, "category": "A", "mechanism": "def_param 5074 direct + dynamic-receiver cascade 6151.", "fix_direction": "ADR-67 — closed."}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "target": "rubocop-ast",
+  "files": 101,
+  "exprs": 11433,
+  "precision": 0.6558,
+  "protection": 0.2604,
+  "cause_site_counts": {"unsupported_syntax": 435, "none": 317, "inferred_return_untyped": 289, "external_gem_without_rbs": 12, "explicit_untyped": 1},
+  "opaque_split": {"local_reads": 868, "calls": 1974, "ivars": 91},
+  "local_read_buckets": {"def_param": 472, "block_param": 152, "assigned_local": 244},
+  "call_receiver_tiers": {"precise": 60, "dynamic_top": 993, "implicit_self": 921},
+  "cases": [
+    {"key": "inherited parser/ast methods (node_parts/type/loc/children/parent/source)", "sites": 300, "category": "B", "mechanism": "class Node < Parser::AST::Node (node.rb:21); parser/ast gems have no RBS so the ancestor chain of the class most files subclass stops; alias node_parts to_a forwards into the gap", "fix_direction": "parser+ast RBS via collection/libraries; engine: carry external_gem_without_rbs cause through unresolvable superclass constants (currently tags only 12 of ~hundreds)"},
+    {"key": "def_node_matcher/def_node_search generated matchers", "sites": 25, "category": "E", "mechanism": "NodePattern compile-to-method DSL; generated defs invisible", "fix_direction": "plugin recognizer for the NodePattern compiler"},
+    {"key": "def_callback class-macro invocations", "sites": 24, "category": "E", "mechanism": "class-body macro calls (traversal.rb:133+) generating on_* visitors; opaque sites are the macro calls themselves", "fix_direction": "plugin or macro-call-site exclusion from the metric"},
+    {"key": "rexical lexer attr state (ss/state/filename/action/emit)", "sites": 60, "category": "A", "mechanism": "attr_accessor resolves to untyped ivar (control confirms same-file Dynamic); value side needs strscan RBS", "fix_direction": "ADR-58 known; strscan under libraries: for the value side"},
+    {"key": "singleton attr_reader over class ivar (Subcompiler.registry)", "sites": 5, "category": "A", "mechanism": "class << self attr_reader over @registry; control B.registry -> Dynamic", "fix_direction": "ADR-58 family (class-level ivar through singleton attr)"},
+    {"key": "Array[Thread::Backtrace::Location]?#first", "sites": 2, "category": "D", "mechanism": "nilable-receiver dispatch collapse (repeat of concurrent-ruby control)", "fix_direction": "dispatch non-nil arms and join"},
+    {"key": "Hash-of-Dynamic / tuple-of-Dynamic #[]", "sites": 10, "category": "C", "mechanism": "container-of-Dynamic element reads", "fix_direction": "closes as upstream holes close"},
+    {"key": "unsupported_syntax cause bucket", "sites": 435, "category": "F", "mechanism": "mostly unresolved sends/constant paths into parser/ast (missing-gem-RBS in disguise), not grammar constructs", "fix_direction": "cause-attribution fix + parser/ast RBS"}
+  ]
+}

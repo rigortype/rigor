@@ -1,0 +1,53 @@
+{
+  "target": "redmine",
+  "files": 346,
+  "exprs": 128495,
+  "precision": 0.4776,
+  "protection": 0.3503,
+  "cause_site_counts": {
+    "none": 6924,
+    "inferred_return_untyped": 5580,
+    "unsupported_syntax": 5452,
+    "external_gem_without_rbs": 279,
+    "explicit_untyped": 129,
+    "analyzer_budget_cutoff": 2
+  },
+  "tractability_summary": { "engine_gap": 11034, "add_rbs": 408 },
+  "opaque_split": { "local_reads": 15385, "calls": 32615, "ivars": 2155 },
+  "local_read_buckets": { "def_param": 6942, "block_param": 3636, "assigned_local": 4807 },
+  "call_receiver_tiers": { "dynamic_top": 17635, "implicit_self": 9181, "precise": 5799 },
+  "unsupported_syntax_construct_histogram": {
+    "chain_carried_propagation": 6309,
+    "introduction_site_calls": 12569,
+    "unresolved_constants": 493,
+    "attr_call_or_write_syntax": 34,
+    "attr_call_operator_write_syntax": 3,
+    "note": "genuinely unmodeled Ruby syntax = 37 nodes (CallOrWriteNode `x.a ||= v`, CallOperatorWriteNode `x.a += v`); ~97% of the cause is exhausted method dispatch, split across the coverage-lens class-graph gap (G), the required-positionals-only user-method binder (D), and Rails metaprogramming (E)"
+  },
+  "cases": [
+    { "key": "coverage lens drops cross-file class graph", "sites": -1, "category": "G", "mechanism": "discovery_seeded_scope seeds only discovered_classes+param table (coverage_scan.rb:58-76); check runner seeds def_nodes/superclasses/includes/methods (runner.rb:1577-1596). Verified: seeded scope 506 classes, 0 def_nodes/superclasses/includes; cross-file user-method calls (l:647, render_404, scm_iconv, User.current, Redmine::I18n#t...) measured unresolved though rigor check resolves them. Biases the whole corpus sweep.", "fix_direction": "seed project_scope_seed_tables (or the same trio) in the coverage lens; successor to PR #505" },
+    { "key": "user_method_param_shape_simple? binder cliff", "sites": -1, "category": "D", "mechanism": "inter-procedural user-method return inference declines ANY def with optionals/rest/keywords/block (expression_typer.rb:2427-2435, 2388-2392); dispatcher defers to it, so the call lands Dynamic[top]. Verified same-file: render_404(options={}) at application_controller.rb:348, scm_cmd(*args,&) at bazaar_adapter.rb:71, self.accept_atom_auth(*actions) at :639.", "fix_direction": "bind optionals from default-expression types, rest as Array[join], keywords by name from KeywordHashNode; infer the body instead of declining wholesale" },
+    { "key": "binder-decline cause mislabeled unsupported_syntax", "sites": -1, "category": "D", "mechanism": "a FOUND user def declined by the binder (or aborted by the rescue in try_user_method_inference) records no cause and falls to unresolved_call_result -> UNSUPPORTED_SYNTAX, escaping ADR-82 WD2/WD3's inferred_return_untyped routing (method_dispatcher.rb:210-216).", "fix_direction": "record INFERRED_RETURN_UNTYPED whenever resolve_user_def_with_owner found a def" },
+    { "key": "ActionController::Parameters#[]", "sites": 581, "category": "E", "mechanism": "params store read", "fix_direction": "owner: rigor-actionpack" },
+    { "key": "singleton(User)#current", "sites": 494, "category": "E", "mechanism": "ActiveSupport::CurrentAttributes `attribute :user` metaprogramming (user.rb:894-904)", "fix_direction": "owner: rigor-activesupport-core-ext CurrentAttributes recognizer" },
+    { "key": "singleton(Model)#table_name family", "sites": 550, "category": "E", "mechanism": "AR class method, returns String", "fix_direction": "owner: rigor-activerecord" },
+    { "key": "FlashHash#[]= / #now", "sites": 147, "category": "E", "mechanism": "actionpack flash store; []= also mirrors Dynamic RHS l(...)", "fix_direction": "owner: rigor-actionpack" },
+    { "key": "Redmine::Export::PDF::ITCPDF wrappers", "sites": 106, "category": "B", "mechanism": "wrapper bodies end in RBPDF gem calls; rbpdf ships no RBS (pdf.rb:48-78)", "fix_direction": "add_rbs for rbpdf, or dependency-source opt-in" },
+    { "key": "container-of-Dynamic Hash/Array element ops", "sites": 195, "category": "C", "mechanism": "Hash[Dynamic,Dynamic]#[] etc.; element reads/writes mirror Dynamic", "fix_direction": "closes only via upstream value typing" },
+    { "key": "ActionDispatch::Request#post?/xhr?/get?", "sites": 64, "category": "E", "mechanism": "boolean predicates missing from actionpack surface", "fix_direction": "owner: rigor-actionpack (cheap: -> bool)" },
+    { "key": "Session#[] / #[]=", "sites": 49, "category": "E", "mechanism": "session store, values inherently untyped", "fix_direction": "owner: rigor-actionpack (honest label)" },
+    { "key": "Setting.* generated accessors", "sites": 70, "category": "E", "mechanism": "class_eval accessors generated from config/settings.yml (setting.rb:336-349)", "fix_direction": "redmine-local plugin or pre_eval" },
+    { "key": "Gantt#date_from/#date_to", "sites": 42, "category": "D", "mechanism": "attr_reader over ivar assigned Date.civil(...) (gantt.rb:57,86); ADR-58 WD2/WD3 pending; `date` stdlib RBS availability unverified (no libraries: key)", "fix_direction": "ADR-58 ivar-field typing; check default stdlib set" },
+    { "key": "AR scopes/relations (visible/where/sorted/givable/find...)", "sites": 200, "category": "E", "mechanism": "AR scope DSL + relation methods", "fix_direction": "owner: rigor-activerecord" },
+    { "key": "singleton(Redmine::Configuration)#[]", "sites": 32, "category": "C", "mechanism": "@config[name], YAML-loaded hash behind an ivar (configuration.rb:82-85)", "fix_direction": "irreducible; honest label via lens fix" },
+    { "key": "singleton(Redmine::I18n)#t", "sites": 29, "category": "E", "mechanism": "i18n translate", "fix_direction": "owner: rigor-rails-i18n" },
+    { "key": "AR associations/columns (Issue#project, Issue#id, User#pref...)", "sites": 60, "category": "E", "mechanism": "belongs_to / column accessors", "fix_direction": "owner: rigor-activerecord" },
+    { "key": "UserPreference#[] / #[]=", "sites": 28, "category": "E", "mechanism": "body reads read_attribute(:others) hash (user_preference.rb:85-92)", "fix_direction": "root: rigor-activerecord read_attribute" },
+    { "key": "singleton(Redmine::Notifiable)#new", "sites": 15, "category": "D", "mechanism": "class < Struct.new(:name,:parent); folded precisely in an isolated dispatch probe yet recorded opaque in the corpus scan — order/memo-dependent instability", "fix_direction": "reproduce the two-verdict divergence on the same node; check return-memo generation keying" },
+    { "key": "param-sourced user-method returns (add_filter, replace_invalid_utf8)", "sites": 17, "category": "A", "mechanism": "bodies return param-derived values", "fix_direction": "ADR-67 (closed)" },
+    { "key": "def/block param local reads", "sites": 10578, "category": "A", "mechanism": "parameter reads", "fix_direction": "ADR-67 (closed)" },
+    { "key": "control-flow joins + writes mirroring opaque arms", "sites": 11400, "category": "G", "mechanism": "If/And/Or/EmbeddedStatements/writes mirror inner Dynamic", "fix_direction": "metric artifact, double-counting" },
+    { "key": "x.attr ||= v / x.attr += v", "sites": 37, "category": "F", "mechanism": "CallOrWriteNode/CallOperatorWriteNode have no PRISM_DISPATCH handler — the only unmodeled syntax in the corpus", "fix_direction": "add handlers mirroring the local-variable compound-assign equivalents" },
+    { "key": "unresolved constants", "sites": 493, "category": "F", "mechanism": "RedmineApp::Application (config/ outside paths), Doorkeeper and other gem constants, plugin constants", "fix_direction": "mostly B/E; config/ paths exclusion is a target-config choice" }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "target": "Algorithms-and-Data-Structures-in-Ruby",
+  "files": 256,
+  "exprs": 18755,
+  "precision": 0.5341,
+  "protection": 0.2627,
+  "cause_site_counts": {"inferred_return_untyped": 1852, "none": 944, "unsupported_syntax": 144, "explicit_untyped": 40},
+  "opaque_split": {"local_reads": 3462, "calls": 3328, "ivars": 183},
+  "local_read_buckets": {"def_param": 1990, "assigned_local": 1263, "block_param": 209},
+  "call_receiver_tiers": {"dynamic_top": 2911, "precise": 306, "implicit_self": 111},
+  "cases": [
+    {"key": "Array#[] / #[]= on bare Array from Array.new(dynamic_len, 0)", "sites": 61, "category": "D", "mechanism": "Array.new with Dynamic size discards fill type (verified bisect); the []= half additionally hits the attribute-write-result gap.", "fix_direction": "Array[type(fill)] degrade + attribute-write RHS typing."},
+    {"key": "String?#strip via gets", "sites": 28, "category": "D", "mechanism": "gets returns String?; dispatch on the optional answers Dynamic instead of the String arm, poisoning whole scripts from line 1.", "fix_direction": "Non-nil-arm result typing for T? receiver dispatch."},
+    {"key": "ComplexNumber#real/#imaginary attr getters", "sites": 28, "category": "A", "mechanism": "attr_accessor getters resolve via discovered-method tier to Dynamic; backing ivars are param-sourced.", "fix_direction": "ADR-58 WD2/WD3 + ADR-67 (closed)."},
+    {"key": "Hash#[] / #[]= on bare Hash from Hash.new()", "sites": 17, "category": "C", "mechanism": "Hash.new() yields unparameterized Hash; mutation-accreted key/value types deliberately read untyped per the open-shape contract (PR #249).", "fix_direction": "None engine-side beyond the attribute-write RHS rule for the []= half."},
+    {"key": "{}#[] open-shape reads", "sites": 13, "category": "C", "mechanism": "Settled PR #249 contract.", "fix_direction": "None."},
+    {"key": "container/tuple of Dynamic ([]#max, Array[Dynamic]#[], Hash[Dynamic]#[])", "sites": 30, "category": "C", "mechanism": "Element joins over already-Dynamic elements from def params.", "fix_direction": "Closes with A roots."},
+    {"key": "{}#[]= attribute-write", "sites": 6, "category": "D", "mechanism": "Setter-RHS family (verified on textbringer).", "fix_direction": "Attribute-write RHS typing."},
+    {"key": "def params + arithmetic cascade", "sites": 4900, "category": "A", "mechanism": "def_param 1990 direct + ~2900 dynamic-receiver arithmetic calls downstream; inferred_return_untyped 1852 causes.", "fix_direction": "ADR-67 (closed)."}
+  ]
+}

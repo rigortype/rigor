@@ -1,0 +1,35 @@
+{
+  "target": "liquid",
+  "files": 63,
+  "exprs": 10701,
+  "precision": 0.5481,
+  "protection": 0.4206,
+  "cause_site_counts": {
+    "none": 376,
+    "inferred_return_untyped": 641,
+    "unsupported_syntax": 166,
+    "explicit_untyped": 10
+  },
+  "opaque_split": { "local_reads": 1818, "calls": 1667, "ivars": 236 },
+  "local_read_buckets": { "def_param": 1109, "block_param": 202, "assigned_local": 507 },
+  "call_receiver_tiers": { "implicit_self": 339, "dynamic_top": 1098, "precise": 230 },
+  "cases": [
+    { "key": "singleton(Liquid::Environment)#default", "sites": 16, "category": "A", "mechanism": "singleton-class ivar memoization @default ||= new (cross-file class_ivars, closed)", "fix_direction": "closed thread" },
+    { "key": "singleton(Liquid::Utils)#to_number", "sites": 12, "category": "A", "mechanism": "param-sourced case/when; obj.to_number else-branch joins Dynamic", "fix_direction": "ADR-67 (closed)" },
+    { "key": "singleton(Liquid::Utils)#to_liquid_value", "sites": 11, "category": "A", "mechanism": "returns the param", "fix_direction": "ADR-67 (closed)" },
+    { "key": "{}#[]=", "sites": 9, "category": "G", "mechanism": "[]= mirrors Dynamic RHS", "fix_direction": "none (artifact)" },
+    { "key": "Liquid::Error#message", "sites": 9, "category": "D", "mechanism": "inherited RBS-core method (Exception#message -> String) unresolved through source-defined subclass; minimal repro MyError < StandardError answers Dynamic", "fix_direction": "continue ancestor resolution into RBS-declared superclasses of source classes" },
+    { "key": "singleton(Liquid::Utils)#to_integer", "sites": 7, "category": "A", "mechanism": "param-sourced; Kernel#Integer folds constants only", "fix_direction": "widen Integer(untyped) to ::Integer instead of Dynamic (minor)" },
+    { "key": "singleton(Liquid::Deprecations)#warn", "sites": 7, "category": "D", "mechanism": "cross-file-only Dynamic: identical single-file repro answers nil; suspect ::Warning constant resolution under module nesting or singleton attr_accessor in project env", "fix_direction": "bisect project-env return inference for this shape" },
+    { "key": "Array#[] / Array[Dynamic]#last", "sites": 14, "category": "C", "mechanism": "untyped-element array reads", "fix_direction": "element-type sources (ADR-67/58)" },
+    { "key": "Proc#call", "sites": 6, "category": "C", "mechanism": "bare Proc from Dynamic container; core RBS call is untyped", "fix_direction": "proc-type propagation from definition sites (only helps typed procs)" },
+    { "key": "singleton(Liquid::Expression)#parse", "sites": 6, "category": "D", "mechanism": "param-shape guard: optional params disqualify return inference (expression_typer.rb:2427)", "fix_direction": "extend user_method_param_shape_simple? to optionals/kwargs/rest/block" },
+    { "key": "Liquid::StandardFilters::InputIterator#sort", "sites": 4, "category": "D", "mechanism": "include-Enumerable methods unresolved on source classes (repro: Iter.new.sort Dynamic)", "fix_direction": "resolve module-included methods; bind Elem from each's yield type" },
+    { "key": "Liquid::Registers#static", "sites": 4, "category": "A", "mechanism": "attr_reader over param-sourced ivar", "fix_direction": "ADR-58 (pending WDs)" },
+    { "key": "Hash[Dynamic,Dynamic]?#key?", "sites": 3, "category": "D", "mechanism": "optional-receiver dispatch refused; nil branch would be bot, join is sound", "fix_direction": "dispatch T?#m as join over T and NilClass branches" },
+    { "key": "i18n#t via alias_method", "sites": 33, "category": "D", "mechanism": "alias_method send unmodeled (alias keyword works); repro typeof_probe7", "fix_direction": "model alias_method with two symbol-literal args as alias" },
+    { "key": "dynamic-receiver calls", "sites": 1098, "category": "C", "mechanism": "propagation on already-Dynamic receivers ([] 118, []= 57, == 50)", "fix_direction": "upstream fixes" },
+    { "key": "def/block param reads", "sites": 1311, "category": "A", "mechanism": "parameter inference off (ADR-67, closed)", "fix_direction": "closed" },
+    { "key": "ivar reads", "sites": 236, "category": "A", "mechanism": "param-sourced ivar fields", "fix_direction": "ADR-58 WD1b/WD2/WD3" }
+  ]
+}

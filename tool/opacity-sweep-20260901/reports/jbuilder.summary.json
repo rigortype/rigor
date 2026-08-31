@@ -1,0 +1,20 @@
+{
+  "target": "jbuilder",
+  "files": 12,
+  "exprs": 1481,
+  "precision": 0.4706,
+  "protection": 0.3362,
+  "cause_site_counts": {"unsupported_syntax": 20, "none": 51, "inferred_return_untyped": 82, "external_gem_without_rbs": 1},
+  "opaque_split": {"local_reads": 273, "calls": 252, "ivars": 39},
+  "local_read_buckets": {"def_param": 205, "block_param": 31, "assigned_local": 37},
+  "call_receiver_tiers": {"precise": 21, "implicit_self": 100, "dynamic_top": 131},
+  "cases": [
+    {"key": "param-sourced locals + same-file _helper returns", "sites": 270, "category": "A", "mechanism": "236 param reads; _format_keys/_array/_blank?/_scope etc. return param-derived values (jbuilder.rb:277-366).", "fix_direction": "closed"},
+    {"key": "Rails surface (Rails.cache, Generators DSL, ActionView renderer)", "sites": 35, "category": "E", "mechanism": "Inherited Rails::Generators::NamedBase methods, Rails.cache, railtie hooks.", "fix_direction": "rails plugin / ADR-72 overlay ownership"},
+    {"key": "cross-file user-method summaries (Errors.build, attributes!, template_lookup_options)", "sites": 10, "category": "G", "mechanism": "Coverage lens types cross-file user-method calls Dynamic; rigor check resolves the same summaries (verified matrix). Metric-infrastructure artifact.", "fix_direction": "teach the coverage lens to consult project-wide summaries like check does"},
+    {"key": "splat DSL (set! and friends)", "sites": 8, "category": "D", "mechanism": "Rest-param summary drop, engine-wide (check matrix: spl silent, pln fires).", "fix_direction": "rest/kwrest summary fix"},
+    {"key": "Proc#call (key_formatter)", "sites": 2, "category": "D", "mechanism": "Proc call answers Dynamic (key_formatter.rb:20).", "fix_direction": "type Proc#call from literal block returns"},
+    {"key": "joins/mirrors", "sites": 100, "category": "G", "mechanism": "If/Write/Yield/Or/And mirrors.", "fix_direction": "metric artifact"}
+  ],
+  "notes": "2 parse errors are ERB generator templates; protection CLI exits 1 because of them while writing complete JSON."
+}

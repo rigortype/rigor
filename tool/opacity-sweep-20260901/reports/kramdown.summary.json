@@ -1,0 +1,32 @@
+{
+  "target": "kramdown",
+  "files": 55,
+  "exprs": 21329,
+  "precision": 0.6276,
+  "protection": 0.3651,
+  "cause_site_counts": {
+    "inferred_return_untyped": 1493,
+    "none": 679,
+    "unsupported_syntax": 195,
+    "explicit_untyped": 163
+  },
+  "opaque_split": { "local_reads": 2041, "calls": 3362, "ivars": 514 },
+  "local_read_buckets": { "def_param": 895, "block_param": 395, "assigned_local": 751 },
+  "call_receiver_tiers": { "implicit_self": 464, "dynamic_top": 2488, "precise": 410 },
+  "cases": [
+    { "key": "Kramdown::Element accessors (value/type/children/options/attr)", "sites": 48, "category": "A", "mechanism": "attr_accessor over ivars written from optional init params; the AST value class every converter walks", "fix_direction": "ADR-58 ivar-field typing; biggest single cascade in the target" },
+    { "key": "Hash[Symbol|String,Dynamic]#[] and bare Hash #[] / #[]=", "sites": 103, "category": "C", "mechanism": "@options and attr hashes valued Dynamic", "fix_direction": "value sources upstream" },
+    { "key": "Array[Dynamic]#last/#[]", "sites": 30, "category": "C", "mechanism": "@stack / children element arrays", "fix_direction": "upstream" },
+    { "key": "Proc#call (registry callables)", "sites": 19, "category": "C", "mechanism": "syntax_highlighter/math_engine registries return stored callables", "fix_direction": "plugin territory at best" },
+    { "key": "singleton(Kramdown::Utils::Entities)#entity", "sites": 19, "category": "C", "mechanism": "ENTITY_MAP is Hash.new{block} filled imperatively; module_function dispatch itself verified working", "fix_direction": "model imperative constant-hash fills (low value)" },
+    { "key": "Kramdown::Utils::StringScanner(?)#scan/[]/check/current_line_number", "sites": 26, "category": "D", "mechanism": "inherited RBS-stdlib methods unresolved through source subclass of ::StringScanner (strscan IS a default library), stacked with optional-receiver refusal", "fix_direction": "resolve MRO into RBS ancestors; dispatch T? as join over T and NilClass" },
+    { "key": "String?#length", "sites": 3, "category": "D", "mechanism": "optional-receiver refusal on a pure core-RBS method", "fix_direction": "T? dispatch join" },
+    { "key": "implicit-self add_text/macro/define_parser/define", "sites": 130, "category": "D", "mechanism": "optional/block parameters disqualify return inference (user_method_param_shape_simple?, expression_typer.rb:2427)", "fix_direction": "extend the param-shape guard to optionals/kwargs/rest/block" },
+    { "key": "implicit-self warning", "sites": 34, "category": "A", "mechanism": "@warnings ivar-sourced", "fix_direction": "ADR-58" },
+    { "key": "dynamic-receiver calls", "sites": 2488, "category": "C", "mechanism": "propagation downstream of Element accessors and @options", "fix_direction": "upstream fixes cascade" },
+    { "key": "def/block param reads", "sites": 1290, "category": "A", "mechanism": "parameter inference (ADR-67, closed)", "fix_direction": "closed" },
+    { "key": "ivar reads", "sites": 514, "category": "A", "mechanism": "@stack/@tree/@options fields", "fix_direction": "ADR-58" },
+    { "key": "unsupported_syntax cluster", "sites": 195, "category": "F", "mechanism": "propagation from registry/metaprogramming introductions: Struct.new do-blocks, Hash.new default-proc, method(:sym) handles in @parsers", "fix_direction": "model Struct.new-with-block members and method-handle types" },
+    { "key": "explicit_untyped cluster", "sites": 163, "category": "B", "mechanism": "authored untyped in loaded RBS (to_s 26, sub! 13)", "fix_direction": "add_rbs lane" }
+  ]
+}

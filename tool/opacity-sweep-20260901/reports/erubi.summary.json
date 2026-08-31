@@ -1,0 +1,26 @@
+{
+  "target": "erubi",
+  "files": 3,
+  "exprs": 866,
+  "precision": 0.4723,
+  "protection": 0.2766,
+  "cause_site_counts": {
+    "inferred_return_untyped": 61,
+    "none": 27,
+    "unsupported_syntax": 14
+  },
+  "opaque_split": { "local_reads": 153, "calls": 148, "ivars": 27 },
+  "local_read_buckets": { "def_param": 70, "block_param": 28, "assigned_local": 55 },
+  "call_receiver_tiers": { "implicit_self": 33, "dynamic_top": 96, "precise": 19 },
+  "cases": [
+    { "key": "non-empty-string#>= (RUBY_VERSION comparisons)", "sites": 7, "category": "D", "mechanism": "methods reached via RBS include (Comparable on String) do not resolve; RUBY_VERSION.length works, >= does not; literals mask it via value folding", "fix_direction": "resolve RBS-module-included methods during dispatch" },
+    { "key": "/regex/#send(MATCH_METHOD, s)", "sites": 3, "category": "D", "mechanism": "send with constant Symbol unfoldable; MATCH_METHOD Dynamic downstream of the Comparable gap", "fix_direction": "fold send(:sym) after constants fold" },
+    { "key": "Hash#fetch on properties", "sites": 5, "category": "C", "mechanism": "optional-param hash is Dynamic", "fix_direction": "param-shape guard + ADR-67" },
+    { "key": "MatchData?#begin/#end", "sites": 2, "category": "D", "mechanism": "optional-receiver refusal", "fix_direction": "T? dispatch join" },
+    { "key": "CGI = Object.new / triple h definition", "sites": 2, "category": "F", "mechanism": "runtime feature probing via constant reassignment and require-rescue conditional defs", "fix_direction": "none (legitimately dynamic)" },
+    { "key": "implicit-self add_text etc.", "sites": 20, "category": "A", "mechanism": "@src ivar from optional-param initialize", "fix_direction": "ADR-58/67" },
+    { "key": "dynamic-receiver calls", "sites": 96, "category": "C", "mechanism": "propagation from @src/input/properties", "fix_direction": "upstream" },
+    { "key": "def/block param reads", "sites": 98, "category": "A", "mechanism": "ADR-67 (closed)", "fix_direction": "closed" },
+    { "key": "ivar reads", "sites": 27, "category": "A", "mechanism": "ADR-58", "fix_direction": "ADR-58" }
+  ]
+}

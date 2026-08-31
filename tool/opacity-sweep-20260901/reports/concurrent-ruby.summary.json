@@ -1,0 +1,24 @@
+{
+  "target": "concurrent-ruby",
+  "files": 178,
+  "exprs": 23757,
+  "precision": 0.5604,
+  "protection": 0.4951,
+  "cause_site_counts": {"inferred_return_untyped": 685, "none": 641, "unsupported_syntax": 472, "explicit_untyped": 10},
+  "opaque_split": {"local_reads": 3231, "calls": 3858, "ivars": 496},
+  "local_read_buckets": {"def_param": 2120, "block_param": 290, "assigned_local": 821},
+  "call_receiver_tiers": {"precise": 888, "dynamic_top": 1658, "implicit_self": 1312},
+  "cases": [
+    {"key": "implicit_self#synchronize", "sites": 186, "category": "D", "mechanism": "superclass is a conditionally assigned constant (LockableObjectImplementation = case on Concurrent.on_*?); ancestor resolution stops, every synchronize/ns_* in LockableObject subclasses unresolved", "fix_direction": "constant-fold RUBY_ENGINE predicates so the case folds; or union-of-classes superclass"},
+    {"key": "extend-module singleton dispatch (Concurrent.on_*?, Promises factory, NativeInteger extend self)", "sites": 120, "category": "D", "mechanism": "extend M never joins the singleton ancestor chain; verified same-file control Host.on_x? -> Dynamic", "fix_direction": "fold statically visible `extend M` into singleton-ancestor resolution (ADR-43 home); also unlocks the case folding of mechanism 1"},
+    {"key": "singleton(Concurrent)#monotonic_time (module_function)", "sites": 31, "category": "D", "mechanism": "module_function :name singleton copy unmodeled; verified control MF.mono -> Dynamic", "fix_direction": "model module_function as def + singleton copy"},
+    {"key": "Concurrent::AtomicFixnum#value/#compare_and_set", "sites": 43, "category": "D", "mechanism": "class AtomicFixnum < AtomicFixnumImplementation where the superclass constant is a runtime case over engine predicates (atomic_fixnum.rb:99-136)", "fix_direction": "same as case 1"},
+    {"key": "Mutex#synchronize", "sites": 48, "category": "C", "mechanism": "block-generic binding works (control: Constant[1]); X binds Dynamic because block bodies read ivars and call the D-case factories", "fix_direction": "closes as ivar typing + D cases land"},
+    {"key": "Array[Dynamic]?#length/[]/clear + Hash-union|nil#[]=", "sites": 40, "category": "D", "mechanism": "nilable receiver collapses dispatch to Dynamic; nil-free union dispatch works (controls)", "fix_direction": "dispatch non-nil arms and join; nil arm as diagnostic not Dynamic"},
+    {"key": "Concurrent::Maybe.just/.nothing", "sites": 21, "category": "D", "mechanism": "resolved def self whose body new(...) goes through runtime extend SafeInitialization constructor override via safe_initialization! macro", "fix_direction": "extend modeling + macro body evaluation, or a tiny plugin recognizer"},
+    {"key": "Thread.pass", "sites": 9, "category": "D", "mechanism": "core singleton resolution fails even in an isolated control file; not void-mapping (void types as top)", "fix_direction": "unit-test Thread singleton dispatch in core env"},
+    {"key": "def_param+block_param local reads", "sites": 2410, "category": "A", "mechanism": "parameter-sourced opacity", "fix_direction": "ADR-67, closed"},
+    {"key": "opaque ivar reads", "sites": 496, "category": "A", "mechanism": "ivar field typing", "fix_direction": "ADR-58 WD2/WD3, known"},
+    {"key": "unsupported_syntax causes", "sites": 472, "category": "F", "mechanism": "mostly unresolved-dispatch fallback (the D mechanisms) + JRuby-only java.* chains; not grammar-level syntax", "fix_direction": "shrinks as D cases land; java.* is platform-conditional and legitimately unresolvable"}
+  ]
+}

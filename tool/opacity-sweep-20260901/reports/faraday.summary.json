@@ -1,0 +1,22 @@
+{
+  "target": "faraday",
+  "files": 33,
+  "exprs": 5819,
+  "precision": 0.4953,
+  "protection": 0.2969,
+  "cause_site_counts": {"inferred_return_untyped": 301, "explicit_untyped": 12, "none": 310, "unsupported_syntax": 129, "external_gem_without_rbs": 1},
+  "opaque_split": {"local_reads": 991, "calls": 1098, "ivars": 102},
+  "local_read_buckets": {"def_param": 650, "block_param": 152, "assigned_local": 189},
+  "call_receiver_tiers": {"precise": 116, "implicit_self": 315, "dynamic_top": 667},
+  "cases": [
+    {"key": "Struct.new(...) do-block class bodies (Request, Options layer)", "sites": 90, "category": "D", "mechanism": "Factory block not modeled as a class body: self inside defs types as the enclosing module (singleton(Faraday)), self.class types bare Class; Struct member accessors and sibling methods dispatch Dynamic. Evidence: request.rb:27 + probe pair singleton(Faraday)#params @ request.rb:86; Class#options_for @ options/connection_options.rb:13.", "fix_direction": "Recognise CONST = Struct.new(...)/StructSubclass.new(...) do..end as a class-body scope for CONST; synthesize member accessors from symbol args."},
+    {"key": "def/block param locals", "sites": 802, "category": "A", "mechanism": "Param-sourced local reads (ADR-67 lane).", "fix_direction": "closed"},
+    {"key": "dynamic-receiver call propagation", "sites": 667, "category": "C", "mechanism": "Calls on already-Dynamic receivers ([] 103, each 23, []= 23); rooted in A/case-1.", "fix_direction": "follows the roots"},
+    {"key": "singleton(Faraday::Utils)#URI/unescape/default_params_encoder/deep_merge", "sites": 16, "category": "A", "mechanism": "module_function dispatch resolves; bodies return params or Proc#call on an untyped memoized ivar (utils.rb:70).", "fix_direction": "closed (param inference); minor Proc#call component"},
+    {"key": "singleton(Faraday::Request|Response)#register_middleware", "sites": 7, "category": "D", "mechanism": "Reached via extend MiddlewareRegistry; extend-module methods are invisible to singleton dispatch (verified in the mail sweep's scratch control). Behind that, the **kwargs return would hit the splat-summary drop.", "fix_direction": "extend ancestors in singleton dispatch; then rest/kwrest summary fix"},
+    {"key": "Mutex/Monitor#synchronize", "sites": 4, "category": "C", "mechanism": "Generic block-return binds the block body's Dynamic value.", "fix_direction": "follows block-body roots"},
+    {"key": "Hash#[] (Headers KeyMap)", "sites": 5, "category": "C", "mechanism": "Container-of-Dynamic via untyped ivars (utils/headers.rb:53).", "fix_direction": "ivar typing lane"},
+    {"key": "unsupported_syntax cause (129)", "sites": 129, "category": "F", "mechanism": "Only CallOrWriteNode (2 sites) lacks a node handler; the rest are closed-world-miss implicit-self calls (Struct DSL members, send/public_send, def_delegators) — collapses into case D1 plus reflection.", "fix_direction": "case D1 + Forwardable def_delegators modeling"},
+    {"key": "join/mirror nodes (If/And/Or/EmbeddedStatements/LocalVariableWrite)", "sites": 392, "category": "G", "mechanism": "Joins and mirrors of inner Dynamic expressions.", "fix_direction": "metric artifact"}
+  ]
+}

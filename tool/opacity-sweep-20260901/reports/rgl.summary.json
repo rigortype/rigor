@@ -1,0 +1,22 @@
+{
+  "target": "rgl",
+  "files": 28,
+  "exprs": 3938,
+  "precision": 0.499,
+  "protection": 0.3811,
+  "cause_site_counts": {"inferred_return_untyped": 247, "none": 135, "unsupported_syntax": 54, "explicit_untyped": 7, "external_gem_without_rbs": 2},
+  "opaque_split": {"local_reads": 744, "calls": 680, "ivars": 135},
+  "local_read_buckets": {"def_param": 406, "block_param": 253, "assigned_local": 85},
+  "call_receiver_tiers": {"precise": 113, "dynamic_top": 428, "implicit_self": 138},
+  "cases": [
+    {"key": "vertex/property Hash[Dynamic,Dynamic] reads/writes", "sites": 28, "category": "C", "mechanism": "maps keyed by inherently untyped vertices", "fix_direction": "generics on Graph (RBS), not dispatch work"},
+    {"key": "graph API returns (add_edge/add_vertex/each_*/detect)", "sites": 30, "category": "A", "mechanism": "dispatch resolves through include chain; returns end in ivar dicts and params (inferred_return_untyped 55.5%)", "fix_direction": "ADR-58 + ADR-67, counted"},
+    {"key": "module Graph + include Enumerable, non-generic elements", "sites": 15, "category": "C", "mechanism": "Enumerable methods yield untyped elements; Graph has no element parameter", "fix_direction": "RBS generics on Graph / ADR-20"},
+    {"key": "def_event_handlers class_eval heredoc", "sites": 10, "category": "E", "mechanism": "string-eval generated handle_* visitor methods (graph_visitor.rb:104-122)", "fix_direction": "plugin recognizer"},
+    {"key": "Hash[...]?#[] / #[]= nilable receiver", "sites": 9, "category": "D", "mechanism": "nilable-receiver dispatch collapse (repeat)", "fix_direction": "dispatch non-nil arms and join"},
+    {"key": "{}#[]= non-literal key on empty shape", "sites": 3, "category": "C", "mechanism": "dynamic-key write cannot extend a literal shape", "fix_direction": "widen shape to Hash[K,V] on unknown-key write instead of Dynamic"},
+    {"key": "attr-backed state (color_map/distance_map) + ivars", "sites": 150, "category": "A", "mechanism": "ivar field typing", "fix_direction": "ADR-58, known"},
+    {"key": "def_param+block_param reads", "sites": 659, "category": "A", "mechanism": "parameter-sourced; block-param share highest of the five targets (traversal yields)", "fix_direction": "ADR-67, closed"},
+    {"key": "unsupported_syntax causes", "sites": 54, "category": "F", "mechanism": "alias == eql? operator aliases, class_eval heredoc, def self.[](*a) splat constructors", "fix_direction": "alias modeling; rest is metaprogramming"}
+  ]
+}

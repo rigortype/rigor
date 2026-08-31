@@ -1,0 +1,23 @@
+{
+  "target": "net-ssh",
+  "files": 97,
+  "exprs": 19911,
+  "precision": 0.5725,
+  "protection": 0.3404,
+  "cause_site_counts": {"none": 573, "unsupported_syntax": 475, "inferred_return_untyped": 1235, "explicit_untyped": 5},
+  "opaque_split": {"local_reads": 2427, "calls": 3700, "ivars": 217},
+  "local_read_buckets": {"def_param": 1282, "block_param": 249, "assigned_local": 896},
+  "call_receiver_tiers": {"precise": 426, "implicit_self": 1044, "dynamic_top": 2230},
+  "cases": [
+    {"key": "splat/kwrest return-summary drop (Buffer.from, send_packet, send_and_wait)", "sites": 46, "category": "D", "mechanism": "Any def with *rest or **kwrest loses its inferred call-site return even when the body's return is precise; minimal scratch repro (plain precise, *args Dynamic, **opts Dynamic, block innocent, instance methods affected).", "fix_direction": "Bind rest->Array[Dynamic], kwrest->Hash[Symbol,Dynamic]; keep the body-inferred summary."},
+    {"key": "OpenSSL/stdlib RBS not loaded", "sites": 330, "category": "B", "mechanism": "::OpenSSL::Cipher reads Dynamic (cipher_factory.rb:28); 143 OpenSSL:: refs in 29 files; transport/kex/cipher chains Dynamic downstream; drives most of unsupported_syntax 475 (no node-handler gaps exist).", "fix_direction": "libraries: [openssl, socket, zlib] or require-detection."},
+    {"key": "refined-receiver dispatch (non-empty-string#==/<)", "sites": 15, "category": "D", "mechanism": "Refined-tier receiver not erased to base for method lookup; RUBY_PLATFORM == \"java\" -> Dynamic (certificate.rb:35), repro'd in scratch.", "fix_direction": "Erase Refined to base class in MethodDispatcher lookup."},
+    {"key": "def/block param locals + @content param->ivar (Buffer read_* family)", "sites": 1566, "category": "A", "mechanism": "1531 param reads plus @content = content.to_s feeding read/read_long/read_string/read_key (~35 pair sites).", "fix_direction": "closed (ADR-67 / ADR-58 lane)"},
+    {"key": "Hash-of-Dynamic containers + dynamic-receiver propagation", "sites": 2270, "category": "C", "mechanism": "Hash[Dynamic,Dynamic]/#[]=/#[] on channel properties etc.; 2230 calls on Dynamic receivers.", "fix_direction": "follows A/B roots"},
+    {"key": "Proc#[] on literal proc", "sites": 6, "category": "D", "mechanism": "key = Proc.new {..}; key[\"A\"] -> Dynamic (algorithms.rb:468); Proc#call/#[] not typed from the literal block.", "fix_direction": "Infer Proc call results from literal block returns."},
+    {"key": "Socket#send name collision", "sites": 3, "category": "D", "mechanism": "Real BasicSocket#send shadowed by reflection-send handling (socks4.rb:54).", "fix_direction": "Prefer a defined send method over reflection when the receiver class defines one."},
+    {"key": "Class#send / singleton_class metaprogramming", "sites": 10, "category": "F", "mechanism": "singleton_class returns bare Class (identity lost) + send with literal symbols (ctr.rb:41); genuine metaprogramming.", "fix_direction": "plugin/edge; not core"},
+    {"key": "Net::SSH::Buffer#append self-return opaque (cross-file lens artifact)", "sites": 4, "category": "G", "mechanism": "Coverage lens types cross-file user-method calls Dynamic; rigor check resolves the same summary (verified matrix). Underlies many pair counts here.", "fix_direction": "coverage lens should consult project-wide summaries like check"},
+    {"key": "joins/mirrors", "sites": 1013, "category": "G", "mechanism": "LocalVariableWrite/EmbeddedStatements/If/Or/And mirroring inner Dynamic.", "fix_direction": "metric artifact"}
+  ]
+}

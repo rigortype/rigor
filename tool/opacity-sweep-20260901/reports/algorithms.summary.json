@@ -1,0 +1,20 @@
+{
+  "target": "algorithms",
+  "files": 14,
+  "exprs": 4076,
+  "precision": 0.3761,
+  "protection": 0.1637,
+  "cause_site_counts": {"inferred_return_untyped": 385, "none": 367, "unsupported_syntax": 37, "explicit_untyped": 8},
+  "opaque_split": {"local_reads": 948, "calls": 916, "ivars": 196},
+  "local_read_buckets": {"def_param": 544, "block_param": 48, "assigned_local": 356},
+  "call_receiver_tiers": {"precise": 64, "dynamic_top": 775, "implicit_self": 77},
+  "cases": [
+    {"key": "Struct.new node classes (Node#new + left/right/key chains)", "sites": 300, "category": "D", "mechanism": "Struct.new(:sym,...) constant resolves but synthesized #new and member accessors are unmodeled; the gem's entire node data flow is downstream", "fix_direction": "synthesize members + new arity from literal Struct.new — ADR-48 Data-folding sibling; highest payoff here"},
+    {"key": "require-fallback C-ext alias (Containers::Deque = CDeque | RubyDeque)", "sites": 30, "category": "D", "mechanism": "rescue LoadError conditional constant alias; the C-ext arm is statically unresolvable so the join goes Dynamic despite a fully analyzable Ruby arm", "fix_direction": "type the constant as the resolvable arm in rescue-LoadError fallback assignments (FP-safe)"},
+    {"key": "container API over ivar state (Stack#push/pop, Heap#size/pop)", "sites": 40, "category": "A", "mechanism": "resolved defs delegating to untyped ivars", "fix_direction": "ADR-58, known"},
+    {"key": "instance_variable_get reflection", "sites": 4, "category": "F", "mechanism": "reflection on another object's ivars (heap.rb merge!)", "fix_direction": "legitimate dynamism; literal-string ivar modeling at best"},
+    {"key": "empty-literal shape dynamic-index access", "sites": 10, "category": "C", "mechanism": "dynamic-key/[] on literal-derived shapes", "fix_direction": "widen to element-join instead of Dynamic"},
+    {"key": "recursive tree helpers (isred/splay/colorflip/*_recursive)", "sites": 40, "category": "A", "mechanism": "param-fed recursion over node params; closes only after Struct nodes type", "fix_direction": "ADR-67 + case 1"},
+    {"key": "def_param + assigned_local reads", "sites": 900, "category": "A", "mechanism": "naked-array algorithm params and swap locals; assigned_local mostly C from Dynamic containers", "fix_direction": "ADR-67, counted"}
+  ]
+}

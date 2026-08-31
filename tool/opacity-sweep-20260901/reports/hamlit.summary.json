@@ -1,0 +1,34 @@
+{
+  "target": "hamlit",
+  "files": 61,
+  "exprs": 10000,
+  "precision": 0.5467,
+  "protection": 0.3191,
+  "cause_site_counts": {
+    "inferred_return_untyped": 688,
+    "none": 341,
+    "unsupported_syntax": 199,
+    "external_gem_without_rbs": 24,
+    "explicit_untyped": 5
+  },
+  "opaque_split": { "local_reads": 1488, "calls": 1846, "ivars": 147 },
+  "local_read_buckets": { "def_param": 891, "block_param": 204, "assigned_local": 393 },
+  "call_receiver_tiers": { "implicit_self": 434, "dynamic_top": 1236, "precise": 176 },
+  "cases": [
+    { "key": "singleton(Hamlit::HamlError)#message", "sites": 26, "category": "D", "mechanism": "def self.message(key, *args) — rest param disqualifies return inference though body would infer String", "fix_direction": "param-shape guard extension (rest -> Array[join(args)])" },
+    { "key": "ParseNode/Line Struct.new-with-block", "sites": 140, "category": "D", "mechanism": "do-block Struct.new loses ADR-48 fold (repro typeof_probe9)", "fix_direction": "fold block-carrying Struct.new" },
+    { "key": "Hamlit::HamlError#backtrace", "sites": 5, "category": "D", "mechanism": "inherited RBS-core method unresolved through source subclass of StandardError", "fix_direction": "MRO into RBS ancestors" },
+    { "key": "MatchData?#[] / String?#size", "sites": 7, "category": "D", "mechanism": "optional-receiver refusal on core methods", "fix_direction": "T? dispatch as join" },
+    { "key": "singleton(Hamlit::HamlUtil)#unescape_interpolation", "sites": 5, "category": "D", "mechanism": "optional param disqualifies return inference", "fix_direction": "param-shape guard extension" },
+    { "key": "singleton(Hamlit::HamlUtil)#html_safe", "sites": 10, "category": "B", "mechanism": "ActiveSupport String#html_safe monkey-patch surface", "fix_direction": "rails overlay / plugin" },
+    { "key": "merge_attributes! / contains_interpolation?", "sites": 10, "category": "A", "mechanism": "param-sourced returns", "fix_direction": "ADR-67 (closed)" },
+    { "key": "HamlOptions.defaults/buffer_defaults", "sites": 5, "category": "A", "mechanism": "class-level ivar hash (closed class-ivar thread)", "fix_direction": "closed" },
+    { "key": "{}#[]=", "sites": 13, "category": "G", "mechanism": "[]= mirrors Dynamic RHS", "fix_direction": "artifact" },
+    { "key": "Hash[...]#[] / non-empty-array#last", "sites": 17, "category": "C", "mechanism": "Dynamic-valued containers", "fix_direction": "upstream" },
+    { "key": "Temple/Tilt/Rails surface", "sites": 24, "category": "B", "mechanism": "external_gem_without_rbs (lock present, correctly labeled)", "fix_direction": "add_rbs / plugin" },
+    { "key": "Ripper.lex token chains", "sites": 14, "category": "B", "mechanism": "ripper sigs not loaded", "fix_direction": "load ripper sigs" },
+    { "key": "dynamic-receiver calls", "sites": 1236, "category": "C", "mechanism": "propagation, dominated by ParseNode fields", "fix_direction": "cascades from Struct fix" },
+    { "key": "def/block param reads", "sites": 1095, "category": "A", "mechanism": "ADR-67 (closed)", "fix_direction": "closed" },
+    { "key": "ivar reads", "sites": 147, "category": "A", "mechanism": "ADR-58", "fix_direction": "ADR-58" }
+  ]
+}

@@ -1,0 +1,27 @@
+# mail — opacity attribution (2026-09-01)
+
+## Numbers
+
+| metric | value |
+| --- | --- |
+| files | 111 (0 parse errors) |
+| expressions | 422090 — INFLATED: ~56k lines of ragel-generated parser tables in lib/mail/parsers/ contribute the bulk of the 407870 constant-tier expressions |
+| precision | 97.79% (headline number is a table artifact; opaque volume 9336 is the comparable quantity) |
+| protection | 48.42% (1941 / 2068) |
+| cause_site_counts | inferred_return_untyped 854, none 744, unsupported_syntax 420, explicit_untyped 32, external_gem_without_rbs 18 |
+| tractability | engine_gap 1274, add_rbs 50 |
+
+Opaque split (9336): calls 4129 (precise-receiver 721, implicit-self 1180, dynamic-receiver 2228), local reads 2879 (def_param 1268, block_param 288, assigned_local 1323), ivars 155, joins/mirrors (If 467, LocalVariableWrite 430, EmbeddedStatements 149, And 129, Begin 113, Or 66) = G. Only CallOrWriteNode (5) lacks a node handler.
+
+## Cases
+
+1. **`extend Module` invisible to singleton dispatch — D (218+ sites), verified ENGINE-WIDE.** (Check matrix: `ExtHost.own(1).nosuch` fires while `ExtHost.extdef(1).nosuch` through `extend ExtM` stays silent — and that pair is SAME-file, so this is not the lens artifact of case 2.) Every ragel parser does `extend Mail::ParserTools` and calls `chars(data, i, j)` inside `def self.parse` (~218 opaque implicit-self `chars` calls; parser_tools.rb:6). Scratch control (minisplat lib/mini.rb UsesTools): a plain module def called through `extend` answers Dynamic for BOTH implicit-self and explicit receiver, while a sibling `def self.own` resolves to its constant return. Mechanism: extended-module methods are not entered into singleton method resolution at all. Fix direction: include `extend M` ancestors in singleton dispatch (ADR-43 ancestor-resolution lane). Retro-explains faraday's register_middleware pairs too. (ParserTools' `chars` is additionally defined under a module-level `if` — irrelevant here, since even unconditional defs fail through extend.)
+2. **Cross-file reopened-module self-calls — RE-CLASSIFIED G-metric (lens artifact, ~110 sites).** `Mail.register_autoload` is `def self.` in lib/mail.rb; elements.rb/fields.rb/network.rb reopen `module Mail` and call it at body level (61 opaque implicit-self sites plus kin). Scratch lens repro (reopen_a/reopen_b): same-file resolves (42), cross-file Dynamic. BUT the jbuilder-phase check matrix showed `rigor check` DOES resolve the reopened cross-file call (`ReopenM.reg(1).nosuch` fires `undefined method ... for 42` from the reopened file). So this — and cross-file user-method summaries generally — is a coverage/protection-lens scope artifact, not an engine dispatch gap. Fix direction: the coverage lens should consult project-wide summaries the way check does; the tractability "engine_gap" counts in these JSONs are inflated by it.
+3. **Struct factory constants — D (39 sites).** `AddressStruct = Struct.new(:raw, :domain, ...)` (address_lists_parser.rb:12-13): the definition call `Struct.new(...)` itself types Dynamic (12 sites of `singleton(Struct)#new`), and although the constant then reads precise `singleton(AddressStruct)`, `.new` on it answers Dynamic (27 sites). Same family as faraday's do-block variant. Fix: synthesize the subclass (members, #new arity) from literal symbol args.
+4. **Empty-array-literal mutation — D, generated-code weighted (117 sites).** `stack = []` then `stack[top] = cs` in the ragel state machines (address_lists_parser.rb:32103) — receiver stays empty-tuple `[]`, index write/read answers Dynamic (`[]#[]=` 95, `[]#[]` 22). Fix: widen a `[]`-typed local to Array[elem-join] on index write / treat Tuple[] index ops via the Array fallback.
+5. **`class << self` / instance attr_accessor reads — D but a KNOWN-OPEN lane (ADR-58 WD2/WD3), ~100 sites.** `_trans_keys`/`_indicies`/`_trans_actions`/`_index_offsets`/`_key_spans` (singleton attr_accessor, assigned a literal table two lines below — address_lists_parser.rb:17-20) all read Dynamic; `Mail::Header.maximum_amount` same shape. Scratch control: `SAcc.tk` (singleton attr + same-file literal assignment) → Dynamic, and even instance `IAcc.new.v` with `@v = 7` in initialize → Dynamic. Attr methods themselves resolve; the backing-ivar summary is the missing half. Count, do not re-design: this is the pending ADR-58 lane.
+6. **Union receiver with `{}` arm — C, policy (41 sites).** `Hash | {}#[]` (37) e.g. network/retriever_methods/imap.rb:77. Scratch control: dispatch on a union works per-arm (`"x"|"yy"` #length → `1 | 2`); the Dynamic comes from the `{}` arm alone — the open-HashShape-reads-untyped policy (PR #249) plus Hash[Dynamic] arms. Not a union-dispatch failure; do not file as D.
+7. **Registry/ivar-rooted singleton helpers — A/ivar lane (~70 sites).** `Mail::Utilities.blank?` 41 (utilities.rb:287 — param-sourced branches), `Encodings.get_encoding/register/decode_encode` (@transfer_encodings class-ivar Hash registry), `Multibyte::Unicode.u_unpack` (param unpack), `Message#body/body=`, `SmtpEnvelope#message/from`, delivery-method `settings` 51 (attr_accessor backed by param-merged Hash).
+8. **`Mail::Configuration.instance` — stdlib Singleton metaprogramming (7 sites).** `include Singleton` provides `.instance` via included-hook extend — the same extend-invisibility as case 1 plus stdlib hook modeling.
+9. **B small:** external_gem_without_rbs 18 (mini_mime et al.); add_rbs tractability 50.
+10. **G joins/mirrors:** ~1354 sites.

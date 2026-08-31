@@ -1,0 +1,29 @@
+{
+  "target": "slim",
+  "files": 27,
+  "exprs": 4861,
+  "precision": 0.5748,
+  "protection": 0.3425,
+  "cause_site_counts": {
+    "inferred_return_untyped": 215,
+    "none": 175,
+    "unsupported_syntax": 148,
+    "explicit_untyped": 11
+  },
+  "opaque_split": { "local_reads": 524, "calls": 854, "ivars": 163 },
+  "local_read_buckets": { "def_param": 311, "block_param": 85, "assigned_local": 128 },
+  "call_receiver_tiers": { "implicit_self": 227, "dynamic_top": 522, "precise": 105 },
+  "cases": [
+    { "key": "Temple DSL surface (options/define_options/use/register/after/before/set_options)", "sites": 100, "category": "E", "mechanism": "methods inherited from Temple mixins and Engine DSL; temple ships no RBS", "fix_direction": "temple RBS or a Temple plugin" },
+    { "key": "Temple::Grammar << and | DSL", "sites": 54, "category": "E", "mechanism": "grammar constants with overloaded operators from the gem", "fix_direction": "plugin territory" },
+    { "key": "on_* visitor sexp params ([] cluster)", "sites": 122, "category": "A", "mechanism": "S-expression arrays arrive as untyped params; Temple dispatches on_* via send", "fix_direction": "ADR-67 (closed) + Temple plugin for dispatch edges" },
+    { "key": "Hash[Dynamic,Dynamic]#[]/#[]=/#delete", "sites": 41, "category": "C", "mechanism": "options hashes with Dynamic values", "fix_direction": "upstream" },
+    { "key": "optional-receiver String/Array (\"\"?#<<, String?#size, Array[D]?#last...)", "sites": 25, "category": "D", "mechanism": "T? receiver dispatch refused though the nil branch is bot", "fix_direction": "dispatch T?#m as join over T and NilClass" },
+    { "key": "union-with-nil receiver (Array | nil | non-empty-array)#last/size", "sites": 5, "category": "D", "mechanism": "union receiver dispatch refused; all non-nil arms agree", "fix_direction": "join dispatch over union arms" },
+    { "key": "Thread#[]/#[]=", "sites": 4, "category": "B", "mechanism": "core RBS declares them untyped", "fix_direction": "none (honest)" },
+    { "key": "attribution artifact: no Gemfile.lock", "sites": 148, "category": "G", "mechanism": "missing-gem-constant index is lock-driven; Temple constants report unsupported_syntax instead of external_gem_without_rbs (haml with a lock reports 30 gem sites, slim 0)", "fix_direction": "fall back to gemspec/require graph when no lockfile" },
+    { "key": "dynamic-receiver calls", "sites": 522, "category": "C", "mechanism": "propagation from sexp params and option hashes", "fix_direction": "upstream" },
+    { "key": "def/block param reads", "sites": 396, "category": "A", "mechanism": "ADR-67 (closed)", "fix_direction": "closed" },
+    { "key": "ivar reads", "sites": 163, "category": "A", "mechanism": "ADR-58", "fix_direction": "ADR-58" }
+  ]
+}

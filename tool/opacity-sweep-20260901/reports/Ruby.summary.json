@@ -1,0 +1,23 @@
+{
+  "target": "Ruby",
+  "files": 188,
+  "exprs": 17755,
+  "precision": 0.6295,
+  "protection": 0.3871,
+  "cause_site_counts": {"inferred_return_untyped": 1055, "none": 749, "unsupported_syntax": 200, "explicit_untyped": 44, "analyzer_budget_cutoff": 1},
+  "opaque_split": {"local_reads": 2353, "calls": 3007, "ivars": 82},
+  "local_read_buckets": {"def_param": 1351, "assigned_local": 657, "block_param": 345},
+  "call_receiver_tiers": {"dynamic_top": 1994, "precise": 421, "implicit_self": 592},
+  "cases": [
+    {"key": "Array#[] on bare Array from Array.new(dynamic_size, fill)", "sites": 35, "category": "D", "mechanism": "Array.new with a Dynamic size discards the fill/block element type and yields unparameterized Array (literal size folds to a tuple) — verified by scratch bisect.", "fix_direction": "Degrade to Array[type(fill)] / Array[type(block)] when size is Dynamic instead of bare Array."},
+    {"key": "rest-parameter methods never fold their return (AverageMedian#average_median etc.)", "sites": 7, "category": "D", "mechanism": "Any user method with a *rest param answers Dynamic at all call sites even when every branch returns nil; the no-splat twin (incl. def-level rescue + raise) folds to nil — verified by scratch bisect M1-M6.", "fix_direction": "Bind rest param as Array[join(extra args)] (or Array[untyped]) and continue body return folding."},
+    {"key": "user-method returns reading ivars/params (add_edge/push/to_array/edges/neighbors)", "sites": 69, "category": "A", "mechanism": "inferred_return_untyped family (1055 cause sites): resolved user methods whose returns are param/ivar-sourced.", "fix_direction": "ADR-67 / ADR-58 — closed, counted only."},
+    {"key": "minitest assert/assert_equal/assert_raises", "sites": 158, "category": "B", "mechanism": "Minitest::Test ancestry has no RBS in the environment; assertions are unresolved implicit-self calls.", "fix_direction": "minitest RBS (collection) in the env."},
+    {"key": "{}#[]= attribute-write result", "sites": 11, "category": "D", "mechanism": "Same setter-RHS mechanism verified on textbringer: x[k]=v evaluates to RHS but is typed by dispatch.", "fix_direction": "Type attribute-write CallNodes as their RHS."},
+    {"key": "optional receivers from nil-unions (String?#split via gets, 0?#- via ivar nil-union)", "sites": 20, "category": "D", "mechanism": "Dispatch on T? answers Dynamic instead of the non-nil arm's result; beginner scripts hit it via gets and via ivar summaries that union nil.", "fix_direction": "Type T? dispatch results via the non-nil arm; nil-arm stays diagnostic."},
+    {"key": "SizedQueue#push", "sites": 7, "category": "B", "mechanism": "Bundled rbs core declares ::Thread::SizedQueue but not the toplevel ::SizedQueue/::Queue aliases; Rigor stub-synthesizes the constant and dispatch answers top.", "fix_direction": "Builtin-import/overlay declaring the toplevel Queue/SizedQueue aliases."},
+    {"key": "Hash[Dynamic]#[] / non-empty-array[top]#[]", "sites": 24, "category": "C", "mechanism": "Element reads of containers whose element type is opaque from A roots.", "fix_direction": "Closes with roots."},
+    {"key": "unsupported_syntax bucket", "sites": 200, "category": "F", "mechanism": "Only 1 site is a truly unhandled node class (CallOperatorWriteNode); the rest are unresolved implicit-self dispatch mislabeled unsupported_syntax — same taxonomy artifact as textbringer.", "fix_direction": "Split the cause label; resolve via minitest RBS + toplevel def resolution."},
+    {"key": "attr-backed getters (root/arr/stack/queue/heap_size implicit-self)", "sites": 80, "category": "A", "mechanism": "attr_reader calls resolve through the discovered-method tier to Dynamic[Top]; needs ivar-field to accessor-return propagation.", "fix_direction": "ADR-58 WD2/WD3."}
+  ]
+}

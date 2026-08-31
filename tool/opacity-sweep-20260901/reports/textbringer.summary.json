@@ -1,0 +1,28 @@
+{
+  "target": "textbringer",
+  "files": 77,
+  "exprs": 32923,
+  "precision": 0.6652,
+  "protection": 0.5214,
+  "cause_site_counts": {"none": 1628, "unsupported_syntax": 692, "explicit_untyped": 56, "inferred_return_untyped": 632},
+  "opaque_split": {"local_reads": 2591, "calls": 4372, "ivars": 1079},
+  "local_read_buckets": {"block_param": 1093, "assigned_local": 1055, "def_param": 443},
+  "call_receiver_tiers": {"dynamic_top": 2921, "precise": 717, "implicit_self": 734},
+  "cases": [
+    {"key": "Buffer attr_* getters (point/file_name/mode/name/keymap/keymap=)", "sites": 93, "category": "B", "mechanism": "Handwritten sig/buffer.rbs omits every attr_reader getter (only name=/file_name= setters declared); discovered-method tier answers Dynamic[Top] by design to suppress FPs (prior-note section 6).", "fix_direction": "Project-side RBS completion; engine already correct per FP discipline."},
+    {"key": "attribute-write result typing ({}#[]= 25, Mark#location= 7, dynamic []= 32)", "sites": 64, "category": "D", "mechanism": "Ruby defines x[k]=v / x.attr=v to evaluate to the RHS, but the ATTRIBUTE_WRITE CallNode is typed by dispatch and lands Dynamic even with precise receiver+RHS (verified: ispell.rb:101 CallNode Dynamic[top], receiver {}, RHS false).", "fix_direction": "Type attribute-write CallNodes as their RHS argument type syntactically; keep dispatch for diagnostics. FP-free precision add."},
+    {"key": "Theme DSL cascade (Theme.define + t.color/face/palette)", "sites": 457, "category": "B", "mechanism": "Textbringer::Theme has no .rbs file at all; DSL block params t/p untyped, cascading across themes/.", "fix_direction": "Add sig/theme.rbs incl. block signature for Theme.define."},
+    {"key": "GLOBAL_MAP.define_key", "sites": 216, "category": "B", "mechanism": "GLOBAL_MAP created via define_keymap :GLOBAL_MAP (const_set macro, keymap.rb:111); the constant is undeclared in sig so every read is Dynamic and define_key cascades.", "fix_direction": "Declare GLOBAL_MAP: Keymap in sig (B); const_set folding is plugin territory by policy."},
+    {"key": "Hash[Dynamic]/Array[Dynamic] element reads", "sites": 83, "category": "C", "mechanism": "Element reads of containers whose element type is already Dynamic from upstream param/ivar roots.", "fix_direction": "Closes with A/B roots; no independent mechanism."},
+    {"key": "Controller?#overriding_map=", "sites": 11, "category": "B", "mechanism": "attr_accessor :overriding_map absent from sig/controller.rbs; receiver is Controller? (optional) on top.", "fix_direction": "RBS completion; also fully closed by the attribute-write RHS rule without RBS."},
+    {"key": "{}#[] open-shape read", "sites": 10, "category": "C", "mechanism": "Mutated {} constant widens to open HashShape; open-shape reads read untyped per the settled PR #249 contract.", "fix_direction": "None; settled design."},
+    {"key": "singleton(Utils)#message", "sites": 10, "category": "D", "mechanism": "module_function directive in utils.rb + instance-side RBS 'def message'; singleton dispatch does not mirror the instance signature onto the singleton.", "fix_direction": "Treat source-level module_function as RBS self?. — mirror instance sigs to the singleton for such modules."},
+    {"key": "DabbrevExtension#[] / #[]= (refine Buffer body)", "sites": 14, "category": "D", "mechanism": "Inside 'refine Buffer do' bodies self is typed as the refinement module; with self=Buffer both methods resolve via sig/buffer.rbs lines 31/144.", "fix_direction": "Bind self inside refine-blocks to the refined class."},
+    {"key": "String?#sub", "sites": 6, "category": "D", "mechanism": "Optional receiver (String? from slice) makes the union dispatch answer Dynamic instead of the non-nil arm's result.", "fix_direction": "Type T? receiver dispatch results via the non-nil arm; nil-arm stays a diagnostic concern."},
+    {"key": "singleton(Clipboard)#copy", "sites": 8, "category": "B", "mechanism": "clipboard gem ships no RBS.", "fix_direction": "Gem RBS / collection."},
+    {"key": "unsupported_syntax bucket == unresolved implicit-self dispatch in define_command blocks", "sites": 692, "category": "E", "mechanism": "Only 5 of 692 are a genuinely unhandled node class (CallOperatorWriteNode); the rest are unresolved_call_result (expression_typer.rb:1204) from blocks re-homed via Commands.send(:define_method) — lexical self is the module object, runtime self an includer. Also a cause-taxonomy artifact: closed-world-unresolved dispatch is labeled unsupported_syntax.", "fix_direction": "Textbringer-DSL plugin declaring block self-type (E); core-eligible sliver: direct define_method(name,&block) self-rebinding; split the cause label."},
+    {"key": "ivar reads", "sites": 1079, "category": "A", "mechanism": "ADR-58 ivar-field typing pipeline (WD1 landed, WD2/WD3 pending) — known territory.", "fix_direction": "ADR-58 WD2/WD3."},
+    {"key": "def/block params", "sites": 1536, "category": "A", "mechanism": "Parameter inference, ADR-67 — CLOSED, counted only.", "fix_direction": "ADR-67."},
+    {"key": "EmbeddedStatements + If/Or/And joins", "sites": 686, "category": "G", "mechanism": "Metric mirrors of inner-expression opacity.", "fix_direction": "None."}
+  ]
+}

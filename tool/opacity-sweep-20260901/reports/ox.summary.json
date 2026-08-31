@@ -1,0 +1,20 @@
+{
+  "target": "ox",
+  "files": 15,
+  "exprs": 1752,
+  "precision": 0.5457,
+  "protection": 0.3213,
+  "cause_site_counts": {"inferred_return_untyped": 110, "none": 129, "unsupported_syntax": 25},
+  "opaque_split": {"local_reads": 294, "calls": 290, "ivars": 2},
+  "local_read_buckets": {"def_param": 101, "block_param": 56, "assigned_local": 137},
+  "call_receiver_tiers": {"dynamic_top": 211, "implicit_self": 37, "precise": 42},
+  "cases": [
+    {"key": "ivar-backed method/accessor returns (nodes/attributes/value/name)", "sites": 42, "category": "D", "mechanism": "Inferred returns sourced from ivar reads do not propagate to call sites: the ivar read inside def nodes types Array[Dynamic]|[] (type-of element.rb:52:7) but every call answers Dynamic; attr_accessor readers fail identically same-file on the defining class; literal-return sibling folds fine; method_missing innocent.", "fix_direction": "ADR-58 WD2/WD3: feed per-class ivar field types into method-return inference and synthesize attr_* signatures; drains the 211-site cascade."},
+    {"key": "dynamic-receiver cascade ([]/==/each/select/size)", "sites": 211, "category": "C", "mechanism": "Propagation seeded by case 1 and A params.", "fix_direction": ""},
+    {"key": "assigned-local reads (match/found chains)", "sites": 137, "category": "C", "mechanism": "Same cascade landing in locals.", "fix_direction": ""},
+    {"key": "def/block params (incl. Element#alocate returning param-tainted found)", "sites": 157, "category": "A", "mechanism": "Parameter-sourced.", "fix_direction": "CLOSED (ADR-67)."},
+    {"key": "Hash[D,D]?#[] / #has_key?", "sites": 7, "category": "D", "mechanism": "Element access is C (Dynamic values); has_key? on nil-union receiver declines where bool is derivable from the Hash arm.", "fix_direction": "Dispatch through T? receivers by joining per-arm answers (Postel: nil arm raises)."},
+    {"key": "reflective instance_variable_set/get with computed names", "sites": 25, "category": "F", "mechanism": "Ox::Bag's reflective initialize/method_missing; cause attaches to the enclosing each block.", "fix_direction": "Inherent to the reflective class; not an engine target."},
+    {"key": "If/Or/EmbeddedStatements mirrors", "sites": 62, "category": "G", "mechanism": "Structural nodes mirroring inner Dynamic.", "fix_direction": ""}
+  ]
+}

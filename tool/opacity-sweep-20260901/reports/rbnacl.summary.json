@@ -1,0 +1,20 @@
+{
+  "target": "rbnacl",
+  "files": 37,
+  "exprs": 4286,
+  "precision": 0.6428,
+  "protection": 0.5779,
+  "cause_site_counts": {"inferred_return_untyped": 136, "none": 45, "unsupported_syntax": 44},
+  "opaque_split": {"local_reads": 488, "calls": 613, "ivars": 68},
+  "local_read_buckets": {"def_param": 351, "block_param": 0, "assigned_local": 137},
+  "call_receiver_tiers": {"precise": 165, "dynamic_top": 204, "implicit_self": 244},
+  "cases": [
+    {"key": "cross-file calls to source-inferred project methods (Util.*)", "sites": 80, "category": "D", "mechanism": "discovery_seeded_scope seeds discovered_classes + param_inferred_types but no inferred-return table (coverage_scan.rb:58); check_length folds to true same-file but is opaque at all 12 cross-file sites; minimal 2-file scratch reproduces for plain class methods too.", "fix_direction": "Seed a per-method inferred-return summary (ReturnInferenceCollector, ADR-67-style) — or the ADR-14 sig-gen adoption path per project."},
+    {"key": "defaulted parameters kill return propagation (zeros(n=32))", "sites": 40, "category": "D", "mechanism": "Same-file scratch: required-param def folds even with Dynamic arg; positional or keyword default makes every call form answer Dynamic.", "fix_direction": "Type the default expression into the parameter's initial type."},
+    {"key": "libsodium FFI DSL macro calls (sodium_constant/function/type/primitive/layout)", "sites": 154, "category": "E", "mechanism": "extend Sodium + module_eval heredoc string-eval + attach_function + const_set(public_send(...)); also the named constructs behind unsupported_syntax (20% of causes).", "fix_direction": "rbnacl plugin interpreting the macros (name/arity/-> bool are in the call)."},
+    {"key": "DSL-generated native wrappers + constants (auth_hmacsha*, KEYBYTES...)", "sites": 140, "category": "B", "mechanism": "Own-native methods/constants that exist only after the E-case metaprogramming runs.", "fix_direction": "Same plugin as case 3."},
+    {"key": "A-tainted ivars (@key etc.)", "sites": 68, "category": "A", "mechanism": "ADR-58 WD1 types reads from writes; the writes are param-sourced.", "fix_direction": "CLOSED upstream (ADR-67)."},
+    {"key": "def params", "sites": 351, "category": "A", "mechanism": "Parameter-sourced.", "fix_direction": "CLOSED (ADR-67)."},
+    {"key": "dynamic-receiver cascade (bytesize/==/[])", "sites": 204, "category": "C", "mechanism": "From cases 1/2/5.", "fix_direction": ""}
+  ]
+}

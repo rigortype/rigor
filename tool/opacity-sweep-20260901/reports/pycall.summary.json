@@ -1,0 +1,20 @@
+{
+  "target": "pycall",
+  "files": 22,
+  "exprs": 3103,
+  "precision": 0.6226,
+  "protection": 0.4893,
+  "cause_site_counts": {"inferred_return_untyped": 96, "unsupported_syntax": 89, "none": 77, "explicit_untyped": 1},
+  "opaque_split": {"local_reads": 339, "calls": 463, "ivars": 17},
+  "local_read_buckets": {"def_param": 215, "block_param": 41, "assigned_local": 83},
+  "call_receiver_tiers": {"dynamic_top": 227, "implicit_self": 124, "precise": 112},
+  "cases": [
+    {"key": "attr_reader synthesis (__pyptr__/obj)", "sites": 50, "category": "D", "mechanism": "attr_* reader dispatch answers Dynamic even same-file (verified in ox discriminator); here declared in modules (PyObjectWrapper) too.", "fix_direction": "ADR-58 WD2/WD3 attr_* signature synthesis from ivar field types."},
+    {"key": "C-defined constants (LibPython::API/Helpers, PyPtr)", "sites": 92, "category": "B", "mechanism": "Defined in ext/pycall C sources; Ruby tree only consumes them.", "fix_direction": "Own-native RBS sidecar."},
+    {"key": "PyCall module functions (import_module/builtins/len/init)", "sites": 28, "category": "C", "mechanism": "module_function dispatch itself works (scratch control folds); bodies terminate in case-2 C constants; builtins stacks the memoized-ivar-return gap.", "fix_direction": ""},
+    {"key": "FFI::Struct DSL (by_ref/layout/offset_of/field writes)", "sites": 30, "category": "E", "mechanism": "ffi gem has no RBS and Struct layout is metaprogramming; staked out by rigor-ffi-plugin-author.", "fix_direction": "FFI plugin."},
+    {"key": "Python attribute proxying via method_missing (__dict__/__radd__/hasattr?)", "sites": 89, "category": "F", "mechanism": "Runtime resolution of Python attributes; operator table maps to __add__ etc.; plus define_singleton_method in pyimport; behind most of unsupported_syntax (34% of causes).", "fix_direction": "Inherent; at most a PyObjectWrapper plugin treating proxied sends as declared-Dynamic."},
+    {"key": "def/block params", "sites": 256, "category": "A", "mechanism": "Parameter-sourced.", "fix_direction": "CLOSED (ADR-67)."},
+    {"key": "dynamic-receiver cascade", "sites": 227, "category": "C", "mechanism": "Seeded by cases 1-5.", "fix_direction": ""}
+  ]
+}

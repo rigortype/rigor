@@ -1,0 +1,20 @@
+{
+  "target": "numo-narray",
+  "files": 2,
+  "exprs": 2324,
+  "precision": 0.4337,
+  "protection": 0.3785,
+  "cause_site_counts": {"unsupported_syntax": 163, "none": 130, "inferred_return_untyped": 35, "explicit_untyped": 2},
+  "opaque_split": {"local_reads": 469, "calls": 500, "ivars": 0},
+  "local_read_buckets": {"def_param": 200, "block_param": 44, "assigned_local": 225},
+  "call_receiver_tiers": {"dynamic_top": 322, "implicit_self": 101, "precise": 77},
+  "cases": [
+    {"key": "Numo::NArray own C-defined API (ndim/shape/size/[]/zeros/cast/...)", "sites": 120, "category": "B", "mechanism": "extra.rb's reopening names the class precisely, but every C-defined method (instance + singleton) is invisible to source scanning; no numo RBS exists.", "fix_direction": "RBS sidecar or plugin for ~40 C methods; converts the cascade wholesale."},
+    {"key": "Array#* overload mis-selection under Dynamic arg -> String", "sites": 10, "category": "D", "mechanism": "idx = [true]*ndim with Dynamic ndim types idx as String (type-of extra.rb:213:11) — overload selection pins the (String)->String join overload on a Dynamic argument; downstream String#[]= (7 sites) is a wrong-precise, FP-relevant answer.", "fix_direction": "Never pin an overload on a Dynamic argument: join overload returns or answer Dynamic (Dynamic-arg variant of the OverloadSelector value-pinning fix)."},
+    {"key": "Ruby helpers whose bodies are C-call chains (check_axis/concatenate/split)", "sites": 18, "category": "C", "mechanism": "Inferred returns Dynamic because every leaf hits case-1 methods.", "fix_direction": ""},
+    {"key": "def/block params", "sites": 244, "category": "A", "mechanism": "Parameter-sourced.", "fix_direction": "CLOSED (ADR-67)."},
+    {"key": "splat-argument call sites (self[*idx], new(*shp), swapaxes(*axes))", "sites": 163, "category": "F", "mechanism": "Sampled unsupported_syntax sites all carry splat arguments; SplatNode itself is 43 opaque nodes; numo builds shape tuples as arrays then splats them everywhere.", "fix_direction": "Type splat calls when the splatted local has a known tuple/array type."},
+    {"key": "assigned-local cascade", "sites": 225, "category": "C", "mechanism": "Downstream of cases 1/2.", "fix_direction": ""},
+    {"key": "C-defined constants (dtype classes, DimensionError)", "sites": 29, "category": "B", "mechanism": "Constants with no Ruby definition.", "fix_direction": ""}
+  ]
+}

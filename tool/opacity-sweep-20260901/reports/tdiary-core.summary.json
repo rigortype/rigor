@@ -1,0 +1,23 @@
+{
+  "target": "tdiary-core",
+  "files": 69,
+  "exprs": 19942,
+  "precision": 0.5475,
+  "precision_probe": 0.5517,
+  "protection": 0.3473,
+  "cause_site_counts": {"inferred_return_untyped": 1874, "unsupported_syntax": 165, "external_gem_without_rbs": 23, "none": 616, "explicit_untyped": 23},
+  "opaque_split": {"local_reads": 1654, "calls": 3741, "ivars": 1302},
+  "local_read_buckets": {"def_param": 732, "block_param": 391, "assigned_local": 531},
+  "call_receiver_tiers": {"precise": 295, "implicit_self": 758, "dynamic_top": 2688},
+  "cases": [
+    {"key": "plugin-file DSL binding (h, add_conf_proc, conf, cgi, navi_item, use)", "sites": 350, "category": "E", "mechanism": "Plugin files are instance_eval'd in TDiary::Plugin; top-level calls have no static binding (h = ERB::Util#h via include, plugin.rb:9).", "fix_direction": "rigor-tdiary plugin binding plugin-file scope to TDiary::Plugin"},
+    {"key": "ivar reads (@conf/@cgi/@date)", "sites": 1302, "category": "A", "mechanism": "App-state ivars assigned from params/IO/plugin loading; highest ivar share of the five targets.", "fix_direction": "ADR-58 lane; count only"},
+    {"key": "Struct factory (Market = Struct.new(:host, :region))", "sites": 18, "category": "D", "mechanism": "Same-file .new and member reads Dynamic (pa_api.rb:7-9); engine-wide per check matrix.", "fix_direction": "Struct subclass synthesis from literal symbol args"},
+    {"key": "optional-receiver dispatch (String?#empty?, Hash[..]?#[], Array[..]?#each)", "sites": 30, "category": "D", "mechanism": "Nilable receiver answers Dynamic in lens AND check (verified control); diagnostic quietness is ADR-5-consistent but the result could be the non-nil arm's type.", "fix_direction": "policy call: type the non-nil arm's result, keep the diagnostic quiet"},
+    {"key": "TDiary.root/logger/server_root (class << self, cross-file)", "sites": 25, "category": "G", "mechanism": "Lens artifact: class << self defs resolve in check same- and cross-file; the coverage lens drops cross-file summaries.", "fix_direction": "coverage lens should consult project-wide summaries"},
+    {"key": "stdlib/gem RBS holes (WEBrick#mount, PStore, Bundler, FileUtils)", "sites": 40, "category": "B", "mechanism": "Partial or missing stdlib/gem signatures.", "fix_direction": "add_rbs / libraries config"},
+    {"key": "containers + propagation (Hash[Dynamic], File.open block, CGI params)", "sites": 2700, "category": "C", "mechanism": "Dynamic-valued containers and CGI/ivar-rooted receivers.", "fix_direction": "follows A/B/E roots"},
+    {"key": "unsupported_syntax (unresolved vendored/plugin constants + eval)", "sites": 165, "category": "F", "mechanism": "No node-handler gaps; unresolved constants in vendored aws/rack + plugin loader reflection (eval).", "fix_direction": "mostly E-adjacent; eval is genuine dynamic"},
+    {"key": "joins/mirrors + super forwarding", "sites": 1290, "category": "G", "mechanism": "EmbeddedStatements/If/Write/And/Or mirrors; ForwardingSuperNode 68 mostly lens-artifact-adjacent.", "fix_direction": "metric artifact"}
+  ]
+}

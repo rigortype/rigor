@@ -1,0 +1,23 @@
+{
+  "target": "oj",
+  "files": 11,
+  "exprs": 1650,
+  "precision": 0.6758,
+  "protection": 0.5709,
+  "cause_site_counts": {"unsupported_syntax": 15, "inferred_return_untyped": 79, "none": 33},
+  "opaque_split": {"local_reads": 169, "calls": 245, "ivars": 6},
+  "local_read_buckets": {"def_param": 131, "block_param": 15, "assigned_local": 23},
+  "call_receiver_tiers": {"dynamic_top": 115, "precise": 60, "implicit_self": 70},
+  "cases": [
+    {"key": "implicit_self Hash-inherited (has_key?/fetch/store/key)", "sites": 26, "category": "D", "mechanism": "Dispatch resolves source-defined ancestors but never falls through to the RBS of a builtin superclass; verified — {}.has_key?(:a) folds to false while the identical call inside SubHash < Hash answers Dynamic, SubStr < String #length also Dynamic, user-to-user inheritance folds fine.", "fix_direction": "Ancestor-chain fallthrough to builtin-superclass RBS with unbound generics bound to untyped; param-independent returns (bool/Integer) become precise immediately."},
+    {"key": "singleton(JSON)#create_id", "sites": 15, "category": "B", "mechanism": "json gem's Ruby-level method, unscanned and no RBS library configured; under mimic the runtime def is Oj's C.", "fix_direction": ""},
+    {"key": "Hash[Dynamic,Dynamic]#[]= / #[] / #fetch", "sites": 16, "category": "C", "mechanism": "@attrs values include Dynamic writes; element ops return the Dynamic value type.", "fix_direction": ""},
+    {"key": "Oj::MimicDumpOption#store", "sites": 4, "category": "D", "mechanism": "Same builtin-superclass fallthrough gap, explicit-self flavor.", "fix_direction": "Same as case 1."},
+    {"key": "singleton(JSON::Ext::Generator::State)#from_state/merge/clear", "sites": 5, "category": "B", "mechanism": "External native (json gem C extension); no Ruby defs exist anywhere.", "fix_direction": ""},
+    {"key": "def_param local reads", "sites": 131, "category": "A", "mechanism": "Parameter-sourced (incl. *args rest params).", "fix_direction": "CLOSED (ADR-67)."},
+    {"key": "block_param local reads", "sites": 15, "category": "A", "mechanism": "Parameter-sourced.", "fix_direction": "CLOSED (ADR-67)."},
+    {"key": "dynamic-receiver sends ([]/to_sym/to_s/each)", "sites": 115, "category": "C", "mechanism": "Propagation from A/B seeds.", "fix_direction": ""},
+    {"key": "X.class_eval do ... end reopenings (mimic.rb Date/Exception/...)", "sites": 15, "category": "F", "mechanism": "class_eval blocks lose class scope; implicit-self sends inside (civil/year/month/day/start) unresolvable; Date stdlib RBS also unconfigured (B stacked under F).", "fix_direction": "Recognize X.class_eval do with a constant receiver as a class reopening."},
+    {"key": "EmbeddedStatements/If/Unless mirrors", "sites": 29, "category": "G", "mechanism": "Structural nodes mirroring inner Dynamic expressions.", "fix_direction": ""}
+  ]
+}

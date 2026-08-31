@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[engine]** `Foo.instance` on a class that includes the stdlib `Singleton` mixin now types as `Foo` instead of untyped, so the methods you call on that instance are typed too ([#514](https://github.com/rigortype/rigor/pull/514)).
+
 - **[engine]** `x.nil?`, `x.is_a?(C)`, `x.respond_to?(:m)`, `!x`, `x.frozen?`, `x.equal?(y)`, `x.inspect`, `x.hash` and `x.object_id` now carry their own type even when Rigor cannot type `x` — their result never depended on the receiver — which is worth 2.3 points of type precision on Rigor's own `lib` and no new diagnostics ([#508](https://github.com/rigortype/rigor/pull/508), [#503](https://github.com/rigortype/rigor/issues/503)).
 
 ### Fixed

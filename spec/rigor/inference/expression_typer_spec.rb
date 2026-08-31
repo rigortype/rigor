@@ -1543,4 +1543,20 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Array")
     end
   end
+
+  # Issue #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is
+  # `String − \"\"`) erases to its base for RBS method lookup, so a method the catalog tier does not
+  # promote still resolves instead of declining the whole dispatch to Dynamic.
+  describe "refined-receiver RBS lookup erasure" do
+    let(:project_scope) { Rigor::Scope.empty(environment: Rigor::Environment.for_project) }
+
+    it "resolves comparison and plain methods on the predefined-constant refinements" do
+      expect(project_scope.type_of(parse_expression('RUBY_VERSION != "1.0"')).describe(:short)).to eq("bool")
+      expect(project_scope.type_of(parse_expression('RUBY_VERSION.split(".")')).describe(:short)).to eq("Array[String]")
+    end
+
+    it "keeps the catalog tier's refinement promotions winning (control)" do
+      expect(project_scope.type_of(parse_expression("RUBY_VERSION.upcase")).describe(:short)).to eq("non-empty-string")
+    end
+  end
 end

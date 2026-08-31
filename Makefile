@@ -161,11 +161,29 @@ check-json:
 	bundle exec exe/rigor check --format=json lib
 
 # Report type-precision coverage for `lib/`.
-# Exits non-zero when precision ratio drops below 43 % (the calibrated
-# baseline measured against Rigor's own source on 2026-05-26).
+# Exits non-zero when the precision ratio drops below 57 %.
+#
+# Recalibrated 2026-08-31. The original 43 % was measured on 2026-05-26 and
+# never moved; by v0.3.6 `lib` read 58.96 %, so the gate carried ~16 points
+# of slack and could not fail on any regression a person would ship. The new
+# number is calibrated on the DRIFT, measured by running the current analyzer
+# against every 0.3.x tag's `lib` tree (a fixed analyzer, a moving codebase —
+# the volatility the threshold has to tolerate):
+#
+#   v0.2.9 59.88 · v0.3.0 59.62 · v0.3.1 59.55 · v0.3.2 59.39 · v0.3.3 59.37
+#   v0.3.4 59.02 · v0.3.5 58.94 · v0.3.6 58.96 · master 58.98
+#
+# A 0.94-point band over three months and +108 files, drifting down roughly
+# 0.1 points per release as the codebase grows. 57 % leaves ~2 points, about
+# two years of that drift, so ordinary development cannot trip it — a gate
+# that fires on correct input teaches people to route around it (AGENTS.md
+# § "Implementation Guidelines"). An engine change that legitimately LOWERS
+# precision (a soundness fix that widens a type) re-baselines this line
+# deliberately, which is the point of the gate.
+#
 # Use `rigor coverage lib/` without --threshold for a non-gating report.
 coverage:
-	bundle exec exe/rigor coverage --threshold 0.43 lib
+	bundle exec exe/rigor coverage --threshold 0.57 lib
 
 # ADR-50 WD4 perf-regression gate. Runs `rigor check --no-cache` over `lib`
 # in-process, measures wall / allocations / peak-RSS, and gates against

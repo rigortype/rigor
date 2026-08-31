@@ -362,8 +362,9 @@ jobs:
           echo "rigor self-check found errors — see diagnostic output above"
           exit 1
 
-      # Precision gate: `rigor coverage --threshold 0.43 lib` fails when the
-      # type-inference precision ratio on Rigor's own source drops below 43 %.
+      # Precision gate: `rigor coverage --threshold 0.57 lib` fails when the
+      # type-inference precision ratio on Rigor's own source drops below 57 %.
+      # See the Makefile's `coverage` target for how that number is calibrated.
       # The cold variant runs this so the gate exercises the full analysis path
       # without any cached assistance; the warm variant skips it to avoid
       # double-counting in CI time.

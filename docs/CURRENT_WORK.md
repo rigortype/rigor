@@ -67,8 +67,9 @@ Rigor is for.
   post-#508 tree (`def` parameters 17,246 + block parameters 3,490 of 68,336 opaque expressions),
   and both levers on them are the closed ones above. Re-measure against the note's attribution
   before proposing anything here.
-- **`make check-coverage --threshold 0.43`** now gates a different number: `lib` reads 58.98% and the
-  two corpus applications 47.8% / 48.9%. Whether to tighten it is an open, self-contained decision.
+- ~~The precision gate's threshold~~ — done 2026-08-31: `make coverage` moved 0.43 → 0.57, calibrated
+  on the measured drift (0.94 points across the whole 0.3.x line under a fixed analyzer), not on the
+  headroom. The two corpus applications read 47.8% / 48.9%, so the gate stays a `lib`-only number.
 - **Ivars are parameters one hop downstream, so they are not a separate lever.** Scoped 2026-08-31:
   of `lib`'s 2,104 opaque ivar reads, **1,656 (79%) have a write whose own rvalue is `Dynamic`** —
   ADR-67's frontier. The one structural sub-pattern (a class-body `@mutex = …` read from a

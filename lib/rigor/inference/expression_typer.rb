@@ -1123,11 +1123,28 @@ module Rigor
         dynamic_top
       end
 
+      # Issue #520 — Ruby defines the value of an attribute / index assignment (`x.attr = v`, `h[k] = v`)
+      # as the RHS object itself, whatever the writer method returns. The dispatch pipeline still runs
+      # first for everything it observes on the side (effect collection, provenance, recorders, and the
+      # rules' own view of the writer), but its RESULT is discarded in favor of the last argument's type —
+      # `Hash#[]=`'s declared V made `h[k] = true` read Dynamic on an untyped hash, ~300 sites across the
+      # 2026-09-01 corpus sweep. Safe-navigation writes stay on the dispatch result: `x&.attr = v` is
+      # `v | nil`, which is #518's (safe-navigation) territory, not plain value semantics.
+      def call_type_for(node)
+        result = call_dispatch_type_for(node)
+        return result unless node.attribute_write? && !node.safe_navigation?
+
+        rhs = node.arguments&.arguments&.last
+        return result if rhs.nil? || rhs.is_a?(Prism::SplatNode)
+
+        type_of(rhs)
+      end
+
       # Slice 2 routes call expressions through `MethodDispatcher`. The receiver and every argument are typed
       # first, then the dispatcher is asked for a result type. A nil result triggers the fail-soft fallback
       # for the CallNode itself (the inner type_of calls already record their own fallbacks for unrecognised
       # receivers/args, so the tracer captures both the immediate dispatch miss and the deeper cause).
-      def call_type_for(node)
+      def call_dispatch_type_for(node)
         narrowed = indexed_narrowing_for(node)
         return narrowed if narrowed
 

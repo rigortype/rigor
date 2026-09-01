@@ -12,6 +12,15 @@ module Rigor
       #    children plus transitive STI subclasses) and yields a row per model.
       # 2. The plugin combines those rows with the parsed {SchemaTable} to produce this index.
       #
+      # Phase 2's schema is OPTIONAL. A project that ships raw migrations only — the DB-agnostic Rails
+      # pattern, where `db/schema.rb` is gitignored (Redmine) — has no schema to combine, and `schema_table:
+      # nil` then yields the REDUCED index: every {Entry} carries its resolved table name, associations,
+      # enums, scopes, validations, callbacks and aliases, and an EMPTY column set. Only the column-keyed
+      # surface stands down; the schema was never an input to any of the rest. {#columns_known?} tells the
+      # two modes apart — an empty column set means "the schema is unknown", not "this model has no
+      # columns", and consumers that would fire on an unrecognised column must not read the two the same
+      # way.
+      #
       # `table_name_override` is non-nil when the source contained `self.table_name = "..."`. When nil,
       # the table name derives from {Inflector.tableize}.
       #
@@ -75,10 +84,15 @@ module Rigor
 
         attr_reader :entries
 
-        def initialize(entries)
+        def initialize(entries, columns_known: true)
           @entries = entries.freeze
+          @columns_known = columns_known
           freeze
         end
+
+        # Whether a schema was parsed into this index. `false` in the reduced mode (no `db/schema.rb` and no
+        # `db/structure.sql`), where every entry's column set is empty because the columns are UNKNOWN.
+        def columns_known? = @columns_known == true
 
         def find(class_name)
           entries[class_name.to_s]
@@ -88,6 +102,8 @@ module Rigor
         def class_names = entries.keys
         def empty? = entries.empty?
 
+        # `schema_table` may be nil — see the reduced mode described on the class. Every other input is
+        # source-derived, so the entries are identical in both modes apart from `columns`.
         def self.build(model_rows:, schema_table:, type_override_columns: nil)
           rows_by_name = model_rows.to_h { |row| [row.fetch(:class_name), row] }
           overrides = type_override_columns || []
@@ -97,7 +113,7 @@ module Rigor
             # The STI ancestry chain, root → self. For a plain (non-STI) model this is just `[row]`.
             chain = sti_chain(row, rows_by_name)
             table_name = sti_table_name(chain)
-            columns = apply_type_overrides(schema_table.columns_for(table_name) || [], overrides)
+            columns = apply_type_overrides(schema_table&.columns_for(table_name) || [], overrides)
 
             # STI children inherit their ancestors' declared associations / enums / aliases / scopes /
             # validations / callbacks. Without the merge a `where(<parent-association>: ...)` on the
@@ -114,7 +130,7 @@ module Rigor
               aliases: merge_aliases(chain)
             ).freeze
           end
-          new(entries.freeze)
+          new(entries.freeze, columns_known: !schema_table.nil?)
         end
 
         # Remaps every type-overridden column's `ruby_type` to `"Object"` so instance-side column narrowing

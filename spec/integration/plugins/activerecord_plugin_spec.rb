@@ -64,8 +64,11 @@ RSpec.describe "plugins/rigor-activerecord" do
 
   let(:plugin_class) { Rigor::Plugin::Activerecord }
 
+  # `schema: nil` materialises NO `db/schema.rb`, which is how the reduced-mode examples build a project
+  # that ships models but no committed schema (the DB-agnostic Rails pattern).
   def run_ar(source, schema: DEFAULT_SCHEMA, models: DEFAULT_MODELS, plugin_config: nil)
-    files = { "db/schema.rb" => schema }.merge(models)
+    files = models.dup
+    files["db/schema.rb"] = schema if schema
     plugin_entry = plugin_config ? { "gem" => "rigor-activerecord", "config" => plugin_config } : nil
     run_plugin(source: source, plugin_entry: plugin_entry, files: files)
   end
@@ -75,7 +78,8 @@ RSpec.describe "plugins/rigor-activerecord" do
   # / scopes / validations / callbacks). The `model_index` accessor isn't surfaced through `run_plugin` because
   # the other plugin examples don't need it.
   def run_ar_with_index(source, models:, schema:)
-    files = { "db/schema.rb" => schema, "demo.rb" => source }.merge(models)
+    files = { "demo.rb" => source }.merge(models)
+    files["db/schema.rb"] = schema if schema
     Dir.mktmpdir do |dir|
       materialize_files(dir, files)
       Dir.chdir(dir) do
@@ -368,16 +372,45 @@ RSpec.describe "plugins/rigor-activerecord" do
   end
 
   describe "graceful failure modes" do
-    it "warns when `db/schema.rb` is missing rather than crashing" do
-      # No `files:` argument — no schema.rb gets written.
+    it "discloses a missing `db/schema.rb` at :info rather than crashing" do
+      # No `files:` argument — no schema.rb gets written. Shipping raw migrations only and gitignoring
+      # `db/schema.rb` is a supported Rails layout, not a misconfiguration, and the plugin still types
+      # models from source in that mode — so the disclosure is graded `:info` (what the plugin recognised),
+      # not `:warning` (the plugin could not run). The two grades that DO stay `:warning` — an unreadable
+      # and an unparseable schema — are pinned below.
       result = run_plugin(source: "User.find(1)\n")
-      warning = result.diagnostics.find { |d| d.rule == "load-error" }
-      expect(warning.severity).to eq(:warning)
-      expect(warning.message).to include("db/schema.rb")
-      expect(warning.message).to include("not found")
+      notice = result.diagnostics.find { |d| d.rule == "load-error" }
+      expect(notice.severity).to eq(:info)
+      expect(notice.message).to include("db/schema.rb")
+      expect(notice.message).to include("not found")
+      expect(notice.message).to include("column checks")
     end
 
-    it "emits the load-error warning at most once across many analyzed files" do
+    it "keeps an unreadable schema at :warning (the actionable half of the grade split)" do
+      # The schema path EXISTS and the user meant it to be read, so failing to read it is a real problem
+      # even though reduced mode still applies. Without this sibling the `:info` regrade above would read as
+      # "every schema-load disclosure is informational". `db/schema.rb` as a directory is the deterministic
+      # way to make the read raise something other than ENOENT (`Errno::EISDIR` from `File.binread`).
+      Dir.mktmpdir do |dir|
+        materialize_files(dir, DEFAULT_MODELS)
+        FileUtils.mkdir_p(File.join(dir, "db", "schema.rb"))
+        File.write(File.join(dir, "demo.rb"), "User.find(1)\n")
+        Dir.chdir(dir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]
+          )
+          result = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil, collect_stats: false,
+            plugin_requirer: build_plugin_requirer
+          ).run
+          notice = result.diagnostics.find { |d| d.rule == "load-error" }
+          expect(notice).not_to be_nil
+          expect(notice.severity).to eq(:warning)
+        end
+      end
+    end
+
+    it "emits the load-error disclosure at most once across many analyzed files" do
       # Solidus monorepo / Redmine (migrations-only) scale: hundreds of files, but `db/schema.rb` absence is a
       # single project-global root cause. Pre-fix the plugin emitted `load-error` per file (346× on Redmine).
       result = run_plugin(
@@ -407,6 +440,196 @@ RSpec.describe "plugins/rigor-activerecord" do
           runner.run
           plugin = runner.plugin_registry.find("activerecord")
           expect(plugin.instance_variable_get(:@load_errors).size).to eq(1)
+        end
+      end
+    end
+  end
+
+  describe "reduced mode — no committed schema (#569)" do
+    # A project that ships raw migrations and gitignores `db/schema.rb` (Redmine) used to get NOTHING from
+    # this plugin: `model_index` short-circuited on the missing schema, so even `Project.find` — a call the
+    # plugin fully models — stayed opaque. The schema gates the COLUMN surface only; table names, finders,
+    # scopes and associations are all derived from project SOURCE. Reduced mode keeps those and lets the
+    # column surface decline exactly as an unrecognised column already does.
+    #
+    # Every example below is paired with a schema-PRESENT sibling on the same fixture, so "the reduced mode
+    # answers X" is always read against "the full mode answers Y".
+
+    let(:reduced_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => <<~RUBY,
+          class User < ApplicationRecord
+            has_many :posts
+            scope :admins, -> { where(admin: true) }
+          end
+        RUBY
+        "app/models/post.rb" => <<~RUBY
+          class Post < ApplicationRecord
+            belongs_to :user
+          end
+        RUBY
+      }
+    end
+
+    let(:reduced_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define(version: 2026_09_01_000000) do
+          create_table "users", force: :cascade do |t|
+            t.string  "name"
+            t.boolean "admin"
+          end
+
+          create_table "posts", force: :cascade do |t|
+            t.string "title"
+            t.references "user", foreign_key: true
+          end
+        end
+      SCHEMA
+    end
+
+    # The inferred type at a `Rigor.dump_type(...)` call, as the engine's own `dump-type` rule renders it.
+    # This is the only channel that can tell `Dynamic` (what reduced mode used to produce everywhere) apart
+    # from a real contributed type; a `call.undefined-method` probe would conflate `String` with `Constant`.
+    def dumped_types(source, schema:)
+      result = run_ar(source, schema: schema, models: reduced_models)
+      result.diagnostics
+            .select { |d| d.qualified_rule == "dump.type" }
+            .map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    describe "must fire — the source-derived surface stays live without a schema" do
+      it "types `Model.find(id)` as the model in both modes" do
+        source = "Rigor.dump_type(User.find(1))\n"
+        expect(dumped_types(source, schema: nil)).to eq(["User"])
+        expect(dumped_types(source, schema: reduced_schema)).to eq(["User"])
+      end
+
+      it "types a declared `scope` call as the same relation in both modes" do
+        source = "Rigor.dump_type(User.admins)\n"
+        reduced = dumped_types(source, schema: nil)
+        expect(reduced).to eq(dumped_types(source, schema: reduced_schema))
+        expect(reduced.first).to include("User")
+        expect(reduced.first).not_to include("untyped")
+      end
+
+      it "types a `has_many` association read as the same relation in both modes" do
+        source = <<~RUBY
+          user = User.find(1)
+          Rigor.dump_type(user.posts)
+        RUBY
+        reduced = dumped_types(source, schema: nil)
+        expect(reduced).to eq(dumped_types(source, schema: reduced_schema))
+        expect(reduced.first).to include("Post")
+      end
+
+      it "types a `belongs_to` association read as the target model in both modes" do
+        source = <<~RUBY
+          post = Post.find(1)
+          Rigor.dump_type(post.user)
+        RUBY
+        expect(dumped_types(source, schema: nil)).to eq(["User"])
+        expect(dumped_types(source, schema: reduced_schema)).to eq(["User"])
+      end
+
+      it "still recognises the AR call itself (model-call info survives the missing schema)" do
+        diags = plugin_diagnostics(run_ar("User.find(1)\n", schema: nil, models: reduced_models))
+        info = diags.find { |d| d.rule == "model-call" }
+        expect(info).not_to be_nil
+        expect(info.message).to include("returns User (table: `users`)")
+      end
+    end
+
+    describe "must decline — the column surface stands down exactly as an unknown column does" do
+      it "leaves a column reader untyped without a schema, and types it with one" do
+        source = <<~RUBY
+          user = User.find(1)
+          Rigor.dump_type(user.name)
+        RUBY
+        # `Dynamic[top]` means the plugin contributed nothing and the call fell back to the analyzer's own
+        # dispatch — precisely what a column the schema does not declare already produces.
+        expect(dumped_types(source, schema: nil)).to eq(["Dynamic[top]"])
+        expect(dumped_types(source, schema: reduced_schema)).to eq(["String"])
+      end
+
+      it "does not fire unknown-column without a schema, and does fire with one" do
+        typo = "User.where(emial: 'a')\n"
+        reduced = plugin_diagnostics(run_ar(typo, schema: nil, models: reduced_models))
+        full = plugin_diagnostics(run_ar(typo, schema: reduced_schema, models: reduced_models))
+        expect(reduced.find { |d| d.rule == "unknown-column" }).to be_nil
+        expect(full.find { |d| d.rule == "unknown-column" }).not_to be_nil
+      end
+    end
+
+    describe "the index itself" do
+      it "reports columns_known? false without a schema and true with one" do
+        _result, reduced = run_ar_with_index("x = 1\n", models: reduced_models, schema: nil)
+        _result, full = run_ar_with_index("x = 1\n", models: reduced_models, schema: reduced_schema)
+        expect(reduced.columns_known?).to be(false)
+        expect(full.columns_known?).to be(true)
+      end
+
+      it "keeps every source-derived field and empties only the columns" do
+        _result, index = run_ar_with_index("x = 1\n", models: reduced_models, schema: nil)
+        user = index.find("User")
+        expect(user.table_name).to eq("users")
+        expect(user.scopes).to eq(["admins"])
+        expect(user.association_names).to eq(["posts"])
+        expect(user.column_names).to be_empty
+      end
+    end
+
+    describe "ADR-9 fact publication stays withheld in reduced mode" do
+      # Every consumer reads `columns:` as authoritative: rigor-actionpack fires `unknown-permit-key` on a
+      # `permit(:title)` key that is not in it, rigor-shoulda-matchers fires `unknown-column` on a
+      # `have_db_column(:title)` matcher. Publishing the reduced index's EMPTY column set would turn this
+      # precision win into a false positive on every strong-parameter key in the project, so the fact stays
+      # unpublished — exactly where those consumers already are on a schema-less target.
+      it "withholds the fact without a schema and publishes it with one" do
+        expect(published_model_index(schema: nil)).to be_nil
+        expect(published_model_index(schema: reduced_schema)).to include("User")
+      end
+
+      def published_model_index(schema:)
+        published = :unset
+        consumer = Class.new(Rigor::Plugin::Base) do
+          manifest(
+            id: "reduced-consumer", version: "0.1.0",
+            consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
+          )
+        end
+        consumer.define_method(:prepare) do |services|
+          published = services.fact_store.read(plugin_id: "activerecord", name: :model_index)
+        end
+        stub_const("FakeReducedConsumerPlugin", consumer)
+        run_with_consumer(consumer, schema: schema)
+        published == :unset ? nil : published
+      end
+
+      def run_with_consumer(consumer, schema:)
+        Rigor::Plugin.unregister!
+        files = reduced_models.merge("demo.rb" => "x = 1\n")
+        files["db/schema.rb"] = schema if schema
+        Dir.mktmpdir do |dir|
+          materialize_files(dir, files)
+          Dir.chdir(dir) do
+            configuration = Rigor::Configuration.new(
+              Rigor::Configuration::DEFAULTS.merge(
+                "paths" => ["demo.rb"],
+                "plugins" => %w[rigor-activerecord rigor-reduced-consumer]
+              )
+            )
+            Rigor::Analysis::Runner.new(
+              configuration: configuration, cache_store: nil, collect_stats: false,
+              plugin_requirer: lambda { |name|
+                case File.basename(name, ".rb")
+                when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
+                when "rigor-reduced-consumer" then Rigor::Plugin.register(consumer)
+                end
+                true
+              }
+            ).run
+          end
         end
       end
     end

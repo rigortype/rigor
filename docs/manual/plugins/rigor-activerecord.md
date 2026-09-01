@@ -30,7 +30,8 @@ errors_demo.rb:24:1: error: `User.find` expects at least 1 argument, got 0 [plug
 | Recognised `Model.find` / `Model.find_by` / `Model.where` call | `:info` | `plugin.activerecord.model-call` |
 | `Model.find_by(unknown: ...)` / `Model.where(unknown: ...)` | `:error` | `plugin.activerecord.unknown-column` |
 | `Model.find` with 0 args | `:error` | `plugin.activerecord.wrong-arity` |
-| No schema source (`db/schema.rb` or `db/structure.sql`) readable | `:warning` | `plugin.activerecord.load-error` |
+| No schema source (`db/schema.rb` or `db/structure.sql`) present — reduced mode | `:info` | `plugin.activerecord.load-error` |
+| A schema source that exists but cannot be read or parsed | `:warning` | `plugin.activerecord.load-error` |
 
 Did-you-mean suggestions use `DidYouMean` fuzzy matching against
 the resolved table's column names.
@@ -87,6 +88,16 @@ never surfaces a false `call.undefined-method`.
   only; a column whose SQL type has no Ruby mapping (a custom enum,
   `tsvector`, `ltree`) degrades to `Object` (never dropped), and
   non-`public`-schema partition tables are skipped.
+- **No committed schema — reduced mode.** A project that ships raw
+  migrations and gitignores `db/schema.rb` (the DB-agnostic Rails
+  pattern) still gets table names, finders, scopes and associations:
+  those are read from your model source, not from the schema. Only
+  the column-dependent half stands down — column readers stay
+  untyped and `where(col:)` keys are not validated, exactly as they
+  are for a table the schema does not describe. The plugin says so
+  once per run at `:info`. Committing a schema dump (or pointing
+  `schema_file` / `structure_sql_file` at one) turns the column half
+  back on; nothing else changes.
 - **Column reads, not setters.** The plugin types instance-side
   column *reads* (`user.name`, `user.admin?`) and singular
   associations, but not the `name=` setter or the dirty-tracking

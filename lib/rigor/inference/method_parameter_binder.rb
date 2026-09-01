@@ -332,8 +332,7 @@ module Rigor
         when :rest_positional
           Type::Combinator.nominal_of("Array", type_args: [translated])
         when :rest_keyword
-          symbol_nominal = Type::Combinator.nominal_of("Symbol")
-          Type::Combinator.nominal_of("Hash", type_args: [symbol_nominal, translated])
+          Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.nominal_of("Symbol"), translated])
         else
           translated
         end
@@ -344,7 +343,8 @@ module Rigor
         RbsTypeTranslator.translate(
           rbs_type,
           self_type: self_type,
-          instance_type: instance_type
+          instance_type: instance_type,
+          alias_expander: @environment&.rbs_loader
         )
       rescue StandardError
         Type::Combinator.untyped

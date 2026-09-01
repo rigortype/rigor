@@ -1543,4 +1543,83 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Array")
     end
   end
+
+  # Issue #533 — `x.send(:selector)` with a literal symbol is statically `x.selector` and resolves
+  # through the same tiers; `alias_method :new, :old` mirrors the `alias` keyword into the discovered
+  # tables with the original def node for return inference.
+  describe "literal send and alias_method resolution" do
+    def program_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    let(:box_source) do
+      "class Box\n  def open\n    \"contents\"\n  end\n\n  private\n\n  def secret\n    42\n  end\nend\n"
+    end
+
+    it "resolves send with a literal selector through the direct-call tiers, private included" do
+      expect(program_type("#{box_source}Box.new.send(:open)\n", 1).describe).to eq('"contents"')
+      expect(program_type("#{box_source}Box.new.send(:secret)\n", 1).describe).to eq("42")
+      expect(scope.type_of(parse_expression('"abc".send(:upcase)')).describe).to eq('"ABC"')
+    end
+
+    it "declines a variable selector and an unknown method (fail-soft controls)" do
+      variable = program_type("#{box_source}name = :open\nBox.new.send(name)\n", 2)
+      expect(variable.describe(:short)).to eq("Dynamic[top]")
+      expect(program_type("#{box_source}Box.new.send(:missing_method)\n", 1).describe(:short)).to eq("Dynamic[top]")
+    end
+
+    it "resolves a call through `alias_method :new, :old` with the original def's return" do
+      source = "class I18n\n  def translate(key)\n    key.to_s\n  end\n  " \
+               "alias_method :t, :translate\nend\nI18n.new.t(:hello)\n"
+      expect(program_type(source, 1).describe).to eq('"hello"')
+    end
+  end
+
+  # Issue #532 — the attribute compound-write family (`x.attr ||= v` / `&&=` / `+=`), the last
+  # genuinely unmodeled value-position constructs the corpus census found. Value semantics mirror the
+  # local / ivar / index siblings; scope effects are unchanged (follow-up on the issue).
+  describe "attribute compound writes" do
+    def statement_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    let(:struct_source) { "Point = Struct.new(:x)\npt = Point.new(1)\n" }
+
+    it "types `x.attr ||= v` as the union of the truthy read and the RHS" do
+      type = statement_type("#{struct_source}pt.x ||= 9\n", 2)
+      expect(type.describe(:short)).to include("9")
+    end
+
+    it "unions the skipped-call nil into a `&.`-form compound write" do
+      type = statement_type("#{struct_source}pt&.x ||= 9\n", 2)
+      expect(type.describe(:short)).to include("nil")
+    end
+
+    it "keeps an operator write on an unresolved read fail-soft (control)" do
+      type = statement_type("def f(o)\n  o.count += 1\nend\n", 0)
+      expect(type).not_to be_nil
+    end
+  end
+
+  # Issue #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is
+  # `String − \"\"`) erases to its base for RBS method lookup, so a method the catalog tier does not
+  # promote still resolves instead of declining the whole dispatch to Dynamic.
+  describe "refined-receiver RBS lookup erasure" do
+    let(:project_scope) { Rigor::Scope.empty(environment: Rigor::Environment.for_project) }
+
+    it "resolves comparison and plain methods on the predefined-constant refinements" do
+      expect(project_scope.type_of(parse_expression('RUBY_VERSION != "1.0"')).describe(:short)).to eq("bool")
+      expect(project_scope.type_of(parse_expression('RUBY_VERSION.split(".")')).describe(:short)).to eq("Array[String]")
+    end
+
+    it "keeps the catalog tier's refinement promotions winning (control)" do
+      expect(project_scope.type_of(parse_expression("RUBY_VERSION.upcase")).describe(:short)).to eq("non-empty-string")
+    end
+  end
 end

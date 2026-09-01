@@ -28,6 +28,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** `alias_method :new_name, :old_name` now resolves like the `alias` keyword — calls through the alias infer the original method's return — and `x.send(:selector)` with a literal symbol resolves as the direct call would, private methods included ([#549](https://github.com/rigortype/rigor/pull/549), [#533](https://github.com/rigortype/rigor/issues/533)).
+
 - **[engine]** A call whose argument Rigor cannot type no longer picks one RBS overload by declaration order — `[true] * n` with an untyped `n` read as `String` and produced argument-type false positives on the array it actually returns; such calls now carry the candidate set gradually, removing 18 false positives across the survey corpus with none added ([#537](https://github.com/rigortype/rigor/pull/537), [#521](https://github.com/rigortype/rigor/issues/521)).
 
 - **[cli]** `rigor coverage --protection` no longer reports a call to your own method as an "unsupported syntax" hole when the real story is a return type Rigor could not infer — the cause table now routes those sites to the inference-gap bucket, so the report's engine-gap/add-RBS split reflects what would actually help ([#536](https://github.com/rigortype/rigor/pull/536), [#522](https://github.com/rigortype/rigor/issues/522)).

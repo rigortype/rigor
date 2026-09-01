@@ -1544,6 +1544,40 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  # Issue #533 — `x.send(:selector)` with a literal symbol is statically `x.selector` and resolves
+  # through the same tiers; `alias_method :new, :old` mirrors the `alias` keyword into the discovered
+  # tables with the original def node for return inference.
+  describe "literal send and alias_method resolution" do
+    def program_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    let(:box_source) do
+      "class Box\n  def open\n    \"contents\"\n  end\n\n  private\n\n  def secret\n    42\n  end\nend\n"
+    end
+
+    it "resolves send with a literal selector through the direct-call tiers, private included" do
+      expect(program_type("#{box_source}Box.new.send(:open)\n", 1).describe).to eq('"contents"')
+      expect(program_type("#{box_source}Box.new.send(:secret)\n", 1).describe).to eq("42")
+      expect(scope.type_of(parse_expression('"abc".send(:upcase)')).describe).to eq('"ABC"')
+    end
+
+    it "declines a variable selector and an unknown method (fail-soft controls)" do
+      variable = program_type("#{box_source}name = :open\nBox.new.send(name)\n", 2)
+      expect(variable.describe(:short)).to eq("Dynamic[top]")
+      expect(program_type("#{box_source}Box.new.send(:missing_method)\n", 1).describe(:short)).to eq("Dynamic[top]")
+    end
+
+    it "resolves a call through `alias_method :new, :old` with the original def's return" do
+      source = "class I18n\n  def translate(key)\n    key.to_s\n  end\n  " \
+               "alias_method :t, :translate\nend\nI18n.new.t(:hello)\n"
+      expect(program_type(source, 1).describe).to eq('"hello"')
+    end
+  end
+
   # Issue #532 — the attribute compound-write family (`x.attr ||= v` / `&&=` / `+=`), the last
   # genuinely unmodeled value-position constructs the corpus census found. Value semantics mirror the
   # local / ivar / index siblings; scope effects are unchanged (follow-up on the issue).

@@ -29,6 +29,7 @@ require_relative "method_dispatcher/regexp_folding"
 require_relative "method_dispatcher/cgi_folding"
 require_relative "method_dispatcher/uri_folding"
 require_relative "method_dispatcher/set_folding"
+require_relative "method_dispatcher/json_folding"
 require_relative "method_dispatcher/kernel_dispatch"
 require_relative "method_dispatcher/universal_object_dispatch"
 require_relative "method_dispatcher/singleton_mixin_dispatch"
@@ -732,7 +733,7 @@ module Rigor
       #
       # The precise-tier folders, consulted in order via the uniform `_DispatchTier` interface
       # (`try_dispatch(CallContext) -> Type?`). Order is significant: ConstantFolding's
-      # exact-value folds win first, the eight stdlib singleton folders sit in the middle (each
+      # exact-value folds win first, the stdlib singleton folders sit in the middle (each
       # gates on a distinct `Singleton` receiver, so their relative order is immaterial), and
       # BlockFolding runs last because its rules only apply to block-taking calls — the cheaper
       # arity folds above it filter the common cases first. Adding a precise tier is a one-line
@@ -742,13 +743,13 @@ module Rigor
       ].freeze)
       private_constant :PRECISE_TIERS_HEAD
 
-      # ADR-53 re-review follow-up (gate-by-held-key applied to the built-in tiers): the eight
-      # stdlib singleton folders are mutually exclusive — each fires only on `Singleton[<its
+      # ADR-53 re-review follow-up (gate-by-held-key applied to the built-in tiers): the stdlib
+      # singleton folders are mutually exclusive — each fires only on `Singleton[<its
       # class>]`, the first check in every `try_dispatch` — so at most one can match a given
       # receiver and their relative trial order was never observable. Compiling them into a
-      # class-name table turns eight no-op trials per call into one Hash read, skipped entirely
+      # class-name table turns nine no-op trials per call into one Hash read, skipped entirely
       # when the receiver is not a `Singleton` (the overwhelmingly common case). The table sits
-      # where the eight sat in the old flat list: after ShapeDispatch, before KernelDispatch.
+      # where the original eight sat in the old flat list: after ShapeDispatch, before KernelDispatch.
       STDLIB_SINGLETON_FOLDERS = Ractor.make_shareable({
         "File" => FileFolding,
         "Shellwords" => ShellwordsFolding,
@@ -757,7 +758,8 @@ module Rigor
         "Regexp" => RegexpFolding,
         "CGI" => CGIFolding,
         "URI" => URIFolding,
-        "Set" => SetFolding
+        "Set" => SetFolding,
+        "JSON" => JSONFolding
       }.freeze)
       private_constant :STDLIB_SINGLETON_FOLDERS
 

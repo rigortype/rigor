@@ -1,0 +1,1 @@
+- **[engine]** `JSON.generate` and `JSON.pretty_generate` now type as `String` instead of widening to `untyped`, closing a named-receiver-opaque gap upstream RBS left on `pretty_generate`. ([#571](https://github.com/rigortype/rigor/pull/571))

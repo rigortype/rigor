@@ -3,15 +3,30 @@
 # Integration spec for `plugins/rigor-shoulda-matchers/`. Validates shoulda matchers against the :model_index
 # cross-plugin fact (ADR-9) published by rigor-activerecord.
 #
-# Tests exercise the Analyzer module directly with a stub model_index — the full integration through
-# rigor-activerecord's producer is covered by the activerecord plugin spec; here we pin the matcher recogniser
-# shape independently so a future rigor-activerecord refactor can't accidentally break the matcher contract.
+# Issue #573: the analyzer used to consume the fact as if it were rigor-activerecord's internal `ModelIndex`
+# OBJECT (`index.find(anchor)` then `entry.column?(...)`), but the published fact is a plain Hash
+# (`Activerecord#index_to_published_hash` — ADR-9's "the value is data, not objects" contract, the same shape
+# rigor-actionpack and rigor-factorybot key into with `model_index[model_class]`). `Hash#find` with a
+# non-block argument does not do a keyed lookup — it returns an Enumerator — so the real cross-plugin path
+# raised `NoMethodError` on the very first matcher in any file with a `describe <Model>` block, and the old
+# spec below never caught it because it stubbed a `ModelIndex`-shaped object instead of the Hash the producer
+# actually publishes.
+#
+# The lets below now stub the REAL Hash shape (so a future rigor-activerecord field rename shows up here
+# too), and the "cross-plugin integration" block at the bottom drives the full producer → consumer path
+# through `Rigor::Analysis::Runner` with a real `rigor-activerecord` schema + model, so the contract is
+# pinned end-to-end and not just at the shape level.
 
 require "spec_helper"
+require "fileutils"
+require "tmpdir"
 
 SHOULDA_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-shoulda-matchers/lib", __dir__)
+ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-activerecord/lib", __dir__)
 $LOAD_PATH.unshift(SHOULDA_PLUGIN_LIB) unless $LOAD_PATH.include?(SHOULDA_PLUGIN_LIB)
+$LOAD_PATH.unshift(ACTIVERECORD_PLUGIN_LIB) unless $LOAD_PATH.include?(ACTIVERECORD_PLUGIN_LIB)
 require "rigor-shoulda-matchers"
+require "rigor-activerecord"
 
 RSpec.describe "plugins/rigor-shoulda-matchers" do
   before { Rigor::Plugin.unregister! }
@@ -19,37 +34,30 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
 
   let(:plugin_class) { Rigor::Plugin::ShouldaMatchers }
 
-  # Minimal stub model_index. Mirrors the surface rigor-activerecord's ModelIndex exposes (`find` returning an
-  # Entry that responds to `column?` / `association?` / `association` / `column_names` / `association_names`).
+  # The published `:model_index` fact's per-model entry — the flat Hash `Activerecord#index_to_published_hash`
+  # builds, NOT rigor-activerecord's internal `ModelIndex::Entry` Struct. `columns:` is `Array<String>`;
+  # `associations:` is `Array<Hash>` with String `name:` / `target:`, Symbol `kind:`.
   let(:user_entry) do
-    Class.new do
-      def initialize(columns:, associations:)
-        @columns = columns
-        @associations = associations
-      end
-
-      def column?(name) = @columns.include?(name.to_sym)
-      def column_names = @columns.map(&:to_s)
-      def association?(name) = @associations.any? { |a| a[:name] == name.to_s }
-      def association(name) = @associations.find { |a| a[:name] == name.to_s }
-      def association_names = @associations.map { |a| a[:name] }
-    end.new(
-      columns: %i[id email name created_at],
+    {
+      table: "users",
+      columns: %w[id email name created_at],
       associations: [
-        { name: "author", kind: :singular, target: "User" },
-        { name: "posts", kind: :collection, target: "Post" },
-        { name: "profile", kind: :singular, target: "Profile" }
-      ]
-    )
+        { name: "author", kind: :singular, target: "User", nullable: false },
+        { name: "posts", kind: :collection, target: "Post", nullable: nil },
+        { name: "profile", kind: :singular, target: "Profile", nullable: true }
+      ],
+      enums: {},
+      scopes: [],
+      validations: [],
+      callbacks: [],
+      aliases: {}
+    }
   end
 
-  let(:model_index) do
-    entries = { "User" => user_entry }
-    Class.new do
-      def initialize(entries) = @entries = entries
-      def find(class_name) = @entries[class_name.to_s]
-    end.new(entries)
-  end
+  # The published fact itself: a plain Hash keyed by class name — exactly what
+  # `services.fact_store.read(plugin_id: "activerecord", name: :model_index)` returns, never a `ModelIndex`
+  # object.
+  let(:model_index) { { "User" => user_entry } }
 
   # Drives the plugin's per-node path (ADR-37): the engine walks with ancestors and the Analyzer's per-node
   # `violations_for` validates each matcher against the (innermost enclosing) describe-model anchor. This
@@ -282,6 +290,101 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
       RUBY
       err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
+    end
+  end
+
+  # #573 regression coverage: drives the FULL producer → consumer path through `Rigor::Analysis::Runner` —
+  # rigor-activerecord parses a real `db/schema.rb` + model and publishes the real `:model_index` Hash via
+  # `#prepare`; rigor-shoulda-matchers reads it via `read_fact` and validates a real spec file's matchers
+  # against it. Every test above stubs the fact (now Hash-shaped); this block is what actually proves the two
+  # plugins agree on the wire shape — a hand-rolled stub, however shaped, can still drift from what
+  # `Activerecord#index_to_published_hash` really emits.
+  describe "cross-plugin integration (real :model_index fact from rigor-activerecord)" do
+    let(:schema_for_integration) do
+      <<~SCHEMA
+        ActiveRecord::Schema.define do
+          create_table :users do |t|
+            t.string :name
+            t.string :email
+          end
+        end
+      SCHEMA
+    end
+
+    let(:user_model_for_integration) do
+      <<~RUBY
+        class User < ApplicationRecord
+        end
+      RUBY
+    end
+
+    def with_real_model_index(spec_source)
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "app", "models"))
+        FileUtils.mkdir_p(File.join(dir, "db"))
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "db", "schema.rb"), schema_for_integration)
+        File.write(File.join(dir, "app", "models", "user.rb"), user_model_for_integration)
+        File.write(File.join(dir, "spec", "user_spec.rb"), spec_source)
+
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "spec")],
+            "plugins" => %w[rigor-activerecord rigor-shoulda-matchers]
+          )
+        )
+
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration,
+            cache_store: nil,
+            plugin_requirer: lambda do |name|
+              case File.basename(name, ".rb")
+              when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
+              when "rigor-shoulda-matchers" then Rigor::Plugin.register(Rigor::Plugin::ShouldaMatchers)
+              end
+              true
+            end
+          )
+          yield runner.run
+        end
+      end
+    end
+
+    def shoulda_diagnostics(result)
+      result.diagnostics.select { |d| d.source_family == "plugin.shoulda-matchers" }
+    end
+
+    it "fires unknown-column for an unknown column (must-fire)" do
+      with_real_model_index(<<~RUBY) do |result|
+        RSpec.describe User do
+          it { should have_db_column(:nonexistent) }
+        end
+      RUBY
+        diags = shoulda_diagnostics(result)
+        err = diags.find { |d| d.rule == "unknown-column" }
+        expect(err).not_to be_nil
+        expect(err.severity).to eq(:warning)
+        expect(err.message).to include("nonexistent")
+        expect(err.message).to include("User")
+
+        # Regression guard: `Hash#find(anchor)` (no block) used to return an Enumerator instead of the
+        # entry, and calling `#column?` on it raised NoMethodError — which the engine isolates as ONE
+        # `runtime-error` diagnostic for the whole file, in place of every real diagnostic below it.
+        expect(diags.map(&:rule)).not_to include("runtime-error")
+      end
+    end
+
+    it "stays silent for a known column (must-not-fire)" do
+      with_real_model_index(<<~RUBY) do |result|
+        RSpec.describe User do
+          it { should have_db_column(:email) }
+        end
+      RUBY
+        diags = shoulda_diagnostics(result)
+        expect(diags.map(&:rule)).not_to include("unknown-column")
+        expect(diags.map(&:rule)).not_to include("runtime-error")
+      end
     end
   end
 end

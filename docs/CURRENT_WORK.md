@@ -33,6 +33,11 @@ Synthesis: [`docs/notes/20260901-corpus-opacity-attribution.md`](notes/20260901-
 sweep harness on branch `opacity-sweep-harness-20260901` (its probe predates #535 — re-run before
 sizing new levers).
 
+**The drain's postmortem landed as [ADR-105](adr/105-pr-landing-flow.md)** (PR #562, merged):
+changelog entries now land as `changelog.d/<section>/<slug>.md` fragments (never direct
+`[Unreleased]` edits — GitHub ignores `merge=union` for PR mergeability), and autonomous sessions
+merge each audited+green PR as they go instead of queueing. Both rules are in AGENTS.md.
+
 ## What the merge session itself established (worth knowing before touching the same files)
 
 - GitHub ignores `.gitattributes merge=union` for PR mergeability, so every post-first merge needed a

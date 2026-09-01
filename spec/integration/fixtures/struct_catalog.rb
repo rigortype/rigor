@@ -4,10 +4,14 @@ include Rigor::Testing
 # ADR-48 Struct follow-up — `Struct.new` value folding (slices 1 + 2, the
 # sound *transient* form). `Struct.new(:a, :b)` now carries a precise
 # `StructClass` member layout, `.new(...)` materialises a `StructInstance`,
-# and a member read off a **fresh** (chained) instance folds to the member
-# type. Because a `Struct` instance is mutable, a read off a *stored*
-# binding degrades to `Dynamic[top]` rather than fold a possibly-stale
-# value (the fold-safe-local promotion is the deferred slice 3).
+# and a member read off a **freshly materialised** instance folds to the
+# member type. Freshly materialised means the receiver expression itself
+# built the struct — `.new`, `[]`, or a `.with` copy — not merely that it is
+# a chained call: a method that hands back its own receiver would otherwise
+# serve construction-time values after a mutation (issue #595). Because a
+# `Struct` instance is mutable, a read off a *stored* binding degrades to
+# `Dynamic[top]` rather than fold a possibly-stale value (the fold-safe-local
+# promotion is the deferred slice 3).
 
 # `Struct.new(:a, :b)` builds a fresh anonymous Struct *subclass* (a class
 # object), now carried as a `StructClass` with the ordered member list so

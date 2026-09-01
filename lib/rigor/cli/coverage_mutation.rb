@@ -262,13 +262,11 @@ module Rigor
       # the two sets were assembled.
       #
       # The two cache phases each get their OWN {Cache::FileDigest.with_run} scope and the MEASUREMENT sits
-      # between them, deliberately: that scope installs a per-path digest memo, and {Protection::ClosureKillOracle}
-      # rewrites one process-private temp file per mutant and digests it through a buffer binding. A memo
-      # spanning the measurement would hand every mutant after the first the FIRST one's digest, the mutated
-      # file's discovery bundle would never be re-walked, and the run would report zero cross-file kills — a
-      # plausible-looking number rather than an error. The oracle's own comment states the same invariant from
-      # the other side. The cost of two scopes is one extra SHA-256 per cached file, against a measurement
-      # that is hundreds of analyses.
+      # between them, deliberately: that scope installs a per-path digest memo. {Protection::ClosureKillOracle}
+      # now writes each mutant to a fresh block-scoped path, so a memo spanning the measurement could no
+      # longer serve one mutant another's digest — but keeping the measurement outside any memo scope stays
+      # correct by construction rather than by the oracle's path discipline, and costs only one extra
+      # SHA-256 per cached file against a measurement that is hundreds of analyses.
       def measure_mutation_files(paths, cache:, scanner:, context:, configuration:, workers:)
         cached = with_digest_run(configuration) { paths.to_h { |path| [path, cache.fetch(path)] }.compact }
         pending = paths - cached.keys

@@ -42,10 +42,15 @@ module Rigor
       #
       # A child ends at {.run_worker}'s `exit!`, which skips `at_exit` AND object finalizers, so a `Tempfile`
       # a child creates is never reclaimed by the mechanism that reclaims the parent's (issue #330 —
-      # `Protection::ClosureKillOracle`'s per-process mutant file leaked one file per worker per
+      # `Protection::ClosureKillOracle`'s mutant file leaked one file per worker per
       # `rigor coverage --protection --mutation` run). Answering with the directory the parent already removes
       # once every child has been collected makes the child's scratch state the parent's problem, which is the
       # only place it can be solved: the names are random, so nothing outside the child could find them.
+      #
+      # Still load-bearing after issue #572 gave that oracle a block-scoped temp file. The block unwinds on
+      # both paths a child can take on its own — a normal return and the `StandardError` {.run_worker}
+      # rescues — but a child killed by a signal unwinds nothing at all, and this directory is what reclaims
+      # what it left behind.
       #
       # The directory check is the belt to {.run_worker}'s braces: the offer is only worth taking while the
       # parent still has the directory open, and answering `nil` once it is gone degrades to `Dir.tmpdir`

@@ -116,7 +116,10 @@ quoting is up to the database adapter.
   are for a table the schema does not describe. The plugin says so
   once per run at `:info`. Committing a schema dump (or pointing
   `schema_file` / `structure_sql_file` at one) turns the column half
-  back on; nothing else changes.
+  back on from the next cold run — a warm cache keeps serving the
+  reduced index until it is invalidated, so use `rigor check
+  --no-cache` (or `make cache-clean`) if you want to see the change
+  immediately.
 - **Column reads, not setters.** The plugin types instance-side
   column *reads* (`user.name`, `user.admin?`) and singular
   associations, but not the `name=` setter or the dirty-tracking

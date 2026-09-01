@@ -319,6 +319,54 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
     end
 
+    # Issue #529 — a signature whose return names a type alias (or an intersection through one) used to
+    # collapse to `untyped` at the translation boundary. The dispatch tier passes its loader as the
+    # translator's alias expander, so the aliased return resolves like the spelled-out type would.
+    describe "aliased return types (issue #529)" do
+      let(:aliased_rbs) do
+        <<~RBS
+          interface _RigorSpecMarker
+          end
+
+          class RigorSpecLeaf
+          end
+
+          type rigor_spec_leaf = RigorSpecLeaf & _RigorSpecMarker
+
+          class RigorSpecTree
+            def leaf: () -> rigor_spec_leaf
+            def leaf_or_nil: () -> rigor_spec_leaf?
+          end
+        RBS
+      end
+      let(:aliased_environment) do
+        Rigor::Environment.new(
+          rbs_loader: Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: issue #529)", aliased_rbs]])
+        )
+      end
+      let(:tree) { Rigor::Type::Combinator.nominal_of("RigorSpecTree") }
+
+      def dispatch_on_tree(method_name)
+        described_class.try_dispatch(cc(
+                                       receiver: tree,
+                                       method_name: method_name,
+                                       args: [],
+                                       environment: aliased_environment
+                                     ))
+      end
+
+      it "resolves an alias-of-intersection return to the nominal member" do
+        type = dispatch_on_tree(:leaf)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("RigorSpecLeaf")
+      end
+
+      it "keeps the optional wrapper around a resolved alias" do
+        type = dispatch_on_tree(:leaf_or_nil)
+        expect(type.describe(:short)).to eq("RigorSpecLeaf?")
+      end
+    end
+
     it "returns nil when the environment has no RBS loader" do
       blank_env = Rigor::Environment.new
       expect(blank_env.rbs_loader).to be_nil

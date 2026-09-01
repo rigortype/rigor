@@ -1,0 +1,1 @@
+- **[dev]** The spec suite pins `RIGOR_DISABLE_YJIT=1`, so an in-process CLI invocation no longer leaks a live deferred-YJIT deadline thread into later examples — the leak made `spec/rigor/runtime/jit_spec.rb` flake depending on how spec files were packed across parallel workers. ([#567](https://github.com/rigortype/rigor/pull/567))

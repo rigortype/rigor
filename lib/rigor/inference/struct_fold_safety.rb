@@ -277,13 +277,22 @@ module Rigor
         true
       end
 
-      # Constructs whose body runs zero-or-many times or is deferred (loops, blocks, lambdas): a single static pass
-      # over the body cannot model a member setter's effect across iterations, so a setter inside one disqualifies the
-      # local. Straight-line conditionals (`if` / `unless` / `case`) are NOT boundaries — their branch scopes join
+      # Constructs a member setter's effect cannot escape, so a setter inside one disqualifies the local: a
+      # block or lambda body is evaluated for its own scope and its bindings do NOT leak to the continuation
+      # (`[1].each { s.x = v }; s.x` would read the construction value — verified unsound on #525), and a
+      # `for` body is not routed through the loop evaluator that would join it.
+      #
+      # Straight-line conditionals (`if` / `unless` / `case`) are NOT boundaries — their branch scopes join
       # soundly, so a setter in one branch is fine.
+      #
+      # `while` / `until` are not boundaries either, since issue #597. They look like the block case and are
+      # the opposite of it: `eval_loop` joins the body's exit scope with the pre-loop scope, so a setter's
+      # effect DOES reach the continuation, as the union of "the loop ran" and "it did not" — exactly the
+      # per-iteration summary the wholesale gate was standing in for. The gate was self-fulfilling here: it
+      # disqualified the local, `apply_setter_writeback` declines on a local that is not fold-safe, so the
+      # body-exit binding kept the construction value, which is the staleness the gate existed to hide.
       def deferred_boundary?(node)
-        node.is_a?(Prism::WhileNode) || node.is_a?(Prism::UntilNode) ||
-          node.is_a?(Prism::ForNode) || node.is_a?(Prism::BlockNode) ||
+        node.is_a?(Prism::ForNode) || node.is_a?(Prism::BlockNode) ||
           node.is_a?(Prism::LambdaNode)
       end
 

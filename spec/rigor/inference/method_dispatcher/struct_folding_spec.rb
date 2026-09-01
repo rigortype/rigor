@@ -161,13 +161,48 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
-    it "does NOT fold a member whose setter sits inside a loop" do
-      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+    # Issue #597 supersedes the wholesale decline this case used to assert. A loop is not a block: `eval_loop`
+    # joins the body's exit scope with the pre-loop scope, so the setter's effect DOES reach the
+    # continuation as "the loop ran" unioned with "it did not". The read answers that join — never the stale
+    # construction value alone (which is the #540 always-falsey trap in reverse), and no longer a wholesale
+    # `Dynamic[top]`.
+    it "folds a member whose setter sits inside a loop to the per-iteration join" do
+      expect(dumped_types(<<~RUBY)).to eq(["1 | 9"])
         Point = Struct.new(:x, :y)
         def reader(cond)
           p = Point.new(1, 2)
           while cond
             p.x = 9
+          end
+          dump_type(p.x)
+        end
+      RUBY
+    end
+
+    # …and a member the loop does NOT set keeps its exact construction value, because both arms of the join
+    # agree on it. This is the half #596 already paid, and it must survive the summary.
+    it "keeps an unset member exact across a loop that sets a sibling" do
+      expect(dumped_types(<<~RUBY)).to eq(["2"])
+        Point = Struct.new(:x, :y)
+        def reader(cond)
+          p = Point.new(1, 2)
+          while cond
+            p.x = 9
+          end
+          dump_type(p.y)
+        end
+      RUBY
+    end
+
+    # A setter on only SOME paths through the body needs no special case: the not-taken path contributes the
+    # pre-loop binding, so the same join covers it.
+    it "folds a member set on only some paths through the loop body" do
+      expect(dumped_types(<<~RUBY)).to eq(["1 | 9"])
+        Point = Struct.new(:x, :y)
+        def reader(cond, flag)
+          p = Point.new(1, 2)
+          while cond
+            p.x = 9 if flag
           end
           dump_type(p.x)
         end

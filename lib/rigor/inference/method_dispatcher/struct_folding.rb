@@ -56,9 +56,41 @@ module Rigor
             dispatch_struct_class(receiver, context)
           when Type::StructInstance
             fold_instance(receiver, context)
+          when Type::Union
+            fold_union_instance(receiver, context)
           when Type::Singleton
             fold_named_new(receiver, context)
           end
+        end
+
+        # Issue #597 — a read off a UNION of same-class `StructInstance`s answers the join of what the read
+        # gives on each member.
+        #
+        # This is where an in-loop member setter's per-iteration effect becomes readable. `eval_loop` joins
+        # the body's exit scope with the pre-loop scope, so `s = P.new(1, 2); while c; s.x = "a"; end` leaves
+        # `s` as `P(x: "a", y: 2) | P(x: 1, y: 2)` — already the sound summary of "the loop ran" and "it did
+        # not". Only the read could not use it, and declined to `Dynamic[top]` on a carrier that is not a
+        # bare `StructInstance`.
+        #
+        # Reading through the union rather than collapsing the carrier is deliberate: it leaves every type
+        # the engine displays exactly as it was, and it pays on both axes at once — a member the loop SETS
+        # answers `1 | "a"` instead of Dynamic, and a member it does not set answers `2` on both arms and so
+        # stays exactly as precise as it was before the loop. It also picks up struct unions from `if` /
+        # `case` merges for free, which have the same shape and the same soundness.
+        #
+        # Sound because a union receiver IS one of its members at runtime, so the value read is one of the
+        # per-arm answers and their join covers it. Any arm that is not a same-class `StructInstance`, or
+        # that declines, abandons the whole fold — a partial answer would be a claim about a value some arm
+        # cannot support.
+        def fold_union_instance(union, context)
+          arms = union.members
+          return nil unless arms.size > 1 && arms.all?(Type::StructInstance)
+          return nil unless arms.map(&:class_name).uniq.size == 1
+
+          folded = arms.map { |arm| fold_instance(arm, context.with(receiver: arm)) }
+          return nil if folded.any?(&:nil?)
+
+          Type::Combinator.union(*folded)
         end
 
         # A `Struct.new`-defined class assigned to a constant (or a `class Point < Struct.new(...)`

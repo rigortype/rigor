@@ -1544,6 +1544,35 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  # Issue #520 — Ruby defines the value of an attribute / index assignment as the RHS object itself,
+  # whatever the writer method returns. `Hash#[]=`'s declared V made `h[k] = true` read Dynamic on an
+  # untyped hash.
+  describe "attribute / index assignment value semantics" do
+    def writer_call_type(source, method_name)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      write = nil
+      Rigor::Source::NodeWalker.each(root) { |n| write = n if n.is_a?(Prism::CallNode) && n.name == method_name }
+      index[write].type_of(write)
+    end
+
+    it "types `h[k] = v` as the RHS, not the writer's declared return" do
+      # Inside the def, `h` is an untyped parameter; the write's value is still the RHS constant.
+      type = writer_call_type("def f(h)\n  h[:k] = true\nend\n", :[]=)
+      expect(type.describe).to eq("true")
+    end
+
+    it "types `x.attr = v` as the RHS" do
+      type = writer_call_type("def f(x)\n  x.size = 42\nend\n", :size=)
+      expect(type.describe).to eq("42")
+    end
+
+    it "leaves index READS on the dispatch result (control)" do
+      type = scope.type_of(parse_expression("[1, 2][0]"))
+      expect(type.describe).to eq("1")
+    end
+  end
+
   # Issue #525 — a `Line = Struct.new(...) do ... end` value is a StructInstance carrier whose
   # block-def methods are discovered under "Line"; the discovered and user-inference tiers accept the
   # named member carriers as receivers, so those methods resolve with the carrier itself as `self`.

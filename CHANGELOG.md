@@ -28,6 +28,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** An attribute or index assignment (`x.attr = v`, `h[k] = v`) now carries the assigned value's type, as Ruby defines, instead of the writer method's declared return — so `h[k] = true` no longer reads as untyped on an untyped hash ([#538](https://github.com/rigortype/rigor/pull/538), [#520](https://github.com/rigortype/rigor/issues/520)).
+
 - **[engine]** Methods defined in a `Struct.new(...) do ... end` block now resolve on the struct's values — `Line.new(text).describe` infers the block def's return instead of reading untyped ([#555](https://github.com/rigortype/rigor/pull/555), [#525](https://github.com/rigortype/rigor/issues/525)).
 
 - **[engine]** Calling your own method with optional, keyword, rest, or block parameters no longer loses its inferred return type — the call-site binder binds each parameter it can identify (defaults included, `options = {}` too) instead of giving up on the whole signature, which also surfaced a real crash path in a survey app the code's own TODO had flagged ([#547](https://github.com/rigortype/rigor/pull/547), [#524](https://github.com/rigortype/rigor/issues/524)).

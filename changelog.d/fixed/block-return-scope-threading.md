@@ -1,0 +1,1 @@
+- **[engine]** A block whose last expression reads a variable the block itself assigned now types as that value instead of falling back to an unknown type, so `m.synchronize do v = compute; v end` is typed as precisely as `m.synchronize { compute }`. ([#533](https://github.com/rigortype/rigor/issues/533))

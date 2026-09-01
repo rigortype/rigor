@@ -20,6 +20,7 @@ require_relative "index_write_widening"
 require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
 require_relative "multi_target_binder"
+require_relative "content_join"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
@@ -442,7 +443,8 @@ module Rigor
         # Widen BEFORE recording the narrowing: rebinding the receiver drops the per-slot narrowings keyed on it, so
         # the reverse order would trade this feature away for the widening. The two are complementary — the shape
         # forgets that the collection is still empty, the narrowing remembers that THIS slot is now non-nil.
-        post = IndexWriteWidening.widen(node: node, current_scope: post)
+        post = IndexWriteWidening.widen(node: node, current_scope: post,
+                                        arg_types: index_write_arg_types(node, result_type))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
         [result_type, post]
@@ -453,8 +455,35 @@ module Rigor
       # `eval_index_or_write` does, so they take the same widening; the value itself is still typed by the expression
       # typer (`type_of_assignment_write`), which is what the default did.
       def eval_index_write(node)
-        [scope.type_of(node, tracer: tracer),
-         IndexWriteWidening.widen(node: node, current_scope: scope)]
+        stored = scope.type_of(node, tracer: tracer)
+        [stored,
+         IndexWriteWidening.widen(node: node, current_scope: scope,
+                                  arg_types: index_write_arg_types(node, stored))]
+      end
+
+      # `[key_type, stored_value_type]` for an index-write node, shaped exactly like a `[]=` call's
+      # argument list so the widening seam can join it the same way (issue #560). The stored value is
+      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's already-computed
+      # `t[0] + 5`, which is the whole point: it is the value the mutation put in the slot, and the one
+      # the retained element evidence provably no longer covers. Returns `[]` when the key is unresolvable,
+      # which reproduces the pre-join widening.
+      def index_write_arg_types(node, stored_type)
+        key_node = first_index_argument(node)
+        return MutationWidening::NO_ARG_TYPES if key_node.nil? || stored_type.nil?
+
+        [scope.type_of(key_node, tracer: tracer), stored_type]
+      rescue StandardError
+        MutationWidening::NO_ARG_TYPES
+      end
+
+      # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`), typed in the scope the
+      # arguments are evaluated in. Gated on the content-adder table so a non-adding mutator (`pop`, `sort!`)
+      # never pays for typing its arguments.
+      def mutator_arg_types(call_node)
+        return MutationWidening::NO_ARG_TYPES unless ContentJoin::CONTENT_ADDERS.include?(call_node.name)
+        return MutationWidening::NO_ARG_TYPES if call_node.receiver.nil?
+
+        content_arg_types(call_node, scope)
       end
 
       def first_index_argument(node)
@@ -1403,7 +1432,8 @@ module Rigor
         # Flow-folding G1 / G2 — widen a local- or instance-variable binding when the call is an in-place mutator on it
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
-        post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope)
+        post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope,
+                                                       arg_types: mutator_arg_types(node))
         # ADR-48 slice 4 — Struct member-setter re-typing. After `s.x = v` on a fold-safe StructInstance local, rebind
         # `s` to a StructInstance with member `:x` replaced by the assigned type, so a later `s.x` folds to `v` and a
         # sibling `s.y` stays precise. `call_type` is the setter's own result (the assigned value type). Sound only for
@@ -2333,7 +2363,7 @@ module Rigor
         calls = []
         Source::NodeWalker.each(body) do |descendant|
           next unless descendant.is_a?(Prism::CallNode)
-          next unless MutationWidening::CONTENT_ADDERS.include?(descendant.name)
+          next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
@@ -2368,7 +2398,7 @@ module Rigor
         pairs = calls.flat_map { |c| hash_pair_types(c, block_entry) }
         return nil if pairs.empty? && !hashish?(pre_state)
 
-        MutationWidening.join_hash_content(pre_state, pairs)
+        ContentJoin.join_hash_content(pre_state, pairs)
       end
 
       def join_array_param(calls, pre_state, block_entry)
@@ -2379,9 +2409,9 @@ module Rigor
           # array-arity forget already widened the binding; contribute nothing.
           next [] if index_write?(c)
 
-          MutationWidening.array_added_elements(c.name, content_arg_types(c, block_entry))
+          ContentJoin.array_added_elements(c.name, content_arg_types(c, block_entry))
         end
-        MutationWidening.join_array_content(pre_state, added)
+        ContentJoin.join_array_content(pre_state, added)
       end
 
       # Walks the block body for content-mutator calls (`<<`, `push`, `[]=`, …) whose receiver is a captured outer local
@@ -2410,7 +2440,7 @@ module Rigor
       # `[receiver_name, node]` when `node` is a content mutation whose receiver is a local variable satisfying `accept`
       # (depth predicate), else `[nil, nil]`. Covers `[]=`-style CallNode mutators and the index-write node forms.
       def content_mutation_target(node)
-        is_call_mutator = node.is_a?(Prism::CallNode) && MutationWidening::CONTENT_ADDERS.include?(node.name)
+        is_call_mutator = node.is_a?(Prism::CallNode) && ContentJoin::CONTENT_ADDERS.include?(node.name)
         return [nil, nil] unless is_call_mutator || index_write?(node)
 
         receiver = node.receiver

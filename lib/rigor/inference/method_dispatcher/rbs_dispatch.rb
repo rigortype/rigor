@@ -230,6 +230,13 @@ module Rigor
               # still resolve through Method's RBS contract. Routing here keeps reflective Method methods
               # working without forcing the carrier to collapse to a plain Nominal at construction.
               ["Method", :instance, []]
+            when Type::Refined, Type::Difference
+              # #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is
+              # `String − ""`) is a precision layer over its base; RBS method lookup erases to the base
+              # carrier (`RUBY_VERSION != "1.0"` resolves through `String#!=` instead of declining the
+              # whole dispatch to Dynamic). The refinement-aware promotions (`String#upcase` →
+              # `uppercase-string`, …) run in their own catalog tier ABOVE this one, so they still win.
+              receiver_descriptor(receiver.base)
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end

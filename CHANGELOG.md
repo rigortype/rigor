@@ -24,6 +24,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** Methods on refined strings (`RUBY_VERSION != "1.0"`, `RUBY_VERSION.split(".")`) now resolve through the underlying `String` instead of losing the whole call to untyped, and an `is_a?` guard against a class Rigor cannot see no longer keeps the old type on the guarded branch — the guard's own proof wins ([#550](https://github.com/rigortype/rigor/pull/550), [#533](https://github.com/rigortype/rigor/issues/533)).
+
 - **[engine]** A block-taking call on a statically-folded `Set` constant (`NAMES.any? { … }`) no longer answers the blockless method's constant — the block decides the runtime answer, and the wrong fold could flag reachable conditions as always-truthy ([#546](https://github.com/rigortype/rigor/pull/546), [#539](https://github.com/rigortype/rigor/issues/539)).
 
 - **[engine]** Overload selection now sees through alias-declared parameters — an alias expanding to a concrete class rejects a non-matching argument instead of gradually accepting everything and winning by list position ([#558](https://github.com/rigortype/rigor/pull/558), [#529](https://github.com/rigortype/rigor/issues/529)).

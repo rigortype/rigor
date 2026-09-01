@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[engine]** Methods a class gains through `extend SomeModule`, `extend self`, or `module_function` now resolve on the class itself — existence and inferred return types both — removing 39 undefined-method false positives across the survey corpus ([#554](https://github.com/rigortype/rigor/pull/554), [#526](https://github.com/rigortype/rigor/issues/526)).
+
 - **[engine]** Rails-style implicit namespaces now resolve: `Api` in `class Api::V1::AccountsController` types as the namespace module even though Zeitwerk means no `module Api` ever appears in source — worth +1.16 points of type precision on Mastodon ([#551](https://github.com/rigortype/rigor/pull/551), [#528](https://github.com/rigortype/rigor/issues/528)).
 
 - **[plugins]** rigor-actionpack now types `params.expect(...)` and `params.slice(...)` as strong-parameter chains, so Rails 8's `expect` idiom keeps the same typed, protected receiver `require`/`permit` chains have ([#548](https://github.com/rigortype/rigor/pull/548), [#534](https://github.com/rigortype/rigor/issues/534)).

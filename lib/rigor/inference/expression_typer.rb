@@ -9,6 +9,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
+require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "dynamic_origin"
@@ -83,6 +84,9 @@ module Rigor
         Prism::ProgramNode => :type_of_program,
         # Calls
         Prism::CallNode => :call_type_for,
+        Prism::CallOrWriteNode => :call_or_write_type_for,
+        Prism::CallAndWriteNode => :call_and_write_type_for,
+        Prism::CallOperatorWriteNode => :call_operator_write_type_for,
         Prism::ArgumentsNode => :type_of_non_value,
         # Constants
         Prism::ConstantReadNode => :type_of_constant_read,
@@ -957,10 +961,10 @@ module Rigor
         end
       end
 
-      def fallback_for(node, family:)
+      def fallback_for(node, family:, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
         inner = dynamic_top
-        record_fallback(node, family: family, inner_type: inner, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
-        scope.record_dynamic_origin(node, DynamicOrigin::UNSUPPORTED_SYNTAX)
+        record_fallback(node, family: family, inner_type: inner, origin: origin)
+        scope.record_dynamic_origin(node, origin)
         inner
       end
 
@@ -1123,6 +1127,48 @@ module Rigor
         dynamic_top
       end
 
+      # Issue #532 — the attribute compound-write family (`x.attr ||= v`, `&&=`, `+=`), the last
+      # genuinely unmodeled value-position constructs the 2026-09-01 corpus census found (they fell to the
+      # `unsupported_syntax` fallback). Value semantics mirror the local / ivar / index siblings:
+      # `||=` is `truthy(read) | rhs`, `&&=` is `falsey(read) | rhs`, and an operator write is the
+      # operator dispatched on the read result. A `&.`-form compound write unions the skipped-call nil in
+      # (#518's rule). Scope effects stay as before (none) — the struct member writeback and shape
+      # widening for these forms are follow-up work recorded on #532.
+      def call_or_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        value = Type::Combinator.union(Narrowing.narrow_truthy(current), type_of(node.value))
+        with_compound_write_safe_nav(node, value)
+      end
+
+      def call_and_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        value = Type::Combinator.union(Narrowing.narrow_falsey(current), type_of(node.value))
+        with_compound_write_safe_nav(node, value)
+      end
+
+      def call_operator_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        result = MethodDispatcher.dispatch(
+          receiver_type: current, method_name: node.binary_operator, arg_types: [type_of(node.value)],
+          environment: scope.environment, call_node: node, scope: scope
+        ) || dynamic_top
+        with_compound_write_safe_nav(node, result)
+      end
+
+      def attribute_compound_read_type(node)
+        receiver = type_of(node.receiver)
+        MethodDispatcher.dispatch(
+          receiver_type: receiver, method_name: node.read_name, arg_types: [],
+          environment: scope.environment, call_node: node, scope: scope
+        ) || dynamic_top
+      end
+
+      def with_compound_write_safe_nav(node, value)
+        return value unless node.call_operator_loc&.slice == "&."
+
+        Type::Combinator.union(value, Type::Combinator.constant_of(nil))
+      end
+
       # Slice 2 routes call expressions through `MethodDispatcher`. The receiver and every argument are typed
       # first, then the dispatcher is asked for a result type. A nil result triggers the fail-soft fallback
       # for the CallNode itself (the inner type_of calls already record their own fallbacks for unrecognised
@@ -1140,6 +1186,9 @@ module Rigor
         # asks nothing further of dispatch. Off (the default) this is one integer read.
         Effects::Collector.record_call(node, receiver, scope) if Effects::Collector.active?
 
+        literal_send = try_literal_send(node, receiver)
+        return literal_send if literal_send
+
         local_def_result = try_local_def_dispatch(node, receiver, arg_types)
         return local_def_result if local_def_result
 
@@ -1148,14 +1197,8 @@ module Rigor
         # the corresponding element bound to the block parameter and assemble the results into a
         # `Tuple[U_1..U_n]`. This sits ahead of `MethodDispatcher.dispatch` so the RBS tier does not re-widen
         # the answer back to `Array[union]`.
-        per_element = try_per_element_block_fold(node, receiver)
-        return per_element if per_element
-
-        inject_fold = try_block_inject_fold(node, receiver, arg_types)
-        return inject_fold if inject_fold
-
-        hash_transform = try_hash_shape_block_fold(node, receiver)
-        return hash_transform if hash_transform
+        block_fold = try_receiver_block_folds(node, receiver, arg_types)
+        return block_fold if block_fold
 
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,
@@ -1201,7 +1244,26 @@ module Rigor
         record_unresolved_self_call(node, receiver) if Analysis::SelfCallResolutionRecorder.active?
         Effects::Collector.record_unresolved(node, scope.source_path) if Effects::Collector.active?
 
-        fallback_for(node, family: :prism)
+        fallback_for(node, family: :prism, origin: unresolved_call_origin(receiver, node.name))
+      end
+
+      # Issue #522 — the honest cause for a call the tiers exhausted. When the receiver's class HAS a
+      # discovered project def for the method, the miss is a return the engine could not infer (the
+      # discovered-method tier deliberately declined in favor of body inference, which then declined too —
+      # `MethodDispatcher#try_discovered_method`'s decline arms), which is ADR-82's
+      # `INFERRED_RETURN_UNTYPED`, not "unsupported syntax". Without this, every service-object `#call`
+      # whose body defeats inference reports to `coverage --protection` as a syntax gap. The generic cause
+      # stays for genuinely unresolved names (framework DSL sends, methods no scanned file defines).
+      def unresolved_call_origin(receiver, method_name)
+        class_name, kind = case receiver
+                           when Type::Nominal then [receiver.class_name, :instance]
+                           when Type::Singleton then [receiver.class_name, :singleton]
+                           else [nil, nil]
+                           end
+        return DynamicOrigin::UNSUPPORTED_SYNTAX if class_name.nil?
+        return DynamicOrigin::UNSUPPORTED_SYNTAX unless scope.discovered_method?(class_name, method_name, kind)
+
+        DynamicOrigin::INFERRED_RETURN_UNTYPED
       end
 
       # ADR-82 WD6 — carry the receiver's provenance onto the call it produces (returning the unchanged
@@ -1338,16 +1400,58 @@ module Rigor
         end
       end
 
-      def try_user_method_inference(receiver, call_node, arg_types)
+      # The three receiver-shaped block folds, in their historical order (extracted whole from
+      # `call_dispatch_type_for` for method-length budget).
+      def try_receiver_block_folds(node, receiver, arg_types)
+        per_element = try_per_element_block_fold(node, receiver)
+        return per_element if per_element
+
+        inject_fold = try_block_inject_fold(node, receiver, arg_types)
+        return inject_fold if inject_fold
+
+        try_hash_shape_block_fold(node, receiver)
+      end
+
+      # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:
+      # the private-boundary idiom (protobuf's `send(:get_file_descriptor)` at 84 sites) resolves through
+      # the same dispatch + project-inference tiers as the direct call would. `send` legitimately crosses
+      # visibility, so no public-only gate applies (`public_send` is treated identically — typing the
+      # success path of a call that would raise on a private method is ADR-5 optimism). Declines: a
+      # non-literal selector, a splat / forwarded tail (positional correspondence unknown), or a block at
+      # the call site (block forwarding is out of this slice).
+      LITERAL_SEND_SELECTORS = %i[send __send__ public_send].freeze
+      private_constant :LITERAL_SEND_SELECTORS
+
+      def try_literal_send(node, receiver)
+        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
+        return nil unless node.block.nil?
+
+        args = node.arguments&.arguments
+        return nil unless args && args.first.is_a?(Prism::SymbolNode)
+
+        rest = args[1..]
+        return nil if rest.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
+
+        inner_name = args.first.unescaped.to_sym
+        inner_args = rest.map { |a| type_of(a) }
+        MethodDispatcher.dispatch(
+          receiver_type: receiver, method_name: inner_name, arg_types: inner_args,
+          block_type: nil, environment: scope.environment, call_node: node, scope: scope
+        ) ||
+          try_user_method_inference(receiver, node, inner_args, method_name: inner_name) ||
+          try_project_singleton_inference(receiver, node, inner_args, method_name: inner_name)
+      end
+
+      def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name)
         return nil unless user_inference_receiver?(receiver)
 
-        def_node, owner = resolve_user_def_with_owner(receiver.class_name, call_node.name)
+        def_node, owner = resolve_user_def_with_owner(receiver.class_name, method_name)
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types)
         return result if result.nil?
 
-        degrade_if_overridable(result, owner, call_node.name, :instance)
+        degrade_if_overridable(result, owner, method_name, :instance)
       rescue StandardError
         nil
       end
@@ -1362,16 +1466,16 @@ module Rigor
       # Resolution is OWN-class only: the singleton-ancestry chain (`extend`ed modules, inherited
       # class-method dispatch) is not walked at this slice. A miss degrades to today's `Dynamic[top]`, never
       # a false resolution (ADR-57 follow-up § module-singleton).
-      def try_singleton_method_inference(receiver, call_node, arg_types)
+      def try_singleton_method_inference(receiver, call_node, arg_types, method_name: call_node.name)
         return nil unless receiver.is_a?(Type::Singleton)
 
-        def_node = scope.singleton_def_for(receiver.class_name, call_node.name)
+        def_node = scope.singleton_def_for(receiver.class_name, method_name)
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types)
         return result if result.nil?
 
-        degrade_if_overridable(result, receiver.class_name, call_node.name, :singleton)
+        degrade_if_overridable(result, receiver.class_name, method_name, :singleton)
       rescue StandardError
         nil
       end
@@ -1380,9 +1484,9 @@ module Rigor
       # body the project itself wrote. Which of the two tiers applies is decided by the receiver carrier —
       # `Singleton[Foo]` when the constant names a class or module, `Nominal[…]` when it holds an ordinary
       # object (#320) — so the two are mutually exclusive and consulting both is one resolution attempt.
-      def try_project_singleton_inference(receiver, call_node, arg_types)
-        try_singleton_method_inference(receiver, call_node, arg_types) ||
-          try_singleton_object_constant_inference(receiver, call_node, arg_types)
+      def try_project_singleton_inference(receiver, call_node, arg_types, method_name: call_node.name)
+        try_singleton_method_inference(receiver, call_node, arg_types, method_name: method_name) ||
+          try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: method_name)
       end
 
       # #320 — resolves a call whose receiver is a constant holding an ordinary object with a `class << Const`
@@ -1390,10 +1494,10 @@ module Rigor
       # that object, so the receiver carrier is passed through unchanged. Own-constant only, and only for a
       # name the project actually recorded — a miss degrades to today's `Dynamic[top]`, never a false
       # resolution. `Singleton` receivers never reach here: {#try_singleton_method_inference} owns them.
-      def try_singleton_object_constant_inference(receiver, call_node, arg_types)
+      def try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: call_node.name)
         return nil unless receiver.is_a?(Type::Nominal)
 
-        def_node = SingletonObjectConstant.def_node_for(call_node, receiver, call_node.name, scope)
+        def_node = SingletonObjectConstant.def_node_for(call_node, receiver, method_name, scope)
         return nil if def_node.nil?
 
         infer_user_method_return(def_node, receiver, arg_types)
@@ -2394,20 +2498,23 @@ module Rigor
 
       # Builds the body scope for a user-defined instance method call: a fresh `Scope` with `self_type` set
       # to the receiver's nominal type, the project-wide accumulators inherited (so the body sees the same
-      # `discovered_classes` / `class_ivars` / etc. the caller does), and required positional parameters
-      # bound from the call's `arg_types` by index. Returns nil when the parameter shape is too complex for
-      # the first-iteration binder (rest args, keyword args, block params, etc.).
+      # `discovered_classes` / `class_ivars` / etc. the caller does), and the call's `arg_types` bound to
+      # the parameters. Returns nil when the binding is truly ambiguous (arity mismatch, trailing `post`
+      # params, `...` forwarding).
+      #
+      # Issue #524 — the binder is per-PARAMETER, not per-signature. The first iteration declined any def
+      # with an optional / rest / keyword / block parameter outright, so ONE `options = {}` default zeroed
+      # out an otherwise-inferable return at every call site (the widest engine lever the 2026-09-01 sweep
+      # measured, verified on ten targets). Now: requireds bind by index; supplied optionals by index and
+      # unsupplied ones from a LITERAL default (else `Dynamic`); `*rest` collects the leftover positionals
+      # as a Tuple; keywords bind by name from a trailing keyword-hash shape, falling back to their literal
+      # default — or `Dynamic` when the shape is open or absent; `**kwrest`, `&block`, and destructured
+      # positionals bind `Dynamic`. Binding `Dynamic` is monotone-safe (wider in → wider out), so the only
+      # declines left are the shapes where positional CORRESPONDENCE itself is unknowable.
       def build_user_method_body_scope(def_node, receiver, arg_types)
         params = def_node.parameters
-        required = params&.requireds || []
-        return nil unless params.nil? || user_method_param_shape_simple?(params)
-        return nil unless required.size == arg_types.size
-
-        # Bind required positionals by index. The body scope starts from an empty fact store and narrowing
-        # set, so `with_local`'s fact / narrowing invalidations would be no-ops here — build the locals
-        # table directly (matching `with_local`'s `name.to_sym` key).
-        locals = {}
-        required.each_with_index { |param, index| locals[param.name.to_sym] = arg_types[index] }
+        locals = bind_params_from_call_types(params, arg_types)
+        return nil if locals.nil?
 
         # Construct the body scope in a SINGLE allocation — the previous `Scope.empty.with_*.with_*…` chain
         # allocated a fresh frozen Scope per field, run per user-method-call inference (ADR-44). The
@@ -2423,6 +2530,102 @@ module Rigor
         )
       end
 
+      # The locals table for the body scope, or nil to decline. Keys match `with_local`'s `name.to_sym`.
+      # The body scope starts from an empty fact store and narrowing set, so `with_local`'s fact /
+      # narrowing invalidations would be no-ops here — the table is built directly.
+      def bind_params_from_call_types(params, arg_types)
+        return arg_types.empty? ? {} : nil if params.nil?
+        return nil unless bindable_param_shape?(params)
+
+        positional = arg_types.dup
+        kw_shape = positional.pop if takes_keywords?(params) && positional.last.is_a?(Type::HashShape)
+        locals = bind_positional_params(params, positional)
+        return nil if locals.nil?
+
+        bind_keyword_params(params, kw_shape, locals)
+        locals[params.keyword_rest.name.to_sym] = dynamic_top if params.keyword_rest&.name
+        locals[params.block.name.to_sym] = dynamic_top if params.block&.name
+        locals
+      end
+
+      # Trailing required positionals after a rest (`def f(a, *m, z)`) shift the correspondence; `...`
+      # arrives as the keyword_rest slot. Both stay declined — correspondence, not width, is the issue.
+      def bindable_param_shape?(params)
+        params.is_a?(Prism::ParametersNode) &&
+          params.posts.empty? &&
+          !params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+      end
+
+      def takes_keywords?(params)
+        params.keywords.any? || !params.keyword_rest.nil?
+      end
+
+      def bind_positional_params(params, positional)
+        requireds = params.requireds
+        optionals = params.optionals
+        return nil if positional.size < requireds.size
+        return nil if params.rest.nil? && positional.size > requireds.size + optionals.size
+
+        locals = {}
+        requireds.each_with_index { |param, index| bind_positional_param(locals, param, positional[index]) }
+        optionals.each_with_index do |param, index|
+          supplied = positional[requireds.size + index]
+          locals[param.name.to_sym] = supplied || literal_default_type(param.value)
+        end
+        bind_rest_param(params, positional, locals)
+        locals
+      end
+
+      def bind_rest_param(params, positional, locals)
+        rest_name = params.rest&.name
+        return if rest_name.nil?
+
+        leftover = positional[(params.requireds.size + params.optionals.size)..] || []
+        locals[rest_name.to_sym] = Type::Combinator.tuple_of(*leftover)
+      end
+
+      # A destructured positional (`def f((a, b))`) consumes one argument slot but binds its leaf names
+      # `Dynamic` — element correspondence through the destructure is a later slice.
+      def bind_positional_param(locals, param, arg_type)
+        if param.is_a?(Prism::MultiTargetNode)
+          Destructure.target_names(param).each { |name| locals[name.to_sym] = dynamic_top }
+        else
+          locals[param.name.to_sym] = arg_type
+        end
+      end
+
+      def bind_keyword_params(params, kw_shape, locals)
+        open_shape = kw_shape && kw_shape.extra_keys == :open
+        params.keywords.each do |param|
+          name = param.name.to_s.delete_suffix(":").to_sym
+          supplied = kw_shape&.pairs&.[](name)
+          locals[name] = supplied ||
+                         (open_shape ? dynamic_top : keyword_default_type(param))
+        end
+      end
+
+      def keyword_default_type(param)
+        param.respond_to?(:value) && param.value ? literal_default_type(param.value) : dynamic_top
+      end
+
+      # A default expression contributes its type only when it is lexically scope-free — a scalar literal
+      # or an EMPTY collection literal (`options = {}` is the dominant Rails idiom). Anything that could
+      # read the def's own lexical scope binds `Dynamic` instead of being mis-typed in the caller's scope.
+      LITERAL_DEFAULT_NODES = [
+        Prism::IntegerNode, Prism::FloatNode, Prism::StringNode, Prism::SymbolNode,
+        Prism::TrueNode, Prism::FalseNode, Prism::NilNode
+      ].freeze
+      private_constant :LITERAL_DEFAULT_NODES
+
+      def literal_default_type(value_node)
+        return dynamic_top if value_node.nil?
+        return type_of(value_node) if LITERAL_DEFAULT_NODES.any? { |klass| value_node.is_a?(klass) }
+        return type_of(value_node) if value_node.is_a?(Prism::ArrayNode) && value_node.elements.empty?
+        return type_of(value_node) if value_node.is_a?(Prism::HashNode) && value_node.elements.empty?
+
+        dynamic_top
+      end
+
       # ADR-48 Struct slice 3 — the fold-safe-local set for a method body (runs only on a return-memo miss,
       # so the per-call cost is bounded — measured perf-neutral). Struct member layouts of constant
       # receivers are resolved through the discovery side-table the body scope inherits.
@@ -2431,19 +2634,6 @@ module Rigor
           body,
           ->(name) { scope.struct_member_layout(name)&.[](:members) }
         )
-      end
-
-      # First iteration accepts only required positional parameters: `def foo(a, b, c)`. Optionals, rest,
-      # keyword params, and block params disqualify the method from inference (the caller observes
-      # `Dynamic[Top]` instead).
-      def user_method_param_shape_simple?(params)
-        return false unless params.is_a?(Prism::ParametersNode)
-
-        params.optionals.empty? &&
-          params.rest.nil? &&
-          params.keywords.empty? &&
-          params.keyword_rest.nil? &&
-          params.block.nil?
       end
 
       # Slice A-engine. Implicit-self calls (no `node.receiver`) adopt the surrounding scope's `self_type`

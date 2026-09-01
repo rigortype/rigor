@@ -1869,6 +1869,32 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # Issue #544 — the recording gate: a receiver with an untracked (Dynamic) constituent can hold a
+  # caller-supplied slot value the `||=` keeps, so recording the default alone invents a fact (mail's
+  # `options[:count] ||= :all` folded a reachable `count: 1` path away once #537 stopped hiding the
+  # Dynamic arm behind a wrong overload pin).
+  describe "indexed `||=` narrowing recording gate" do
+    def indexed_key(name, key)
+      Rigor::Scope::IndexedKey.new(receiver_kind: :local, receiver_name: name, key: key)
+    end
+
+    it "declines the record when the receiver carries an untracked Dynamic arm" do
+      _, shaped = evaluate("h = {}")
+      dynamic_hash = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("Hash"))
+      seeded = scope.with_local(:options, Rigor::Type::Combinator.union(dynamic_hash, shaped.local(:h)))
+
+      _, post = evaluate("options[:count] ||= :all", base_scope: seeded)
+
+      expect(post.indexed_narrowings).not_to have_key(indexed_key(:options, :count))
+    end
+
+    it "still records for a fully tracked receiver (control)" do
+      _, post = evaluate("params = {}\nparams[:f] ||= []")
+
+      expect(post.indexed_narrowings).to have_key(indexed_key(:params, :f))
+    end
+  end
+
   describe "compound writes rebind into post-scope (Slice 7 phase 3)" do
     def constant(value) = Rigor::Type::Combinator.constant_of(value)
 
@@ -2181,6 +2207,31 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         s
       RUBY
       expect(post.local(:s)).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    # Issue #553 — the join arm is chosen by the pre-state's OWN evidence, never by the mutator set: `[]=` is legal
+    # on Array, Hash, and countless index-writable classes, so an index-write on a shapeless binding must not
+    # synthesize a hash carrier (mail's `compose_codepoints` mutated its untyped Array param through integer/range
+    # index writes and handed `Hash[Integer | Range, …]` to its caller's `.pack`).
+    it "does not synthesize a Hash from index writes on a shapeless captured binding" do
+      _, post = evaluate(<<~RUBY)
+        x = unknown_value
+        [1].each { x[0..2] = 9 }
+        x
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "still joins index-write evidence when the pre-state carries hash shape" do
+      _, post = evaluate(<<~RUBY)
+        h = {}
+        [1].each { h[:k] = 1 }
+        h
+      RUBY
+      joined = post.local(:h)
+      expect(joined).to be_a(Rigor::Type::Nominal)
+      expect(joined.class_name).to eq("Hash")
+      expect(joined.type_args.first).to eq(Rigor::Type::Combinator.constant_of(:k))
     end
   end
 

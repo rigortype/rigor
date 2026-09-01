@@ -1,6 +1,6 @@
 module Rigor
   module Type
-    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance
+    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Refined | Intersection | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance | BoundMethod
 
     type accepts_mode = :strict | :gradual | :loose
 

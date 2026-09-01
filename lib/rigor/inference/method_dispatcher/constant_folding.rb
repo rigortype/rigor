@@ -220,6 +220,16 @@ module Rigor
           method_name = context.method_name
           args = context.args
 
+          # Issue #539 — every fold in this tier executes the BLOCKLESS form of the method against the
+          # constant value. A call site that passes a block (literal or `&arg`) has different semantics —
+          # `SET.any? { |n| lookup(n) }` folded to the blockless `Set#any?`'s `true` on any non-empty set,
+          # a wrong type the flow rules then amplified (`flow.always-truthy-condition` on our own lib).
+          # The catalog's `block_dependent` classification covers the C body's own iterator, not the call
+          # site's block, so the guard belongs here. Internal per-element dispatches hand a non-CallNode
+          # (e.g. the `&:sym` BlockArgumentNode) as `call_node` — those carry no call-site block.
+          call_node = context.call_node
+          return nil if call_node.is_a?(Prism::CallNode) && call_node.block
+
           if REFLECTIVE_SEND_METHODS.include?(method_name)
             first_arg = args.first
             return nil unless first_arg.is_a?(Type::Constant) && first_arg.value.is_a?(Symbol)

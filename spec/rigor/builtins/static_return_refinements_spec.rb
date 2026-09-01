@@ -29,6 +29,37 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       expect(type).to eq(expected_dir_type)
     end
 
+    # `IO.read` / `File.read` return nil only when a positional LENGTH is given (EOF); the
+    # no-length whole-file idiom always returns a String — the upstream RBS's single
+    # `-> String?` row fired possible-nil-receiver on working code (redmine's read_file_head).
+    it "drops the nil for IO.read / File.read without a positional length" do
+      path = Rigor::Type::Combinator.constant_of("x.txt")
+      %w[IO File].each do |owner|
+        type = described_class.lookup(
+          owner_class_name: owner, method_name: :read, kind: :singleton, arg_types: [path]
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      end
+    end
+
+    it "keeps a keyword-only trailing hash out of the length count (File.read(path, mode: 'rb'))" do
+      path = Rigor::Type::Combinator.constant_of("x.txt")
+      kwargs = Rigor::Type::Combinator.hash_shape_of(mode: Rigor::Type::Combinator.constant_of("rb"))
+      type = described_class.lookup(
+        owner_class_name: "File", method_name: :read, kind: :singleton, arg_types: [path, kwargs]
+      )
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "declines IO.read WITH a positional length — nil is really possible at EOF" do
+      path = Rigor::Type::Combinator.constant_of("x.txt")
+      length = Rigor::Type::Combinator.constant_of(100)
+      type = described_class.lookup(
+        owner_class_name: "IO", method_name: :read, kind: :singleton, arg_types: [path, length]
+      )
+      expect(type).to be_nil
+    end
+
     it "is nil for an unregistered method name" do
       type = described_class.lookup(
         owner_class_name: "Kernel",

@@ -2516,8 +2516,8 @@ module Rigor
             function.trailing_positionals.empty?
         end
 
-        def translate_param_type(rbs_type, _environment)
-          Inference::RbsTypeTranslator.translate(rbs_type)
+        def translate_param_type(rbs_type, environment)
+          Inference::RbsTypeTranslator.translate(rbs_type, alias_expander: environment&.rbs_loader)
         rescue StandardError
           Type::Combinator.untyped
         end
@@ -2651,7 +2651,7 @@ module Rigor
           return nil unless self_type.respond_to?(:class_name)
 
           method_def =
-            if def_node.receiver.nil?
+            if def_node.receiver.nil? && !singleton_context_def?(scope, self_type.class_name, def_node.name)
               Reflection.instance_method_definition(self_type.class_name, def_node.name, scope: scope)
             else
               Reflection.singleton_method_definition(self_type.class_name, def_node.name, scope: scope)
@@ -2664,16 +2664,27 @@ module Rigor
           declared_return_union(method_def, scope.environment)
         end
 
+        # A receiverless `def` inside `class << self` is a singleton def; the def NODE alone cannot say
+        # so, but the discovery walk recorded it under the singleton kind (and not the instance kind).
+        # Without this, `class << self; def load` compared its body against `Kernel#load: -> bool` — the
+        # inherited INSTANCE method — instead of its own `def self.load` signature. A name defined on
+        # both facets stays on the instance lookup (the pre-existing conservative reading).
+        def singleton_context_def?(scope, class_name, method_name)
+          scope.discovered_method?(class_name, method_name, :singleton) &&
+            !scope.discovered_method?(class_name, method_name, :instance)
+        end
+
         # `type_vars:` — ADR-35 WD9 tier 1. When the caller supplies a generic-instantiation
         # substitution map (parent-side, keyed by the parent class's declared type-parameter names),
         # a `-> T` return is translated at its instantiated type (`-> Integer`) rather than degrading
         # to `Dynamic[Top]`. The default empty map is the pre-WD9 behaviour, under which any type
         # variable degrades to `Dynamic[Top]` and the rule stays silent.
-        def declared_return_union(method_def, _environment, type_vars: {})
+        def declared_return_union(method_def, environment, type_vars: {})
           translated = method_def.method_types.filter_map do |mt|
             Inference::RbsTypeTranslator.translate(
               mt.type.return_type,
-              self_type: nil, instance_type: nil, type_vars: type_vars
+              self_type: nil, instance_type: nil, type_vars: type_vars,
+              alias_expander: environment&.rbs_loader
             )
           rescue StandardError
             nil
@@ -2971,7 +2982,10 @@ module Rigor
           return {} if param_names.empty? || param_names.size != args.size
 
           translated = args.map do |arg|
-            Inference::RbsTypeTranslator.translate(arg, self_type: nil, instance_type: nil, type_vars: {})
+            Inference::RbsTypeTranslator.translate(
+              arg, self_type: nil, instance_type: nil, type_vars: {},
+                   alias_expander: scope.environment&.rbs_loader
+            )
           rescue StandardError
             nil
           end
@@ -3028,8 +3042,9 @@ module Rigor
 
           scope, override_method, parent_class, parent_method = resolved
           parent_type_vars = ancestor_instantiation_type_vars(scope, parent_class)
-          override_params = positional_param_types(override_method)
-          parent_params = positional_param_types(parent_method, type_vars: parent_type_vars)
+          override_params = positional_param_types(override_method, environment: scope.environment)
+          parent_params = positional_param_types(parent_method, type_vars: parent_type_vars,
+                                                                environment: scope.environment)
           return nil if override_params.nil? || parent_params.nil?
 
           index = first_narrowed_param_index(override_params, parent_params)
@@ -3049,7 +3064,7 @@ module Rigor
         # map (parent class's type params → the subclass's instantiation) so a parent `(T)` parameter
         # is compared at its instantiated type. Empty (the default, and the override side) keeps the
         # pre-WD9 degrade-to-`Dynamic[Top]` behaviour.
-        def positional_param_types(method_def, type_vars: {})
+        def positional_param_types(method_def, type_vars: {}, environment: nil)
           method_types = method_def.method_types
           return nil unless method_types.size == 1
 
@@ -3058,7 +3073,8 @@ module Rigor
 
           (func.required_positionals + func.optional_positionals).map do |param|
             Inference::RbsTypeTranslator.translate(
-              param.type, self_type: nil, instance_type: nil, type_vars: type_vars
+              param.type, self_type: nil, instance_type: nil, type_vars: type_vars,
+                          alias_expander: environment&.rbs_loader
             )
           rescue StandardError
             nil

@@ -2015,6 +2015,44 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
+  # Issue #528 — every proper prefix of a discovered compact class name is a namespace module that
+  # provably exists at runtime (Zeitwerk derives it from the directory; mastodon never writes
+  # `module Api`). The prefixes join the discovered-classes table so bare namespace reads — and the
+  # inner ConstantReadNodes of resolving constant paths — type as singletons.
+  describe "namespace-prefix synthesis" do
+    it "registers each proper prefix of a compact class declaration" do
+      _, idx = index_for("class Api::V1::AccountsController
+end
+Api
+")
+      scope = idx[parse("x").statements.body.first]
+      classes = scope.discovered_classes
+      expect(classes.keys).to include("Api", "Api::V1", "Api::V1::AccountsController")
+      expect(classes["Api"].describe(:short)).to eq("singleton(Api)")
+    end
+
+    it "never overwrites an explicitly declared namespace" do
+      source = "module Api
+  VERSION = 1
+end
+class Api::V1::AccountsController
+end
+"
+      _, idx = index_for(source)
+      scope = idx[parse("x").statements.body.first]
+      expect(scope.discovered_classes["Api"].describe(:short)).to eq("singleton(Api)")
+    end
+
+    it "leaves a genuinely unknown constant unresolved (control)" do
+      program, idx = index_for("class Api::V1::AccountsController
+end
+Unrelated
+")
+      read = program.statements.body.last
+      expect(idx[read].type_of(read).describe(:short)).to eq("Dynamic[top]")
+    end
+  end
+
   # Issue #526 — `extend M` / `extend self` / bare `module_function` fold the module's instance defs
   # onto the extender's singleton, so `C.helper` resolves (existence AND call-site return inference,
   # with `self = Singleton[C]` exactly as Ruby binds).

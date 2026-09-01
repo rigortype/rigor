@@ -1869,6 +1869,32 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # Issue #544 — the recording gate: a receiver with an untracked (Dynamic) constituent can hold a
+  # caller-supplied slot value the `||=` keeps, so recording the default alone invents a fact (mail's
+  # `options[:count] ||= :all` folded a reachable `count: 1` path away once #537 stopped hiding the
+  # Dynamic arm behind a wrong overload pin).
+  describe "indexed `||=` narrowing recording gate" do
+    def indexed_key(name, key)
+      Rigor::Scope::IndexedKey.new(receiver_kind: :local, receiver_name: name, key: key)
+    end
+
+    it "declines the record when the receiver carries an untracked Dynamic arm" do
+      _, shaped = evaluate("h = {}")
+      dynamic_hash = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("Hash"))
+      seeded = scope.with_local(:options, Rigor::Type::Combinator.union(dynamic_hash, shaped.local(:h)))
+
+      _, post = evaluate("options[:count] ||= :all", base_scope: seeded)
+
+      expect(post.indexed_narrowings).not_to have_key(indexed_key(:options, :count))
+    end
+
+    it "still records for a fully tracked receiver (control)" do
+      _, post = evaluate("params = {}\nparams[:f] ||= []")
+
+      expect(post.indexed_narrowings).to have_key(indexed_key(:params, :f))
+    end
+  end
+
   describe "compound writes rebind into post-scope (Slice 7 phase 3)" do
     def constant(value) = Rigor::Type::Combinator.constant_of(value)
 

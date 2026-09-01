@@ -265,20 +265,26 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(described_class.admissible_evidence([], [nominal("String")])).to eq([nominal("String")])
     end
 
-    # A seed that carries a Dynamic member reaches the same answer by a different route — that slot
-    # really does hold something unknown — and the two must not be conflated on the way in: read off
-    # the widened carrier both are `Array[Dynamic[top]]`, and only the pre-state LITERAL tells `[]`
-    # from `[x]`.
-    it "keeps a gradual member when the seed carries a Dynamic of its own" do
+    # A seed whose own slot the engine could not type cannot rule anything out either, so it admits
+    # like an empty one. (Whether the RESULT stays open is the caller's decision, not this method's
+    # — `MutationWidening#gradual_floor` owns it.)
+    it "admits everything when the seed carries a Dynamic of its own" do
       expect(described_class.admissible_evidence([untyped], [nominal("String")]))
-        .to eq([nominal("String"), untyped])
+        .to eq([nominal("String")])
     end
 
-    # A gradual seed admits a foreign class precisely — a union that already carries `Dynamic[top]`
-    # accepts against any declared element type, so the signature gate has nothing left to protect.
-    it "admits a foreign class precisely once the seed is already gradual" do
+    it "admits a foreign class once the seed is already gradual" do
       expect(described_class.admissible_evidence([constant(:multi), untyped], [nominal("String")]))
-        .to eq([nominal("String"), untyped])
+        .to eq([nominal("String")])
+    end
+
+    # N1 — a Union argument is judged member-by-member, not wholesale. `evidence_class` has no
+    # answer for a Union, so the wholesale reading floored `String | Integer` against an Integer
+    # seed even though half of it is admissible.
+    it "admits a Union argument member-by-member" do
+      added = Rigor::Type::Combinator.union(nominal("Integer"), nominal("String"))
+      expect(described_class.admissible_evidence([constant(1)], [added]))
+        .to eq([nominal("Integer"), untyped])
     end
 
     it "reads a Union seed's members individually" do

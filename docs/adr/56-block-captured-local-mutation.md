@@ -227,20 +227,21 @@ scope they are evaluated in and threads them as `arg_types:`; an
 index-write node (`h[k] ||= v` and siblings) synthesizes the `[]=`
 argument shape `[key, stored_value]`.
 
-Two gates that the block path does not need bind the straight-line
-one, because there the join's result reaches a `def`'s return check:
+Three gates that the block path does not need bind the straight-line
+one, and the third is the load-bearing one:
 
 - **Seed admissibility.** Growing a carrier's element union can break
-  a hand-written signature. haml's `temple = [:multi]; temple <<
-  [:static, s]` against `-> Array[:multi]` draws eight false
-  `def.return-type-mismatch` if the appended tuple joins precisely,
+  a hand-written signature, because there the join's result reaches a
+  `def`'s return check. haml's `temple = [:multi]; temple << [:static,
+  s]` against `-> Array[:multi]` draws eight false
+  `def.return-type-mismatch` if the appended tuple joins as itself,
   and PR #561 hit the same wall from the other direction. A member
   whose class the seed does not already carry therefore contributes
-  `Dynamic[top]` instead — `Array[:multi | Dynamic[top]]` is gradual,
-  so it accepts against the declared type while still stopping the
-  stale fold. An empty seed has nothing to contradict, which is where
-  the precision goes: mail's `stack = []; stack[top] = cs` reads
-  `Array[Integer]` where it read `Array[Dynamic[top]]`.
+  `Dynamic[top]` instead. A gradual member does not rescue this on its
+  own — `Array[:multi | [:static, String] | Dynamic[top]]` is still
+  rejected, since every non-`Dynamic` member is judged separately — so
+  the gate and the floor below are independent, and neither substitutes
+  for the other.
 - **Shape erasure on the added value.** A stored literal collection
   stays aliased and is mutated through the slot (`params[:f] ||= [];
   params[:f] << :status`), so its literal shape is erased along with
@@ -248,21 +249,45 @@ one, because there the join's result reaches a `def`'s return check:
   literal `[]` would pin `Hash[Symbol, []]` on a hash whose slot holds
   `[:status]`, and `params[:f].empty?` would fold to a wrong `true`:
   the same class of stale fold the change exists to remove.
-- **A Hash never closes over its join.** The widening is a one-way
-  door — it leaves a `Nominal`, which `widen_for_mutator` declines —
-  so only the FIRST store into a collection ever reaches a join. An
-  Array survives that: its element parameter is a union over
-  POSITIONS, and a missed store leaves it merely incomplete. A Hash
-  does not: its parameters are unions over KEYS and a read selects
-  one, so the hidden stores make a closed answer WRONG for the keys
-  they wrote. mail's `Message#to_yaml` — `hash = {}`, then
-  `hash['headers'] = {}`, then `hash['multipart_body'] = []` appended
-  through the read — drew `undefined method '<<' for Hash[…]` on a
-  program correct by construction, because the value parameter kept
-  the first store's Hash arm and had dropped the Array arm. Both Hash
-  parameters therefore stay gradual; the Array element parameter does
-  not, which is what keeps ADR-56's own `acc.push(m)` loop result at
-  `Array[Integer]`.
+- **The straight-line join never CLOSES the parameter it feeds.** The
+  widening is a one-way door — it leaves a `Nominal`, which
+  `widen_for_mutator` declines — so this seam sees exactly ONE store
+  and the next one is invisible. Closing over one sample of a growing
+  population is a wrong type, not an imprecise one:
+
+      a = []
+      a.push(1)       # joins -> Array[Integer]
+      a.push("s")     # DECLINED -- pre-state is a Nominal now
+      a.last.upcase   # correct Ruby, prints "S"
+
+  drew `undefined method 'upcase' for Integer`, and mail's
+  `Message#to_yaml` is the same defect one carrier over. Every
+  straight-line join therefore contributes `Dynamic[top]` alongside its
+  evidence. That costs issue #560 nothing: a union carrying `Dynamic`
+  cannot constant-fold, so the stale always-falsey folds the join
+  exists to remove stay removed.
+
+**The correction that matters for future readers.** A first attempt at
+the rule above blamed the CARRIER: an Array's element union is over
+positions and survives a missed store, a Hash's value union is over
+keys and does not. The `a.last.upcase` probe refutes it — `a.last`
+selects a position exactly as `hash[k]` selects a key, and a dropped
+arm is a wrong answer either way. The real line is **how much the
+joining path saw**, and it puts slice C on the other side of the same
+rule rather than in tension with it: `content_writeback_block_captures`
+and `loop_content_writeback` scan the WHOLE body and join every mutator
+call in it before writing back, so their evidence is complete for that
+body and their precise join stays justified. `acc = []; xs.each { |x|
+acc.push(x) }` keeps reading `Array[Integer]`.
+
+That split has one mechanical consequence worth recording:
+`ContentJoin.drop_dynamic` now flattens `Union` members before
+filtering. The straight-line floor reaches the slice-C re-derivation
+nested inside a union (`Array[Dynamic[top] | Integer]`), where a
+`grep_v` could not see it, and this ADR's own `acc.push(m)` loop result
+silently became `Array[Dynamic[top] | Integer]`. Discarding it at that
+seam is exactly right — the re-derivation saw every store, so the
+straight-line path's admission of incompleteness does not apply to it.
 
 ### WD3 — One mechanism, shared
 

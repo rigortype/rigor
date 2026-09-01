@@ -467,20 +467,29 @@ module Rigor
       # `t[0] + 5`, which is the whole point: it is the value the mutation put in the slot, and the one
       # the retained element evidence provably no longer covers. Returns `[]` when the key is unresolvable,
       # which reproduces the pre-join widening.
+      # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
+      # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
+      # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
+      # internal-error path, where it is visible.
       def index_write_arg_types(node, stored_type)
         key_node = first_index_argument(node)
         return MutationWidening::NO_ARG_TYPES if key_node.nil? || stored_type.nil?
         return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
 
         [scope.type_of(key_node, tracer: tracer), stored_type]
-      rescue StandardError
-        MutationWidening::NO_ARG_TYPES
       end
 
-      # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`), typed in the scope the
-      # arguments are evaluated in.
+      # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`).
       #
-      # Two gates, both about cost rather than correctness — the join declines on its own in either case.
+      # **The two scopes are different on purpose.** `current_scope` is the post-call scope the widening will
+      # actually rewrite, so the receiver gate has to ask IT whether the binding is still a literal-shape
+      # carrier — asking the entry scope could green-light a join the widening then declines, or miss one it
+      # would make. The arguments, though, are evaluated BEFORE the call in Ruby's order, so their types come
+      # from the entry `scope`; that also matches how the block path types its own mutator arguments against
+      # the block-ENTRY scope. Between the two points the only edits to the scope are the block / escape /
+      # plugin-assertion helpers above, none of which can rebind a mutator call's argument expressions.
+      #
+      # Both gates are about cost, not correctness — the join declines on its own in either case.
       # `Scope#type_of` builds a fresh `ExpressionTyper` per call and memoizes nothing, so typing arguments a
       # join will not consume is pure overhead, and `<<` on a String buffer is one of the commonest calls
       # there is. The content-adder table skips a non-adding mutator (`pop`, `sort!`); `joinable_receiver?`

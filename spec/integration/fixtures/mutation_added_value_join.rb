@@ -22,40 +22,40 @@ include Rigor::Testing
 # back covers it and nothing folds. ---
 pushed = [1, 2]
 pushed.push(6)
-assert_type("Array[1 | 2 | Integer]", pushed)
-assert_type("1 | 2 | Integer", pushed.last)
+assert_type("Array[1 | 2 | Dynamic[top] | Integer]", pushed)
+assert_type("1 | 2 | Dynamic[top] | Integer", pushed.last)
 
 shoveled = [1, 2]
 shoveled << 6
-assert_type("Array[1 | 2 | Integer]", shoveled)
+assert_type("Array[1 | 2 | Dynamic[top] | Integer]", shoveled)
 
 unshifted = [1, 2]
 unshifted.unshift(9)
-assert_type("Array[1 | 2 | Integer]", unshifted)
+assert_type("Array[1 | 2 | Dynamic[top] | Integer]", unshifted)
 
 # --- The slot rewriters. PR #561 already widened the pinning here; the
 # join keeps that and adds the stored value. For the compound form the
 # stored value is the compound machinery's already-computed `t[0] + 5`. ---
 compound = [1, 2]
 compound[0] += 5
-assert_type("Array[Integer]", compound)
+assert_type("Array[Dynamic[top] | Integer]", compound)
 
 slotted = [1, 2]
 slotted[0] = 6
-assert_type("Array[Integer]", slotted)
+assert_type("Array[Dynamic[top] | Integer]", slotted)
 
 # --- An EMPTY seed has no element evidence to contradict, so the stored
-# value joins precisely. An Array survives the widening's one-way door
-# (only the FIRST store ever reaches a join) because its element
-# parameter is a union over POSITIONS: a missed store leaves it merely
-# incomplete. The Hash section below is where that stops being true. ---
+# value is admitted as itself — but the parameter still does not CLOSE.
+# This seam sees one store, and the widening is a one-way door, so the
+# next store is invisible; the `b1_*` cases at the bottom are what that
+# costs when the floor is missing. ---
 stack = []
 stack[1] = 42
-assert_type("Array[Integer]", stack)
+assert_type("Array[Dynamic[top] | Integer]", stack)
 
 built = []
 built.push("a")
-assert_type("Array[String]", built)
+assert_type("Array[Dynamic[top] | String]", built)
 
 # --- A seed slot the engine cannot type is EVIDENCE ("this slot holds
 # something unknown"), and reaches the same gradual answer by a
@@ -78,11 +78,8 @@ mixed << "s"
 assert_type("Array[1 | 2 | Dynamic[top]]", mixed)
 
 # --- Hash: the stored key and value join their own side's evidence, and
-# BOTH parameters then stay gradual. Only the first store into a hash
-# ever reaches a join (the widening leaves a Nominal, which is declined),
-# and a Hash's parameters are unions over KEYS that a read selects one
-# of — so closing them makes the read a wrong type for every key the
-# missed stores wrote. Redmine's `import.rb:274` is this shape —
+# take the same gradual floor the element side takes, for the same
+# reason. Redmine's `import.rb:274` is this shape —
 # `csv_options = {:headers => false}` then `csv_options[:encoding] =
 # enc`, read back and compared. ---
 csv_options = { headers: false }
@@ -129,6 +126,57 @@ def to_yaml_straight_line(part)
   hash["multipart_body"] << part
   hash
 end
+
+# --- The straight-line seam sees ONE store, so it may never close the
+# parameter it contributes to. Every line below is correct Ruby that
+# prints "S"; closing the first store's evidence drew `undefined method
+# 'upcase' for Integer` on all three mutator forms. The gradual floor is
+# what keeps them honest — and it costs the stale folds nothing, because
+# a union carrying Dynamic cannot constant-fold either. ---
+def b1_push
+  a = []
+  a.push(1)
+  a.push("s")
+  a.last.upcase
+end
+
+def b1_shovel
+  b = []
+  b << 1
+  b << "s"
+  b.last.upcase
+end
+
+def b1_index_write
+  c = []
+  c[0] = 1
+  c[1] = "s"
+  c.last.upcase
+end
+
+# --- and the must-still-succeed sibling that keeps the floor from being
+# a blanket one: the BLOCK path scans the whole body and joins every
+# store in it, so its evidence IS complete and its join stays precise.
+# ADR-56 slice C owns this answer and this change must not move it. ---
+def block_path_stays_precise
+  acc = []
+  [1, 2, 3].each { |x| acc.push(x) }
+  assert_type("Array[1 | 2 | 3]", acc)
+  acc.last
+end
+
+# --- two live master FPs this join removes, kept as regression pins.
+# The first is post-#561 value pinning read back through a widened hash;
+# the second is the stale element union failing to cover a pushed value. ---
+def fixed_hash_value_read(v)
+  h = { a: 1 }
+  h[:b] = v
+  h[:b].upcase
+end
+
+fixed_include = [1, 2]
+fixed_include.push(6)
+puts "yes" if fixed_include.include?(6)
 
 # --- and the must-still-fire sibling: a value the seed pins to a class
 # with no `<<`, where NO store ever put an appendable there. The literal

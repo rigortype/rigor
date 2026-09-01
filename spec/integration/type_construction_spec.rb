@@ -183,14 +183,15 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(flow.map(&:line)).to eq([marked_line(harness, "# GENUINE-FALSEY")])
     end
 
-    # The join's own FP surface, and the reason an empty seed does not close its parameter. mail's
-    # `Message#to_yaml` stores `{}` and then `[]` into a hash seeded `{}`, and appends through the
-    # READ of the second key; only the first store reaches the join, so a precise value parameter
-    # dropped the Array arm and drew `undefined method '<<' for Hash[...]` on correct code. The
-    # fixture carries the block, unconditional and straight-line forms — the three separate a
-    # branch-scoping bug from an evidence bug — against a value the seed really does pin to a class
-    # with no `<<`, where the diagnostic is right and must survive.
-    it "keeps a stored-then-appended hash value silent without silencing a genuinely pinned one" do
+    # The join's own FP surface, and the reason a straight-line join never CLOSES its parameter.
+    # This seam sees one store and the widening is a one-way door, so the next store is invisible:
+    # `a = []; a.push(1); a.push("s"); a.last.upcase` is correct Ruby that a closed `Array[Integer]`
+    # rejected, and mail's `Message#to_yaml` is the same defect one carrier over. The fixture
+    # carries all three mutator forms of the first and the block / unconditional / straight-line
+    # forms of the second — together they separate a branch-scoping bug from an evidence bug —
+    # against a value the seed really does pin to a class with no `<<`, where the diagnostic is
+    # right and must survive.
+    it "keeps stored-then-read values silent without silencing a genuinely pinned one" do
       undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
       expect(undefined.map(&:line)).to eq([marked_line(harness, "# GENUINE-UNDEFINED")])
     end

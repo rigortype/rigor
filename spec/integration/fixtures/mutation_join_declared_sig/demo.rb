@@ -54,4 +54,4 @@ assert_type("Array[:multi | Dynamic[top]]", heterogeneous)
 
 homogeneous = [:multi]
 homogeneous << :static
-assert_type("Array[:multi | Symbol]", homogeneous)
+assert_type("Array[:multi | Dynamic[top] | Symbol]", homogeneous)

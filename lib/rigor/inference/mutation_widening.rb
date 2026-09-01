@@ -293,14 +293,54 @@ module Rigor
       # carrier untouched.
       #
       # `seed_elements` is the PRE-STATE literal's own element list, not the widened carrier's —
-      # {ContentJoin.admissible_evidence} explains why the two are not interchangeable.
+      # `[]` and `[x]` on an untyped `x` widen to the SAME `Array[Dynamic[top]]`, and only the
+      # literal distinguishes "no evidence" from "one slot holds something unknown".
+      #
+      # **The join records what it saw; it never CLOSES the parameter.** That is
+      # {#gradual_floor}'s job, and the reason is the seam this method sits on rather than anything
+      # about Array or Hash.
       def join_added_elements(widened, method_name, arg_types, seed_elements)
         return widened unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name)
 
         added = value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
         return widened if added.empty?
 
-        ContentJoin.join_array_content(widened, ContentJoin.admissible_evidence(seed_elements, added))
+        admitted = ContentJoin.admissible_evidence(seed_elements, added)
+        ContentJoin.join_array_content(widened, gradual_floor(admitted))
+      end
+
+      # Straight-line evidence is ALWAYS incomplete, so a straight-line join may never close the
+      # parameter it contributes to.
+      #
+      # This seam sees ONE store — the call being evaluated. The widening it feeds is a one-way
+      # door: it replaces the literal carrier with a `Nominal`, and {#widen_for_mutator} declines a
+      # `Nominal` outright, so the NEXT store is invisible. Closing over one sample of a growing
+      # population is therefore a wrong type, not an imprecise one:
+      #
+      #     a = []
+      #     a.push(1)          # joins -> Array[Integer]
+      #     a.push("s")        # DECLINED -- pre-state is a Nominal now
+      #     a.last.upcase      # correct Ruby, prints "S"
+      #
+      # closed to `Array[Integer]` and drew `undefined method 'upcase' for Integer` on code that
+      # runs fine. `mail`'s `Message#to_yaml` is the same defect one carrier over — `hash = {}`,
+      # `hash['headers'] = {}`, then `hash['multipart_body'] = []` appended through the read, where
+      # the value parameter kept the first store's Hash arm and had dropped the Array arm.
+      #
+      # An earlier reading of this blamed the carrier — Array element unions are over positions and
+      # survive a missed store, Hash value unions are over keys and do not. The probe above refutes
+      # it: `a.last` selects a position exactly as `hash[k]` selects a key, and a dropped arm is a
+      # wrong answer either way. The real line is **how much the joining path saw**, and it puts the
+      # BLOCK path (ADR-56 slice C) on the other side: `content_writeback_block_captures` scans the
+      # whole body and joins every mutator call in it before writing back, so its evidence IS
+      # complete for that body and its precise join stays justified — `acc = []; xs.each { |x|
+      # acc.push(x) }` keeps reading `Array[Integer]`.
+      #
+      # `Array[Integer | Dynamic[top]]` still does everything issue #560 needs: a union carrying
+      # `Dynamic` cannot constant-fold, so every stale always-falsey the join was written to remove
+      # stays removed.
+      def gradual_floor(types)
+        types + [Type::Combinator.untyped]
       end
 
       # The Hash-side twin of {#join_added_elements}: `h[k] = v` / `h.store(k, v)` join the stored
@@ -319,14 +359,12 @@ module Rigor
         ContentJoin.join_hash_content(widened, [[key, value]])
       end
 
-      # One carrier for a stored key or value, and it is ALWAYS gradual — see {ContentJoin}'s
-      # "Why the HASH side never closes over its join". Only the first store into a hash reaches a
-      # join, and a Hash's parameters are unions over KEYS that a read selects one of, so a closed
-      # answer is a wrong type for every key the missed stores wrote. `mail`'s `Message#to_yaml`
-      # drew `undefined method '<<'` off exactly that.
+      # One carrier for a stored key or value. A `Hash` pair has a single slot per side, so the
+      # admissible list folds to a union rather than being truncated — and it takes the same
+      # {#gradual_floor} the element side takes, for the same reason: this seam saw one store.
       def admitted_union(seed_members, added)
         admitted = ContentJoin.admissible_evidence(seed_members, [added])
-        Type::Combinator.union(*admitted, Type::Combinator.untyped)
+        Type::Combinator.union(*gradual_floor(admitted))
       end
 
       # Normalizes the types the mutator's arguments contribute, before they join.

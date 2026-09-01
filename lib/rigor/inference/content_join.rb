@@ -63,6 +63,13 @@ module Rigor
           arg_types.drop(1)
         when :[]=
           # `arr[i] = v` / `arr[i, n] = v` — value is the last argument.
+          #
+          # The SPLICE forms (`arr[i, n] = other` / `arr[range] = other`) store `other`'s ELEMENTS,
+          # not `other` itself, so reading the value as one element over-widens: `a[0, 2] = [1, 2]`
+          # contributes `Array[Integer]` where `Integer` is the truth. Left alone deliberately —
+          # the answer is a superset either way, so it can only cost precision, and splitting the
+          # arities here would need the receiver's own element type to unwrap against. Revisit if a
+          # corpus site ever reads an element back through a splice-built array.
           [arg_types.last]
         when :fill
           # `fill(value)` — only the no-block single-value form adds a concrete element; block /
@@ -105,7 +112,7 @@ module Rigor
       end
 
       # ----------------------------------------------------------------
-      # Seed-admissibility — the straight-line join's FP gate (issue #560).
+      # Seed-admissibility — the straight-line join's signature gate (issue #560).
       #
       # A join is not free: it grows the carrier's element union, and a carrier that grows a member
       # the enclosing method's HAND-WRITTEN signature does not admit turns a correct program into a
@@ -119,68 +126,53 @@ module Rigor
       #
       # — where joining the appended tuple precisely reads `Array[:multi | [:static, String]]` and
       # draws a mismatch against `Array[:multi]` on eight sites. (PR #561 hit the same wall from the
-      # other direction and had to scope value-pin widening away from adders to avoid it.)
+      # other direction and had to scope value-pin widening away from adders to avoid it.) A gradual
+      # member does NOT rescue that: `Array[:multi | [:static, String] | untyped]` is still rejected,
+      # because every non-`Dynamic` member is judged on its own. The gate is what keeps the foreign
+      # member out; the caller's gradual floor is a separate concern and neither substitutes for the
+      # other.
       #
       # So added evidence is admitted per member, against the class set the SEED already carries:
       #
       # - the seed's class set already admits the added member's class — the collection is
-      #   homogeneous in the sense that matters, and the member joins precisely
-      #   (`u = [1, 2]; u.push(6)` → `Array[1 | 2 | Integer]`);
+      #   homogeneous in the sense that matters, and the member joins as itself
+      #   (`u = [1, 2]; u.push(6)` contributes `Integer`);
       # - it does not — the collection is provably heterogeneous, and between the literal seed and
       #   the author's signature the engine has no ground to adjudicate. It contributes
-      #   `Dynamic[top]` instead of a foreign precise member. `Array[:multi | untyped]` is gradual:
-      #   it ACCEPTS against the declared `Array[:multi]`, and it still stops the stale constant
-      #   fold, which is the whole point of the join.
-      # - the seed carries NO evidence at all — it is an empty literal — and the join stays gradual.
-      #   {#admissible_evidence} explains why that case is not the precision opportunity it looks
-      #   like.
+      #   `Dynamic[top]` instead of a foreign precise member;
+      # - the seed carries nothing to contradict — an empty literal, or a slot the engine cannot type
+      #   — and every member is admitted as itself.
       #
       # The second case only ever replaces a WRONG precise element type with a gradual one, so it is
       # a soundness improvement paid for in opacity on exactly the sites that were lying.
       #
-      # ----------------------------------------------------------------
-      # Why the HASH side never closes over its join, and the Array side does.
-      #
-      # The widening is a one-way door. It replaces the literal carrier with a `Nominal`, and
-      # {MutationWidening.widen_for_mutator} declines a `Nominal` outright, so only the FIRST store
-      # into a collection ever reaches a join — every later one is invisible.
-      #
-      # An Array survives that. Its element parameter is a union over POSITIONS: each store adds to
-      # one set, no store invalidates another, and a missed store leaves the union merely incomplete.
-      #
-      # A Hash does not. Its value parameter is a union over KEYS, and a read selects ONE key — the
-      # per-key typing that could answer it lived in the `HashShape` the widening just destroyed. So
-      # a missed store does not leave the answer incomplete, it makes the read's type WRONG:
-      #
-      #     hash = {}
-      #     hash['headers'] = {}                          # joins: Hash[String, Hash[…]]
-      #     hash['multipart_body'] = []                   # DECLINED — pre-state is a Nominal now
-      #     body.parts.map { |p| hash['multipart_body'] << p.to_yaml }
-      #
-      # is `mail`'s `Message#to_yaml`. The read answered `Hash[…]` — the first store's value, with
-      # the `[]` store's arm dropped — and a program correct by construction drew `undefined method
-      # '<<'`. kramdown's `hash = {type: el.type}` + `hash[:children] = []` is the same shape from
-      # the other side: there the first store happened to contribute `untyped`, which is the only
-      # reason the join REMOVED a false `undefined method '<<' for Symbol` instead of causing one.
-      #
-      # So {MutationWidening#join_added_pairs} keeps both Hash parameters gradual. The key side goes
-      # with the value side: a too-narrow key parameter turns a later `hash[:sym]` read into a
-      # `call.argument-type` FP by the identical mechanism.
+      # What this module does NOT decide is whether the resulting parameter may be CLOSED. That is
+      # the caller's call, and it turns on whether the caller saw every store —
+      # {MutationWidening#join_added_elements} carries the rule and the counter-example.
 
       # `added`, with every member the seed's class set does not admit replaced by `Dynamic[top]`.
       #
-      # `seed_members` MUST come from the pre-state LITERAL carrier, not from the widened one — `[]`
-      # and `[x]` on an untyped `x` widen to the SAME `Array[Dynamic[top]]`, and only the literal
-      # distinguishes "no evidence" (join it outright) from "one slot holds something unknown" (keep
-      # a gradual member, so {#join_array_content}'s floor-dropping cannot narrow that slot into the
-      # added class).
+      # A seed that carries nothing to contradict admits everything: an empty literal has no class
+      # set, and a `Dynamic` member means the engine could not type that slot, so it cannot rule
+      # anything out either.
+      #
+      # Both sides are flattened through their `Union` members before matching. Judging a union
+      # wholesale would floor `["a", 1]`-shaped evidence against an `Integer` seed even though its
+      # `Integer` half is admissible, and `evidence_class` has no answer for a `Union` at all — so
+      # the wholesale reading is strictly worse and no simpler.
       def admissible_evidence(seed_members, added)
         members = seed_members.flat_map { |m| union_members(m) }
-        return added if members.empty?
-        return added + [Type::Combinator.untyped] if members.any?(Type::Dynamic)
+        return added if members.empty? || members.any?(Type::Dynamic)
 
         classes = members.filter_map { |m| evidence_class(m) }.to_set
-        added.map { |type| classes.include?(evidence_class(type)) ? type : Type::Combinator.untyped }
+        added.flat_map { |type| admit_members(union_members(type), classes) }
+      end
+
+      # Each member of one added type, kept when its class is admitted and floored when it is not.
+      # A type whose members are all admitted returns them unchanged, so the common single-member
+      # case is `[type]`.
+      def admit_members(members, classes)
+        members.map { |m| classes.include?(evidence_class(m)) ? m : Type::Combinator.untyped }
       end
 
       # The class name a type carrier commits its values to, or `nil` when it commits to none. A
@@ -199,9 +191,20 @@ module Rigor
         type.is_a?(Type::Union) ? type.members : [type]
       end
 
-      # Drops `Dynamic` (incl. `untyped`) constituents from a type list.
+      # Drops `Dynamic` (incl. `untyped`) constituents from a type list, INCLUDING the ones sitting
+      # inside a `Union` member — a `Dynamic` is a constituent wherever it sits, which is what this
+      # helper's callers have always meant by the word.
+      #
+      # The nesting is not hypothetical: a straight-line join floors its result (it saw one store,
+      # see {MutationWidening#gradual_floor}), so an accumulator mutated inside a loop reaches the
+      # slice-C re-derivation as `Array[Dynamic[top] | Integer]` rather than the bare
+      # `Array[Dynamic[top]]` it used to. A `grep_v` cannot see that, and ADR-56's own `acc = [];
+      # while …; acc.push(m); end` → `Array[Integer]` silently became `Array[Dynamic[top] |
+      # Integer]`. Discarding it is exactly right at THIS seam: the block and loop paths scan the
+      # whole body and join every store in it, so their evidence is complete and the straight-line
+      # path's admission of incompleteness no longer applies.
       def drop_dynamic(types)
-        types.grep_v(Type::Dynamic)
+        types.flat_map { |type| union_members(type) }.grep_v(Type::Dynamic)
       end
 
       # Element types carried by a collection binding, regardless of which carrier holds them: a

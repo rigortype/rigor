@@ -1,6 +1,6 @@
 ---
 locals:
-  local_array: Array[Symbol]
+  local_array: Array[Dynamic[top] | Symbol]
   local_array_empty: bool
   local_op: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
   local_op_empty: bool

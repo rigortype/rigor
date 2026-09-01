@@ -130,6 +130,23 @@ module Rigor
         widen_receiver_aliases(call_node.receiver, call_node.name, current_scope, arg_types: arg_types)
       end
 
+      # True when `receiver` names at least one variable whose CURRENT binding is a literal-shape
+      # carrier — the only pre-state {#widen_for_mutator} joins into. Callers use it to skip typing a
+      # mutator's arguments when nothing will consume them: `buf << x` on a String and `arr << x` on an
+      # already-nominal Array are the common cases, and `Scope#type_of` memoizes nothing.
+      def joinable_receiver?(receiver, scope)
+        return false if receiver.nil?
+
+        ReceiverAlias.candidates(receiver).any? do |read|
+          current =
+            case read
+            when Prism::LocalVariableReadNode then scope.local(read.name)
+            when Prism::InstanceVariableReadNode then scope.ivar(read.name)
+            end
+          current.is_a?(Type::Tuple) || current.is_a?(Type::HashShape)
+        end
+      end
+
       # Widens every variable `receiver` can evaluate to, against `method_name`'s mutator table.
       def widen_receiver_aliases(receiver, method_name, current_scope, arg_types: NO_ARG_TYPES)
         return current_scope if receiver.nil?

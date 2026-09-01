@@ -470,6 +470,7 @@ module Rigor
       def index_write_arg_types(node, stored_type)
         key_node = first_index_argument(node)
         return MutationWidening::NO_ARG_TYPES if key_node.nil? || stored_type.nil?
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
 
         [scope.type_of(key_node, tracer: tracer), stored_type]
       rescue StandardError
@@ -477,11 +478,17 @@ module Rigor
       end
 
       # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`), typed in the scope the
-      # arguments are evaluated in. Gated on the content-adder table so a non-adding mutator (`pop`, `sort!`)
-      # never pays for typing its arguments.
-      def mutator_arg_types(call_node)
+      # arguments are evaluated in.
+      #
+      # Two gates, both about cost rather than correctness — the join declines on its own in either case.
+      # `Scope#type_of` builds a fresh `ExpressionTyper` per call and memoizes nothing, so typing arguments a
+      # join will not consume is pure overhead, and `<<` on a String buffer is one of the commonest calls
+      # there is. The content-adder table skips a non-adding mutator (`pop`, `sort!`); `joinable_receiver?`
+      # skips a receiver whose current binding is not a literal-shape carrier.
+      def mutator_arg_types(call_node, current_scope)
         return MutationWidening::NO_ARG_TYPES unless ContentJoin::CONTENT_ADDERS.include?(call_node.name)
-        return MutationWidening::NO_ARG_TYPES if call_node.receiver.nil?
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(call_node.receiver,
+                                                                                         current_scope)
 
         content_arg_types(call_node, scope)
       end
@@ -1433,7 +1440,7 @@ module Rigor
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
         post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope,
-                                                       arg_types: mutator_arg_types(node))
+                                                       arg_types: mutator_arg_types(node, post_scope))
         # ADR-48 slice 4 — Struct member-setter re-typing. After `s.x = v` on a fold-safe StructInstance local, rebind
         # `s` to a StructInstance with member `:x` replaced by the assigned type, so a later `s.x` folds to `v` and a
         # sibling `s.y` stays precise. `call_type` is the setter's own result (the assigned value type). Sound only for

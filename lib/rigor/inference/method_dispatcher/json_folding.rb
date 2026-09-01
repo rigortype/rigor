@@ -29,7 +29,7 @@ module Rigor
       # * `generate(obj)` / `generate(obj, opts)` — returns `Nominal[String]`.
       # * `pretty_generate(obj)` / `pretty_generate(obj, opts)` — returns `Nominal[String]`.
       #
-      # === Non-constant / unsupported cases
+      # === Unsupported cases
       #
       # Returns `nil` (deferring to the next dispatcher tier) when:
       # - the receiver is not `Singleton[JSON]`,

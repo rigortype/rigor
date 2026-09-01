@@ -749,7 +749,7 @@ module Rigor
       # receiver and their relative trial order was never observable. Compiling them into a
       # class-name table turns nine no-op trials per call into one Hash read, skipped entirely
       # when the receiver is not a `Singleton` (the overwhelmingly common case). The table sits
-      # where the nine sat in the old flat list: after ShapeDispatch, before KernelDispatch.
+      # where the original eight sat in the old flat list: after ShapeDispatch, before KernelDispatch.
       STDLIB_SINGLETON_FOLDERS = Ractor.make_shareable({
         "File" => FileFolding,
         "Shellwords" => ShellwordsFolding,

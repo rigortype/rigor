@@ -1,0 +1,1 @@
+- **[cache]** A warm `rigor check` now re-analyzes after a `bundle add` / `bundle remove` instead of replaying the diagnostics from before the lockfile changed. ([#565](https://github.com/rigortype/rigor/pull/565))

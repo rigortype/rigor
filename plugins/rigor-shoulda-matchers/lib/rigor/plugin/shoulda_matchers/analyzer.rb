@@ -30,8 +30,8 @@ module Rigor
       #   have_db_column(:col)
       #   have_db_index(:col)
       #
-      # All look up `:col` against the model's columns (`Entry#column?`). Unknown columns fire
-      # `unknown-column`.
+      # All look up `:col` against the model's `columns:` (the published `:model_index` fact's flat
+      # `Array<String>` per model — see `Analyzer#column_names`). Unknown columns fire `unknown-column`.
       #
       # ### Association matchers
       #
@@ -74,7 +74,10 @@ module Rigor
 
         # @param path [String]
         # @param root [Prism::Node]
-        # @param model_index [Object, nil] the `:model_index` fact value. When nil the analyzer falls silent.
+        # @param model_index [Hash{String => Hash}, nil] the `:model_index` fact value — the flat
+        #   `class_name => { table:, columns:, associations:, ... }` Hash `rigor-activerecord` publishes
+        #   (ADR-9's "the value is data, not objects" contract; see `Activerecord#index_to_published_hash`).
+        #   When nil the analyzer falls silent.
         # @return [Array<Diagnostic>]
         # The matcher violations for a single call node (0..1), or `[]` when it is not a shoulda matcher,
         # sits outside any `describe <ModelConst>` block, or the model is unknown. ADR-37: the engine owns
@@ -84,7 +87,7 @@ module Rigor
         #
         # @param matcher_call [Prism::Node]
         # @param ancestors [Array<Prism::Node>]
-        # @param model_index [Object, nil]
+        # @param model_index [Hash{String => Hash}, nil]
         # @return [Array<Violation>]
         def violations_for(matcher_call:, ancestors:, model_index:)
           return [] if model_index.nil?
@@ -93,7 +96,10 @@ module Rigor
           anchor = anchor_for(ancestors)
           return [] if anchor.nil?
 
-          entry = model_index.find(anchor)
+          # Keyed Hash lookup — NOT `ModelIndex#find`. The published fact is a plain Hash (`class_name =>
+          # entry Hash`), never the `ModelIndex` object `rigor-activerecord` builds internally (issue #573:
+          # `Hash#find(anchor)` with no block returns an Enumerator, not the entry).
+          entry = model_index[anchor]
           return [] if entry.nil?
 
           violation = diagnostic_for(matcher_call, anchor, entry)
@@ -170,19 +176,30 @@ module Rigor
           end
         end
 
+        # `entry` is the published fact's per-model Hash: `{ table:, columns:, associations:, ... }`.
+        # `columns:` is a flat `Array<String>` (`Activerecord#index_to_published_hash`); `associations:` is
+        # `Array<Hash>` with String `:name`, Symbol `:kind` (`:singular` | `:collection`), `:nullable`,
+        # `:polymorphic`, and a `:target` that is a String except on polymorphic rows, where it is nil —
+        # the row shape `ModelDiscoverer#build_association_row` publishes. Only `:name` and `:kind` are
+        # read here.
+        def column_names(entry) = entry[:columns] || []
+        def association_rows(entry) = entry[:associations] || []
+        def find_association(entry, name) = association_rows(entry).find { |a| a[:name] == name.to_s }
+
         def column_violation(matcher_call, anchor, entry, column_name)
-          return nil if entry.column?(column_name)
+          return nil if column_names(entry).include?(column_name.to_s)
 
           Violation.new(
             rule: "unknown-column",
             message: "#{matcher_call.name}(:#{column_name}) — no column `#{column_name}` on " \
-                     "#{anchor} (columns: #{entry.column_names.sort.join(', ')})"
+                     "#{anchor} (columns: #{column_names(entry).sort.join(', ')})"
           )
         end
 
         def association_violation(matcher_call, anchor, entry, assoc_name, expected_kind:)
-          if entry.association?(assoc_name)
-            actual = entry.association(assoc_name)[:kind]
+          association = find_association(entry, assoc_name)
+          if association
+            actual = association[:kind]
             return nil if actual == expected_kind
 
             Violation.new(
@@ -191,10 +208,11 @@ module Rigor
                        "a #{actual} association; #{matcher_call.name} expects #{expected_kind}"
             )
           else
+            known = association_rows(entry).map { |a| a[:name] }
             Violation.new(
               rule: "unknown-association",
               message: "#{matcher_call.name}(:#{assoc_name}) — no association `#{assoc_name}` on " \
-                       "#{anchor} (associations: #{entry.association_names.sort.join(', ')})"
+                       "#{anchor} (associations: #{known.sort.join(', ')})"
             )
           end
         end

@@ -638,13 +638,15 @@ RSpec.describe "plugins/rigor-activerecord" do
   describe "class-side `table_name` / `quoted_table_name` (#569 follow-on)" do
     # `Model.table_name` was the single largest opaque call family on a schema-less project (517
     # named-receiver sites on Redmine). The index already resolves the name, so the call can be typed —
-    # but only PINNED to that exact string where the name is not a guess. `Entry#table_name_exact?` draws
-    # the line: declared in source, or corroborated by a table the schema actually has.
+    # but only PINNED to that exact string where the source SAYS the name. `Entry#table_name_exact?` is
+    # declared-only: a String-literal `self.table_name =` on the class or an STI ancestor, with no computed
+    # override anywhere in the chain. An inflected name is never pinned, and the schema is not admitted as
+    # corroboration for one (see the `users` example below).
 
     let(:tn_models) do
       {
         "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
-        # Inflected, and the schema (when present) has a `users` table — corroborated.
+        # Inflected to `users`, which the schema below DOES declare — and still must not pin.
         "app/models/user.rb" => "class User < ApplicationRecord\nend\n",
         # Declared, and deliberately DISAGREEING with the inflection (`legacy_people`), so an assertion on
         # "people" cannot pass by accident.
@@ -655,22 +657,39 @@ RSpec.describe "plugins/rigor-activerecord" do
         RUBY
         # STI child of a declared-name root: shares the root's table.
         "app/models/employee.rb" => "class Employee < LegacyPerson\nend\n",
-        # Inflected to `ghosts`, which no schema here declares — the shape a `table_name_prefix` or a
-        # project-custom inflection produces.
-        "app/models/ghost.rb" => "class Ghost < ApplicationRecord\nend\n",
-        # Computes its own name, AND inflects to `tenants`, which the schema below DOES declare. The
-        # corroboration is a coincidence: the running app reads `<tenant>_tenants`, so pinning `"tenants"`
-        # here would fold `Tenant.table_name == "tenants"` to true against a name the app never uses.
+        # The three computed-override spellings. Each sits UNDER a declared literal — an ancestor's in the
+        # first two, its own in the third — so the chain walk does find a literal and the examples below
+        # fail without the computed guard rather than passing for the trivial reason.
+        "app/models/tenant_base.rb" => <<~RUBY,
+          class TenantBase < ApplicationRecord
+            self.table_name = "tenants"
+          end
+        RUBY
         "app/models/tenant.rb" => <<~'RUBY',
-          class Tenant < ApplicationRecord
+          class Tenant < TenantBase
             self.table_name = "#{Current.tenant}_tenants"
           end
         RUBY
-        # Same hazard, spelled as a singleton method instead of an assignment.
-        "app/models/shard.rb" => <<~'RUBY'
-          class Shard < ApplicationRecord
+        "app/models/shard_base.rb" => <<~RUBY,
+          class ShardBase < ApplicationRecord
+            self.table_name = "shards"
+          end
+        RUBY
+        "app/models/shard.rb" => <<~'RUBY',
+          class Shard < ShardBase
             def self.table_name
               "shard_#{Current.id}"
+            end
+          end
+        RUBY
+        "app/models/ledger.rb" => <<~'RUBY'
+          class Ledger < ApplicationRecord
+            self.table_name = "ledgers_v1"
+
+            class << self
+              def table_name
+                "ledgers_#{Current.era}"
+              end
             end
           end
         RUBY
@@ -695,6 +714,10 @@ RSpec.describe "plugins/rigor-activerecord" do
           create_table "shards", force: :cascade do |t|
             t.string "label"
           end
+
+          create_table "ledgers", force: :cascade do |t|
+            t.string "label"
+          end
         end
       SCHEMA
     end
@@ -716,22 +739,19 @@ RSpec.describe "plugins/rigor-activerecord" do
       it "pins an STI child to its root's declared table" do
         expect(tn_types("Rigor.dump_type(Employee.table_name)\n", schema: nil)).to eq(['"people"'])
       end
-
-      it "pins an inflected name the schema corroborates" do
-        expect(tn_types("Rigor.dump_type(User.table_name)\n", schema: tn_schema)).to eq(['"users"'])
-      end
     end
 
-    describe "must not pin — an uncorroborated derivation widens instead of guessing a value" do
-      it "answers String, not a pinned guess, for an inflected name with no schema" do
+    describe "must not pin — anything short of a source declaration widens instead of guessing" do
+      it "answers String for an inflected name in BOTH modes, schema table or not" do
         # The opacity is still closed (`Dynamic[top]` is what this call produced before), but the exact
-        # string is unknown: `table_name_prefix`, a `def self.table_name` override and a custom inflection
-        # all land here, and pinning any of them would be a wrong precise type.
-        expect(tn_types("Rigor.dump_type(User.table_name)\n", schema: nil)).to eq(["String"])
-      end
-
-      it "answers String for an inflected name the schema does not declare" do
-        expect(tn_types("Rigor.dump_type(Ghost.table_name)\n", schema: tn_schema)).to eq(["String"])
+        # string is unknown, and a `users` table in the schema is NOT evidence that it is `User`'s: under an
+        # `ApplicationRecord` with `self.table_name_prefix = "app_"`, `User` really reads `app_users` while
+        # a `users` table declared by some other model would "corroborate" the inflection — and the pin
+        # would fold `User.table_name == "app_users"` always-falsey on working code. Prefix / suffix /
+        # namespace derivation is not reachably airtight, so no inflected name is ever pinned.
+        source = "Rigor.dump_type(User.table_name)\n"
+        expect(tn_types(source, schema: nil)).to eq(["String"])
+        expect(tn_types(source, schema: tn_schema)).to eq(["String"])
       end
 
       it "never pins `quoted_table_name` — the quoting is adapter-dependent" do
@@ -744,17 +764,23 @@ RSpec.describe "plugins/rigor-activerecord" do
         expect(tn_types("Rigor.dump_type(Widget.table_name)\n", schema: tn_schema)).to eq(["Dynamic[top]"])
       end
 
-      it "refuses a coincidental schema match when the class computes its own name" do
-        # `Tenant` inflects to `tenants` and the schema HAS a `tenants` table, so the corroboration rule
-        # alone would pin it — but the class assigns a computed name, so the match is a coincidence. Pinning
-        # would fold `Tenant.table_name == "tenants"` to `true` against a name the app never uses. The
-        # `LegacyPerson` example above is the must-still-pin sibling: a literal declaration still pins even
-        # though it too is an explicit override.
+      # The three computed-override spellings, each over a chain that DOES carry a declared literal — so
+      # without the `table_name_computed` guard the chain walk finds that literal and pins it, and each
+      # example fails. `LegacyPerson` above is the must-still-pin sibling: a literal with nothing computing
+      # over it still pins.
+      it "refuses when a non-literal `self.table_name =` overrides an ancestor's declaration" do
+        # `Tenant`'s chain declares `"tenants"` on `TenantBase`, but `Tenant` assigns a computed name, so
+        # `"tenants"` is not what the app reads. Pinning it would fold `Tenant.table_name == "acme_tenants"`
+        # always-falsey.
         expect(tn_types("Rigor.dump_type(Tenant.table_name)\n", schema: tn_schema)).to eq(["String"])
       end
 
-      it "refuses the same when the override is a `def self.table_name`" do
+      it "refuses when a `def self.table_name` overrides an ancestor's declaration" do
         expect(tn_types("Rigor.dump_type(Shard.table_name)\n", schema: tn_schema)).to eq(["String"])
+      end
+
+      it "refuses the `class << self; def table_name` spelling over the class's own declaration" do
+        expect(tn_types("Rigor.dump_type(Ledger.table_name)\n", schema: tn_schema)).to eq(["String"])
       end
     end
   end

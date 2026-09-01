@@ -39,11 +39,12 @@ module Rigor
         #              `belongs_to` → `false` (required by default since Rails 5) unless `optional: true`
         #              / `required: false`. Meaningless for `:collection` rows.
         #
-        # `table_name_exact` records whether `table_name` is the name the application actually uses or a
-        # derivation nothing corroborates. It is true when the source DECLARED it (`self.table_name =
-        # "..."` somewhere in the STI chain) or when the parsed schema has a table by that name; false when
-        # the name is a bare {Inflector.tableize} guess the schema could not confirm. Only a true reading
-        # licenses pinning the name to a value — see `Activerecord#table_name_return_type`.
+        # `table_name_exact` records whether `table_name` is the name the application actually uses, or a
+        # derivation that merely looks right. It is true ONLY when the source declared the name as a String
+        # literal — `self.table_name = "…"` on this class or, walking leaf → root, on an STI ancestor — and
+        # no class in that chain also computes the name at runtime. An {Inflector.tableize} guess is never
+        # exact. Only a true reading licenses pinning the name to a value; see
+        # `Activerecord#table_name_return_type` for why the schema is not admitted as corroboration.
         Entry = Struct.new(:class_name, :table_name, :table_name_exact, :columns, :associations,
                            :enums, :scopes, :validations, :callbacks, :aliases,
                            keyword_init: true) do
@@ -130,7 +131,7 @@ module Rigor
             acc[class_name] = Entry.new(
               class_name: class_name,
               table_name: table_name,
-              table_name_exact: table_name_exact?(chain, declared, table_name, schema_table),
+              table_name_exact: table_name_exact?(chain, declared),
               columns: columns.freeze,
               associations: merge_named_rows(chain.flat_map { |r| Array(r[:associations]) }),
               enums: merge_enums(chain),
@@ -179,19 +180,23 @@ module Rigor
           declared_table_name(chain) || inflected_table_name(chain)
         end
 
-        # Whether `table_name` is the name the application actually uses, rather than a derivation nothing
-        # corroborates — the condition that licenses pinning it to a value.
+        # Whether `table_name` is the name the application actually uses — the condition that licenses
+        # pinning it to a value. DECLARED-ONLY: a String literal `self.table_name =` on this class or an STI
+        # ancestor, and no class in the chain computing the name at runtime (`def self.table_name`, the
+        # `class << self` spelling, a non-literal assignment) — a computed override anywhere beats an
+        # ancestor's literal, because it is what actually answers.
         #
-        # A class anywhere in the STI chain that computes its own name (`def self.table_name`, a non-literal
-        # `self.table_name =`) is never exact, EVEN IF the schema happens to have a table matching the
-        # inflection: that match would be a coincidence, not a corroboration. Otherwise a literal
-        # declaration is exact by construction, and a bare inflection is exact only when the parsed schema
-        # confirms a table by that name.
-        def self.table_name_exact?(chain, declared, table_name, schema_table)
+        # An inflected name is NEVER exact, not even when the parsed schema has a table by that name.
+        # Existence in the schema is not corroboration: the table can belong to a different model. Under an
+        # `ApplicationRecord` that sets `self.table_name_prefix = "app_"`, `User` really reads `app_users`
+        # while a schema carrying both `users` (another model's, declared) and `app_users` would "confirm"
+        # the inflected `users` — and `User.table_name == "app_users"`, true at runtime, would then fold
+        # always-falsey. Prefix / suffix / namespace derivation is not reachably airtight, so the lane is
+        # dropped rather than patched.
+        def self.table_name_exact?(chain, declared)
           return false if chain.any? { |row| row[:table_name_computed] }
-          return true unless declared.nil?
 
-          schema_table&.table?(table_name) || false
+          !declared.nil?
         end
 
         # The nearest explicit `self.table_name = "..."` walking leaf → root, or nil when the chain declared

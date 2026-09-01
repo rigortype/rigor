@@ -354,13 +354,20 @@ module Rigor
       end
 
       # `Model.table_name` is a String either way; whether it is safe to VALUE-PIN turns on how the name was
-      # derived. `Entry#table_name_exact?` holds only when the source declared it (`self.table_name = "…"`)
-      # or the parsed schema has a table by that name. An inflected guess nothing corroborates is NOT
-      # pinned: a `def self.table_name` override, a `table_name_prefix` / `table_name_suffix` on the
-      # namespace, an abstract class (whose real answer is `nil`), and a project-custom inflection rule (the
-      # manual's own listed limitation) all land there, and `Constant["users"]` on any of them is a wrong
-      # precise type that value-dependent folding downstream would then act on. Widening to `String` is
-      # monotone imprecision instead — and it still closes the opacity, which is what the call site had.
+      # derived. `Entry#table_name_exact?` holds ONLY for a name the source declared as a String literal
+      # (`self.table_name = "…"`, inherited down an STI chain, and not overridden by a computed one). An
+      # inflected name is never pinned, however plausible: a `table_name_prefix` / `table_name_suffix` on
+      # the namespace, an abstract class (whose real answer is `nil`), and a project-custom inflection rule
+      # all silently change the real name, and `Constant["users"]` on any of them is a wrong precise type
+      # that value-dependent folding downstream acts on — `Model.table_name == <real name>` folds
+      # always-falsey, an error on working code.
+      #
+      # The schema is deliberately NOT admitted as corroboration for an inflected name. A table existing
+      # does not make it THIS model's table: with a `table_name_prefix = "app_"`, `User` reads `app_users`
+      # while a `users` table declared by another model would "confirm" the inflection. Prefix / suffix /
+      # namespace derivation is not reachably airtight, and a smaller set of pins beats a wrong one.
+      # Widening to `String` is monotone imprecision — and it still closes the opacity the call site had,
+      # which is the whole measured win.
       #
       # `String` rather than `String | nil` for the abstract-class case follows the same call as
       # `#column_return_type`: under-reporting nil is a false negative, over-reporting it lights up

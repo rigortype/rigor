@@ -77,15 +77,23 @@ scope invoked on a typed relation (`User.where(...).published`)
 never surfaces a false `call.undefined-method`.
 
 `User.table_name` types as `String`, and as the exact string
-where the plugin knows it exactly — a `self.table_name = "people"`
-in your source (inherited down an STI chain), or an inflected name
-the schema confirms with a table of that name. An inflected name
-nothing confirms stays plain `String`: `table_name_prefix`, a
-`def self.table_name` override and a custom inflection rule all
-produce a name the plugin cannot see, and guessing the value
-there would be worse than not knowing it.
-`User.quoted_table_name` is always `String` — the quoting is up
-to the database adapter.
+only when your source says the name: a literal
+`self.table_name = "people"` on the class or on an STI ancestor,
+with nothing in that chain computing the name at runtime (a
+`def self.table_name`, a `class << self` version of it, or an
+interpolated assignment all count as computing it). Every other
+name — anything the plugin derived by pluralizing the class name —
+stays plain `String`.
+
+That includes names that look confirmed. A `users` table in your
+schema is not evidence that it is `User`'s table: with a
+`self.table_name_prefix` on the base class, `User` really reads
+`app_users`, and a `users` table belonging to some other model
+would "confirm" the wrong guess. A wrong exact string is worse
+than an honest `String` — code comparing `User.table_name` would
+quietly take the wrong branch — so the plugin pins only what you
+wrote down. `User.quoted_table_name` is always `String`; the
+quoting is up to the database adapter.
 
 ## Limitations
 

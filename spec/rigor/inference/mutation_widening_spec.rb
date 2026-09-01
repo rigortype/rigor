@@ -83,8 +83,8 @@ RSpec.describe Rigor::Inference::MutationWidening do
     it "keeps value pinning under an ADDING mutator (`<<` never rewrites an existing slot)" do
       # haml's `tmp = [:multi]; tmp << compiled` returns arrays that really do start with `:multi`,
       # and its handwritten sig says `Array[:multi]` — widening the pinning under `<<` drew eight
-      # false `def.return-type-mismatch` on the corpus gate. The added value's under-coverage is the
-      # value-join half still open on #560.
+      # false `def.return-type-mismatch` on the corpus gate. The ADDED value's under-coverage is
+      # covered separately, by the arg_types join below.
       tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(:multi))
       widened = described_class.widen_for_mutator(tuple, :<<)
       expect(widened.class_name).to eq("Array")
@@ -179,6 +179,97 @@ RSpec.describe Rigor::Inference::MutationWidening do
         Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
       )
       expect(described_class.widen_for_mutator(odd, :clear)).to be_nil
+    end
+  end
+
+  # Issue #560 — the ADDED-value join. `arg_types` carries the mutator call's argument types; the
+  # widened carrier joins the content evidence they introduce, so the continuation covers the value
+  # the mutation actually stored instead of only the seed's.
+  describe ".widen_for_mutator with added-value evidence" do
+    def constant(value)
+      Rigor::Type::Combinator.constant_of(value)
+    end
+
+    def nominal(name)
+      Rigor::Type::Combinator.nominal_of(name)
+    end
+
+    it "joins an appended value's class into the element union" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1), constant(2))
+      widened = described_class.widen_for_mutator(tuple, :push, arg_types: [constant(6)])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(constant(1), constant(2), nominal("Integer")))
+    end
+
+    # Without the join, `u.last` reads `1 | 2` and `u.last == 6` folds to a constant. The default
+    # (no `arg_types`) is the pre-join behaviour, which is what makes this pair discriminating.
+    it "leaves the element union alone when no argument evidence is supplied" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1), constant(2))
+      widened = described_class.widen_for_mutator(tuple, :push)
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(constant(1), constant(2)))
+    end
+
+    # The added value is value-pin widened before it joins, or the join would trade an always-falsey
+    # fold for an always-truthy one: `Array[1 | 2 | 6]` lets `u.last == 6` fold to `true`.
+    it "widens the added value's own pinning rather than joining the constant" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1))
+      widened = described_class.widen_for_mutator(tuple, :<<, arg_types: [constant(6)])
+      expect(widened.type_args.first.members).to include(nominal("Integer"))
+      expect(widened.type_args.first.members).not_to include(constant(6))
+    end
+
+    # An empty seed has no evidence to contradict, so the store joins precisely — mail's ragel
+    # `stack = []; stack[top] = cs` (issue #533 item 8), which read `Array[untyped]` before.
+    it "joins precisely into an empty seed" do
+      widened = described_class.widen_for_mutator(
+        Rigor::Type::Combinator.tuple_of, :[]=, arg_types: [constant(0), constant(42)]
+      )
+      expect(widened.type_args.first).to eq(nominal("Integer"))
+    end
+
+    # The FP gate. haml's `temple = [:multi]; temple << [:static, s]` against a hand-written
+    # `-> Array[:multi]`: a precise join reads `Array[:multi | [:static, String]]`, which the
+    # subtype oracle rejects. A class the seed does not admit takes the gradual floor instead.
+    it "floors an added member whose class the seed does not admit" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(:multi))
+      added = Rigor::Type::Combinator.tuple_of(constant(:static), constant("x"))
+      widened = described_class.widen_for_mutator(tuple, :<<, arg_types: [added])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(constant(:multi),
+                                                                          Rigor::Type::Combinator.untyped))
+    end
+
+    it "joins precisely when the seed's class set DOES admit the added member" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(:multi))
+      widened = described_class.widen_for_mutator(tuple, :<<, arg_types: [constant(:static)])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(constant(:multi), nominal("Symbol")))
+    end
+
+    # A stored literal collection stays aliased and gets mutated through the slot
+    # (`params[:f] ||= []; params[:f] << :status`), so its literal SHAPE is erased along with the
+    # value pinning — `Hash[Symbol, []]` would fold `params[:f].empty?` to a wrong `true`.
+    it "erases a stored literal collection's shape, keeping its class" do
+      widened = described_class.widen_for_mutator(
+        Rigor::Type::HashShape.new, :[]=,
+        arg_types: [constant(:f), Rigor::Type::Combinator.tuple_of]
+      )
+      expect(widened.type_args.first).to eq(nominal("Symbol"))
+      expect(widened.type_args.last).to eq(Rigor::Type::Combinator.nominal_of(
+                                             "Array", type_args: [Rigor::Type::Combinator.untyped]
+                                           ))
+    end
+
+    it "joins a stored key and value into a HashShape's own evidence" do
+      shape = Rigor::Type::HashShape.new(a: constant(1))
+      widened = described_class.widen_for_mutator(shape, :store, arg_types: [constant(:b), constant(2)])
+      expect(widened.type_args.first).to eq(nominal("Symbol"))
+      expect(widened.type_args.last).to eq(nominal("Integer"))
+    end
+
+    # Removers and reorderers add nothing: the arity-forget alone, byte-identical to the no-evidence
+    # call. Supplying arg_types must not make them join.
+    it "ignores argument evidence for a mutator that adds no content" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1))
+      expect(described_class.widen_for_mutator(tuple, :delete, arg_types: [constant("x")]))
+        .to eq(described_class.widen_for_mutator(tuple, :delete))
     end
   end
 

@@ -232,4 +232,57 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(result.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
     end
   end
+
+  # Issue #560 — the straight-line join's FP gate. Growing a carrier's element union can break a
+  # HAND-WRITTEN signature (haml's `temple = [:multi]; temple << [:static, s]` against
+  # `-> Array[:multi]`), so added evidence is admitted per member against the class set the seed
+  # already carries, and a member the seed does not admit takes the gradual floor instead.
+  describe ".admissible_evidence" do
+    let(:untyped) { Rigor::Type::Combinator.untyped }
+
+    def constant(value)
+      Rigor::Type::Combinator.constant_of(value)
+    end
+
+    def nominal(name)
+      Rigor::Type::Combinator.nominal_of(name)
+    end
+
+    it "admits a member whose class the seed already carries" do
+      expect(described_class.admissible_evidence([constant(1)], [nominal("Integer")]))
+        .to eq([nominal("Integer")])
+    end
+
+    it "floors a member whose class the seed does not carry" do
+      expect(described_class.admissible_evidence([constant(:multi)], [nominal("String")]))
+        .to eq([untyped])
+    end
+
+    # An empty seed has nothing to contradict, so nothing is floored — this is where the precision
+    # goes (`stack = []; stack[top] = cs`).
+    it "admits everything when the seed carries no evidence" do
+      expect(described_class.admissible_evidence([], [nominal("String")])).to eq([nominal("String")])
+    end
+
+    # A `Dynamic` seed member is the empty-literal FLOOR, not evidence: `join_array_content` drops it
+    # as soon as real added evidence exists, so it must not act as a class the seed carries either.
+    it "treats a Dynamic seed member as no evidence rather than as a class" do
+      expect(described_class.admissible_evidence([untyped], [nominal("String")]))
+        .to eq([nominal("String")])
+    end
+
+    it "reads a Union seed's members individually" do
+      seed = [Rigor::Type::Combinator.union(constant(:a), nominal("Integer"))]
+      expect(described_class.admissible_evidence(seed, [nominal("Integer"), nominal("String")]))
+        .to eq([nominal("Integer"), untyped])
+    end
+
+    # A carrier whose class cannot be named cannot be SHOWN compatible, so it floors. The Tuple case
+    # is the haml one: an appended `[:static, …]` is an Array, and a Symbol seed does not admit it.
+    it "names Tuple and HashShape by their runtime class" do
+      expect(described_class.evidence_class(Rigor::Type::Combinator.tuple_of)).to eq("Array")
+      expect(described_class.evidence_class(Rigor::Type::HashShape.new)).to eq("Hash")
+      expect(described_class.evidence_class(Rigor::Type::Combinator.untyped)).to be_nil
+    end
+  end
 end

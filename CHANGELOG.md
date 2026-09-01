@@ -28,6 +28,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** `rigor coverage --protection` no longer reports a call to your own method as an "unsupported syntax" hole when the real story is a return type Rigor could not infer — the cause table now routes those sites to the inference-gap bucket, so the report's engine-gap/add-RBS split reflects what would actually help ([#536](https://github.com/rigortype/rigor/pull/536), [#522](https://github.com/rigortype/rigor/issues/522)).
+
 - **[engine]** Slot-rewriting mutators (`t[0] += 5`, `opts[:k] = v`, `fill`, `map!`) now widen a literal collection's value pinning along with its shape, so the stale constant union no longer feeds a false always-falsey on the new value ([#561](https://github.com/rigortype/rigor/pull/561), [#560](https://github.com/rigortype/rigor/issues/560)).
 - **[engine]** An index write on a receiver the engine cannot shape no longer synthesizes a Hash type — mail's `compose_codepoints`, which mutates its Array parameter through integer and range index writes, returns untyped instead of a phantom `Hash[Integer | Range, ...]` that fired on the caller's `.pack` ([#559](https://github.com/rigortype/rigor/pull/559), [#553](https://github.com/rigortype/rigor/issues/553)).
 - **[engine]** `x.attr ||= v`, `x.attr &&= v`, and `x.attr += v` now carry their real value semantics instead of falling to untyped as unsupported syntax — the last genuinely unmodeled expressions the corpus survey found ([#552](https://github.com/rigortype/rigor/pull/552), [#532](https://github.com/rigortype/rigor/issues/532)).

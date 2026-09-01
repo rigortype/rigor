@@ -213,6 +213,42 @@ self-check ~19.9s). The `loop_body_fixpoint` fixture's `acc.push(m)` case
 tightened from the imprecise-but-sound `Array[Dynamic[top]] | []` to
 `Array[Integer]` (a slice-C precision win, fixture + spec updated).
 
+**Generalized to straight-line code (2026-09-01, issue #560).** The
+same under-coverage exists without a block: `u = [1, 2]; u.push(6)`
+kept `Array[1 | 2]`, so `u.last == 6` folded to a constant and drew a
+false always-falsey. The join is therefore no longer a block-path
+mechanism, and its algebra moved out of `MutationWidening` into
+`Rigor::Inference::ContentJoin` — `CONTENT_ADDERS`,
+`array_added_elements`, `join_array_content`, `join_hash_content` — so
+`widen_after_call` / `IndexWriteWidening.widen` and the block seams
+above share one implementation rather than the second copy WD3 warns
+about. The straight-line caller types the mutator's arguments in the
+scope they are evaluated in and threads them as `arg_types:`; an
+index-write node (`h[k] ||= v` and siblings) synthesizes the `[]=`
+argument shape `[key, stored_value]`.
+
+Two gates that the block path does not need bind the straight-line
+one, because there the join's result reaches a `def`'s return check:
+
+- **Seed admissibility.** Growing a carrier's element union can break
+  a hand-written signature. haml's `temple = [:multi]; temple <<
+  [:static, s]` against `-> Array[:multi]` draws eight false
+  `def.return-type-mismatch` if the appended tuple joins precisely,
+  and PR #561 hit the same wall from the other direction. A member
+  whose class the seed does not already carry therefore contributes
+  `Dynamic[top]` instead — `Array[:multi | Dynamic[top]]` is gradual,
+  so it accepts against the declared type while still stopping the
+  stale fold. An empty seed has nothing to contradict, which is where
+  the precision goes: mail's `stack = []; stack[top] = cs` reads
+  `Array[Integer]` where it read `Array[Dynamic[top]]`.
+- **Shape erasure on the added value.** A stored literal collection
+  stays aliased and is mutated through the slot (`params[:f] ||= [];
+  params[:f] << :status`), so its literal shape is erased along with
+  its value pinning — `[]` joins as `Array[Dynamic[top]]`. Joining the
+  literal `[]` would pin `Hash[Symbol, []]` on a hash whose slot holds
+  `[:status]`, and `params[:f].empty?` would fold to a wrong `true`:
+  the same class of stale fold the change exists to remove.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

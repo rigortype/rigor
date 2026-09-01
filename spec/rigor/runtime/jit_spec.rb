@@ -5,7 +5,12 @@ require "rigor/runtime/jit"
 
 RSpec.describe Rigor::Runtime::Jit do
   # Snapshot + restore the two env switches this module reads so an example
-  # that sets them never leaks state into the rest of the suite.
+  # that sets them never leaks state into the rest of the suite. This is also
+  # the one file that lifts `spec_helper`'s suite-wide `RIGOR_DISABLE_YJIT=1`
+  # pin — it has to, since the examples below exercise the enable paths that
+  # pin exists to suppress — so the window in which a stray sleeper thread
+  # could land on `stub_yjit_off` is exactly these examples. Nothing else may
+  # arm a real deadline; `cli_spec` pins that.
   # The recorded monotonic deadline is module state that outlives an example (and that any earlier spec
   # arming a real deadline would have set), so it is snapshotted and cleared here too.
   around do |example|

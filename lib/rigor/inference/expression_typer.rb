@@ -83,6 +83,9 @@ module Rigor
         Prism::ProgramNode => :type_of_program,
         # Calls
         Prism::CallNode => :call_type_for,
+        Prism::CallOrWriteNode => :call_or_write_type_for,
+        Prism::CallAndWriteNode => :call_and_write_type_for,
+        Prism::CallOperatorWriteNode => :call_operator_write_type_for,
         Prism::ArgumentsNode => :type_of_non_value,
         # Constants
         Prism::ConstantReadNode => :type_of_constant_read,
@@ -1121,6 +1124,48 @@ module Rigor
         # propagates correctly through downstream call chains without surfacing misleading false-positive
         # diagnostics.
         dynamic_top
+      end
+
+      # Issue #532 — the attribute compound-write family (`x.attr ||= v`, `&&=`, `+=`), the last
+      # genuinely unmodeled value-position constructs the 2026-09-01 corpus census found (they fell to the
+      # `unsupported_syntax` fallback). Value semantics mirror the local / ivar / index siblings:
+      # `||=` is `truthy(read) | rhs`, `&&=` is `falsey(read) | rhs`, and an operator write is the
+      # operator dispatched on the read result. A `&.`-form compound write unions the skipped-call nil in
+      # (#518's rule). Scope effects stay as before (none) — the struct member writeback and shape
+      # widening for these forms are follow-up work recorded on #532.
+      def call_or_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        value = Type::Combinator.union(Narrowing.narrow_truthy(current), type_of(node.value))
+        with_compound_write_safe_nav(node, value)
+      end
+
+      def call_and_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        value = Type::Combinator.union(Narrowing.narrow_falsey(current), type_of(node.value))
+        with_compound_write_safe_nav(node, value)
+      end
+
+      def call_operator_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        result = MethodDispatcher.dispatch(
+          receiver_type: current, method_name: node.binary_operator, arg_types: [type_of(node.value)],
+          environment: scope.environment, call_node: node, scope: scope
+        ) || dynamic_top
+        with_compound_write_safe_nav(node, result)
+      end
+
+      def attribute_compound_read_type(node)
+        receiver = type_of(node.receiver)
+        MethodDispatcher.dispatch(
+          receiver_type: receiver, method_name: node.read_name, arg_types: [],
+          environment: scope.environment, call_node: node, scope: scope
+        ) || dynamic_top
+      end
+
+      def with_compound_write_safe_nav(node, value)
+        return value unless node.call_operator_loc&.slice == "&."
+
+        Type::Combinator.union(value, Type::Combinator.constant_of(nil))
       end
 
       # Slice 2 routes call expressions through `MethodDispatcher`. The receiver and every argument are typed

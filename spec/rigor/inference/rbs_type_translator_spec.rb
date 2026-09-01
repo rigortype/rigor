@@ -190,5 +190,67 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
         expect(type.class_name).to eq("Integer")
       end
     end
+
+    describe "alias and intersection types (issue #529)" do
+      let(:loader) do
+        Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: issue #529)", <<~RBS]])
+          type str_like = ::String
+          type wrapped = ::Array[str_like]
+          type json = ::String | ::Array[json]
+
+          interface _Marker
+          end
+
+          class AliasedNode
+          end
+
+          type nodeish = AliasedNode & _Marker
+        RBS
+      end
+
+      it "resolves an alias through the expander" do
+        type = described_class.translate(parse_rbs("str_like"), alias_expander: loader)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("String")
+      end
+
+      it "resolves an alias nested inside a class-instance argument" do
+        type = described_class.translate(parse_rbs("wrapped"), alias_expander: loader)
+        expect(type.describe).to eq("Array[String]")
+      end
+
+      it "reads an intersection as its first informative member" do
+        type = described_class.translate(parse_rbs("::String & ::Integer"), alias_expander: loader)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("String")
+      end
+
+      it "skips interface members when picking the intersection's representative" do
+        type = described_class.translate(parse_rbs("nodeish"), alias_expander: loader)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("AliasedNode")
+      end
+
+      it "degrades an all-interface intersection to Dynamic[Top]" do
+        type = described_class.translate(parse_rbs("_Marker & _Marker"), alias_expander: loader)
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      it "terminates on a recursive alias via the expansion budget" do
+        type = described_class.translate(parse_rbs("json"), alias_expander: loader)
+        expect(type).to be_a(Rigor::Type::Union)
+        expect(type.members.map { |m| m.describe(:short) }).to include("String")
+      end
+
+      it "degrades an alias to Dynamic[Top] without an expander" do
+        type = described_class.translate(parse_rbs("str_like"))
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      it "degrades an unresolvable alias to Dynamic[Top]" do
+        type = described_class.translate(parse_rbs("no_such_alias"), alias_expander: loader)
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+    end
   end
 end

@@ -7,6 +7,8 @@ require_relative "../environment"
 require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/precision_scanner"
 require_relative "../inference/scope_indexer"
+require_relative "../language_server/project_context"
+require_relative "../protection/discovery_seed"
 require_relative "../scope"
 require_relative "coverage_report"
 
@@ -22,11 +24,17 @@ module Rigor
       # @param files [Array<String>] explicit `.rb` file paths to scan.
       # @param configuration [Rigor::Configuration]
       # @return [Rigor::CLI::CoverageReport]
+      #
+      # Issue #513 — the environment is PLUGIN-AWARE (`LanguageServer::ProjectContext`, the same builder
+      # `--protection` uses), not the bare RBS environment this path carried until 2026-09-01. Without the
+      # plugin registry every plugin-typed receiver read `Dynamic` and the precision ratio understated the
+      # engine by ~1.2 points on a Rails target — the defect the protection path documented and fixed for
+      # itself on 2026-07-04, never applied here.
       def precision_report(files:, configuration:)
         scope = discovery_seeded_scope(
           files: files,
           configuration: configuration,
-          environment: project_environment(configuration),
+          environment: LanguageServer::ProjectContext.new(configuration: configuration).environment,
           parameter_inference: configuration.parameter_inference
         )
         scanner = Inference::PrecisionScanner.new(scope: scope)
@@ -36,18 +44,14 @@ module Rigor
       end
 
       # The cross-file facts a scan must see to report the types the engine actually infers, rather than the types a
-      # file-at-a-time walk can reach on its own:
+      # file-at-a-time walk can reach on its own.
       #
-      # - `discovered_classes` — a project constant naming a class defined in a SIBLING file (`Account`, `User`) types
-      #   as `singleton(Account)` instead of `Dynamic`. Without it a single-file scan cannot see a class it does not
-      #   itself declare (the model-constant undercount found 2026-07-04).
-      # - `param_inferred_types` (ADR-67 WD3) — an undeclared parameter seeded with the union of its call sites'
-      #   argument types.
-      #
-      # Both spanned the `--protection` scan only until 2026-08-31, so the PRECISION ratio — the number `rigor
-      # coverage`, `rigor check --coverage` and the `check-coverage` threshold gate all report — was measured on a
-      # stripped scope and understated the engine by 4.87 points on this repository's own `lib`. The two surfaces now
-      # build the same seed set, so their ratios describe the same engine.
+      # Issue #513 — the seed is the FULL check-walk bundle (`Protection::DiscoverySeed.discovery_tables`: classes,
+      # def nodes and sources for both kinds, superclasses, includes, visibilities, methods, and the Data / Struct
+      # member layouts), not just `discovered_classes`. The two-table seed #505 introduced closed the biggest part of
+      # the gap and left the rest: without the def-node / ancestry tables every cross-file call to a source-inferred
+      # project method measured as unresolved while `rigor check` resolves it — +0.27pp on redmine, +0.77pp on
+      # mastodon from the tables alone.
       #
       # `parameter_inference` is a parameter rather than a config read because the two callers want different answers:
       # the precision lens must mirror the walk it describes (`check` leaves the table empty unless
@@ -57,10 +61,7 @@ module Rigor
       # @return [Rigor::Scope]
       def discovery_seeded_scope(files:, configuration:, environment:, parameter_inference:, workers: nil)
         base = Scope.empty(environment: environment)
-        seed = {}
-
-        discovered = Inference::ScopeIndexer.discovered_classes_for_paths(files)
-        seed[:discovered_classes] = discovered unless discovered.empty?
+        seed = Protection::DiscoverySeed.discovery_tables(files).dup
 
         if parameter_inference
           table = Inference::ParameterInferenceCollector.collect(
@@ -73,13 +74,6 @@ module Rigor
         return base if seed.empty?
 
         base.with_discovery(base.discovery.with(**seed))
-      end
-
-      def project_environment(configuration)
-        Environment.for_project(
-          libraries: configuration.libraries,
-          signature_paths: configuration.signature_paths
-        )
       end
 
       # Parses one file and feeds the scan result (or a parse-error record) into `accumulator`. `scanner` /

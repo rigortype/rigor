@@ -20,6 +20,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # `dumped_types(...).first` is only the FIRST dump in the fixture, so a source that accidentally grows a
+  # second `dump_type` would have its extra answer silently dropped. Every fixture here is written with
+  # exactly one; "reports exactly one dump per fixture" below is the assertion that keeps it honest.
   def dumped_type(source) = dumped_types(source).first
 
   describe "the tail reads a name the body binds" do
@@ -130,6 +133,114 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # PR #584 review — a `next` / `break` in a statement BEFORE the tail leaves the block carrying a value the
+  # fold never sees: `evaluate(body).first` is the fall-through value only, and no next-value join into the
+  # block return exists (`type_of_jump` types both as `Bot`). Threading such a body reports the fall-through
+  # as if it were the whole answer, which is the one way this change could invent a false positive rather
+  # than merely widen. The fold declines instead, which is master's answer for every shape here.
+  describe "a prefix that can jump out of the block" do
+    it "declines on a value-carrying `next` before the tail" do
+      # THE BLOCKER. `next 5` makes the block's value 5 for that yield, and `Mutex#synchronize` is
+      # `[X] () { () -> X } -> X`, so the CALL answers 5. Typing it `42` would be unsound.
+      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+        m = Mutex.new
+        flag = [true, false].sample
+        dump_type(m.synchronize do
+          next 5 if flag
+          v = 42
+          v
+        end)
+      RUBY
+    end
+
+    it "declines on a value-carrying `break` before the tail" do
+      # `break` is the same defect wearing different clothes: it terminates the YIELDING CALL and makes it
+      # answer 5, so `42` is as unsound here as it is for `next`. Measured on master (78983b38) at review
+      # time, this shape answers `Dynamic[top]` there too — declining restores master's answer rather than
+      # regressing anything. (The review brief predicted `42` for this shape on master; it does not.)
+      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+        m = Mutex.new
+        flag = [true, false].sample
+        dump_type(m.synchronize do
+          break 5 if flag
+          v = 42
+          v
+        end)
+      RUBY
+    end
+
+    it "still threads when the `next` belongs to a nested block" do
+      # The boundary control, and the reason the prefix walk is not a plain DFS: `next` inside `each`'s block
+      # ends THAT iteration and cannot carry a value out of the outer block, so declining here would cost
+      # precision for nothing.
+      expect(dumped_type(<<~RUBY)).to eq("42")
+        m = Mutex.new
+        dump_type(m.synchronize do
+          [1, 2].each { next 1 }
+          v = 42
+          v
+        end)
+      RUBY
+    end
+
+    it "still threads when the `next` belongs to a loop" do
+      # A loop consumes both jump forms — `next` continues it, `break` leaves it — so neither reaches the
+      # block. Same boundary rule as the nested-block case above.
+      expect(dumped_type(<<~RUBY)).to eq("42")
+        m = Mutex.new
+        flag = [true, false].sample
+        dump_type(m.synchronize do
+          while flag
+            next 5
+          end
+          v = 42
+          v
+        end)
+      RUBY
+    end
+
+    it "still threads when the `next` belongs to a lambda" do
+      expect(dumped_type(<<~RUBY)).to eq("42")
+        m = Mutex.new
+        dump_type(m.synchronize do
+          fn = -> { next 1 }
+          v = 42
+          v
+        end)
+      RUBY
+    end
+  end
+
+  describe "the per-element Tuple fold's arity cap" do
+    it "threads every position at the cap" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 2, 3, 4, 5, 6, 7, 8]")
+        dump_type([1, 2, 3, 4, 5, 6, 7, 8].map do |e|
+          v = e
+          v
+        end)
+      RUBY
+    end
+
+    it "falls back to tail-only typing one element past the cap" do
+      # The documented cliff: each threaded position costs a FULL body evaluation, so past the cap the walk
+      # still folds per position but types each one tail-only. A ninth element therefore drops the values.
+      type = dumped_type(<<~RUBY)
+        dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+          v = e
+          v
+        end)
+      RUBY
+      expect(type).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+    end
+
+    it "leaves the fold itself untouched past the cap" do
+      # Only the threading is capped: a single-statement body never needed it, so the fold still answers the
+      # exact per-position values at any arity.
+      expect(dumped_type("dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map { |e| e })"))
+        .to eq("[1, 2, 3, 4, 5, 6, 7, 8, 9]")
+    end
+  end
+
   describe "declines — the answer must not move" do
     it "keeps a single-statement block body on the tail-only path" do
       expect(dumped_type("dump_type(Mutex.new.synchronize { 42 })")).to eq("42")
@@ -185,6 +296,20 @@ RSpec.describe "block-return scope threading", type: :runner do
         dump_type(x)
       RUBY
     end
+  end
+
+  # PR #584 review NIT 6 — `dumped_type` reads only the first dump, so this pins the property that makes
+  # that safe for every fixture in the file: one `dump_type` call in, exactly one dump diagnostic out. A
+  # fixture that grew a second call would be losing an answer silently rather than failing here.
+  it "reports exactly one dump per fixture" do
+    types = dumped_types(<<~RUBY)
+      m = Mutex.new
+      dump_type(m.synchronize do
+        v = 42
+        v
+      end)
+    RUBY
+    expect(types).to eq(["42"])
   end
 
   describe "corpus shapes the fix was measured against" do

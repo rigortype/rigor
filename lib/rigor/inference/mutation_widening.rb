@@ -185,29 +185,33 @@ module Rigor
           # name against the OUTER scope would hit an unrelated same-named binding.
           next acc if read.is_a?(Prism::LocalVariableReadNode) && read.depth.zero?
 
-          widen_alias_read(call_node.name, read, acc)
+          # `values: :keep` — this is the block-capture path, and the slice-C content join that runs
+          # after it re-adds the appended values' types onto the widened seed, so the seed's own value
+          # pinning is still justified (`out = [0]; arr.each { out << x }` never rewrites slot 0). The
+          # straight-line paths have no such join, which is why their default is `:widen` (issue #560).
+          widen_alias_read(call_node.name, read, acc, values: :keep)
         end
       end
 
-      def widen_alias_read(method_name, read, scope)
+      def widen_alias_read(method_name, read, scope, values: :widen)
         case read
-        when Prism::LocalVariableReadNode then widen_local(method_name, read.name, scope)
-        when Prism::InstanceVariableReadNode then widen_ivar(method_name, read.name, scope)
+        when Prism::LocalVariableReadNode then widen_local(method_name, read.name, scope, values: values)
+        when Prism::InstanceVariableReadNode then widen_ivar(method_name, read.name, scope, values: values)
         else scope
         end
       end
 
-      def widen_local(method_name, var_name, current_scope)
+      def widen_local(method_name, var_name, current_scope, values: :widen)
         current = current_scope.local(var_name)
-        widened = widen_for_mutator(current, method_name)
+        widened = widen_for_mutator(current, method_name, values: values)
         return current_scope if widened.nil?
 
         current_scope.with_local(var_name, widened)
       end
 
-      def widen_ivar(method_name, var_name, current_scope)
+      def widen_ivar(method_name, var_name, current_scope, values: :widen)
         current = current_scope.ivar(var_name)
-        widened = widen_for_mutator(current, method_name)
+        widened = widen_for_mutator(current, method_name, values: values)
         return current_scope if widened.nil?
 
         current_scope.with_ivar(var_name, widened)
@@ -217,18 +221,27 @@ module Rigor
       # `method_name`, or `nil` when no widening applies (binding is not a literal-shape
       # carrier, OR the method is not a mutator for that shape, OR the binding is already a
       # nominal — no precision to lose).
-      def widen_for_mutator(type, method_name)
+      # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning
+      # (`t[0] += 5` holds 6 where `Constant[1]` was — issue #560). Adders, removers, and reorderers
+      # leave every surviving slot's value intact, so their widening keeps the pinning; an ADDED
+      # value's under-coverage is the value-join half still open on #560.
+      VALUE_REWRITING_MUTATORS = %i[[]= fill map! collect! replace store merge! update transform_values!].to_set.freeze
+      private_constant :VALUE_REWRITING_MUTATORS
+
+      def widen_for_mutator(type, method_name, values: :widen)
+        values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
+
         return nil if type.nil?
 
         case type
         when Type::Tuple
           return nil unless ARRAY_MUTATORS.include?(method_name)
 
-          widen_tuple(type)
+          widen_tuple(type, values: values)
         when Type::HashShape
           return nil unless HASH_MUTATORS.include?(method_name)
 
-          widen_hash_shape(type)
+          widen_hash_shape(type, values: values)
         when Type::Difference
           widen_difference(type, method_name)
         end
@@ -256,24 +269,30 @@ module Rigor
         end
       end
 
-      # `Tuple[A, B, C]` → `Nominal[Array, [union(A, B, C)]]`. An empty tuple has no element
-      # evidence, so the widened form carries `untyped` element bound — matches the
-      # `tuple_to_array` widening already used by `BlockFolding`.
-      def widen_tuple(tuple)
+      # `Tuple[A, B, C]` → `Nominal[Array, [union(A, B, C)]]`; under `values: :widen`, each element's
+      # VALUE pinning widens to its class nominal (`1 | 2` → `Integer`): a slot-rewriting mutator
+      # falsifies values along with the shape — `t = [1, 2]; t[0] += 5` holds `6` at slot 0, so a
+      # surviving `Array[1 | 2]` feeds the constant-comparison fold and fires a false always-falsey
+      # on `t[0] == 6` (issue #560). An empty tuple has no element evidence, so the widened form
+      # carries `untyped` element bound — matches `BlockFolding`'s `tuple_to_array` widening.
+      def widen_tuple(tuple, values: :widen)
         element_type =
           if tuple.elements.empty?
             Type::Combinator.untyped
-          elsif tuple.elements.size == 1
-            tuple.elements.first
           else
-            Type::Combinator.union(*tuple.elements)
+            elements = tuple.elements
+            elements = elements.map { |e| Type::Combinator.widen_value_pinned(e) } if values == :widen
+            elements.size == 1 ? elements.first : Type::Combinator.union(*elements)
           end
         Type::Combinator.nominal_of("Array", type_args: [element_type])
       end
 
       # `HashShape` (closed or open) → `Nominal[Hash, [Kunion, Vunion]]`. Empty / extra-keys-only
-      # shapes degrade to a fully-untyped Hash.
-      def widen_hash_shape(shape)
+      # shapes degrade to a fully-untyped Hash. Values widen their pinning the same way
+      # {#widen_tuple}'s elements do (issue #560): `opts = {headers: false}` then
+      # `opts[:encoding] = v` must not keep `false` as the whole value bound — redmine's
+      # `import.rb:274` read the stored key back through it and drew a false always-falsey.
+      def widen_hash_shape(shape, values: :widen)
         if shape.pairs.empty?
           return Type::Combinator.nominal_of("Hash",
                                              type_args: [Type::Combinator.untyped,
@@ -281,8 +300,9 @@ module Rigor
         end
 
         key_type = key_union_for(shape.pairs.keys)
-        value_type = Type::Combinator.union(*shape.pairs.values)
-        Type::Combinator.nominal_of("Hash", type_args: [key_type, value_type])
+        value_types = shape.pairs.values
+        value_types = value_types.map { |v| Type::Combinator.widen_value_pinned(v) } if values == :widen
+        Type::Combinator.nominal_of("Hash", type_args: [key_type, Type::Combinator.union(*value_types)])
       end
 
       # Maps the literal Ruby key set to a union of the corresponding type carriers. Symbol / String /
@@ -292,15 +312,12 @@ module Rigor
       # `Constant<:k1> | Constant<:k2>` union — that would be a precision improvement that complicates
       # the widening contract; the goal here is to LOSE precision, not to record a new fact set.
       def key_union_for(keys)
-        carriers = keys.map { |k| key_widening_carrier(k) }.uniq
-        carriers.size == 1 ? carriers.first : Type::Combinator.union(*carriers)
-      end
+        carriers = keys.map do |key|
+          next Type::Combinator.constant_of(key) if [true, false, nil].include?(key)
 
-      def key_widening_carrier(key)
-        case key
-        when true, false, nil then Type::Combinator.constant_of(key)
-        else Type::Combinator.nominal_of(key.class.name)
-        end
+          Type::Combinator.nominal_of(key.class.name)
+        end.uniq
+        carriers.size == 1 ? carriers.first : Type::Combinator.union(*carriers)
       end
 
       # ----------------------------------------------------------------

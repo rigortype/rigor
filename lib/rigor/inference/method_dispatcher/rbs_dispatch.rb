@@ -230,6 +230,13 @@ module Rigor
               # still resolve through Method's RBS contract. Routing here keeps reflective Method methods
               # working without forcing the carrier to collapse to a plain Nominal at construction.
               ["Method", :instance, []]
+            when Type::Refined, Type::Difference
+              # #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is
+              # `String − ""`) is a precision layer over its base; RBS method lookup erases to the base
+              # carrier (`RUBY_VERSION != "1.0"` resolves through `String#!=` instead of declining the
+              # whole dispatch to Dynamic). The refinement-aware promotions (`String#upcase` →
+              # `uppercase-string`, …) run in their own catalog tier ABOVE this one, so they still win.
+              receiver_descriptor(receiver.base)
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end
@@ -355,7 +362,7 @@ module Rigor
             # fallback returns the caller's type, not Object.
             self_type = self_type_override || resolved_self_type
 
-            method_type = OverloadSelector.select(
+            candidates = OverloadSelector.select_candidates(
               method_definition,
               arg_types: args,
               self_type: self_type,
@@ -364,17 +371,15 @@ module Rigor
               block_required: !block_type.nil?,
               environment: environment
             )
-            return nil unless method_type
+            return nil if candidates.empty?
 
             call_site = [class_name, method_name, kind]
-            record_dispatch_provenance(method_definition, method_type, scope, call_node, call_site)
-            full_type_vars = compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
-
-            RbsTypeTranslator.translate(
-              method_type.type.return_type,
-              self_type: self_type,
-              instance_type: instance_type,
-              type_vars: full_type_vars
+            record_dispatch_provenance(method_definition, candidates.first, scope, call_node, call_site)
+            join_candidate_returns(
+              candidates,
+              self_type: self_type, instance_type: instance_type, type_vars: type_vars,
+              args: args, block_type: block_type, scope: scope, call_node: call_node, call_site: call_site,
+              alias_expander: environment.rbs_loader
             )
           end
 
@@ -400,6 +405,39 @@ module Rigor
           # The two method-level type-parameter binding positions, layered in precedence order over the
           # receiver-derived `type_vars`: the block return type first, then the argument positions (which
           # never displace an existing key). See {#compose_arg_type_vars} for the argument envelope.
+          # Issue #521 — more than one candidate means a `Dynamic[Top]` argument made the overloads
+          # indistinguishable; pinning the first answered a wrong precise type the runtime can contradict
+          # (`[true] * n` read as String). The join is the candidates' return union wrapped in `Dynamic`,
+          # not the bare union: the untyped argument may satisfy constraints (kwarg shapes, value pins)
+          # that exclude arms statically-indistinguishable here, so a bare union licenses the negative
+          # rules to fire on arms the runtime never takes — measured immediately as three false positives
+          # on this repository's own `lib` (`Integer(v)` joining the `exception: bool` nil arm). The
+          # `Dynamic[T]` carrier keeps the candidate set visible without that license (ADR-5).
+          # A candidate whose return does not translate leaves the join incomplete — decline (fail-soft
+          # to Dynamic downstream) rather than answer a join missing an arm the runtime can take.
+          # rubocop:disable Metrics/ParameterLists
+          def join_candidate_returns(candidates, self_type:, instance_type:, type_vars:, args:, block_type:,
+                                     scope:, call_node:, call_site:, alias_expander: nil)
+            returns = candidates.map do |method_type|
+              full_type_vars = compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
+              RbsTypeTranslator.translate(
+                method_type.type.return_type,
+                self_type: self_type,
+                instance_type: instance_type,
+                type_vars: full_type_vars,
+                alias_expander: alias_expander
+              )
+            end
+            return returns.first if returns.size == 1
+            return nil if returns.any?(&:nil?)
+
+            distinct = returns.uniq
+            return distinct.first if distinct.size == 1
+
+            Type::Combinator.dynamic(Type::Combinator.union(*distinct))
+          end
+          # rubocop:enable Metrics/ParameterLists
+
           def compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
             vars = compose_block_type_vars(method_type, type_vars, block_type)
             compose_arg_type_vars(method_type, vars, args, scope: scope, call_node: call_node,
@@ -658,7 +696,8 @@ module Rigor
               block,
               self_type: self_type,
               instance_type: instance_type,
-              type_vars: type_vars
+              type_vars: type_vars,
+              alias_expander: environment.rbs_loader
             )
           end
 
@@ -666,7 +705,7 @@ module Rigor
           # list; some signatures use `RBS::Types::UntypedFunction` (a `(?)` block) which exposes no
           # parameter types -- we treat it as "no information" and return an empty array so the binder
           # defaults every slot.
-          def translate_block_positional_params(block, self_type:, instance_type:, type_vars:)
+          def translate_block_positional_params(block, self_type:, instance_type:, type_vars:, alias_expander: nil)
             fun = block.type
             return [] unless fun.respond_to?(:required_positionals)
 
@@ -676,7 +715,8 @@ module Rigor
                 param.type,
                 self_type: self_type,
                 instance_type: instance_type,
-                type_vars: type_vars
+                type_vars: type_vars,
+                alias_expander: alias_expander
               )
             end
           end

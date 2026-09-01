@@ -303,9 +303,9 @@ module Rigor
         return widened unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name)
 
         added = value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
-        return unpinned_elements(widened, arg_types) if added.empty?
+        return widened if added.empty? && arg_types.empty?
 
-        admitted = ContentJoin.admissible_evidence(seed_elements, added)
+        admitted = added.empty? ? NO_ADDED_EVIDENCE : ContentJoin.admissible_evidence(seed_elements, added)
         ContentJoin.join_array_content(widened, gradual_floor(admitted))
       end
 
@@ -367,24 +367,37 @@ module Rigor
         Type::Combinator.union(*gradual_floor(admitted))
       end
 
-      # A content adder that RAN but yielded no element evidence still falsified the retained constants —
-      # `m = [1, 2]; m.concat(xs)` really can leave `6` at the end — so the surviving elements lose their
-      # value pinning. Without this the widened carrier keeps `Array[1 | 2]`, and `m.last == 6`
-      # constant-folds to false on correct code: the same stale-evidence family as #540 / #541 / #544 /
-      # #560, reached through a different door. `concat` with a non-literal argument is the shape; `<<` /
-      # `push` with an unresolvable one is the same.
+      # A content adder whose arguments the extractor could read NOTHING out of is still one store: the
+      # mutation ran, and what it appended is unknown. It therefore takes the ordinary one-store treatment
+      # — no admitted evidence, and {#gradual_floor}'s `Dynamic[top]` arm — rather than an answer of its
+      # own.
       #
-      # The discriminator is `arg_types` being NON-empty while the extracted evidence is empty: real
-      # arguments the extractor could not read anything out of. An EMPTY `arg_types` means the caller
-      # supplied no argument machinery at all — the ADR-56 block-capture path, which passes none because its
-      # own slice-C join re-adds the appended types afterwards. Flooring there would strip the seed pinning
-      # that path is entitled to keep (`out = [0]; arr.each { out << x }` must stay `0 | …`).
-      def unpinned_elements(widened, arg_types)
-        return widened if arg_types.empty?
-
-        args = widened.type_args.map { |t| Type::Combinator.widen_value_pinned(t) }
-        Type::Combinator.nominal_of("Array", type_args: args)
-      end
+      # An EMPTY `arg_types` is a different case and keeps the pre-join carrier untouched: no argument
+      # machinery reached this call at all. The ADR-56 block-capture path is the one that matters — it
+      # passes none because its slice-C join re-adds the appended types afterwards, and flooring there
+      # would strip seed pinning it keeps on purpose — but it is not the only producer. A genuinely
+      # zero-arg adder (`m.concat`) and `content_arg_types`' own rescue land here too; both are runtime
+      # no-ops or unanalyzable, so leaving the carrier alone is right for them as well.
+      #
+      # Getting this wrong once is instructive enough to keep. An earlier cut replaced the carrier with a
+      # CLOSED `Array[<seed base>]`, reasoning that the retained constants were falsified so the honest
+      # answer was their nominal base. The first half is right — `m = [1, 2]; m.concat(xs)` really can
+      # leave `6` at the end, and keeping `Array[1 | 2]` folds `m.last == 6` to false on correct code. The
+      # second half broke this file's own rule two methods down (a seam that sees one store may never
+      # CLOSE the parameter) and cost exactly what that rule protects: `Array[Symbol]` under haml's
+      # hand-written `-> Array[:multi]` brought back the #561 `def.return-type-mismatch`, and
+      # `m.last.upcase` after the concat drew `undefined method` on code that is correct when `xs` holds
+      # strings.
+      #
+      # `Array[1 | 2 | Dynamic[top]]` settles all three: the `Dynamic` arm stops the fold, the surviving
+      # pinning keeps the accepting form the signature gate documents (`Array[:multi | Dynamic[top]]`), and
+      # a union carrying `Dynamic` dispatches quietly.
+      #
+      # Known and accepted false negative: `m.concat([])` is a runtime no-op, so `m.last == 6` there really
+      # is always false, and the `Dynamic` arm suppresses a CORRECT always-falsey. Telling an empty literal
+      # argument from an unreadable one is possible in principle; a false negative on a no-op call is a far
+      # better trade than the two false positives above.
+      NO_ADDED_EVIDENCE = [].freeze
 
       # Normalizes the types the mutator's arguments contribute, before they join.
       #

@@ -8,5 +8,8 @@ class Temple
   # The declared gradual arm the rederivation must not flatten away.
   def keeps_declared_gradual_arm: (Array[Integer | untyped] a) -> String
 
+  # The unreadable-arg door onto the same hand-written element type.
+  def compile_all: (untyped nodes) -> Array[:multi]
+
   def genuinely_wrong: () -> Array[Symbol]
 end

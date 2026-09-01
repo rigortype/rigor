@@ -190,6 +190,17 @@ def concat_unknown(xs)
   m
 end
 
+# --- and the DISPATCH read after the same store, which the fold check
+# above structurally cannot see. Correct Ruby whenever `xs` holds
+# strings, so answering `Array[Integer]` here — closing the parameter on
+# zero evidence about what the concat added — drew `undefined method
+# 'upcase' for Integer`. The one-store gradual arm dispatches quietly. ---
+def concat_unknown_then_dispatch(xs)
+  m = [1, 2]
+  m.concat(xs)
+  m.last.upcase
+end
+
 # --- and the must-still-fire sibling: a value the seed pins to a class
 # with no `<<`, where NO store ever put an appendable there. The literal
 # shape survives (no mutator ran), so the read is the pinned member and

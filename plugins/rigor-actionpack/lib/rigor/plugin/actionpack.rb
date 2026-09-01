@@ -208,12 +208,79 @@ module Rigor
       # never return nil (`expect` raises like `require`; `slice` always returns a Parameters), so the
       # non-nil lenient nominal cannot fold a flow rule wrong.
       #
-      # `Parameters#[]` — the LARGEST pair on both apps (redmine 581, mastodon ~475) — is deliberately
-      # NOT here: `params[:missing]` returns nil at runtime, and typing it as the non-nil nominal folded
-      # `url.nil?` / `if params[:r]` conditions constant on five working controllers (measured before
-      # withdrawal). Typing it `Parameters | nil` instead trades those folds for a possible-nil-receiver
-      # storm on idiomatic unguarded reads. `[]` needs a rules-level decision first — see #534.
-      STRONG_PARAMS_CHAIN_METHODS = %i[require permit permit! expect slice].freeze
+      # ## The admission rule for this table
+      #
+      # A method belongs here **iff its Rails implementation returns an `ActionController::Parameters`
+      # on every path** — either a fresh `new_instance_with_inherited_permitted_status(...)` or `self`.
+      # That is a stronger bar than "usually returns Parameters", and it is the bar that keeps the
+      # entry FP-safe, because the RBS-less nominal buys leniency on the *method surface* only:
+      #
+      # - Method-surface rules DO decline on it. `call.undefined-method` bails at
+      #   `Rigor::Reflection.rbs_class_known?` (lib/rigor/analysis/check_rules.rb:720) because Rigor
+      #   ships no RBS for Parameters, and the argument / arity rules gate on the same predicate
+      #   (:1151, :2126). So `params.slice(:a).whatever_rails_adds` never fires, and a scalar-shaped
+      #   use of a Parameters-typed value (`.to_i`, `.strip`, string interpolation) resolves lenient
+      #   -to-Dynamic rather than to a diagnostic.
+      # - **Flow rules do NOT.** Truthiness folding, ternary arm selection and `.nil?` folding key on
+      #   the type being *nil-free*, not on whether Rigor knows its methods. A non-nil nominal standing
+      #   in for a value that is nil at runtime is a wrong precise type, and the folds it licenses are
+      #   real diagnostics on correct code. This is why the table admits only never-nil methods, and
+      #   why `#[]` is excluded below.
+      #
+      # Return contracts verified against rails v8.1.0.beta1
+      # (`actionpack/lib/action_controller/metal/strong_parameters.rb`). Deliberately excluded even
+      # though they are Parameters-shaped: `compact!` (`self if @parameters.compact!` — returns nil
+      # when nothing changed, :1038); `select` / `reject` / `filter` / `transform_keys` /
+      # `transform_values` (`to_enum(...)` without a block, so the answer depends on the call's block
+      # argument, :1004/:1018/:934/:917); `select!` / `keep_if`, whose doc comment ("returns nil if no
+      # changes were made") contradicts its body (`self`, :1010) — a contradiction that could resolve
+      # either way on a future Rails, and the demand does not justify betting on it; `dig` / `fetch` /
+      # `to_h` / `to_unsafe_h`, which return a caller value, nil, or a HashWithIndifferentAccess.
+      # `reject!` / `delete_if` / `compact_blank!` DO return `self` on every path (:1024/:1028/:1050)
+      # and are admissible under the same argument — deferred only to keep this change at the
+      # reviewed set; admit them with the next batch.
+      #
+      # ## Why `Parameters#[]` is NOT here (issue #534 item 1, adjudicated 2026-09-01)
+      #
+      # `#[]` is the single largest named-receiver pair on both survey apps (redmine 581, mastodon
+      # ~475), so it is the entry with by far the most to gain — and both typings of it were measured
+      # on a fixture controller of ordinary Rails idioms before being rejected:
+      #
+      # - **`#[] -> Parameters` (non-nil).** Types the whole chain (`params[:a][:b][:c]` resolves), but
+      #   the non-nil nominal is a *wrong* precise type at a missing key, and the flow rules act on it.
+      #   Every `params[:k]` condition becomes always-truthy, so a ternary over one folds to its true
+      #   arm: `mode = params[:full] ? :full : :short` types `mode` as `:full`, and the live guard
+      #   `return if mode == :short` draws `flow.always-truthy-condition` — a diagnostic on a branch
+      #   the program really takes. The same fold proves `if url.nil?` unreachable and types its body
+      #   `bot`. This reproduces the withdrawal measured on five working redmine/mastodon controllers.
+      #   (A shape like `x = params[:flag] ? nil : "a"; x.upcase` also changes answer, but it is a true
+      #   positive both before and after — `String | nil` genuinely can be nil — so it is evidence of
+      #   the fold, not of an FP. The two shapes above are the ones that are silent today and wrong
+      #   under this typing, which is why they are what the spec pins.)
+      # - **`#[] -> Parameters | nil`.** Fixes every fold above (no ternary collapse, no `bot` branch)
+      #   and still carries the chain — `params[:user][:name]` types `Parameters?` and
+      #   `params[:user].permit(:name)` types `Parameters`, because the dispatcher strips the nil arm
+      #   for the receiver gate. Idiomatic *chained* reads stay silent too: `call.possible-nil-receiver`
+      #   restricts itself to `Prism::LocalVariableReadNode` receivers (`CheckRules#nil_receiver_diagnostic`'s local-read restriction), so
+      #   `params[:q].strip` cannot fire. What it does fire on is the assigned form — `q = params[:q];
+      #   q.strip` — at **error** severity, once per unguarded use. Guarded forms (`return if q.nil?`,
+      #   `if q`, `q&.strip`, `|| ""`) all narrow correctly and stay silent, so this is not a broken
+      #   rule; it is the rule working, on a shape working Rails controllers use constantly. Adopting
+      #   it would put an error on correct code in exchange for a coverage metric.
+      #
+      # Both trades buy protection-coverage with false positives, which inverts the project's ordering
+      # of those two goods (AGENTS.md: "false positives outrank worst-case static reading"). `#[]`
+      # therefore stays Dynamic, and three control specs pin that answer with the exact probe shapes
+      # above — two negatives, each verified to go RED under the typing it rejects, plus a must-fire
+      # sibling proving the fixture can raise both rules. Reopening it needs a *rules-level* change
+      # first — a receiver-position nullable the flow rules read as unknown rather than as nil — not
+      # another plugin table row.
+      STRONG_PARAMS_CHAIN_METHODS = %i[
+        require permit permit! expect slice
+        except without extract! slice!
+        merge merge! reverse_merge reverse_merge! with_defaults with_defaults!
+        compact compact_blank deep_dup
+      ].freeze
 
       dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, _scope|
         next nil unless call_node.is_a?(Prism::CallNode)

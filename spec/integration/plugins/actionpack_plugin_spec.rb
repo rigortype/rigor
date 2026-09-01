@@ -252,6 +252,182 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    it "types every never-nil Parameters chain link, and keeps the chain through them (#534)" do
+      # The admission rule for `STRONG_PARAMS_CHAIN_METHODS`: the Rails implementation must return a
+      # Parameters on EVERY path. Contracts read off rails v8.1.0.beta1's strong_parameters.rb.
+      links = [
+        "params.except(:page)", "params.without(:page)", "params.extract!(:a)", "params.slice!(:a)",
+        "params.merge(x: 1)", "params.merge!(x: 1)", "params.reverse_merge(x: 1)",
+        "params.reverse_merge!(x: 1)", "params.with_defaults(x: 1)", "params.with_defaults!(x: 1)",
+        "params.compact", "params.compact_blank", "params.deep_dup"
+      ]
+      chains = [
+        "params.except(:page).permit(:name)",
+        "params.merge(x: 1).require(:user).permit(:name)",
+        "params.deep_dup.slice(:a).except(:b)"
+      ]
+      body = (links + chains).map { |expr| "    Rigor.dump_type(#{expr})" }.join("\n")
+      with_demo("class C\n  def create\n#{body}\n  end\nend\n") do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(links.size + chains.size)
+        expect(dumps).to all(include("ActionController::Parameters"))
+      end
+    end
+
+    it "keeps the Parameters-shaped-but-not-Parameters methods OUT of the table (#534)" do
+      # The paired negative for the spec above. Each of these looks like a chain link and is not:
+      # `compact!` returns nil when nothing changed; `select` without a block returns an Enumerator;
+      # `dig` returns a leaf value or nil; `to_h` returns a HashWithIndifferentAccess. Admitting any of
+      # them would put a wrong precise type on a value the flow rules then act on.
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(params.compact!)
+            Rigor.dump_type(params.select { |_k, v| v })
+            Rigor.dump_type(params.dig(:a, :b))
+            Rigor.dump_type(params.to_h)
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(4)
+        dumps.each { |d| expect(d).not_to include("ActionController::Parameters") }
+      end
+    end
+
+    it "does not hijack the same method names on Hash / Array / Kernel receivers (#534)" do
+      # `merge` / `slice` / `except` / `compact` are hot core method names. The rule is receiver-gated
+      # on the Parameters nominal, so the core answers must survive intact — this is the regression the
+      # widened table could plausibly cause.
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type({ a: 1 }.merge(b: 2))
+            Rigor.dump_type([1, 2].slice(0))
+            Rigor.dump_type(require("set"))
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(3)
+        dumps.each { |d| expect(d).not_to include("ActionController::Parameters") }
+        expect(dumps[0]).to include("a: 1").and include("b: 2")
+        expect(dumps[1]).to include("1")
+      end
+    end
+
+    it "keeps the widened Parameters surface FP-safe (no undefined-method on the new links)" do
+      source = <<~RUBY
+        class C
+          def create
+            params.except(:page).each { |k, v| [k, v] }
+            params.merge(x: 1).to_unsafe_h
+            params.deep_dup.whatever_rails_adds
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+        expect(undefined).to be_empty
+      end
+    end
+
+    # --- `Parameters#[]` adjudication controls (#534 item 1) -------------------------------------
+    #
+    # `#[]` is the largest pair on both survey apps and stays untyped anyway. The two specs below pin
+    # the exact probe shapes that rejected each candidate typing, so a future attempt has to break a
+    # named assertion rather than rediscover the hazard. They are paired with the must-fire control
+    # below, so neither can pass because the rules are off or the fixture went unanalysed.
+    it "keeps a `params[:key]` condition unfolded — the `[] -> Parameters` hazard (#534)" do
+      # Both assertions discriminate: they pass on the shipped answer (`[]` -> Dynamic) and fail under
+      # `#[] -> Parameters`, which is what makes them a pin rather than a decoration.
+      #
+      # 1. A non-nil nominal makes `params[:full]` always-truthy, so the ternary folds to its true arm,
+      #    `mode` types `:full` instead of `:full | :short`, and `mode == :short` — live code — draws
+      #    `flow.always-truthy-condition` ("condition is always falsey").
+      # 2. The same fold proves the `if url.nil?` arm unreachable, so its body types `bot`.
+      source = <<~RUBY
+        class C
+          def create
+            mode = params[:full] ? :full : :short
+            return "s" if mode == :short
+
+            url = params[:back_url]
+            if url.nil?
+              Rigor.dump_type(url)
+            end
+            "f"
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        folds = result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        expect(folds).to be_empty
+        dump = result.diagnostics.find { |d| d.rule == "dump.type" }
+        expect(dump).not_to be_nil
+        expect(dump.message).not_to include("bot")
+      end
+    end
+
+    it "draws no possible-nil-receiver on an assigned `params[:key]` — the `[] -> Parameters?` hazard (#534)" do
+      # `#[] -> Parameters | nil` fixes every fold above and still carries the chain, but
+      # `call.possible-nil-receiver` fires on `Prism::LocalVariableReadNode` receivers
+      # (`CheckRules#nil_receiver_diagnostic`'s local-read restriction) — i.e. exactly the
+      # `q = params[:q]; q.strip` shape Rails controllers use constantly — at error severity, once
+      # per unguarded use.
+      source = <<~RUBY
+        class C
+          def create
+            q = params[:q]
+            q.strip
+            attrs = params[:user]
+            attrs.permit(:name)
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        nil_receivers = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+        expect(nil_receivers).to be_empty
+      end
+    end
+
+    it "CONTROL: the harness fires undefined-method and possible-nil-receiver in this fixture shape" do
+      # The must-fire sibling for the three `#[]` controls above.
+      source = <<~RUBY
+        class C
+          def create
+            "a string".no_such_method_on_string
+            s = ["a", nil].sample
+            s.upcase
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        rules = result.diagnostics.map(&:rule)
+        expect(rules).to include("call.undefined-method")
+        expect(rules).to include("call.possible-nil-receiver")
+      end
+    end
+
+    it "CONTROL: the harness fires the truthiness fold in this fixture shape" do
+      # The must-fire sibling for the Arm-A pin: three specs above assert
+      # `flow.always-truthy-condition` empty, which a rule-id rename would vacuate silently.
+      source = <<~RUBY
+        class C
+          def create
+            flag = true
+            "y" if flag
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        rules = result.diagnostics.map(&:rule)
+        expect(rules).to include("flow.always-truthy-condition")
+      end
+    end
+
     it "does not re-type `require` / `permit` on a non-Parameters receiver" do
       # The receiver gate is `ActionController::Parameters` — a bare `require 'x'` (Kernel) or a `permit`
       # on some other object must not become Parameters.

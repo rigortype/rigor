@@ -435,6 +435,9 @@ module Rigor
 
         key_node = first_index_argument(node)
         address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
+        # Issue #544 — a receiver with an untracked (Dynamic / Top) constituent can hold a caller-supplied
+        # slot value the `||=` keeps, so the recorded default would invent a fact; decline the record.
+        address = nil if address && !IndexedNarrowing.fully_tracked_receiver_type?(scope.type_of(node.receiver))
         post = post_rhs
         # Widen BEFORE recording the narrowing: rebinding the receiver drops the per-slot narrowings keyed on it, so
         # the reverse order would trade this feature away for the widening. The two are complementary — the shape

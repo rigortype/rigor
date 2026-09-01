@@ -14,8 +14,13 @@ end
 require_relative "../version"
 require_relative "../cache/descriptor"
 require_relative "../cache/engine_source"
+require_relative "../cache/file_digest"
 require_relative "../cache/rbs_descriptor"
 require_relative "../environment/default_libraries"
+# Both resolvers are leaf files (no requires beyond `yaml`), so the boot-slimming probe reaches the two
+# lockfile paths without loading `rigor/environment` or the RBS machinery.
+require_relative "../environment/lockfile_resolver"
+require_relative "../environment/rbs_collection_discovery"
 
 module Rigor
   module Analysis
@@ -80,7 +85,7 @@ module Rigor
       def descriptor(configuration:, files:, explain:, rbs_config_entries:)
         Cache::Descriptor.new(
           gems: [Cache::RbsDescriptor.rbs_gem_entry],
-          configs: rbs_config_entries + engine_source_entries + [
+          configs: rbs_config_entries + engine_source_entries + lockfile_entries(configuration) + [
             config_entry("configuration", Marshal.dump(configuration.to_h)),
             config_entry("engine",
                          "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),
@@ -104,6 +109,41 @@ module Rigor
         return [] if identity.nil?
 
         [config_entry("engine-source", identity)]
+      end
+
+      # Issue #564 — the two dependency lockfiles, BY CONTENT. Both are inputs to the run's diagnostics and
+      # neither was represented in the key: the locked gem set decides which bundle-shipped `sig/` dirs and
+      # which `rbs_collection` dirs load, which ADR-72 gem overlays apply, what the ADR-82 WD9 missing-gem
+      # constant index owns, and whether `rbs.coverage.missing-gem` fires at all. Editing a lockfile touches
+      # no analyzed source and no `.rbs` file, so the `paths` slot, the `configuration` slot (which carries
+      # the lockfile PATH, never its bytes) and the recorded dependency descriptor were all unchanged by a
+      # `bundle add` — and a warm run replayed the pre-edit diagnostics in BOTH directions: an
+      # `undefined-method` on `3.minutes` surviving the `bundle add activesupport` that licenses the overlay,
+      # and the same call staying silent after the `bundle remove` that revokes it.
+      #
+      # A KEY slot rather than a dependency entry, because a dependency descriptor can only say "a file I
+      # recorded changed": it cannot express a lockfile that did not exist when the entry was written and
+      # does now, which is the `bundle init` / first-`bundle install` case.
+      #
+      # Content-only — the resolved PATH is deliberately not in the payload, so a checkout that moves (a CI
+      # runner's workspace, a renamed directory) still hits with an identical lockfile.
+      def lockfile_entries(configuration)
+        bundler = Environment::LockfileResolver.resolve_lockfile_path(
+          lockfile_path: configuration.bundler_lockfile, auto_detect: configuration.bundler_auto_detect
+        )
+        collection = Environment::RbsCollectionDiscovery.resolve_lockfile_path(
+          lockfile_path: configuration.rbs_collection_lockfile,
+          auto_detect: configuration.rbs_collection_auto_detect
+        )
+        [lockfile_entry("bundler.lockfile", bundler), lockfile_entry("rbs_collection.lockfile", collection)]
+      end
+
+      # `nil` — no lockfile resolves — is itself part of the identity, so it carries its own sentinel rather
+      # than dropping the slot: "absent" and "present but empty" must not key the same.
+      ABSENT_LOCKFILE = "\0absent"
+
+      def lockfile_entry(key, path)
+        config_entry(key, path.nil? ? ABSENT_LOCKFILE : Cache::FileDigest.hexdigest(path.to_s))
       end
 
       def config_entry(key, payload)

@@ -66,7 +66,6 @@ built on them:
 request.post?          # bool — and so do get? / put? / patch? / delete? /
                        # head? / options? / trace? / link? / unlink? /
                        # xhr? / xml_http_request? / ssl? / local? / form_data?
-request.format         # Mime::Type | Mime::NullType
 flash.now              # ActionDispatch::Flash::FlashNow
 flash.keep             # ActionDispatch::Flash::FlashHash
 flash[:notice] = "hi"  # "hi" — an assignment is its right-hand side
@@ -86,6 +85,13 @@ which is both the real contract (every one of them is an `==`,
 to type at all: a condition that folds needs to prove *one* constant,
 and a union of both never does. `return unless request.post?` and
 `mode = request.get? ? :a : :b` read exactly as they did before.
+
+`request.format` is **not** typed. That inertness argument is
+narrower than it looks — it holds for a union of the two boolean
+constants, not for a union of ordinary classes, which is nil-free and
+so *can* fold a condition — and `Mime::NullType`, the value `format`
+returns when there is no format, answers `nil?` with `true` while
+being a real object. Typing it needs a nil-aware answer.
 
 ## Limitations
 

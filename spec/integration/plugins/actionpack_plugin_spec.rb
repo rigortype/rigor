@@ -446,10 +446,14 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
   end
 
-  # Issue #534 "same lane" — the request predicates, `request.format`, and the FlashHash chain. Each
-  # contract read off Rails v8.0.2 / rack v3.1.8. Written as paired assertions for the same reason
-  # #578's block is: the value of every answer here is that it is HONEST, and the negatives are what
-  # discriminate an honest answer from a merely useful-looking one.
+  # Issue #534 "same lane" — the request predicates and the FlashHash chain. Each contract read off
+  # Rails v8.0.2 / rack v3.1.8. Written as paired assertions for the same reason #578's block is: the
+  # value of every answer here is that it is HONEST, and the negatives are what discriminate an honest
+  # answer from a merely useful-looking one.
+  #
+  # `request.format` was withdrawn from this batch under review and is filed separately: a
+  # `Mime::Type | Mime::NullType` union is nil-free, so unlike `true | false` it is NOT flow-inert, and
+  # `Mime::NullType` carries an explicit `def nil?; true; end` that a nil-free union mismodels.
   describe "the request / flash surface (#534)" do
     def type_dumps(result)
       result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
@@ -472,7 +476,11 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
-    it "types `request.format` as the two classes `formats.first || NullType` can produce" do
+    it "leaves `request.format` untyped — withdrawn from this batch under review (#534)" do
+      # The pin for the withdrawal, so re-adding the rule has to break a named assertion rather than
+      # slip back in. `Mime::Type | Mime::NullType` is nil-free, hence not flow-inert the way the
+      # predicates' `true | false` is, and `Mime::NullType` defines `nil?` as `true` — a
+      # nil-masquerading object a nil-free union mismodels. Typing it needs its own adjudication.
       source = <<~RUBY
         class C
           def create
@@ -481,7 +489,33 @@ RSpec.describe "plugins/rigor-actionpack" do
         end
       RUBY
       with_demo(source) do |result|
-        expect(type_dumps(result)).to eq(["dump_type: Mime::NullType | Mime::Type"])
+        expect(type_dumps(result)).to eq(["dump_type: Dynamic[top]"])
+      end
+    end
+
+    it "keeps a `request.format` condition unfolded — the withdrawn union's hazard (#534)" do
+      # The shape review used to reject the union: no dump assertion, so what turns it red is the false
+      # positive itself. Under `format -> Mime::Type | Mime::NullType` the ternary folds to `:f` and the
+      # live `mode == :n` guard draws `flow.always-truthy-condition`.
+      source = <<~RUBY
+        class C
+          def create
+            mode = request.format ? :f : :n
+            return "a" if mode == :n
+
+            "b"
+          end
+
+          def nil_branch
+            return "none" if request.format.nil?
+
+            "some"
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(rule_ids(result)).not_to include("flow.always-truthy-condition")
+        expect(rule_ids(result)).not_to include("flow.unreachable-branch")
       end
     end
 
@@ -511,8 +545,8 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
-    it "does not hijack the predicate / format / flash names on other receivers" do
-      # `post?`, `format` and `now` are ordinary method names. All three rules are receiver-gated on the
+    it "does not hijack the predicate / flash names on other receivers" do
+      # `post?`, `keep` and `now` are ordinary method names. Both rules are receiver-gated on the
       # request-context nominals, so a project's own object keeps its answers.
       source = <<~RUBY
         class Poll
@@ -520,21 +554,21 @@ RSpec.describe "plugins/rigor-actionpack" do
             true
           end
 
-          def format
-            "csv"
+          def keep
+            "kept"
           end
         end
 
         class C
           def create
             Rigor.dump_type(Poll.new.post?)
-            Rigor.dump_type(Poll.new.format)
+            Rigor.dump_type(Poll.new.keep)
             Rigor.dump_type(Time.now)
           end
         end
       RUBY
       with_demo(source) do |result|
-        expect(type_dumps(result)).to eq(["dump_type: true", 'dump_type: "csv"', "dump_type: Time"])
+        expect(type_dumps(result)).to eq(["dump_type: true", 'dump_type: "kept"', "dump_type: Time"])
       end
     end
 
@@ -542,10 +576,10 @@ RSpec.describe "plugins/rigor-actionpack" do
       source = <<~RUBY
         class C
           def create
-            request.format.json?
-            request.format.symbol
             flash.now[:alert] = "oops"
+            flash.now.whatever_rails_adds
             flash.keep.discard
+            flash.keep.sweep
           end
         end
       RUBY
@@ -592,7 +626,7 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
-    it "draws no fold on predicate boolean operators or a `request.format` guard (#534)" do
+    it "draws no fold on predicate boolean operators (#534)" do
       source = <<~RUBY
         class C
           def boolean_ops
@@ -602,10 +636,10 @@ RSpec.describe "plugins/rigor-actionpack" do
             [x, y]
           end
 
-          def format_guard
-            raise "no format" unless request.format
+          def raise_guard
+            raise "not a post" unless request.post?
 
-            request.format.json?
+            request.xhr?
           end
         end
       RUBY

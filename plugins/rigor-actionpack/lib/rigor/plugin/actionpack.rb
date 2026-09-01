@@ -245,12 +245,15 @@ module Rigor
       #
       # - **`#[] -> Parameters` (non-nil).** Types the whole chain (`params[:a][:b][:c]` resolves), but
       #   the non-nil nominal is a *wrong* precise type at a missing key, and the flow rules act on it.
-      #   `x = params[:flag] ? nil : "a"; x.upcase` folds the ternary to its truthy arm, types `x` as
-      #   `nil`, and emits `call.undefined-method` at **error** severity on code that works whenever
-      #   the param is absent. `mode = params[:full] ? :full : :short; return if mode == :short` emits
-      #   `flow.always-truthy-condition`. Branch bodies under `if url.nil?` type as `bot`. Two hard
-      #   false positives in a 56-line probe; this reproduces the withdrawal measured on five working
-      #   redmine/mastodon controllers.
+      #   Every `params[:k]` condition becomes always-truthy, so a ternary over one folds to its true
+      #   arm: `mode = params[:full] ? :full : :short` types `mode` as `:full`, and the live guard
+      #   `return if mode == :short` draws `flow.always-truthy-condition` — a diagnostic on a branch
+      #   the program really takes. The same fold proves `if url.nil?` unreachable and types its body
+      #   `bot`. This reproduces the withdrawal measured on five working redmine/mastodon controllers.
+      #   (A shape like `x = params[:flag] ? nil : "a"; x.upcase` also changes answer, but it is a true
+      #   positive both before and after — `String | nil` genuinely can be nil — so it is evidence of
+      #   the fold, not of an FP. The two shapes above are the ones that are silent today and wrong
+      #   under this typing, which is why they are what the spec pins.)
       # - **`#[] -> Parameters | nil`.** Fixes every fold above (no ternary collapse, no `bot` branch)
       #   and still carries the chain — `params[:user][:name]` types `Parameters?` and
       #   `params[:user].permit(:name)` types `Parameters`, because the dispatcher strips the nil arm
@@ -264,9 +267,11 @@ module Rigor
       #
       # Both trades buy protection-coverage with false positives, which inverts the project's ordering
       # of those two goods (AGENTS.md: "false positives outrank worst-case static reading"). `#[]`
-      # therefore stays Dynamic, and the two control specs in the plugin spec pin that answer with the
-      # exact probe shapes above. Reopening it needs a *rules-level* change first — a receiver-position
-      # nullable that the flow rules read as unknown rather than as nil — not another plugin table row.
+      # therefore stays Dynamic, and three control specs pin that answer with the exact probe shapes
+      # above — two negatives, each verified to go RED under the typing it rejects, plus a must-fire
+      # sibling proving the fixture can raise both rules. Reopening it needs a *rules-level* change
+      # first — a receiver-position nullable the flow rules read as unknown rather than as nil — not
+      # another plugin table row.
       STRONG_PARAMS_CHAIN_METHODS = %i[
         require permit permit! expect slice
         except without extract! slice!

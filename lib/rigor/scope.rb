@@ -715,6 +715,7 @@ module Rigor
 
       by_subclass[raw_ancestor] = compute_ancestor_class_name(subclass_qualified, raw_ancestor)
     end
+    private :ancestor_walk_gave_up, :resolve_ancestor_class_name
 
     def compute_ancestor_class_name(subclass_qualified, raw_ancestor)
       segments = subclass_qualified.split("::")

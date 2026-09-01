@@ -87,11 +87,16 @@ per project — this one contributing signatures rather than diagnostics.
 
 ## Scope and limits
 
-- **Returns conservative types.** ActiveSupport's `Integer#days` returns
-  an `ActiveSupport::Duration`; this bundle uses `untyped` because
-  Rigor's analysis environment usually doesn't know the Duration
-  class. The goal is to silence the `call.undefined-method` rule, not
-  to give precise return types.
+- **Returns conservative types**, with the Duration multipliers as the
+  documented exception. `Integer#days` is declared `untyped` in the
+  bundle and then typed `ActiveSupport::Duration` by the plugin's
+  `DURATION_MULTIPLIERS` rule, together with the `+` / `-` / `*`
+  arithmetic around it (`Time - 30.minutes` → `Time`, `2 * 1.day` →
+  Duration, `Date - 1.week` → `Date | Time`). The split exists because
+  naming the class in RBS would force the bundle to DECLARE it, and a
+  declared class with an incomplete signature turns every omitted
+  member into a false `undefined-method` — see the comment on
+  `DURATION_MULTIPLIERS` (#534).
 - **`html_safe` returns `String`.** Truly it returns
   `ActiveSupport::SafeBuffer` (a String subclass), but loss of the
   `html_safe?` predicate value is the only practical precision gap.

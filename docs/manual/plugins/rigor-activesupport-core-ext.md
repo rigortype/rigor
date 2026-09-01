@@ -57,20 +57,54 @@ Roughly the top ~40 selectors plus their close neighbours, across:
 Time.current     # without the bundle: call.undefined-method Time.current
 ```
 
+## Durations are typed
+
+`1.day`, `5.minutes`, `2.5.hours` and every other multiplier type as
+`ActiveSupport::Duration`, and the arithmetic around them keeps its
+meaning:
+
+```ruby
+1.day                     # ActiveSupport::Duration
+Time.current - 30.minutes # Time
+2 * 1.day                 # ActiveSupport::Duration
+1.day + 1.hour            # ActiveSupport::Duration
+Date.today - 1.week       # Date | Time
+```
+
+`Date ± duration` is a union because that is what Rails does: a
+date-part duration gives you back a `Date`, a sub-day one gives you a
+`Time`.
+
+Rigor ships **no signature** for `ActiveSupport::Duration`, on purpose.
+That keeps the whole Duration surface lenient — `1.day.ago`,
+`5.minutes.from_now`, `3.hours.in_minutes` and anything else Duration
+forwards through `method_missing` resolve without a diagnostic — while
+the site still counts as a concrete receiver for
+`rigor coverage --protection`. A partial signature would be worse than
+none: every member it omitted would become a false
+`call.undefined-method`.
+
+The multiplier only fires on a receiver Rigor has proven numeric, so
+`created_at.day`, `Date.today.year` and your own object's `#days` keep
+the answers they always had.
+
 ## No diagnostics, no config
 
-The plugin is RBS-only — it emits no diagnostics and has no
-configuration knobs. It contributes its signatures unconditionally when
-listed under `plugins:`.
+The plugin emits no diagnostics and has no configuration knobs. It
+contributes its signatures — and the Duration typing above —
+unconditionally when listed under `plugins:`.
 
 ## Limitations
 
-- **Conservative return types.** `Integer#days` really returns
-  `ActiveSupport::Duration`, but the bundle types it `untyped` because
-  the analysis environment usually lacks the Duration class — the goal
-  is to silence undefined-method, not to give precise returns. Likewise
-  `#html_safe` is typed `String` (not `SafeBuffer`) and `#try` / `#try!`
-  return `untyped`.
+- **Conservative return types.** `#html_safe` is typed `String` (not
+  `SafeBuffer`) and `#try` / `#try!` return `untyped` — the goal for
+  those is to silence undefined-method, not to give precise returns.
+  (The Duration multipliers are the exception: they are declared
+  `untyped` in the bundle and then typed by the plugin, which is the
+  only way to name a class the bundle must not declare.)
+- **`duration / x` is not typed.** `1.day / 2` is a Duration but
+  `1.day / 1.hour` is a plain `24`; the answer depends on the operand,
+  so Rigor declines rather than guessing.
 - **Project-private monkey-patches are not covered** — only real
   ActiveSupport extensions. For your own core-class patches see the
   `pre_eval:` mechanism ([ADR-17](../../adr/17-monkey-patch-pre-evaluation.md)).

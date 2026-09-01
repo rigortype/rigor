@@ -33,6 +33,11 @@ module Rigor
     #    schedule and forward the rest. Mismatches emit `wrong-arity`.
     # 2. **Missing schedule** — `perform_in()` / `perform_at()` with zero arguments emit `missing-schedule`.
     #
+    # ## What it types
+    #
+    # `perform_async` / `perform_in` / `perform_at` on a **discovered** worker return the job id, a
+    # `String` (#534) — see {JID_TYPE} for why the nil arm of `Sidekiq::Client#push` is not in the answer.
+    #
     # ## What it contributes to `rigor unused`
     #
     # The workers a schedule file names under `class:` and nothing else (ADR-102 WD3 / #367) — see
@@ -51,8 +56,9 @@ module Rigor
         id: "sidekiq",
         # Bumped 2026-08-16 — publishes `:reachability_roots` for `rigor unused` (ADR-102 WD3): the workers
         # a schedule file enqueues by name, which no `perform_async` call site writes down.
-        version: "0.2.0",
-        description: "Validates Sidekiq `Worker.perform_async` argument arity.",
+        # Bumped 2026-09-01 (#534 item 4) — the enqueue methods return the jid `String`.
+        version: "0.3.0",
+        description: "Validates Sidekiq `Worker.perform_async` argument arity and types the jid it returns.",
         config_schema: {
           "worker_search_paths" => { kind: :array, default: ["app/workers", "app/sidekiq"] },
           "worker_marker_modules" => { kind: :array, default: %w[Sidekiq::Job Sidekiq::Worker] },
@@ -142,6 +148,55 @@ module Rigor
         next [] if index.nil? || index.empty?
 
         diagnostics_for(Analyzer.violations_for(call_node: node, worker_index: index), path: path, node: node)
+      end
+
+      # Issue #534 item 4 — the enqueue methods return the job id. `Sidekiq::Client#push` ends with
+      # `payload["jid"]`, a 24-character hex `String`, and `perform_async` / `perform_in` / `perform_at`
+      # all reach it through `Setter#perform_async`. The corpus sweep counted ~90 mastodon sites reading
+      # `Dynamic[top]`.
+      #
+      # `perform_inline` is deliberately absent: it runs the job in-process and returns whatever the
+      # project's own `#perform` returns, which is a different question this plugin does not answer.
+      JID_ENTRY_METHODS = %i[perform_async perform_in perform_at].freeze
+
+      # ## Why `String` and not `String?` — adjudicated 2026-09-01, both arms measured
+      #
+      # `push` returns nil rather than a jid when a client middleware halts the chain
+      # (`payload = middleware.invoke(...) { normed }; if payload … end`), so `String | nil` is the
+      # complete reading. It is not the one that ships, and the reason is the same ordering that kept
+      # `Parameters#[]` out of rigor-actionpack (#578) — measured on a fixture of the shapes real code
+      # writes, in both directions:
+      #
+      # - **`String?`** puts `call.possible-nil-receiver` at ERROR severity on the assigned-then-used
+      #   shape — `jid = W.perform_async(id); jid.length` — which is the ordinary way to record the id you
+      #   just got. The rule restricts itself to local-variable-read receivers, so the chained
+      #   `W.perform_async(id).to_s` stays silent while the assigned form does not; the assigned form is
+      #   the only one worth typing at all. (It fires per *method*, not per use: `jid.to_s` is silent
+      #   because `NilClass` has `to_s`. That makes the noise unpredictable rather than absent.)
+      # - **`String`** draws nothing on any shape in the fixture, including the defensive `return unless
+      #   jid` and `if (jid = W.perform_async(id))` guards — the truthiness fold needs the flow to prove
+      #   a constant, and it does not fire on these.
+      #
+      # The nil arm is real but reachable only through a project's own client middleware returning false
+      # from `#call`, which is rare, deliberate, and exactly the situation where the project knows to
+      # check. Claiming non-nil there costs a missed `possible-nil-receiver` on code that already has to
+      # be written defensively; claiming nullable costs an error on the common code that does not. The
+      # spec pins both directions, and the `String?` arm is verified to go red on the assigned shape.
+      JID_TYPE = "String"
+
+      dynamic_return methods: JID_ENTRY_METHODS do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+
+        index = producer_value(:worker_index)
+        next nil if index.nil? || index.empty?
+
+        # The gate is the DISCOVERED worker set, not the method name: a project's own
+        # `SomeOtherThing.perform_async` that is not a Sidekiq job keeps its own answer.
+        class_name = Analyzer.constant_receiver_name(call_node.receiver)
+        next nil if class_name.nil?
+        next nil unless index.known?(class_name) || index.known?("::#{class_name}")
+
+        Rigor::Type::Combinator.nominal_of(JID_TYPE)
       end
 
       private

@@ -125,4 +125,164 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       expect(undefined.size).to eq(2)
     end
   end
+
+  # Issue #534 item 3. The multipliers were `() -> untyped` in the RBS bundle, so `1.day` was
+  # `Dynamic[top]` on ~265 mastodon sites. They now return the RBS-less `ActiveSupport::Duration`
+  # nominal, and the arithmetic rule keeps the operators around it honest.
+  describe "Duration multipliers (#534)" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def rules(result)
+      result.diagnostics.map(&:qualified_rule)
+    end
+
+    it "types every multiplier as ActiveSupport::Duration, on Integer and Float receivers" do
+      names = Rigor::Plugin::ActivesupportCoreExt::DURATION_MULTIPLIERS
+      source = names.map { |n| "Rigor.dump_type(1.#{n})" }.join("\n")
+      # `fortnight(s)` is Integer-only in the bundle, so the Float sweep skips it.
+      source += "\n#{(names - %i[fortnight fortnights]).map { |n| "Rigor.dump_type(2.5.#{n})" }.join("\n")}\n"
+      result = run_plugin(source: source)
+
+      expect(dumps(result).size).to eq((names.size * 2) - 2)
+      expect(dumps(result)).to all(eq("dump_type: ActiveSupport::Duration"))
+    end
+
+    it "types a multiplier on a non-literal Integer receiver" do
+      result = run_plugin(source: "n = 3\nRigor.dump_type(n.days)\n")
+      expect(dumps(result)).to eq(["dump_type: ActiveSupport::Duration"])
+    end
+
+    it "leaves the Duration surface lenient — no undefined-method on the chain" do
+      # The whole reason `ActiveSupport::Duration` is not declared in the RBS bundle. Every call below is
+      # real Duration API; a declared class would have to enumerate all of it or fire on the remainder.
+      source = <<~RUBY
+        Rigor.dump_type(1.day.ago)
+        Rigor.dump_type(5.minutes.from_now)
+        Rigor.dump_type(1.day.to_i)
+        Rigor.dump_type(3.hours.in_minutes)
+        Rigor.dump_type(1.week.iso8601)
+        1.day.since(Time.now)
+      RUBY
+      result = run_plugin(source: source)
+      expect(rules(result)).not_to include("call.undefined-method")
+      expect(dumps(result)).to all(eq("dump_type: Dynamic[top]"))
+    end
+
+    it "does NOT retype `day` / `month` / `year` / `hour` on Time and Date receivers" do
+      # The FP boundary. These are real Integer-returning methods on Time / Date, so a name-only rule
+      # would silently turn `created_at.day` into a Duration.
+      source = <<~RUBY
+        t = Time.now
+        Rigor.dump_type(t.day)
+        Rigor.dump_type(t.month)
+        Rigor.dump_type(t.year)
+        Rigor.dump_type(t.hour)
+        d = Date.today
+        Rigor.dump_type(d.day)
+        Rigor.dump_type(d.year)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result).size).to eq(6)
+      expect(dumps(result)).to all(eq("dump_type: Integer"))
+    end
+
+    it "does NOT retype a project's own `days` method" do
+      source = <<~RUBY
+        class Widget
+          def days
+            7
+          end
+        end
+
+        Rigor.dump_type(Widget.new.days)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(["dump_type: 7"])
+    end
+
+    describe "the arithmetic correction" do
+      # Typing the multiplier alone regressed five shapes, because the overload selector commits when the
+      # argument is a named class it has no RBS for. Each assertion below is one of the measured
+      # regressions, and each one fails (with a `call.undefined-method` on the line after it) if the
+      # arithmetic rule is removed while the multiplier rule stays.
+      it "keeps `Time` ± Duration a Time" do
+        source = <<~RUBY
+          t = Time.now
+          Rigor.dump_type(t + 3.days)
+          Rigor.dump_type(t - 30.minutes)
+          (Time.now - 30.minutes).beginning_of_day
+        RUBY
+        result = run_plugin(source: source)
+        expect(dumps(result)).to eq(["dump_type: Time", "dump_type: Time"])
+        expect(rules(result)).not_to include("call.undefined-method")
+      end
+
+      it "keeps numeric ± / * Duration a Duration" do
+        source = <<~RUBY
+          Rigor.dump_type(2 * 1.day)
+          Rigor.dump_type(3 + 1.day)
+          Rigor.dump_type(1.day + 1.hour)
+          Rigor.dump_type(1.day * 2)
+          (2 * 1.day).ago
+          (3 + 1.day).from_now
+        RUBY
+        result = run_plugin(source: source)
+        expect(dumps(result)).to all(eq("dump_type: ActiveSupport::Duration"))
+        expect(dumps(result).size).to eq(4)
+        expect(rules(result)).not_to include("call.undefined-method")
+      end
+
+      it "widens `Date` ± Duration to the two kinds the duration's parts can make" do
+        # `Duration#since` returns a Date for a date-part duration and a Time for a sub-day one, so the
+        # union is the runtime contract. Without the rule this commits to `Rational` and the next line is
+        # `undefined method 'year' for Rational`.
+        source = <<~RUBY
+          Rigor.dump_type(Date.today + 1.day)
+          Rigor.dump_type(Date.today - 1.week)
+          (Date.today - 1.week).year
+          (Date.today + 1.hour).hour
+        RUBY
+        result = run_plugin(source: source)
+        expect(dumps(result)).to all(eq("dump_type: Date | Time"))
+        expect(rules(result)).not_to include("call.undefined-method")
+      end
+
+      it "leaves arithmetic with no Duration operand exactly as it was" do
+        source = <<~RUBY
+          Rigor.dump_type(1 + 1)
+          Rigor.dump_type(2 * 3)
+          Rigor.dump_type(1 - 1)
+          Rigor.dump_type("a" + "b")
+          Rigor.dump_type([1] + [2])
+          Rigor.dump_type(Time.now - Time.now)
+          Rigor.dump_type(Date.today - Date.today)
+          Rigor.dump_type(Time.now - 1)
+          Rigor.dump_type(Date.today + 1)
+        RUBY
+        result = run_plugin(source: source)
+        expect(dumps(result)).to eq(
+          [
+            "dump_type: 2", "dump_type: 6", "dump_type: 0", 'dump_type: "ab"', "dump_type: [1, 2]",
+            "dump_type: Float", "dump_type: Rational", "dump_type: Time", "dump_type: Date"
+          ]
+        )
+      end
+
+      it "declines the operator pairs whose answer depends on the operand" do
+        # `1.day / 2` is a Duration but `1.day / 1.hour` is a plain 24; `Duration * Duration` is not a
+        # quantity Rails promises. Both stay lenient rather than guessing.
+        result = run_plugin(source: "Rigor.dump_type(1.day / 2)\nRigor.dump_type(1.day * 1.day)\n")
+        expect(dumps(result)).to all(eq("dump_type: Dynamic[top]"))
+        expect(dumps(result).size).to eq(2)
+      end
+    end
+
+    it "CONTROL: the harness fires undefined-method in this fixture shape" do
+      # The must-fire sibling for every `not_to include(\"call.undefined-method\")` above.
+      result = run_plugin(source: %(1.no_such_method_on_integer\n))
+      expect(rules(result)).to include("call.undefined-method")
+    end
+  end
 end

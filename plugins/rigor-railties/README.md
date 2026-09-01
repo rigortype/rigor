@@ -1,16 +1,18 @@
-# rigor-railties — the Rails framework core as an effect vocabulary
+# rigor-railties — the Rails framework core
 
-Unlike every other plugin in this tree, `rigor-railties` emits no
-diagnostic, types no receiver and declares no producer. It exists for
-one job: to carry the part of Rails' effect vocabulary that belongs to
-no single component gem — the cache, the logger, the environment, the
-configuration, the credentials — and to name the entry-point preset
-`effects.snapshot.reach:` adopts.
+`rigor-railties` emits no diagnostic and declares no producer. It
+carries the part of Rails that belongs to no single component gem: the
+cache, the logger, the environment, the configuration, the credentials.
+It does two things with them — names their effect vocabulary and the
+entry-point preset `effects.snapshot.reach:` adopts, and types the four
+`Rails.` singleton readers.
 
-It is inert unless the project has an `effects:` block in `.rigor.yml`.
-See [ADR-103](../../docs/adr/103-effect-labels.md) for what effect
-labels are and [`docs/internal-spec/plugin.md`](../../docs/internal-spec/plugin.md)
-§ Effect contributions for the manifest surface it uses.
+The effect half is inert unless the project has an `effects:` block in
+`.rigor.yml`. See [ADR-103](../../docs/adr/103-effect-labels.md) for
+what effect labels are and
+[`docs/internal-spec/plugin.md`](../../docs/internal-spec/plugin.md)
+§ Effect contributions for the manifest surface it uses. The reader
+typing below needs no configuration at all.
 
 ```yaml
 plugins:
@@ -22,6 +24,43 @@ plugins:
 
 effects: {}
 ```
+
+## The `Rails.` singleton readers
+
+`Rails.logger`, `Rails.cache`, `Rails.configuration` and
+`Rails.application` each type to a **lenient nominal** — a real Rails
+class name Rigor ships no RBS for:
+
+| Reader | Type |
+| --- | --- |
+| `Rails.logger` | `ActiveSupport::BroadcastLogger` |
+| `Rails.cache` | `ActiveSupport::Cache::Store` |
+| `Rails.configuration` | `Rails::Application::Configuration` |
+| `Rails.application` | `Rails::Application` |
+
+They were `Dynamic[top]` before, which left the whole
+`Rails.cache.fetch(...)` / `Rails.application.config...` surface
+unprotected — 261 sites on mastodon alone. The nominal makes each site
+a *concrete* receiver, so `rigor coverage --protection` counts it and
+the dispatch resolves against a named class.
+
+**RBS-less is the point, not an omission.** Rigor's `undefined-method`
+and arity rules decline on a class it has no RBS for, so
+`Rails.logger.tagged { }`, `Rails.cache.delete_matched(/x/)` and
+`Rails.configuration.x.your_own_key` all stay silent — which is what
+you want, because `Rails::Application::Configuration` answers custom
+keys through `method_missing` and no signature could ever be complete
+for it. Declaring a partial RBS would invert that: every member the
+signature omitted would become a false positive.
+
+For the same reason `Rails.logger` is **not** typed as stdlib
+`::Logger`. Rigor knows `::Logger`'s RBS, so that name would put
+`undefined-method` on `tagged`, `silence`, `broadcast_to` and
+`local_level=` — four false positives on ordinary Rails code.
+
+The gate is the literal `Rails` constant (bare or `::Rails`), with no
+arguments and no block. A project's own `logger` method, a nested
+`Foo::Rails.logger`, and `Rails.logger("extra")` are all left alone.
 
 ## Effects
 
@@ -133,6 +172,8 @@ everything is permitted to happen, and bounding it says nothing.
 
 - **No diagnostics.** `effect.envelope-exceeded` comes from the engine,
   from bounds the *project* wrote, and only when `effects.check` is on.
+  The reader typing above emits nothing either — it changes what a
+  receiver *is*, never what Rigor says about it.
 - **No ActiveSupport purity.** The `%a{pure}` sweep over `blank?` /
   `present?` / `try` and the rest of the core_ext predicate surface
   belongs to

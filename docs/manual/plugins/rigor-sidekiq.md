@@ -42,6 +42,28 @@ arguments.
 | `plugin.sidekiq.missing-schedule` | error | `perform_in()` / `perform_at()` called with zero arguments (the schedule is required even when `#perform` takes none) |
 | `plugin.sidekiq.load-error` | warning | worker discovery failed (parse/read error) — once per file |
 
+## What it types
+
+`perform_async` / `perform_in` / `perform_at` on a **discovered**
+worker return the job id, so the value you assign is a `String`:
+
+```ruby
+jid = WelcomeEmailWorker.perform_async(123)
+jid.upcase                # String — resolved, and checked
+OtherThing.perform_async  # untouched: not a discovered worker
+```
+
+`perform_inline` is not typed — it runs the job in-process and returns
+whatever your `#perform` returns.
+
+The type is plain `String`, not `String?`, even though
+`Sidekiq::Client#push` returns nil when a client middleware halts the
+chain. That path needs a middleware in your own app that returns false
+from `#call` — rare, deliberate, and code that already knows to check —
+whereas typing it nullable puts a `call.possible-nil-receiver` error on
+the ordinary `jid = W.perform_async(id); jid.length`. Rigor takes the
+answer that is silent on the common code.
+
 ## Configuration
 
 ```yaml

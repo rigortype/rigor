@@ -973,6 +973,18 @@ module Rigor
         # than unioning is the FP-safe direction anyway: the grant licenses a FOLD, so retaining one an
         # arm did not have could fold a stale constant, while dropping one only costs precision.
         struct_fold_safe_locals: join_struct_fold_safe(other),
+        # Issue #600 — the sibling omission of the same class, and the same failure mode: absent from this
+        # constructor call, the flag fell back to `false`, so ANY merge inside a block re-armed the #316/#319
+        # decline gate. `RSpec.describe do; if c; end; output; end` bound a cross-file top-level `def output`
+        # again after the `if`, which is the wrong-bind direction the gate exists to prevent — the block's real
+        # `self` may have gained a public same-named method by `include`, and that wins the MRO over the
+        # private `Object` def.
+        #
+        # `||`, not `&&`: opacity is the DECLINING state, so keeping it once either arm has it is the FP-safe
+        # merge. Like the fold-safe set this is normally a property of the enclosing block (stamped once at
+        # block entry by `entering_opaque_block` and inherited through `rebuild`), so both arms usually carry
+        # the same value and the `||` is that value.
+        opaque_block_self: @opaque_block_self || other.opaque_block_self,
         dynamic_origins: @dynamic_origins,
         local_origins: join_origins(@local_origins, other.local_origins),
         ivar_origins: join_origins(@ivar_origins, other.ivar_origins),

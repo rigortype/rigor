@@ -73,6 +73,43 @@ RSpec.describe "toplevel def captured by a DSL block" do
     RUBY
   end
 
+  # Issue #600 — the decline survived exactly until the first branch merge. `Scope#join` omitted
+  # `opaque_block_self` from the joined scope's constructor call, so it fell back to `false` and any `if` /
+  # `case` / `while` inside the block re-armed the bind for everything after it. The repro is the issue's
+  # two-file one with an `if` spliced in ahead of the matcher, and it must stay as silent as the version
+  # without it.
+  it "keeps declining after a branch merge inside the DSL block" do
+    spliced = <<~RUBY
+      RSpec.describe "x" do
+        it "prints" do
+          if [true, false].sample
+            x = 1
+          else
+            x = 2
+          end
+          expect { puts x }.to output(/ok/).to_stdout_from_any_process
+        end
+      end
+    RUBY
+
+    expect(messages_for("helper.rb" => helper_source, "a_spec.rb" => spliced))
+      .not_to include(/to_stdout_from_any_process/)
+  end
+
+  # The must-bind sibling, so the example above cannot pass on a build that simply stopped binding anything
+  # after an `if`: the same merge in genuine top-level code still binds the cross-file helper, still types its
+  # `nil` return, and still fires.
+  it "still binds a cross-file toplevel helper after a merge outside any block" do
+    expect(messages_for("helper.rb" => helper_source, "script.rb" => <<~RUBY)).to include(/to_stdout_from_any_process/)
+      if [true, false].sample
+        y = 1
+      else
+        y = 2
+      end
+      output(y).to_stdout_from_any_process
+    RUBY
+  end
+
   # The decline must not be paid for with a new `call.unresolved-toplevel` on the declined name: the
   # suppression side keeps reading the unrestricted table, so a name the project defines at the top level is
   # never reported as unresolved. (`it` / `expect` warn here for the unrelated reason that nothing in the run

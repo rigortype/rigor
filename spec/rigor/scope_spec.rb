@@ -394,4 +394,150 @@ RSpec.describe Rigor::Scope do
         .to eq([false, true, false])
     end
   end
+
+  # Issue #600 — the sibling omission of #589's, found one review apart and with the same shape: the flag was
+  # simply absent from `build_joined_scope`, so it fell back to `false` and EVERY merge inside a block reset
+  # the #316/#319 decline gate. The direction is what makes it urgent — opacity is the DECLINING state, so a
+  # lost flag is a WRONG BIND (a cross-file top-level `def` captured by a DSL block again), not lost precision.
+  describe "#join opaque block self" do
+    it "keeps the flag when both arms carry it" do
+      left = described_class.empty.entering_opaque_block
+      right = described_class.empty.entering_opaque_block
+      expect(left.join(right).opaque_block_self?).to be(true)
+    end
+
+    # `||`, where the fold-safe set intersects: that grant licenses a FOLD, so keeping one an arm lacked could
+    # fold a stale constant. This flag licenses a DECLINE, so the conservative merge is the opposite one —
+    # keeping it costs only precision, dropping it binds a call the gate exists to leave alone. Asserted in
+    # both argument orders because the join reads one side through `@`-ivars and the other through a reader.
+    it "keeps the flag when only one arm carries it" do
+      opaque = described_class.empty.entering_opaque_block
+      clear = described_class.empty
+      expect([opaque.join(clear).opaque_block_self?, clear.join(opaque).opaque_block_self?]).to eq([true, true])
+    end
+
+    # The must-not-fire pairing: a join does not manufacture opacity, so a merge in ordinary top-level code
+    # still binds. Without this, an `opaque_block_self: true` constant would satisfy the two above.
+    it "stays clear when neither arm carries it" do
+      expect(described_class.empty.join(described_class.empty).opaque_block_self?).to be(false)
+    end
+  end
+
+  # Issue #600's systematic half. Two omissions of ONE class were found one review apart — #589's
+  # `struct_fold_safe_locals` and #600's `opaque_block_self` — and both were the same mistake: a constructor
+  # keyword missing from `build_joined_scope`, silently taking its default at every branch merge, surfacing far
+  # from the join as a lost fold or a wrong bind. These examples end the class: a keyword added to the
+  # constructor and forgotten in the join turns one of them red.
+  describe "#join field coverage" do
+    def constructor_keywords
+      described_class.instance_method(:initialize).parameters
+                     .filter_map { |kind, name| name if %i[key keyreq].include?(kind) }
+    end
+
+    # How `join` must treat each constructor keyword.
+    #
+    # - `:merged` — combined from both arms (union, intersection, agreement, or `||`). The exact rule differs
+    #   per field and is pinned by the examples above and around; what this roster pins is that the field is
+    #   REACHED at all.
+    # - `:receiver` — deliberately taken from the receiver alone. `discovery` and `source_path` describe where
+    #   the code IS, not what a branch did. The three `*_origins` node tables are advisory, compare-by-identity
+    #   and shared by reference: passing only `mine` is the documented contract, not an omission.
+    # - `:required` — no default exists for it to silently fall back to.
+    def join_field_groups
+      { merged: %i[
+          locals fact_store self_type ivars cvars globals
+          indexed_narrowings method_chain_narrowings declaration_sourced
+          struct_fold_safe_locals opaque_block_self
+          local_origins ivar_origins optimistic_locals optimistic_ivars
+        ],
+        receiver: %i[discovery source_path dynamic_origins void_origins optimistic_origins],
+        required: %i[environment] }
+    end
+
+    let(:type) { Rigor::Type::Combinator.constant_of(1) }
+    let(:node) { Prism.parse("x").value.statements.body.first }
+    let(:fact) do
+      Rigor::Analysis::FactStore::Fact.new(
+        bucket: :local_binding, target: Rigor::Analysis::FactStore::Target.local(:x),
+        predicate: :==, payload: type
+      )
+    end
+
+    # One arm, populated so that EVERY constructor keyword holds a non-default value. Both arms are built from
+    # the same values, so the agreement / intersection rules keep them and any field the join forgets shows up
+    # as the constructor default instead.
+    def populated(fact, type, node)
+      described_class.new(
+        environment: Rigor::Environment.default,
+        locals: { x: type }.freeze,
+        fact_store: Rigor::Analysis::FactStore.empty.with_fact(fact),
+        self_type: type,
+        ivars: { :@i => type }.freeze,
+        cvars: { :@@c => type }.freeze,
+        globals: { :$g => type }.freeze,
+        discovery: Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_classes: { "C" => :class }.freeze),
+        indexed_narrowings: { %i[local h k] => type }.freeze,
+        method_chain_narrowings: { %i[local r m] => type }.freeze,
+        declaration_sourced: Set[%i[local x]].freeze,
+        source_path: "lib/a.rb",
+        struct_fold_safe_locals: Set[:s].freeze,
+        opaque_block_self: true,
+        dynamic_origins: { node => :cause }.compare_by_identity,
+        local_origins: { x: :cause }.freeze,
+        ivar_origins: { :@i => :cause }.freeze,
+        void_origins: { node => :cause }.compare_by_identity,
+        optimistic_origins: { node => :cause }.compare_by_identity,
+        optimistic_locals: { x: :cause }.freeze,
+        optimistic_ivars: { :@i => :cause }.freeze
+      )
+    end
+
+    it "has a join rule recorded for every constructor keyword" do
+      # A keyword added to the constructor without a row above fails here, which is the prompt to decide its
+      # join semantics rather than discover them from a bug report a release later.
+      expect(constructor_keywords).to match_array(join_field_groups.values.flatten)
+    end
+
+    # `environment` is excluded because it has no default to fall back TO — every scope here carries the same
+    # one, so a difference could never be observed for it.
+    def joinable_fields = join_field_groups.values.flatten - %i[environment]
+
+    # The fields whose value on `candidate` is indistinguishable from a scope that was never populated at
+    # all — i.e. exactly the ones a join silently dropped back to the constructor default.
+    def fields_left_at_default(candidate)
+      default = described_class.empty
+      joinable_fields.select { |field| candidate.public_send(field) == default.public_send(field) }
+    end
+
+    it "leaves no field at its constructor default after joining two populated scopes" do
+      joined = populated(fact, type, node).join(populated(fact, type, node))
+
+      expect(fields_left_at_default(joined)).to eq([])
+    end
+
+    # Non-vacuity for the example above: the comparison really can see a default, so a green run there means
+    # the fields were carried rather than that nothing was ever compared.
+    it "reports every field of an unpopulated scope as defaulted" do
+      expect(fields_left_at_default(described_class.empty)).to match_array(joinable_fields)
+    end
+
+    # The advisory node tables are shared by reference and only the RECEIVER's are passed — deliberate, and
+    # documented on the join. Encoded here as the expected semantics so a future audit does not "fix" it.
+    it "carries only the receiver's advisory origin tables" do
+      mine = Prism.parse("x").value.statements.body.first
+      theirs = Prism.parse("y").value.statements.body.first
+      left = described_class.empty.record_dynamic_origin(mine, :cause)
+      right = described_class.empty.record_dynamic_origin(theirs, :cause)
+
+      joined = left.join(right)
+
+      expect([joined.dynamic_origins.key?(mine), joined.dynamic_origins.key?(theirs)]).to eq([true, false])
+    end
+
+    it "drops a self type the two arms disagree about" do
+      left = described_class.empty.with_self_type(Rigor::Type::Combinator.constant_of(1))
+      right = described_class.empty.with_self_type(Rigor::Type::Combinator.constant_of(2))
+      expect(left.join(right).self_type).to be_nil
+    end
+  end
 end

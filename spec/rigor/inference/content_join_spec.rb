@@ -264,11 +264,20 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(described_class.admissible_evidence([], [nominal("String")])).to eq([nominal("String")])
     end
 
-    # A `Dynamic` seed member is the empty-literal FLOOR, not evidence: `join_array_content` drops it
-    # as soon as real added evidence exists, so it must not act as a class the seed carries either.
-    it "treats a Dynamic seed member as no evidence rather than as a class" do
+    # The seed comes from the pre-state LITERAL, and that is what separates these two: `[]` reads as
+    # no members at all, while `[x]` on an untyped `x` reads as one Dynamic member that really does
+    # say "this slot is unknown". Only the first may let `join_array_content`'s floor-dropping narrow
+    # the carrier to the added class; the second keeps its own gradual member.
+    it "keeps a gradual member when the seed carries a Dynamic of its own" do
       expect(described_class.admissible_evidence([untyped], [nominal("String")]))
-        .to eq([nominal("String")])
+        .to eq([nominal("String"), untyped])
+    end
+
+    # A gradual seed admits a foreign class precisely — a union that already carries `Dynamic[top]`
+    # accepts against any declared element type, so the signature gate has nothing left to protect.
+    it "admits a foreign class precisely once the seed is already gradual" do
+      expect(described_class.admissible_evidence([constant(:multi), untyped], [nominal("String")]))
+        .to eq([nominal("String"), untyped])
     end
 
     it "reads a Union seed's members individually" do

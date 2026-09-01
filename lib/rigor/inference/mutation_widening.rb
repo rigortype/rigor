@@ -264,11 +264,12 @@ module Rigor
         when Type::Tuple
           return nil unless ARRAY_MUTATORS.include?(method_name)
 
-          join_added_elements(widen_tuple(type, values: values), method_name, arg_types)
+          join_added_elements(widen_tuple(type, values: values), method_name, arg_types, type.elements)
         when Type::HashShape
           return nil unless HASH_MUTATORS.include?(method_name)
 
-          join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types)
+          join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
+                           ContentJoin.hash_shape_key_values(type))
         when Type::Difference
           widen_difference(type, method_name)
         end
@@ -289,30 +290,39 @@ module Rigor
       #
       # Non-adders (removers, reorderers) introduce no element evidence and return the widened
       # carrier untouched.
-      def join_added_elements(widened, method_name, arg_types)
+      # `seed_elements` is the PRE-STATE literal's own element list, not the widened carrier's —
+      # {ContentJoin.admissible_evidence} explains why the two are not interchangeable.
+      def join_added_elements(widened, method_name, arg_types, seed_elements)
         return widened unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name)
 
         added = value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
         return widened if added.empty?
 
-        seed = ContentJoin.collection_element_types(widened)
-        ContentJoin.join_array_content(widened, ContentJoin.admissible_evidence(seed, added))
+        ContentJoin.join_array_content(widened, ContentJoin.admissible_evidence(seed_elements, added))
       end
 
       # The Hash-side twin of {#join_added_elements}: `h[k] = v` / `h.store(k, v)` join the stored
       # key and value into the widened `Hash[K, V]` carrier, each admitted against its OWN side's
       # seed evidence (a foreign key does not make the value gradual, or the reverse).
-      def join_added_pairs(widened, method_name, arg_types)
+      def join_added_pairs(widened, method_name, arg_types, seed_pairs)
         return widened unless ContentJoin::HASH_CONTENT_ADDERS.include?(method_name)
         return widened if arg_types.size < 2
 
         added = value_pin_widened([arg_types.first, arg_types.last])
         return widened unless added.size == 2
 
-        seed_keys, seed_values = ContentJoin.hash_shape_key_values(widened)
-        key = ContentJoin.admissible_evidence(seed_keys, [added.first]).first
-        value = ContentJoin.admissible_evidence(seed_values, [added.last]).first
+        seed_keys, seed_values = seed_pairs
+        key = admitted_union(seed_keys, added.first)
+        value = admitted_union(seed_values, added.last)
         ContentJoin.join_hash_content(widened, [[key, value]])
+      end
+
+      # One carrier for a stored key or value. A `Hash` pair has a single slot per side, so the
+      # admissible list — which is two members when the seed's own evidence is gradual — folds to a
+      # union rather than being truncated.
+      def admitted_union(seed_members, added)
+        admitted = ContentJoin.admissible_evidence(seed_members, [added])
+        admitted.size == 1 ? admitted.first : Type::Combinator.union(*admitted)
       end
 
       # Normalizes the types the mutator's arguments contribute, before they join.

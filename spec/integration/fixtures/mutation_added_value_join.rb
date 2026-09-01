@@ -56,6 +56,18 @@ built = []
 built.push("a")
 assert_type("Array[String]", built)
 
+# --- A seed slot the engine cannot type is EVIDENCE ("this slot holds
+# something unknown"), not the empty-literal floor. The join must not
+# let it collapse into the added class, or `from_dynamic.first` would
+# read `Integer` for a slot holding whatever the caller passed. The
+# empty seed just above is the case that DOES collapse — the pair is
+# what keeps the two apart. ---
+def gradual_seed(x)
+  from_dynamic = [x]
+  from_dynamic.push(1)
+  assert_type("Array[Dynamic[top] | Integer]", from_dynamic)
+end
+
 # --- A HETEROGENEOUS add is the case the join must NOT claim precisely:
 # the seed's class set does not admit `String`, so the added member takes
 # the gradual floor rather than a foreign precise member. `Array[1 | 2 |

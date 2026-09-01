@@ -139,21 +139,21 @@ module Rigor
       # a soundness improvement paid for in opacity on exactly the sites that were lying.
 
       # `added`, with every member the seed's class set does not admit replaced by `Dynamic[top]`.
+      #
+      # `seed_members` MUST come from the pre-state LITERAL carrier, not from the widened one. The two
+      # disagree on exactly the case that matters: `[]` widens to `Array[Dynamic[top]]`, where the
+      # `Dynamic` is the empty-seed FLOOR and carries nothing, while `[x]` on an untyped `x` widens to
+      # the same carrier with a `Dynamic` that is real evidence — that slot holds an unknown value.
+      # Read off the literal, the two are `[]` and `[Dynamic[top]]`, and they part company here: the
+      # first admits the added evidence outright, the second keeps its own gradual member so
+      # {#join_array_content}'s floor-dropping cannot narrow an unknown slot into the added class.
       def admissible_evidence(seed_members, added)
-        classes = admitted_classes(seed_members)
-        return added if classes.nil?
+        members = seed_members.flat_map { |m| union_members(m) }
+        return added if members.empty?
+        return added + [Type::Combinator.untyped] if members.any?(Type::Dynamic)
 
+        classes = members.filter_map { |m| evidence_class(m) }.to_set
         added.map { |type| classes.include?(evidence_class(type)) ? type : Type::Combinator.untyped }
-      end
-
-      # The set of class names the seed's REAL element evidence carries, or `nil` when it carries
-      # none. `Dynamic` members are not evidence — they are the empty-seed floor, and
-      # {#join_array_content} drops them as soon as real added evidence exists.
-      def admitted_classes(seed_members)
-        members = seed_members.flat_map { |m| union_members(m) }.grep_v(Type::Dynamic)
-        return nil if members.empty?
-
-        members.filter_map { |m| evidence_class(m) }.to_set
       end
 
       # The class name a type carrier commits its values to, or `nil` when it commits to none. A

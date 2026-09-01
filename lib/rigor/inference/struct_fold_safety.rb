@@ -180,6 +180,10 @@ module Rigor
       def self_uses_pure?(node, members, sibling_pure)
         return true if node.nil? || scope_boundary?(node)
         return false if node.is_a?(Prism::SelfNode)
+        # `super` / `super(...)` runs an ancestor's body against this same `self`, and the resolver
+        # `sibling_pure` walks owns-class defs only, so nothing here can vouch for what it does. Latent
+        # while struct carriers have no subclass ancestry to reach, closed before they do.
+        return false if node.is_a?(Prism::SuperNode) || node.is_a?(Prism::ForwardingSuperNode)
 
         if node.is_a?(Prism::CallNode)
           return false unless self_call_pure?(node, members, sibling_pure)

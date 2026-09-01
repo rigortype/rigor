@@ -1551,7 +1551,7 @@ module Rigor
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types,
-                                          self_fold_safe: fold_safe_call_receiver?(call_node))
+                                          self_fold_safe: fold_safe_call_receiver?(call_node, receiver))
         return result if result.nil?
 
         degrade_if_overridable(result, owner, method_name, :instance)
@@ -1560,26 +1560,63 @@ module Rigor
       end
 
       # Issue #525 — whether the RECEIVER EXPRESSION of this call is one whose struct member map is still
-      # current, using the same two tests `StructFolding#foldable_receiver?` applies to a member read: the
-      # receiver is a chained call (FRESH — nothing can have mutated it between materialisation and the
-      # call), or a local the fold-safe scan proved is never mutated / aliased / escaped.
+      # current. Three arms:
       #
-      # The `nil` / `self` arm inherits the CURRENT body's own grant, which is what lets a chain of
-      # implicit-self readers propagate: `Line.new(…).outer` grants `outer`'s body `:self`, and an
-      # `inner` call inside it carries the grant into `inner`'s body.
+      # - a call that MATERIALISES the struct (`Point.new(…)`, `Point[…]`, `Struct.new(:x).new(…)`, a
+      #   `.with(…)` copy) — the object was created by this very expression, so nothing has run against it;
+      # - a local the fold-safe scan proved is never mutated / aliased / escaped;
+      # - `nil` / `self`, inheriting the CURRENT body's own grant, which is what lets a chain of
+      #   implicit-self readers propagate: `Line.new(…).outer` grants `outer`'s body `:self`, and an
+      #   `inner` call inside it carries the grant into `inner`'s body.
+      #
+      # The first arm is deliberately NARROWER than `StructFolding#fresh_receiver?`, which accepts any
+      # chained call. "Chained" is not "fresh" once a method can hand back its own receiver, and a
+      # self-returning fluent builder is ordinary Ruby:
+      #
+      #     Line = Struct.new(:text) do
+      #       def with_text(v) = (self.text = v; self)
+      #       def shout       = text.upcase
+      #     end
+      #     Line.new("a").with_text("z").shout   # runtime "Z"
+      #
+      # Accepting the `with_text(…)` receiver as fresh would grant `shout` a member map two statements
+      # stale and fold `"A"`. Only the shapes the folding layer itself materialises qualify here.
       #
       # This is only a property of the receiver expression; whether the grant is actually issued also needs
       # a `StructInstance` carrier and a body that survives the self-use scan, both decided in
       # {#build_user_method_body_scope}.
-      def fold_safe_call_receiver?(call_node)
+      def fold_safe_call_receiver?(call_node, receiver)
         return false if call_node.nil?
 
         case call_node.receiver
-        when Prism::CallNode then true
+        when Prism::CallNode then materialization_call?(call_node.receiver, receiver)
         when Prism::LocalVariableReadNode then scope.struct_fold_safe?(call_node.receiver.name)
         when nil, Prism::SelfNode then scope.struct_fold_safe?(:self)
         else false
         end
+      end
+
+      # A call whose RESULT is a newly built struct. `.new` / `.[]` qualify off a struct-class expression;
+      # `.with` copies an instance, but only when the struct did not define its own `with` — a hand-written
+      # one is free to return `self`, which is exactly the staleness this method exists to refuse.
+      def materialization_call?(node, receiver)
+        case node.name
+        when :new, :[] then struct_class_expression?(node.receiver)
+        when :with then resolve_user_def_with_owner(receiver.class_name, :with).first.nil?
+        else false
+        end
+      end
+
+      # An expression naming the struct class itself: a constant the project's member-layout side-table
+      # knows. The inline `Struct.new(:a, :b).new(…)` factory is deliberately absent — it cannot reach this
+      # method. Its block form defers in `StructFolding.fold_struct_new`, and its blockless form yields an
+      # ANONYMOUS instance, which `#user_inference_receiver?` rejects for want of a class name. A grant needs
+      # a block-defined method resolved on a named carrier, so only the constant form can ever ask.
+      def struct_class_expression?(node)
+        return false unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+
+        name = Source::ConstantPath.qualified_name_or_nil(node)
+        !name.nil? && !scope.struct_member_layout(name).nil?
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
@@ -1659,7 +1696,10 @@ module Rigor
         store = (Thread.current[CLASS_GRAPH_CACHE_KEY] ||= {}.compare_by_identity)
         by_def = (store[scope.discovered_def_nodes] ||= {}.compare_by_identity)
         by_super = (by_def[scope.discovered_superclasses] ||= {}.compare_by_identity)
-        by_super[scope.discovered_includes] ||= { name: {}, user_def: {} }
+        # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
+        # is a pure function of the same frozen index trio — the sibling resolver it walks reads nothing
+        # else.
+        by_super[scope.discovered_includes] ||= { name: {}, user_def: {}, self_pure: {}.compare_by_identity }
       end
 
       def resolve_user_def_through_ancestors(class_name, method_name)
@@ -2682,9 +2722,21 @@ module Rigor
       def body_fold_safe_locals(def_node, receiver, self_fold_safe)
         locals = struct_fold_safe_locals_for(def_node.body)
         return locals unless self_fold_safe && receiver.is_a?(Type::StructInstance)
-        return locals unless self_fold_safe_body?(def_node.body, receiver, [def_node])
+        return locals unless self_fold_safe_grant?(def_node, receiver)
 
         locals + [:self]
+      end
+
+      # The memoised entry point to the grant scan. Without the memo the walk re-runs on every
+      # granted-CANDIDATE call, return-memo HITS included — the body scope is built before the memo is
+      # consulted, so a hot call site pays the scan every time. Only the OUTERMOST scan is memoised: an
+      # inner answer can rest on the cycle guard's `seen` set, which is not part of the key.
+      def self_fold_safe_grant?(def_node, receiver)
+        per_def = (class_graph_buckets[:self_pure][def_node] ||= {})
+        key = [receiver.class_name, receiver.member_names]
+        return per_def[key] if per_def.key?(key)
+
+        per_def[key] = self_fold_safe_body?(def_node.body, receiver, [def_node])
       end
 
       # Whether `body`'s every use of `self` is a pure read, resolving each unrecognised self-call against

@@ -419,6 +419,11 @@ RSpec.describe "Struct.new value folding", type: :runner do
           text.upcase
         end
 
+        def with_text(v)
+          self.text = v
+          self
+        end
+
         def ping
           pong
         end
@@ -444,6 +449,10 @@ RSpec.describe "Struct.new value folding", type: :runner do
         expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).outer)")).to eq(["\"A\""])
       end
 
+      it "folds off a `.with` copy" do
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).with(text: \"b\").shout)")).to eq(["\"B\""])
+      end
+
       it "folds each call site against ITS OWN carrier, not a shared answer" do
         types = dumped_types(<<~RUBY)
           #{line_def}
@@ -467,6 +476,15 @@ RSpec.describe "Struct.new value folding", type: :runner do
 
       it "declines a body that lets self escape" do
         expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).escaping(x))")).to eq(["Dynamic[top]"])
+      end
+
+      it "declines a chain through a self-returning fluent builder" do
+        # `with_text` hands back its own receiver AFTER writing a member, so the chained `.shout` runs on an
+        # object two statements stale. A "any chained call is fresh" reading folds `"A"` here; the runtime
+        # value is `"Z"`. Only recognised MATERIALISATIONS (`.new` / `.[]` / `.with`) count as fresh for the
+        # grant — the sibling examples above are the must-still-fold controls for that narrowing.
+        source = "#{line_def}dump_type(Line.new(\"a\", 2).with_text(\"z\").shout)"
+        expect(dumped_types(source)).to eq(["Dynamic[top]"])
       end
 
       it "declines transitively — a sibling of a sibling that mutates" do

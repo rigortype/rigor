@@ -193,6 +193,16 @@ RSpec.describe Rigor::Inference::StructFoldSafety do
         expect(clears?("def go\n  text\nend", %i[from to])).to be(false)
       end
 
+      it "refuses a bare `super`" do
+        # An ancestor body runs against this same `self`, and the sibling resolver walks own-class defs
+        # only, so nothing can vouch for it.
+        expect(clears?("def shout\n  super\n  text\nend")).to be(false)
+      end
+
+      it "refuses `super(...)` with arguments" do
+        expect(clears?("def shout(v)\n  super(v)\n  text\nend")).to be(false)
+      end
+
       it "refuses a nil body" do
         expect(described_class.self_fold_safe_body?(nil, %i[text])).to be(false)
       end

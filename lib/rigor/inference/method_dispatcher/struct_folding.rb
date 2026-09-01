@@ -287,14 +287,11 @@ module Rigor
           same_carrier?(context.receiver, scope.self_type)
         end
 
-        # Carrier identity for the `:self` grant. `StructInstance` has no value equality, so the comparison
-        # goes through the display form — the same equality the ADR-84 return memo keys on, and exact for
-        # this purpose: two instances that describe identically have the same members and class.
+        # Carrier identity for the `:self` grant. `StructInstance` carries structural equality over exactly
+        # the two fields that matter here (`value_fields :members, :class_name`), so `==` is both the tighter
+        # comparison and allocation-free — no display string is built.
         def same_carrier?(receiver, self_type)
-          return false unless receiver.is_a?(Type::StructInstance)
-          return false if self_type.nil?
-
-          receiver.equal?(self_type) || receiver.describe(:short) == self_type.describe(:short)
+          receiver.is_a?(Type::StructInstance) && receiver == self_type
         end
 
         # A fresh receiver is the transient result of a chained call (`Point.new(1, 2).x`,

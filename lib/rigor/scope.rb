@@ -875,6 +875,19 @@ module Rigor
         # flow-live and `possible-nil-receiver` fires as before.
         declaration_sourced: join_declaration_sourced(other),
         source_path: source_path,
+        # Issue #589 — the fold-safe set MUST survive a merge. It was simply absent from this constructor
+        # call, so it fell back to the empty default and every `if` / `while` in a method silently revoked
+        # struct member folding for the whole body after it: `s = S.new("r"); while c; i += 1; end; s.raw`
+        # answered `Dynamic[top]` while the straight-line sibling folded to `"r"`. The carrier was never
+        # the casualty — `s` still reads `S(raw: "r")` at the merge — only the grant that lets a read
+        # consult it, which is why the shape looked like carrier erasure from the outside.
+        #
+        # The set is a property of the method BODY (a static scan over its root, stamped once by
+        # `ScopeIndexer` / `StatementEvaluator` and threaded by `rebuild`), so both arms of a merge
+        # normally carry the identical set and the intersection below is that set. Intersecting rather
+        # than unioning is the FP-safe direction anyway: the grant licenses a FOLD, so retaining one an
+        # arm did not have could fold a stale constant, while dropping one only costs precision.
+        struct_fold_safe_locals: join_struct_fold_safe(other),
         dynamic_origins: @dynamic_origins,
         local_origins: join_origins(@local_origins, other.local_origins),
         ivar_origins: join_origins(@ivar_origins, other.ivar_origins),
@@ -883,6 +896,19 @@ module Rigor
         optimistic_locals: join_origins(@optimistic_locals, other.optimistic_locals),
         optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars)
       )
+    end
+
+    # Issue #589 — intersect the struct fold-safe grants. Zero-alloc on the common path, where both arms
+    # carry the same frozen set the body scan stamped.
+    def join_struct_fold_safe(other)
+      mine = @struct_fold_safe_locals
+      theirs = other.struct_fold_safe_locals
+      return mine if mine.equal?(theirs) || theirs.nil?
+      return EMPTY_FOLD_SAFE if mine.nil? || mine.empty? || theirs.empty?
+      return mine if mine == theirs
+
+      intersected = mine & theirs
+      intersected.empty? ? EMPTY_FOLD_SAFE : intersected.freeze
     end
 
     # ADR-82 WD1 — merge two branches' propagated origins (self wins on a name conflict; advisory metadata, so

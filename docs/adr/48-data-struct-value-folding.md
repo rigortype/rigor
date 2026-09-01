@@ -467,7 +467,7 @@ map two statements stale and fold `"A"` where the runtime value is `"Z"`. The
 grant path therefore recognises only the shapes the folding layer itself
 materialises. (Slice 2's own reading of `fresh_receiver?` is untouched here and
 has the same latent gap for a direct member read through such a builder — tracked
-separately.)
+as [issue #595](https://github.com/rigortype/rigor/issues/595).)
 
 Two conditions beyond the caller's evidence: the carrier must be a
 `StructInstance`, and the body's every use of `self` must be a pure read

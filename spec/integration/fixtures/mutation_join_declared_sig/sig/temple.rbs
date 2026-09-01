@@ -5,5 +5,8 @@ class Temple
 
   def collect_flags: (Symbol flag) -> Array[Symbol]
 
+  # The declared gradual arm the rederivation must not flatten away.
+  def keeps_declared_gradual_arm: (Array[Integer | untyped] a) -> String
+
   def genuinely_wrong: () -> Array[Symbol]
 end

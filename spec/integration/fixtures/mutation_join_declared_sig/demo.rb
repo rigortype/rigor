@@ -37,6 +37,18 @@ class Temple
     flags
   end
 
+  # A DECLARED gradual arm must survive the block-capture rederivation. `a`'s signature says the
+  # array may hold anything, so `first.upcase` is correct code — but the slice-C rederivation joins
+  # the body's stores onto the declared type, and an earlier draft of the straight-line floor-scrub
+  # flattened Union members before dropping Dynamic. That could not tell a DECLARED `untyped` from
+  # the floor, closed the parameter to `Array[Integer]`, and drew a false `undefined method`.
+  # Provenance would tell them apart (issue #580); until then the floor is kept out of that seam at
+  # its source instead, and a declared arm survives everywhere.
+  def keeps_declared_gradual_arm(a)
+    [1, 2].each { a.push(rand(9)) }
+    a.first.upcase
+  end
+
   # And the rule is still LIVE in this fixture: nothing mutates this
   # array, the body plainly returns integers, and the declared
   # `Array[Symbol]` must still be rejected.

@@ -191,20 +191,17 @@ module Rigor
         type.is_a?(Type::Union) ? type.members : [type]
       end
 
-      # Drops `Dynamic` (incl. `untyped`) constituents from a type list, INCLUDING the ones sitting
-      # inside a `Union` member — a `Dynamic` is a constituent wherever it sits, which is what this
-      # helper's callers have always meant by the word.
+      # Drops `Dynamic` (incl. `untyped`) constituents from a type list.
       #
-      # The nesting is not hypothetical: a straight-line join floors its result (it saw one store,
-      # see {MutationWidening#gradual_floor}), so an accumulator mutated inside a loop reaches the
-      # slice-C re-derivation as `Array[Dynamic[top] | Integer]` rather than the bare
-      # `Array[Dynamic[top]]` it used to. A `grep_v` cannot see that, and ADR-56's own `acc = [];
-      # while …; acc.push(m); end` → `Array[Integer]` silently became `Array[Dynamic[top] |
-      # Integer]`. Discarding it is exactly right at THIS seam: the block and loop paths scan the
-      # whole body and join every store in it, so their evidence is complete and the straight-line
-      # path's admission of incompleteness no longer applies.
+      # Deliberately NOT recursive into `Union` members. A `Dynamic` nested inside a union is
+      # evidence somebody put there — a declared `Array[Integer | untyped]` parameter says the array
+      # may hold anything — and flattening it away closes the parameter and draws a false
+      # `undefined method` on `a.first.upcase`, which is correct code. Telling a declared `untyped`
+      # from the straight-line join's own floor needs provenance the carriers do not have (issue
+      # #580); until they do, the floor is kept out of this seam at its SOURCE instead — see
+      # {StatementEvaluator#loop_content_writeback}.
       def drop_dynamic(types)
-        types.flat_map { |type| union_members(type) }.grep_v(Type::Dynamic)
+        types.grep_v(Type::Dynamic)
       end
 
       # Element types carried by a collection binding, regardless of which carrier holds them: a

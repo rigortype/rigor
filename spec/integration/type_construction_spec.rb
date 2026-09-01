@@ -210,6 +210,16 @@ RSpec.describe "Rigor type construction (integration)" do
     # draws `def.return-type-mismatch` on correct code; the admissibility gate answers `Dynamic[top]`
     # for a class the seed does not admit, and a union carrying it ACCEPTS. `genuinely_wrong` is the
     # live-rule control — without it this example would pass on a rule that never fires.
+    # A DECLARED gradual arm must survive the slice-C rederivation. `keeps_declared_gradual_arm`'s
+    # signature says the array may hold anything, so `a.first.upcase` is correct code. A draft of
+    # the straight-line floor-scrub flattened Union members before dropping Dynamic, which cannot
+    # tell a declared `untyped` from the join's own floor: it closed the parameter to
+    # `Array[Integer]` and drew a false `undefined method 'upcase' for Integer`.
+    it "keeps a declared gradual arm through the block-capture rederivation" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined).to be_empty
+    end
+
     it "draws a return-type mismatch only where the body is genuinely wrong" do
       mismatches = harness.diagnostics.select { |d| d.rule == "def.return-type-mismatch" }
       expect(mismatches.map(&:method_name)).to eq(["genuinely_wrong"])

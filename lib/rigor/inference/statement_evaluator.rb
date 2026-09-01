@@ -976,7 +976,7 @@ module Rigor
         # writeback (a loop may content-mutate a collection without rebinding any local — `acc << x`), so apply it to
         # the single-pass join before returning.
         if names.empty?
-          fast = loop_content_writeback(node.statements, base_scope)
+          fast = loop_content_writeback(node.statements, base_scope, pre_body: post_pred)
           return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, fast)]
         end
 
@@ -1005,9 +1005,9 @@ module Rigor
         post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
         # ADR-56 slice C — loop-body receiver-content element-type join. A loop that content-mutates a collection (`acc
         # << n`) keeps only the seed's element types after the single-pass widen; join the appended/stored types into
-        # the continuation collection (pre-state read from `post_loop` so a local both rebound and content-mutated
-        # composes).
-        loop_content_writeback(node.statements, post_loop)
+        # the continuation collection. Pre-state comes from `post_pred` for a name the loop only content-mutates and
+        # from `post_loop` for one it also rebinds, so composition still works — see {#loop_content_writeback}.
+        loop_content_writeback(node.statements, post_loop, pre_body: post_pred, rebound: names)
       end
 
       # Item 4 — loop-exit predicate narrowing. A `while pred` / `until pred` loop exits PRECISELY on the predicate's
@@ -1117,9 +1117,25 @@ module Rigor
       # Joins loop-body content mutations into the continuation collection bindings. The mutator arguments are typed
       # against `post_loop`, whose locals already carry the loop-body fixpoint widening (so an appended `n` that the
       # loop decrements types `Integer`, not its entry `Constant[3]` — otherwise only the first iteration's value would
-      # be captured, an unsound under-approximation). Pre-state is read from `post_loop` too. A loop body shares the
-      # surrounding scope, so the receiver is any `LocalVariableReadNode` (no depth filter).
-      def loop_content_writeback(statements, post_loop)
+      # be captured, an unsound under-approximation). A loop body shares the surrounding scope, so the receiver is any
+      # `LocalVariableReadNode` (no depth filter).
+      #
+      # **Pre-state comes from `pre_body` — the scope as of the loop predicate — for every name the loop does not
+      # REBIND.** `post_loop` derives from a body evaluation, so the straight-line join inside the body has already
+      # written its own result into that binding, floor and all (issue #560: a straight-line seam sees one store, so it
+      # never closes the parameter it feeds). Re-deriving on top of that is derivation on derived output: this seam
+      # scans the WHOLE body and joins every store in it, so it wants the contents as they stood before the body ran
+      # and re-adds the stores itself. Left on `post_loop`, ADR-56's own `acc = []; while …; acc.push(m); end` read
+      # `Array[Dynamic[top] | Integer]` where it must read `Array[Integer]`.
+      #
+      # Scrubbing the floor back out of `post_loop` instead is NOT an option: once inside a union a `Dynamic` is
+      # indistinguishable from a DECLARED one, and stripping it closes a declared `Array[Integer | untyped]` parameter
+      # and draws a false `undefined method` on correct code. Telling the two apart needs provenance the carriers do
+      # not have (issue #580); taking the pre-body binding sidesteps the question entirely.
+      #
+      # A name the loop rebinds keeps reading `post_loop`, which is what lets a local both rebound (slice B) and
+      # content-mutated compose — the documented behaviour, and there the fixpoint's answer IS the right base.
+      def loop_content_writeback(statements, post_loop, pre_body: nil, rebound: nil)
         return post_loop if statements.nil?
 
         mutations = Hash.new { |h, k| h[k] = [] }
@@ -1130,9 +1146,18 @@ module Rigor
         return post_loop if mutations.empty?
 
         mutations.reduce(post_loop) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, acc, post_loop)
+          joined = join_content_for_local(name, calls, content_seed_scope(name, acc, pre_body, rebound), post_loop)
           joined.nil? ? acc : acc.with_local(name, joined)
         end
+      end
+
+      # The scope a loop content join reads its PRE-STATE from: the pre-body scope for a name the loop only
+      # content-mutates, and the accumulating post-loop scope for one the loop also rebinds. {#loop_content_writeback}
+      # carries the why.
+      def content_seed_scope(name, accumulated, pre_body, rebound)
+        return accumulated if pre_body.nil? || rebound&.include?(name)
+
+        pre_body
       end
 
       # Re-evaluates the loop body once from the converged fixpoint bindings, solely for the `on_enter` side effect of

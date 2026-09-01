@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../source/node_children"
+require_relative "content_join"
 require_relative "receiver_alias"
 
 module Rigor
@@ -113,21 +114,45 @@ module Rigor
       # `non-empty-hash`) AND whose call name is a known in-place mutator for that shape.
       # Returns `current_scope` unchanged otherwise.
       #
+      # `arg_types` carries the mutator call's argument types, already typed by the caller in the
+      # scope the arguments are evaluated in. They are what the widened carrier JOINS its added
+      # content evidence from (issue #560); an empty list means "no evidence", which reproduces the
+      # pre-join behaviour exactly.
+      NO_ARG_TYPES = [].freeze
+
       # @param call_node     [Prism::CallNode]
       # @param current_scope [Rigor::Scope]
+      # @param arg_types     [Array<Rigor::Type::Base>]
       # @return              [Rigor::Scope]
-      def widen_after_call(call_node:, current_scope:)
+      def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES)
         return current_scope if pure_self_returner?(call_node.name)
 
-        widen_receiver_aliases(call_node.receiver, call_node.name, current_scope)
+        widen_receiver_aliases(call_node.receiver, call_node.name, current_scope, arg_types: arg_types)
+      end
+
+      # True when `receiver` names at least one variable whose CURRENT binding is a literal-shape
+      # carrier — the only pre-state {#widen_for_mutator} joins into. Callers use it to skip typing a
+      # mutator's arguments when nothing will consume them: `buf << x` on a String and `arr << x` on an
+      # already-nominal Array are the common cases, and `Scope#type_of` memoizes nothing.
+      def joinable_receiver?(receiver, scope)
+        return false if receiver.nil?
+
+        ReceiverAlias.candidates(receiver).any? do |read|
+          current =
+            case read
+            when Prism::LocalVariableReadNode then scope.local(read.name)
+            when Prism::InstanceVariableReadNode then scope.ivar(read.name)
+            end
+          current.is_a?(Type::Tuple) || current.is_a?(Type::HashShape)
+        end
       end
 
       # Widens every variable `receiver` can evaluate to, against `method_name`'s mutator table.
-      def widen_receiver_aliases(receiver, method_name, current_scope)
+      def widen_receiver_aliases(receiver, method_name, current_scope, arg_types: NO_ARG_TYPES)
         return current_scope if receiver.nil?
 
         ReceiverAlias.candidates(receiver).reduce(current_scope) do |acc, read|
-          widen_alias_read(method_name, read, acc)
+          widen_alias_read(method_name, read, acc, arg_types: arg_types)
         end
       end
 
@@ -193,42 +218,45 @@ module Rigor
         end
       end
 
-      def widen_alias_read(method_name, read, scope, values: :widen)
+      def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES)
         case read
-        when Prism::LocalVariableReadNode then widen_local(method_name, read.name, scope, values: values)
-        when Prism::InstanceVariableReadNode then widen_ivar(method_name, read.name, scope, values: values)
+        when Prism::LocalVariableReadNode
+          widen_local(method_name, read.name, scope, values: values, arg_types: arg_types)
+        when Prism::InstanceVariableReadNode
+          widen_ivar(method_name, read.name, scope, values: values, arg_types: arg_types)
         else scope
         end
       end
 
-      def widen_local(method_name, var_name, current_scope, values: :widen)
+      def widen_local(method_name, var_name, current_scope, values: :widen, arg_types: NO_ARG_TYPES)
         current = current_scope.local(var_name)
-        widened = widen_for_mutator(current, method_name, values: values)
+        widened = widen_for_mutator(current, method_name, values: values, arg_types: arg_types)
         return current_scope if widened.nil?
 
         current_scope.with_local(var_name, widened)
       end
 
-      def widen_ivar(method_name, var_name, current_scope, values: :widen)
+      def widen_ivar(method_name, var_name, current_scope, values: :widen, arg_types: NO_ARG_TYPES)
         current = current_scope.ivar(var_name)
-        widened = widen_for_mutator(current, method_name, values: values)
+        widened = widen_for_mutator(current, method_name, values: values, arg_types: arg_types)
         return current_scope if widened.nil?
 
         current_scope.with_ivar(var_name, widened)
       end
 
+      # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning
+      # (`t[0] += 5` holds 6 where `Constant[1]` was — issue #560). Adders, removers, and reorderers
+      # leave every surviving slot's value intact, so their widening keeps the pinning; what an ADDER
+      # introduces is covered by the {#join_added_elements} join instead, which is why widening the
+      # SEED's pinning under `<<` (the shape haml's hand-written sigs pin) is not needed either.
+      VALUE_REWRITING_MUTATORS = %i[[]= fill map! collect! replace store merge! update transform_values!].to_set.freeze
+      private_constant :VALUE_REWRITING_MUTATORS
+
       # Returns the widened type for a binding whose receiver is about to be mutated by
       # `method_name`, or `nil` when no widening applies (binding is not a literal-shape
       # carrier, OR the method is not a mutator for that shape, OR the binding is already a
       # nominal — no precision to lose).
-      # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning
-      # (`t[0] += 5` holds 6 where `Constant[1]` was — issue #560). Adders, removers, and reorderers
-      # leave every surviving slot's value intact, so their widening keeps the pinning; an ADDED
-      # value's under-coverage is the value-join half still open on #560.
-      VALUE_REWRITING_MUTATORS = %i[[]= fill map! collect! replace store merge! update transform_values!].to_set.freeze
-      private_constant :VALUE_REWRITING_MUTATORS
-
-      def widen_for_mutator(type, method_name, values: :widen)
+      def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
 
         return nil if type.nil?
@@ -237,13 +265,133 @@ module Rigor
         when Type::Tuple
           return nil unless ARRAY_MUTATORS.include?(method_name)
 
-          widen_tuple(type, values: values)
+          join_added_elements(widen_tuple(type, values: values), method_name, arg_types, type.elements)
         when Type::HashShape
           return nil unless HASH_MUTATORS.include?(method_name)
 
-          widen_hash_shape(type, values: values)
+          join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
+                           ContentJoin.hash_shape_key_values(type))
         when Type::Difference
           widen_difference(type, method_name)
+        end
+      end
+
+      # Joins the element evidence the mutator's own ARGUMENTS introduce into the already-widened
+      # Array carrier (issue #560). Without it the widening keeps only the SEED's elements, which
+      # under-covers precisely the value the mutation added: `u = [1, 2]; u.push(6)` left
+      # `Array[1 | 2]`, so `u.last == 6` constant-folded to false and fired a false always-falsey on
+      # correct code. {ContentJoin} owns the algebra — including the seed-admissibility gate that
+      # keeps a heterogeneous accumulator from growing a member a hand-written signature rejects.
+      #
+      # The added evidence is **value-pin widened** first, so the join never manufactures a NEW
+      # constant fold in place of the one it removes: `opts[:mode] = :fast` must not leave
+      # `Constant[:fast]` as the whole value bound and let a later `opts[:mode] == :fast` fold to
+      # `Constant[true]` — that would trade an always-falsey FP for an always-truthy one on the same
+      # shape. Widening it is also what makes the seed's class set the right admissibility test.
+      #
+      # Non-adders (removers, reorderers) introduce no element evidence and return the widened
+      # carrier untouched.
+      #
+      # `seed_elements` is the PRE-STATE literal's own element list, not the widened carrier's —
+      # `[]` and `[x]` on an untyped `x` widen to the SAME `Array[Dynamic[top]]`, and only the
+      # literal distinguishes "no evidence" from "one slot holds something unknown".
+      #
+      # **The join records what it saw; it never CLOSES the parameter.** That is
+      # {#gradual_floor}'s job, and the reason is the seam this method sits on rather than anything
+      # about Array or Hash.
+      def join_added_elements(widened, method_name, arg_types, seed_elements)
+        return widened unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name)
+
+        added = value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
+        return widened if added.empty?
+
+        admitted = ContentJoin.admissible_evidence(seed_elements, added)
+        ContentJoin.join_array_content(widened, gradual_floor(admitted))
+      end
+
+      # Straight-line evidence is ALWAYS incomplete, so a straight-line join may never close the
+      # parameter it contributes to.
+      #
+      # This seam sees ONE store — the call being evaluated. The widening it feeds is a one-way
+      # door: it replaces the literal carrier with a `Nominal`, and {#widen_for_mutator} declines a
+      # `Nominal` outright, so the NEXT store is invisible. Closing over one sample of a growing
+      # population is therefore a wrong type, not an imprecise one:
+      #
+      #     a = []
+      #     a.push(1)          # joins -> Array[Integer]
+      #     a.push("s")        # DECLINED -- pre-state is a Nominal now
+      #     a.last.upcase      # correct Ruby, prints "S"
+      #
+      # closed to `Array[Integer]` and drew `undefined method 'upcase' for Integer` on code that
+      # runs fine. `mail`'s `Message#to_yaml` is the same defect one carrier over — `hash = {}`,
+      # `hash['headers'] = {}`, then `hash['multipart_body'] = []` appended through the read, where
+      # the value parameter kept the first store's Hash arm and had dropped the Array arm.
+      #
+      # An earlier reading of this blamed the carrier — Array element unions are over positions and
+      # survive a missed store, Hash value unions are over keys and do not. The probe above refutes
+      # it: `a.last` selects a position exactly as `hash[k]` selects a key, and a dropped arm is a
+      # wrong answer either way. The real line is **how much the joining path saw**, and it puts the
+      # BLOCK path (ADR-56 slice C) on the other side: `content_writeback_block_captures` scans the
+      # whole body and joins every mutator call in it before writing back, so its evidence IS
+      # complete for that body and its precise join stays justified — `acc = []; xs.each { |x|
+      # acc.push(x) }` keeps reading `Array[Integer]`.
+      #
+      # `Array[Integer | Dynamic[top]]` still does everything issue #560 needs: a union carrying
+      # `Dynamic` cannot constant-fold, so every stale always-falsey the join was written to remove
+      # stays removed.
+      def gradual_floor(types)
+        types + [Type::Combinator.untyped]
+      end
+
+      # The Hash-side twin of {#join_added_elements}: `h[k] = v` / `h.store(k, v)` join the stored
+      # key and value into the widened `Hash[K, V]` carrier, each admitted against its OWN side's
+      # seed evidence (a foreign key does not make the value gradual, or the reverse).
+      def join_added_pairs(widened, method_name, arg_types, seed_pairs)
+        return widened unless ContentJoin::HASH_CONTENT_ADDERS.include?(method_name)
+        return widened if arg_types.size < 2
+
+        added = value_pin_widened([arg_types.first, arg_types.last])
+        return widened unless added.size == 2
+
+        seed_keys, seed_values = seed_pairs
+        key = admitted_union(seed_keys, added.first)
+        value = admitted_union(seed_values, added.last)
+        ContentJoin.join_hash_content(widened, [[key, value]])
+      end
+
+      # One carrier for a stored key or value. A `Hash` pair has a single slot per side, so the
+      # admissible list folds to a union rather than being truncated — and it takes the same
+      # {#gradual_floor} the element side takes, for the same reason: this seam saw one store.
+      def admitted_union(seed_members, added)
+        admitted = ContentJoin.admissible_evidence(seed_members, [added])
+        Type::Combinator.union(*gradual_floor(admitted))
+      end
+
+      # Normalizes the types the mutator's arguments contribute, before they join.
+      #
+      # `widen_value_pinned` erases a constant's VALUE. A stored literal collection needs the same
+      # treatment for its literal SHAPE, and for the same reason one step removed: the program keeps
+      # a reference to what it stored and mutates it through the slot —
+      #
+      #     params[:f] ||= []
+      #     params[:f] << :status
+      #
+      # is Redmine's `Query#as_params` idiom, six times over. The `<<` mutates the nested array, and
+      # nothing writes that back through the outer Hash's value parameter, so joining the literal
+      # `Tuple[]` would pin `Hash[Symbol, []]` on a hash whose slot really holds `[:status]` — a
+      # WRONG precise type, and `params[:f].empty?` would fold to `true` off it. That is the same
+      # class of stale fold this whole change exists to remove, so the shape goes with the value:
+      # `[]` joins as `Array[untyped]`, `{}` as `Hash[untyped, untyped]`. Both are true of the slot
+      # no matter what the program does to the object afterwards.
+      def value_pin_widened(types)
+        types.compact.map { |type| shape_erased(Type::Combinator.widen_value_pinned(type)) }
+      end
+
+      def shape_erased(type)
+        case type
+        when Type::Tuple then widen_tuple(type, values: :widen)
+        when Type::HashShape then widen_hash_shape(type, values: :widen)
+        else type
         end
       end
 
@@ -305,153 +453,14 @@ module Rigor
         Type::Combinator.nominal_of("Hash", type_args: [key_type, Type::Combinator.union(*value_types)])
       end
 
-      # Maps the literal Ruby key set to a union of the corresponding type carriers. Symbol / String /
-      # Integer / Float keys widen to their class nominal; the `true` / `false` / `nil` singleton keys
-      # keep their constant carrier (the constant IS the class's whole value set, and `nil` reads better
-      # than `NilClass` in a widened `Hash[K, V]`). We deliberately do NOT fold the widenable kinds to a
-      # `Constant<:k1> | Constant<:k2>` union — that would be a precision improvement that complicates
-      # the widening contract; the goal here is to LOSE precision, not to record a new fact set.
+      # ADR-56 slice C's content JOIN — the other half of this module — lives in {ContentJoin}, which
+      # both the block-capture path and the straight-line path above share.
+      #
+      # `key_union_for` is delegated rather than duplicated: {#widen_hash_shape} and
+      # `ContentJoin.hash_shape_key_values` must map a literal key set the SAME way, or a widened
+      # carrier and the join that reads it back disagree about the key parameter.
       def key_union_for(keys)
-        carriers = keys.map do |key|
-          next Type::Combinator.constant_of(key) if [true, false, nil].include?(key)
-
-          Type::Combinator.nominal_of(key.class.name)
-        end.uniq
-        carriers.size == 1 ? carriers.first : Type::Combinator.union(*carriers)
-      end
-
-      # ----------------------------------------------------------------
-      # ADR-56 slice C — receiver-content element-type JOIN.
-      #
-      # `widen_after_block` above forgets a literal-shape carrier's arity when a captured local
-      # is content-mutated inside a block, but it keeps only the SEED's element types — an
-      # unsound under-approximation for a non-empty seed (`out = [0]; arr.each { |x| out << x
-      # }` types `Array[0]` while the runtime array is `[0, 1, 2, 3]`). Slice C joins the
-      # appended/stored element (and key/value) types INTO the continuation collection's
-      # parameter, so the result is `Array[0 | Integer]` rather than `Array[0]`.
-      #
-      # Array content-mutators that append/store ELEMENTS. The appended element type is the
-      # call's argument type(s); `[]=`'s value is its LAST argument (the keys precede it).
-      # Subset of `ARRAY_MUTATORS`: only the element-INTRODUCING methods (removers / reorderers
-      # add no new element evidence and are already covered by the arity-forget).
-      ARRAY_CONTENT_ADDERS = %i[
-        << push append prepend unshift concat insert []= fill replace
-      ].to_set.freeze
-
-      # Hash content-mutators that store a key→value pair. For `[]=` / `store` the key is the
-      # first argument and the value the last.
-      HASH_CONTENT_ADDERS = %i[[]= store].to_set.freeze
-
-      # String content-mutators that append to the buffer. String carries no element parameter,
-      # so these contribute nothing to a join — they are listed so the orchestrator recognises
-      # them as content mutators (the binding already widens to `String` via normal typing);
-      # the join helpers below short-circuit on a non-collection pre-state.
-      STRING_CONTENT_ADDERS = %i[<< concat prepend insert replace].to_set.freeze
-
-      # Every method name that mutates a captured local's CONTENT — the union the orchestrator
-      # scans the block body for.
-      CONTENT_ADDERS = (ARRAY_CONTENT_ADDERS | HASH_CONTENT_ADDERS | STRING_CONTENT_ADDERS).freeze
-
-      # The element types a single content-mutator call introduces into an Array, given the
-      # per-argument types (already typed in the block body scope). `concat`/`replace` take
-      # collection arguments, so their element evidence is the arguments' OWN element types
-      # unioned; the rest append the argument values directly. Returns `[]` when no element
-      # evidence (e.g. a `<<` with no resolvable arg).
-      def array_added_elements(method_name, arg_types)
-        return [] if arg_types.empty?
-
-        case method_name
-        when :concat, :replace
-          arg_types.flat_map { |t| collection_element_types(t) }
-        when :insert
-          # `insert(index, *objs)` — first arg is the position.
-          arg_types.drop(1)
-        when :[]=
-          # `arr[i] = v` / `arr[i, n] = v` — value is the last argument.
-          [arg_types.last]
-        when :fill
-          # `fill(value)` — only the no-block single-value form adds a
-          # concrete element; block / range forms are conservatively
-          # ignored (the arity-forget already widened the binding).
-          arg_types.size == 1 ? arg_types : []
-        else # << push append prepend unshift
-          arg_types
-        end
-      end
-
-      # Builds the continuation Array type from the pre-state binding and the appended element
-      # types. The floor is `Array[Dynamic[top]]` (the sound empty-seed behaviour) when there is
-      # no element evidence at all.
-      def join_array_content(pre_state, added_elements)
-        seed_elements = collection_element_types(pre_state)
-        added = added_elements.compact
-        # The empty-seed floor element is `Dynamic[top]` (no element evidence). When real
-        # appended evidence exists that floor carries nothing, so drop it — an empty accumulator
-        # built by `out << x*2` reads `Array[Integer]`, not `Array[Integer | Dynamic[top]]`.
-        seed_elements = drop_dynamic(seed_elements) unless added.empty?
-        elements = seed_elements + added
-        return Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped]) if elements.empty?
-
-        Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.union(*elements)])
-      end
-
-      # Builds the continuation Hash type from the pre-state binding and a list of `[key_type,
-      # value_type]` pairs stored by `[]=` / `store`.
-      def join_hash_content(pre_state, added_pairs)
-        seed_keys, seed_values = hash_shape_key_values(pre_state)
-        added_keys = added_pairs.map(&:first).compact
-        added_values = added_pairs.map(&:last).compact
-        seed_keys = drop_dynamic(seed_keys) unless added_keys.empty?
-        seed_values = drop_dynamic(seed_values) unless added_values.empty?
-        keys = seed_keys + added_keys
-        values = seed_values + added_values
-        key_t = keys.empty? ? Type::Combinator.untyped : Type::Combinator.union(*keys)
-        value_t = values.empty? ? Type::Combinator.untyped : Type::Combinator.union(*values)
-        Type::Combinator.nominal_of("Hash", type_args: [key_t, value_t])
-      end
-
-      # Drops `Dynamic` (incl. `untyped`) constituents from a type list.
-      def drop_dynamic(types)
-        types.grep_v(Type::Dynamic)
-      end
-
-      # Element types carried by a collection binding, regardless of which carrier holds them: a
-      # `Tuple` lists them, a `Nominal[Array, [E]]` has one element param, a bare `Array` /
-      # anything else yields none.
-      def collection_element_types(type)
-        case type
-        when Type::Tuple
-          type.elements
-        when Type::Nominal
-          type.class_name == "Array" ? type.type_args : []
-        when Type::Union
-          # A loop's single-pass join can union the widened collection with its un-widened
-          # literal seed (`Array[0] | [0]`); pull element evidence from every Array-ish member.
-          type.members.flat_map { |m| collection_element_types(m) }
-        else
-          []
-        end
-      end
-
-      # `[keys, values]` evidence from a Hash-ish pre-state binding — a `HashShape` (literal
-      # pairs) or a `Nominal[Hash, [K, V]]`.
-      def hash_shape_key_values(type)
-        case type
-        when Type::HashShape
-          return [[], []] if type.pairs.empty?
-
-          [[key_union_for(type.pairs.keys)], type.pairs.values]
-        when Type::Nominal
-          type.class_name == "Hash" && type.type_args.size == 2 ? [[type.type_args[0]], [type.type_args[1]]] : [[], []]
-        when Type::Union
-          type.members.each_with_object([[], []]) do |m, (ks, vs)|
-            mk, mv = hash_shape_key_values(m)
-            ks.concat(mk)
-            vs.concat(mv)
-          end
-        else
-          [[], []]
-        end
+        ContentJoin.key_union_for(keys)
       end
     end
   end

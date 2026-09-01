@@ -32,11 +32,16 @@ module Rigor
         NODE_CLASSES.any? { |klass| node.is_a?(klass) }
       end
 
+      # `arg_types` is the `[key, stored_value]` pair the caller typed, shaped like a `[]=` call's argument list so
+      # the widening joins the stored value into the carrier's content evidence exactly as a real `[]=` does
+      # (issue #560). Empty means "no evidence" and widens without joining.
+      #
       # @param node          [Prism::Node] one of {NODE_CLASSES}
       # @param current_scope [Rigor::Scope]
+      # @param arg_types     [Array<Rigor::Type::Base>]
       # @return              [Rigor::Scope]
-      def widen(node:, current_scope:)
-        MutationWidening.widen_receiver_aliases(node.receiver, MUTATOR, current_scope)
+      def widen(node:, current_scope:, arg_types: MutationWidening::NO_ARG_TYPES)
+        MutationWidening.widen_receiver_aliases(node.receiver, MUTATOR, current_scope, arg_types: arg_types)
       end
     end
   end

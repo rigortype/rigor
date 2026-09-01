@@ -15,6 +15,7 @@ require_relative "dynamic_origin"
 require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
+require_relative "content_join"
 require_relative "indexed_narrowing"
 require_relative "index_write_widening"
 require_relative "method_dispatcher"
@@ -442,7 +443,8 @@ module Rigor
         # Widen BEFORE recording the narrowing: rebinding the receiver drops the per-slot narrowings keyed on it, so
         # the reverse order would trade this feature away for the widening. The two are complementary — the shape
         # forgets that the collection is still empty, the narrowing remembers that THIS slot is now non-nil.
-        post = IndexWriteWidening.widen(node: node, current_scope: post)
+        post = IndexWriteWidening.widen(node: node, current_scope: post,
+                                        arg_types: index_write_arg_types(node, result_type))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
         [result_type, post]
@@ -453,8 +455,51 @@ module Rigor
       # `eval_index_or_write` does, so they take the same widening; the value itself is still typed by the expression
       # typer (`type_of_assignment_write`), which is what the default did.
       def eval_index_write(node)
-        [scope.type_of(node, tracer: tracer),
-         IndexWriteWidening.widen(node: node, current_scope: scope)]
+        stored = scope.type_of(node, tracer: tracer)
+        [stored,
+         IndexWriteWidening.widen(node: node, current_scope: scope,
+                                  arg_types: index_write_arg_types(node, stored))]
+      end
+
+      # `[key_type, stored_value_type]` for an index-write node, shaped exactly like a `[]=` call's
+      # argument list so the widening seam can join it the same way (issue #560). The stored value is
+      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's already-computed
+      # `t[0] + 5`, which is the whole point: it is the value the mutation put in the slot, and the one
+      # the retained element evidence provably no longer covers. Returns `[]` when the key is unresolvable,
+      # which reproduces the pre-join widening.
+      # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
+      # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
+      # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
+      # internal-error path, where it is visible.
+      def index_write_arg_types(node, stored_type)
+        key_node = first_index_argument(node)
+        return MutationWidening::NO_ARG_TYPES if key_node.nil? || stored_type.nil?
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
+
+        [scope.type_of(key_node, tracer: tracer), stored_type]
+      end
+
+      # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`).
+      #
+      # **The two scopes are different on purpose.** `current_scope` is the post-call scope the widening will
+      # actually rewrite, so the receiver gate has to ask IT whether the binding is still a literal-shape
+      # carrier — asking the entry scope could green-light a join the widening then declines, or miss one it
+      # would make. The arguments, though, are evaluated BEFORE the call in Ruby's order, so their types come
+      # from the entry `scope`; that also matches how the block path types its own mutator arguments against
+      # the block-ENTRY scope. Between the two points the only edits to the scope are the block / escape /
+      # plugin-assertion helpers above, none of which can rebind a mutator call's argument expressions.
+      #
+      # Both gates are about cost, not correctness — the join declines on its own in either case.
+      # `Scope#type_of` builds a fresh `ExpressionTyper` per call and memoizes nothing, so typing arguments a
+      # join will not consume is pure overhead, and `<<` on a String buffer is one of the commonest calls
+      # there is. The content-adder table skips a non-adding mutator (`pop`, `sort!`); `joinable_receiver?`
+      # skips a receiver whose current binding is not a literal-shape carrier.
+      def mutator_arg_types(call_node, current_scope)
+        return MutationWidening::NO_ARG_TYPES unless ContentJoin::CONTENT_ADDERS.include?(call_node.name)
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(call_node.receiver,
+                                                                                         current_scope)
+
+        content_arg_types(call_node, scope)
       end
 
       def first_index_argument(node)
@@ -931,7 +976,7 @@ module Rigor
         # writeback (a loop may content-mutate a collection without rebinding any local — `acc << x`), so apply it to
         # the single-pass join before returning.
         if names.empty?
-          fast = loop_content_writeback(node.statements, base_scope)
+          fast = loop_content_writeback(node.statements, base_scope, pre_body: post_pred)
           return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, fast)]
         end
 
@@ -960,9 +1005,9 @@ module Rigor
         post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
         # ADR-56 slice C — loop-body receiver-content element-type join. A loop that content-mutates a collection (`acc
         # << n`) keeps only the seed's element types after the single-pass widen; join the appended/stored types into
-        # the continuation collection (pre-state read from `post_loop` so a local both rebound and content-mutated
-        # composes).
-        loop_content_writeback(node.statements, post_loop)
+        # the continuation collection. Pre-state comes from `post_pred` for a name the loop only content-mutates and
+        # from `post_loop` for one it also rebinds, so composition still works — see {#loop_content_writeback}.
+        loop_content_writeback(node.statements, post_loop, pre_body: post_pred, rebound: names)
       end
 
       # Item 4 — loop-exit predicate narrowing. A `while pred` / `until pred` loop exits PRECISELY on the predicate's
@@ -1072,9 +1117,25 @@ module Rigor
       # Joins loop-body content mutations into the continuation collection bindings. The mutator arguments are typed
       # against `post_loop`, whose locals already carry the loop-body fixpoint widening (so an appended `n` that the
       # loop decrements types `Integer`, not its entry `Constant[3]` — otherwise only the first iteration's value would
-      # be captured, an unsound under-approximation). Pre-state is read from `post_loop` too. A loop body shares the
-      # surrounding scope, so the receiver is any `LocalVariableReadNode` (no depth filter).
-      def loop_content_writeback(statements, post_loop)
+      # be captured, an unsound under-approximation). A loop body shares the surrounding scope, so the receiver is any
+      # `LocalVariableReadNode` (no depth filter).
+      #
+      # **Pre-state comes from `pre_body` — the scope as of the loop predicate — for every name the loop does not
+      # REBIND.** `post_loop` derives from a body evaluation, so the straight-line join inside the body has already
+      # written its own result into that binding, floor and all (issue #560: a straight-line seam sees one store, so it
+      # never closes the parameter it feeds). Re-deriving on top of that is derivation on derived output: this seam
+      # scans the WHOLE body and joins every store in it, so it wants the contents as they stood before the body ran
+      # and re-adds the stores itself. Left on `post_loop`, ADR-56's own `acc = []; while …; acc.push(m); end` read
+      # `Array[Dynamic[top] | Integer]` where it must read `Array[Integer]`.
+      #
+      # Scrubbing the floor back out of `post_loop` instead is NOT an option: once inside a union a `Dynamic` is
+      # indistinguishable from a DECLARED one, and stripping it closes a declared `Array[Integer | untyped]` parameter
+      # and draws a false `undefined method` on correct code. Telling the two apart needs provenance the carriers do
+      # not have (issue #580); taking the pre-body binding sidesteps the question entirely.
+      #
+      # A name the loop rebinds keeps reading `post_loop`, which is what lets a local both rebound (slice B) and
+      # content-mutated compose — the documented behaviour, and there the fixpoint's answer IS the right base.
+      def loop_content_writeback(statements, post_loop, pre_body: nil, rebound: nil)
         return post_loop if statements.nil?
 
         mutations = Hash.new { |h, k| h[k] = [] }
@@ -1085,9 +1146,18 @@ module Rigor
         return post_loop if mutations.empty?
 
         mutations.reduce(post_loop) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, acc, post_loop)
+          joined = join_content_for_local(name, calls, content_seed_scope(name, acc, pre_body, rebound), post_loop)
           joined.nil? ? acc : acc.with_local(name, joined)
         end
+      end
+
+      # The scope a loop content join reads its PRE-STATE from: the pre-body scope for a name the loop only
+      # content-mutates, and the accumulating post-loop scope for one the loop also rebinds. {#loop_content_writeback}
+      # carries the why.
+      def content_seed_scope(name, accumulated, pre_body, rebound)
+        return accumulated if pre_body.nil? || rebound&.include?(name)
+
+        pre_body
       end
 
       # Re-evaluates the loop body once from the converged fixpoint bindings, solely for the `on_enter` side effect of
@@ -1403,7 +1473,8 @@ module Rigor
         # Flow-folding G1 / G2 — widen a local- or instance-variable binding when the call is an in-place mutator on it
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
-        post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope)
+        post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope,
+                                                       arg_types: mutator_arg_types(node, post_scope))
         # ADR-48 slice 4 — Struct member-setter re-typing. After `s.x = v` on a fold-safe StructInstance local, rebind
         # `s` to a StructInstance with member `:x` replaced by the assigned type, so a later `s.x` folds to `v` and a
         # sibling `s.y` stays precise. `call_type` is the setter's own result (the assigned value type). Sound only for
@@ -2333,7 +2404,7 @@ module Rigor
         calls = []
         Source::NodeWalker.each(body) do |descendant|
           next unless descendant.is_a?(Prism::CallNode)
-          next unless MutationWidening::CONTENT_ADDERS.include?(descendant.name)
+          next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
@@ -2368,7 +2439,7 @@ module Rigor
         pairs = calls.flat_map { |c| hash_pair_types(c, block_entry) }
         return nil if pairs.empty? && !hashish?(pre_state)
 
-        MutationWidening.join_hash_content(pre_state, pairs)
+        ContentJoin.join_hash_content(pre_state, pairs)
       end
 
       def join_array_param(calls, pre_state, block_entry)
@@ -2379,9 +2450,9 @@ module Rigor
           # array-arity forget already widened the binding; contribute nothing.
           next [] if index_write?(c)
 
-          MutationWidening.array_added_elements(c.name, content_arg_types(c, block_entry))
+          ContentJoin.array_added_elements(c.name, content_arg_types(c, block_entry))
         end
-        MutationWidening.join_array_content(pre_state, added)
+        ContentJoin.join_array_content(pre_state, added)
       end
 
       # Walks the block body for content-mutator calls (`<<`, `push`, `[]=`, …) whose receiver is a captured outer local
@@ -2410,7 +2481,7 @@ module Rigor
       # `[receiver_name, node]` when `node` is a content mutation whose receiver is a local variable satisfying `accept`
       # (depth predicate), else `[nil, nil]`. Covers `[]=`-style CallNode mutators and the index-write node forms.
       def content_mutation_target(node)
-        is_call_mutator = node.is_a?(Prism::CallNode) && MutationWidening::CONTENT_ADDERS.include?(node.name)
+        is_call_mutator = node.is_a?(Prism::CallNode) && ContentJoin::CONTENT_ADDERS.include?(node.name)
         return [nil, nil] unless is_call_mutator || index_write?(node)
 
         receiver = node.receiver

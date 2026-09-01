@@ -1,0 +1,1 @@
+- **[engine]** A collection mutated in place now covers the value the mutation added, so correct code like `u = [1, 2]; u.push(6)` no longer reports `u.last == 6` as an always-false condition. ([#560](https://github.com/rigortype/rigor/issues/560), [#581](https://github.com/rigortype/rigor/pull/581))

@@ -83,8 +83,8 @@ RSpec.describe Rigor::Inference::MutationWidening do
     it "keeps value pinning under an ADDING mutator (`<<` never rewrites an existing slot)" do
       # haml's `tmp = [:multi]; tmp << compiled` returns arrays that really do start with `:multi`,
       # and its handwritten sig says `Array[:multi]` — widening the pinning under `<<` drew eight
-      # false `def.return-type-mismatch` on the corpus gate. The added value's under-coverage is the
-      # value-join half still open on #560.
+      # false `def.return-type-mismatch` on the corpus gate. The ADDED value's under-coverage is
+      # covered separately, by the arg_types join below.
       tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(:multi))
       widened = described_class.widen_for_mutator(tuple, :<<)
       expect(widened.class_name).to eq("Array")
@@ -179,6 +179,124 @@ RSpec.describe Rigor::Inference::MutationWidening do
         Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
       )
       expect(described_class.widen_for_mutator(odd, :clear)).to be_nil
+    end
+  end
+
+  # Issue #560 — the ADDED-value join. `arg_types` carries the mutator call's argument types; the
+  # widened carrier joins the content evidence they introduce, so the continuation covers the value
+  # the mutation actually stored instead of only the seed's.
+  describe ".widen_for_mutator with added-value evidence" do
+    def constant(value)
+      Rigor::Type::Combinator.constant_of(value)
+    end
+
+    def nominal(name)
+      Rigor::Type::Combinator.nominal_of(name)
+    end
+
+    it "joins an appended value's class into the element union" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1), constant(2))
+      widened = described_class.widen_for_mutator(tuple, :push, arg_types: [constant(6)])
+      expect(widened.type_args.first.members).to include(nominal("Integer"))
+    end
+
+    # Without the join, `u.last` reads `1 | 2` and `u.last == 6` folds to a constant. The default
+    # (no `arg_types`) is the pre-join behaviour, which is what makes this pair discriminating.
+    it "leaves the element union alone when no argument evidence is supplied" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1), constant(2))
+      widened = described_class.widen_for_mutator(tuple, :push)
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(constant(1), constant(2)))
+    end
+
+    # The added value is value-pin widened before it joins, or the join would trade an always-falsey
+    # fold for an always-truthy one: `Array[1 | 2 | 6]` lets `u.last == 6` fold to `true`.
+    it "widens the added value's own pinning rather than joining the constant" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1))
+      widened = described_class.widen_for_mutator(tuple, :<<, arg_types: [constant(6)])
+      expect(widened.type_args.first.members).to include(nominal("Integer"))
+      expect(widened.type_args.first.members).not_to include(constant(6))
+    end
+
+    # The straight-line seam sees ONE store and the widening is a one-way door (a Nominal pre-state
+    # is declined), so the parameter is RECORDED but never closed. `a = []; a.push(1); a.push("s");
+    # a.last.upcase` is correct Ruby that a closed `Array[Integer]` rejected.
+    it "records a store into an empty Array seed without closing the element type" do
+      widened = described_class.widen_for_mutator(
+        Rigor::Type::Combinator.tuple_of, :[]=, arg_types: [constant(0), constant(42)]
+      )
+      expect(widened.type_args.first)
+        .to eq(Rigor::Type::Combinator.union(nominal("Integer"), Rigor::Type::Combinator.untyped))
+    end
+
+    it "keeps both Hash parameters gradual too" do
+      shape = Rigor::Type::HashShape.new(a: constant(1))
+      widened = described_class.widen_for_mutator(shape, :[]=, arg_types: [constant(:b), constant(2)])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(nominal("Symbol"),
+                                                                          Rigor::Type::Combinator.untyped))
+      expect(widened.type_args.last).to eq(Rigor::Type::Combinator.union(nominal("Integer"),
+                                                                         Rigor::Type::Combinator.untyped))
+    end
+
+    # The FP gate. haml's `temple = [:multi]; temple << [:static, s]` against a hand-written
+    # `-> Array[:multi]`: a precise join reads `Array[:multi | [:static, String]]`, which the
+    # subtype oracle rejects. A class the seed does not admit takes the gradual floor instead.
+    it "floors an added member whose class the seed does not admit" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(:multi))
+      added = Rigor::Type::Combinator.tuple_of(constant(:static), constant("x"))
+      widened = described_class.widen_for_mutator(tuple, :<<, arg_types: [added])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(constant(:multi),
+                                                                          Rigor::Type::Combinator.untyped))
+    end
+
+    it "admits the added member as itself when the seed's class set allows it" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(:multi))
+      widened = described_class.widen_for_mutator(tuple, :<<, arg_types: [constant(:static)])
+      expect(widened.type_args.first.members).to include(nominal("Symbol"))
+    end
+
+    # A stored literal collection stays aliased and gets mutated through the slot
+    # (`params[:f] ||= []; params[:f] << :status`), so its literal SHAPE is erased along with the
+    # value pinning — `Hash[Symbol, []]` would fold `params[:f].empty?` to a wrong `true`.
+    # Read on the ARRAY side, where nothing else gradualizes, so the erasure is what the assertion
+    # sees: the stored `[]` joins as `Array[untyped]`, never as the literal `[]`, because the
+    # program keeps mutating it through the slot (`params[:f] ||= []; params[:f] << :status`) and a
+    # literal `[]` would fold `params[:f].empty?` to a wrong `true`.
+    it "erases a stored literal collection's shape, keeping its class" do
+      seed = Rigor::Type::Combinator.tuple_of(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped])
+      )
+      widened = described_class.widen_for_mutator(seed, :<<, arg_types: [Rigor::Type::Combinator.tuple_of])
+      expect(widened.type_args.first.members).to include(Rigor::Type::Combinator.nominal_of(
+                                                           "Array", type_args: [Rigor::Type::Combinator.untyped]
+                                                         ))
+    end
+
+    it "joins a stored key and value into a HashShape's own evidence" do
+      shape = Rigor::Type::HashShape.new(a: constant(1))
+      widened = described_class.widen_for_mutator(shape, :store, arg_types: [constant(:b), constant(2)])
+      expect(widened.type_args.first.members).to include(nominal("Symbol"))
+      expect(widened.type_args.last.members).to include(nominal("Integer"))
+    end
+
+    # The B1 regression, at the unit. Two stores where only the first reaches the join: the second
+    # finds a Nominal pre-state and is declined, so a CLOSED first store is a wrong type for what
+    # the second one put there. The floor is what makes the second store's absence survivable.
+    it "leaves the first store's element type open to a store it cannot see" do
+      first = described_class.widen_for_mutator(
+        Rigor::Type::Combinator.tuple_of, :push, arg_types: [constant(1)]
+      )
+      expect(first.type_args.first.members).to include(Rigor::Type::Combinator.untyped)
+      # …and the second store really is invisible: a Nominal pre-state is declined outright, which
+      # is the half of the mechanism that makes closing unsafe rather than merely imprecise.
+      expect(described_class.widen_for_mutator(first, :push, arg_types: [constant("s")])).to be_nil
+    end
+
+    # Removers and reorderers add nothing: the arity-forget alone, byte-identical to the no-evidence
+    # call. Supplying arg_types must not make them join.
+    it "ignores argument evidence for a mutator that adds no content" do
+      tuple = Rigor::Type::Combinator.tuple_of(constant(1))
+      expect(described_class.widen_for_mutator(tuple, :delete, arg_types: [constant("x")]))
+        .to eq(described_class.widen_for_mutator(tuple, :delete))
     end
   end
 
@@ -426,232 +544,6 @@ RSpec.describe Rigor::Inference::MutationWidening do
 
       expect(result.local(:arr)).to equal(tuple)
       expect(result.local(:other).class_name).to eq("Array")
-    end
-  end
-
-  # ADR-56 slice C helpers — receiver-content element-type extraction and JOIN. Unlike the arity-forgetting widening
-  # above, these compute the exact continuation element/key/value types, so exact-`eq` assertions on the returned
-  # carriers are load-bearing.
-  describe ".collection_element_types" do
-    let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
-    let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
-
-    it "lists a Tuple's elements in order" do
-      tuple = Rigor::Type::Combinator.tuple_of(int_type, str_type)
-      expect(described_class.send(:collection_element_types, tuple)).to eq([int_type, str_type])
-    end
-
-    it "returns the single type-arg of a Nominal[Array, [E]]" do
-      array = Rigor::Type::Combinator.nominal_of("Array", type_args: [int_type])
-      expect(described_class.send(:collection_element_types, array)).to eq([int_type])
-    end
-
-    it "returns no elements for a non-Array Nominal" do
-      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [str_type, int_type])
-      expect(described_class.send(:collection_element_types, hash)).to eq([])
-    end
-
-    it "flat_maps element evidence across every Union member" do
-      tuple = Rigor::Type::Combinator.tuple_of(int_type)
-      array = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
-      union = Rigor::Type::Combinator.union(tuple, array)
-      # Combinator.union may reorder members, so assert set membership rather than element order.
-      expect(described_class.send(:collection_element_types, union)).to contain_exactly(int_type, str_type)
-    end
-
-    it "returns no elements for a non-collection type" do
-      expect(described_class.send(:collection_element_types, Rigor::Type::Combinator.constant_of(1))).to eq([])
-    end
-  end
-
-  describe ".hash_shape_key_values" do
-    let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
-    let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
-    let(:sym_type) { Rigor::Type::Combinator.nominal_of("Symbol") }
-
-    it "returns the key union and the value list for a HashShape" do
-      shape = Rigor::Type::HashShape.new(a: int_type, b: str_type)
-      keys, values = described_class.send(:hash_shape_key_values, shape)
-      expect(keys).to eq([sym_type])
-      expect(values).to eq([int_type, str_type])
-    end
-
-    it "returns empty key/value lists for an empty HashShape" do
-      keys, values = described_class.send(:hash_shape_key_values, Rigor::Type::HashShape.new)
-      expect(keys).to eq([])
-      expect(values).to eq([])
-    end
-
-    it "returns the two type-args of a Nominal[Hash, [K, V]]" do
-      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [sym_type, int_type])
-      keys, values = described_class.send(:hash_shape_key_values, hash)
-      expect(keys).to eq([sym_type])
-      expect(values).to eq([int_type])
-    end
-
-    it "returns empty lists for a Nominal[Hash] missing a type-arg" do
-      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [sym_type])
-      keys, values = described_class.send(:hash_shape_key_values, hash)
-      expect(keys).to eq([])
-      expect(values).to eq([])
-    end
-
-    it "returns empty lists for a non-Hash Nominal" do
-      array = Rigor::Type::Combinator.nominal_of("Array", type_args: [int_type])
-      keys, values = described_class.send(:hash_shape_key_values, array)
-      expect(keys).to eq([])
-      expect(values).to eq([])
-    end
-
-    it "returns empty lists for a non-Hash type" do
-      keys, values = described_class.send(:hash_shape_key_values, Rigor::Type::Combinator.constant_of(1))
-      expect(keys).to eq([])
-      expect(values).to eq([])
-    end
-
-    it "concats key/value evidence across every Union member" do
-      shape = Rigor::Type::HashShape.new(a: int_type)
-      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [sym_type, str_type])
-      union = Rigor::Type::Combinator.union(shape, hash)
-      keys, values = described_class.send(:hash_shape_key_values, union)
-      # Combinator.union may reorder members, so assert set membership rather than pair order.
-      expect(keys).to contain_exactly(sym_type, sym_type)
-      expect(values).to contain_exactly(int_type, str_type)
-    end
-  end
-
-  describe ".drop_dynamic" do
-    it "removes Dynamic constituents while keeping concrete types in order" do
-      int_type = Rigor::Type::Combinator.nominal_of("Integer")
-      str_type = Rigor::Type::Combinator.nominal_of("String")
-      dyn = Rigor::Type::Combinator.untyped
-
-      result = described_class.send(:drop_dynamic, [int_type, dyn, str_type])
-      expect(result).to eq([int_type, str_type])
-    end
-
-    it "is a no-op when there is no Dynamic constituent" do
-      int_type = Rigor::Type::Combinator.nominal_of("Integer")
-      expect(described_class.send(:drop_dynamic, [int_type])).to eq([int_type])
-    end
-  end
-
-  describe ".array_added_elements" do
-    let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
-    let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
-
-    it "returns no evidence when there are no arguments" do
-      expect(described_class.send(:array_added_elements, :push, [])).to eq([])
-    end
-
-    it "returns every argument directly for << / push / append / prepend / unshift" do
-      %i[<< push append prepend unshift].each do |meth|
-        result = described_class.send(:array_added_elements, meth, [int_type, str_type])
-        expect(result).to eq([int_type, str_type]), "expected #{meth} to pass args through unchanged"
-      end
-    end
-
-    it "flat_maps concat's arguments through collection_element_types" do
-      tuple_arg = Rigor::Type::Combinator.tuple_of(int_type, str_type)
-      result = described_class.send(:array_added_elements, :concat, [tuple_arg])
-      expect(result).to eq([int_type, str_type])
-    end
-
-    it "flat_maps replace's arguments through collection_element_types" do
-      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
-      result = described_class.send(:array_added_elements, :replace, [array_arg])
-      expect(result).to eq([str_type])
-    end
-
-    it "drops the leading index argument for insert" do
-      result = described_class.send(:array_added_elements, :insert, [int_type, str_type])
-      expect(result).to eq([str_type])
-    end
-
-    it "takes only the last argument for []=" do
-      key_type = Rigor::Type::Combinator.nominal_of("Integer")
-      result = described_class.send(:array_added_elements, :[]=, [key_type, str_type])
-      expect(result).to eq([str_type])
-    end
-
-    it "reports the single argument for a single-value fill" do
-      expect(described_class.send(:array_added_elements, :fill, [int_type])).to eq([int_type])
-    end
-
-    it "reports no evidence for a multi-argument fill" do
-      expect(described_class.send(:array_added_elements, :fill, [int_type, str_type])).to eq([])
-    end
-  end
-
-  describe ".join_array_content" do
-    let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
-    let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
-    let(:zero) { Rigor::Type::Combinator.constant_of(0) }
-
-    it "unions seed and added element types, dropping the empty-seed Dynamic floor" do
-      seed = Rigor::Type::Combinator.tuple_of(zero)
-      result = described_class.send(:join_array_content, seed, [int_type])
-      expect(result.class_name).to eq("Array")
-      expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(zero, int_type))
-    end
-
-    it "keeps the seed element type unchanged when there is no added evidence" do
-      seed = Rigor::Type::Combinator.tuple_of(zero)
-      result = described_class.send(:join_array_content, seed, [])
-      expect(result.type_args.first).to eq(zero)
-    end
-
-    it "falls back to the Dynamic floor for an empty seed and no added evidence" do
-      seed = Rigor::Type::Combinator.tuple_of
-      result = described_class.send(:join_array_content, seed, [])
-      expect(result.type_args.first).to be_a(Rigor::Type::Dynamic)
-    end
-
-    it "compacts nil entries out of the added elements" do
-      seed = Rigor::Type::Combinator.tuple_of
-      result = described_class.send(:join_array_content, seed, [int_type, nil])
-      expect(result.type_args.first).to eq(int_type)
-    end
-
-    it "produces a Nominal[Array] carrier" do
-      seed = Rigor::Type::Combinator.tuple_of(zero)
-      result = described_class.send(:join_array_content, seed, [int_type])
-      expect(result).to be_a(Rigor::Type::Nominal)
-    end
-  end
-
-  describe ".join_hash_content" do
-    let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
-    let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
-    let(:sym_type) { Rigor::Type::Combinator.nominal_of("Symbol") }
-
-    it "unions seed and added key/value types, dropping the empty-seed Dynamic floor" do
-      seed = Rigor::Type::HashShape.new(a: int_type)
-      result = described_class.send(:join_hash_content, seed, [[sym_type, str_type]])
-      expect(result.class_name).to eq("Hash")
-      expect(result.type_args[0]).to eq(sym_type)
-      expect(result.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
-    end
-
-    it "falls back to the Dynamic/Dynamic floor for an empty seed and no added pairs" do
-      result = described_class.send(:join_hash_content, Rigor::Type::HashShape.new, [])
-      expect(result.type_args[0]).to be_a(Rigor::Type::Dynamic)
-      expect(result.type_args[1]).to be_a(Rigor::Type::Dynamic)
-    end
-
-    it "compacts nil keys and nil values out of the added pairs independently" do
-      result = described_class.send(:join_hash_content, Rigor::Type::HashShape.new, [[nil, int_type], [sym_type, nil]])
-      expect(result.type_args[0]).to eq(sym_type)
-      expect(result.type_args[1]).to eq(int_type)
-    end
-
-    it "concats (not unions) key/value evidence across a Union seed" do
-      shape_seed = Rigor::Type::HashShape.new(a: int_type)
-      hash_seed = Rigor::Type::Combinator.nominal_of("Hash", type_args: [sym_type, str_type])
-      union_seed = Rigor::Type::Combinator.union(shape_seed, hash_seed)
-      result = described_class.send(:join_hash_content, union_seed, [])
-      expect(result.type_args[0]).to eq(sym_type)
-      expect(result.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
     end
   end
 

@@ -158,6 +158,74 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #560 — the ADDED-value half of the mutation widening. PR #561 widened the value pinning a
+  # slot-REWRITING mutator falsifies; this pins the join that covers what the mutation stored.
+  describe "fixtures/mutation_added_value_join.rb — straight-line mutations join the added value" do
+    let(:harness) { harness_for("mutation_added_value_join") }
+
+    # The lines the fixture marks as genuinely wrong. Read from the source rather than hard-coded so
+    # the fixture stays editable — a hard-coded line number turns any insertion into a false failure.
+    def marked_line(harness, marker)
+      harness.source.lines.index { |l| l.include?(marker) } + 1
+    end
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # The must-not-fire / must-fire pair in one assertion: every mutated-then-read condition in the
+    # fixture is TRUE at runtime and folded to a constant `false` before the join, and the one
+    # comparison nothing mutates must still fold. Asserting the exact line set is what keeps the
+    # "went quiet" half from passing because the rule stopped firing at all.
+    it "silences the stale folds without silencing the genuine one" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq([marked_line(harness, "# GENUINE-FALSEY")])
+    end
+
+    # The join's own FP surface, and the reason a straight-line join never CLOSES its parameter.
+    # This seam sees one store and the widening is a one-way door, so the next store is invisible:
+    # `a = []; a.push(1); a.push("s"); a.last.upcase` is correct Ruby that a closed `Array[Integer]`
+    # rejected, and mail's `Message#to_yaml` is the same defect one carrier over. The fixture
+    # carries all three mutator forms of the first and the block / unconditional / straight-line
+    # forms of the second — together they separate a branch-scoping bug from an evidence bug —
+    # against a value the seed really does pin to a class with no `<<`, where the diagnostic is
+    # right and must survive.
+    it "keeps stored-then-read values silent without silencing a genuinely pinned one" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq([marked_line(harness, "# GENUINE-UNDEFINED")])
+    end
+  end
+
+  describe "fixtures/mutation_join_declared_sig/ — the join stays inside a hand-written signature" do
+    let(:harness) { harness_for("mutation_join_declared_sig") }
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # haml's temple builders (8 sites on the corpus gate) are the shape: a `[:multi]` seed appended
+    # with `[:static, …]` pairs, declared `-> Array[:multi]`. Joining the appended tuple precisely
+    # draws `def.return-type-mismatch` on correct code; the admissibility gate answers `Dynamic[top]`
+    # for a class the seed does not admit, and a union carrying it ACCEPTS. `genuinely_wrong` is the
+    # live-rule control — without it this example would pass on a rule that never fires.
+    # A DECLARED gradual arm must survive the slice-C rederivation. `keeps_declared_gradual_arm`'s
+    # signature says the array may hold anything, so `a.first.upcase` is correct code. A draft of
+    # the straight-line floor-scrub flattened Union members before dropping Dynamic, which cannot
+    # tell a declared `untyped` from the join's own floor: it closed the parameter to
+    # `Array[Integer]` and drew a false `undefined method 'upcase' for Integer`.
+    it "keeps a declared gradual arm through the block-capture rederivation" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined).to be_empty
+    end
+
+    it "draws a return-type mismatch only where the body is genuinely wrong" do
+      mismatches = harness.diagnostics.select { |d| d.rule == "def.return-type-mismatch" }
+      expect(mismatches.map(&:method_name)).to eq(["genuinely_wrong"])
+    end
+  end
+
   describe "fixtures/ivar_mutation_widening.rb — class-ivar Tuple/HashShape widening on mutation" do
     let(:harness) { harness_for("ivar_mutation_widening") }
 

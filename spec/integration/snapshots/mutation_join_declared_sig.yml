@@ -1,0 +1,4 @@
+---
+locals:
+  heterogeneous: Array[:multi | Dynamic[top]]
+  homogeneous: Array[:multi | Dynamic[top] | Symbol]

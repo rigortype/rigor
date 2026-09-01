@@ -299,6 +299,33 @@ block mutation and fired on correct code. The
 distinguishing floor-Dynamic from declared-Dynamic properly is #580's
 provenance mark, deliberately not built here.
 
+### WD2.6 — A mutator whose arguments carry no evidence unpins what it kept (2026-09-02, issue #580)
+
+WD2.5's join reads the mutator's arguments. When it can read nothing
+out of them, the widening previously kept the seed's elements exactly:
+`m = [1, 2]; m.concat(xs)` stayed `Array[1 | 2]`, and `m.last == 6`
+constant-folded to false on code whose runtime value really is 6. The
+mutation ran, so the retained constants were falsified whether or not
+the analyzer could say by what — the same stale-evidence family as
+#540 / #541 / #544 / #560, reached through a different door. The
+surviving elements now lose their value pinning.
+
+The discriminator is `arg_types` being NON-EMPTY while the extracted
+evidence is empty: real arguments the extractor could not read. An
+EMPTY `arg_types` means no argument machinery was supplied at all —
+the block-capture path of WD2.5, whose slice-C join re-adds the
+appended types afterwards — and unpinning there would strip seed
+pinning that path keeps on purpose (`out = [0]; arr.each { out << x }`
+must stay `0 | …`).
+
+This is one of the two residuals recorded on #580. The other, alias
+blindness (`b = a; a.push(6); b.last == 6`), is untouched: it needs the
+receiver-alias set to write through to every alias. The issue's own
+subject — re-joining a widened `Nominal` so later stores accumulate —
+also remains open; the evidence from the attempt, including why a
+scope-side provenance mark cannot carry the signature protection across
+a method return, is recorded on the issue.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

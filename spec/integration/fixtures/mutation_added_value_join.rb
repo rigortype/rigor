@@ -178,6 +178,18 @@ fixed_include = [1, 2]
 fixed_include.push(6)
 puts "yes" if fixed_include.include?(6)
 
+# --- Issue #580 residual (a): a content adder that RAN but yielded no
+# element evidence still falsified the retained constants. `concat`
+# with a non-literal argument contributes nothing extractable, and the
+# surviving `Array[1 | 2]` folded `m.last == 6` to false on code whose
+# runtime value really is 6. The elements lose their pinning instead. ---
+def concat_unknown(xs)
+  m = [1, 2]
+  m.concat(xs)
+  puts "six" if m.last == 6
+  m
+end
+
 # --- and the must-still-fire sibling: a value the seed pins to a class
 # with no `<<`, where NO store ever put an appendable there. The literal
 # shape survives (no mutator ran), so the read is the pinned member and

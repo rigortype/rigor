@@ -303,7 +303,7 @@ module Rigor
         return widened unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name)
 
         added = value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
-        return widened if added.empty?
+        return unpinned_elements(widened, arg_types) if added.empty?
 
         admitted = ContentJoin.admissible_evidence(seed_elements, added)
         ContentJoin.join_array_content(widened, gradual_floor(admitted))
@@ -365,6 +365,25 @@ module Rigor
       def admitted_union(seed_members, added)
         admitted = ContentJoin.admissible_evidence(seed_members, [added])
         Type::Combinator.union(*gradual_floor(admitted))
+      end
+
+      # A content adder that RAN but yielded no element evidence still falsified the retained constants —
+      # `m = [1, 2]; m.concat(xs)` really can leave `6` at the end — so the surviving elements lose their
+      # value pinning. Without this the widened carrier keeps `Array[1 | 2]`, and `m.last == 6`
+      # constant-folds to false on correct code: the same stale-evidence family as #540 / #541 / #544 /
+      # #560, reached through a different door. `concat` with a non-literal argument is the shape; `<<` /
+      # `push` with an unresolvable one is the same.
+      #
+      # The discriminator is `arg_types` being NON-empty while the extracted evidence is empty: real
+      # arguments the extractor could not read anything out of. An EMPTY `arg_types` means the caller
+      # supplied no argument machinery at all — the ADR-56 block-capture path, which passes none because its
+      # own slice-C join re-adds the appended types afterwards. Flooring there would strip the seed pinning
+      # that path is entitled to keep (`out = [0]; arr.each { out << x }` must stay `0 | …`).
+      def unpinned_elements(widened, arg_types)
+        return widened if arg_types.empty?
+
+        args = widened.type_args.map { |t| Type::Combinator.widen_value_pinned(t) }
+        Type::Combinator.nominal_of("Array", type_args: args)
       end
 
       # Normalizes the types the mutator's arguments contribute, before they join.

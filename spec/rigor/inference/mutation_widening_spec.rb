@@ -300,6 +300,31 @@ RSpec.describe Rigor::Inference::MutationWidening do
     end
   end
 
+  # Issue #580 residual (a) — a content adder that RAN but yielded no element evidence still falsified the
+  # retained constants, so they lose their value pinning. `m = [1, 2]; m.concat(xs); m.last == 6` folded to
+  # false on correct code.
+  describe ".widen_for_mutator with arguments that yield no evidence" do
+    let(:tuple) do
+      Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1),
+                                       Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "unpins the retained elements when the arguments carry no extractable evidence" do
+      widened = described_class.widen_for_mutator(tuple, :concat, arg_types: [Rigor::Type::Combinator.untyped])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    # The ADR-56 block-capture path passes NO argument machinery at all, because its own slice-C join re-adds
+    # the appended types afterwards. Flooring there would strip seed pinning that path keeps on purpose, so
+    # an empty `arg_types` must be left exactly as it was.
+    it "keeps the pinning when no argument machinery was supplied at all" do
+      widened = described_class.widen_for_mutator(tuple, :concat)
+      expect(widened.type_args.first)
+        .to eq(Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1),
+                                             Rigor::Type::Combinator.constant_of(2)))
+    end
+  end
+
   describe ".widen_after_call" do
     # Parses the last statement in `source` as a CallNode. We parse a multi-statement source so that local-variable
     # reads in the target expression resolve to `LocalVariableReadNode` — Prism's parser needs an explicit assignment to

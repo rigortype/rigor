@@ -17,54 +17,66 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**The 2026-09-01 opacity campaign is merged AND re-measured.** All 20 sweep PRs + ADR-105 landed;
-the sweep probe was then re-run on the merged master over all 30 targets (the handoff's mandatory
-re-run before sizing new levers), with four verification passes on the ambiguous clusters. Full
-numbers and per-cluster verdicts:
-[`docs/notes/20260901-post-campaign-opacity-recheck.md`](notes/20260901-post-campaign-opacity-recheck.md);
-re-run outputs preserved on `opacity-sweep-harness-20260901`
-(`tool/opacity-sweep-20260901/rerun-20260901/`). Headlines: mastodon 48.9→54.8%, redmine
-47.8→50.2%, rigor-lib 59.3→61.3%; the two per-target drops (numo −3.44pp, DSA-in-Ruby −0.54pp) are
-FULLY attributed to #537/#559's intended wrong-precise→honest trades, zero unexplained residue.
+**The 2026-09-02 fix batch is fully landed: eight PRs merged** (#571 JSON fold, #576 AR
+columns-less index + ADR-26 WD7, #578 Parameters chain links, #579 oracle-tempfile flake fix,
+#581 ADDED-value join, #582 shoulda fact shape, #584 block-return threading, #585 Rails
+readers/Duration/sidekiq). Every PR went through the serial landing pipeline: rebase →
+corpus FP arms (local, `collect_arm.sh`/`diff_arms.py` under the session scratchpad) →
+independent critical review (three of eight needed fix rounds — the reviews caught four
+genuine wrong-type FPs the corpus missed) → remote CI on the draft head → merge.
+Post-batch probe re-run (13 targets, same probe as `opacity-sweep-harness-20260901`):
+**redmine 50.2→53.4% (+3.2pp, the #569 unlock), mastodon 54.8→55.4%**, gems ±0, weighted
++0.49pp. Closed: #560 #569 #570 #572 #573; #533 item 9 and #534 items 1-4 landed.
 
-## Backlog, ranked by the re-run (all on GitHub Issues)
+## In flight (autonomous workers, worktrees under ~/repo/ruby/rigor-wt-*)
 
-1. **[#569](https://github.com/rigortype/rigor/issues/569)** (new) — rigor-activerecord is
-   all-or-nothing on `db/schema.rb`: redmine gitignores it, so the plugin types NOTHING there
-   (~650 direct sites: `table_name` 517 + first-hop `.where`/`.visible`/`.find`). Columns-less
-   degraded `ModelIndex`; additive by construction. **Best next unit of work.**
-2. **[#534](https://github.com/rigortype/rigor/issues/534)** — Rails plugin batch, ~2,015
-   named-receiver sites: `Parameters#[]`/`expect`/`slice` first (1,077), then Rails readers 288 /
-   Duration 195 / Flash+Session+Request ~350 / sidekiq 64. Each sub-item independently landable.
-3. **[#560](https://github.com/rigortype/rigor/issues/560)** — the ADDED-value join (straight-line
-   mutations never join the added value): the live always-falsey FP family; design fork + corpus
-   census already on the issue. mail's ragel cluster shares the root.
-4. **[#525](https://github.com/rigortype/rigor/issues/525)** — struct factories: re-measured to
-   296 mail sites (was 39); the new comment adds the setter-then-read fold-safety shape to the
-   design pass. `:self`-sentinel design for in-body reads already on the issue.
-5. Small/opportunistic: **[#570](https://github.com/rigortype/rigor/issues/570)** (new,
-   JSON.generate fold), [#533](https://github.com/rigortype/rigor/issues/533) items 1/5/7 + new
-   item 9 (block-return pass reads only `body.last` — repro + decline point on the issue),
-   [#527](https://github.com/rigortype/rigor/issues/527) ancestor-walk design pass,
-   [#530](https://github.com/rigortype/rigor/issues/530) items 1+3. Ready-for-human policy calls
-   unchanged: [#541](https://github.com/rigortype/rigor/issues/541) /
-   [#542](https://github.com/rigortype/rigor/issues/542) /
-   [#531](https://github.com/rigortype/rigor/issues/531).
+- **#525** struct-factory `:self` sentinel + setter-rejoin (branch `struct-factory-self-sentinel`).
+- **#580** widened-carrier provenance mark — reopens the one-way door, may lift #581's gradual
+  floors; staged commits so the Hash-gradualization revisit can drop independently (branch
+  `widened-carrier-provenance`).
+- **#534 request surface** — Request predicates / FlashHash / Session, measured-adjudication
+  required per method (branch `actionpack-request-surface`).
 
-Verified NON-levers (do not re-derive): `User.current` 494 sites (honest CurrentAttributes
-propagation), `Mutex#synchronize` cluster (65/66 honest; generic X binds fine), `Thread#[]`
-(honest RBS untyped), `Mail::Utilities.blank?`/`chars` (#554 works; bodies are param-Dynamic),
-tuple min/max (element-union fallback already ships). The parameter/ivar lane stays closed
-(ADR-67 gated / ADR-58 settled).
+## Backlog, re-ranked by the post-batch probe
+
+1. **[#574](https://github.com/rigortype/rigor/issues/574)** (ready-for-HUMAN) — the witness-gate
+   vacuity is now the single blocker on the corpus's biggest remaining pair: `Parameters#[]`
+   581 redmine + 496 mastodon sites. Needs its own corpus FP/FN measurement.
+2. Engine bugs from the batch's reviews, all with repros: **[#586](https://github.com/rigortype/rigor/issues/586)**
+   (declared `Array[untyped]` closes under block mutation — likely one-liner after #580),
+   **[#587](https://github.com/rigortype/rigor/issues/587)** (block-return content-mutation-blind
+   gate + first-iteration pinning), **[#583](https://github.com/rigortype/rigor/issues/583)**
+   (`class ::User` misses all model_index consumers), **[#577](https://github.com/rigortype/rigor/issues/577)**
+   (absence-edge cache invalidation), **[#588](https://github.com/rigortype/rigor/issues/588)**
+   (#585 nits). **[#575](https://github.com/rigortype/rigor/issues/575)** controller-ivar carve-out
+   (ready-for-human).
+3. Standing policy calls unchanged: #541 / #542 / #531 / #527 / #530 items 1+3.
+4. Verified NON-levers (do not re-derive): `User.current` 494 (honest CurrentAttributes),
+   mastodon's `Rails.*` residue (its survey config omits `rigor-railties` — a config gap, NOT an
+   engine gap; adding it invalidates saved base arms, do it at the next full sweep), the
+   `Duration#ago`/`#to_i` pairs (the chain frontier moved forward — receiver typed, lenient call).
+
+## The landing pipeline (keep it — it caught what the corpus missed)
+
+- Implementation parallel in worktrees (bundler = `.bundle/config` copy + `vendor` symlink; the
+  shared stash stack means **NEVER `git stash` in a worktree**; commit before any
+  `git checkout <sha> -- <file>` baseline swap).
+- Heavy execution serial and coordinator-owned: ONE full-suite/corpus job on the machine at a
+  time (a 4-worker parallel `make verify` fleet once OOM-killed the host at 200GB+). Workers run
+  single spec files and `--workers=0` fixtures only.
+- **Draft-PR remote CI is the post-rebase verification** — push early, keep the PR Draft until
+  every gate (corpus arms + review APPROVE + CI) is green, then `gh pr ready` + merge.
+- Corpus arms: `check --no-baseline --no-cache --format json --workers=4` per target, base arms
+  re-derivable from the merged branch's own final arms (a corpus-neutral merge keeps them valid).
+- Every PR gets an independent critical review with VERIFIED findings; a REQUEST-CHANGES round
+  trips back to the implementing worker with the coordinator adjudicating direction.
 
 ## Pitfalls that still bind
 
-- The corpus baseline arms in older session scratchpads predate the merged master — re-collect
-  from a master-pinned worktree before gating the next engine change; regenerate the two apps'
-  `.rigor-ab.yml` (tell for a missing one: −787/−2306 with "silenced by baseline" in stderr).
-- **`rigor type-of` cannot see discovery-seeded joins** (phantom-Hash read Dynamic on BOTH arms of
-  an A/B): binding-level claims need the probe's `discovery_seeded_scope` lens or `check` itself.
-- The precision ratio scores `dynamic_top → dynamic_specific` as zero and honest widening as full
-  loss — pair it with the FP tally before ranking any wrong-precise fix (#537 lesson).
-- Never compare post-#535 coverage ratios to older numbers; read a gate's exit code in its own
-  call; a background corpus arm reads the LIVE checkout — freeze the tree for the whole arm.
+- `rigor type-of` cannot see discovery-seeded joins; binding-level claims need the probe lens or
+  `check`. The precision ratio under-credits `dynamic_specific`; pair it with the FP tally.
+- Compound-shell A/B arms inherit `cd` from earlier lines in the SAME Bash call — a reviewer's
+  master arm silently ran the branch engine; give each arm its own invocation with explicit cwd.
+- GitHub's mergeability check lags pushes ("head branch is out of date" on an up-to-date branch)
+  — retry with backoff, don't rebase-churn.
+- Read gate exit codes in their own call; never compare post-#535 coverage ratios to older numbers.

@@ -136,7 +136,7 @@ module Rigor
     end
 
     module RbsTypeTranslator
-      def self.translate: (untyped rbs_type, ?self_type: Type::t?, ?instance_type: Type::t?, ?type_vars: Hash[Symbol, Type::t]) -> Type::t
+      def self.translate: (untyped rbs_type, ?self_type: Type::t?, ?instance_type: Type::t?, ?type_vars: Hash[Symbol, Type::t], ?alias_expander: untyped) -> Type::t
     end
 
     class Fallback

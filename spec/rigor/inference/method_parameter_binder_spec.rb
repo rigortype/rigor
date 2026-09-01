@@ -51,19 +51,23 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
       binder = described_class.new(environment: env, class_path: "Array", singleton: false)
       result = binder.bind(def_node("def first(n); n; end"))
 
-      # The single relevant overload's type is `int` (an RBS interface), which the translator currently degrades to
-      # `Dynamic[Top]`. The binder MUST NOT have left it at the default-untyped sentinel under a different identity — it
-      # should match the translator's canonical Dynamic[Top].
-      expect(result[:n]).to eq(Rigor::Type::Combinator.untyped)
+      # The single relevant overload's type is the `int` alias (`::Integer | ::_ToInt`). Since #529 the
+      # translator expands it: the Integer member survives as evidence and the interface member keeps the
+      # union gradual, so the binder's result proves the `(int)` overload — not the `()` one — was read.
+      type = result[:n]
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(type.members).to include(Rigor::Type::Combinator.untyped)
     end
 
     it "binds singleton (class-method) parameters when singleton: true" do
       binder = described_class.new(environment: env, class_path: "Integer", singleton: true)
       result = binder.bind(def_node("def sqrt(n); n; end"))
 
-      # `Integer.sqrt(::int)` again degrades to Dynamic[Top] but the singleton path MUST be the one consulted.
+      # `Integer.sqrt(::int)` — the expanded alias's Integer member proves the singleton path was the one
+      # consulted (the instance side has no `sqrt`).
       expect(result.keys).to eq([:n])
-      expect(result[:n]).to eq(Rigor::Type::Combinator.untyped)
+      expect(result[:n].members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
     end
 
     it "routes def self.foo through the singleton path even when singleton: false" do

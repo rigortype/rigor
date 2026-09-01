@@ -203,7 +203,17 @@ module Rigor
       # method on a Parameters value stays engine-lenient (no `undefined-method`), and this types the
       # container only, never a caller's argument (ADR-5). The GitLab strong-params survey (108 leaked
       # `.permit` sites) is the demand.
-      STRONG_PARAMS_CHAIN_METHODS = %i[require permit permit!].freeze
+      # Issue #534 — `expect` (Rails 8's require+permit) and `slice` joined 2026-09-01, from the corpus
+      # sweep's pair counts (63 and 38 sites on mastodon). Both share `require`'s safety shape: they
+      # never return nil (`expect` raises like `require`; `slice` always returns a Parameters), so the
+      # non-nil lenient nominal cannot fold a flow rule wrong.
+      #
+      # `Parameters#[]` — the LARGEST pair on both apps (redmine 581, mastodon ~475) — is deliberately
+      # NOT here: `params[:missing]` returns nil at runtime, and typing it as the non-nil nominal folded
+      # `url.nil?` / `if params[:r]` conditions constant on five working controllers (measured before
+      # withdrawal). Typing it `Parameters | nil` instead trades those folds for a possible-nil-receiver
+      # storm on idiomatic unguarded reads. `[]` needs a rules-level decision first — see #534.
+      STRONG_PARAMS_CHAIN_METHODS = %i[require permit permit! expect slice].freeze
 
       dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, _scope|
         next nil unless call_node.is_a?(Prism::CallNode)

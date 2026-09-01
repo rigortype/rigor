@@ -2387,7 +2387,13 @@ module Rigor
           case class_ordering(nominal.class_name, class_name, context)
           when :superclass then Type::Combinator.nominal_of(class_name)
           when :disjoint then Type::Combinator.bot
-          else nominal # :subclass preserves the bound; :unknown stays conservative
+          when :subclass then nominal
+          else
+            # :unknown — the guard proved membership in a class the environment cannot order against the
+            # bound (an RBS-less gem class, typically). Keeping the old bound licenses `undefined-method`
+            # on the guard-proven branch (concurrent-ruby's `done.is_a?(Concurrent::Maybe)` kept `Array`
+            # and fired on `.value`); the honest join is Dynamic — the guard destroyed the old knowledge.
+            Type::Combinator.untyped
           end
         end
 

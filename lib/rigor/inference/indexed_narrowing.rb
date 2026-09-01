@@ -83,6 +83,20 @@ module Rigor
         [receiver.first, receiver.last, key]
       end
 
+      # Issue #544 — whether the RECEIVER's type is precise enough for a recorded slot value to be a
+      # fact. A `Dynamic` / `Top` constituent means the collection can hold a caller-supplied value at
+      # the slot that `||=` keeps, so recording the default alone would invent a fact (mail's
+      # `options[:count] ||= :all` folded a reachable `count: 1` path away). Unions walk their members;
+      # everything else — the tracked `HashShape` / `Tuple` carriers this feature was built for, and
+      # plain nominals whose RBS read already answers honestly — passes.
+      def fully_tracked_receiver_type?(type)
+        case type
+        when Type::Dynamic, Type::Top then false
+        when Type::Union then type.members.all? { |m| fully_tracked_receiver_type?(m) }
+        else true
+        end
+      end
+
       # Looks up a recorded narrowing for `receiver[key]` against `scope`, returning the narrowed
       # type or nil when no entry applies. Used by ExpressionTyper's `[]` dispatch to refine the
       # result of a stable indexed read.

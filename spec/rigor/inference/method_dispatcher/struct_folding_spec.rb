@@ -374,4 +374,173 @@ RSpec.describe "Struct.new value folding", type: :runner do
       expect(result.diagnostics.map(&:message).join).not_to match(/undefined method/i)
     end
   end
+
+  # Issue #525 — the in-body member read. A block-def method resolved on a foldable struct receiver re-types
+  # its body with the caller's `StructInstance` as `self_type`; before this the receiverless `text` read had
+  # no receiver NODE to prove foldability from and degraded to `Dynamic[top]`, taking the whole method's
+  # return with it. The caller now records its own receiver's foldability as the `:self` sentinel in the
+  # body scope's fold-safe set.
+  describe "in-body member reads through the `:self` sentinel" do
+    let(:line_def) { <<~RUBY }
+      Line = Struct.new(:text, :indent) do
+        def shout
+          text.upcase
+        end
+
+        def explicit
+          self.text.upcase
+        end
+
+        def outer
+          shout
+        end
+
+        def clobber
+          self.text = "z"
+          text.upcase
+        end
+
+        def reset!
+          self.text = ""
+        end
+
+        def via_sibling
+          reset!
+          text.upcase
+        end
+
+        def escaping(sink)
+          sink.take(self)
+          text.upcase
+        end
+
+        def two_hops
+          via_sibling
+          text.upcase
+        end
+
+        def with_text(v)
+          self.text = v
+          self
+        end
+
+        def ping
+          pong
+        end
+
+        def pong
+          ping
+        end
+      end
+    RUBY
+
+    describe "must fold — the caller proved its receiver current" do
+      it "folds an implicit-self member read off a fresh receiver" do
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).shout)")).to eq(["\"A\""])
+      end
+
+      it "folds an explicit `self.member` read the same way" do
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).explicit)")).to eq(["\"A\""])
+      end
+
+      it "propagates the grant through a nested implicit-self call" do
+        # `outer` has no member read of its own; the grant has to reach `shout`'s body through the
+        # receiverless `shout` call for this to fold.
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).outer)")).to eq(["\"A\""])
+      end
+
+      it "folds off a `.with` copy" do
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).with(text: \"b\").shout)")).to eq(["\"B\""])
+      end
+
+      it "folds each call site against ITS OWN carrier, not a shared answer" do
+        types = dumped_types(<<~RUBY)
+          #{line_def}
+          dump_type(Line.new("a", 2).shout)
+          dump_type(Line.new("b", 3).shout)
+        RUBY
+        expect(types).to eq(["\"A\"", "\"B\""])
+      end
+    end
+
+    describe "must decline — the map may be stale by the read" do
+      it "declines a body that assigns the member before reading it" do
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).clobber)")).to eq(["Dynamic[top]"])
+      end
+
+      it "declines a body that calls a sibling mutator before reading" do
+        # The read would fold to the CONSTRUCTION value while the runtime read is `""`. The body has no
+        # setter of its own, so a guard that only looked for direct setters would fold this wrongly.
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).via_sibling)")).to eq(["Dynamic[top]"])
+      end
+
+      it "declines a body that lets self escape" do
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).escaping(x))")).to eq(["Dynamic[top]"])
+      end
+
+      it "declines a chain through a self-returning fluent builder" do
+        # `with_text` hands back its own receiver AFTER writing a member, so the chained `.shout` runs on an
+        # object two statements stale. A "any chained call is fresh" reading folds `"A"` here; the runtime
+        # value is `"Z"`. Only recognised MATERIALISATIONS (`.new` / `.[]` / `.with`) count as fresh for the
+        # grant — the sibling examples above are the must-still-fold controls for that narrowing.
+        source = "#{line_def}dump_type(Line.new(\"a\", 2).with_text(\"z\").shout)"
+        expect(dumped_types(source)).to eq(["Dynamic[top]"])
+      end
+
+      it "declines transitively — a sibling of a sibling that mutates" do
+        # `two_hops` -> `via_sibling` -> `reset!`, which writes the member. The refusal has to travel two
+        # resolution hops, so a one-level sibling check would fold this wrongly.
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).two_hops)")).to eq(["Dynamic[top]"])
+      end
+
+      it "declines a mutually recursive pair rather than looping" do
+        # `ping` -> `pong` -> `ping`. The cycle guard refuses (the conservative direction) instead of
+        # recursing; the assertion doubles as the non-hang control.
+        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).ping)")).to eq(["Dynamic[top]"])
+      end
+
+      it "declines when the CALL SITE receiver is not foldable" do
+        # `v.shout` is not a pure read, so `v` never enters the fold-safe set and the call site cannot vouch
+        # for its member map.
+        expect(dumped_types("#{line_def}v = Line.new(\"a\", 2)\ndump_type(v.shout)")).to eq(["Dynamic[top]"])
+      end
+    end
+
+    describe "the grant is part of the return-memo key" do
+      # The same def, the same receiver carrier and the same (empty) argument list, called once from a
+      # foldable site and once from a non-foldable one. Without the fold-safety bit in the memo key the
+      # first call site to run answers for both — and in the fresh-first order that serves `"A"` for a read
+      # off a local nothing proved current, a wrong type rather than mere imprecision.
+      it "keeps the two polarities apart with the foldable site first" do
+        types = dumped_types(<<~RUBY)
+          #{line_def}
+          dump_type(Line.new("a", 2).shout)
+          v = Line.new("a", 2)
+          dump_type(v.shout)
+        RUBY
+        expect(types).to eq(["\"A\"", "Dynamic[top]"])
+      end
+
+      it "keeps them apart in the opposite order too" do
+        types = dumped_types(<<~RUBY)
+          #{line_def}
+          v = Line.new("a", 2)
+          dump_type(v.shout)
+          dump_type(Line.new("a", 2).shout)
+        RUBY
+        expect(types).to eq(["Dynamic[top]", "\"A\""])
+      end
+    end
+
+    describe "must still decline — the pre-existing fold-safety floor is unmoved" do
+      it "declines a member read off a local that escaped to an unknown method" do
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          Point = Struct.new(:x, :y)
+          p = Point.new(1, 2)
+          sink(p)
+          dump_type(p.x)
+        RUBY
+      end
+    end
+  end
 end

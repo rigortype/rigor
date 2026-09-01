@@ -368,4 +368,30 @@ RSpec.describe Rigor::Scope do
       expect(a).not_to eq(c)
     end
   end
+
+  # Issue #589 — the fold-safe set is a property of the method BODY, stamped once by a static scan and
+  # threaded by `rebuild`. `join` omitted it entirely, so every `if` / `while` merge reset it to empty and
+  # revoked struct member folding for the rest of the body.
+  describe "#join struct fold-safety" do
+    it "keeps a grant both arms carry" do
+      left = described_class.empty.with_struct_fold_safe(Set[:p])
+      right = described_class.empty.with_struct_fold_safe(Set[:p])
+      expect(left.join(right).struct_fold_safe?(:p)).to be(true)
+    end
+
+    # Intersection, not union: the grant licenses a FOLD, so retaining one an arm did not have could fold
+    # a stale constant. Dropping one only costs precision.
+    it "drops a grant only one arm carries" do
+      left = described_class.empty.with_struct_fold_safe(Set[:p])
+      expect(left.join(described_class.empty).struct_fold_safe?(:p)).to be(false)
+    end
+
+    it "keeps only the names both arms agree on" do
+      left = described_class.empty.with_struct_fold_safe(Set[:p, :q])
+      right = described_class.empty.with_struct_fold_safe(Set[:q, :r])
+      joined = left.join(right)
+      expect([joined.struct_fold_safe?(:p), joined.struct_fold_safe?(:q), joined.struct_fold_safe?(:r)])
+        .to eq([false, true, false])
+    end
+  end
 end

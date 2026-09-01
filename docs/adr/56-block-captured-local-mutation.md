@@ -346,6 +346,56 @@ also remains open; the evidence from the attempt, including why a
 scope-side provenance mark cannot carry the signature protection across
 a method return, is recorded on the issue.
 
+### WD2.7 — A merge revoked struct fold-safety (2026-09-02, issue #589)
+
+Reported as "a `while` loop erases a struct local's carrier even when
+the body never touches it", and expected to be a loop-seam widening
+problem in this ADR's territory. It was neither.
+
+The carrier survives the merge intact — `s` still reads
+`S(raw: "r")` there. What was lost is the GRANT that lets a member
+read consult it: `Scope#join` omitted `struct_fold_safe_locals` from
+its constructor call, so it fell back to the empty default. Every
+merge in a method body silently revoked struct member folding for
+everything after it, and an `if` did it exactly as a `while` did —
+this was never loop-specific. The grant is now intersected across the
+merge (both arms normally carry the identical set, since it is a
+static scan over the method root; intersecting is the FP-safe
+direction, because the grant licenses a fold).
+
+Nothing about fold SAFETY moved. The static scan already disqualifies
+a local whose setter sits inside a loop or block (`deferred_setter`),
+one the body rebinds, and one that escapes; the join was discarding
+that scan's answer rather than contradicting it. All three still
+decline, and folding now also holds across this ADR's loop fixpoint
+rather than for a single pass.
+
+Restoring the grant did expose a real gap in that scan, fixed in the
+same change. The scan's counting identity is about the LOCAL and says
+nothing about a member read's RESULT: `s.x << v` mutates the container
+`s.x` returns while `s.x` is a textbook pure read, so the local stayed
+fold-safe while its member's value changed underneath. A local whose
+member-read result is itself a receiver is now disqualified outright,
+with no allow-list of its own — `s.x.to_s` loses precision for
+nothing, but an allow-list is what produced the bug, and being too
+broad only costs a `Dynamic[top]`. That also removes a pre-existing
+false positive on the straight-line form, which fired before this
+branch existed. The scan header's claim that a missed case is "never
+unsound" was false and is corrected there. Remaining residual: #597.
+
+**The payoff was measured and it is NOT mail's ragel cluster**, which
+the issue named as the target. Both of that file's structs are
+excluded for reasons this fix does not touch:
+`address` takes 131 member setters INSIDE the ragel `while`, so
+`deferred_setter` disqualifies it — and that gate is load-bearing
+(#525's sibling verified that removing it serves a stale `nil`);
+`address_list` is returned twice as a bare read, so the escape rule
+disqualifies it. Zero of the ~250 sites unlock. What DOES unlock is
+every struct local a merge previously revoked: a member read after an
+untouching `if` or `while`, and an ADR-48 slice-4 setter write-back
+surviving one. Reaching mail needs a different lever — modelling an
+in-loop setter's per-iteration effect — not this one.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

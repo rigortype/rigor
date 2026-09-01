@@ -69,6 +69,21 @@ plugins:
   knows what `rigor-rails-routes` published, and `permit`
   validation only what `rigor-activerecord` published — enabling
   those producers widens what this plugin can check.
+- **`params[:key]` stays untyped.** Inside a controller, `params`
+  types as `ActionController::Parameters`, and so does the result
+  of every builder method that always returns one — `require`,
+  `permit`, `permit!`, `expect`, `slice`, `slice!`, `except`,
+  `without`, `extract!`, `merge`, `merge!`, `reverse_merge`,
+  `reverse_merge!`, `with_defaults`, `with_defaults!`, `compact`,
+  `compact_blank`, `deep_dup` — so a chain built from them keeps a
+  concrete receiver throughout. A subscript read is deliberately
+  left untyped: `params[:missing]` is `nil` at runtime, and a type
+  that says otherwise would let the flow rules fold live
+  conditions (`if params[:q]`, `url.nil?`) to a constant and report
+  working code. Methods whose result depends on the call — `dig`,
+  `fetch`, `compact!`, and the block-less `select` / `reject` /
+  `transform_keys` / `transform_values` — are untyped for the same
+  reason.
 
 ## Plugin internals
 

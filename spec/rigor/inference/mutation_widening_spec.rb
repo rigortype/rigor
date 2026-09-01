@@ -60,6 +60,37 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(described_class.widen_for_mutator(tuple, :first)).to be_nil
     end
 
+    # Issue #560 — the mutator that falsified the SHAPE can also falsify the VALUES: `t = [1, 2];
+    # t[0] += 5` holds 6 at slot 0, so a surviving `Array[1 | 2]` feeds the constant-comparison fold
+    # and fires a false always-falsey on `t[0] == 6`. The widened element bound is the class nominal.
+    it "widens value-pinned Tuple elements to their class nominal" do
+      tuple = Rigor::Type::Combinator.tuple_of(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2)
+      )
+      widened = described_class.widen_for_mutator(tuple, :[]=)
+      expect(widened.class_name).to eq("Array")
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "widens value-pinned HashShape values to their class nominal" do
+      shape = Rigor::Type::HashShape.new(headers: Rigor::Type::Combinator.constant_of(false))
+      widened = described_class.widen_for_mutator(shape, :[]=)
+      expect(widened.class_name).to eq("Hash")
+      expect(widened.type_args.last).to eq(Rigor::Type::Combinator.nominal_of("FalseClass"))
+    end
+
+    it "keeps value pinning under an ADDING mutator (`<<` never rewrites an existing slot)" do
+      # haml's `tmp = [:multi]; tmp << compiled` returns arrays that really do start with `:multi`,
+      # and its handwritten sig says `Array[:multi]` — widening the pinning under `<<` drew eight
+      # false `def.return-type-mismatch` on the corpus gate. The added value's under-coverage is the
+      # value-join half still open on #560.
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(:multi))
+      widened = described_class.widen_for_mutator(tuple, :<<)
+      expect(widened.class_name).to eq("Array")
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.constant_of(:multi))
+    end
+
     it "declines when the type is already a plain Array nominal" do
       arr = Rigor::Type::Combinator.nominal_of("Array",
                                                type_args: [Rigor::Type::Combinator.nominal_of("String")])

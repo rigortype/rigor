@@ -381,7 +381,8 @@ module Rigor
               method_type.type.return_type,
               self_type: self_type,
               instance_type: instance_type,
-              type_vars: full_type_vars
+              type_vars: full_type_vars,
+              alias_expander: environment.rbs_loader
             )
           end
 
@@ -665,7 +666,8 @@ module Rigor
               block,
               self_type: self_type,
               instance_type: instance_type,
-              type_vars: type_vars
+              type_vars: type_vars,
+              alias_expander: environment.rbs_loader
             )
           end
 
@@ -673,7 +675,7 @@ module Rigor
           # list; some signatures use `RBS::Types::UntypedFunction` (a `(?)` block) which exposes no
           # parameter types -- we treat it as "no information" and return an empty array so the binder
           # defaults every slot.
-          def translate_block_positional_params(block, self_type:, instance_type:, type_vars:)
+          def translate_block_positional_params(block, self_type:, instance_type:, type_vars:, alias_expander: nil)
             fun = block.type
             return [] unless fun.respond_to?(:required_positionals)
 
@@ -683,7 +685,8 @@ module Rigor
                 param.type,
                 self_type: self_type,
                 instance_type: instance_type,
-                type_vars: type_vars
+                type_vars: type_vars,
+                alias_expander: alias_expander
               )
             end
           end

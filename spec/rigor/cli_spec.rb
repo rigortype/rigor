@@ -41,22 +41,34 @@ RSpec.describe Rigor::CLI do
   # its whole 21 s interpreted while the same analysis under `check` (which armed the deadline) took
   # 14.8 s; pinning the arm at the dispatch seam is what keeps the next command from repeating that.
   describe "deferred YJIT" do
-    before do
-      require "rigor/runtime/jit"
-      allow(Rigor::Runtime::Jit).to receive(:enable_after)
+    before { require "rigor/runtime/jit" }
+
+    describe "the arm at the dispatch seam" do
+      before { allow(Rigor::Runtime::Jit).to receive(:enable_after) }
+
+      it "arms the deadline for a dispatched command" do
+        run_cli("effects", "--help")
+
+        expect(Rigor::Runtime::Jit).to have_received(:enable_after)
+          .with(Rigor::Runtime::Jit.deadline_seconds)
+      end
+
+      it "leaves the trivial built-ins unarmed" do
+        run_cli("version")
+
+        expect(Rigor::Runtime::Jit).not_to have_received(:enable_after)
+      end
     end
 
-    it "arms the deadline for a dispatched command" do
-      run_cli("effects", "--help")
-
-      expect(Rigor::Runtime::Jit).to have_received(:enable_after)
-        .with(Rigor::Runtime::Jit.deadline_seconds)
-    end
-
-    it "leaves the trivial built-ins unarmed" do
-      run_cli("version")
-
-      expect(Rigor::Runtime::Jit).not_to have_received(:enable_after)
+    # The other half of the arm, and the half that is a SUITE invariant rather than a product one: because dispatch
+    # arms unconditionally, an unpinned suite leaves one real sleeper thread behind per in-process CLI invocation, and
+    # a sleeper waking inside `jit_spec`'s process-wide `RubyVM::YJIT` stub inflated its single-call assertion to three
+    # on CI. `spec_helper` pins `RIGOR_DISABLE_YJIT=1` so the arm allocates nothing; this example is what fails if that
+    # pin is dropped, instead of the flake coming back somewhere unrelated. `jit_spec` clears the switch per example,
+    # so the real thread behaviour is still covered there.
+    it "spawns no real deadline thread, because the suite pins the opt-out" do
+      expect(Rigor::Runtime::Jit).to be_disabled
+      expect(Rigor::Runtime::Jit.enable_after(0.01)).to be_nil
     end
   end
 

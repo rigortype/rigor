@@ -62,6 +62,24 @@ Warning[:experimental] = false if Warning.respond_to?(:[]=)
 # per-example by setting the platform env var + `RIGOR_CI_DETECT=1` and restoring both after.
 ENV["RIGOR_CI_DETECT"] = "0"
 
+# Deferred YJIT off for the whole suite, for the same determinism reason and one stronger one: `CLI#dispatch` arms
+# `Runtime::Jit.enable_after` for EVERY dispatched command, and that arm spawns a real background thread that sleeps
+# the deadline (5 s) and then calls `RubyVM::YJIT.enable`. Every in-process `Rigor::CLI.start` / `CLI#run` a spec makes
+# therefore left one sleeper behind that OUTLIVED the example — they accumulate monotonically for the rest of the
+# worker process (measured before this pin: `spec/rigor/cli/trace_command_spec.rb` alone ends with one live sleeper per
+# example). A sleeper waking inside a later example's `RubyVM::YJIT` stub lands on that stub, which is exactly how
+# `spec/rigor/runtime/jit_spec.rb`'s single-call `have_received(:enable)` assertion observed three calls on CI: its
+# `around` hook clears this switch and its `stub_yjit_off` replaces both YJIT methods process-wide, so a leaked
+# sleeper skips its own opt-out check and is counted. Whether it flakes depends on which files share a binpacker
+# worker, which is why it passed at 12 workers locally and failed at 4 on CI.
+#
+# Pinning the product's own opt-out is what makes the leak unreachable rather than merely unlikely: `enable_after`
+# returns nil and spawns NO thread when it is set, so no CLI spec — including one written tomorrow — can arm a real
+# deadline. It reaches subprocess `rigor` runs by inheritance too, which only makes those more deterministic (YJIT
+# changes wall-time, never diagnostics or allocations). `jit_spec` is the one file that exercises the real thing, and
+# it already snapshots and clears both switches per example, so it keeps testing the unpinned behaviour.
+ENV["RIGOR_DISABLE_YJIT"] = "1"
+
 require "rigor"
 # Required explicitly: `rigor` boot-slims, so the cache key modules are not on its require graph, and the
 # per-example memo reset below must not depend on which spec file happened to pull this one in first.

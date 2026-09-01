@@ -370,6 +370,19 @@ that scan's answer rather than contradicting it. All three still
 decline, and folding now also holds across this ADR's loop fixpoint
 rather than for a single pass.
 
+Restoring the grant did expose a real gap in that scan, fixed in the
+same change. The scan's counting identity is about the LOCAL and says
+nothing about a member read's RESULT: `s.x << v` mutates the container
+`s.x` returns while `s.x` is a textbook pure read, so the local stayed
+fold-safe while its member's value changed underneath. A local whose
+member-read result is itself a receiver is now disqualified outright,
+with no allow-list of its own — `s.x.to_s` loses precision for
+nothing, but an allow-list is what produced the bug, and being too
+broad only costs a `Dynamic[top]`. That also removes a pre-existing
+false positive on the straight-line form, which fired before this
+branch existed. The scan header's claim that a missed case is "never
+unsound" was false and is corrected there. Remaining residual: #597.
+
 **The payoff was measured and it is NOT mail's ragel cluster**, which
 the issue named as the target. Both of that file's structs are
 excluded for reasons this fix does not touch:

@@ -900,12 +900,16 @@ module Rigor
 
     # Issue #589 — intersect the struct fold-safe grants. Zero-alloc on the common path, where both arms
     # carry the same frozen set the body scan stamped.
+    # A `nil` on EITHER side yields no grants. The field is keyword-defaulted to `EMPTY_FOLD_SAFE` and
+    # threaded by `rebuild`, so `nil` should be unreachable — but the two sides are deliberately symmetric
+    # rather than one arm trusting the other, because the asymmetric form kept every grant when the OTHER
+    # side was nil, which is the one direction that can fold a stale value.
     def join_struct_fold_safe(other)
       mine = @struct_fold_safe_locals
       theirs = other.struct_fold_safe_locals
-      return mine if mine.equal?(theirs) || theirs.nil?
-      return EMPTY_FOLD_SAFE if mine.nil? || mine.empty? || theirs.empty?
-      return mine if mine == theirs
+      return EMPTY_FOLD_SAFE if mine.nil? || theirs.nil?
+      return mine if mine.equal?(theirs) || mine == theirs
+      return EMPTY_FOLD_SAFE if mine.empty? || theirs.empty?
 
       intersected = mine & theirs
       intersected.empty? ? EMPTY_FOLD_SAFE : intersected.freeze

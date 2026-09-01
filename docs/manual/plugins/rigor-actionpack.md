@@ -56,6 +56,37 @@ plugins:
       view_search_paths: ["app/views"]               # default
 ```
 
+## What it types
+
+Inside a controller, `params`, `request`, `session`, `flash` and
+`cookies` type as their Action Pack classes, and so do the chains
+built on them:
+
+```ruby
+request.post?          # bool — and so do get? / put? / patch? / delete? /
+                       # head? / options? / trace? / link? / unlink? /
+                       # xhr? / xml_http_request? / ssl? / local? / form_data?
+request.format         # Mime::Type | Mime::NullType
+flash.now              # ActionDispatch::Flash::FlashNow
+flash.keep             # ActionDispatch::Flash::FlashHash
+flash[:notice] = "hi"  # "hi" — an assignment is its right-hand side
+```
+
+Rigor ships **no signature** for these Action Pack classes, on
+purpose: the receiver becomes concrete (so `rigor coverage
+--protection` counts the site) while the method surface stays
+lenient, so `request.headers`, `flash.now[:alert] = x` and anything
+else the framework adds resolve without a diagnostic. A partial
+signature would be worse than none — every member it omitted would
+become a false `call.undefined-method`.
+
+The predicates are typed `bool` — the union of `true` and `false` —
+which is both the real contract (every one of them is an `==`,
+`match?` or `include?` in Rails or Rack) and the reason they are safe
+to type at all: a condition that folds needs to prove *one* constant,
+and a union of both never does. `return unless request.post?` and
+`mode = request.get? ? :a : :b` read exactly as they did before.
+
 ## Limitations
 
 - **Implicit-self helpers only.** `*_path` / `*_url` calls with an
@@ -84,6 +115,15 @@ plugins:
   `fetch`, `compact!`, and the block-less `select` / `reject` /
   `transform_keys` / `transform_values` — are untyped for the same
   reason.
+- **`flash[:key]` and `session[:key]` stay untyped too**, for that
+  same reason and measured the same way. Both are leaf reads that
+  return whatever was stored — or `nil` for a key that is not set.
+  A non-nil type folds `mode = flash[:notice] ? … : …` to one arm and
+  reports the live guard after it; a nullable one puts
+  `call.possible-nil-receiver` on `note = flash[:notice];
+  note.upcase`. Writing through them is unaffected: `flash[:k] = v`
+  is `v` because that is what an assignment expression means in Ruby,
+  with no rule needed.
 
 ## Plugin internals
 

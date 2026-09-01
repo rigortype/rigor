@@ -446,6 +446,279 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
   end
 
+  # Issue #534 "same lane" — the request predicates, `request.format`, and the FlashHash chain. Each
+  # contract read off Rails v8.0.2 / rack v3.1.8. Written as paired assertions for the same reason
+  # #578's block is: the value of every answer here is that it is HONEST, and the negatives are what
+  # discriminate an honest answer from a merely useful-looking one.
+  describe "the request / flash surface (#534)" do
+    def type_dumps(result)
+      result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+    end
+
+    def rule_ids(result)
+      result.diagnostics.map(&:rule)
+    end
+
+    it "types every genuine-boolean request predicate as `bool`" do
+      # The admission rule: a zero-argument predicate whose Rails/Rack body cannot return a non-boolean.
+      # `request_method == POST` x10 from Rack::Request::Helpers, `/XMLHttpRequest/i.match?` for
+      # xhr?/xml_http_request?, `scheme == "https" || scheme == "wss"` for ssl?, two `LOCALHOST.match?`
+      # conjuncts for local?, `FORM_DATA_MEDIA_TYPES.include?(media_type)` for form_data?.
+      names = Rigor::Plugin::Actionpack::REQUEST_PREDICATE_METHODS
+      body = names.map { |n| "    Rigor.dump_type(request.#{n})" }.join("\n")
+      with_demo("class C\n  def create\n#{body}\n  end\nend\n") do |result|
+        expect(type_dumps(result).size).to eq(names.size)
+        expect(type_dumps(result)).to all(eq("dump_type: bool"))
+      end
+    end
+
+    it "types `request.format` as the two classes `formats.first || NullType` can produce" do
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(request.format)
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(type_dumps(result)).to eq(["dump_type: Mime::NullType | Mime::Type"])
+      end
+    end
+
+    it "types the FlashHash chain, and reads the arity of `keep` / `discard`" do
+      # `now` is `@now ||= FlashNow.new(self)`. `keep` / `discard` are `k ? self[k] : self`, so only the
+      # zero-argument spelling has an answer this plugin can name — given a key they are leaf reads and
+      # must fall through to the untyped verdict below.
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(flash.now)
+            Rigor.dump_type(flash.keep)
+            Rigor.dump_type(flash.discard)
+            Rigor.dump_type(flash.keep(:notice))
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(type_dumps(result)).to eq(
+          [
+            "dump_type: ActionDispatch::Flash::FlashNow",
+            "dump_type: ActionDispatch::Flash::FlashHash",
+            "dump_type: ActionDispatch::Flash::FlashHash",
+            "dump_type: Dynamic[top]"
+          ]
+        )
+      end
+    end
+
+    it "does not hijack the predicate / format / flash names on other receivers" do
+      # `post?`, `format` and `now` are ordinary method names. All three rules are receiver-gated on the
+      # request-context nominals, so a project's own object keeps its answers.
+      source = <<~RUBY
+        class Poll
+          def post?
+            true
+          end
+
+          def format
+            "csv"
+          end
+        end
+
+        class C
+          def create
+            Rigor.dump_type(Poll.new.post?)
+            Rigor.dump_type(Poll.new.format)
+            Rigor.dump_type(Time.now)
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(type_dumps(result)).to eq(["dump_type: true", 'dump_type: "csv"', "dump_type: Time"])
+      end
+    end
+
+    it "keeps the new surface FP-safe (no undefined-method on the chains)" do
+      source = <<~RUBY
+        class C
+          def create
+            request.format.json?
+            request.format.symbol
+            flash.now[:alert] = "oops"
+            flash.keep.discard
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(rule_ids(result)).not_to include("call.undefined-method")
+      end
+    end
+
+    # --- the `bool` adjudication ------------------------------------------------------------------
+    #
+    # `flow.always-truthy-condition` fires when the flow proves a condition folds to ONE constant, and
+    # `true | false` never does. Verified by construction: typing the predicates `Constant[true]`
+    # instead turns the control-flow example below red with four firings, so `bool` — the union — is
+    # precisely what makes them admissible. (The operator example stays green under that arm; it is a
+    # plain regression pin for a shape nothing currently folds, and leans on the CONTROL below for its
+    # liveness.) Contrast `Parameters#[]` (#578), where the candidate was a non-nil nominal standing in
+    # for a value that is nil at runtime, and the fold it licensed was real.
+    it "draws no fold on a predicate control-flow guard — the `bool` question (#534)" do
+      # The ternary is the exact shape that rejected `Parameters#[] -> Parameters`: there `mode`
+      # collapsed to one arm and the live `==` guard after it fired. Here `mode` keeps both arms.
+      source = <<~RUBY
+        class C
+          def create
+            return unless request.post?
+
+            if request.xhr?
+              1
+            else
+              2
+            end
+          end
+
+          def ternary
+            mode = request.get? ? :read : :write
+            return "r" if mode == :read
+
+            "w"
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(rule_ids(result)).not_to include("flow.always-truthy-condition")
+        expect(rule_ids(result)).not_to include("flow.unreachable-branch")
+      end
+    end
+
+    it "draws no fold on predicate boolean operators or a `request.format` guard (#534)" do
+      source = <<~RUBY
+        class C
+          def boolean_ops
+            request.post? && request.xhr?
+            x = !request.get?
+            y = request.ssl? || request.local?
+            [x, y]
+          end
+
+          def format_guard
+            raise "no format" unless request.format
+
+            request.format.json?
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(rule_ids(result)).not_to include("flow.always-truthy-condition")
+        expect(rule_ids(result)).not_to include("flow.unreachable-branch")
+      end
+    end
+
+    # --- `[]=` needs nothing ----------------------------------------------------------------------
+    it "already types a flash / session write as its RHS, with no rule for `[]=` (#534)" do
+      # Ruby's assignment-expression semantics fix the value of `flash[:k] = v` at `v` whatever `[]=`
+      # returns, and the engine already models that. This is the pin for NOT adding a `[]=` rule: a
+      # contribution here could only agree with this answer or contradict it. The corpus's
+      # "`FlashHash#[]=` 127 / 29" is a named-receiver *pair* count, which no return type can move.
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(flash[:notice] = "hi")
+            Rigor.dump_type(session[:user_id] = 1)
+            Rigor.dump_type(flash.now[:alert] = :bad)
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(type_dumps(result)).to eq(['dump_type: "hi"', "dump_type: 1", "dump_type: :bad"])
+      end
+    end
+
+    # --- the leaf-read adjudication ---------------------------------------------------------------
+    it "keeps `flash[:key]` and `session[:key]` untyped (#534)" do
+      source = <<~RUBY
+        class C
+          def leaf_reads
+            Rigor.dump_type(flash[:notice])
+            Rigor.dump_type(session[:user_id])
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(type_dumps(result)).to eq(["dump_type: Dynamic[top]"] * 2)
+      end
+    end
+
+    it "draws no possible-nil-receiver on an assigned leaf read — the `String?` arm (#534)" do
+      # Deliberately carries NO dump assertion, so the thing that turns it red is the false positive
+      # itself and not merely a changed type. Verified: under `flash[:k] -> String | nil`,
+      # `note.upcase` fires `call.possible-nil-receiver` at ERROR severity. `uid.to_i` stays silent
+      # under that arm because `NilClass` has `to_i`, which is what makes the noise unpredictable
+      # rather than absent — and is why the fixture uses two different methods.
+      source = <<~RUBY
+        class C
+          def assigned_use
+            uid = session[:user_id]
+            uid.to_i
+            note = flash[:notice]
+            note.upcase
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(rule_ids(result)).not_to include("call.possible-nil-receiver")
+      end
+    end
+
+    it "keeps a leaf-read condition unfolded — the non-nil `String` arm (#534)" do
+      # The other arm, same construction: no dump assertion, so the false positive is the trigger.
+      # Verified: under `flash[:k] -> String`, the ternary folds to `:flash` and the live
+      # `mode == :plain` guard draws `flow.always-truthy-condition` — a diagnostic on a branch the
+      # program takes. This is `Parameters#[]`'s Arm A (#578) reproduced on FlashHash.
+      source = <<~RUBY
+        class C
+          def ternary
+            mode = flash[:notice] ? :flash : :plain
+            return "f" if mode == :plain
+
+            "p"
+          end
+
+          def session_guard
+            return unless session[:user_id]
+
+            "in"
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(rule_ids(result)).not_to include("flow.always-truthy-condition")
+      end
+    end
+
+    it "CONTROL: the harness fires all three rules the negatives above assert absent" do
+      # The must-fire sibling for this whole block — without it, a rule-id rename or an unanalysed
+      # fixture would make every negative pass while reporting nothing.
+      source = <<~RUBY
+        class C
+          def create
+            "a string".no_such_method_on_string
+            s = ["a", nil].sample
+            s.upcase
+            flag = true
+            "y" if flag
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        expect(rule_ids(result)).to include("call.undefined-method")
+        expect(rule_ids(result)).to include("call.possible-nil-receiver")
+        expect(rule_ids(result)).to include("flow.always-truthy-condition")
+      end
+    end
+  end
+
   describe "helper-call error diagnostics (canonically delegated to rigor-rails-routes)" do
     # rigor-actionpack and rigor-rails-routes both consume the same `:helper_table` fact. To avoid every
     # typo'd / wrong-arity helper call surfacing twice (once per plugin) on every Rails project, the actionpack

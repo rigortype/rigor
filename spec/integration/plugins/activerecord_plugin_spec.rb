@@ -759,6 +759,70 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "a chained scope whose name collides with Kernel (ADR-26 signature half)" do
+    # Found by the #569 corpus run on Redmine: `Issue.visible.open` is a declared scope taking `*args`, but
+    # once `.visible` types to `ActiveRecord::Relation[Issue]` the chained `open` resolves through the
+    # Relation's ancestry to `Kernel#open` and gets checked against `(String, ...)` — three
+    # `call.wrong-arity` ERRORS on correct code, plus `call.argument-type-mismatch` on `open(false)`. The
+    # collision set is every Object/Kernel name (`open`, `select`, `test`, `format`, `p`, `system`, …), so
+    # this is a class of wrong-signature errors, not a strict reading of a real one.
+    #
+    # `ActiveRecord::Relation` is already an ADR-26 `open_receivers:` class, which exempted it from
+    # `call.undefined-method`; `CheckRules#unauthoritative_inherited_signature?` now extends that to the two
+    # rules that read a resolved SIGNATURE — but only for a name the open class INHERITED. A method the
+    # Relation itself declares keeps its arity check, which is the must-still-fire sibling below.
+
+    let(:collision_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/issue.rb" => <<~RUBY
+          class Issue < ApplicationRecord
+            scope :visible, -> { where(closed: false) }
+            scope :open, ->(*args) { where(closed: false) }
+            scope :assigned_to, ->(user) { where(user: user) }
+          end
+        RUBY
+      }
+    end
+
+    def collision_diagnostics(source)
+      run_ar(source, schema: nil, models: collision_models).diagnostics
+    end
+
+    it "does not fire wrong-arity on a chained scope named after a Kernel method" do
+      diags = collision_diagnostics("Issue.visible.open\n")
+      expect(diags.select { |d| d.rule == "call.wrong-arity" }).to be_empty
+    end
+
+    it "does not fire argument-type-mismatch on that same call with an argument" do
+      diags = collision_diagnostics("Issue.visible.open(false)\n")
+      expect(diags.select { |d| d.rule == "call.argument-type-mismatch" }).to be_empty
+    end
+
+    it "still types the chained scope as the relation (the suppression loses no precision)" do
+      diags = collision_diagnostics("Rigor.dump_type(Issue.visible.open)\n")
+      dumped = diags.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      expect(dumped).to eq(["dump_type: ActiveRecord::Relation[Issue]"])
+    end
+
+    it "STILL fires wrong-arity for a method the Relation itself declares" do
+      # `limit` is in the plugin's own bundled `sig/active_record/relation.rbs`, so its signature IS
+      # authoritative for a Relation receiver. Without this sibling the examples above would be satisfied by
+      # simply switching the rule off for `ActiveRecord::Relation`.
+      diags = collision_diagnostics("Issue.visible.limit\n")
+      arity = diags.select { |d| d.rule == "call.wrong-arity" }
+      expect(arity.size).to eq(1)
+      expect(arity.first.message).to include("`limit'")
+      expect(arity.first.message).to include("ActiveRecord::Relation")
+    end
+
+    it "leaves the rule intact on an ordinary closed receiver" do
+      # Guards against the guard being read as "arity checking is off whenever a plugin is loaded".
+      diags = collision_diagnostics("[1].rotate(1, 2)\n")
+      expect(diags.select { |d| d.rule == "call.wrong-arity" }.size).to eq(1)
+    end
+  end
+
   describe "structure.sql fallback (schema_format = :sql)" do
     # GitLab-class apps commit a PostgreSQL `db/structure.sql` and no `db/schema.rb`, which used to leave
     # the plugin inert. The producer now falls back to parsing the DDL through StructureSqlParser.

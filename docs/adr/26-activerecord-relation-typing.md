@@ -217,6 +217,25 @@ still resolves `where` / `each` / `first` precisely.
   contract.** A new optional manifest field; no existing plugin
   breaks; safe within v0.1.x / v0.2.x.
 
+- **WD7 — the exemption covers the signature-reading rules too, for
+  inherited names only.** WD1 exempted `call.undefined-method`, on the
+  ground that a name the RBS cannot enumerate is not evidence of a
+  typo. The same ground disqualifies a *signature* resolved for such a
+  name: `Issue.visible.open` is a declared scope, but `open` is also
+  `Kernel#open`, so resolution walks the Relation's ancestry and checks
+  the call against `(String, ...)`. Found by the #569 corpus run on
+  Redmine — three `call.wrong-arity` errors on working code, plus
+  `call.argument-type-mismatch` on `open(false)`; the collision set is
+  every Object/Kernel name (`open`, `select`, `test`, `format`, `p`,
+  `system`, …), so any project with a scope so named inherits the error
+  the moment the first hop types. The exemption is therefore extended
+  to `call.wrong-arity` and `call.argument-type-mismatch`, and bounded
+  to methods the open class did NOT declare: `Relation#limit` is in the
+  plugin's own bundled RBS, so `relation.limit` with no arguments still
+  fires. What is given up is a genuine typo in a *Kernel-named* call on
+  a relation — which `call.undefined-method` was already silent about
+  under WD1, so nothing that was catchable becomes uncatchable.
+
 ## Alternatives rejected
 
 - **`Array[Model]`.** Typing the relation as an array makes every

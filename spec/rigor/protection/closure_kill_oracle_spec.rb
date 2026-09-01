@@ -92,29 +92,25 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     account_source.sub('Account.wrap("account")', "Account.wrap(nil)")
   end
 
-  let(:built_oracles) { [] }
   let(:configuration) { Rigor::Configuration.load(nil) }
   let(:context) { Rigor::LanguageServer::ProjectContext.new(configuration: configuration) }
-
-  after { built_oracles.each(&:release!) }
 
   # `discovery_seed:` is what `discovery-seeded-mutation-sites` supplies. nil (the default here) is the
   # closure feature adopted ALONE: the mutated file's verdict is then the shipped single-file oracle's,
   # unchanged, and the closure is the only thing this class adds.
-  # Every oracle this spec builds is registered for release after the example. The oracle's mutant `Tempfile`
-  # is otherwise reclaimed only by its finalizer at process exit, which is AFTER `after(:suite)` — so the
-  # residue check added for issue #330 saw two `rigor-mutant-*.rb` files and failed the suite on CI while
-  # passing locally, where GC happened to have run first. Registering here rather than at each call site is
-  # what keeps a later example from reintroducing it by forgetting.
+  #
+  # Issue #572 — this spec used to register every oracle it built in a `built_oracles` side table and release
+  # each one in an `after` hook, because the oracle's mutant `Tempfile` was reclaimed only by its finalizer
+  # and the issue-#330 residue check runs while the process is still alive. The oracle now unlinks the file
+  # inside the method that writes it, so there is nothing left for a call site to forget; the "leaves no
+  # mutant file behind" example below is what holds that.
   def oracle_for(paths, dependents:, seeded: false)
-    oracle = described_class.new(
+    described_class.new(
       configuration: configuration, environment: context.environment, project_scan: context.project_scan,
       paths: paths, dependents: dependents,
       seed_bundles: Rigor::Protection::DiscoverySeed.bundles(paths: paths),
       discovery_seed: seeded ? discovery_seed_for(paths) : nil
     )
-    built_oracles << oracle
-    oracle
   end
 
   def discovery_seed_for(paths)
@@ -144,6 +140,34 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     expect(baseline.own).to be_empty
     expect(baseline.dependents).to be_empty
     expect(oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(true)
+  end
+
+  # Issue #572 — the mutant file's lifetime must be the call that writes it, not the GC's schedule. The oracle
+  # used to keep one `Tempfile` per process, which `Tempfile` reclaims only from its finalizer, so whether the
+  # file was still on disk when the suite's issue-#330 residue check ran was a timing coin flip: it came up
+  # tails on a CI shard (`spec suite leaked 1 temp entry … rigor-mutant-….rb`) and failed a run whose own
+  # rerun of the identical head passed.
+  #
+  # The first two expectations are the non-vacuity half — an oracle that never bound a mutant file would
+  # satisfy "reclaims every mutant file" for free.
+  it "leaves no mutant file behind once the kill run returns" do
+    paths = write_fixture
+    bound = []
+    allow(Rigor::Analysis::BufferBinding).to receive(:new).and_wrap_original do |original, **kwargs|
+      bound << kwargs[:physical_path]
+      original.call(**kwargs)
+    end
+
+    oracle = oracle_for(paths, dependents: recorded_dependents(paths))
+    baseline = oracle.baseline(source: account_source, path: "lib/account.rb")
+    killed = oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)
+
+    mutant_files = bound.grep(/rigor-mutant-/)
+    expect(killed).to be(true)
+    expect(mutant_files).not_to be_empty
+    # `select`, not a boolean: a failure names the file that survived, which is what the CI report needed.
+    expect(mutant_files.select { |file| File.exist?(file) }).to eq([])
+    expect(Dir.glob(File.join(Dir.tmpdir, "rigor-mutant-*"))).to eq([])
   end
 
   # The same mutant, same oracle, with the closure narrowed to the mutated file — what the shipped single-file

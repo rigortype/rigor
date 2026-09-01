@@ -29,7 +29,7 @@ module Rigor
     # closure, and the two effects were indistinguishable in the total.
     #
     # **The mutant's bytes are never on the measured file's disk.** For the closure half they are written to a
-    # process-private temp file and bound to the measured path through {Analysis::BufferBinding} — the #146
+    # block-scoped temp file and bound to the measured path through {Analysis::BufferBinding} — the #146
     # editor seam, whose whole purpose is "analyse THESE bytes at THAT logical path". The binding reaches three
     # places that would otherwise read the file as it sits on disk:
     #
@@ -112,18 +112,6 @@ module Rigor
         [path, *(@dependents[path] || [])]
       end
 
-      # Release the process-private mutant file now, instead of waiting for `Tempfile`'s finalizer at process
-      # exit. A one-shot `rigor coverage` run does not need this — the process ends and the file goes with it —
-      # but a caller that outlives the oracle does: the spec suite's `after(:suite)` residue check (issue #330)
-      # runs while the process is still alive, so an un-released file reads as a leak there even though it
-      # would have been reclaimed a moment later. Idempotent, and safe on an oracle that never mutated
-      # anything (the file is created lazily).
-      def release!
-        @mutant_file&.close!
-        @mutant_file = nil
-        @mutant_pid = nil
-      end
-
       private
 
       # The diagnostic signatures the dependents of `path` report while `source` stands in for it. Empty (and
@@ -138,28 +126,35 @@ module Rigor
       end
 
       # Binds `source` to `path` for the duration of the block, yielding the binding and the seed tables
-      # rebuilt against it. One temp file per process (never per mutant): the digest that invalidates the
-      # mutated file's bundle is taken over the file's CONTENT, and the per-run digest memo is not installed
-      # out here, so rewriting one path in place cannot serve a stale answer.
-      def with_mutant(source, path)
-        File.binwrite(mutant_file.path, source)
-        buffer = Analysis::BufferBinding.new(logical_path: path, physical_path: mutant_file.path)
-        yield(buffer, seed_for(buffer))
-      end
-
-      # The process-private mutant file. Created lazily, and re-created after a fork ({CLI::MutationForkScan}
-      # workers must not share one path), which the pid guard detects.
+      # rebuilt against it.
       #
-      # A worker's copy goes in {Inference::ForkMap.child_scratch_dir} rather than the system temp dir: the
-      # worker ends at `exit!`, which runs neither `at_exit` nor `Tempfile`'s finalizer, so a file placed
-      # anywhere else survives the run with nobody left who knows its name (issue #330). On the parent — and
-      # on the sequential path — that reader answers `nil`, which is `Tempfile.new`'s own default, and the
-      # finalizer reclaims the file at normal exit as before.
-      def mutant_file
-        return @mutant_file if @mutant_file && @mutant_pid == Process.pid
-
-        @mutant_pid = Process.pid
-        @mutant_file = Tempfile.new(["rigor-mutant-", ".rb"], Inference::ForkMap.child_scratch_dir)
+      # The mutant's bytes live in a **block-scoped** temp file: created and unlinked inside this method, so
+      # the oracle holds no file between calls and no caller needs a teardown hook to reclaim one. Issue #572
+      # — the previous design kept one `Tempfile` per process, which `Tempfile` reclaims only from its
+      # finalizer, i.e. at GC time. That made the file's disappearance a timing coin flip: the spec suite's
+      # issue-#330 residue check runs while the process is still alive, so it saw a live `rigor-mutant-*.rb`
+      # and failed a CI shard that the identical head passed on rerun.
+      #
+      # Per-mutant rather than per-process is safe on both axes the per-process comment defended. Freshness:
+      # the digest that invalidates the mutated file's discovery bundle is taken over the file's CONTENT and
+      # the bundles are keyed by the LOGICAL path, so nothing depends on the physical name being stable — a
+      # name that is never reused is strictly further from a stale answer than one rewritten in place. Cost:
+      # one `mkstemp` + `unlink` against the whole analysis-per-dependent this call already runs.
+      #
+      # The directory stays {Inference::ForkMap.child_scratch_dir}, and that is not redundant. A
+      # {CLI::MutationForkScan} worker unwinds this block on both paths it can take on its own — a normal
+      # return and the `StandardError` {Inference::ForkMap.run_worker} rescues — but a worker killed by a
+      # signal unwinds nothing, and its `exit!` runs neither `at_exit` nor a finalizer. The parent's fork
+      # tmpdir stays the backstop for exactly that case (issue #330); on the parent and on the sequential
+      # path the reader answers `nil`, which is `Tempfile.create`'s own default.
+      def with_mutant(source, path)
+        Tempfile.create(["rigor-mutant-", ".rb"], Inference::ForkMap.child_scratch_dir) do |file|
+          file.binmode
+          file.write(source)
+          file.flush
+          buffer = Analysis::BufferBinding.new(logical_path: path, physical_path: file.path)
+          yield(buffer, seed_for(buffer))
+        end
       end
 
       def seed_for(buffer)

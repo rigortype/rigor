@@ -1,0 +1,1 @@
+- **[rigor coverage]** A `--protection --mutation` run with `dependent-closure-kill-oracle` adopted now reclaims each mutant scratch file as soon as that mutant has been measured, instead of leaving them in the temp directory until the process exits ([#572](https://github.com/rigortype/rigor/issues/572), [#579](https://github.com/rigortype/rigor/pull/579)).

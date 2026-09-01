@@ -26,6 +26,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** `x.attr ||= v`, `x.attr &&= v`, and `x.attr += v` now carry their real value semantics instead of falling to untyped as unsupported syntax — the last genuinely unmodeled expressions the corpus survey found ([#552](https://github.com/rigortype/rigor/pull/552), [#532](https://github.com/rigortype/rigor/issues/532)).
+
 - **[engine]** Methods on refined strings (`RUBY_VERSION != "1.0"`, `RUBY_VERSION.split(".")`) now resolve through the underlying `String` instead of losing the whole call to untyped, and an `is_a?` guard against a class Rigor cannot see no longer keeps the old type on the guarded branch — the guard's own proof wins ([#550](https://github.com/rigortype/rigor/pull/550), [#533](https://github.com/rigortype/rigor/issues/533)).
 
 - **[engine]** A block-taking call on a statically-folded `Set` constant (`NAMES.any? { … }`) no longer answers the blockless method's constant — the block decides the runtime answer, and the wrong fold could flag reachable conditions as always-truthy ([#546](https://github.com/rigortype/rigor/pull/546), [#539](https://github.com/rigortype/rigor/issues/539)).

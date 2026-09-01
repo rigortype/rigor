@@ -7,6 +7,7 @@ require_relative "../reflection"
 require_relative "../ast"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
 require_relative "method_parameter_binder"
@@ -2836,11 +2837,115 @@ module Rigor
         result || dynamic_top
       end
 
+      # The block body's value type — what the dispatcher binds a generic block-return variable to.
+      #
+      # Issue #533 item 9: this pass used to type only the body's LAST statement, in the block's ENTRY scope.
+      # A tail reading a name an earlier statement of the same body binds (`m.synchronize do v = 42; v end`)
+      # therefore never saw the binding and fell through `local_read` to `Dynamic[top]`, while the main pass
+      # — which threads scope statement by statement through `StatementEvaluator` — held `42` for the very
+      # same node. {#threaded_block_body_type} closes that gap by reusing the main pass's evaluator; a decline
+      # keeps the tail-only answer verbatim.
       def type_block_body(block_node, block_scope)
         body = block_node.body
         return Type::Combinator.constant_of(nil) if body.nil?
 
-        block_scope.type_of(body)
+        threaded_block_body_type(body, block_scope) || block_scope.type_of(body)
+      end
+
+      # Re-typing the whole body would be wrong to do unconditionally: this path runs for EVERY block-bearing
+      # call, and the statements ahead of the tail are pure cost whenever the tail does not depend on them.
+      # Three declines keep that cost where the defect actually is, each falling back to the tail-only path:
+      #
+      # - a `nil` or non-`StatementsNode` body (`do … rescue … end` parses as a `BeginNode`) and a
+      #   single-statement body — the overwhelming majority of blocks — pay nothing at all;
+      # - a multi-statement body pays one DFS over its non-tail statements, and threads only when the tail
+      #   READS a variable name one of them WRITES ({#tail_depends_on_body_binding?}). That is exactly the
+      #   diagnosed shape, so a block whose tail does not consume the body's own bindings keeps today's type;
+      # - the fold is not re-entrant. `StatementEvaluator#eval_call` already evaluates each nested block body
+      #   once, plus up to three more times under the ADR-56 `BodyFixpoint` when the block rebinds a captured
+      #   local, so a fold nested inside a fold would multiply that work per block-nesting level. Inside a
+      #   threaded body a nested block-bearing call reverts to the tail-only path — a wider answer in a rare
+      #   shape, never a new false positive.
+      #
+      # ADR-56 interaction: the fold cannot double-apply or fight the captured-local write-back. That
+      # write-back is `StatementEvaluator#write_back_block_captures`, computed from the CALLER's scope into
+      # the caller's continuation; this pass only derives a value type from a throwaway block scope and
+      # discards the exit scope, exactly as the tail-only path did.
+      #
+      # Any failure inside the fold falls back to the tail-only answer rather than propagating: the enclosing
+      # `block_return_type_for` rescue would otherwise report "no block" to the dispatcher, which is a much
+      # larger regression than a wide block return.
+      def threaded_block_body_type(body, block_scope)
+        return nil unless body.is_a?(Prism::StatementsNode)
+
+        statements = body.body
+        return nil if statements.size < 2
+        return nil if Thread.current[THREADED_BLOCK_BODY_KEY]
+        return nil unless tail_depends_on_body_binding?(statements)
+
+        Thread.current[THREADED_BLOCK_BODY_KEY] = true
+        begin
+          block_scope.evaluate(body).first
+        ensure
+          Thread.current[THREADED_BLOCK_BODY_KEY] = nil
+        end
+      rescue StandardError
+        nil
+      end
+
+      # Re-entrancy flag for {#threaded_block_body_type}. Thread-local because block typing is re-entrant
+      # within one thread and the fork-pool workers each own their own.
+      THREADED_BLOCK_BODY_KEY = :__rigor_threaded_block_body__
+      private_constant :THREADED_BLOCK_BODY_KEY
+
+      # Every variable-write form whose name `StatementEvaluator` threads into the following statement's
+      # scope, including the multi-assign / pattern targets that appear under a `MultiWriteNode`.
+      VARIABLE_WRITE_NODES = Set[
+        Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode,
+        Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode,
+        Prism::LocalVariableTargetNode,
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
+        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode,
+        Prism::InstanceVariableTargetNode,
+        Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode,
+        Prism::ClassVariableOrWriteNode, Prism::ClassVariableAndWriteNode,
+        Prism::ClassVariableTargetNode,
+        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode,
+        Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
+        Prism::GlobalVariableTargetNode
+      ].freeze
+      private_constant :VARIABLE_WRITE_NODES
+
+      # Every node that OBSERVES a variable binding: the plain reads plus the compound writes, which read
+      # their target before rebinding it (`v += 1` in the tail depends on an earlier `v = 0`).
+      VARIABLE_READ_NODES = (
+        VARIABLE_WRITE_NODES | [
+          Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode,
+          Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+        ]
+      ).freeze
+      private_constant :VARIABLE_READ_NODES
+
+      # True when the tail statement observes a variable name one of the earlier statements binds — the only
+      # way threading the scope through the body can change the tail's type. The name sets are compared
+      # sigil-and-all across kinds, so the answer over-approximates (an `@x` write plus an `x` read threads
+      # needlessly); over-approximating only spends the fold, it never changes an answer.
+      #
+      # Cost is two DFS walks of the body, the second only when the first found a write — the same order of
+      # cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below re-typing.
+      def tail_depends_on_body_binding?(statements)
+        written = Set.new
+        statements[0...-1].each do |statement|
+          Source::NodeWalker.each(statement) do |node|
+            written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
+          end
+        end
+        return false if written.empty?
+
+        Source::NodeWalker.each(statements.last) do |node|
+          return true if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
+        end
+        false
       end
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every

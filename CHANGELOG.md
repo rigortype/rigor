@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[plugins]** rigor-actionpack now types `params.expect(...)` and `params.slice(...)` as strong-parameter chains, so Rails 8's `expect` idiom keeps the same typed, protected receiver `require`/`permit` chains have ([#548](https://github.com/rigortype/rigor/pull/548), [#534](https://github.com/rigortype/rigor/issues/534)).
+
 - **[cli]** `rigor type-of` accepts several positions in one invocation and makes the column optional — `rigor type-of file.rb:42` lists up to 40 expressions on line 42 — so walking a chain of expressions costs one process instead of one each (five positions on a Rails application: 10.3 s → 2.1 s) ([#515](https://github.com/rigortype/rigor/pull/515)).
 
 - **[engine]** `Foo.instance` on a class that includes the stdlib `Singleton` mixin now types as `Foo` instead of untyped, so the methods you call on that instance are typed too ([#514](https://github.com/rigortype/rigor/pull/514)).

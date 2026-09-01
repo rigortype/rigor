@@ -298,8 +298,32 @@ module Rigor
         ContentJoin.join_hash_content(widened, [[key, value]])
       end
 
+      # Normalizes the types the mutator's arguments contribute, before they join.
+      #
+      # `widen_value_pinned` erases a constant's VALUE. A stored literal collection needs the same
+      # treatment for its literal SHAPE, and for the same reason one step removed: the program keeps
+      # a reference to what it stored and mutates it through the slot —
+      #
+      #     params[:f] ||= []
+      #     params[:f] << :status
+      #
+      # is Redmine's `Query#as_params` idiom, six times over. The `<<` mutates the nested array, and
+      # nothing writes that back through the outer Hash's value parameter, so joining the literal
+      # `Tuple[]` would pin `Hash[Symbol, []]` on a hash whose slot really holds `[:status]` — a
+      # WRONG precise type, and `params[:f].empty?` would fold to `true` off it. That is the same
+      # class of stale fold this whole change exists to remove, so the shape goes with the value:
+      # `[]` joins as `Array[untyped]`, `{}` as `Hash[untyped, untyped]`. Both are true of the slot
+      # no matter what the program does to the object afterwards.
       def value_pin_widened(types)
-        types.compact.map { |type| Type::Combinator.widen_value_pinned(type) }
+        types.compact.map { |type| shape_erased(Type::Combinator.widen_value_pinned(type)) }
+      end
+
+      def shape_erased(type)
+        case type
+        when Type::Tuple then widen_tuple(type, values: :widen)
+        when Type::HashShape then widen_hash_shape(type, values: :widen)
+        else type
+        end
       end
 
       # `non-empty-array[T]` / `non-empty-hash[K, V]` → the bare base nominal. These refinement

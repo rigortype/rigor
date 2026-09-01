@@ -429,7 +429,6 @@ RSpec.describe Rigor::Inference::MutationWidening do
     end
   end
 
-
   describe ".widen_hash_shape" do
     it "wraps an empty HashShape as Hash[untyped, untyped] via Combinator.nominal_of" do
       widened = described_class.widen_hash_shape(Rigor::Type::HashShape.new)

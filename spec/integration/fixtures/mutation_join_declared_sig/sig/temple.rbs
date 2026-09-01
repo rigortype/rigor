@@ -1,0 +1,9 @@
+class Temple
+  # haml's own spelling: a hand-written element type that names only the
+  # array's HEAD symbol, over a body that really appends other shapes.
+  def compile_html: (untyped node) -> Array[:multi]
+
+  def collect_flags: (Symbol flag) -> Array[Symbol]
+
+  def genuinely_wrong: () -> Array[Symbol]
+end

@@ -1,0 +1,21 @@
+---
+locals:
+  built: Array[String]
+  compound: Array[Integer]
+  csv_options: Hash[Symbol, Dynamic[top] | FalseClass]
+  fp_compound: Array[Integer]
+  fp_hash: Hash[Symbol, Dynamic[top] | FalseClass]
+  fp_push: Array[1 | 2 | Integer]
+  fp_shovel: Array[1 | 2 | Integer]
+  fp_slot: Array[Integer]
+  genuine: "[1, 2]"
+  mixed: Array[1 | 2 | Dynamic[top]]
+  or_written: Hash[Symbol, Integer]
+  popped: Array[1 | 2]
+  pushed: Array[1 | 2 | Integer]
+  shoveled: Array[1 | 2 | Integer]
+  slotted: Array[Integer]
+  sorted: Array[1 | 2]
+  stack: Array[Integer]
+  unshifted: Array[1 | 2 | Integer]
+  untouched: "[1, 2]"

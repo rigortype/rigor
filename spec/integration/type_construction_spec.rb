@@ -158,6 +158,51 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #560 — the ADDED-value half of the mutation widening. PR #561 widened the value pinning a
+  # slot-REWRITING mutator falsifies; this pins the join that covers what the mutation stored.
+  describe "fixtures/mutation_added_value_join.rb — straight-line mutations join the added value" do
+    let(:harness) { harness_for("mutation_added_value_join") }
+
+    # The line the fixture marks as genuinely dead. Read from the source rather than hard-coded so the
+    # fixture stays editable — a hard-coded line number turns any insertion into a false failure.
+    def genuine_falsey_line(harness)
+      harness.source.lines.index { |l| l.include?("# GENUINE-FALSEY") } + 1
+    end
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # The must-not-fire / must-fire pair in one assertion: every mutated-then-read condition in the
+    # fixture is TRUE at runtime and folded to a constant `false` before the join, and the one
+    # comparison nothing mutates must still fold. Asserting the exact line set is what keeps the
+    # "went quiet" half from passing because the rule stopped firing at all.
+    it "silences the stale folds without silencing the genuine one" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq([genuine_falsey_line(harness)])
+    end
+  end
+
+  describe "fixtures/mutation_join_declared_sig/ — the join stays inside a hand-written signature" do
+    let(:harness) { harness_for("mutation_join_declared_sig") }
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # haml's temple builders (8 sites on the corpus gate) are the shape: a `[:multi]` seed appended
+    # with `[:static, …]` pairs, declared `-> Array[:multi]`. Joining the appended tuple precisely
+    # draws `def.return-type-mismatch` on correct code; the admissibility gate answers `Dynamic[top]`
+    # for a class the seed does not admit, and a union carrying it ACCEPTS. `genuinely_wrong` is the
+    # live-rule control — without it this example would pass on a rule that never fires.
+    it "draws a return-type mismatch only where the body is genuinely wrong" do
+      mismatches = harness.diagnostics.select { |d| d.rule == "def.return-type-mismatch" }
+      expect(mismatches.map(&:method_name)).to eq(["genuinely_wrong"])
+    end
+  end
+
   describe "fixtures/ivar_mutation_widening.rb — class-ivar Tuple/HashShape widening on mutation" do
     let(:harness) { harness_for("ivar_mutation_widening") }
 

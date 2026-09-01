@@ -68,7 +68,7 @@ Larger surfaces — typically need a Rails app shape to make sense.
 | [`rigor-activestorage`](rigor-activestorage/) | 3E | `has_one_attached :avatar` / `has_many_attached :photos` macro discovery + return-type narrowing to `Nominal[ActiveStorage::Attached::One]` / `::Many` | Ruby | ✅ |
 | [`rigor-actioncable`](rigor-actioncable/) | 3F | ActionCable channel discovery + `<Channel>.broadcast_to` / `ActionCable.server.broadcast(stream)` validation, with dynamic-stream suppression | Ruby | ✅ |
 | [`rigor-pundit`](rigor-pundit/) | 3B | Policy class + predicate method validation for `authorize(record, :action)`; receiver-type lookup via `Scope#type_of` | Ruby | ✅ |
-| [`rigor-sidekiq`](rigor-sidekiq/) | 3C | Sidekiq worker `perform_async` / `perform_in` / `perform_at` argument shape; schedule-aware arity model | Ruby | ✅ |
+| [`rigor-sidekiq`](rigor-sidekiq/) | 3C | Sidekiq worker `perform_async` / `perform_in` / `perform_at` argument shape; schedule-aware arity model; the returned jid types as `String` | Ruby | ✅ |
 
 ### Rails ecosystem (framework core)
 

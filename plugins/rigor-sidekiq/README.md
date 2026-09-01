@@ -4,8 +4,9 @@ Tier 3C of Rigor's Rails ecosystem family
 ([roadmap](../../docs/design/20260508-rails-plugins-roadmap.md)).
 Validates `Worker.perform_async(...)` / `.perform_in(...)` /
 `.perform_at(...)` / `.perform_inline(...)` argument counts against the
-discovered `#perform` definitions. No `sidekiq` runtime dependency —
-the plugin reads project source via Prism only.
+discovered `#perform` definitions, and types the jid the first three
+return. No `sidekiq` runtime dependency — the plugin reads project
+source via Prism only.
 
 > **Using this plugin?** The user guide — recognised call shapes, the
 > diagnostic catalogue, configuration, and limitations — lives in the
@@ -55,6 +56,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `worker_search_paths`, and each `schedule_paths` document, through the trusted scope; the digest list feeds the cache descriptor. |
 | `Plugin::Base#diagnostics_for_file` | Emits the once-per-file `load-error` when worker discovery fails (file-level only). |
 | `node_rule(Prism::CallNode)` (ADR-37) | Per-call arity validation of every `Worker.perform_*` over the engine-owned walk. |
+| `dynamic_return methods:` (ADR-52 WD2) | Types the jid `perform_async` / `perform_in` / `perform_at` return, gated on the *discovered* worker set rather than the method name (#534). |
 | Two-pass walk (collect → validate) | Discoverer + analyzer; mirrors `rigor-activejob` / `rigor-actionmailer`. |
 
 ## Comparison with `rigor-activejob`

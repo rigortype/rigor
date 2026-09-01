@@ -74,7 +74,7 @@ Larger surfaces — typically need a Rails app shape to make sense.
 
 | Plugin | What it does |
 | --- | --- |
-| [`rigor-railties`](rigor-railties/) | **Effects only** — no diagnostic, no typing, no producer. Carries the `Rails.` namespace as an effect vocabulary ([ADR-103](../docs/adr/103-effect-labels.md) WD10): `Rails.cache` → `cache.read` / `cache.write`, `Rails.logger` / `Rails.error` → `telemetry`, `Rails.env` and the configuration → `global.read` + `rails.config.read`, credentials → `io.fs.read` + `rails.credentials.read`. Also declares the `rails` entry-point preset that `effects.snapshot.reach:` adopts by name, which spans four directories owned by four different plugins and therefore needs one declarer. |
+| [`rigor-railties`](rigor-railties/) | **No diagnostics, no producer.** Types the four `Rails.` singleton readers — `logger` → `ActiveSupport::BroadcastLogger`, `cache` → `ActiveSupport::Cache::Store`, `configuration` → `Rails::Application::Configuration`, `application` → `Rails::Application`, each a lenient RBS-less nominal. Also carries the `Rails.` namespace as an effect vocabulary ([ADR-103](../docs/adr/103-effect-labels.md) WD10): `Rails.cache` → `cache.read` / `cache.write`, `Rails.logger` / `Rails.error` → `telemetry`, `Rails.env` and the configuration → `global.read` + `rails.config.read`, credentials → `io.fs.read` + `rails.credentials.read`. Also declares the `rails` entry-point preset that `effects.snapshot.reach:` adopts by name, which spans four directories owned by four different plugins and therefore needs one declarer. |
 
 ### Rails ecosystem (meta-gem)
 

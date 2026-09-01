@@ -1,0 +1,192 @@
+# frozen_string_literal: true
+
+# Integration spec for `plugins/rigor-railties/` — issue #534 item 2, the four `Rails.` singleton readers.
+#
+# The plugin's other half (the ADR-103 effect vocabulary and the `rails` entry-point preset) is covered by
+# `spec/rigor/effects/rails_layer_spec.rb`; this file covers only the reader typing, and it is written as
+# paired must-fire / must-not-fire assertions because the whole value of the answer is that it is LENIENT.
+# A nominal that Rigor knows the RBS for would type these sites just as well and put `undefined-method` on
+# working Rails code, so every positive assertion here is accompanied by the negative that discriminates it.
+
+require "spec_helper"
+
+unless defined?(RAILTIES_PLUGIN_LIB)
+  RAILTIES_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-railties/lib", __dir__)
+end
+$LOAD_PATH.unshift(RAILTIES_PLUGIN_LIB) unless $LOAD_PATH.include?(RAILTIES_PLUGIN_LIB)
+require "rigor-railties"
+
+RSpec.describe "plugins/rigor-railties" do
+  before { Rigor::Plugin.unregister! }
+  after { Rigor::Plugin.unregister! }
+
+  let(:plugin_class) { Rigor::Plugin::Railties }
+
+  def dumps(result)
+    result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+  end
+
+  def rules(result)
+    result.diagnostics.map(&:qualified_rule)
+  end
+
+  describe "the singleton-reader types" do
+    it "types all four `Rails.` readers with their lenient nominals (#534)" do
+      source = <<~RUBY
+        Rigor.dump_type(Rails.logger)
+        Rigor.dump_type(Rails.cache)
+        Rigor.dump_type(Rails.configuration)
+        Rigor.dump_type(Rails.application)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(
+        [
+          "dump_type: ActiveSupport::BroadcastLogger",
+          "dump_type: ActiveSupport::Cache::Store",
+          "dump_type: Rails::Application::Configuration",
+          "dump_type: Rails::Application"
+        ]
+      )
+    end
+
+    it "types the root-qualified `::Rails` receiver identically" do
+      result = run_plugin(source: "Rigor.dump_type(::Rails.cache)\n")
+      expect(dumps(result)).to eq(["dump_type: ActiveSupport::Cache::Store"])
+    end
+
+    it "CONTROL: the readers are `Dynamic[top]` without this plugin" do
+      # The paired must-not-fire for every positive above: it proves the four dumps come from THIS plugin
+      # and not from some RBS the environment already carries, so a silently-dropped `dynamic_return` would
+      # fail a named assertion instead of passing vacuously.
+      source = <<~RUBY
+        Rigor.dump_type(Rails.logger)
+        Rigor.dump_type(Rails.cache)
+        Rigor.dump_type(Rails.configuration)
+        Rigor.dump_type(Rails.application)
+      RUBY
+      Rigor::Plugin.unregister!
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("plugins" => []))
+      result = Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), source)
+        Dir.chdir(dir) do
+          Rigor::Analysis::Runner.new(
+            configuration: Rigor::Configuration.new(
+              configuration.to_h.merge("paths" => [File.join(dir, "demo.rb")])
+            ),
+            cache_store: nil
+          ).run
+        end
+      end
+      expect(dumps(result).size).to eq(4)
+      expect(dumps(result)).to all(eq("dump_type: Dynamic[top]"))
+    end
+  end
+
+  describe "the receiver gate" do
+    it "does not hijack `logger` / `cache` / `configuration` / `application` on other receivers" do
+      # These four are ordinary method names. The gate is the syntactic `Rails` constant, so a project's
+      # own `logger` reader, a nested `Foo::Rails`, and a call with arguments must all keep their answers.
+      source = <<~RUBY
+        class Site
+          def logger
+            "site-logger"
+          end
+
+          def probe
+            Rigor.dump_type(logger)
+            Rigor.dump_type(Foo::Rails.logger)
+            Rigor.dump_type(Rails.logger("extra"))
+          end
+        end
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(
+        ['dump_type: "site-logger"', "dump_type: Dynamic[top]", "dump_type: Dynamic[top]"]
+      )
+    end
+  end
+
+  describe "leniency — the reason the nominals are RBS-less" do
+    it "does not fire undefined-method on the ActiveSupport logger surface (#534)" do
+      # The discrimination for the `logger` name choice. Every method below is an ActiveSupport extension
+      # that stdlib `::Logger` does NOT have, so typing the reader `Logger` — the name issue #534 suggested
+      # — makes all four of these `call.undefined-method` on working Rails code (measured: 4/4). The
+      # RBS-less `ActiveSupport::BroadcastLogger` answers the receiver and stays lenient.
+      source = <<~RUBY
+        Rails.logger.info("x")
+        Rails.logger.tagged("req") { 1 }
+        Rails.logger.silence { 1 }
+        Rails.logger.broadcast_to(Rails.logger)
+        Rails.logger.local_level = :debug
+      RUBY
+      result = run_plugin(source: source)
+      expect(rules(result)).not_to include("call.undefined-method")
+    end
+
+    it "does not fire undefined-method on the cache / configuration / application surfaces" do
+      source = <<~RUBY
+        Rails.cache.fetch("k") { 1 }
+        Rails.cache.write("k", 1, expires_in: 5)
+        Rails.cache.delete_matched(/x/)
+        Rails.configuration.x.some_custom_key
+        Rails.configuration.action_mailer.default_url_options
+        Rails.application.routes.url_helpers
+        Rails.application.credentials.dig(:aws, :key)
+        Rails.application.config.time_zone
+      RUBY
+      result = run_plugin(source: source)
+      expect(rules(result)).not_to include("call.undefined-method")
+    end
+
+    it "CONTROL: the harness fires undefined-method in this fixture shape" do
+      # The must-fire sibling for the two negatives above — without it, a rule-id rename or an unanalysed
+      # fixture would make them pass while reporting nothing.
+      result = run_plugin(source: %("a string".no_such_method_on_string\n))
+      expect(rules(result)).to include("call.undefined-method")
+    end
+  end
+
+  describe "the nil question — no fold on defensive Rails idioms" do
+    it "leaves every guarded / defensive reader shape unfolded (#534)" do
+      # All four readers are non-nil nominals, which is what licenses `flow.always-truthy-condition`. The
+      # shapes below are the ones real Rails code writes; none of them may draw a diagnostic.
+      source = <<~RUBY
+        def fallback
+          Rails.logger || ::Logger.new($stdout)
+        end
+
+        def raise_guard
+          raise "no logger" unless Rails.logger
+
+          Rails.logger.info("x")
+        end
+
+        def modifier_if
+          Rails.logger.info("x") if Rails.logger
+        end
+
+        def assigned_truthy
+          app = Rails.application
+          return nil unless app
+
+          app.config
+        end
+
+        def nil_check
+          logger = Rails.logger
+          return if logger.nil?
+
+          logger.info("x")
+        end
+      RUBY
+      result = run_plugin(source: source)
+      expect(rules(result)).not_to include("flow.always-truthy-condition")
+      expect(rules(result)).not_to include("flow.unreachable-branch")
+    end
+
+    it "CONTROL: the harness fires the truthiness fold in this fixture shape" do
+      result = run_plugin(source: "flag = true\n\"y\" if flag\n")
+      expect(rules(result)).to include("flow.always-truthy-condition")
+    end
+  end
+end

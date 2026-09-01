@@ -180,6 +180,44 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
       end
     end
 
+    describe "declared_return_union (alias-declared returns, issue #529)" do
+      # An alias-declared return used to translate to untyped, so the rule was structurally silent on
+      # it. With the check side handing the loader to the translator, the declared side compares at the
+      # expanded type — the must-fire / must-still-succeed pair below discriminates the wiring.
+      let(:alias_sig) do
+        { "alias_demo.rbs" => <<~RBS }
+          type demo_id = ::Integer
+
+          class AliasDemo
+            def id: () -> demo_id
+          end
+        RBS
+      end
+
+      it "fires when the body contradicts the expanded alias" do
+        result = analyze(<<~RUBY, sig: alias_sig)
+          class AliasDemo
+            def id
+              "not-an-integer"
+            end
+          end
+        RUBY
+        expect(return_diags(result).first&.message)
+          .to eq("return-type mismatch on `id': declared Integer, inferred \"not-an-integer\"")
+      end
+
+      it "stays silent when the body satisfies the expanded alias" do
+        result = analyze(<<~RUBY, sig: alias_sig)
+          class AliasDemo
+            def id
+              42
+            end
+          end
+        RUBY
+        expect(return_diags(result)).to be_empty
+      end
+    end
+
     describe "compare_return / dynamic_top? (fires only on a proven :no)" do
       it "stays silent when the body types as Dynamic[top]" do
         result = analyze(<<~RUBY, sig: demo_sig)

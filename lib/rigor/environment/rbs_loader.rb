@@ -1091,7 +1091,14 @@ module Rigor
         name = name.absolute! unless name.absolute?
         return nil unless env.type_alias_decls.key?(name)
 
-        builder.expand_alias2(name, rbs_alias.args)
+        # Memoized per (name, args): the env is immutable for the loader's lifetime, so the expansion is a
+        # pure function of the pair, and #529's translator wiring re-expands the same handful of aliases
+        # (`Prism::node`, `int`, `string`, …) at every call site — the memo recoups most of that wall cost.
+        memo = (@state[:type_alias_expansions] ||= {})
+        key = [name, rbs_alias.args]
+        return memo[key] if memo.key?(key)
+
+        memo[key] = builder.expand_alias2(name, rbs_alias.args)
       rescue ::RBS::BaseError, StandardError
         nil
       end

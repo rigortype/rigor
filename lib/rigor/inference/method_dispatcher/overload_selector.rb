@@ -80,10 +80,22 @@ module Rigor
         #   declaration.
         # @return [RBS::MethodType, nil] the chosen overload, or nil when the definition has no method
         #   types at all.
-        def select(method_definition, arg_types:, self_type:, instance_type:, type_vars: {}, block_required: false,
-                   environment: nil)
+        def select(method_definition, **) = select_candidates(method_definition, **).first
+
+        # Issue #521 — like {.select}, but when a `Dynamic[Top]` argument reaches the gradual pass it
+        # returns EVERY gradually-matching overload instead of pinning the first. An untyped argument
+        # accepts every param indiscriminately, so "first gradual match" is decided by overload-list
+        # position, not by types — `[true] * n` with an untyped `n` pinned `Array#*(string) -> String`
+        # and answered a wrong precise type the runtime can contradict. The caller unions the candidates'
+        # returns, which contains the truth whichever overload the runtime takes. Every other path (strict,
+        # alias-resolved, typed-gradual, arity fallback) still yields exactly one candidate, so `select`
+        # keeps its historical single answer.
+        #
+        # @return [Array<RBS::MethodType>] matching overloads; empty when the definition declares none.
+        def select_candidates(method_definition, arg_types:, self_type:, instance_type:, type_vars: {},
+                              block_required: false, environment: nil)
           overloads = method_definition.method_types
-          return nil if overloads.empty?
+          return [] if overloads.empty?
 
           # `rigor:v1:param: <name> <refinement>` annotations on this method override the RBS-declared
           # parameter type at the matching name. The map is consumed inside `accepts_param?` so overload
@@ -96,15 +108,18 @@ module Rigor
           # an arbitrary sibling-class arm that only wins by overload-list position.
           overloads = ReceiverAffinity.reorder(overloads, self_type: self_type, environment: environment)
 
+          alias_expander = environment&.rbs_loader
           passes = lambda do |require_block|
             run_selection_passes(
-              overloads, arg_types: arg_types, self_type: self_type, instance_type: instance_type,
-                         type_vars: type_vars, block_required: require_block, param_overrides: param_overrides
+              overloads,
+              { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
+                type_vars: type_vars, block_required: require_block, param_overrides: param_overrides,
+                alias_expander: alias_expander }
             )
           end
 
-          match = passes.call(block_required)
-          return match if match
+          matches = passes.call(block_required)
+          return matches unless matches.empty?
 
           # A block at the call site that no block-declaring overload matched: Ruby ignores a block handed
           # to a method that never yields it, so retry treating the block as ignorable rather than failing
@@ -112,8 +127,8 @@ module Rigor
           # `define_command(:x) do … end` against `def define_command: (Symbol) -> Symbol`) degraded to
           # `Dynamic[Top]` — and on a self-send suppressed the whole method's return type.
           if block_required
-            match = passes.call(false)
-            return match if match
+            matches = passes.call(false)
+            return matches unless matches.empty?
           end
 
           # No (usable) block at the call site: prefer an overload that does not REQUIRE a block over
@@ -121,7 +136,7 @@ module Rigor
           # overload first (`() { ... } -> Array[Elem]`) and the bare-call overload second
           # (`() -> Enumerator[...]`). Without this, a no-block `[1, 2].filter` would adopt the block
           # overload's `Array[Elem]` return when the call actually yields an `Enumerator`.
-          overloads.find { |mt| !overload_requires_block?(mt) } || overloads.first
+          [overloads.find { |mt| !overload_requires_block?(mt) } || overloads.first]
         end
 
         def overload_has_block?(method_type)
@@ -147,38 +162,59 @@ module Rigor
           #   `Array#*(int)` wins over the `Array#*(string) -> String` overload for Integer args.
           # - Pass 2 (gradual): the original gradual matcher so overloads that legitimately rely on
           #   duck-typed params still resolve when nothing stricter applies.
-          def run_selection_passes(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
-                                   param_overrides:)
-            shared = {
-              arg_types: arg_types, self_type: self_type, instance_type: instance_type,
-              type_vars: type_vars, block_required: block_required, param_overrides: param_overrides
-            }
-            find_matching_overload(overloads, **shared, strict: true) ||
-              find_matching_overload_via_aliases(overloads, arg_types: arg_types, block_required: block_required) ||
-              find_matching_overload(overloads, **shared, strict: false)
+          # `shared` is the caller-assembled keyword bundle for `find_matching_overload` — hash-shaped
+          # because the pass pipeline forwards it twice and RuboCop's parameter-list budget is real.
+          def run_selection_passes(overloads, shared)
+            strict = find_matching_overload(overloads, **shared, strict: true)
+            return strict unless strict.empty?
+
+            alias_hit = find_matching_overload_via_aliases(
+              overloads, arg_types: shared[:arg_types], block_required: shared[:block_required]
+            )
+            return [alias_hit] if alias_hit
+
+            # Pass 2, array-valued. With every argument carrying real type information the first gradual
+            # match keeps its historical single-winner contract. With a `Dynamic[Top]` argument in play the
+            # matches are indistinguishable by types — position alone would pick — so ALL of them come back
+            # and the dispatch layer unions their returns (#521).
+            matches = find_matching_overload(overloads, **shared, strict: false)
+            return matches.first(1) unless shared[:arg_types].any? { |t| untyped_arg?(t) }
+
+            matches
           end
 
           # rubocop:disable Metrics/ParameterLists
           def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
-                                     param_overrides:, strict:)
-            return nil if strict && arg_types.any? { |t| untyped_arg?(t) }
+                                     param_overrides:, strict:, alias_expander: nil)
+            return [] if strict && arg_types.any? { |t| untyped_arg?(t) }
 
-            overloads.find do |method_type|
-              next false if block_required && !OverloadSelector.overload_has_block?(method_type)
-              next false if !block_required && OverloadSelector.overload_requires_block?(method_type)
+            predicate = lambda do |method_type|
+              next false unless engages_block_shape?(method_type, block_required)
               next false if strict && !strictly_typed_params?(method_type, arg_types.size)
 
               matches?(
-                method_type,
-                arg_types,
-                self_type: self_type,
-                instance_type: instance_type,
-                type_vars: type_vars,
-                param_overrides: param_overrides
+                method_type, arg_types,
+                self_type: self_type, instance_type: instance_type,
+                type_vars: type_vars, param_overrides: param_overrides,
+                alias_expander: alias_expander
               )
             end
+            # Strict keeps its historical first-match short-circuit (a dispatch hot path); the gradual
+            # pass needs the full candidate list for the #521 union.
+            return [overloads.find(&predicate)].compact if strict
+
+            overloads.select(&predicate)
           end
           # rubocop:enable Metrics/ParameterLists
+
+          # Whether the overload's block clause is compatible with the call site's block shape: a
+          # block-bearing call engages only block-declaring overloads; a block-less call skips overloads
+          # that REQUIRE one.
+          def engages_block_shape?(method_type, block_required)
+            return OverloadSelector.overload_has_block?(method_type) if block_required
+
+            !OverloadSelector.overload_requires_block?(method_type)
+          end
 
           # Treats the literal `untyped` carrier (`Dynamic[Top]`) as too imprecise to drive a strict-pass
           # match. Other `Dynamic`-wrapped types with a concrete static facet carry enough information to
@@ -194,9 +230,13 @@ module Rigor
           # to `Dynamic[Top]` at the param level. Only fires when EVERY positional param has a known
           # alias-or-strict shape; otherwise gradual matching takes over.
           def find_matching_overload_via_aliases(overloads, arg_types:, block_required:)
+            # Issue #521 — an untyped argument "maybe"-accepts EVERY alias's strict arm, so it cannot
+            # discriminate between overloads here any more than in the strict pass; without this guard a
+            # Dynamic arg pinned `Array#*(string) -> String` purely by declaration order.
+            return nil if arg_types.any? { |t| untyped_arg?(t) }
+
             overloads.find do |method_type|
-              next false if block_required && !OverloadSelector.overload_has_block?(method_type)
-              next false if !block_required && OverloadSelector.overload_requires_block?(method_type)
+              next false unless engages_block_shape?(method_type, block_required)
 
               fun = method_type.type
               next false unless arity_compatible?(fun, arg_types.size)
@@ -278,7 +318,8 @@ module Rigor
             end
           end
 
-          def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:, param_overrides:)
+          def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:, param_overrides:,
+                       alias_expander: nil)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
 
             fun = method_type.type
@@ -292,7 +333,8 @@ module Rigor
                 self_type: self_type,
                 instance_type: instance_type,
                 type_vars: type_vars,
-                param_overrides: param_overrides
+                param_overrides: param_overrides,
+                alias_expander: alias_expander
               )
             end
           end
@@ -346,12 +388,14 @@ module Rigor
             head
           end
 
-          def accepts_param?(param, arg, self_type:, instance_type:, type_vars:, param_overrides:)
+          def accepts_param?(param, arg, self_type:, instance_type:, type_vars:, param_overrides:,
+                             alias_expander: nil)
             param_type = param_overrides[param.name] || RbsTypeTranslator.translate(
               param.type,
               self_type: self_type,
               instance_type: instance_type,
-              type_vars: type_vars
+              type_vars: type_vars,
+              alias_expander: alias_expander
             )
             # An `untyped` arg gradually accepts against every param, so a value-pinning param would be
             # "matched" with zero evidence and its value-precise return (`(nil) -> []`) would beat broader

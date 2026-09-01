@@ -9,7 +9,7 @@ module Rigor
       # Load a baseline file from disk.
       # Returns `nil` when `path` is nil (no baseline configured).
       # Raises {LoadError} on malformed or unsupported content.
-      def self.load: (::String? path) -> Baseline?
+      def self.load: (::String? path, ?project_root: ::String) -> Baseline?
 
       # Build a baseline from a current run's diagnostic stream.
       def self.from_diagnostics: (untyped diagnostics, ?match_mode: :rule | :message) -> Baseline

@@ -14,6 +14,12 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[engine]** Methods a class gains through `extend SomeModule`, `extend self`, or `module_function` now resolve on the class itself — existence and inferred return types both — removing 39 undefined-method false positives across the survey corpus ([#554](https://github.com/rigortype/rigor/pull/554), [#526](https://github.com/rigortype/rigor/issues/526)).
+
+- **[engine]** Rails-style implicit namespaces now resolve: `Api` in `class Api::V1::AccountsController` types as the namespace module even though Zeitwerk means no `module Api` ever appears in source — worth +1.16 points of type precision on Mastodon ([#551](https://github.com/rigortype/rigor/pull/551), [#528](https://github.com/rigortype/rigor/issues/528)).
+
+- **[plugins]** rigor-actionpack now types `params.expect(...)` and `params.slice(...)` as strong-parameter chains, so Rails 8's `expect` idiom keeps the same typed, protected receiver `require`/`permit` chains have ([#548](https://github.com/rigortype/rigor/pull/548), [#534](https://github.com/rigortype/rigor/issues/534)).
+
 - **[cli]** `rigor type-of` accepts several positions in one invocation and makes the column optional — `rigor type-of file.rb:42` lists up to 40 expressions on line 42 — so walking a chain of expressions costs one process instead of one each (five positions on a Rails application: 10.3 s → 2.1 s) ([#515](https://github.com/rigortype/rigor/pull/515)).
 
 - **[engine]** `Foo.instance` on a class that includes the stdlib `Singleton` mixin now types as `Foo` instead of untyped, so the methods you call on that instance are typed too ([#514](https://github.com/rigortype/rigor/pull/514)).
@@ -23,6 +29,33 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 ### Fixed
 
 - **[engine]** An attribute or index assignment (`x.attr = v`, `h[k] = v`) now carries the assigned value's type, as Ruby defines, instead of the writer method's declared return — so `h[k] = true` no longer reads as untyped on an untyped hash ([#538](https://github.com/rigortype/rigor/pull/538), [#520](https://github.com/rigortype/rigor/issues/520)).
+
+- **[engine]** Methods defined in a `Struct.new(...) do ... end` block now resolve on the struct's values — `Line.new(text).describe` infers the block def's return instead of reading untyped ([#555](https://github.com/rigortype/rigor/pull/555), [#525](https://github.com/rigortype/rigor/issues/525)).
+
+- **[engine]** Calling your own method with optional, keyword, rest, or block parameters no longer loses its inferred return type — the call-site binder binds each parameter it can identify (defaults included, `options = {}` too) instead of giving up on the whole signature, which also surfaced a real crash path in a survey app the code's own TODO had flagged ([#547](https://github.com/rigortype/rigor/pull/547), [#524](https://github.com/rigortype/rigor/issues/524)).
+
+- **[engine]** `File.read(path)` and `IO.read(path)` without a length now type as `String` instead of `String?` — the no-length form never returns nil, so guards on whole-file reads stop flagging impossible nils ([#547](https://github.com/rigortype/rigor/pull/547)).
+
+- **[engine]** `alias_method :new_name, :old_name` now resolves like the `alias` keyword — calls through the alias infer the original method's return — and `x.send(:selector)` with a literal symbol resolves as the direct call would, private methods included ([#549](https://github.com/rigortype/rigor/pull/549), [#533](https://github.com/rigortype/rigor/issues/533)).
+
+- **[engine]** A call whose argument Rigor cannot type no longer picks one RBS overload by declaration order — `[true] * n` with an untyped `n` read as `String` and produced argument-type false positives on the array it actually returns; such calls now carry the candidate set gradually, removing 18 false positives across the survey corpus with none added ([#537](https://github.com/rigortype/rigor/pull/537), [#521](https://github.com/rigortype/rigor/issues/521)).
+
+- **[cli]** `rigor coverage --protection` no longer reports a call to your own method as an "unsupported syntax" hole when the real story is a return type Rigor could not infer — the cause table now routes those sites to the inference-gap bucket, so the report's engine-gap/add-RBS split reflects what would actually help ([#536](https://github.com/rigortype/rigor/pull/536), [#522](https://github.com/rigortype/rigor/issues/522)).
+
+- **[engine]** Slot-rewriting mutators (`t[0] += 5`, `opts[:k] = v`, `fill`, `map!`) now widen a literal collection's value pinning along with its shape, so the stale constant union no longer feeds a false always-falsey on the new value ([#561](https://github.com/rigortype/rigor/pull/561), [#560](https://github.com/rigortype/rigor/issues/560)).
+- **[engine]** An index write on a receiver the engine cannot shape no longer synthesizes a Hash type — mail's `compose_codepoints`, which mutates its Array parameter through integer and range index writes, returns untyped instead of a phantom `Hash[Integer | Range, ...]` that fired on the caller's `.pack` ([#559](https://github.com/rigortype/rigor/pull/559), [#553](https://github.com/rigortype/rigor/issues/553)).
+- **[engine]** `x.attr ||= v`, `x.attr &&= v`, and `x.attr += v` now carry their real value semantics instead of falling to untyped as unsupported syntax — the last genuinely unmodeled expressions the corpus survey found ([#552](https://github.com/rigortype/rigor/pull/552), [#532](https://github.com/rigortype/rigor/issues/532)).
+
+- **[engine]** Methods on refined strings (`RUBY_VERSION != "1.0"`, `RUBY_VERSION.split(".")`) now resolve through the underlying `String` instead of losing the whole call to untyped, and an `is_a?` guard against a class Rigor cannot see no longer keeps the old type on the guarded branch — the guard's own proof wins ([#550](https://github.com/rigortype/rigor/pull/550), [#533](https://github.com/rigortype/rigor/issues/533)).
+
+- **[engine]** A block-taking call on a statically-folded `Set` constant (`NAMES.any? { … }`) no longer answers the blockless method's constant — the block decides the runtime answer, and the wrong fold could flag reachable conditions as always-truthy ([#546](https://github.com/rigortype/rigor/pull/546), [#539](https://github.com/rigortype/rigor/issues/539)).
+
+- **[engine]** Overload selection now sees through alias-declared parameters — an alias expanding to a concrete class rejects a non-matching argument instead of gradually accepting everything and winning by list position ([#558](https://github.com/rigortype/rigor/pull/558), [#529](https://github.com/rigortype/rigor/issues/529)).
+- **[check]** The declared side of `def.return-type-mismatch` and the ADR-35 override rules now sees through RBS type aliases, so a redefinition contradicting an alias-declared signature is reported instead of silently accepted ([#557](https://github.com/rigortype/rigor/pull/557), [#529](https://github.com/rigortype/rigor/issues/529)).
+- **[engine]** RBS type aliases and intersections now translate instead of collapsing to untyped — prism's `type node = Node & _Node` reads as `Prism::Node`, and aliased returns, parameters, and block parameters resolve through the alias table ([#556](https://github.com/rigortype/rigor/pull/556), [#529](https://github.com/rigortype/rigor/issues/529)).
+- **[cli]** `rigor coverage` and `rigor check --coverage` now measure the same engine `rigor check` runs: the precision ratio sees your project's cross-file methods, ancestry, and plugin-contributed types instead of under-reporting them as untyped, and precisely-folded `Data` / `Struct` values count as typed ([#535](https://github.com/rigortype/rigor/pull/535), [#513](https://github.com/rigortype/rigor/issues/513), [#523](https://github.com/rigortype/rigor/issues/523)).
+
+- **[engine]** `h[k] ||= default` no longer pins later `h[k]` reads to the default when Rigor cannot fully see the hash — a caller-supplied value kept by the `||=` was folded away, firing "condition is always truthy" on reachable branches ([#545](https://github.com/rigortype/rigor/pull/545), [#544](https://github.com/rigortype/rigor/issues/544)).
 
 - **[engine]** A collection handed out by one method and filled through that reference — `(bucket_for(entry)[key] ||= {})[name] = row` — is no longer read as still empty, so `empty?` and `size` on it stop folding to a constant in every other method of the class ([#507](https://github.com/rigortype/rigor/pull/507), [#506](https://github.com/rigortype/rigor/issues/506)).
 

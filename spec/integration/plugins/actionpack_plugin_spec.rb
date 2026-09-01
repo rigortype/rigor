@@ -214,6 +214,44 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    it "keeps `expect` / `slice` chained off `params` typed as Parameters (#534)" do
+      # Both share `require`'s safety shape: they never return nil, so the non-nil lenient nominal
+      # cannot fold a flow rule wrong. `[]` is deliberately absent — see the control below.
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(params.expect(user: [:name]))
+            Rigor.dump_type(params.slice(:q, :page))
+            Rigor.dump_type(params.expect(user: [:name]).slice(:name))
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(3)
+        expect(dumps).to all(include("ActionController::Parameters"))
+      end
+    end
+
+    it "leaves `params[:key]` untyped — it returns nil at runtime, and a non-nil nominal folds flow rules (#534)" do
+      # Measured before withdrawal: typing `[]` as the non-nil Parameters folded `url.nil?` /
+      # `if params[:r]` conditions constant on five working redmine/mastodon controllers.
+      source = <<~RUBY
+        class C
+          def create
+            url = params[:back_url]
+            if url.nil?
+              Rigor.dump_type(url)
+            end
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        folds = result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        expect(folds).to be_empty
+      end
+    end
+
     it "does not re-type `require` / `permit` on a non-Parameters receiver" do
       # The receiver gate is `ActionController::Parameters` — a bare `require 'x'` (Kernel) or a `permit`
       # on some other object must not become Parameters.

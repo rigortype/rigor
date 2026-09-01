@@ -174,16 +174,22 @@ check-json:
 #   v0.3.4 59.02 · v0.3.5 58.94 · v0.3.6 58.96 · master 58.98
 #
 # A 0.94-point band over three months and +108 files, drifting down roughly
-# 0.1 points per release as the codebase grows. 57 % leaves ~2 points, about
-# two years of that drift, so ordinary development cannot trip it — a gate
+# 0.1 points per release as the codebase grows. The margin leaves ~2 points,
+# about two years of that drift, so ordinary development cannot trip it — a gate
 # that fires on correct input teaches people to route around it (AGENTS.md
 # § "Implementation Guidelines"). An engine change that legitimately LOWERS
 # precision (a soundness fix that widens a type) re-baselines this line
 # deliberately, which is the point of the gate.
 #
+# Re-pinned 2026-09-01 for #513 + #523: the lens now seeds the full
+# check-walk discovery bundle, runs plugin-aware, and classifies the
+# Data / Struct / BoundMethod carriers, moving `lib` 58.98 % → 59.81 %.
+# The threshold shifts by the same ~0.8 points to keep the calibrated
+# margin unchanged.
+#
 # Use `rigor coverage lib/` without --threshold for a non-gating report.
 coverage:
-	bundle exec exe/rigor coverage --threshold 0.57 lib
+	bundle exec exe/rigor coverage --threshold 0.58 lib
 
 # ADR-50 WD4 perf-regression gate. Runs `rigor check --no-cache` over `lib`
 # in-process, measures wall / allocations / peak-RSS, and gates against

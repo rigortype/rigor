@@ -41,6 +41,21 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(use.fetch("precise_ratio")).to eq(1.0)
     end
 
+    # Issue #513 — the seed is the full check-walk discovery bundle, not just `discovered_classes`: without
+    # the def-node / def-source tables a cross-file call to a source-inferred project method measured as
+    # unresolved while `rigor check` resolves it (redmine's `l` / `render_404`, +0.27–0.77pp on the apps).
+    it "resolves a cross-file call to a source-inferred project method, instead of counting it opaque" do
+      File.write("util.rb", "class Util\n  def self.greeting\n    \"hi\"\n  end\nend\n")
+      File.write("use_util.rb", "Util.greeting.upcase\n")
+
+      status, out, = run(["--format", "json", "util.rb", "use_util.rb"])
+
+      expect(status).to eq(0)
+      use = JSON.parse(out).fetch("by_file").find { |f| f.fetch("file") == "use_util.rb" }
+      expect(use.fetch("dynamic_opaque_count")).to eq(0)
+      expect(use.fetch("precise_ratio")).to eq(1.0)
+    end
+
     it "seeds inferred parameter types only when `parameter_inference:` is on, mirroring the check walk" do
       File.write("app.rb", <<~RUBY)
         class Greeter

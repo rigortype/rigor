@@ -435,6 +435,9 @@ module Rigor
 
         key_node = first_index_argument(node)
         address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
+        # Issue #544 — a receiver with an untracked (Dynamic / Top) constituent can hold a caller-supplied
+        # slot value the `||=` keeps, so the recorded default would invent a fact; decline the record.
+        address = nil if address && !IndexedNarrowing.fully_tracked_receiver_type?(scope.type_of(node.receiver))
         post = post_rhs
         # Widen BEFORE recording the narrowing: rebinding the receiver drops the per-slot narrowings keyed on it, so
         # the reverse order would trade this feature away for the widening. The two are complementary — the shape
@@ -1444,6 +1447,10 @@ module Rigor
         # whose body we cannot prove match-free). A call provably match-free on a known receiver — `$3.to_i`, `year <
         # 50` — does NOT clobber, so the multi-statement `m = /…/ =~ s; …; use($2)` stdlib idiom keeps its precision
         # while a genuinely interposed match still invalidates.
+        # The chain above is Scope-total by construction (every helper returns its input scope or a
+        # combinator result); the `||=` is a runtime no-op that pins the INFERRED type back to Scope for
+        # the negative rules when a helper's return widens to `Scope?` under call-site binding (#524).
+        post_scope ||= scope
         post_scope = post_scope.forget_match_globals if match_capable_call?(node)
         [call_type, post_scope]
       end
@@ -1482,12 +1489,14 @@ module Rigor
         seed = current_scope.class_ivars_for(class_name)
         return current_scope if seed.empty?
 
-        seed.reduce(current_scope) do |acc, (ivar_name, seed_type)|
+        widened = current_scope
+        seed.each do |ivar_name, seed_type|
           local_type = current_scope.ivar(ivar_name)
-          next acc if local_type.nil? || local_type == seed_type
+          next if local_type.nil? || local_type == seed_type
 
-          acc.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
+          widened = widened.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
         end
+        widened
       end
 
       def intervening_call_candidate?(call_node)
@@ -2336,7 +2345,11 @@ module Rigor
       end
 
       # Joins content evidence for a memo / param given its pre-state and a list of mutator calls, dispatching Array vs
-      # Hash by the mutator set.
+      # Hash by the PRE-STATE's own evidence. The mutator set never picks the arm on its own: `[]=` is legal on Array,
+      # Hash, and countless index-writable classes, so an index-write against a receiver the engine cannot shape must
+      # not synthesize a hash carrier — mail's `compose_codepoints` mutated its untyped Array param through
+      # integer/range index writes and returned `Hash[Integer | Range, …]` to its caller (issue #553). Dynamic in,
+      # Dynamic out: a shapeless pre-state falls through to `join_array_param`, which declines it.
       def join_content_for_param(calls, pre_state, block_entry)
         return nil if pre_state.nil?
 
@@ -2344,7 +2357,7 @@ module Rigor
           # String carries no element parameter; mutating `<<`/`concat` makes the constant value unsound (`s = "a"; s <<
           # x` → runtime `"a…"`), so widen to the nominal base. Sound — only widens.
           Type::Combinator.nominal_of("String")
-        elsif hashish?(pre_state) || (hash_mutations?(calls) && !arrayish?(pre_state))
+        elsif hashish?(pre_state)
           join_hash_param(calls, pre_state, block_entry)
         else
           join_array_param(calls, pre_state, block_entry)
@@ -2412,12 +2425,6 @@ module Rigor
       # accumulator, whose `<<` carries no element parameter and whose binding already types as `String`.
       def join_content_for_local(name, calls, post_scope, block_entry)
         join_content_for_param(calls, post_scope.local(name), block_entry)
-      end
-
-      def hash_mutations?(calls)
-        calls.any? do |c|
-          index_write?(c) || (c.is_a?(Prism::CallNode) && MutationWidening::HASH_CONTENT_ADDERS.include?(c.name))
-        end
       end
 
       def index_write?(node)

@@ -63,6 +63,43 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(result.sites.first.dynamic_origin).to eq(:inferred_return_untyped)
   end
 
+  # Issue #522 — a call the dispatch tiers exhausted still names a PROJECT method: the discovered tier
+  # declined in favor of body inference (a def source exists) and inference declined on the parameter
+  # shape. The honest cause is the inference gap, not "unsupported syntax" — on mastodon every
+  # service-object `#call` carried the wrong label.
+  it "routes a chain behind an unresolved call with a discovered project def to inferred_return_untyped" do
+    # `call`'s own receiver is concrete (protected — not a site); the label shows on the DOWNSTREAM
+    # dispatch whose Dynamic receiver inherits the call node's provenance via ADR-82 WD6. The def uses a
+    # trailing post parameter — the one shape the #524 per-parameter binder still declines — so the
+    # fixture keeps exercising the decline path on the integrated tree too.
+    result = scan(<<~RUBY)
+      class Service
+        def call(first, *rest, last)
+          rest
+        end
+      end
+
+      Service.new.call(1, 2, 3).foo
+    RUBY
+    site = result.sites.find { |s| s.method_name == "foo" }
+    expect(site).not_to be_nil
+    expect(site.dynamic_origin).to eq(:inferred_return_untyped)
+  end
+
+  # The generic cause stays for a name no scanned file defines — the discriminating control for the
+  # relabel above.
+  it "keeps the generic cause behind an unresolved call with no discovered project def" do
+    result = scan(<<~RUBY)
+      class Service
+      end
+
+      Service.new.frobnicate(1).foo
+    RUBY
+    site = result.sites.find { |s| s.method_name == "foo" }
+    expect(site).not_to be_nil
+    expect(site.dynamic_origin).to eq(:unsupported_syntax)
+  end
+
   it "routes an unbound instance-variable's chain to inference (ADR-82 root-enrichment)" do
     # `@x` is not assigned in this scope — the engine does not track the field's type (an ADR-58 gap) —
     # so `@x.foo` and, via WD6, `@x.foo.bar` route to `inferred_return_untyped` instead of no cause.

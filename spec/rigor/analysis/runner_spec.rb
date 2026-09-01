@@ -4665,20 +4665,22 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(result.diagnostics.select { |d| d.rule == "assert.type-mismatch" }).to be_empty
     end
 
-    it "returns Dynamic[Top] when the top-level def has a complex param shape" do
-      # `def helper(x, kind: :default)` has a kwarg — the first-iteration binder rejects it. The engine still prefers
-      # the local def over RBS dispatch and returns `Dynamic[Top]`, suppressing the spurious `Array#select`-style
-      # mis-routing that previously caused `select(...)` to type as `Array[Elem]`.
+    it "infers through a complex param shape while still preferring the local def over RBS dispatch" do
+      # `def select(class_name, method_name, kind: :instance)` has a kwarg. The first-iteration binder
+      # rejected the whole signature and answered `Dynamic[Top]`; the #524 per-parameter binder infers the
+      # return — and the property this spec has always guarded still holds: the LOCAL def wins over
+      # `Array#select` / `Kernel#select`, so `mt` is the def's own return, never `Array[Elem]`.
       result = analyze(<<~RUBY)
+        require "rigor/testing"
+        include Rigor::Testing
         def select(class_name, method_name, kind: :instance)
           class_name
         end
         mt = select("Array", :first)
-        mt.no_such_method_on_array
+        assert_type("\\"Array\\"", mt)
       RUBY
 
-      # `mt` is `Dynamic[Top]`; the undefined-method rule skips Dynamic receivers so no diagnostic surfaces.
-      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      expect(result.diagnostics.select { |d| d.rule == "assert.type-mismatch" }).to be_empty
     end
   end
 

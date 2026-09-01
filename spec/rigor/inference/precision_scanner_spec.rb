@@ -107,6 +107,32 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
     end
   end
 
+  # Issue #523 — every precisely-folded carrier must land in a precise tier. These five fell through
+  # `classify`'s `else` arm to `:dynamic_top`, so 810 ADR-48 Data / Struct and bound-method sites on this
+  # repository's own `lib` were counted OPAQUE by the ratio `rigor coverage` and the `make coverage`
+  # gate report. The spec enumerates them so a future carrier addition fails loud instead of silently
+  # diluting the ratio.
+  describe "carrier classification" do
+    let(:scanner) { described_class.new }
+
+    it "classifies DataClass and StructClass as nominal (class-side carriers, like Singleton)" do
+      data_class = Rigor::Type::Combinator.data_class_of(members: %i[x y], class_name: "Point")
+      struct_class = Rigor::Type::Combinator.struct_class_of(members: %i[a], class_name: "Row")
+      expect(scanner.send(:classify, data_class)).to eq(:nominal)
+      expect(scanner.send(:classify, struct_class)).to eq(:nominal)
+    end
+
+    it "classifies DataInstance, StructInstance, and BoundMethod as shaped" do
+      int = Rigor::Type::Combinator.constant_of(1)
+      data_instance = Rigor::Type::Combinator.data_instance_of(members: { x: int }, class_name: "Point")
+      struct_instance = Rigor::Type::Combinator.struct_instance_of(members: { a: int }, class_name: "Row")
+      bound = Rigor::Type::Combinator.bound_method_of(Rigor::Type::Combinator.nominal_of("String"), :upcase)
+      expect(scanner.send(:classify, data_instance)).to eq(:shaped)
+      expect(scanner.send(:classify, struct_instance)).to eq(:shaped)
+      expect(scanner.send(:classify, bound)).to eq(:shaped)
+    end
+  end
+
   describe "union and intersection classification" do
     it "classifies a mixed union by its worst member" do
       # `x || 1` — the || result is a union of the unknown `x` (dynamic_top)

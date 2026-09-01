@@ -153,9 +153,12 @@ module Rigor
         when Type::Bot                          then :bot
         when Type::Top                          then :top
         when Type::Constant                     then :constant
-        when Type::Nominal, Type::Singleton     then :nominal
+        when Type::Nominal, Type::Singleton,
+             Type::DataClass, Type::StructClass then :nominal
         when Type::Tuple, Type::HashShape,
-             Type::IntegerRange, Type::App      then :shaped
+             Type::IntegerRange, Type::App,
+             Type::DataInstance, Type::StructInstance,
+             Type::BoundMethod                  then :shaped
         when Type::Refined                      then :refined
         when Type::Dynamic                      then classify_dynamic(type)
         when Type::Union                        then worst_of(type.members)

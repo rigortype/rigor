@@ -502,7 +502,7 @@ RSpec.describe "Struct.new value folding", type: :runner do
           end
         end
 
-        Pkg::Parser.parse("a,b").items.first.local
+        Pkg::Parser::Result.new([], []).items.first.local
       RUBY
       expect(result.diagnostics.map(&:message).join("\n")).not_to match(/undefined method/i)
     end
@@ -510,11 +510,16 @@ RSpec.describe "Struct.new value folding", type: :runner do
     # The must-still-succeed control for the example above: the same chain over a NON-empty member still folds to
     # a real element type, so a genuine typo on it is still reported. Without this the silence above could come
     # from the whole chain having degraded rather than from the widening.
+    #
+    # Issue #595 moved both examples off the FACTORY-METHOD receiver they used to carry
+    # (`Pkg::Parser.parse("a,b").items`, `build.items`). A chained call is no longer read as fresh, so that
+    # receiver now declines — which would have left the silence example passing for the wrong reason and this
+    # control failing. A direct materialisation keeps the pair discriminating over exactly the widening it was
+    # written for; the factory-method route's own decline is pinned in the #595 block below.
     it "still reports a genuine typo reached through a non-empty member" do
       result = analyze(<<~RUBY)
         Pair = Struct.new(:label, :items)
-        def build = Pair.new("hi", [1, 2])
-        build.items.first.zzz_undefined
+        Pair.new("hi", [1, 2]).items.first.zzz_undefined
       RUBY
       expect(result.diagnostics.map(&:message).join("\n")).to include("zzz_undefined")
     end
@@ -706,6 +711,142 @@ RSpec.describe "Struct.new value folding", type: :runner do
           p = Point.new(1, 2)
           sink(p)
           dump_type(p.x)
+        RUBY
+      end
+    end
+  end
+
+  # Issue #595 — slice 2's freshness test read "the receiver is a chained call" as "the receiver is a
+  # transient nothing else holds". A method that returns its own receiver falsifies that, and the fluent
+  # builder is ordinary Ruby, so the gate served construction-time member values against a mutated object.
+  # The test now recognises MATERIALISATIONS only, sharing one implementation with the slice-5 `:self` grant.
+  describe "freshness is materialisation, not chaining" do
+    let(:builder_def) { <<~RUBY }
+      Line = Struct.new(:text, :indent) do
+        def with_text(v)
+          self.text = v
+          self
+        end
+
+        def dup_self
+          self
+        end
+
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+
+    describe "must stay Dynamic — the chain hands back a mutated object" do
+      it "declines a read through a self-returning fluent setter" do
+        # Runtime `"z"`; the pre-fix gate folded the construction-time `"a"`.
+        source = "#{builder_def}dump_type(Line.new(\"a\", 2).with_text(\"z\").text)"
+        expect(dumped_types(source)).to eq(["Dynamic[top]"])
+      end
+
+      it "declines a read through a bare self-returning method after a setter" do
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          #{builder_def}
+          x = Line.new("a", 2)
+          x.text = "z"
+          dump_type(x.dup_self.text)
+        RUBY
+      end
+
+      it "declines a `.with` copy taken off a stale-derived receiver" do
+        # The composed shape: `.with` IS a materialisation, but its receiver is not, so the copy it
+        # produces carries the stale map. Refusing the prefix kills the composition at its root.
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          #{builder_def}
+          x = Line.new("a", 2)
+          x.text = "z"
+          dump_type(x.dup_self.with(indent: 9).text)
+        RUBY
+      end
+
+      it "declines a block-def method call off that same stale-derived receiver" do
+        # The slice-5 grant fires off `.with`'s carrier, so the same prefix leaked into whole method
+        # bodies: this folded `"A"` against a runtime `"Z"` with the grant's own arm behaving correctly.
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          #{builder_def}
+          x = Line.new("a", 2)
+          x.text = "z"
+          dump_type(x.dup_self.with(indent: 9).shout)
+        RUBY
+      end
+    end
+
+    describe "must still fold — the receiver really was just materialised" do
+      it "folds a read off `.new`" do
+        expect(dumped_types("#{builder_def}dump_type(Line.new(\"c\", 2).text)")).to eq(["\"c\""])
+      end
+
+      it "folds a read off `[]`" do
+        expect(dumped_types("#{builder_def}dump_type(Line[\"d\", 2].text)")).to eq(["\"d\""])
+      end
+
+      it "folds a read off a `.with` copy of a materialisation" do
+        source = "#{builder_def}dump_type(Line.new(\"e\", 2).with(text: \"f\").text)"
+        expect(dumped_types(source)).to eq(["\"f\""])
+      end
+
+      it "folds a projection off a materialisation" do
+        source = "#{builder_def}dump_type(Line.new(\"h\", 2).to_h)"
+        expect(dumped_types(source)).to eq(["{ text: \"h\", indent: 2 }"])
+      end
+
+      it "keeps the slice-5 grant firing off a materialisation" do
+        expect(dumped_types("#{builder_def}dump_type(Line.new(\"g\", 2).shout)")).to eq(["\"G\""])
+      end
+    end
+
+    describe "the measured precision trade" do
+      it "declines a genuinely fresh helper return (the accepted cost)" do
+        # `make` really does hand back a new instance, but the whitelist cannot see through it. Accepted:
+        # a before/after run over haml's and hamlit's parsers, faraday's Options/Request and mail's
+        # received_parser showed an identical diagnostic set and identical `type-scan` coverage, because a
+        # helper return at those sites does not infer to a StructInstance in the first place. The richer
+        # fix (consult the callee's return for a self-alias) waits for a corpus that shows a real loss.
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          #{builder_def}
+          def make = Line.new("x", 1)
+          dump_type(make.text)
+        RUBY
+      end
+
+      it "declines the factory-method route, and the direct one still reports the typo" do
+        # The paired form of the trade, over the shape the #293 guards above used to carry. The factory
+        # return is genuinely fresh, but the whitelist cannot see through `parse`, so the chain declines and
+        # a typo on it goes unreported; written as a direct materialisation the same typo still fires. The
+        # loss direction is a missed error, never a diagnostic on correct code — and closing it needs the
+        # callee's return consulted for a `self` alias, which is issue #595's deferred richer half.
+        factory = <<~RUBY
+          Pair = Struct.new(:label, :items)
+          def build = Pair.new("hi", [1, 2])
+        RUBY
+        via_factory = analyze("#{factory}build.items.first.zzz_undefined")
+        direct = analyze("#{factory}Pair.new(\"hi\", [1, 2]).items.first.zzz_undefined")
+
+        expect(via_factory.diagnostics.map(&:message).join("\n")).not_to include("zzz_undefined")
+        expect(direct.diagnostics.map(&:message).join("\n")).to include("zzz_undefined")
+      end
+    end
+
+    describe "a hand-written `with` is not a materialisation" do
+      it "declines a `.with` the struct defined itself" do
+        # A user `with` is free to return `self`, which would reopen the whole family through the one
+        # non-`new` name on the whitelist.
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          Pair = Struct.new(:a, :b) do
+            def with(**opts)
+              self.a = opts[:a]
+              self
+            end
+          end
+          x = Pair.new(1, 2)
+          x.a = 9
+          dump_type(x.with(a: 3).a)
         RUBY
       end
     end

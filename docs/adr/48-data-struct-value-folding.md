@@ -31,14 +31,18 @@ first target.
 **`Struct` follow-up — slices 1 + 2 landed (the sound *transient* form).**
 The mutable sibling carriers `Type::StructClass` / `Type::StructInstance`
 ship, `Struct.new(...)` folds to a `StructClass` member layout, `.new` /
-`[]` materialises a `StructInstance`, and a member read off a **fresh**
-(chained) instance folds (`Struct.new(:x, :y).new(1, 2).x` → `Constant[1]`,
-for the anonymous / constant / subclass / local-class forms, positional +
-`keyword_init:`). The mutation-soundness story is resolved by a
+`[]` materialises a `StructInstance`, and a member read off a **freshly
+materialised** instance folds (`Struct.new(:x, :y).new(1, 2).x` →
+`Constant[1]`, for the anonymous / constant / subclass / local-class forms,
+positional + `keyword_init:`). The mutation-soundness story is resolved by a
 **fresh-receiver gate** rather than write-site invalidation: a member read
-off a *stored* binding degrades to `Dynamic[top]` (a transient cannot have
-been mutated between materialisation and a chained read, so no invalidation
-is needed; a stored binding might have, so it is not folded). This touches
+off a *stored* binding degrades to `Dynamic[top]` (a receiver this expression
+just materialised cannot have been mutated since, so no invalidation is
+needed; a stored binding might have, so it is not folded). "Freshly
+materialised" means `.new` / `[]` / `.with`, NOT any chained call —
+[#595](https://github.com/rigortype/rigor/issues/595) corrected that on
+2026-09-02, after a self-returning fluent builder was found serving
+construction-time values post-mutation. This touches
 no write sites — far lower false-positive risk than enumerating every escape
 path — and is precisely the gate the deferred slice 3 relaxes. See
 § "Struct follow-up" below for the full record.
@@ -403,14 +407,55 @@ escape path* — a call argument, an alias assignment, a container store, a
 block capture — and **missing one is unsound, which manufactures a
 false positive** (the project's cardinal sin). Route (b) is realised at its
 soundest extreme: a `StructInstance` member read folds **only when its
-receiver node is a fresh `.new(...)` / `.with(...)` call** — a transient that
-provably cannot have been mutated between materialisation and the chained
-read. A read off a *stored* binding degrades to `Dynamic[top]`. This touches
+receiver node MATERIALISES the struct** — `Point.new(…)`, `Point[…]`, or a
+`.with(…)` copy off a struct that did not hand-write its own `with`. Such a
+receiver is a transient nothing else holds, so it cannot have been mutated
+between materialisation and the chained read. A read off a *stored* binding
+degrades to `Dynamic[top]`. This touches
 **no write sites**, so no escape path can be missed; the cost is that bound
 instances (the common `p = Point.new(1, 2); p.x` shape) do not yet fold.
 Member *setters* (`s.x = v`) return the assigned value type (modelling the
 setter's own return, sound regardless of mutation state, and avoiding a
 fall-through undefined-method on an unregistered writer).
+
+The materialisation whitelist is a **2026-09-02 correction**
+([#595](https://github.com/rigortype/rigor/issues/595), RESOLVED). Slices 1-2
+shipped the gate as "the receiver node is a chained CALL", reading *chained* as
+*transient*. A method that hands back its own receiver falsifies that, and the
+fluent builder is ordinary Ruby:
+
+```ruby
+Line = Struct.new(:text) do
+  def with_text(v) = (self.text = v; self)
+  def dup_self    = self
+end
+x = Line.new("a"); x.text = "z"
+x.dup_self.text                    # folded "a", runtime "z"
+Line.new("a").with_text("z").text  # folded "a", runtime "z"
+```
+
+Two facts combine: `infer_user_method_return` types a body under a fixed
+`self_type` carrier, so the in-body setter never poisons the returned `self`,
+and the gate never asked the callee what it returns. The whitelist answers
+both at once — any callee outside it refuses, whatever it does internally —
+and is the SAME predicate
+([`StructFolding.materialization_call?`](../../lib/rigor/inference/method_dispatcher/struct_folding.rb))
+the ADR-48 slice-5 `:self` grant uses. Sharing it is the point: while the two
+gates had forked answers, a correctly whitelisted `.with` fold could still fire
+off a receiver the other gate wrongly called fresh
+(`x.dup_self.with(indent: 9).shout`), so the composed shape survived a fix to
+either half alone.
+
+The cost is a genuinely fresh helper return: `def make = Line.new("x")` then
+`make.text` no longer folds, because the whitelist cannot see through `make`.
+Measured, that costs nothing observable on the struct-heaviest real files in
+the named corpus targets — haml's and hamlit's parsers, faraday's
+`Options`/`Request`, mail's `received_parser` — where a before/after run shows
+an identical diagnostic set and an identical `type-scan` coverage (570
+unrecognized, `CallNode` 461/1966). For the loss to bite, the helper's return
+must already infer to a `StructInstance`, and at these sites it does not. The
+richer fix — consult the callee's inferred return and accept it when it is
+provably not a `self` alias — is deferred until a corpus shows a real loss.
 
 **Slice plan (Struct):** slice 1 = the `StructClass` carrier + `Struct.new`
 recognition; slice 2 = the `StructInstance` carrier + fresh-chain member
@@ -458,16 +503,16 @@ is a keyword and no Ruby local can carry that name, so no new `Scope` field is
 needed. `foldable_receiver?` gains a matching arm for a `nil` / `self` receiver,
 tied to the exact carrier the grant was issued for.
 
-The materialisation test is deliberately narrower than slice 2's
-`fresh_receiver?`, which accepts ANY chained call. "Chained" stops meaning
-"fresh" as soon as a method can hand back its own receiver, and a self-returning
-fluent builder is ordinary Ruby: `Line.new("a").with_text("z").shout` over
-`def with_text(v) = (self.text = v; self)` would otherwise grant `shout` a member
-map two statements stale and fold `"A"` where the runtime value is `"Z"`. The
-grant path therefore recognises only the shapes the folding layer itself
-materialises. (Slice 2's own reading of `fresh_receiver?` is untouched here and
-has the same latent gap for a direct member read through such a builder — tracked
-as [issue #595](https://github.com/rigortype/rigor/issues/595).)
+The materialisation test the grant uses is the SAME one slice 2's
+`fresh_receiver?` uses — one implementation,
+`StructFolding.materialization_call?`. Neither reads a bare chained call as
+fresh: "chained" stops meaning "fresh" as soon as a method can hand back its own
+receiver, and a self-returning fluent builder is ordinary Ruby.
+`Line.new("a").with_text("z").shout` over `def with_text(v) = (self.text = v;
+self)` would otherwise grant `shout` a member map two statements stale and fold
+`"A"` where the runtime value is `"Z"`. Slice 2 shipped the looser reading and
+was corrected alongside it — see the fresh-receiver-gate paragraph above and
+[#595](https://github.com/rigortype/rigor/issues/595).
 
 Two conditions beyond the caller's evidence: the carrier must be a
 `StructInstance`, and the body's every use of `self` must be a pure read

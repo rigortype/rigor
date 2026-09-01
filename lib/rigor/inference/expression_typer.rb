@@ -1569,9 +1569,9 @@ module Rigor
       #   implicit-self readers propagate: `Line.new(…).outer` grants `outer`'s body `:self`, and an
       #   `inner` call inside it carries the grant into `inner`'s body.
       #
-      # The first arm is deliberately NARROWER than `StructFolding#fresh_receiver?`, which accepts any
-      # chained call. "Chained" is not "fresh" once a method can hand back its own receiver, and a
-      # self-returning fluent builder is ordinary Ruby:
+      # The first arm shares `StructFolding`'s materialisation test with the direct member-read gate. Neither
+      # accepts a bare chained call: "chained" is not "fresh" once a method can hand back its own receiver,
+      # and a self-returning fluent builder is ordinary Ruby:
       #
       #     Line = Struct.new(:text) do
       #       def with_text(v) = (self.text = v; self)
@@ -1596,27 +1596,17 @@ module Rigor
         end
       end
 
-      # A call whose RESULT is a newly built struct. `.new` / `.[]` qualify off a struct-class expression;
-      # `.with` copies an instance, but only when the struct did not define its own `with` — a hand-written
-      # one is free to return `self`, which is exactly the staleness this method exists to refuse.
+      # Issue #595 — the materialisation test now lives ONCE, in `StructFolding`, because the direct
+      # member-read gate needs the identical answer; see {StructFolding.materialization_call?}. The
+      # ancestor-walking resolver is passed in so the `.with` guard also sees a `with` defined in an included
+      # module, which the scope's own-class table would miss. `method(:…)` is memoised because this runs on
+      # every struct-receiver call, and `ExpressionTyper` is rebuilt per `Scope#type_of`.
       def materialization_call?(node, receiver)
-        case node.name
-        when :new, :[] then struct_class_expression?(node.receiver)
-        when :with then resolve_user_def_with_owner(receiver.class_name, :with).first.nil?
-        else false
-        end
+        MethodDispatcher::StructMaterialization.materialization_call?(node, receiver, scope, user_def_lookup)
       end
 
-      # An expression naming the struct class itself: a constant the project's member-layout side-table
-      # knows. The inline `Struct.new(:a, :b).new(…)` factory is deliberately absent — it cannot reach this
-      # method. Its block form defers in `StructFolding.fold_struct_new`, and its blockless form yields an
-      # ANONYMOUS instance, which `#user_inference_receiver?` rejects for want of a class name. A grant needs
-      # a block-defined method resolved on a named carrier, so only the constant form can ever ask.
-      def struct_class_expression?(node)
-        return false unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
-
-        name = Source::ConstantPath.qualified_name_or_nil(node)
-        !name.nil? && !scope.struct_member_layout(name).nil?
+      def user_def_lookup
+        @user_def_lookup ||= method(:resolve_user_def_through_ancestors)
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`

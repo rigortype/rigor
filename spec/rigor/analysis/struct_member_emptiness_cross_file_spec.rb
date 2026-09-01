@@ -62,15 +62,20 @@ RSpec.describe "Struct member emptiness across files" do
     RUBY
   end
 
-  it "stays silent on a member filled by `<<` right after construction" do
+  # Both consumers construct the cross-file struct DIRECTLY rather than through the factory method they used to
+  # call (`Pkg::Parser.parse("a,b")`, `Pkg::Builder.build`). Issue #595 stopped reading a chained call as a fresh
+  # receiver, so a factory return no longer folds — which would have left the silence example passing for the
+  # wrong reason and its "yes" control failing. The cross-file property this file exists for is untouched: the
+  # struct and its member layout still come from `a.rb` and are resolved by the consumer in `b.rb`.
+  it "stays silent on a member seeded empty in the defining file" do
     expect(undefined_method_messages(empty_seeded_factory, <<~RUBY)).to be_empty
-      p Pkg::Parser.parse("a,b").items.first.local
+      p Pkg::Parser::Result.new([], []).items.first.local
     RUBY
   end
 
   it "still folds a never-mutated non-empty member precisely enough to report a typo on it" do
     expect(undefined_method_messages(literal_seeded_factory, <<~RUBY)).to include(a_string_matching(/zzz_undefined/))
-      p Pkg::Builder.build.items.first.zzz_undefined
+      p Pkg::Builder::Pair.new(["a"], []).items.first.zzz_undefined
     RUBY
   end
 end

@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "singleton_folding"
+require_relative "struct_materialization"
 require_relative "member_shape_projection"
 
 module Rigor
@@ -40,6 +41,9 @@ module Rigor
         # The `[]` / `to_h` / `deconstruct` / `members` / `with` projections
         # and the reader-redefinition guard are shared with {DataFolding}.
         extend MemberShapeProjection
+
+        # Issue #595 / #525 — the shared materialisation test; see {StructMaterialization}.
+        extend StructMaterialization
 
         # @return [Rigor::Type, nil] the folded result, or nil to defer.
         def try_dispatch(context)
@@ -294,25 +298,29 @@ module Rigor
           receiver.is_a?(Type::StructInstance) && receiver == self_type
         end
 
-        # A fresh receiver is the transient result of a chained call (`Point.new(1, 2).x`,
-        # `inst.with(x: 9).y`).
+        # A fresh receiver is the result of a chained call that MATERIALISED the struct — `Point.new(1, 2).x`,
+        # `Point[1, 2].x`, `inst.with(x: 9).y`. Not merely a chained call: slices 1-2 read "chained" as
+        # "cannot have been mutated between materialisation and the read", and a method that hands back its
+        # own receiver falsifies that (issue #595):
+        #
+        #     Line = Struct.new(:text) do
+        #       def with_text(v) = (self.text = v; self)
+        #       def dup_self    = self
+        #     end
+        #     x = Line.new("a"); x.text = "z"
+        #     x.dup_self.text                    # the chain returns the SAME, mutated object
+        #     Line.new("a").with_text("z").text  # so does the fluent spelling
+        #
+        # Both folded the construction-time `"a"` against a runtime `"z"` — a wrong precise value on
+        # ordinary fluent-builder Ruby. `infer_user_method_return` types a body under a fixed `self_type`,
+        # so the setter never poisons the returned `self`, and the freshness test never asked the callee
+        # what it returns. Restricting the test to the shapes this module itself materialises closes the
+        # family in one place: any other callee refuses, whatever it does internally.
         def fresh_receiver?(context)
           node = context.call_node
           return false if node.nil?
 
-          node.receiver.is_a?(Prism::CallNode)
-        end
-
-        # A fold-safe stored receiver is a local-variable read whose name the body's fold-safe set (on the
-        # scope) marks as safe to fold — never aliased / escaped, and any mutation a straight-line member
-        # setter the write-back keeps the binding current for.
-        def fold_safe_local_receiver?(context)
-          node = context.call_node
-          receiver = node&.receiver
-          scope = context.scope
-          return false unless receiver.is_a?(Prism::LocalVariableReadNode) && scope
-
-          scope.struct_fold_safe?(receiver.name)
+          materialization_call?(node.receiver, context.receiver, context.scope)
         end
 
         # ADR-48 slice 4 — precise mutated-member re-typing. After a `local.member = v` setter on a

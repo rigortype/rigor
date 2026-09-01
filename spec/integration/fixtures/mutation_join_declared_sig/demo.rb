@@ -49,6 +49,18 @@ class Temple
     a.first.upcase
   end
 
+  # The haml wall reached through the UNREADABLE-ARG door. `nodes` is untyped, so the concat contributes
+  # no element evidence — but the mutation ran, so the retained `:multi` pinning alone is not the answer
+  # either. Answering `Array[Symbol]` (the seed's nominal base) closes the parameter on zero evidence and
+  # draws the #561 mismatch against this method's hand-written `-> Array[:multi]`; the one-store gradual
+  # arm keeps the accepting `Array[:multi | Dynamic[top]]` form instead. The `<<` sibling above covers the
+  # readable-foreign-evidence path, and this covers the unreadable one.
+  def compile_all(nodes)
+    temple = [:multi]
+    temple.concat(nodes)
+    temple
+  end
+
   # And the rule is still LIVE in this fixture: nothing mutates this
   # array, the body plainly returns integers, and the declared
   # `Array[Symbol]` must still be rejected.

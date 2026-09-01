@@ -299,6 +299,53 @@ block mutation and fired on correct code. The
 distinguishing floor-Dynamic from declared-Dynamic properly is #580's
 provenance mark, deliberately not built here.
 
+### WD2.6 — A mutator whose arguments carry no evidence takes the one-store gradual arm (2026-09-02, issue #580)
+
+WD2.5's join reads the mutator's arguments. When it can read nothing
+out of them, the widening previously kept the seed's elements exactly:
+`m = [1, 2]; m.concat(xs)` stayed `Array[1 | 2]`, and `m.last == 6`
+constant-folded to false on code whose runtime value really is 6. The
+mutation ran, so the retained constants were falsified whether or not
+the analyzer could say by what — the same stale-evidence family as
+#540 / #541 / #544 / #560, reached through a different door. The
+surviving elements keep their pinning and gain a gradual arm.
+
+Such a store is treated as ONE UNREADABLE STORE and runs the ordinary
+one-store pipeline: no admitted evidence, plus WD2.5's `Dynamic[top]`
+arm. `m` reads `Array[1 | 2 | Dynamic[top]]`. Closing it instead — to
+the seed's nominal base, which a first cut did — violates WD2.5's own
+rule that a seam seeing one store may never close the parameter, and
+costs exactly what that rule protects: `Array[Symbol]` under haml's
+hand-written `-> Array[:multi]` brings back the #561
+`def.return-type-mismatch`, and a post-concat `m.last.upcase` draws
+`undefined method` on code that is correct when the argument holds
+strings. Both are now pinned as fixtures, since the fold assertion
+alone cannot see either.
+
+The discriminator is `arg_types` being NON-EMPTY while the extracted
+evidence is empty: real arguments the extractor could not read. An
+EMPTY `arg_types` means no argument machinery reached the call, and
+leaves the carrier untouched. The block-capture path of WD2.5 is the
+producer that matters there — it passes none because its slice-C join
+re-adds the appended types afterwards, and touching the carrier would
+strip seed pinning it keeps on purpose (`out = [0]; arr.each { out <<
+x }` must stay `0 | …`) — but it is not the only one: a zero-arg adder
+(`m.concat`) and the argument typer's own rescue land there too, and
+leaving the carrier alone is right for them as well.
+
+Known and accepted false negative: `m.concat([])` is a runtime no-op,
+so `m.last == 6` after it really is always false, and the `Dynamic`
+arm suppresses a CORRECT always-falsey. A false negative on a no-op
+call is a better trade than the two false positives above.
+
+This is one of the two residuals recorded on #580. The other, alias
+blindness (`b = a; a.push(6); b.last == 6`), is untouched: it needs the
+receiver-alias set to write through to every alias. The issue's own
+subject — re-joining a widened `Nominal` so later stores accumulate —
+also remains open; the evidence from the attempt, including why a
+scope-side provenance mark cannot carry the signature protection across
+a method return, is recorded on the issue.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

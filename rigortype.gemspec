@@ -90,7 +90,11 @@ Gem::Specification.new do |spec|
   # exercises the real catalogue; the production dep belongs on the
   # plugin gem (rspec-rails apps already pull rack via actionpack).
   spec.add_development_dependency "rack", ">= 2.0", "< 4.0"
-  spec.add_development_dependency "binpacker", ">= 0.1.0", "< 1.0"
+  # 0.5.0 is the floor, not a preference: CI's `Tests` matrix runs `binpacker run --shard K/N` and gates
+  # the merge on `binpacker shards-check`, both of which arrived in 0.5.0. An older binpacker would fail
+  # the run on an unknown flag rather than quietly running the whole suite three times, but it would fail
+  # it far from the cause.
+  spec.add_development_dependency "binpacker", ">= 0.5.0", "< 1.0"
   spec.add_development_dependency "rake", ">= 13.0", "< 15.0"
   # ADR-32 — the `rigor-rbs-inline` plugin under `plugins/`
   # depends on the upstream `rbs-inline` gem at runtime. The

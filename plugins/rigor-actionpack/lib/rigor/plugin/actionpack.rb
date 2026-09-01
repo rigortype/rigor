@@ -61,8 +61,10 @@ module Rigor
         # DomainBlocksController` resolves as `Admin::DomainBlocksController` (matching the
         # `ControllerDiscoverer`), so render paths and filter-chain validation on nested controllers are
         # correct.
-        version: "0.9.0",
-        description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request`).",
+        # Bumped 2026-09-02 (#534 "same lane") — the request predicates, `request.format` and the
+        # FlashHash chain join the typed surface.
+        version: "0.10.0",
+        description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
           "view_search_paths" => { kind: :array, default: ["app/views"] }
@@ -287,6 +289,126 @@ module Rigor
 
         Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
       end
+
+      # Phase 5c (2026-09-02, issue #534 "same lane") — the rest of the request-context surface the
+      # corpus sweep measured after the #578 / #585 batch: `request.post?` 28 and `request.xhr?` 27 on
+      # the two apps, `request.format` 21, `flash.now` inside the redmine 147 / mastodon 29 flash
+      # cluster. Each is typed from its Rails/Rack source contract, verified at v8.0.2 / rack v3.1.8.
+      #
+      # ## The predicates return a real `bool`, and a real `bool` does not fold
+      #
+      # Every method in this table is a zero-argument predicate whose body is a genuine boolean
+      # expression — `request_method == POST` and its nine siblings in `Rack::Request::Helpers`,
+      # `/XMLHttpRequest/i.match?(...)` for `xhr?` / `xml_http_request?`, `scheme == "https" || scheme ==
+      # "wss"` for `ssl?`, two `LOCALHOST.match?` conjuncts for `local?`, and
+      # `FORM_DATA_MEDIA_TYPES.include?(media_type)` for `form_data?`. None can return a non-boolean, so
+      # `true | false` is the exact type rather than an approximation.
+      #
+      # `bool` is a UNION of the two constants, and that is what makes it FP-safe where a nominal would
+      # not be: `flow.always-truthy-condition` fires when the flow proves the condition folds to ONE
+      # constant, and a union of both never does. Measured on the shapes controllers actually write —
+      # `return unless request.post?`, `if request.xhr? … else … end`, `mode = request.get? ? :a : :b`,
+      # `request.post? && x`, `!request.get?`, `raise unless request.format` — the answer is zero
+      # diagnostics, unchanged from the `Dynamic[top]` baseline. This is the opposite of the
+      # `Parameters#[]` case (#578): there the candidate type was a non-nil *nominal* standing in for a
+      # value that is nil at runtime, and the fold it licensed was wrong.
+      REQUEST_PREDICATE_METHODS = %i[
+        get? post? put? patch? delete? head? options? trace? link? unlink?
+        xhr? xml_http_request? ssl? local? form_data?
+      ].freeze
+
+      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:request]], methods: REQUEST_PREDICATE_METHODS do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil unless call_node.arguments.nil?
+        next nil unless call_node.block.nil?
+
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.constant_of(true),
+          Rigor::Type::Combinator.constant_of(false)
+        )
+      end
+
+      # `ActionDispatch::Http::MimeNegotiation#format` is `formats.first || Mime::NullType.instance`, so
+      # the honest answer is the two-class union and not `Mime::Type` alone: `formats` is filtered
+      # (`v.select! { |f| f.symbol || f.ref == "*/*" }`) and CAN come back empty — `?format=bogus` is the
+      # reachable path — at which point the caller holds a `Mime::NullType`, which is not a `Mime::Type`.
+      #
+      # Both arms are RBS-less, so the union is lenient in both: `request.format.json?`,
+      # `request.format.symbol` and `request.format.to_s` all resolve lenient-to-`Dynamic` rather than to
+      # a diagnostic — which is also what makes the union free. `NullType` answers every `…?` send with
+      # `false` through its own `method_missing`, so the two arms genuinely share the surface app code
+      # uses. Naming only `Mime::Type` would have been a wrong precise type for no gain.
+      REQUEST_FORMAT_TYPES = %w[Mime::Type Mime::NullType].freeze
+
+      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:request]], methods: %i[format] do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil unless call_node.arguments.nil?
+
+        Rigor::Type::Combinator.union(
+          *REQUEST_FORMAT_TYPES.map { |name| Rigor::Type::Combinator.nominal_of(name) }
+        )
+      end
+
+      # The FlashHash methods whose Rails body returns something this plugin can name on every path.
+      #
+      # - `now` is `@now ||= FlashNow.new(self)` — a memoised, never-nil `ActionDispatch::Flash::FlashNow`.
+      #   It is the carrier behind `flash.now[:alert] = "…"`, the second-most-written flash idiom.
+      # - `keep` and `discard` are `k ? self[k] : self`, so they are admissible ONLY in their
+      #   zero-argument form, where the answer is `self` — a FlashHash. Given a key they return a leaf
+      #   value or nil, which is the hazard below. The rule reads the arity syntactically, so the two
+      #   spellings get different answers from the same table row.
+      #
+      # Both nominals are RBS-less, hence lenient, for the reason `REQUEST_CONTEXT_READER_TYPES`
+      # documents.
+      FLASH_CHAIN_TYPES = {
+        now: "ActionDispatch::Flash::FlashNow",
+        keep: REQUEST_CONTEXT_READER_TYPES[:flash],
+        discard: REQUEST_CONTEXT_READER_TYPES[:flash]
+      }.freeze
+
+      # `keep` / `discard` answer `self` only when called with no key.
+      FLASH_SELF_RETURNING_METHODS = %i[keep discard].freeze
+
+      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:flash]], methods: FLASH_CHAIN_TYPES.keys do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil unless call_node.arguments.nil?
+        next nil unless call_node.block.nil?
+
+        class_name = FLASH_CHAIN_TYPES[call_node.name]
+        next nil if class_name.nil?
+
+        Rigor::Type::Combinator.nominal_of(class_name)
+      end
+
+      # ## What deliberately does NOT land here (issue #534, adjudicated 2026-09-02)
+      #
+      # **`FlashHash#[]=` and `Session#[]=` need no rule, and adding one could only do harm.** Two
+      # independent measurements say so. First, Ruby's assignment-expression semantics make the value of
+      # `flash[:notice] = msg` the RHS whatever `[]=` returns, and Rigor already models that: on a
+      # controller fixture with no plugin rule at all, `flash[:notice] = "hi"` types `"hi"` and
+      # `session[:user_id] = 1` types `1`. Second, `coverage --protection` scores a fixture of five such
+      # writes at **6/6 (100%)** — the lens measures *receiver* concreteness, and `flash` / `session` are
+      # already concrete nominals, so there is no coverage to win either. The corpus's "`FlashHash#[]=`
+      # 127 / 29" is a *named-receiver pair* count (a dispatch whose method does not resolve), which no
+      # return-type contribution can move. A rule here could only agree with the answer already given, or
+      # contradict it.
+      #
+      # **`FlashHash#[]` and `Session#[]` stay untyped, and both candidate arms were run.** Both are leaf
+      # reads — `@flashes[k.to_s]` and the session delegate's `[]` — returning whatever was stored, or
+      # nil for a key that is not set, so this is `Parameters#[]` (#578) again and it measures the same:
+      #
+      # - **non-nil `String`**: `mode = flash[:notice] ? :flash : :plain` folds to `:flash`, and the live
+      #   `mode == :plain` guard draws `flow.always-truthy-condition` — a diagnostic on a branch the
+      #   program takes.
+      # - **`String | nil`**: no folds, but `note = flash[:notice]; note.upcase` fires
+      #   `call.possible-nil-receiver` at ERROR severity — the assigned-then-used shape controllers write
+      #   constantly. (`uid.to_i` is silent because `NilClass` has `to_i`, which makes the noise
+      #   unpredictable rather than absent.)
+      #
+      # One false positive each, on ordinary controller code, in exchange for a coverage number. Session
+      # is if anything worse than Parameters: `session[:user_id]` is *the* nil-checked read in Rails, so
+      # the fold lands on the guard that matters most. Reopening either needs the same rules-level change
+      # #574 tracks, not a plugin table row. The specs pin both arms as executable controls.
 
       private
 

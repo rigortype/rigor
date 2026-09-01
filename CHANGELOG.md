@@ -28,6 +28,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** An index write on a receiver the engine cannot shape no longer synthesizes a Hash type — mail's `compose_codepoints`, which mutates its Array parameter through integer and range index writes, returns untyped instead of a phantom `Hash[Integer | Range, ...]` that fired on the caller's `.pack` ([#559](https://github.com/rigortype/rigor/pull/559), [#553](https://github.com/rigortype/rigor/issues/553)).
 - **[engine]** `x.attr ||= v`, `x.attr &&= v`, and `x.attr += v` now carry their real value semantics instead of falling to untyped as unsupported syntax — the last genuinely unmodeled expressions the corpus survey found ([#552](https://github.com/rigortype/rigor/pull/552), [#532](https://github.com/rigortype/rigor/issues/532)).
 
 - **[engine]** Methods on refined strings (`RUBY_VERSION != "1.0"`, `RUBY_VERSION.split(".")`) now resolve through the underlying `String` instead of losing the whole call to untyped, and an `is_a?` guard against a class Rigor cannot see no longer keeps the old type on the guarded branch — the guard's own proof wins ([#550](https://github.com/rigortype/rigor/pull/550), [#533](https://github.com/rigortype/rigor/issues/533)).

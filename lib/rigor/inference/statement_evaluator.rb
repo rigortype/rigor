@@ -2339,7 +2339,11 @@ module Rigor
       end
 
       # Joins content evidence for a memo / param given its pre-state and a list of mutator calls, dispatching Array vs
-      # Hash by the mutator set.
+      # Hash by the PRE-STATE's own evidence. The mutator set never picks the arm on its own: `[]=` is legal on Array,
+      # Hash, and countless index-writable classes, so an index-write against a receiver the engine cannot shape must
+      # not synthesize a hash carrier — mail's `compose_codepoints` mutated its untyped Array param through
+      # integer/range index writes and returned `Hash[Integer | Range, …]` to its caller (issue #553). Dynamic in,
+      # Dynamic out: a shapeless pre-state falls through to `join_array_param`, which declines it.
       def join_content_for_param(calls, pre_state, block_entry)
         return nil if pre_state.nil?
 
@@ -2347,7 +2351,7 @@ module Rigor
           # String carries no element parameter; mutating `<<`/`concat` makes the constant value unsound (`s = "a"; s <<
           # x` → runtime `"a…"`), so widen to the nominal base. Sound — only widens.
           Type::Combinator.nominal_of("String")
-        elsif hashish?(pre_state) || (hash_mutations?(calls) && !arrayish?(pre_state))
+        elsif hashish?(pre_state)
           join_hash_param(calls, pre_state, block_entry)
         else
           join_array_param(calls, pre_state, block_entry)
@@ -2415,12 +2419,6 @@ module Rigor
       # accumulator, whose `<<` carries no element parameter and whose binding already types as `String`.
       def join_content_for_local(name, calls, post_scope, block_entry)
         join_content_for_param(calls, post_scope.local(name), block_entry)
-      end
-
-      def hash_mutations?(calls)
-        calls.any? do |c|
-          index_write?(c) || (c.is_a?(Prism::CallNode) && MutationWidening::HASH_CONTENT_ADDERS.include?(c.name))
-        end
       end
 
       def index_write?(node)

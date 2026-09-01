@@ -70,6 +70,14 @@ to `make verify`, so nothing downstream will catch a skipped rewrite. It is the
 one step silently lost when the mechanical steps around it get done; do not let
 "the entries are already there" stand in for reviewing and consolidating them.
 
+**Consolidate `changelog.d/` fragments before anything else.** Since ADR-105,
+entries land as `changelog.d/<section>/<slug>.md` fragments, not as direct
+`[Unreleased]` edits — so the seal starts by moving every fragment's line(s)
+under the matching `###` section of `[Unreleased]` (creating sections in Keep
+a Changelog order as needed) and deleting the fragment files (`git rm`). After
+this, `changelog.d/` contains only its `README.md`, and the enumeration below
+runs over the consolidated `[Unreleased]` exactly as it always has.
+
 `CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 **This skill is the canonical statement of the entry rules** — `AGENTS.md`
 carries only the landing-time one-liner, because the full set matters to a

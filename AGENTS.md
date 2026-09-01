@@ -73,6 +73,11 @@ per-class blocklist entry, or a genuine plugin-contract misuse — **never disab
   `docs/CURRENT_WORK.md`. Anything touching a non-`.md` file is code: branch + PR.
 - Push with an explicit refspec — `git push origin HEAD:refs/heads/<branch>`. This clone's
   `push.default` can otherwise land a bare `push -u` on `master`.
+- **Land audited+green PRs as you go; do not queue them.** In an autonomous session, merge each PR
+  (`gh pr merge N --merge`) as soon as the diff is audited and `make verify` + CI are green; fork
+  the next branch from post-merge `master`. If the merge is denied, say so immediately. Batching or
+  stacking is reserved for changes the user must adjudicate as a set — deferral manufactures stacks
+  and sibling conflicts ([ADR-105](docs/adr/105-pr-landing-flow.md)).
 
 ## Release Cadence
 
@@ -92,17 +97,15 @@ flow is the `rigor-release-prep` skill.
   - **The link is the half that gets more expensive to add later.** You know your own PR number now;
     recovering it at the cut costs a cycle-wide enumeration plus a per-entry match against it. v0.3.6
     reached its release with 21 entries and zero links, and reconstructing the 18 dominated the prep.
-- **Parallel agents each write their own entry; `CHANGELOG.md` merges by union.** `.gitattributes`
-  marks the file `merge=union`, so two branches appending to `## [Unreleased]` no longer conflict on
-  insertion order. That resolution was always "keep both" — git now applies it instead of stopping to
-  ask. Do **not** tell agents to skip their entry: the link is cheapest at landing (above), and a
-  deferred entry is one somebody has to reconstruct.
-  - The one artefact union can produce is a **duplicated `###` heading**, when two branches each open a
-    section `[Unreleased]` did not have. It merges silently, so it is gated instead:
-    `spec/docs/changelog_conformance_spec.rb` fails on a section declared twice in a release, and
-    merging the two headings is the whole fix. Prefer adding under a heading that already exists.
-  - Reviewing the wording is still yours, but it belongs **at the cut**, where release prep consolidates
-    across the whole cycle anyway — not serialised through one session while branches wait.
+- **Entries land as fragment files, never as direct `[Unreleased]` edits.** Write
+  `changelog.d/<section>/<branch-slug>.md` — one bullet line in the entry grammar above, `<section>`
+  one of `added changed deprecated removed fixed security`. Release prep consolidates fragments into
+  `CHANGELOG.md` at the cut; only release prep writes `[Unreleased]`. Gate:
+  `spec/docs/changelog_fragments_spec.rb`. Why ([ADR-105](docs/adr/105-pr-landing-flow.md)): GitHub
+  ignores `.gitattributes merge=union` for PR mergeability, so same-anchor entries serialized a
+  19-PR queue into ~17 update+CI cycles; per-PR file additions cannot conflict. Do **not** skip the
+  entry: the link is cheapest at landing (above). Reviewing the wording belongs **at the cut**,
+  where release prep consolidates across the whole cycle anyway.
 
 ## Implementation Guidelines
 

@@ -280,14 +280,24 @@ call in it before writing back, so their evidence is complete for that
 body and their precise join stays justified. `acc = []; xs.each { |x|
 acc.push(x) }` keeps reading `Array[Integer]`.
 
-That split has one mechanical consequence worth recording:
-`ContentJoin.drop_dynamic` now flattens `Union` members before
-filtering. The straight-line floor reaches the slice-C re-derivation
-nested inside a union (`Array[Dynamic[top] | Integer]`), where a
-`grep_v` could not see it, and this ADR's own `acc.push(m)` loop result
-silently became `Array[Dynamic[top] | Integer]`. Discarding it at that
-seam is exactly right — the re-derivation saw every store, so the
-straight-line path's admission of incompleteness does not apply to it.
+That split has one mechanical consequence worth recording, and one
+false path worth recording alongside it. The straight-line floor can
+reach the LOOP re-derivation through `post_loop`, whose binding already
+carries the in-body join's output — re-deriving on top of it is
+derivation on derived output. The shipped fix is at that source:
+`loop_content_writeback` seeds each name the loop does not rebind from
+the pre-body scope (`post_pred`), so the floor never enters its input;
+a name the loop also rebinds keeps reading `post_loop` (the slice-B/C
+composition), where a surviving floor costs precision, never
+correctness. `ContentJoin.drop_dynamic` stays a plain `grep_v` over
+top-level members. The false path: an earlier head instead flattened
+`Union` members inside `drop_dynamic`, which cleared this seam but
+dropped DECLARATION-sourced gradual arms everywhere else — a declared
+`Array[Integer | untyped]` parameter closed to `Array[Integer]` under
+block mutation and fired on correct code. The
+`keeps_declared_gradual_arm` fixture pins the survival of such arms;
+distinguishing floor-Dynamic from declared-Dynamic properly is #580's
+provenance mark, deliberately not built here.
 
 ### WD3 — One mechanism, shared
 

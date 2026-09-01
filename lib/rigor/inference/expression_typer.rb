@@ -83,6 +83,9 @@ module Rigor
         Prism::ProgramNode => :type_of_program,
         # Calls
         Prism::CallNode => :call_type_for,
+        Prism::CallOrWriteNode => :call_or_write_type_for,
+        Prism::CallAndWriteNode => :call_and_write_type_for,
+        Prism::CallOperatorWriteNode => :call_operator_write_type_for,
         Prism::ArgumentsNode => :type_of_non_value,
         # Constants
         Prism::ConstantReadNode => :type_of_constant_read,
@@ -957,10 +960,10 @@ module Rigor
         end
       end
 
-      def fallback_for(node, family:)
+      def fallback_for(node, family:, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
         inner = dynamic_top
-        record_fallback(node, family: family, inner_type: inner, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
-        scope.record_dynamic_origin(node, DynamicOrigin::UNSUPPORTED_SYNTAX)
+        record_fallback(node, family: family, inner_type: inner, origin: origin)
+        scope.record_dynamic_origin(node, origin)
         inner
       end
 
@@ -1123,6 +1126,48 @@ module Rigor
         dynamic_top
       end
 
+      # Issue #532 — the attribute compound-write family (`x.attr ||= v`, `&&=`, `+=`), the last
+      # genuinely unmodeled value-position constructs the 2026-09-01 corpus census found (they fell to the
+      # `unsupported_syntax` fallback). Value semantics mirror the local / ivar / index siblings:
+      # `||=` is `truthy(read) | rhs`, `&&=` is `falsey(read) | rhs`, and an operator write is the
+      # operator dispatched on the read result. A `&.`-form compound write unions the skipped-call nil in
+      # (#518's rule). Scope effects stay as before (none) — the struct member writeback and shape
+      # widening for these forms are follow-up work recorded on #532.
+      def call_or_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        value = Type::Combinator.union(Narrowing.narrow_truthy(current), type_of(node.value))
+        with_compound_write_safe_nav(node, value)
+      end
+
+      def call_and_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        value = Type::Combinator.union(Narrowing.narrow_falsey(current), type_of(node.value))
+        with_compound_write_safe_nav(node, value)
+      end
+
+      def call_operator_write_type_for(node)
+        current = attribute_compound_read_type(node)
+        result = MethodDispatcher.dispatch(
+          receiver_type: current, method_name: node.binary_operator, arg_types: [type_of(node.value)],
+          environment: scope.environment, call_node: node, scope: scope
+        ) || dynamic_top
+        with_compound_write_safe_nav(node, result)
+      end
+
+      def attribute_compound_read_type(node)
+        receiver = type_of(node.receiver)
+        MethodDispatcher.dispatch(
+          receiver_type: receiver, method_name: node.read_name, arg_types: [],
+          environment: scope.environment, call_node: node, scope: scope
+        ) || dynamic_top
+      end
+
+      def with_compound_write_safe_nav(node, value)
+        return value unless node.call_operator_loc&.slice == "&."
+
+        Type::Combinator.union(value, Type::Combinator.constant_of(nil))
+      end
+
       # Slice 2 routes call expressions through `MethodDispatcher`. The receiver and every argument are typed
       # first, then the dispatcher is asked for a result type. A nil result triggers the fail-soft fallback
       # for the CallNode itself (the inner type_of calls already record their own fallbacks for unrecognised
@@ -1201,7 +1246,26 @@ module Rigor
         record_unresolved_self_call(node, receiver) if Analysis::SelfCallResolutionRecorder.active?
         Effects::Collector.record_unresolved(node, scope.source_path) if Effects::Collector.active?
 
-        fallback_for(node, family: :prism)
+        fallback_for(node, family: :prism, origin: unresolved_call_origin(receiver, node.name))
+      end
+
+      # Issue #522 — the honest cause for a call the tiers exhausted. When the receiver's class HAS a
+      # discovered project def for the method, the miss is a return the engine could not infer (the
+      # discovered-method tier deliberately declined in favor of body inference, which then declined too —
+      # `MethodDispatcher#try_discovered_method`'s decline arms), which is ADR-82's
+      # `INFERRED_RETURN_UNTYPED`, not "unsupported syntax". Without this, every service-object `#call`
+      # whose body defeats inference reports to `coverage --protection` as a syntax gap. The generic cause
+      # stays for genuinely unresolved names (framework DSL sends, methods no scanned file defines).
+      def unresolved_call_origin(receiver, method_name)
+        class_name, kind = case receiver
+                           when Type::Nominal then [receiver.class_name, :instance]
+                           when Type::Singleton then [receiver.class_name, :singleton]
+                           else [nil, nil]
+                           end
+        return DynamicOrigin::UNSUPPORTED_SYNTAX if class_name.nil?
+        return DynamicOrigin::UNSUPPORTED_SYNTAX unless scope.discovered_method?(class_name, method_name, kind)
+
+        DynamicOrigin::INFERRED_RETURN_UNTYPED
       end
 
       # ADR-82 WD6 — carry the receiver's provenance onto the call it produces (returning the unchanged

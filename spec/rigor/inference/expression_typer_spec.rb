@@ -1543,4 +1543,49 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Array")
     end
   end
+
+  # Issue #532 — the attribute compound-write family (`x.attr ||= v` / `&&=` / `+=`), the last
+  # genuinely unmodeled value-position constructs the corpus census found. Value semantics mirror the
+  # local / ivar / index siblings; scope effects are unchanged (follow-up on the issue).
+  describe "attribute compound writes" do
+    def statement_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    let(:struct_source) { "Point = Struct.new(:x)\npt = Point.new(1)\n" }
+
+    it "types `x.attr ||= v` as the union of the truthy read and the RHS" do
+      type = statement_type("#{struct_source}pt.x ||= 9\n", 2)
+      expect(type.describe(:short)).to include("9")
+    end
+
+    it "unions the skipped-call nil into a `&.`-form compound write" do
+      type = statement_type("#{struct_source}pt&.x ||= 9\n", 2)
+      expect(type.describe(:short)).to include("nil")
+    end
+
+    it "keeps an operator write on an unresolved read fail-soft (control)" do
+      type = statement_type("def f(o)\n  o.count += 1\nend\n", 0)
+      expect(type).not_to be_nil
+    end
+  end
+
+  # Issue #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is
+  # `String − \"\"`) erases to its base for RBS method lookup, so a method the catalog tier does not
+  # promote still resolves instead of declining the whole dispatch to Dynamic.
+  describe "refined-receiver RBS lookup erasure" do
+    let(:project_scope) { Rigor::Scope.empty(environment: Rigor::Environment.for_project) }
+
+    it "resolves comparison and plain methods on the predefined-constant refinements" do
+      expect(project_scope.type_of(parse_expression('RUBY_VERSION != "1.0"')).describe(:short)).to eq("bool")
+      expect(project_scope.type_of(parse_expression('RUBY_VERSION.split(".")')).describe(:short)).to eq("Array[String]")
+    end
+
+    it "keeps the catalog tier's refinement promotions winning (control)" do
+      expect(project_scope.type_of(parse_expression("RUBY_VERSION.upcase")).describe(:short)).to eq("non-empty-string")
+    end
+  end
 end

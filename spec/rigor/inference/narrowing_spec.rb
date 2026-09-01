@@ -735,10 +735,14 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(described_class.narrow_class(integer_nominal, "Integer", exact: true)).to eq(integer_nominal)
     end
 
-    it "leaves the type unchanged when the asked class is unknown to the host Ruby" do
-      # `Foo::Bar` is not defined in the test environment, so the ordering check returns `:unknown` and we stay
-      # conservative.
-      expect(described_class.narrow_class(integer_nominal, "Foo::Bar")).to eq(integer_nominal)
+    it "widens to Dynamic when the asked class is unknown to the host Ruby (#533)" do
+      # `Foo::Bar` is not defined in the test environment, so the ordering check returns `:unknown`. The
+      # guard proved membership in a class the environment cannot order against the bound; KEEPING the
+      # bound licensed `undefined-method` on the guard-proven branch (concurrent-ruby's
+      # `done.is_a?(Concurrent::Maybe)` kept `Array` and fired on `.value`), so the honest join is
+      # Dynamic — the guard destroyed the old knowledge.
+      narrowed = described_class.narrow_class(integer_nominal, "Foo::Bar")
+      expect(narrowed).to be_a(Rigor::Type::Dynamic)
     end
 
     it "uses the analyzer environment for RBS-only hierarchy lookups" do

@@ -374,8 +374,9 @@ RSpec.describe "plugins/rigor-actionpack" do
     it "draws no possible-nil-receiver on an assigned `params[:key]` — the `[] -> Parameters?` hazard (#534)" do
       # `#[] -> Parameters | nil` fixes every fold above and still carries the chain, but
       # `call.possible-nil-receiver` fires on `Prism::LocalVariableReadNode` receivers
-      # (check_rules.rb:1271) — i.e. exactly the `q = params[:q]; q.strip` shape Rails controllers use
-      # constantly — at error severity, once per unguarded use.
+      # (`CheckRules#nil_receiver_diagnostic`'s local-read restriction) — i.e. exactly the
+      # `q = params[:q]; q.strip` shape Rails controllers use constantly — at error severity, once
+      # per unguarded use.
       source = <<~RUBY
         class C
           def create
@@ -407,6 +408,23 @@ RSpec.describe "plugins/rigor-actionpack" do
         rules = result.diagnostics.map(&:rule)
         expect(rules).to include("call.undefined-method")
         expect(rules).to include("call.possible-nil-receiver")
+      end
+    end
+
+    it "CONTROL: the harness fires the truthiness fold in this fixture shape" do
+      # The must-fire sibling for the Arm-A pin: three specs above assert
+      # `flow.always-truthy-condition` empty, which a rule-id rename would vacuate silently.
+      source = <<~RUBY
+        class C
+          def create
+            flag = true
+            "y" if flag
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        rules = result.diagnostics.map(&:rule)
+        expect(rules).to include("flow.always-truthy-condition")
       end
     end
 

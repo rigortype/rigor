@@ -236,6 +236,9 @@ module Rigor
       # changes were made") contradicts its body (`self`, :1010) — a contradiction that could resolve
       # either way on a future Rails, and the demand does not justify betting on it; `dig` / `fetch` /
       # `to_h` / `to_unsafe_h`, which return a caller value, nil, or a HashWithIndifferentAccess.
+      # `reject!` / `delete_if` / `compact_blank!` DO return `self` on every path (:1024/:1028/:1050)
+      # and are admissible under the same argument — deferred only to keep this change at the
+      # reviewed set; admit them with the next batch.
       #
       # ## Why `Parameters#[]` is NOT here (issue #534 item 1, adjudicated 2026-09-01)
       #
@@ -258,7 +261,7 @@ module Rigor
       #   and still carries the chain — `params[:user][:name]` types `Parameters?` and
       #   `params[:user].permit(:name)` types `Parameters`, because the dispatcher strips the nil arm
       #   for the receiver gate. Idiomatic *chained* reads stay silent too: `call.possible-nil-receiver`
-      #   restricts itself to `Prism::LocalVariableReadNode` receivers (check_rules.rb:1271), so
+      #   restricts itself to `Prism::LocalVariableReadNode` receivers (`CheckRules#nil_receiver_diagnostic`'s local-read restriction), so
       #   `params[:q].strip` cannot fire. What it does fire on is the assigned form — `q = params[:q];
       #   q.strip` — at **error** severity, once per unguarded use. Guarded forms (`return if q.nil?`,
       #   `if q`, `q&.strip`, `|| ""`) all narrow correctly and stay silent, so this is not a broken

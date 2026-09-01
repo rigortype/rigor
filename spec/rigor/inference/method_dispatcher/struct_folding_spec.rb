@@ -96,6 +96,97 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
+    # Issue #589 — a merge must not revoke the grant. `Scope#join` omitted the fold-safe set from its
+    # constructor, so it fell back to the empty default and EVERY `if` / `while` in a method silently
+    # stopped struct folding for the rest of the body. The carrier survived the merge intact; only the
+    # grant that lets a read consult it was lost, which is why the shape read as carrier erasure.
+    it "folds after a loop whose body never touches the struct" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        Point = Struct.new(:x, :y)
+        def reader(n)
+          p = Point.new(1, 2)
+          i = 0
+          while i < n
+            i += 1
+          end
+          dump_type(p.x)
+        end
+      RUBY
+    end
+
+    # The same seam, reached through an `if` — this was never loop-specific.
+    it "folds after a conditional whose branches never touch the struct" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        Point = Struct.new(:x, :y)
+        def reader(cond)
+          p = Point.new(1, 2)
+          if cond
+            puts "side effect"
+          end
+          dump_type(p.x)
+        end
+      RUBY
+    end
+
+    # …and it holds across the ADR-56 loop fixpoint rather than for one pass: a read INSIDE a later loop
+    # sees the grant too.
+    it "folds inside a later loop body after an untouching loop" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        Point = Struct.new(:x, :y)
+        def reader(cond, n)
+          p = Point.new(1, 2)
+          i = 0
+          while i < n
+            i += 1
+          end
+          while cond
+            dump_type(p.x)
+          end
+        end
+      RUBY
+    end
+
+    # The must-still-decline half, and the reason the grant is computed by a static body scan rather than
+    # inferred at the merge. A setter inside a loop or block cannot be modelled by a single static pass, so
+    # the local is disqualified up front; without that gate the read serves the stale materialisation value
+    # (verified unsound on #525's sibling — it answered `nil` for a member the block had written).
+    it "does NOT fold a member whose setter sits inside a block" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        def reader
+          p = Point.new(1, 2)
+          [1].each { p.x = 9 }
+          dump_type(p.x)
+        end
+      RUBY
+    end
+
+    it "does NOT fold a member whose setter sits inside a loop" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        def reader(cond)
+          p = Point.new(1, 2)
+          while cond
+            p.x = 9
+          end
+          dump_type(p.x)
+        end
+      RUBY
+    end
+
+    it "does NOT fold a local the loop body rebinds" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        def reader(cond)
+          p = Point.new(1, 2)
+          while cond
+            p = Point.new(3, 4)
+          end
+          dump_type(p.x)
+        end
+      RUBY
+    end
+
     it "does NOT fold a bound local that escapes through an alias" do
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
         Point = Struct.new(:x, :y)

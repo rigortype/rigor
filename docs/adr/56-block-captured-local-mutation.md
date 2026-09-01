@@ -299,7 +299,7 @@ block mutation and fired on correct code. The
 distinguishing floor-Dynamic from declared-Dynamic properly is #580's
 provenance mark, deliberately not built here.
 
-### WD2.6 — A mutator whose arguments carry no evidence unpins what it kept (2026-09-02, issue #580)
+### WD2.6 — A mutator whose arguments carry no evidence takes the one-store gradual arm (2026-09-02, issue #580)
 
 WD2.5's join reads the mutator's arguments. When it can read nothing
 out of them, the widening previously kept the seed's elements exactly:
@@ -308,7 +308,7 @@ constant-folded to false on code whose runtime value really is 6. The
 mutation ran, so the retained constants were falsified whether or not
 the analyzer could say by what — the same stale-evidence family as
 #540 / #541 / #544 / #560, reached through a different door. The
-surviving elements now lose their value pinning.
+surviving elements keep their pinning and gain a gradual arm.
 
 Such a store is treated as ONE UNREADABLE STORE and runs the ordinary
 one-store pipeline: no admitted evidence, plus WD2.5's `Dynamic[top]`

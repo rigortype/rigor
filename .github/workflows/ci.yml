@@ -278,9 +278,14 @@ jobs:
       #
       # The restore-keys are scoped to the current Gemfile.lock hash so
       # that a lockfile change (e.g. adding a gem) never restores a cache
-      # built under the old lockfile.  A stale-lockfile restore would make
-      # the gem-without-rbs count diverge between warm and cold, failing
-      # the warm==cold diff gate even when the analysis is correct.
+      # built under the old lockfile.  This was once load-bearing: it was
+      # compensating for a run-result cache key that did not encode the
+      # lockfile it depended on, so a stale-lockfile restore made the
+      # gem-without-rbs count diverge between warm and cold and failed the
+      # warm==cold diff gate on a correct analysis (#564).  The engine now
+      # keys on the lockfile's contents itself, so the scoping is kept as
+      # cache hygiene — it stops the store filling with entries whose keys
+      # can no longer hit — rather than for correctness.
       - name: Restore Rigor analysis cache
         id: restore-cache
         if: matrix.cache == 'warm'

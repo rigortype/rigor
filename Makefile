@@ -98,8 +98,15 @@ test-ractor-pool:
 # rebalancing between workers) to absorb shared-runner noise.
 # Worker count comes from `workers: auto` in binpacker.yml (CPU
 # count); override it via the config profile.
+#
+# BINPACKER_FLAGS threads per-invocation arguments through without
+# turning this target into a second CLI. CI's sharded matrix uses it for
+# `--shard K/N --report …`; a local run leaves it empty and gets the
+# whole suite.
+BINPACKER_FLAGS ?=
+
 test-binpacker:
-	bundle exec binpacker run
+	bundle exec binpacker run $(BINPACKER_FLAGS)
 
 lint:
 	bundle exec rubocop lib/ spec/ plugins/ examples/ apps/

@@ -141,6 +141,14 @@ module Rigor
       # #387 — the loaded plugins' compiled effect contributions, read by `rigor effects` so the snapshot's
       # vocabulary is the one the collection window scanned under. Same `untyped` reasoning again.
       def effect_plugin_facts: () -> untyped
+      # The incremental session's read surface (ADR-46 / ADR-67 / ADR-103) — `IncrementalSession`
+      # drives a live Runner through these between rechecks. Typed `untyped` like the cache / effects
+      # readers above until their namespaces are sig-covered.
+      def return_summaries: () -> untyped
+      def param_inferred_types: () -> untyped
+      def effect_collections_by_path: () -> untyped
+      def collect_param_inference_table: (untyped files) -> untyped
+      def evaluate_return_types: (untyped paths, untyped specs) -> untyped
     end
   end
 end

@@ -9,6 +9,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
+require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "dynamic_origin"
@@ -2485,20 +2486,23 @@ module Rigor
 
       # Builds the body scope for a user-defined instance method call: a fresh `Scope` with `self_type` set
       # to the receiver's nominal type, the project-wide accumulators inherited (so the body sees the same
-      # `discovered_classes` / `class_ivars` / etc. the caller does), and required positional parameters
-      # bound from the call's `arg_types` by index. Returns nil when the parameter shape is too complex for
-      # the first-iteration binder (rest args, keyword args, block params, etc.).
+      # `discovered_classes` / `class_ivars` / etc. the caller does), and the call's `arg_types` bound to
+      # the parameters. Returns nil when the binding is truly ambiguous (arity mismatch, trailing `post`
+      # params, `...` forwarding).
+      #
+      # Issue #524 — the binder is per-PARAMETER, not per-signature. The first iteration declined any def
+      # with an optional / rest / keyword / block parameter outright, so ONE `options = {}` default zeroed
+      # out an otherwise-inferable return at every call site (the widest engine lever the 2026-09-01 sweep
+      # measured, verified on ten targets). Now: requireds bind by index; supplied optionals by index and
+      # unsupplied ones from a LITERAL default (else `Dynamic`); `*rest` collects the leftover positionals
+      # as a Tuple; keywords bind by name from a trailing keyword-hash shape, falling back to their literal
+      # default — or `Dynamic` when the shape is open or absent; `**kwrest`, `&block`, and destructured
+      # positionals bind `Dynamic`. Binding `Dynamic` is monotone-safe (wider in → wider out), so the only
+      # declines left are the shapes where positional CORRESPONDENCE itself is unknowable.
       def build_user_method_body_scope(def_node, receiver, arg_types)
         params = def_node.parameters
-        required = params&.requireds || []
-        return nil unless params.nil? || user_method_param_shape_simple?(params)
-        return nil unless required.size == arg_types.size
-
-        # Bind required positionals by index. The body scope starts from an empty fact store and narrowing
-        # set, so `with_local`'s fact / narrowing invalidations would be no-ops here — build the locals
-        # table directly (matching `with_local`'s `name.to_sym` key).
-        locals = {}
-        required.each_with_index { |param, index| locals[param.name.to_sym] = arg_types[index] }
+        locals = bind_params_from_call_types(params, arg_types)
+        return nil if locals.nil?
 
         # Construct the body scope in a SINGLE allocation — the previous `Scope.empty.with_*.with_*…` chain
         # allocated a fresh frozen Scope per field, run per user-method-call inference (ADR-44). The
@@ -2514,6 +2518,102 @@ module Rigor
         )
       end
 
+      # The locals table for the body scope, or nil to decline. Keys match `with_local`'s `name.to_sym`.
+      # The body scope starts from an empty fact store and narrowing set, so `with_local`'s fact /
+      # narrowing invalidations would be no-ops here — the table is built directly.
+      def bind_params_from_call_types(params, arg_types)
+        return arg_types.empty? ? {} : nil if params.nil?
+        return nil unless bindable_param_shape?(params)
+
+        positional = arg_types.dup
+        kw_shape = positional.pop if takes_keywords?(params) && positional.last.is_a?(Type::HashShape)
+        locals = bind_positional_params(params, positional)
+        return nil if locals.nil?
+
+        bind_keyword_params(params, kw_shape, locals)
+        locals[params.keyword_rest.name.to_sym] = dynamic_top if params.keyword_rest&.name
+        locals[params.block.name.to_sym] = dynamic_top if params.block&.name
+        locals
+      end
+
+      # Trailing required positionals after a rest (`def f(a, *m, z)`) shift the correspondence; `...`
+      # arrives as the keyword_rest slot. Both stay declined — correspondence, not width, is the issue.
+      def bindable_param_shape?(params)
+        params.is_a?(Prism::ParametersNode) &&
+          params.posts.empty? &&
+          !params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+      end
+
+      def takes_keywords?(params)
+        params.keywords.any? || !params.keyword_rest.nil?
+      end
+
+      def bind_positional_params(params, positional)
+        requireds = params.requireds
+        optionals = params.optionals
+        return nil if positional.size < requireds.size
+        return nil if params.rest.nil? && positional.size > requireds.size + optionals.size
+
+        locals = {}
+        requireds.each_with_index { |param, index| bind_positional_param(locals, param, positional[index]) }
+        optionals.each_with_index do |param, index|
+          supplied = positional[requireds.size + index]
+          locals[param.name.to_sym] = supplied || literal_default_type(param.value)
+        end
+        bind_rest_param(params, positional, locals)
+        locals
+      end
+
+      def bind_rest_param(params, positional, locals)
+        rest_name = params.rest&.name
+        return if rest_name.nil?
+
+        leftover = positional[(params.requireds.size + params.optionals.size)..] || []
+        locals[rest_name.to_sym] = Type::Combinator.tuple_of(*leftover)
+      end
+
+      # A destructured positional (`def f((a, b))`) consumes one argument slot but binds its leaf names
+      # `Dynamic` — element correspondence through the destructure is a later slice.
+      def bind_positional_param(locals, param, arg_type)
+        if param.is_a?(Prism::MultiTargetNode)
+          Destructure.target_names(param).each { |name| locals[name.to_sym] = dynamic_top }
+        else
+          locals[param.name.to_sym] = arg_type
+        end
+      end
+
+      def bind_keyword_params(params, kw_shape, locals)
+        open_shape = kw_shape && kw_shape.extra_keys == :open
+        params.keywords.each do |param|
+          name = param.name.to_s.delete_suffix(":").to_sym
+          supplied = kw_shape&.pairs&.[](name)
+          locals[name] = supplied ||
+                         (open_shape ? dynamic_top : keyword_default_type(param))
+        end
+      end
+
+      def keyword_default_type(param)
+        param.respond_to?(:value) && param.value ? literal_default_type(param.value) : dynamic_top
+      end
+
+      # A default expression contributes its type only when it is lexically scope-free — a scalar literal
+      # or an EMPTY collection literal (`options = {}` is the dominant Rails idiom). Anything that could
+      # read the def's own lexical scope binds `Dynamic` instead of being mis-typed in the caller's scope.
+      LITERAL_DEFAULT_NODES = [
+        Prism::IntegerNode, Prism::FloatNode, Prism::StringNode, Prism::SymbolNode,
+        Prism::TrueNode, Prism::FalseNode, Prism::NilNode
+      ].freeze
+      private_constant :LITERAL_DEFAULT_NODES
+
+      def literal_default_type(value_node)
+        return dynamic_top if value_node.nil?
+        return type_of(value_node) if LITERAL_DEFAULT_NODES.any? { |klass| value_node.is_a?(klass) }
+        return type_of(value_node) if value_node.is_a?(Prism::ArrayNode) && value_node.elements.empty?
+        return type_of(value_node) if value_node.is_a?(Prism::HashNode) && value_node.elements.empty?
+
+        dynamic_top
+      end
+
       # ADR-48 Struct slice 3 — the fold-safe-local set for a method body (runs only on a return-memo miss,
       # so the per-call cost is bounded — measured perf-neutral). Struct member layouts of constant
       # receivers are resolved through the discovery side-table the body scope inherits.
@@ -2522,19 +2622,6 @@ module Rigor
           body,
           ->(name) { scope.struct_member_layout(name)&.[](:members) }
         )
-      end
-
-      # First iteration accepts only required positional parameters: `def foo(a, b, c)`. Optionals, rest,
-      # keyword params, and block params disqualify the method from inference (the caller observes
-      # `Dynamic[Top]` instead).
-      def user_method_param_shape_simple?(params)
-        return false unless params.is_a?(Prism::ParametersNode)
-
-        params.optionals.empty? &&
-          params.rest.nil? &&
-          params.keywords.empty? &&
-          params.keyword_rest.nil? &&
-          params.block.nil?
       end
 
       # Slice A-engine. Implicit-self calls (no `node.receiver`) adopt the surrounding scope's `self_type`

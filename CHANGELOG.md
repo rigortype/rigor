@@ -28,6 +28,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** Calling your own method with optional, keyword, rest, or block parameters no longer loses its inferred return type — the call-site binder binds each parameter it can identify (defaults included, `options = {}` too) instead of giving up on the whole signature, which also surfaced a real crash path in a survey app the code's own TODO had flagged ([#547](https://github.com/rigortype/rigor/pull/547), [#524](https://github.com/rigortype/rigor/issues/524)).
+
+- **[engine]** `File.read(path)` and `IO.read(path)` without a length now type as `String` instead of `String?` — the no-length form never returns nil, so guards on whole-file reads stop flagging impossible nils ([#547](https://github.com/rigortype/rigor/pull/547)).
+
 - **[engine]** `alias_method :new_name, :old_name` now resolves like the `alias` keyword — calls through the alias infer the original method's return — and `x.send(:selector)` with a literal symbol resolves as the direct call would, private methods included ([#549](https://github.com/rigortype/rigor/pull/549), [#533](https://github.com/rigortype/rigor/issues/533)).
 
 - **[engine]** A call whose argument Rigor cannot type no longer picks one RBS overload by declaration order — `[true] * n` with an untyped `n` read as `String` and produced argument-type false positives on the array it actually returns; such calls now carry the candidate set gradually, removing 18 false positives across the survey corpus with none added ([#537](https://github.com/rigortype/rigor/pull/537), [#521](https://github.com/rigortype/rigor/issues/521)).

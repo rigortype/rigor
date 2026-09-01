@@ -66,13 +66,32 @@ module Rigor
       FILE_NON_EMPTY = ->(_arg_types) { NON_EMPTY_STRING }
       private_constant :FILE_NON_EMPTY
 
+      STRING_NOMINAL = Type::Combinator.nominal_of("String").freeze
+      private_constant :STRING_NOMINAL
+
+      # `IO.read(name)` / `File.read(name)` return nil ONLY when a `length` argument is given
+      # and the stream is at EOF; the no-length form always returns a String (it raises on
+      # error). Upstream RBS declares one row with an optional length — `-> String?` for every
+      # call shape — so the whole-file idiom `File.read(path, mode: 'rb')` read as nilable and
+      # fired `possible-nil-receiver` on working code (redmine's Import#read_file_head, three
+      # sites). The refinement drops the nil exactly when no positional length is present; a
+      # keyword-only trailing hash (`mode:`, `encoding:`) is not a length. Same family as the
+      # staged upstream signature fixes (#159).
+      IO_READ_NO_LENGTH = lambda do |arg_types|
+        positional = arg_types.grep_v(Type::HashShape)
+        positional.size <= 1 ? STRING_NOMINAL : nil
+      end
+      private_constant :IO_READ_NO_LENGTH
+
       # Frozen ((owner_class_name, method_name, kind) => handler) table. The kind tag is
       # `:both`, `:singleton`, or `:instance`. New entries SHOULD prefer `:both` unless the
       # singleton- and instance-side shapes genuinely differ.
       OVERRIDES = {
         ["Kernel", :__dir__, :both] => KERNEL_DIR,
         ["File", :expand_path, :singleton] => FILE_NON_EMPTY,
-        ["File", :dirname, :singleton] => FILE_NON_EMPTY
+        ["File", :dirname, :singleton] => FILE_NON_EMPTY,
+        ["IO", :read, :singleton] => IO_READ_NO_LENGTH,
+        ["File", :read, :singleton] => IO_READ_NO_LENGTH
       }.freeze
       private_constant :OVERRIDES
 

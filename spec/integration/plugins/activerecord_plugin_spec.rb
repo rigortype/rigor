@@ -635,6 +635,130 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "class-side `table_name` / `quoted_table_name` (#569 follow-on)" do
+    # `Model.table_name` was the single largest opaque call family on a schema-less project (517
+    # named-receiver sites on Redmine). The index already resolves the name, so the call can be typed —
+    # but only PINNED to that exact string where the name is not a guess. `Entry#table_name_exact?` draws
+    # the line: declared in source, or corroborated by a table the schema actually has.
+
+    let(:tn_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        # Inflected, and the schema (when present) has a `users` table — corroborated.
+        "app/models/user.rb" => "class User < ApplicationRecord\nend\n",
+        # Declared, and deliberately DISAGREEING with the inflection (`legacy_people`), so an assertion on
+        # "people" cannot pass by accident.
+        "app/models/legacy_person.rb" => <<~RUBY,
+          class LegacyPerson < ApplicationRecord
+            self.table_name = "people"
+          end
+        RUBY
+        # STI child of a declared-name root: shares the root's table.
+        "app/models/employee.rb" => "class Employee < LegacyPerson\nend\n",
+        # Inflected to `ghosts`, which no schema here declares — the shape a `table_name_prefix` or a
+        # project-custom inflection produces.
+        "app/models/ghost.rb" => "class Ghost < ApplicationRecord\nend\n",
+        # Computes its own name, AND inflects to `tenants`, which the schema below DOES declare. The
+        # corroboration is a coincidence: the running app reads `<tenant>_tenants`, so pinning `"tenants"`
+        # here would fold `Tenant.table_name == "tenants"` to true against a name the app never uses.
+        "app/models/tenant.rb" => <<~'RUBY',
+          class Tenant < ApplicationRecord
+            self.table_name = "#{Current.tenant}_tenants"
+          end
+        RUBY
+        # Same hazard, spelled as a singleton method instead of an assignment.
+        "app/models/shard.rb" => <<~'RUBY'
+          class Shard < ApplicationRecord
+            def self.table_name
+              "shard_#{Current.id}"
+            end
+          end
+        RUBY
+      }
+    end
+
+    let(:tn_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define(version: 2026_09_01_000001) do
+          create_table "users", force: :cascade do |t|
+            t.string "name"
+          end
+
+          create_table "people", force: :cascade do |t|
+            t.string "given_name"
+          end
+
+          create_table "tenants", force: :cascade do |t|
+            t.string "label"
+          end
+
+          create_table "shards", force: :cascade do |t|
+            t.string "label"
+          end
+        end
+      SCHEMA
+    end
+
+    def tn_types(source, schema:)
+      run_ar(source, schema: schema, models: tn_models)
+        .diagnostics
+        .select { |d| d.qualified_rule == "dump.type" }
+        .map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    describe "must fire — the name is pinned where it is exactly known" do
+      it "pins a source-declared `self.table_name` in BOTH modes" do
+        source = "Rigor.dump_type(LegacyPerson.table_name)\n"
+        expect(tn_types(source, schema: nil)).to eq(['"people"'])
+        expect(tn_types(source, schema: tn_schema)).to eq(['"people"'])
+      end
+
+      it "pins an STI child to its root's declared table" do
+        expect(tn_types("Rigor.dump_type(Employee.table_name)\n", schema: nil)).to eq(['"people"'])
+      end
+
+      it "pins an inflected name the schema corroborates" do
+        expect(tn_types("Rigor.dump_type(User.table_name)\n", schema: tn_schema)).to eq(['"users"'])
+      end
+    end
+
+    describe "must not pin — an uncorroborated derivation widens instead of guessing a value" do
+      it "answers String, not a pinned guess, for an inflected name with no schema" do
+        # The opacity is still closed (`Dynamic[top]` is what this call produced before), but the exact
+        # string is unknown: `table_name_prefix`, a `def self.table_name` override and a custom inflection
+        # all land here, and pinning any of them would be a wrong precise type.
+        expect(tn_types("Rigor.dump_type(User.table_name)\n", schema: nil)).to eq(["String"])
+      end
+
+      it "answers String for an inflected name the schema does not declare" do
+        expect(tn_types("Rigor.dump_type(Ghost.table_name)\n", schema: tn_schema)).to eq(["String"])
+      end
+
+      it "never pins `quoted_table_name` — the quoting is adapter-dependent" do
+        source = "Rigor.dump_type(LegacyPerson.quoted_table_name)\n"
+        expect(tn_types(source, schema: nil)).to eq(["String"])
+        expect(tn_types(source, schema: tn_schema)).to eq(["String"])
+      end
+
+      it "contributes nothing on a receiver that is not a discovered model" do
+        expect(tn_types("Rigor.dump_type(Widget.table_name)\n", schema: tn_schema)).to eq(["Dynamic[top]"])
+      end
+
+      it "refuses a coincidental schema match when the class computes its own name" do
+        # `Tenant` inflects to `tenants` and the schema HAS a `tenants` table, so the corroboration rule
+        # alone would pin it — but the class assigns a computed name, so the match is a coincidence. Pinning
+        # would fold `Tenant.table_name == "tenants"` to `true` against a name the app never uses. The
+        # `LegacyPerson` example above is the must-still-pin sibling: a literal declaration still pins even
+        # though it too is an explicit override.
+        expect(tn_types("Rigor.dump_type(Tenant.table_name)\n", schema: tn_schema)).to eq(["String"])
+      end
+
+      it "refuses the same when the override is a `def self.table_name`" do
+        expect(tn_types("Rigor.dump_type(Shard.table_name)\n", schema: tn_schema)).to eq(["String"])
+      end
+    end
+  end
+
   describe "structure.sql fallback (schema_format = :sql)" do
     # GitLab-class apps commit a PostgreSQL `db/structure.sql` and no `db/schema.rb`, which used to leave
     # the plugin inert. The producer now falls back to parsing the DDL through StructureSqlParser.

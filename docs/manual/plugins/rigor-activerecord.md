@@ -76,6 +76,17 @@ Chained query methods keep the element type, and iteration
 scope invoked on a typed relation (`User.where(...).published`)
 never surfaces a false `call.undefined-method`.
 
+`User.table_name` types as `String`, and as the exact string
+where the plugin knows it exactly — a `self.table_name = "people"`
+in your source (inherited down an STI chain), or an inflected name
+the schema confirms with a table of that name. An inflected name
+nothing confirms stays plain `String`: `table_name_prefix`, a
+`def self.table_name` override and a custom inflection rule all
+produce a name the plugin cannot see, and guessing the value
+there would be worse than not knowing it.
+`User.quoted_table_name` is always `String` — the quoting is up
+to the database adapter.
+
 ## Limitations
 
 - **Direct-superclass match only.** `class Admin < User` where

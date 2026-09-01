@@ -63,7 +63,12 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
-        # Bumped 2026-09-01 — reduced mode: a missing `db/schema.rb` / `db/structure.sql` degrades to a
+        # Bumped 2026-09-01 — `table_name` / `quoted_table_name` join the recognised class-side surface, and
+        # `ModelIndex::Entry` gains the `table_name_exact` member that gates value-pinning. A Struct member
+        # addition is not Marshal-compatible with the cached 0.6.0 payload, so the bump (part of the
+        # producer cache key) is what keeps a warm run from loading it.
+        #
+        # 0.6.0, 2026-09-01 — reduced mode: a missing `db/schema.rb` / `db/structure.sql` degrades to a
         # columns-less {ModelIndex} instead of disabling the plugin. The version is part of the producer
         # cache KEY, so the bump is what stops a warm run from serving the pre-change payload (which,
         # having no `columns_known` ivar, would read as reduced mode on a schema-PRESENT project and
@@ -73,7 +78,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.6.0",
+        version: "0.7.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -212,7 +217,10 @@ module Rigor
       # The class-side finder / relation entry-point names `finder_return_type` recognises. Static half of
       # the `dynamic_return` name gate; the run-time half comes from the model index (scopes,
       # associations, columns).
-      FINDER_METHOD_NAMES = %i[find find_by! find_by where all order limit none select].freeze
+      FINDER_METHOD_NAMES = %i[
+        find find_by! find_by where all order limit none select
+        table_name quoted_table_name
+      ].freeze
       private_constant :FINDER_METHOD_NAMES
 
       # Return-type contribution via the run-time `methods:` name gate (ADR-52 slice 5b). `Model.find(id)`
@@ -336,7 +344,32 @@ module Rigor
           # of the query DSL chains through the bundled `ActiveRecord::Relation` RBS once a relation is
           # open.
           relation_of(entry.class_name)
+        when :table_name
+          table_name_return_type(entry)
+        when :quoted_table_name
+          # Quoting is adapter-dependent — `"users"` on PostgreSQL, backticked on MySQL — so unlike
+          # `table_name` the exact string is not derivable from project source even when the bare name is.
+          Rigor::Type::Combinator.nominal_of("String")
         end
+      end
+
+      # `Model.table_name` is a String either way; whether it is safe to VALUE-PIN turns on how the name was
+      # derived. `Entry#table_name_exact?` holds only when the source declared it (`self.table_name = "…"`)
+      # or the parsed schema has a table by that name. An inflected guess nothing corroborates is NOT
+      # pinned: a `def self.table_name` override, a `table_name_prefix` / `table_name_suffix` on the
+      # namespace, an abstract class (whose real answer is `nil`), and a project-custom inflection rule (the
+      # manual's own listed limitation) all land there, and `Constant["users"]` on any of them is a wrong
+      # precise type that value-dependent folding downstream would then act on. Widening to `String` is
+      # monotone imprecision instead — and it still closes the opacity, which is what the call site had.
+      #
+      # `String` rather than `String | nil` for the abstract-class case follows the same call as
+      # `#column_return_type`: under-reporting nil is a false negative, over-reporting it lights up
+      # `possible-nil-receiver` on the ordinary idiom, and this project ranks the latter as the worse
+      # failure.
+      def table_name_return_type(entry)
+        return Rigor::Type::Combinator.nominal_of("String") unless entry.table_name_exact?
+
+        Rigor::Type::Combinator.constant_of(entry.table_name)
       end
 
       # `Post.published` / `Post.recent(5)` — a user-declared `scope` returns a relation of the model

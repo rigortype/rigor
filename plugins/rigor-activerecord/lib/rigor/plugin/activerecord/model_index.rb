@@ -38,9 +38,17 @@ module Rigor
         # - `nullable` — Boolean; whether a `:singular` accessor can return `nil`. `has_one` → `true`;
         #              `belongs_to` → `false` (required by default since Rails 5) unless `optional: true`
         #              / `required: false`. Meaningless for `:collection` rows.
-        Entry = Struct.new(:class_name, :table_name, :columns, :associations,
+        #
+        # `table_name_exact` records whether `table_name` is the name the application actually uses or a
+        # derivation nothing corroborates. It is true when the source DECLARED it (`self.table_name =
+        # "..."` somewhere in the STI chain) or when the parsed schema has a table by that name; false when
+        # the name is a bare {Inflector.tableize} guess the schema could not confirm. Only a true reading
+        # licenses pinning the name to a value — see `Activerecord#table_name_return_type`.
+        Entry = Struct.new(:class_name, :table_name, :table_name_exact, :columns, :associations,
                            :enums, :scopes, :validations, :callbacks, :aliases,
                            keyword_init: true) do
+          def table_name_exact? = table_name_exact == true
+
           def column(name)
             columns.find { |c| c.name == name.to_s }
           end
@@ -112,7 +120,8 @@ module Rigor
             class_name = row.fetch(:class_name)
             # The STI ancestry chain, root → self. For a plain (non-STI) model this is just `[row]`.
             chain = sti_chain(row, rows_by_name)
-            table_name = sti_table_name(chain)
+            declared = declared_table_name(chain)
+            table_name = declared || inflected_table_name(chain)
             columns = apply_type_overrides(schema_table&.columns_for(table_name) || [], overrides)
 
             # STI children inherit their ancestors' declared associations / enums / aliases / scopes /
@@ -121,6 +130,7 @@ module Rigor
             acc[class_name] = Entry.new(
               class_name: class_name,
               table_name: table_name,
+              table_name_exact: table_name_exact?(chain, declared, table_name, schema_table),
               columns: columns.freeze,
               associations: merge_named_rows(chain.flat_map { |r| Array(r[:associations]) }),
               enums: merge_enums(chain),
@@ -166,10 +176,37 @@ module Rigor
         # The effective table name for an STI chain: the nearest explicit `self.table_name =` override
         # walking leaf → root, else the name inflected from the root class.
         def self.sti_table_name(chain)
+          declared_table_name(chain) || inflected_table_name(chain)
+        end
+
+        # Whether `table_name` is the name the application actually uses, rather than a derivation nothing
+        # corroborates — the condition that licenses pinning it to a value.
+        #
+        # A class anywhere in the STI chain that computes its own name (`def self.table_name`, a non-literal
+        # `self.table_name =`) is never exact, EVEN IF the schema happens to have a table matching the
+        # inflection: that match would be a coincidence, not a corroboration. Otherwise a literal
+        # declaration is exact by construction, and a bare inflection is exact only when the parsed schema
+        # confirms a table by that name.
+        def self.table_name_exact?(chain, declared, table_name, schema_table)
+          return false if chain.any? { |row| row[:table_name_computed] }
+          return true unless declared.nil?
+
+          schema_table&.table?(table_name) || false
+        end
+
+        # The nearest explicit `self.table_name = "..."` walking leaf → root, or nil when the chain declared
+        # none. Split out from {sti_table_name} because "was it declared?" is the question
+        # `table_name_exact` answers, and re-deriving it from the resolved name is not possible.
+        def self.declared_table_name(chain)
           chain.reverse_each do |row|
             override = row[:table_name_override]
             return override if override
           end
+          nil
+        end
+
+        # The name inflected from the ROOT class of the chain — an STI child shares its root's table.
+        def self.inflected_table_name(chain)
           Rigor::Plugin::Inflector.tableize(strip_leading_namespace(chain.first.fetch(:class_name)))
         end
 

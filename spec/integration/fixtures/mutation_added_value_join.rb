@@ -45,9 +45,10 @@ slotted[0] = 6
 assert_type("Array[Integer]", slotted)
 
 # --- An EMPTY seed has no element evidence to contradict, so the stored
-# value joins precisely. This is mail's ragel-table shape (issue #533
-# item 8): `stack = []; stack[top] = cs` read `Array[untyped]` before
-# the join and reads the element type now. ---
+# value joins precisely. An Array survives the widening's one-way door
+# (only the FIRST store ever reaches a join) because its element
+# parameter is a union over POSITIONS: a missed store leaves it merely
+# incomplete. The Hash section below is where that stops being true. ---
 stack = []
 stack[1] = 42
 assert_type("Array[Integer]", stack)
@@ -57,11 +58,10 @@ built.push("a")
 assert_type("Array[String]", built)
 
 # --- A seed slot the engine cannot type is EVIDENCE ("this slot holds
-# something unknown"), not the empty-literal floor. The join must not
-# let it collapse into the added class, or `from_dynamic.first` would
-# read `Integer` for a slot holding whatever the caller passed. The
-# empty seed just above is the case that DOES collapse — the pair is
-# what keeps the two apart. ---
+# something unknown"), and reaches the same gradual answer by a
+# different route. The two must not be conflated on the way IN: read
+# off the widened carrier both `[]` and `[x]` are `Array[Dynamic[top]]`,
+# and only the pre-state literal tells them apart. ---
 def gradual_seed(x)
   from_dynamic = [x]
   from_dynamic.push(1)
@@ -77,18 +77,69 @@ mixed = [1, 2]
 mixed << "s"
 assert_type("Array[1 | 2 | Dynamic[top]]", mixed)
 
-# --- Hash: the stored key and value join their own side's evidence. The
-# key is admitted (Symbol seed, Symbol key); the value is not (the seed
-# says FalseClass), so it floors. Redmine's `import.rb:274` is this
-# shape — `csv_options = {:headers => false}` then
-# `csv_options[:encoding] = enc`, read back and compared. ---
+# --- Hash: the stored key and value join their own side's evidence, and
+# BOTH parameters then stay gradual. Only the first store into a hash
+# ever reaches a join (the widening leaves a Nominal, which is declined),
+# and a Hash's parameters are unions over KEYS that a read selects one
+# of — so closing them makes the read a wrong type for every key the
+# missed stores wrote. Redmine's `import.rb:274` is this shape —
+# `csv_options = {:headers => false}` then `csv_options[:encoding] =
+# enc`, read back and compared. ---
 csv_options = { headers: false }
 csv_options[:mode] = :fast
-assert_type("Hash[Symbol, Dynamic[top] | FalseClass]", csv_options)
+assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]", csv_options)
 
 or_written = {}
 or_written[:a] ||= 1
-assert_type("Hash[Symbol, Integer]", or_written)
+assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]", or_written)
+
+# --- mail's `Message#to_yaml`, the shape that pinned the open-parameter
+# rule down. Several straight-line stores into a hash seeded `{}`, then
+# an Array stored under one key and appended to through the READ. Only
+# the FIRST store reaches the join (the widening leaves a Nominal, which
+# `widen_for_mutator` declines), so a precise value parameter would carry
+# the `{}` store's Hash arm and have DROPPED the `[]` store's Array arm —
+# and `<<` on the read drew `undefined method '<<' for Hash[...]` on a
+# program that is right by construction. Both the block form and the
+# straight-line form must stay silent, and the conditional form too:
+# the three separate a scoping bug from an evidence bug. ---
+def to_yaml_shape(parts, multipart)
+  hash = {}
+  hash["headers"] = {}
+  hash["transport_encoding"] = "7bit"
+  if multipart
+    hash["multipart_body"] = []
+    parts.map { |part| hash["multipart_body"] << part }
+  end
+  hash
+end
+
+def to_yaml_unconditional(parts)
+  hash = {}
+  hash["headers"] = {}
+  hash["multipart_body"] = []
+  parts.map { |part| hash["multipart_body"] << part }
+  hash
+end
+
+def to_yaml_straight_line(part)
+  hash = {}
+  hash["headers"] = {}
+  hash["multipart_body"] = []
+  hash["multipart_body"] << part
+  hash
+end
+
+# --- and the must-still-fire sibling: a value the seed pins to a class
+# with no `<<`, where NO store ever put an appendable there. The literal
+# shape survives (no mutator ran), so the read is the pinned member and
+# the diagnostic is right. Without this case the three above would pass
+# on a rule that had simply stopped firing. ---
+def never_appendable
+  pinned = { name: :tag }
+  pinned[:name] << 2 # GENUINE-UNDEFINED
+  pinned
+end
 
 # --- Removers and reorderers add nothing, so they keep the pre-join
 # arity-forget exactly: element evidence unchanged, shape forgotten. ---

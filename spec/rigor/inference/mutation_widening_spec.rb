@@ -217,13 +217,27 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(widened.type_args.first.members).not_to include(constant(6))
     end
 
-    # An empty seed has no evidence to contradict, so the store joins precisely — mail's ragel
-    # `stack = []; stack[top] = cs` (issue #533 item 8), which read `Array[untyped]` before.
-    it "joins precisely into an empty seed" do
+    # An ARRAY's empty seed joins precisely: its element parameter is a union over POSITIONS, so the
+    # widening's one-way door (only the FIRST store reaches a join) leaves the union merely
+    # incomplete, never wrong for a particular read. mail's ragel `stack = []; stack[top] = cs`
+    # (issue #533 item 8) read `Array[untyped]` before.
+    it "joins precisely into an empty Array seed" do
       widened = described_class.widen_for_mutator(
         Rigor::Type::Combinator.tuple_of, :[]=, arg_types: [constant(0), constant(42)]
       )
       expect(widened.type_args.first).to eq(nominal("Integer"))
+    end
+
+    # A HASH never closes over its join, empty seed or not. Its parameters are unions over KEYS and
+    # a read selects ONE key, so the stores the one-way door hides make a closed answer WRONG for
+    # the keys they wrote — mail's `Message#to_yaml` drew `undefined method '<<'` off exactly that.
+    it "keeps both Hash parameters gradual even when the seed carries evidence" do
+      shape = Rigor::Type::HashShape.new(a: constant(1))
+      widened = described_class.widen_for_mutator(shape, :[]=, arg_types: [constant(:b), constant(2)])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(nominal("Symbol"),
+                                                                          Rigor::Type::Combinator.untyped))
+      expect(widened.type_args.last).to eq(Rigor::Type::Combinator.union(nominal("Integer"),
+                                                                         Rigor::Type::Combinator.untyped))
     end
 
     # The FP gate. haml's `temple = [:multi]; temple << [:static, s]` against a hand-written
@@ -246,22 +260,25 @@ RSpec.describe Rigor::Inference::MutationWidening do
     # A stored literal collection stays aliased and gets mutated through the slot
     # (`params[:f] ||= []; params[:f] << :status`), so its literal SHAPE is erased along with the
     # value pinning — `Hash[Symbol, []]` would fold `params[:f].empty?` to a wrong `true`.
+    # Read on the ARRAY side, where nothing else gradualizes, so the erasure is what the assertion
+    # sees: the stored `[]` joins as `Array[untyped]`, never as the literal `[]`, because the
+    # program keeps mutating it through the slot (`params[:f] ||= []; params[:f] << :status`) and a
+    # literal `[]` would fold `params[:f].empty?` to a wrong `true`.
     it "erases a stored literal collection's shape, keeping its class" do
-      widened = described_class.widen_for_mutator(
-        Rigor::Type::HashShape.new, :[]=,
-        arg_types: [constant(:f), Rigor::Type::Combinator.tuple_of]
+      seed = Rigor::Type::Combinator.tuple_of(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped])
       )
-      expect(widened.type_args.first).to eq(nominal("Symbol"))
-      expect(widened.type_args.last).to eq(Rigor::Type::Combinator.nominal_of(
-                                             "Array", type_args: [Rigor::Type::Combinator.untyped]
-                                           ))
+      widened = described_class.widen_for_mutator(seed, :<<, arg_types: [Rigor::Type::Combinator.tuple_of])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.nominal_of(
+                                              "Array", type_args: [Rigor::Type::Combinator.untyped]
+                                            ))
     end
 
     it "joins a stored key and value into a HashShape's own evidence" do
       shape = Rigor::Type::HashShape.new(a: constant(1))
       widened = described_class.widen_for_mutator(shape, :store, arg_types: [constant(:b), constant(2)])
-      expect(widened.type_args.first).to eq(nominal("Symbol"))
-      expect(widened.type_args.last).to eq(nominal("Integer"))
+      expect(widened.type_args.first.members).to include(nominal("Symbol"))
+      expect(widened.type_args.last.members).to include(nominal("Integer"))
     end
 
     # Removers and reorderers add nothing: the arity-forget alone, byte-identical to the no-evidence

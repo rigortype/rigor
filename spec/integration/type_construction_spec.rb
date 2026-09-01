@@ -163,10 +163,10 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/mutation_added_value_join.rb — straight-line mutations join the added value" do
     let(:harness) { harness_for("mutation_added_value_join") }
 
-    # The line the fixture marks as genuinely dead. Read from the source rather than hard-coded so the
-    # fixture stays editable — a hard-coded line number turns any insertion into a false failure.
-    def genuine_falsey_line(harness)
-      harness.source.lines.index { |l| l.include?("# GENUINE-FALSEY") } + 1
+    # The lines the fixture marks as genuinely wrong. Read from the source rather than hard-coded so
+    # the fixture stays editable — a hard-coded line number turns any insertion into a false failure.
+    def marked_line(harness, marker)
+      harness.source.lines.index { |l| l.include?(marker) } + 1
     end
 
     it "produces no assert_type mismatches" do
@@ -180,7 +180,19 @@ RSpec.describe "Rigor type construction (integration)" do
     # "went quiet" half from passing because the rule stopped firing at all.
     it "silences the stale folds without silencing the genuine one" do
       flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
-      expect(flow.map(&:line)).to eq([genuine_falsey_line(harness)])
+      expect(flow.map(&:line)).to eq([marked_line(harness, "# GENUINE-FALSEY")])
+    end
+
+    # The join's own FP surface, and the reason an empty seed does not close its parameter. mail's
+    # `Message#to_yaml` stores `{}` and then `[]` into a hash seeded `{}`, and appends through the
+    # READ of the second key; only the first store reaches the join, so a precise value parameter
+    # dropped the Array arm and drew `undefined method '<<' for Hash[...]` on correct code. The
+    # fixture carries the block, unconditional and straight-line forms — the three separate a
+    # branch-scoping bug from an evidence bug — against a value the seed really does pin to a class
+    # with no `<<`, where the diagnostic is right and must survive.
+    it "keeps a stored-then-appended hash value silent without silencing a genuinely pinned one" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq([marked_line(harness, "# GENUINE-UNDEFINED")])
     end
   end
 

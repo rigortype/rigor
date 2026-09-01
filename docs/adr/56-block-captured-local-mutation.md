@@ -248,6 +248,21 @@ one, because there the join's result reaches a `def`'s return check:
   literal `[]` would pin `Hash[Symbol, []]` on a hash whose slot holds
   `[:status]`, and `params[:f].empty?` would fold to a wrong `true`:
   the same class of stale fold the change exists to remove.
+- **A Hash never closes over its join.** The widening is a one-way
+  door — it leaves a `Nominal`, which `widen_for_mutator` declines —
+  so only the FIRST store into a collection ever reaches a join. An
+  Array survives that: its element parameter is a union over
+  POSITIONS, and a missed store leaves it merely incomplete. A Hash
+  does not: its parameters are unions over KEYS and a read selects
+  one, so the hidden stores make a closed answer WRONG for the keys
+  they wrote. mail's `Message#to_yaml` — `hash = {}`, then
+  `hash['headers'] = {}`, then `hash['multipart_body'] = []` appended
+  through the read — drew `undefined method '<<' for Hash[…]` on a
+  program correct by construction, because the value parameter kept
+  the first store's Hash arm and had dropped the Array arm. Both Hash
+  parameters therefore stay gradual; the Array element parameter does
+  not, which is what keeps ADR-56's own `acc.push(m)` loop result at
+  `Array[Integer]`.
 
 ### WD3 — One mechanism, shared
 

@@ -319,12 +319,14 @@ module Rigor
         ContentJoin.join_hash_content(widened, [[key, value]])
       end
 
-      # One carrier for a stored key or value. A `Hash` pair has a single slot per side, so the
-      # admissible list — which is two members when the seed's own evidence is gradual — folds to a
-      # union rather than being truncated.
+      # One carrier for a stored key or value, and it is ALWAYS gradual — see {ContentJoin}'s
+      # "Why the HASH side never closes over its join". Only the first store into a hash reaches a
+      # join, and a Hash's parameters are unions over KEYS that a read selects one of, so a closed
+      # answer is a wrong type for every key the missed stores wrote. `mail`'s `Message#to_yaml`
+      # drew `undefined method '<<'` off exactly that.
       def admitted_union(seed_members, added)
         admitted = ContentJoin.admissible_evidence(seed_members, [added])
-        admitted.size == 1 ? admitted.first : Type::Combinator.union(*admitted)
+        Type::Combinator.union(*admitted, Type::Combinator.untyped)
       end
 
       # Normalizes the types the mutator's arguments contribute, before they join.

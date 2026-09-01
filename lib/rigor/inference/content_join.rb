@@ -123,9 +123,6 @@ module Rigor
       #
       # So added evidence is admitted per member, against the class set the SEED already carries:
       #
-      # - the seed carries no real element evidence (an empty literal, or a pure `untyped` floor) —
-      #   there is nothing to contradict, so the added evidence joins precisely. This is the
-      #   `stack = []; stack[top] = cs` → `Array[Integer]` precision win;
       # - the seed's class set already admits the added member's class — the collection is
       #   homogeneous in the sense that matters, and the member joins precisely
       #   (`u = [1, 2]; u.push(6)` → `Array[1 | 2 | Integer]`);
@@ -134,19 +131,49 @@ module Rigor
       #   `Dynamic[top]` instead of a foreign precise member. `Array[:multi | untyped]` is gradual:
       #   it ACCEPTS against the declared `Array[:multi]`, and it still stops the stale constant
       #   fold, which is the whole point of the join.
+      # - the seed carries NO evidence at all — it is an empty literal — and the join stays gradual.
+      #   {#admissible_evidence} explains why that case is not the precision opportunity it looks
+      #   like.
       #
-      # The third case only ever replaces a WRONG precise element type with a gradual one, so it is
+      # The second case only ever replaces a WRONG precise element type with a gradual one, so it is
       # a soundness improvement paid for in opacity on exactly the sites that were lying.
+      #
+      # ----------------------------------------------------------------
+      # Why the HASH side never closes over its join, and the Array side does.
+      #
+      # The widening is a one-way door. It replaces the literal carrier with a `Nominal`, and
+      # {MutationWidening.widen_for_mutator} declines a `Nominal` outright, so only the FIRST store
+      # into a collection ever reaches a join — every later one is invisible.
+      #
+      # An Array survives that. Its element parameter is a union over POSITIONS: each store adds to
+      # one set, no store invalidates another, and a missed store leaves the union merely incomplete.
+      #
+      # A Hash does not. Its value parameter is a union over KEYS, and a read selects ONE key — the
+      # per-key typing that could answer it lived in the `HashShape` the widening just destroyed. So
+      # a missed store does not leave the answer incomplete, it makes the read's type WRONG:
+      #
+      #     hash = {}
+      #     hash['headers'] = {}                          # joins: Hash[String, Hash[…]]
+      #     hash['multipart_body'] = []                   # DECLINED — pre-state is a Nominal now
+      #     body.parts.map { |p| hash['multipart_body'] << p.to_yaml }
+      #
+      # is `mail`'s `Message#to_yaml`. The read answered `Hash[…]` — the first store's value, with
+      # the `[]` store's arm dropped — and a program correct by construction drew `undefined method
+      # '<<'`. kramdown's `hash = {type: el.type}` + `hash[:children] = []` is the same shape from
+      # the other side: there the first store happened to contribute `untyped`, which is the only
+      # reason the join REMOVED a false `undefined method '<<' for Symbol` instead of causing one.
+      #
+      # So {MutationWidening#join_added_pairs} keeps both Hash parameters gradual. The key side goes
+      # with the value side: a too-narrow key parameter turns a later `hash[:sym]` read into a
+      # `call.argument-type` FP by the identical mechanism.
 
       # `added`, with every member the seed's class set does not admit replaced by `Dynamic[top]`.
       #
-      # `seed_members` MUST come from the pre-state LITERAL carrier, not from the widened one. The two
-      # disagree on exactly the case that matters: `[]` widens to `Array[Dynamic[top]]`, where the
-      # `Dynamic` is the empty-seed FLOOR and carries nothing, while `[x]` on an untyped `x` widens to
-      # the same carrier with a `Dynamic` that is real evidence — that slot holds an unknown value.
-      # Read off the literal, the two are `[]` and `[Dynamic[top]]`, and they part company here: the
-      # first admits the added evidence outright, the second keeps its own gradual member so
-      # {#join_array_content}'s floor-dropping cannot narrow an unknown slot into the added class.
+      # `seed_members` MUST come from the pre-state LITERAL carrier, not from the widened one — `[]`
+      # and `[x]` on an untyped `x` widen to the SAME `Array[Dynamic[top]]`, and only the literal
+      # distinguishes "no evidence" (join it outright) from "one slot holds something unknown" (keep
+      # a gradual member, so {#join_array_content}'s floor-dropping cannot narrow that slot into the
+      # added class).
       def admissible_evidence(seed_members, added)
         members = seed_members.flat_map { |m| union_members(m) }
         return added if members.empty?

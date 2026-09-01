@@ -258,16 +258,17 @@ RSpec.describe Rigor::Inference::ContentJoin do
         .to eq([untyped])
     end
 
-    # An empty seed has nothing to contradict, so nothing is floored — this is where the precision
-    # goes (`stack = []; stack[top] = cs`).
+    # An empty seed has nothing to contradict, so the added evidence joins outright. This is the
+    # ARRAY-side answer; the Hash side gradualizes downstream in `MutationWidening#admitted_union`,
+    # because a Hash parameter is a union over keys that a read selects one of.
     it "admits everything when the seed carries no evidence" do
       expect(described_class.admissible_evidence([], [nominal("String")])).to eq([nominal("String")])
     end
 
-    # The seed comes from the pre-state LITERAL, and that is what separates these two: `[]` reads as
-    # no members at all, while `[x]` on an untyped `x` reads as one Dynamic member that really does
-    # say "this slot is unknown". Only the first may let `join_array_content`'s floor-dropping narrow
-    # the carrier to the added class; the second keeps its own gradual member.
+    # A seed that carries a Dynamic member reaches the same answer by a different route — that slot
+    # really does hold something unknown — and the two must not be conflated on the way in: read off
+    # the widened carrier both are `Array[Dynamic[top]]`, and only the pre-state LITERAL tells `[]`
+    # from `[x]`.
     it "keeps a gradual member when the seed carries a Dynamic of its own" do
       expect(described_class.admissible_evidence([untyped], [nominal("String")]))
         .to eq([nominal("String"), untyped])

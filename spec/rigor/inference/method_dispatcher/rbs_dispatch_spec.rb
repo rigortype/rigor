@@ -332,10 +332,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
           end
 
           type rigor_spec_leaf = RigorSpecLeaf & _RigorSpecMarker
+          type rigor_spec_name = ::String & _RigorSpecMarker
 
           class RigorSpecTree
             def leaf: () -> rigor_spec_leaf
             def leaf_or_nil: () -> rigor_spec_leaf?
+            def graft: (rigor_spec_leaf) -> ::Integer
+                     | (rigor_spec_name) -> ::String
           end
         RBS
       end
@@ -364,6 +367,34 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       it "keeps the optional wrapper around a resolved alias" do
         type = dispatch_on_tree(:leaf_or_nil)
         expect(type.describe(:short)).to eq("RigorSpecLeaf?")
+      end
+
+      # Overload selection: BOTH overloads carry alias params, so the strict pass skips them (not
+      # strictly typed) and the well-known-alias pass does not know these names — the gradual pass
+      # decides. With the expander threaded through `accepts_param?`, the first overload's expanded
+      # `Nominal[RigorSpecLeaf]` REJECTS a String argument outright, so the call lands on the
+      # String-aliased overload. Before the threading both params translated untyped, the first
+      # overload gradually accepted everything, and the String argument read Integer by list position.
+      it "steers overload selection through an expanded alias parameter" do
+        string_arg = Rigor::Type::Combinator.nominal_of("String")
+        type = described_class.try_dispatch(cc(
+                                              receiver: tree,
+                                              method_name: :graft,
+                                              args: [string_arg],
+                                              environment: aliased_environment
+                                            ))
+        expect(type.describe(:short)).to eq("String")
+      end
+
+      it "still selects the first alias-param overload when the argument matches it" do
+        leaf_arg = Rigor::Type::Combinator.nominal_of("RigorSpecLeaf")
+        type = described_class.try_dispatch(cc(
+                                              receiver: tree,
+                                              method_name: :graft,
+                                              args: [leaf_arg],
+                                              environment: aliased_environment
+                                            ))
+        expect(type.describe(:short)).to eq("Integer")
       end
     end
 

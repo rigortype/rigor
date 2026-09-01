@@ -443,6 +443,41 @@ effect) — a straight-line conditional is fine, its branch scopes join. Designe
 in
 [`docs/notes/20260615-struct-folding-slice3-design.md`](../notes/20260615-struct-folding-slice3-design.md).
 
+**Slice 5 landed ([#525](https://github.com/rigortype/rigor/issues/525)) — the
+in-body member read.** Slices 1–4 all decide foldability from the receiver
+NODE, so a member read written with no receiver at all — the ordinary body of a
+`Struct.new(:text) do def shout; text.upcase; end end` method — had nothing to
+decide from and degraded to `Dynamic[top]`, taking its method's whole return
+with it. The caller knows the answer, so it passes it down: `try_user_method_inference`
+applies the same two tests `StructFolding#foldable_receiver?` uses to the
+receiver EXPRESSION, and `build_user_method_body_scope` records the result as the
+`:self` sentinel in the body scope's fold-safe set — collision-free, since `self`
+is a keyword and no Ruby local can carry that name, so no new `Scope` field is
+needed. `foldable_receiver?` gains a matching arm for a `nil` / `self` receiver,
+tied to the exact carrier the grant was issued for.
+
+Two conditions beyond the caller's evidence: the carrier must be a
+`StructInstance`, and the body's every use of `self` must be a pure read
+(`StructFoldSafety.self_fold_safe_body?`). A member setter on self, a bare
+`self` that escapes, and a self-call that is neither a member reader nor a fixed
+pure read all refuse. The last is what makes the grant closed under the calls the
+body makes: `def shout; reset!; text.upcase; end` over a sibling
+`def reset!; self.text = ""; end` has no setter of its own, so a guard that only
+looked for direct setters would fold `text` to the construction value while the
+runtime read is `""`. Unrecognised self-calls are instead resolved against the
+receiver's own class and asked the same question, cycle-guarded and depth-capped,
+so a body that merely DELEGATES (`def outer; shout; end`) keeps the grant while
+one that reaches a writer at any depth loses it.
+
+**The grant is part of the ADR-84 return-memo key.** It is a third
+call-site-varying dimension: the same `(def_node, receiver, arg_types)` returns a
+folded member type from a foldable call site and `Dynamic[top]` from a
+non-foldable one. Verified by removing the key element — the first call site to
+run then answers for both, and in the foldable-first order that serves the folded
+value for a read off a local nothing proved current, a wrong type rather than
+mere imprecision. It is read off the built body scope rather than threaded
+separately, so the key cannot drift from the scope that produced the result.
+
 ## Rejected / deferred alternatives
 
 - **Reuse `HashShape` for the instance, tagged with a class name.**

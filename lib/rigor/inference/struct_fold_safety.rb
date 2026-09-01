@@ -137,6 +137,99 @@ module Rigor
         (call_node.arguments&.arguments&.size || 0) == 1
       end
 
+      # Self-calls that cannot change a member, on top of the receiver's own member READERS. Same list the
+      # stored-local scan trusts, so the two halves of the gate cannot drift on what "pure" means. `:class`
+      # is added because `self.class.new(...)` is the ordinary way a struct method builds a sibling.
+      SELF_PURE_READS = (FIXED_READS + %i[class]).freeze
+
+      # Issue #525 — whether a method body may be granted the `:self` fold-safety sentinel, i.e. whether the
+      # caller's member map is still the struct's state at every member read the body performs.
+      #
+      # Three shapes refuse, and the third is what makes the grant closed under the calls the body makes:
+      #
+      # 1. a member setter or `[]=` on self (`self.text = v`) — a later read would fold the STALE
+      #    construction value, the wrong-type family this gate exists to prevent;
+      # 2. a bare `self` anywhere but as a call receiver — passed, stored or returned, `self` reaches code
+      #    that can mutate it;
+      # 3. any other self-call that is not a member reader or a fixed pure read. `def shout; reset!;
+      #    text.upcase; end` over a sibling `def reset!; self.text = ""; end` has no setter of its OWN, so a
+      #    guard that only looked for (1) would grant it and fold `text` to the construction value while the
+      #    runtime read is `""`.
+      #
+      # (3) is what makes the grant CLOSED under the calls the body makes. A caller that can resolve sibling
+      # methods passes a block: it receives each otherwise-unrecognised self-call name and answers whether
+      # that sibling is itself self-fold-safe, which is how `def outer; shout; end` keeps the grant while
+      # `def go; reset!; text; end` loses it. Without the block — or for a name the block cannot resolve —
+      # the call refuses, so the AST-only answer stays the conservative one.
+      #
+      # Nested `def` / `class` / `module` bodies are skipped: their statements do not run during THIS body's
+      # evaluation. Blocks are descended into — they share `self`.
+      #
+      # @param body [Prism::Node, nil]
+      # @param member_names [Enumerable<Symbol>] the receiver carrier's member names.
+      # @yieldparam name [Symbol] an unrecognised self-call selector.
+      # @yieldreturn [Boolean] whether that sibling method is itself self-fold-safe.
+      def self_fold_safe_body?(body, member_names, &sibling_pure)
+        return false if body.nil?
+
+        self_uses_pure?(body, member_names.to_set(&:to_sym), sibling_pure)
+      end
+
+      # Recursive worker for {self_fold_safe_body?}. A `SelfNode` reached here came through a non-receiver
+      # edge (a call's own `self` receiver is skipped below), so it is an escape.
+      def self_uses_pure?(node, members, sibling_pure)
+        return true if node.nil? || scope_boundary?(node)
+        return false if node.is_a?(Prism::SelfNode)
+
+        if node.is_a?(Prism::CallNode)
+          return false unless self_call_pure?(node, members, sibling_pure)
+
+          return call_children_pure?(node, members, sibling_pure)
+        end
+
+        children_pure?(node, members, sibling_pure)
+      end
+
+      # A call is pure for this scan unless it targets `self` (explicitly or implicitly) under a name that is
+      # neither one of the receiver's member readers nor a fixed pure read. `self.text = v` arrives as a
+      # `:text=` call and `self[:text] = v` as `:[]=`; neither is in either set, so both refuse — and neither
+      # is offered to `sibling_pure`, since a name that WRITES is not made safe by where it is defined.
+      def self_call_pure?(call_node, members, sibling_pure)
+        receiver = call_node.receiver
+        return true unless receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        name = call_node.name
+        return true if members.include?(name) || SELF_PURE_READS.include?(name)
+        return false if writer_selector?(name)
+
+        !sibling_pure.nil? && sibling_pure.call(name)
+      end
+
+      # A selector that assigns: `text=`, `[]=`. Never delegated to `sibling_pure` — a writer is unsafe on
+      # its face, and asking the resolver about it would let a struct with a hand-written `def text=(v)` that
+      # the resolver walks into read as pure.
+      def writer_selector?(name)
+        text = name.to_s
+        text.end_with?("=") && !%w[== != <= >= ===].include?(text)
+      end
+
+      # Children of a call, skipping an explicit `self` RECEIVER — that occurrence is the call's own target
+      # and was already judged by {self_call_pure?}, not an escape.
+      def call_children_pure?(call_node, members, sibling_pure)
+        call_node.rigor_each_child do |child|
+          next if child.is_a?(Prism::SelfNode) && child.equal?(call_node.receiver)
+          return false unless self_uses_pure?(child, members, sibling_pure)
+        end
+        true
+      end
+
+      def children_pure?(node, members, sibling_pure)
+        node.rigor_each_child do |child|
+          return false unless self_uses_pure?(child, members, sibling_pure)
+        end
+        true
+      end
+
       # Constructs whose body runs zero-or-many times or is deferred (loops, blocks, lambdas): a single static pass
       # over the body cannot model a member setter's effect across iterations, so a setter inside one disqualifies the
       # local. Straight-line conditionals (`if` / `unless` / `case`) are NOT boundaries — their branch scopes join

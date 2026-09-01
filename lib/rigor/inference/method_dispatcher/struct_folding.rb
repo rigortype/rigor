@@ -258,7 +258,43 @@ module Rigor
         # read) or a FOLD-SAFE stored local (ADR-48 slice 3 — `StructFoldSafety` proved the binding is
         # never mutated / aliased / escaped in its scope).
         def foldable_receiver?(context)
-          fresh_receiver?(context) || fold_safe_local_receiver?(context)
+          fresh_receiver?(context) || fold_safe_local_receiver?(context) ||
+            fold_safe_self_receiver?(context)
+        end
+
+        # Issue #525 — the in-body half. A member read written with no receiver (or `self.member`) inside a
+        # method the CALLER resolved on a fold-safe struct receiver: `Line.new("a", 2).shout` re-types
+        # `shout`'s body with `self_type` = the caller's `StructInstance`, and the implicit-self `text` read
+        # arrives here with the right carrier but no receiver node, so neither of the two arms above can see
+        # that the caller's receiver was foldable.
+        #
+        # The caller records that grant as the `:self` sentinel in the body scope's fold-safe set — a
+        # `Set[Symbol]` no Ruby local can collide with, since `self` is a keyword. The grant is issued only
+        # for a `StructInstance` carrier whose body {Inference::StructFoldSafety.self_fold_safe_body?}
+        # cleared, and it is tied HERE to the exact carrier it was issued for: a body scope reached by any
+        # other route types its `self` differently, and the read declines rather than fold a map that
+        # belongs to a different instance.
+        def fold_safe_self_receiver?(context)
+          node = context.call_node
+          return false if node.nil?
+
+          receiver_node = node.receiver
+          return false unless receiver_node.nil? || receiver_node.is_a?(Prism::SelfNode)
+
+          scope = context.scope
+          return false unless scope&.struct_fold_safe?(:self)
+
+          same_carrier?(context.receiver, scope.self_type)
+        end
+
+        # Carrier identity for the `:self` grant. `StructInstance` has no value equality, so the comparison
+        # goes through the display form — the same equality the ADR-84 return memo keys on, and exact for
+        # this purpose: two instances that describe identically have the same members and class.
+        def same_carrier?(receiver, self_type)
+          return false unless receiver.is_a?(Type::StructInstance)
+          return false if self_type.nil?
+
+          receiver.equal?(self_type) || receiver.describe(:short) == self_type.describe(:short)
         end
 
         # A fresh receiver is the transient result of a chained call (`Point.new(1, 2).x`,

@@ -127,4 +127,75 @@ RSpec.describe Rigor::Inference::StructFoldSafety do
       RUBY
     end
   end
+
+  # Issue #525 — the in-body half. Whether a method body may be told "the caller's member map is still your
+  # struct's state", which is what licenses folding a receiverless member read inside it.
+  describe ".self_fold_safe_body?" do
+    def body_of(source)
+      Prism.parse(source).value.statements.body.first.body
+    end
+
+    def clears?(source, members = %i[text indent])
+      described_class.self_fold_safe_body?(body_of(source), members)
+    end
+
+    describe "clears — every use of self is a pure read" do
+      it "clears an implicit-self member read" do
+        expect(clears?("def shout\n  text.upcase\nend")).to be(true)
+      end
+
+      it "clears an explicit `self.member` read" do
+        expect(clears?("def shout\n  self.text.upcase\nend")).to be(true)
+      end
+
+      it "clears a fixed Struct read and `self.class`" do
+        expect(clears?("def pair\n  [to_h, self.class]\nend")).to be(true)
+      end
+
+      it "clears a member read inside a block (blocks share self)" do
+        expect(clears?("def shout\n  [1].map { text }\nend")).to be(true)
+      end
+
+      it "clears when a nested def would be unsafe (it does not run in this body)" do
+        # The nested def's `self.text =` executes only when THAT method is called, not during this body.
+        expect(clears?("def shout\n  def reset!\n    self.text = \"\"\n  end\n  text\nend")).to be(true)
+      end
+    end
+
+    describe "refuses — the map may not survive to the read" do
+      it "refuses a member setter on self" do
+        expect(clears?("def go\n  self.text = \"z\"\n  text\nend")).to be(false)
+      end
+
+      it "refuses an index write on self" do
+        expect(clears?("def go\n  self[:text] = \"z\"\n  text\nend")).to be(false)
+      end
+
+      it "refuses a call to a sibling method, which could mutate a member" do
+        # The body has no setter of its OWN — this is the shape a setter-only guard would wrongly clear.
+        expect(clears?("def go\n  reset!\n  text\nend")).to be(false)
+      end
+
+      it "refuses when self escapes as an argument" do
+        expect(clears?("def go(sink)\n  sink.take(self)\n  text\nend")).to be(false)
+      end
+
+      it "refuses when self escapes as the returned value" do
+        expect(clears?("def go\n  self\nend")).to be(false)
+      end
+
+      it "refuses a setter reached through a block" do
+        expect(clears?("def go\n  [1].each { self.text = \"z\" }\n  text\nend")).to be(false)
+      end
+
+      it "refuses a name that is not a member of THIS carrier" do
+        # `text` is a member reader for the default carrier but not for this one, so the same body flips.
+        expect(clears?("def go\n  text\nend", %i[from to])).to be(false)
+      end
+
+      it "refuses a nil body" do
+        expect(described_class.self_fold_safe_body?(nil, %i[text])).to be(false)
+      end
+    end
+  end
 end

@@ -1,0 +1,598 @@
+{
+  "files": 56,
+  "parse_errors": 0,
+  "total": 12831,
+  "tier_counts": {
+    "constant": 4046,
+    "nominal": 2177,
+    "dynamic_top": 6047,
+    "shaped": 451,
+    "bot": 97,
+    "dynamic_specific": 6,
+    "refined": 7
+  },
+  "opaque_node_classes": {
+    "ConstantReadNode": 19,
+    "BlockNode": 117,
+    "EmbeddedStatementsNode": 66,
+    "LocalVariableReadNode": 2354,
+    "LocalVariableTargetNode": 88,
+    "IfNode": 172,
+    "CallNode": 2126,
+    "YieldNode": 5,
+    "BeginNode": 8,
+    "LocalVariableWriteNode": 244,
+    "ConstantPathNode": 26,
+    "ForwardingSuperNode": 9,
+    "InstanceVariableWriteNode": 109,
+    "InstanceVariableReadNode": 353,
+    "ParenthesesNode": 52,
+    "SplatNode": 57,
+    "GlobalVariableReadNode": 9,
+    "AndNode": 85,
+    "OrNode": 39,
+    "CaseNode": 18,
+    "MultiWriteNode": 9,
+    "LocalVariableOperatorWriteNode": 2,
+    "UnlessNode": 6,
+    "GlobalVariableTargetNode": 1,
+    "GlobalVariableWriteNode": 1,
+    "ModuleNode": 1,
+    "ConstantWriteNode": 14,
+    "MultiTargetNode": 2,
+    "InstanceVariableTargetNode": 32,
+    "InstanceVariableOperatorWriteNode": 2,
+    "InstanceVariableOrWriteNode": 3,
+    "SuperNode": 18
+  },
+  "local_read_buckets": {
+    "def_param": 1734,
+    "block_param": 147,
+    "assigned_local": 473
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 1493,
+    "precise": 115,
+    "implicit_self": 515,
+    "dynamic_specific": 3
+  },
+  "opaque_ivar_reads": 353,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/parser",
+  "scanned_paths": [
+    "lib"
+  ],
+  "parameter_inference": false,
+  "precise": 6778,
+  "precision_ratio": 0.5283,
+  "named_receiver_opaque_pairs": {
+    "{ parent: Dynamic[top]?, sibbling_left: Dynamic[top], sib...#[]": {
+      "count": 9,
+      "examples": [
+        "lib/parser/source/tree_rewriter/action.rb:115",
+        "lib/parser/source/tree_rewriter/action.rb:115",
+        "lib/parser/source/tree_rewriter/action.rb:115"
+      ]
+    },
+    "Proc#call": {
+      "count": 6,
+      "examples": [
+        "lib/gauntlet_parser.rb:37",
+        "lib/gauntlet_parser.rb:43",
+        "lib/parser/runner/ruby_parse.rb:45"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#max": {
+      "count": 6,
+      "examples": [
+        "lib/parser/max_numparam_stack.rb:34",
+        "lib/parser/source/range.rb:212",
+        "lib/parser/source/range.rb:223"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 5,
+      "examples": [
+        "lib/parser/current_arg_stack.rb:43",
+        "lib/parser/max_numparam_stack.rb:38",
+        "lib/parser/max_numparam_stack.rb:52"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#emit_kwargs": {
+      "count": 4,
+      "examples": [
+        "lib/parser/builders/default.rb:1100",
+        "lib/parser/builders/default.rb:1185",
+        "lib/parser/builders/default.rb:1199"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 3,
+      "examples": [
+        "lib/parser/current_arg_stack.rb:35",
+        "lib/parser/max_numparam_stack.rb:46",
+        "lib/parser/variables_stack.rb:20"
+      ]
+    },
+    "bot#range": {
+      "count": 3,
+      "examples": [
+        "lib/parser/source/rewriter.rb:430",
+        "lib/parser/source/rewriter.rb:433",
+        "lib/parser/source/rewriter.rb:434"
+      ]
+    },
+    "Parser::Base#diagnostics": {
+      "count": 3,
+      "examples": [
+        "lib/parser/base.rb:90",
+        "lib/parser/base.rb:91",
+        "lib/parser/base.rb:93"
+      ]
+    },
+    "Parser::Source::Buffer#source=": {
+      "count": 3,
+      "examples": [
+        "lib/parser/base.rb:108",
+        "lib/parser/runner.rb:237",
+        "lib/parser/source/buffer.rb:124"
+      ]
+    },
+    "AST::Node#loc": {
+      "count": 2,
+      "examples": [
+        "lib/parser/source/comment/associator.rb:130",
+        "lib/parser/source/comment/associator.rb:130"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#emit_index": {
+      "count": 2,
+      "examples": [
+        "lib/parser/builders/default.rb:1189",
+        "lib/parser/builders/default.rb:1203"
+      ]
+    },
+    "singleton(Parser::Source::TreeRewriter)#warn_of_deprecation": {
+      "count": 2,
+      "examples": [
+        "lib/parser/source/tree_rewriter.rb:343",
+        "lib/parser/source/tree_rewriter.rb:352"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#emit_forward_arg": {
+      "count": 2,
+      "examples": [
+        "lib/parser/builders/default.rb:892",
+        "lib/parser/builders/default.rb:904"
+      ]
+    },
+    "{ crossing_deletions: Dynamic[top], different_replacement...#[]": {
+      "count": 2,
+      "examples": [
+        "lib/parser/source/tree_rewriter.rb:412",
+        "lib/parser/source/tree_rewriter.rb:419"
+      ]
+    },
+    "Parser::Lexer::Dedenter#dedent": {
+      "count": 2,
+      "examples": [
+        "lib/parser/builders/default.rb:395",
+        "lib/parser/builders/default.rb:400"
+      ]
+    },
+    "Parser::VariablesStack#reset": {
+      "count": 2,
+      "examples": [
+        "lib/parser/base.rb:177",
+        "lib/parser/base.rb:178"
+      ]
+    },
+    "Parser::Source::Buffer#raw_source=": {
+      "count": 2,
+      "examples": [
+        "lib/parser/base.rb:106",
+        "lib/parser/source/buffer.rb:175"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 2,
+      "examples": [
+        "lib/parser/source/range.rb:211",
+        "lib/parser/source/range.rb:224"
+      ]
+    },
+    "Parser::Base#default_encoding": {
+      "count": 2,
+      "examples": [
+        "lib/parser/base.rb:35",
+        "lib/parser/base.rb:54"
+      ]
+    },
+    "Parser::Source::Range#end_pos": {
+      "count": 2,
+      "examples": [
+        "lib/parser/source/range.rb:156",
+        "lib/parser/source/range.rb:305"
+      ]
+    },
+    "Parser::Source::Range#begin_pos": {
+      "count": 2,
+      "examples": [
+        "lib/parser/source/range.rb:156",
+        "lib/parser/source/range.rb:304"
+      ]
+    },
+    "Array[Dynamic[top]]#reduce": {
+      "count": 2,
+      "examples": [
+        "lib/gauntlet_parser.rb:63",
+        "lib/parser/source/map.rb:142"
+      ]
+    },
+    "Hash?#[]": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/comment/associator.rb:208"
+      ]
+    },
+    "{}#[]=": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/map.rb:169"
+      ]
+    },
+    "Parser::Source::Map#expression": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/comment.rb:129"
+      ]
+    },
+    "Source::Comment#location": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/comment.rb:122"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/buffer.rb:347"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/buffer.rb:345"
+      ]
+    },
+    "Parser::Source::Range#size": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/buffer.rb:202"
+      ]
+    },
+    "singleton(Parser::Source::Buffer)#reencode_string": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/buffer.rb:169"
+      ]
+    },
+    "Parser::Source::Buffer#name": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner/ruby_rewrite.rb:76"
+      ]
+    },
+    "Parser::SyntaxError#diagnostic": {
+      "count": 1,
+      "examples": [
+        "lib/gauntlet_parser.rb:32"
+      ]
+    },
+    "Parser::Source::Range#source_buffer": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/range.rb:303"
+      ]
+    },
+    "singleton(Parser::Source::Rewriter)#warn_of_deprecation": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/rewriter.rb:40"
+      ]
+    },
+    "Parser::Source::Rewriter#active_insertions=": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/rewriter.rb:336"
+      ]
+    },
+    "Parser::Source::Rewriter#active_clobber=": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/rewriter.rb:340"
+      ]
+    },
+    "bot#replacement": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/rewriter.rb:433"
+      ]
+    },
+    "Array[Dynamic[top]]#inject": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/tree_rewriter/action.rb:138"
+      ]
+    },
+    "Parser::Source::TreeRewriter::Action#do_combine": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/tree_rewriter/action.rb:140"
+      ]
+    },
+    "Range#bsearch": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/tree_rewriter/action.rb:148"
+      ]
+    },
+    "Parser::Source::TreeRewriter::Action#combine_children": {
+      "count": 1,
+      "examples": [
+        "lib/parser/source/tree_rewriter/action.rb:218"
+      ]
+    },
+    "Array[Dynamic[top]]?#pop": {
+      "count": 1,
+      "examples": [
+        "lib/parser/static_environment.rb:50"
+      ]
+    },
+    "ParserGauntlet#source_index": {
+      "count": 1,
+      "examples": [
+        "lib/gauntlet_parser.rb:119"
+      ]
+    },
+    "ParserGauntlet#update_gem_tarballs": {
+      "count": 1,
+      "examples": [
+        "lib/gauntlet_parser.rb:120"
+      ]
+    },
+    "ParserGauntlet#run_the_gauntlet": {
+      "count": 1,
+      "examples": [
+        "lib/gauntlet_parser.rb:123"
+      ]
+    },
+    "Parser::Base#parse": {
+      "count": 1,
+      "examples": [
+        "lib/parser/base.rb:36"
+      ]
+    },
+    "Parser::CurrentArgStack#reset": {
+      "count": 1,
+      "examples": [
+        "lib/parser/base.rb:176"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#emit_encoding": {
+      "count": 1,
+      "examples": [
+        "lib/parser/builders/default.rb:641"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#emit_procarg0": {
+      "count": 1,
+      "examples": [
+        "lib/parser/builders/default.rb:993"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#emit_arg_inside_procarg0": {
+      "count": 1,
+      "examples": [
+        "lib/parser/builders/default.rb:994"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#emit_lambda": {
+      "count": 1,
+      "examples": [
+        "lib/parser/builders/default.rb:1114"
+      ]
+    },
+    "Parser::AST::Node#updated": {
+      "count": 1,
+      "examples": [
+        "lib/parser/builders/default.rb:1168"
+      ]
+    },
+    "Parser::Source::Map::Send#expression": {
+      "count": 1,
+      "examples": [
+        "lib/parser/builders/default.rb:1227"
+      ]
+    },
+    "Array[Dynamic[top]]#[]=": {
+      "count": 1,
+      "examples": [
+        "lib/parser/current_arg_stack.rb:31"
+      ]
+    },
+    "singleton(Parser::Messages)#compile": {
+      "count": 1,
+      "examples": [
+        "lib/parser/diagnostic.rb:70"
+      ]
+    },
+    "Parser::Lexer::Explanation#state_before_explanation=": {
+      "count": 1,
+      "examples": [
+        "lib/parser/lexer/explanation.rb:34"
+      ]
+    },
+    "singleton(Parser::Color)#underline": {
+      "count": 1,
+      "examples": [
+        "lib/parser/lexer/explanation.rb:43"
+      ]
+    },
+    "{ \"(\": \")\", \"[\": \"]\", \"{\": \"}\", \"<\": \">\" }#fetch": {
+      "count": 1,
+      "examples": [
+        "lib/parser/lexer/literal.rb:64"
+      ]
+    },
+    "Parser::Source::Rewriter?#process": {
+      "count": 1,
+      "examples": [
+        "lib/parser/rewriter.rb:28"
+      ]
+    },
+    "singleton(Parser::Rewriter)#warn_of_deprecation": {
+      "count": 1,
+      "examples": [
+        "lib/parser/rewriter.rb:99"
+      ]
+    },
+    "Parser::Runner#execute": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner.rb:12"
+      ]
+    },
+    "singleton(Parser::Builders::Default)#send": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner.rb:202"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | Hash[Dynamic[top], Tru...#[]": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner.rb:202"
+      ]
+    },
+    "singleton(Parser::Color)#yellow": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner/ruby_parse.rb:24"
+      ]
+    },
+    "singleton(Parser::Color)#magenta": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner/ruby_parse.rb:25"
+      ]
+    },
+    "singleton(Parser::Color)#green": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner/ruby_parse.rb:32"
+      ]
+    },
+    "Parser::Runner::RubyParse::LocationProcessor#process": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner/ruby_parse.rb:144"
+      ]
+    },
+    "singleton(Object)#const_get": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner/ruby_rewrite.rb:43"
+      ]
+    },
+    "singleton(IO)#popen": {
+      "count": 1,
+      "examples": [
+        "lib/parser/runner/ruby_rewrite.rb:73"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "==": 90,
+    "loc": 89,
+    "expression": 72,
+    "[]": 61,
+    "type": 48,
+    "-": 44,
+    "join": 42,
+    "range": 41,
+    "to_sym": 41,
+    "begin_pos": 40,
+    "+": 39,
+    "length": 36,
+    "updated": 36,
+    "children": 35,
+    "end_pos": 29,
+    "empty?": 29,
+    "on": 28,
+    "size": 26,
+    "to_s": 20,
+    "!=": 20,
+    "replacement": 18,
+    ">": 17,
+    "dup": 16,
+    "first": 16,
+    "each": 15,
+    "name": 15,
+    "version": 14,
+    "last": 13,
+    "<<": 13,
+    "line": 13,
+    ">=": 12,
+    "nil?": 11,
+    "=~": 11,
+    "include?": 11,
+    "begin": 11,
+    "location": 11,
+    "freeze": 10,
+    "<=>": 10,
+    "<": 10,
+    "<=": 10
+  },
+  "implicit_self_methods_top": {
+    "loc": 155,
+    "value": 53,
+    "diagnostic": 27,
+    "process": 18,
+    "check_reserved_for_numparam": 14,
+    "check_condition": 12,
+    "join_exprs": 10,
+    "declared?": 10,
+    "active_queue": 9,
+    "line_begins": 9,
+    "emit": 6,
+    "string_value": 5,
+    "advance_comment": 5,
+    "color": 5,
+    "type": 5,
+    "top": 4,
+    "rewrite_hash_args_to_kwargs": 4,
+    "coerce_encoding": 4,
+    "data": 4,
+    "check_duplicate_args": 4,
+    "static_string": 3,
+    "words?": 3,
+    "text": 3,
+    "check_duplicate_pattern_variable": 3,
+    "check_lvar_name": 3,
+    "associate_and_advance_comment": 3,
+    "children": 3,
+    "try": 3,
+    "collapse_string_parts?": 3,
+    "active_insertions": 3,
+    "input_size": 3,
+    "parse": 3,
+    "line_index_for_position": 3,
+    "on_argument": 3,
+    "on_vasgn": 2,
+    "merge_actions!": 2,
+    "source": 2,
+    "emit_start_tok": 2,
+    "source_lines": 2,
+    "source_buffer": 2
+  }
+}

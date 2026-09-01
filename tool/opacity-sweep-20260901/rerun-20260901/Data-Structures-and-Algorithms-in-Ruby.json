@@ -1,0 +1,780 @@
+{
+  "files": 113,
+  "parse_errors": 5,
+  "total": 49743,
+  "tier_counts": {
+    "constant": 21317,
+    "dynamic_top": 19311,
+    "dynamic_specific": 194,
+    "bot": 1160,
+    "shaped": 1574,
+    "nominal": 6089,
+    "refined": 35,
+    "top": 63
+  },
+  "opaque_node_classes": {
+    "LocalVariableReadNode": 7505,
+    "ParenthesesNode": 1311,
+    "OrNode": 73,
+    "CallNode": 8567,
+    "BlockNode": 280,
+    "LocalVariableWriteNode": 907,
+    "AndNode": 215,
+    "IfNode": 306,
+    "LocalVariableOperatorWriteNode": 68,
+    "IndexOperatorWriteNode": 3,
+    "CallOperatorWriteNode": 45,
+    "EmbeddedStatementsNode": 9,
+    "InstanceVariableWriteNode": 24,
+    "LocalVariableTargetNode": 40,
+    "ClassVariableReadNode": 1,
+    "InstanceVariableReadNode": 13,
+    "ConstantReadNode": 6,
+    "ConstantPathNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 5091,
+    "assigned_local": 2318,
+    "block_param": 96
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 6134,
+    "dynamic_specific": 84,
+    "implicit_self": 208,
+    "precise": 2141
+  },
+  "opaque_ivar_reads": 13,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/Data-Structures-and-Algorithms-in-Ruby",
+  "scanned_paths": [
+    "."
+  ],
+  "parameter_inference": false,
+  "precise": 30175,
+  "precision_ratio": 0.6066,
+  "named_receiver_opaque_pairs": {
+    "Array#[]": {
+      "count": 246,
+      "examples": [
+        "./AlgorithmsChapters/DP/ALS.rb:12",
+        "./AlgorithmsChapters/DP/ALS.rb:12",
+        "./AlgorithmsChapters/DP/ALS.rb:13"
+      ]
+    },
+    "Heap#arr": {
+      "count": 147,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:38",
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:41",
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:42"
+      ]
+    },
+    "Graph#addEdge": {
+      "count": 95,
+      "examples": [
+        "./Graph/Graph.rb:133",
+        "./Graph/Graph.rb:134",
+        "./Graph/Graph.rb:263"
+      ]
+    },
+    "Heap#size": {
+      "count": 86,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:14",
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:35",
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:38"
+      ]
+    },
+    "Graph#count": {
+      "count": 82,
+      "examples": [
+        "./Graph/Graph.rb:139",
+        "./Graph/Graph.rb:153",
+        "./Graph/Graph.rb:171"
+      ]
+    },
+    "Array#[]=": {
+      "count": 77,
+      "examples": [
+        "./AlgorithmsChapters/DAC/ClosestPair.rb:73",
+        "./AlgorithmsChapters/DP/ALS.rb:5",
+        "./AlgorithmsChapters/DP/ALS.rb:6"
+      ]
+    },
+    "Graph#addUndirectedEdge": {
+      "count": 60,
+      "examples": [
+        "./Graph/Graph.rb:217",
+        "./Graph/Graph.rb:218",
+        "./Graph/Graph.rb:219"
+      ]
+    },
+    "Tree#root": {
+      "count": 55,
+      "examples": [
+        "./BinaryTree/Tree.rb:41",
+        "./BinaryTree/Tree.rb:58",
+        "./BinaryTree/Tree.rb:72"
+      ]
+    },
+    "Queue#push": {
+      "count": 46,
+      "examples": [
+        "./BinaryTree/Tree.rb:147",
+        "./BinaryTree/Tree.rb:153",
+        "./BinaryTree/Tree.rb:156"
+      ]
+    },
+    "Graph#Adj": {
+      "count": 31,
+      "examples": [
+        "./Graph/Graph.rb:129",
+        "./Graph/Graph.rb:140",
+        "./Graph/Graph.rb:159"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 30,
+      "examples": [
+        "./AlgorithmsChapters/BT/TSP.rb:43",
+        "./AlgorithmsChapters/DP/LargestBitonicSubseq.rb:36",
+        "./AlgorithmsChapters/DP/LargestBitonicSubseq.rb:36"
+      ]
+    },
+    "BTree#root": {
+      "count": 25,
+      "examples": [
+        "./BinaryTree/BTree.rb:25",
+        "./BinaryTree/BTree.rb:57",
+        "./BinaryTree/BTree.rb:60"
+      ]
+    },
+    "Queue#pop": {
+      "count": 24,
+      "examples": [
+        "./BinaryTree/Tree.rb:150",
+        "./BinaryTree/Tree.rb:187",
+        "./BinaryTree/Tree.rb:198"
+      ]
+    },
+    "GraphAM#count": {
+      "count": 24,
+      "examples": [
+        "./Graph/GraphAM.rb:122",
+        "./Graph/GraphAM.rb:122",
+        "./Graph/GraphAM.rb:136"
+      ]
+    },
+    "RBTree#NullNode": {
+      "count": 24,
+      "examples": [
+        "./BinaryTree/RBTree.rb:20",
+        "./BinaryTree/RBTree.rb:21",
+        "./BinaryTree/RBTree.rb:35"
+      ]
+    },
+    "Heap#compare": {
+      "count": 24,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:38",
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:41",
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:51"
+      ]
+    },
+    "DoublyLinkedList#head": {
+      "count": 22,
+      "examples": [
+        "./LinkedList/Doubly.rb:32",
+        "./LinkedList/Doubly.rb:43",
+        "./LinkedList/Doubly.rb:52"
+      ]
+    },
+    "Heap#remove": {
+      "count": 22,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:138",
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:135",
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:136"
+      ]
+    },
+    "Heap#isEmpty": {
+      "count": 21,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:68",
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:84",
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:68"
+      ]
+    },
+    "[]#pop": {
+      "count": 16,
+      "examples": [
+        "./BinaryTree/Tree.rb:939",
+        "./Stack/StackExercise.rb:29",
+        "./Stack/StackExercise.rb:33"
+      ]
+    },
+    "AVLTree#height": {
+      "count": 14,
+      "examples": [
+        "./BinaryTree/AVLTree.rb:29",
+        "./BinaryTree/AVLTree.rb:29",
+        "./BinaryTree/AVLTree.rb:70"
+      ]
+    },
+    "Tree#insert": {
+      "count": 14,
+      "examples": [
+        "./BinaryTree/Tree.rb:1048",
+        "./BinaryTree/Tree.rb:1049",
+        "./BinaryTree/Tree.rb:1050"
+      ]
+    },
+    "CountMap#hm": {
+      "count": 13,
+      "examples": [
+        "./HashTable/CountMap.rb:10",
+        "./HashTable/CountMap.rb:11",
+        "./HashTable/CountMap.rb:11"
+      ]
+    },
+    "DoublyLinkedList#addHead": {
+      "count": 13,
+      "examples": [
+        "./LinkedList/Doubly.rb:198",
+        "./LinkedList/Doubly.rb:217",
+        "./LinkedList/Doubly.rb:218"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 12,
+      "examples": [
+        "./BinaryTree/Tree.rb:253",
+        "./Collections/Stack.rb:9",
+        "./Collections/deque.rb:17"
+      ]
+    },
+    "MedianHeap#maxHeap": {
+      "count": 12,
+      "examples": [
+        "./Heap/HeapEx.rb:421",
+        "./Heap/HeapEx.rb:421",
+        "./Heap/HeapEx.rb:422"
+      ]
+    },
+    "Array[Dynamic[top]?]#[]": {
+      "count": 12,
+      "examples": [
+        "./Graph/Graph.rb:886",
+        "./Graph/Graph.rb:890",
+        "./Graph/Graph.rb:891"
+      ]
+    },
+    "Array[Dynamic[top]] | []#pop": {
+      "count": 12,
+      "examples": [
+        "./BinaryTree/Tree.rb:167",
+        "./BinaryTree/Tree.rb:243",
+        "./BinaryTree/Tree.rb:529"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 11,
+      "examples": [
+        "./AlgorithmsChapters/DP/ALS.rb:12",
+        "./AlgorithmsChapters/DP/ALS.rb:13",
+        "./AlgorithmsChapters/DP/ALS.rb:17"
+      ]
+    },
+    "HashTableLP#Flag": {
+      "count": 11,
+      "examples": [
+        "./HashTable/HashTableLP.rb:32",
+        "./HashTable/HashTableLP.rb:32",
+        "./HashTable/HashTableLP.rb:35"
+      ]
+    },
+    "MedianHeap#minHeap": {
+      "count": 10,
+      "examples": [
+        "./Heap/HeapEx.rb:424",
+        "./Heap/HeapEx.rb:427",
+        "./Heap/HeapEx.rb:429"
+      ]
+    },
+    "HashTableLP#tableSize": {
+      "count": 10,
+      "examples": [
+        "./HashTable/HashTableLP.rb:17",
+        "./HashTable/HashTableLP.rb:31",
+        "./HashTable/HashTableLP.rb:39"
+      ]
+    },
+    "Stack#push": {
+      "count": 9,
+      "examples": [
+        "./Queue/StackUsingQueue.rb:53",
+        "./Queue/StackUsingQueue.rb:54",
+        "./Queue/StackUsingQueue.rb:55"
+      ]
+    },
+    "Array[Dynamic[top]] | []#[]": {
+      "count": 9,
+      "examples": [
+        "./Queue/QueueEx.rb:110",
+        "./Queue/QueueEx.rb:117",
+        "./Queue/QueueEx.rb:144"
+      ]
+    },
+    "RangeMaxST#segArr": {
+      "count": 9,
+      "examples": [
+        "./BinaryTree/rangeMaxST.rb:19",
+        "./BinaryTree/rangeMaxST.rb:26",
+        "./BinaryTree/rangeMaxST.rb:28"
+      ]
+    },
+    "RmqST#segArr": {
+      "count": 9,
+      "examples": [
+        "./BinaryTree/rmqST.rb:19",
+        "./BinaryTree/rmqST.rb:26",
+        "./BinaryTree/rmqST.rb:28"
+      ]
+    },
+    "Queue#add": {
+      "count": 9,
+      "examples": [
+        "./Queue/Queue.rb:45",
+        "./Queue/Queue.rb:46",
+        "./Queue/Queue.rb:47"
+      ]
+    },
+    "Dequeue#deq": {
+      "count": 8,
+      "examples": [
+        "./Queue/Dequeue.rb:9",
+        "./Queue/Dequeue.rb:13",
+        "./Queue/Dequeue.rb:17"
+      ]
+    },
+    "AVLTree#insert": {
+      "count": 8,
+      "examples": [
+        "./BinaryTree/AVLTree.rb:199",
+        "./BinaryTree/AVLTree.rb:200",
+        "./BinaryTree/AVLTree.rb:201"
+      ]
+    },
+    "BTree#max": {
+      "count": 8,
+      "examples": [
+        "./BinaryTree/BTree.rb:83",
+        "./BinaryTree/BTree.rb:107",
+        "./BinaryTree/BTree.rb:109"
+      ]
+    },
+    "Heap#isMinHeap=": {
+      "count": 8,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:8",
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:8",
+        "./AlgorithmsChapters/Greedy/JoinRopes.rb:8"
+      ]
+    },
+    "Heap#size=": {
+      "count": 8,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:12",
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:12",
+        "./AlgorithmsChapters/Greedy/JoinRopes.rb:12"
+      ]
+    },
+    "Heap#arr=": {
+      "count": 8,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:13",
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:13",
+        "./AlgorithmsChapters/Greedy/JoinRopes.rb:13"
+      ]
+    },
+    "SPLAYTree#root": {
+      "count": 8,
+      "examples": [
+        "./BinaryTree/SPLAYTree.rb:22",
+        "./BinaryTree/SPLAYTree.rb:92",
+        "./BinaryTree/SPLAYTree.rb:122"
+      ]
+    },
+    "Heap#isMinHeap": {
+      "count": 8,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/ChotaBhim.rb:23",
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:23",
+        "./AlgorithmsChapters/Greedy/JoinRopes.rb:23"
+      ]
+    },
+    "SegmentTree#segArr": {
+      "count": 8,
+      "examples": [
+        "./BinaryTree/SegmentTree.rb:19",
+        "./BinaryTree/SegmentTree.rb:26",
+        "./BinaryTree/SegmentTree.rb:28"
+      ]
+    },
+    "RBTree#root": {
+      "count": 8,
+      "examples": [
+        "./BinaryTree/RBTree.rb:30",
+        "./BinaryTree/RBTree.rb:65",
+        "./BinaryTree/RBTree.rb:90"
+      ]
+    },
+    "GraphAM#adj": {
+      "count": 8,
+      "examples": [
+        "./Graph/GraphAM.rb:126",
+        "./Graph/GraphAM.rb:140",
+        "./Graph/GraphAM.rb:141"
+      ]
+    },
+    "Hash#[]": {
+      "count": 8,
+      "examples": [
+        "./HashTable/HashTableExercise.rb:9",
+        "./HashTable/HashTableExercise.rb:16",
+        "./HashTable/HashTableExercise.rb:19"
+      ]
+    },
+    "RBTree#leftRotate": {
+      "count": 7,
+      "examples": [
+        "./BinaryTree/RBTree.rb:105",
+        "./BinaryTree/RBTree.rb:109",
+        "./BinaryTree/RBTree.rb:180"
+      ]
+    },
+    "RBTree#rightRotate": {
+      "count": 7,
+      "examples": [
+        "./BinaryTree/RBTree.rb:104",
+        "./BinaryTree/RBTree.rb:110",
+        "./BinaryTree/RBTree.rb:174"
+      ]
+    },
+    "RmqST#n": {
+      "count": 6,
+      "examples": [
+        "./BinaryTree/rmqST.rb:8",
+        "./BinaryTree/rmqST.rb:13",
+        "./BinaryTree/rmqST.rb:41"
+      ]
+    },
+    "RmqST#getMin": {
+      "count": 6,
+      "examples": [
+        "./BinaryTree/rmqST.rb:101",
+        "./BinaryTree/rmqST.rb:102",
+        "./BinaryTree/rmqST.rb:104"
+      ]
+    },
+    "HashTableSC#arrayList": {
+      "count": 6,
+      "examples": [
+        "./HashTable/HashTableSC.rb:25",
+        "./HashTable/HashTableSC.rb:34",
+        "./HashTable/HashTableSC.rb:36"
+      ]
+    },
+    "SegmentTree#size": {
+      "count": 6,
+      "examples": [
+        "./BinaryTree/SegmentTree.rb:8",
+        "./BinaryTree/SegmentTree.rb:13",
+        "./BinaryTree/SegmentTree.rb:33"
+      ]
+    },
+    "[]#[]": {
+      "count": 6,
+      "examples": [
+        "./BinaryTree/Tree.rb:938",
+        "./Queue/QueueEx.rb:106",
+        "./Queue/QueueEx.rb:140"
+      ]
+    },
+    "RangeMaxST#n": {
+      "count": 6,
+      "examples": [
+        "./BinaryTree/rangeMaxST.rb:8",
+        "./BinaryTree/rangeMaxST.rb:13",
+        "./BinaryTree/rangeMaxST.rb:42"
+      ]
+    },
+    "AVLTree#max": {
+      "count": 6,
+      "examples": [
+        "./BinaryTree/AVLTree.rb:70",
+        "./BinaryTree/AVLTree.rb:101",
+        "./BinaryTree/AVLTree.rb:102"
+      ]
+    },
+    "Queue#remove": {
+      "count": 6,
+      "examples": [
+        "./Queue/Queue.rb:50",
+        "./Queue/Queue.rb:51",
+        "./Queue/QueueLL.rb:71"
+      ]
+    },
+    "Stack#que1": {
+      "count": 6,
+      "examples": [
+        "./Queue/StackUsingQueue.rb:11",
+        "./Queue/StackUsingQueue.rb:19",
+        "./Queue/StackUsingQueue.rb:25"
+      ]
+    },
+    "Queue#count": {
+      "count": 6,
+      "examples": [
+        "./Queue/Queue.rb:12",
+        "./Queue/Queue.rb:22",
+        "./Queue/Queue.rb:33"
+      ]
+    },
+    "Items#wt": {
+      "count": 6,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/FractionalKnapsack.rb:9",
+        "./AlgorithmsChapters/Greedy/FractionalKnapsack.rb:27",
+        "./AlgorithmsChapters/Greedy/FractionalKnapsack.rb:28"
+      ]
+    },
+    "Queue#stk2": {
+      "count": 6,
+      "examples": [
+        "./Queue/QueueUsingStack.rb:14",
+        "./Queue/QueueUsingStack.rb:15",
+        "./Queue/QueueUsingStack.rb:19"
+      ]
+    },
+    "Stack#stk": {
+      "count": 6,
+      "examples": [
+        "./Stack/Stack.rb:11",
+        "./Stack/Stack.rb:15",
+        "./Stack/Stack.rb:19"
+      ]
+    },
+    "RBTree#root=": {
+      "count": 5,
+      "examples": [
+        "./BinaryTree/RBTree.rb:21",
+        "./BinaryTree/RBTree.rb:66",
+        "./BinaryTree/RBTree.rb:91"
+      ]
+    },
+    "BTree#min": {
+      "count": 5,
+      "examples": [
+        "./BinaryTree/BTree.rb:217",
+        "./BinaryTree/BTree.rb:251",
+        "./BinaryTree/BTree.rb:255"
+      ]
+    },
+    "Hash#[]=": {
+      "count": 5,
+      "examples": [
+        "./HashTable/HashTableExercise.rb:9",
+        "./HashTable/HashTableExercise.rb:19",
+        "./Searching/Searching.rb:2120"
+      ]
+    },
+    "Items#density": {
+      "count": 5,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/FractionalKnapsack.rb:23",
+        "./AlgorithmsChapters/Greedy/FractionalKnapsack.rb:23",
+        "./AlgorithmsChapters/Greedy/FractionalKnapsack.rb:31"
+      ]
+    },
+    "HashTableLP#EMPTY_VALUE": {
+      "count": 5,
+      "examples": [
+        "./HashTable/HashTableLP.rb:12",
+        "./HashTable/HashTableLP.rb:32",
+        "./HashTable/HashTableLP.rb:53"
+      ]
+    },
+    "Hash[Dynamic[top], 1 | Dynamic[top]]#[]": {
+      "count": 5,
+      "examples": [
+        "./Searching/Searching.rb:2128",
+        "./Searching/Searching.rb:2129",
+        "./Searching/Searching.rb:2421"
+      ]
+    },
+    "Heap#peek": {
+      "count": 5,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/HuffmanTree.rb:140",
+        "./Heap/HeapEx.rb:122",
+        "./Heap/HeapEx.rb:132"
+      ]
+    },
+    "Set#hm": {
+      "count": 5,
+      "examples": [
+        "./Collections/Set2.rb:8",
+        "./Collections/Set2.rb:12",
+        "./Collections/Set2.rb:16"
+      ]
+    },
+    "HashTableLP#Key": {
+      "count": 5,
+      "examples": [
+        "./HashTable/HashTableLP.rb:33",
+        "./HashTable/HashTableLP.rb:56",
+        "./HashTable/HashTableLP.rb:73"
+      ]
+    },
+    "HashTableLP#FILLED_VALUE": {
+      "count": 5,
+      "examples": [
+        "./HashTable/HashTableLP.rb:35",
+        "./HashTable/HashTableLP.rb:56",
+        "./HashTable/HashTableLP.rb:73"
+      ]
+    },
+    "Stack#head": {
+      "count": 5,
+      "examples": [
+        "./Stack/StackLL.rb:30",
+        "./Stack/StackLL.rb:34",
+        "./Stack/StackLL.rb:42"
+      ]
+    },
+    "Queue#stk1": {
+      "count": 5,
+      "examples": [
+        "./Queue/QueueUsingStack.rb:10",
+        "./Queue/QueueUsingStack.rb:17",
+        "./Queue/QueueUsingStack.rb:18"
+      ]
+    },
+    "Tree#treeDepthUtil": {
+      "count": 5,
+      "examples": [
+        "./BinaryTree/Tree.rb:361",
+        "./BinaryTree/Tree.rb:368",
+        "./BinaryTree/Tree.rb:369"
+      ]
+    },
+    "JobSequencing#jobs": {
+      "count": 5,
+      "examples": [
+        "./AlgorithmsChapters/Greedy/JobSequencing.rb:29",
+        "./AlgorithmsChapters/Greedy/JobSequencing.rb:35",
+        "./AlgorithmsChapters/Greedy/JobSequencing.rb:43"
+      ]
+    },
+    "RangeMaxST#getMax": {
+      "count": 5,
+      "examples": [
+        "./BinaryTree/rangeMaxST.rb:101",
+        "./BinaryTree/rangeMaxST.rb:102",
+        "./BinaryTree/rangeMaxST.rb:103"
+      ]
+    },
+    "SPLAYTree#rightRotate": {
+      "count": 5,
+      "examples": [
+        "./BinaryTree/SPLAYTree.rb:101",
+        "./BinaryTree/SPLAYTree.rb:106",
+        "./BinaryTree/SPLAYTree.rb:107"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 1640,
+    "+": 535,
+    "-": 525,
+    "==": 515,
+    "<": 255,
+    "to_s": 247,
+    "[]=": 240,
+    ">": 213,
+    "!=": 189,
+    "left": 152,
+    "right": 142,
+    "length": 123,
+    "value": 100,
+    "/": 91,
+    "<=": 84,
+    ">=": 76,
+    "dest": 59,
+    "parent": 54,
+    "size": 53,
+    "keys": 48,
+    "*": 46,
+    "arr": 43,
+    "<=>": 41,
+    "n": 40,
+    "next": 38,
+    "data": 37,
+    "sort!": 35,
+    "ord": 31,
+    "%": 28,
+    "push": 26,
+    "pop": 25,
+    "abs": 24,
+    "right=": 23,
+    "left=": 21,
+    "parent=": 19,
+    "colour": 19,
+    "-@": 18,
+    "leaf": 16,
+    "cost": 12,
+    "src": 11
+  },
+  "implicit_self_methods_top": {
+    "swap": 20,
+    "min": 15,
+    "max": 13,
+    "fibonacci": 6,
+    "binarySearchRotateArrayUtil": 5,
+    "editDistUtil": 5,
+    "findRotationMaxUtil": 4,
+    "greater": 4,
+    "mxVal": 4,
+    "rotationMaxUtil": 3,
+    "binarySearch01Util": 3,
+    "firstIndex": 3,
+    "findLastIndex": 3,
+    "findFirstIndex": 3,
+    "optBstCostTDUtil": 3,
+    "sum": 3,
+    "optBstCostUtil": 3,
+    "minCostBstTDUtil": 3,
+    "MatrixChainMulTDUtil": 3,
+    "MatrixChainMulBruteForceUtil": 3,
+    "reverseArray": 3,
+    "bottomInsert": 3,
+    "fibonacciTDUtil": 3,
+    "minCost": 3,
+    "maxValueJobUtil": 3,
+    "binarySearchUtil": 3,
+    "maxCost01KnapsackUtil": 3,
+    "maxCost01KnapsackTDUtil": 3,
+    "sortedInsert": 2,
+    "countRotation": 2,
+    "partition": 2,
+    "matchExp": 2,
+    "infixToPostfixUtil": 2,
+    "fastestWayTDUtil": 2,
+    "pow": 2,
+    "p": 2,
+    "maxValueJobUtilTD": 2,
+    "minCoins2": 2,
+    "GCD": 2,
+    "josephus": 1
+  }
+}

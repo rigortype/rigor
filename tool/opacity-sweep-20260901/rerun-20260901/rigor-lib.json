@@ -1,0 +1,799 @@
+{
+  "files": 430,
+  "parse_errors": 0,
+  "total": 168912,
+  "tier_counts": {
+    "constant": 51464,
+    "nominal": 37833,
+    "bot": 4919,
+    "shaped": 9135,
+    "dynamic_top": 64720,
+    "dynamic_specific": 242,
+    "refined": 238,
+    "top": 361
+  },
+  "opaque_node_classes": {
+    "LocalVariableWriteNode": 3135,
+    "CallNode": 22532,
+    "LocalVariableReadNode": 28242,
+    "BlockNode": 2513,
+    "EmbeddedStatementsNode": 1415,
+    "OrNode": 748,
+    "AndNode": 666,
+    "ParenthesesNode": 178,
+    "LocalVariableTargetNode": 583,
+    "BeginNode": 191,
+    "InstanceVariableWriteNode": 677,
+    "IfNode": 845,
+    "LocalVariableOperatorWriteNode": 23,
+    "InstanceVariableReadNode": 2079,
+    "MultiWriteNode": 64,
+    "ConstantReadNode": 38,
+    "CaseNode": 292,
+    "SplatNode": 187,
+    "YieldNode": 47,
+    "UnlessNode": 68,
+    "ConstantPathNode": 248,
+    "ModuleNode": 105,
+    "MultiTargetNode": 67,
+    "IndexOrWriteNode": 21,
+    "ForwardingSuperNode": 24,
+    "InstanceVariableOrWriteNode": 22,
+    "SuperNode": 23,
+    "LocalVariableOrWriteNode": 6,
+    "InstanceVariableTargetNode": 5,
+    "CallOrWriteNode": 3,
+    "GlobalVariableReadNode": 22,
+    "InstanceVariableOperatorWriteNode": 1,
+    "IndexOperatorWriteNode": 4,
+    "ConstantWriteNode": 5,
+    "GlobalVariableWriteNode": 1,
+    "LocalVariableAndWriteNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 17493,
+    "assigned_local": 7045,
+    "block_param": 3704
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 3484,
+    "dynamic_top": 16806,
+    "precise": 2118,
+    "dynamic_specific": 118,
+    "top": 6
+  },
+  "opaque_ivar_reads": 2079,
+  "target": "/Users/megurine/repo/ruby/rigor",
+  "scanned_paths": [
+    "lib"
+  ],
+  "parameter_inference": false,
+  "precise": 103589,
+  "precision_ratio": 0.6133,
+  "named_receiver_opaque_pairs": {
+    "Type::Constant#value": {
+      "count": 136,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:868",
+        "lib/rigor/analysis/check_rules.rb:1341",
+        "lib/rigor/analysis/check_rules.rb:1604"
+      ]
+    },
+    "Hash#[]": {
+      "count": 97,
+      "examples": [
+        "lib/rigor/analysis/baseline.rb:105",
+        "lib/rigor/analysis/baseline.rb:110",
+        "lib/rigor/analysis/baseline.rb:120"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 78,
+      "examples": [
+        "lib/rigor/analysis/baseline.rb:252",
+        "lib/rigor/analysis/check_rules/ivar_write_collector.rb:108",
+        "lib/rigor/analysis/check_rules/ivar_write_collector.rb:109"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#fetch": {
+      "count": 57,
+      "examples": [
+        "lib/rigor/analysis/runner/pool_coordinator.rb:401",
+        "lib/rigor/cli.rb:146",
+        "lib/rigor/cli.rb:147"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 46,
+      "examples": [
+        "lib/rigor/analysis/dependency_source_inference/builder.rb:60",
+        "lib/rigor/analysis/reachability/scan_cache.rb:77",
+        "lib/rigor/analysis/runner.rb:1589"
+      ]
+    },
+    "Thread#[]": {
+      "count": 43,
+      "examples": [
+        "lib/rigor/analysis/dependency_recorder.rb:96",
+        "lib/rigor/analysis/dependency_recorder.rb:133",
+        "lib/rigor/analysis/dependency_recorder.rb:136"
+      ]
+    },
+    "Type::Union#members": {
+      "count": 43,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:1414",
+        "lib/rigor/analysis/check_rules.rb:1708",
+        "lib/rigor/analysis/check_rules.rb:2500"
+      ]
+    },
+    "Type::Tuple#elements": {
+      "count": 41,
+      "examples": [
+        "lib/rigor/inference/acceptance.rb:702",
+        "lib/rigor/inference/acceptance.rb:705",
+        "lib/rigor/inference/acceptance.rb:709"
+      ]
+    },
+    "Type::Nominal#class_name": {
+      "count": 39,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:768",
+        "lib/rigor/analysis/check_rules.rb:1606",
+        "lib/rigor/analysis/check_rules.rb:1876"
+      ]
+    },
+    "Type::Singleton#class_name": {
+      "count": 33,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:1713",
+        "lib/rigor/effects/collector.rb:158",
+        "lib/rigor/inference/acceptance.rb:181"
+      ]
+    },
+    "{}#[]=": {
+      "count": 33,
+      "examples": [
+        "lib/rigor/analysis/runner/pool_coordinator.rb:379",
+        "lib/rigor/analysis/runner/pool_coordinator.rb:451",
+        "lib/rigor/cache/rbs_class_ancestor_table.rb:31"
+      ]
+    },
+    "singleton(JSON)#pretty_generate": {
+      "count": 25,
+      "examples": [
+        "lib/rigor/cli/baseline_command.rb:168",
+        "lib/rigor/cli/check_command.rb:850",
+        "lib/rigor/cli/coverage_renderer.rb:96"
+      ]
+    },
+    "{}#[]": {
+      "count": 23,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:1004",
+        "lib/rigor/analysis/check_rules/duplicate_hash_key_collector.rb:86",
+        "lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb:253"
+      ]
+    },
+    "Prism::Node#rigor_each_child": {
+      "count": 22,
+      "examples": [
+        "lib/rigor/analysis/check_rules/always_truthy_condition_collector.rb:88",
+        "lib/rigor/analysis/check_rules/rule_walk.rb:156",
+        "lib/rigor/analysis/check_rules/self_closedness_scanner.rb:56"
+      ]
+    },
+    "Hash[String, Dynamic[top]]#fetch": {
+      "count": 20,
+      "examples": [
+        "lib/rigor/configuration.rb:480",
+        "lib/rigor/configuration.rb:481",
+        "lib/rigor/configuration.rb:483"
+      ]
+    },
+    "Type::Nominal#type_args": {
+      "count": 17,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:1606",
+        "lib/rigor/inference/method_dispatcher/iterator_dispatch.rb:265",
+        "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:217"
+      ]
+    },
+    "Array#[]": {
+      "count": 17,
+      "examples": [
+        "lib/rigor/analysis/effects_cache_probe.rb:105",
+        "lib/rigor/analysis/effects_cache_probe.rb:105",
+        "lib/rigor/analysis/runner.rb:778"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 16,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:3090",
+        "lib/rigor/analysis/runner/buffer_pool_dispatcher.rb:137",
+        "lib/rigor/analysis/runner/pool_coordinator.rb:437"
+      ]
+    },
+    "Type::HashShape#pairs": {
+      "count": 15,
+      "examples": [
+        "lib/rigor/inference/acceptance.rb:734",
+        "lib/rigor/inference/method_dispatcher/block_folding.rb:177",
+        "lib/rigor/inference/method_dispatcher/block_folding.rb:272"
+      ]
+    },
+    "Type::Nominal | Type::Singleton#class_name": {
+      "count": 15,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:865",
+        "lib/rigor/inference/closure_escape_analyzer.rb:82",
+        "lib/rigor/inference/method_dispatcher.rb:352"
+      ]
+    },
+    "Thread#[]=": {
+      "count": 14,
+      "examples": [
+        "lib/rigor/analysis/dependency_recorder.rb:103",
+        "lib/rigor/analysis/self_call_resolution_recorder.rb:79",
+        "lib/rigor/cache/file_digest.rb:57"
+      ]
+    },
+    "Proc#call": {
+      "count": 14,
+      "examples": [
+        "lib/rigor/builtins/imported_refinements.rb:161",
+        "lib/rigor/builtins/imported_refinements.rb:556",
+        "lib/rigor/builtins/imported_refinements.rb:586"
+      ]
+    },
+    "singleton(Rigor::Reflection)#instance_method_definition": {
+      "count": 14,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:837",
+        "lib/rigor/analysis/check_rules.rb:1096",
+        "lib/rigor/analysis/check_rules.rb:2655"
+      ]
+    },
+    "Rigor::Type::Constant#value": {
+      "count": 12,
+      "examples": [
+        "lib/rigor/builtins/hkt_builtins.rb:261",
+        "lib/rigor/type/combinator.rb:278",
+        "lib/rigor/type/combinator.rb:306"
+      ]
+    },
+    "singleton(Rigor::Inference::BudgetTrace)#hit": {
+      "count": 12,
+      "examples": [
+        "lib/rigor/inference/body_fixpoint.rb:62",
+        "lib/rigor/inference/expression_typer.rb:1669",
+        "lib/rigor/inference/expression_typer.rb:2039"
+      ]
+    },
+    "singleton(Rigor::Analysis::DependencyRecorder)#active?": {
+      "count": 12,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:2850",
+        "lib/rigor/inference/expression_typer.rb:2098",
+        "lib/rigor/inference/expression_typer.rb:2145"
+      ]
+    },
+    "singleton(Rigor::Inference::MethodDispatcher::SingletonFo...#receiver?": {
+      "count": 11,
+      "examples": [
+        "lib/rigor/inference/method_dispatcher/cgi_folding.rb:63",
+        "lib/rigor/inference/method_dispatcher/data_folding.rb:38",
+        "lib/rigor/inference/method_dispatcher/file_folding.rb:98"
+      ]
+    },
+    "bot#class": {
+      "count": 11,
+      "examples": [
+        "lib/rigor/analysis/fact_store.rb:101",
+        "lib/rigor/analysis/fact_store.rb:121",
+        "lib/rigor/environment/class_registry.rb:87"
+      ]
+    },
+    "singleton(Marshal)#load": {
+      "count": 11,
+      "examples": [
+        "lib/rigor/analysis/reachability/scan_cache.rb:111",
+        "lib/rigor/analysis/runner/buffer_pool_dispatcher.rb:194",
+        "lib/rigor/analysis/runner/pool_coordinator.rb:526"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 10,
+      "examples": [
+        "lib/rigor/inference/hkt_reducer.rb:228",
+        "lib/rigor/language_server/buffer_table.rb:31",
+        "lib/rigor/language_server/buffer_table.rb:32"
+      ]
+    },
+    "singleton(Rigor::Reflection)#singleton_method_definition": {
+      "count": 10,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:1094",
+        "lib/rigor/analysis/check_rules.rb:2657",
+        "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:304"
+      ]
+    },
+    "Hash#[]=": {
+      "count": 10,
+      "examples": [
+        "lib/rigor/cli/check_command.rb:576",
+        "lib/rigor/cli/coverage_scan.rb:71",
+        "lib/rigor/configuration.rb:424"
+      ]
+    },
+    "Hash#fetch": {
+      "count": 9,
+      "examples": [
+        "lib/rigor/analysis/reachability/scan.rb:213",
+        "lib/rigor/analysis/rule_catalog.rb:936",
+        "lib/rigor/analysis/rule_catalog.rb:940"
+      ]
+    },
+    "singleton(Rigor::Effects::Label)#valid?": {
+      "count": 9,
+      "examples": [
+        "lib/rigor/configuration.rb:784",
+        "lib/rigor/configuration.rb:811",
+        "lib/rigor/configuration.rb:871"
+      ]
+    },
+    "singleton(Rigor::Reflection)#instance_definition": {
+      "count": 9,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:951",
+        "lib/rigor/analysis/check_rules.rb:1387",
+        "lib/rigor/analysis/check_rules.rb:1777"
+      ]
+    },
+    "[Dynamic[top], 0]#max": {
+      "count": 8,
+      "examples": [
+        "lib/rigor/cli/effects_report.rb:114",
+        "lib/rigor/cli/prism_colorizer.rb:60",
+        "lib/rigor/cli/trace_renderer.rb:164"
+      ]
+    },
+    "Rigor::LanguageServer::ProjectContext#environment": {
+      "count": 8,
+      "examples": [
+        "lib/rigor/cli/coverage_command.rb:253",
+        "lib/rigor/cli/coverage_mutation.rb:180",
+        "lib/rigor/cli/coverage_mutation.rb:182"
+      ]
+    },
+    "singleton(Rigor::Plugin::Loader)#load": {
+      "count": 8,
+      "examples": [
+        "lib/rigor/analysis/effects_cache_probe.rb:122",
+        "lib/rigor/analysis/reachability/plugin_roots.rb:99",
+        "lib/rigor/analysis/runner/project_pre_passes.rb:248"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#max": {
+      "count": 8,
+      "examples": [
+        "lib/rigor/cli/trace_renderer.rb:258",
+        "lib/rigor/inference/method_dispatcher/constant_folding.rb:935",
+        "lib/rigor/inference/method_dispatcher/constant_folding.rb:1258"
+      ]
+    },
+    "Prism::BeginNode | Prism::StatementsNode | nil#rigor_each_child": {
+      "count": 8,
+      "examples": [
+        "lib/rigor/inference/synthetic_method_scanner.rb:177",
+        "lib/rigor/inference/synthetic_method_scanner.rb:180",
+        "lib/rigor/inference/synthetic_method_scanner.rb:314"
+      ]
+    },
+    "Range#begin": {
+      "count": 8,
+      "examples": [
+        "lib/rigor/inference/expression_typer.rb:2943",
+        "lib/rigor/inference/expression_typer.rb:2945",
+        "lib/rigor/inference/expression_typer.rb:2945"
+      ]
+    },
+    "singleton(Rigor::Cache::FileDigest)#with_run": {
+      "count": 7,
+      "examples": [
+        "lib/rigor/analysis/effects_cache_probe.rb:99",
+        "lib/rigor/analysis/incremental_session.rb:217",
+        "lib/rigor/analysis/incremental_session.rb:442"
+      ]
+    },
+    "Range#end": {
+      "count": 7,
+      "examples": [
+        "lib/rigor/inference/expression_typer.rb:2943",
+        "lib/rigor/inference/expression_typer.rb:2945",
+        "lib/rigor/inference/expression_typer.rb:2945"
+      ]
+    },
+    "{ name: String, relative: Dynamic[top], path: Dynamic[top...#fetch": {
+      "count": 7,
+      "examples": [
+        "lib/rigor/cli/docs_command.rb:97",
+        "lib/rigor/cli/docs_command.rb:107",
+        "lib/rigor/cli/docs_command.rb:107"
+      ]
+    },
+    "Type::HashShape#closed?": {
+      "count": 7,
+      "examples": [
+        "lib/rigor/inference/expression_typer.rb:3250",
+        "lib/rigor/inference/method_dispatcher/data_folding.rb:149",
+        "lib/rigor/inference/method_dispatcher/member_shape_projection.rb:49"
+      ]
+    },
+    "Rigor::Analysis::Runner::PoolCoordinator?#resolve_sequential_environment": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/analysis/runner.rb:550",
+        "lib/rigor/analysis/runner.rb:643",
+        "lib/rigor/analysis/runner.rb:676"
+      ]
+    },
+    "{ method: Dynamic[top], receiver: \"Float\" | \"Integer\" | \"...#[]": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/triage/catalogue.rb:128",
+        "lib/rigor/triage/catalogue.rb:128",
+        "lib/rigor/triage/catalogue.rb:201"
+      ]
+    },
+    "Type::HashShape#optional_keys": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/inference/expression_typer.rb:3251",
+        "lib/rigor/inference/method_dispatcher/data_folding.rb:150",
+        "lib/rigor/inference/method_dispatcher/member_shape_projection.rb:143"
+      ]
+    },
+    "singleton(Rigor::Effects::Registry)#for_configuration": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/analysis/effects_cache_probe.rb:128",
+        "lib/rigor/analysis/runner/effect_envelope_pass.rb:235",
+        "lib/rigor/cli/effects_command.rb:218"
+      ]
+    },
+    "Hash[String, json::value[String]] | {}#fetch": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/cli/skill_describe.rb:365",
+        "lib/rigor/effects/catalog.rb:127",
+        "lib/rigor/effects/registry.rb:75"
+      ]
+    },
+    "singleton(Rigor::CLI::PrismColorizer)#colorize": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/cli/annotate_command.rb:180",
+        "lib/rigor/cli/trace_renderer.rb:153",
+        "lib/rigor/cli/trace_renderer.rb:194"
+      ]
+    },
+    "Prism::ClassNode | Prism::ConstantWriteNode | Prism::Modu...#rigor_each_child": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/inference/scope_indexer.rb:1908",
+        "lib/rigor/inference/scope_indexer.rb:2076",
+        "lib/rigor/inference/scope_indexer.rb:2123"
+      ]
+    },
+    "singleton(Rigor::CLI::Options)#add_config": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/cli/coverage_command.rb:101",
+        "lib/rigor/cli/doctor_command.rb:95",
+        "lib/rigor/cli/effects_command.rb:142"
+      ]
+    },
+    "Prism::ClassNode | Prism::ModuleNode | Prism::Node#rigor_each_child": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/analysis/check_rules/ivar_write_collector.rb:82",
+        "lib/rigor/inference/scope_indexer.rb:1318",
+        "lib/rigor/inference/scope_indexer.rb:1410"
+      ]
+    },
+    "singleton(FileUtils)#mkdir_p": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/analysis/reachability/scan_cache.rb:94",
+        "lib/rigor/cache/incremental_snapshot.rb:234",
+        "lib/rigor/cache/store.rb:442"
+      ]
+    },
+    "Type::Dynamic#static_facet": {
+      "count": 6,
+      "examples": [
+        "lib/rigor/effects/collector.rb:162",
+        "lib/rigor/inference/method_dispatcher.rb:637",
+        "lib/rigor/inference/method_dispatcher/overload_selector.rb:223"
+      ]
+    },
+    "Type::Difference | Type::Refined#base": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:881",
+        "lib/rigor/inference/acceptance.rb:235",
+        "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:239"
+      ]
+    },
+    "Type::IntegerRange#lower": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/inference/method_dispatcher/constant_folding.rb:369",
+        "lib/rigor/inference/method_dispatcher/literal_string_folding.rb:211",
+        "lib/rigor/inference/method_dispatcher/literal_string_folding.rb:219"
+      ]
+    },
+    "Prism::CallNode | Prism::ClassNode | Prism::ModuleNode | ...#rigor_each_child": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/inference/scope_indexer.rb:498",
+        "lib/rigor/inference/scope_indexer.rb:2022",
+        "lib/rigor/inference/scope_indexer.rb:2184"
+      ]
+    },
+    "Array[Dynamic[top]]#max": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/analysis/check_rules.rb:1230",
+        "lib/rigor/cli/docs_command.rb:105",
+        "lib/rigor/cli/plugin_command.rb:96"
+      ]
+    },
+    "Mutex#synchronize": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/language_server/debouncer.rb:30",
+        "lib/rigor/language_server/debouncer.rb:46",
+        "lib/rigor/language_server/synchronized_writer.rb:17"
+      ]
+    },
+    "singleton(Rigor::Inference::BudgetTrace)#enabled?": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/cli/check_command.rb:633",
+        "lib/rigor/inference/expression_typer.rb:2238",
+        "lib/rigor/inference/expression_typer.rb:2251"
+      ]
+    },
+    "Hash | {}#[]": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/analysis/incremental_session.rb:280",
+        "lib/rigor/analysis/incremental_session.rb:289",
+        "lib/rigor/analysis/incremental_session.rb:297"
+      ]
+    },
+    "singleton(Rigor::Effects::Attribution)#empty": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/effects/collector.rb:45",
+        "lib/rigor/effects/collector.rb:94",
+        "lib/rigor/effects/scanner.rb:58"
+      ]
+    },
+    "singleton(Object)#const_get": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/builtins/predefined_constant_refinements.rb:114",
+        "lib/rigor/inference/acceptance.rb:795",
+        "lib/rigor/plugin/blueprint.rb:31"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/cache/file_digest.rb:106",
+        "lib/rigor/rbs_extended/hkt_directives.rb:170",
+        "lib/rigor/rbs_extended/hkt_directives.rb:170"
+      ]
+    },
+    ":usage_error | Hash[Dynamic[top], Dynamic[top]]#fetch": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/cli/lsp_command.rb:23",
+        "lib/rigor/cli/lsp_command.rb:44",
+        "lib/rigor/cli/mcp_command.rb:25"
+      ]
+    },
+    "singleton(Rigor::Effects::EnvelopeIndex)#empty": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/effects/collector.rb:45",
+        "lib/rigor/effects/collector.rb:94",
+        "lib/rigor/effects/scanner.rb:58"
+      ]
+    },
+    "singleton(Rigor::Effects::PluginFacts)#empty": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/effects/collector.rb:46",
+        "lib/rigor/effects/collector.rb:95",
+        "lib/rigor/effects/scanner.rb:59"
+      ]
+    },
+    "Rigor::Cache::Descriptor?#nil?": {
+      "count": 5,
+      "examples": [
+        "lib/rigor/analysis/effects_cache_probe.rb:70",
+        "lib/rigor/analysis/effects_cache_probe.rb:89",
+        "lib/rigor/analysis/run_cache_probe.rb:74"
+      ]
+    },
+    "singleton(Rigor::Cache::EngineSource)#process_identity": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/analysis/run_cache_key.rb:108",
+        "lib/rigor/cache/incremental_snapshot.rb:137",
+        "lib/rigor/protection/mutation_cache.rb:187"
+      ]
+    },
+    "Rigor::BleedingEdge::Feature | Rigor::BleedingEdge::Featu...#id": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/bleeding_edge.rb:214",
+        "lib/rigor/bleeding_edge.rb:227",
+        "lib/rigor/bleeding_edge.rb:244"
+      ]
+    },
+    "singleton(Rigor::Effects::SignatureSources)#collect": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/analysis/run_cache_probe.rb:122",
+        "lib/rigor/analysis/runner/effect_annotation_residual_pass.rb:75",
+        "lib/rigor/analysis/runner/effect_envelope_pass.rb:298"
+      ]
+    },
+    "singleton(Rigor::Effects::EffectTable)#empty": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/analysis/runner.rb:86",
+        "lib/rigor/analysis/runner.rb:920",
+        "lib/rigor/effects/propagator.rb:53"
+      ]
+    },
+    "singleton(Rigor::BleedingEdge)#features": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/cli/show_bleedingedge_command.rb:63",
+        "lib/rigor/cli/show_bleedingedge_command.rb:74",
+        "lib/rigor/cli/show_bleedingedge_command.rb:91"
+      ]
+    },
+    "singleton(Rigor::Inference::ParameterInferenceCollector)#collect": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/analysis/runner.rb:551",
+        "lib/rigor/analysis/runner.rb:989",
+        "lib/rigor/cli/coverage_scan.rb:67"
+      ]
+    },
+    "singleton(Rigor::Inference::DefNodeResolver)#resolve": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/analysis/runner.rb:656",
+        "lib/rigor/scope.rb:481",
+        "lib/rigor/scope.rb:494"
+      ]
+    },
+    "Type::App#bound": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/inference/hkt_reducer.rb:53",
+        "lib/rigor/inference/hkt_reducer.rb:54",
+        "lib/rigor/inference/hkt_reducer.rb:59"
+      ]
+    },
+    "{ count: 0, max: 0, percentiles: {}, over: Hash[Integer, ...#[]": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/cli/check_command.rb:688",
+        "lib/rigor/cli/check_command.rb:689",
+        "lib/rigor/cli/check_command.rb:689"
+      ]
+    },
+    "Monitor#synchronize": {
+      "count": 4,
+      "examples": [
+        "lib/rigor/cache/store.rb:192",
+        "lib/rigor/cache/store.rb:201",
+        "lib/rigor/cache/store.rb:210"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 1258,
+    "empty?": 841,
+    "==": 762,
+    "size": 521,
+    "to_s": 520,
+    "puts": 455,
+    "map": 450,
+    "name": 426,
+    "each": 410,
+    "fetch": 320,
+    "freeze": 311,
+    "+": 309,
+    "first": 290,
+    "nil?": 263,
+    "arguments": 207,
+    "join": 191,
+    "receiver": 181,
+    "include?": 181,
+    "dup": 173,
+    "<<": 150,
+    "-": 137,
+    "class": 132,
+    "value": 132,
+    "any?": 129,
+    "location": 117,
+    "to_sym": 104,
+    "all?": 103,
+    "class_name": 101,
+    "key?": 98,
+    "elements": 96,
+    "[]=": 92,
+    "body": 88,
+    "method_name": 80,
+    "keys": 80,
+    "path": 76,
+    "filter_map": 76,
+    "environment": 76,
+    "to_h": 75,
+    "uniq": 74,
+    ">": 73
+  },
+  "implicit_self_methods_top": {
+    "walk": 64,
+    "env": 35,
+    "value_fields": 23,
+    "total": 16,
+    "add": 15,
+    "files": 15,
+    "expect!": 14,
+    "send": 14,
+    "value": 13,
+    "cache_store": 13,
+    "consume": 13,
+    "record_hkt_error": 12,
+    "concrete_class_name": 12,
+    "constant_values": 11,
+    "taint": 11,
+    "kind": 11,
+    "dynamic_top?": 11,
+    "walk_node": 10,
+    "bound": 10,
+    "describe": 10,
+    "nil_member?": 10,
+    "plugins": 10,
+    "lookup_method": 9,
+    "translate_in": 9,
+    "method_name": 9,
+    "const_name_string": 9,
+    "instance_exec": 9,
+    "record_method_kind": 8,
+    "analyse": 8,
+    "resolve": 8,
+    "propagate": 8,
+    "narrow_integer_comparison": 8,
+    "collect_in_pattern_bindings": 7,
+    "element_type_of": 7,
+    "meta_new_block_body": 7,
+    "walk_methods_and_def_nodes": 7,
+    "record_unresolved": 7,
+    "rooted?": 7,
+    "skip_ws": 7,
+    "format_param": 7
+  }
+}

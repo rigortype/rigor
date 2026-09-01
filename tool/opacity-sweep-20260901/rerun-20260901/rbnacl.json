@@ -1,0 +1,580 @@
+{
+  "files": 37,
+  "parse_errors": 0,
+  "total": 4286,
+  "tier_counts": {
+    "constant": 1630,
+    "nominal": 1098,
+    "bot": 88,
+    "refined": 54,
+    "dynamic_top": 1303,
+    "shaped": 113
+  },
+  "opaque_node_classes": {
+    "ModuleNode": 22,
+    "ConstantPathNode": 48,
+    "CallNode": 519,
+    "AndNode": 7,
+    "GlobalVariableReadNode": 3,
+    "InstanceVariableWriteNode": 29,
+    "LocalVariableReadNode": 414,
+    "InstanceVariableReadNode": 55,
+    "LocalVariableWriteNode": 54,
+    "IfNode": 19,
+    "ConstantReadNode": 74,
+    "InstanceVariableOrWriteNode": 1,
+    "BeginNode": 5,
+    "ConstantWriteNode": 3,
+    "OrNode": 8,
+    "UnlessNode": 1,
+    "ClassNode": 11,
+    "ForwardingSuperNode": 1,
+    "EmbeddedStatementsNode": 20,
+    "CaseNode": 2,
+    "BlockNode": 1,
+    "LocalVariableTargetNode": 2,
+    "MultiWriteNode": 1,
+    "ConstantTargetNode": 3
+  },
+  "local_read_buckets": {
+    "def_param": 351,
+    "assigned_local": 63
+  },
+  "call_receiver_tiers": {
+    "precise": 95,
+    "dynamic_top": 184,
+    "implicit_self": 240
+  },
+  "opaque_ivar_reads": 55,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/rbnacl",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 2983,
+  "precision_ratio": 0.696,
+  "named_receiver_opaque_pairs": {
+    "singleton(RbNaCl::Util)#check_string": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/base.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/auth.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305/private_key.rb:45"
+      ]
+    },
+    "singleton(RbNaCl::Util)#verify32": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:90",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/key_comparator.rb:51"
+      ]
+    },
+    "singleton(RbNaCl::Util)#check_hmac_key": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:44",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:44",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:44"
+      ]
+    },
+    "singleton(RbNaCl::SelfTest)#hmac_test": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/self_test.rb:118",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/self_test.rb:119",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/self_test.rb:120"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA512256)#auth_hmacsha512256_final": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:82"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA512256)#auth_hmacsha512256_update": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:81"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA512256)#auth_hmacsha512256_init": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512256.rb:80"
+      ]
+    },
+    "singleton(RbNaCl::Util)#zero_pad": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:100",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:103"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA512)#auth_hmacsha512_final": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:82"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA512)#auth_hmacsha512_update": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:81"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA512)#auth_hmacsha512_init": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:80"
+      ]
+    },
+    "RbNaCl::Hash::Blake2b::State?#pointer": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:154",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:167"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA256)#auth_hmacsha256_init": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:80"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA256)#auth_hmacsha256_update": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:81"
+      ]
+    },
+    "singleton(RbNaCl::HMAC::SHA256)#auth_hmacsha256_final": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha256.rb:82"
+      ]
+    },
+    "singleton(RbNaCl::Util)#verify64": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hmac/sha512.rb:90"
+      ]
+    },
+    "singleton(RbNaCl::OneTimeAuths::Poly1305)#onetimeauth_poly1305": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/one_time_auths/poly1305.rb:41"
+      ]
+    },
+    "singleton(RbNaCl::OneTimeAuths::Poly1305)#onetimeauth_poly1305_verify": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/one_time_auths/poly1305.rb:45"
+      ]
+    },
+    "singleton(RbNaCl::PasswordHash::Argon2)#digest_str_verify": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/password_hash.rb:106"
+      ]
+    },
+    "singleton(RbNaCl::PasswordHash::Argon2)#opslimit_value": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/password_hash/argon2.rb:96"
+      ]
+    },
+    "singleton(RbNaCl::Signatures::Ed25519::VerifyKey)#crypto_sign_ed25519_pk_to_curve25519": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/signatures/ed25519/verify_key.rb:118"
+      ]
+    },
+    "singleton(RbNaCl::Signatures::Ed25519::VerifyKey)#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/signatures/ed25519/verify_key.rb:93"
+      ]
+    },
+    "singleton(RbNaCl::Signatures::Ed25519::VerifyKey)#sign_ed25519_open": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/signatures/ed25519/verify_key.rb:76"
+      ]
+    },
+    "singleton(RbNaCl::Signatures::Ed25519::SigningKey)#crypto_sign_ed25519_sk_to_curve25519": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/signatures/ed25519/signing_key.rb:143"
+      ]
+    },
+    "singleton(RbNaCl::Signatures::Ed25519::SigningKey)#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/signatures/ed25519/signing_key.rb:118"
+      ]
+    },
+    "singleton(RbNaCl::Signatures::Ed25519::SigningKey)#sign_ed25519": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/signatures/ed25519/signing_key.rb:95"
+      ]
+    },
+    "singleton(RbNaCl::Signatures::Ed25519::SigningKey)#sign_ed25519_seed_keypair": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/signatures/ed25519/signing_key.rb:67"
+      ]
+    },
+    "singleton(RbNaCl::Util)#bin2hex": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/serializable.rb:19"
+      ]
+    },
+    "singleton(RbNaCl::SelfTest)#digital_signature_test": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/self_test.rb:116"
+      ]
+    },
+    "singleton(RbNaCl::SelfTest)#secret_box_test": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/self_test.rb:115"
+      ]
+    },
+    "singleton(RbNaCl::SelfTest)#box_test": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/self_test.rb:114"
+      ]
+    },
+    "singleton(RbNaCl::SecretBoxes::XSalsa20Poly1305)#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/secret_boxes/xsalsa20poly1305.rb:109"
+      ]
+    },
+    "singleton(RbNaCl::SecretBoxes::XSalsa20Poly1305)#secretbox_xsalsa20poly1305_open": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/secret_boxes/xsalsa20poly1305.rb:98"
+      ]
+    },
+    "singleton(RbNaCl::SecretBoxes::XSalsa20Poly1305)#secretbox_xsalsa20poly1305": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/secret_boxes/xsalsa20poly1305.rb:72"
+      ]
+    },
+    "singleton(RbNaCl::PasswordHash::SCrypt)#scrypt": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/password_hash/scrypt.rb:61"
+      ]
+    },
+    "singleton(RbNaCl::PasswordHash::Argon2)#pwhash_str": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/password_hash/argon2.rb:148"
+      ]
+    },
+    "singleton(RbNaCl::PasswordHash::Argon2)#pwhash": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/password_hash/argon2.rb:127"
+      ]
+    },
+    "singleton(RbNaCl::PasswordHash::Argon2)#digest_size_value": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/password_hash/argon2.rb:98"
+      ]
+    },
+    "singleton(RbNaCl::PasswordHash::Argon2)#memlimit_value": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/password_hash/argon2.rb:97"
+      ]
+    },
+    "singleton(RbNaCl::Init)#sodium_init": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl.rb:108"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::Base)#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/base.rb:84"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::Base)#nonce_bytes": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/base.rb:98"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::Base)#key_bytes": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/base.rb:112"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::Base)#tag_bytes": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/base.rb:126"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::ChaCha20Poly1305IETF)#aead_chacha20poly1305_ietf_encrypt": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/chacha20poly1305_ietf.rb:29"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::ChaCha20Poly1305IETF)#aead_chacha20poly1305_ietf_decrypt": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/chacha20poly1305_ietf.rb:36"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::ChaCha20Poly1305Legacy)#aead_chacha20poly1305_encrypt": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/chacha20poly1305_legacy.rb:28"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::ChaCha20Poly1305Legacy)#aead_chacha20poly1305_decrypt": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/chacha20poly1305_legacy.rb:35"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::XChaCha20Poly1305IETF)#aead_xchacha20poly1305_ietf_encrypt": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/xchacha20poly1305_ietf.rb:29"
+      ]
+    },
+    "singleton(RbNaCl::AEAD::XChaCha20Poly1305IETF)#aead_xchacha20poly1305_ietf_decrypt": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/aead/xchacha20poly1305_ietf.rb:36"
+      ]
+    },
+    "singleton(RbNaCl::Auth)#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/auth.rb:82"
+      ]
+    },
+    "singleton(RbNaCl::Auth)#key_bytes": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/auth.rb:96"
+      ]
+    },
+    "singleton(RbNaCl::Auth)#tag_bytes": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/auth.rb:110"
+      ]
+    },
+    "RbNaCl::Boxes::Curve25519XSalsa20Poly1305::PrivateKey#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305.rb:104"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Curve25519XSalsa20Poly1305)#box_curve25519xsalsa20poly1305_afternm": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305.rb:126"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Curve25519XSalsa20Poly1305)#box_curve25519xsalsa20poly1305_open_afternm": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305.rb:152"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Curve25519XSalsa20Poly1305)#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305.rb:163"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Curve25519XSalsa20Poly1305)#box_curve25519xsalsa20poly1305_beforenm": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305.rb:185"
+      ]
+    },
+    "singleton(RbNaCl::GroupElements::Curve25519)#base": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305/private_key.rb:71"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Curve25519XSalsa20Poly1305::Priv...#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/curve25519xsalsa20poly1305/private_key.rb:78"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Sealed)#box_seal": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/sealed.rb:98"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Sealed)#box_seal_open": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/sealed.rb:121"
+      ]
+    },
+    "singleton(RbNaCl::Boxes::Sealed)#primitive": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/boxes/sealed.rb:132"
+      ]
+    },
+    "singleton(RbNaCl::GroupElements::Curve25519)#scalarmult_curve25519": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/group_elements/curve25519.rb:70"
+      ]
+    },
+    "singleton(RbNaCl::Hash::SHA256)#hash_sha256": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash.rb:30"
+      ]
+    },
+    "singleton(RbNaCl::Hash::SHA512)#hash_sha512": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash.rb:45"
+      ]
+    },
+    "RbNaCl::Hash::Blake2b::State#release": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:141"
+      ]
+    },
+    "singleton(RbNaCl::Hash::Blake2b)#generichash_blake2b_init": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:143"
+      ]
+    },
+    "RbNaCl::Hash::Blake2b::State#pointer": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:143"
+      ]
+    },
+    "singleton(RbNaCl::Hash::Blake2b)#generichash_blake2b_update": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:154"
+      ]
+    },
+    "singleton(RbNaCl::Hash::Blake2b)#generichash_blake2b_final": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rbnacl/lib/rbnacl/hash/blake2b.rb:167"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "bytesize": 43,
+    "==": 19,
+    "[]": 14,
+    "to_s": 13,
+    "to_str": 10,
+    "new": 10,
+    "+": 5,
+    ">": 5,
+    "verify": 4,
+    "[]=": 4,
+    "fetch": 4,
+    "<": 4,
+    "-": 4,
+    "class": 3,
+    "to_i": 3,
+    "to_int": 3,
+    "b": 2,
+    "size": 2,
+    "slice": 2,
+    "decrypt": 2,
+    "!=": 2,
+    "to_bytes": 2,
+    "encoding": 2,
+    "primitive": 2,
+    "zero?": 1,
+    "slice!": 1,
+    "split": 1,
+    "map": 1,
+    "downcase": 1,
+    "ffi_lib": 1,
+    "extend": 1,
+    "unpack1": 1,
+    "open": 1,
+    "box": 1,
+    "<=": 1,
+    "auth": 1,
+    "key_bytes": 1,
+    "sign": 1,
+    "verify_key": 1,
+    "encrypt": 1
+  },
+  "implicit_self_methods_top": {
+    "sodium_constant": 58,
+    "sodium_function": 44,
+    "sodium_type": 21,
+    "sodium_primitive": 21,
+    "data_len": 14,
+    "nonce_bytes": 9,
+    "key": 8,
+    "tag_bytes": 7,
+    "to_bytes": 7,
+    "layout": 7,
+    "primitive": 4,
+    "signature_bytes": 4,
+    "attach_function": 3,
+    "compute_authenticator": 3,
+    "hexdigest": 3,
+    "box_common_test": 2,
+    "module_eval": 2,
+    "sodium_version_string": 2,
+    "c_verify64": 2,
+    "c_verify32": 2,
+    "c_verify16": 2,
+    "validate_opts": 2,
+    "beforenm": 2,
+    "key_bytes": 2,
+    "pwhash_str_verify": 1,
+    "c_random_bytes": 1,
+    "sodium_function_with_return_code": 1,
+    "ffi_lib": 1,
+    "def_delegators": 1,
+    "const_set": 1,
+    "public_send": 1,
+    "generichash_blake2b": 1,
+    "box_curve25519xsalsa20poly1305_keypair": 1
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "files": 3,
+  "parse_errors": 0,
+  "total": 866,
+  "tier_counts": {
+    "constant": 323,
+    "nominal": 89,
+    "dynamic_top": 431,
+    "shaped": 8,
+    "bot": 3,
+    "dynamic_specific": 12
+  },
+  "opaque_node_classes": {
+    "CallNode": 136,
+    "LocalVariableReadNode": 152,
+    "BlockNode": 8,
+    "InstanceVariableWriteNode": 8,
+    "LocalVariableWriteNode": 21,
+    "OrNode": 9,
+    "EmbeddedStatementsNode": 20,
+    "IfNode": 24,
+    "UnlessNode": 4,
+    "AndNode": 8,
+    "CaseNode": 2,
+    "InstanceVariableReadNode": 27,
+    "ParenthesesNode": 4,
+    "YieldNode": 3,
+    "SplatNode": 1,
+    "ForwardingSuperNode": 3,
+    "ConstantReadNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 70,
+    "block_param": 28,
+    "assigned_local": 54
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 33,
+    "precise": 5,
+    "dynamic_top": 94,
+    "dynamic_specific": 4
+  },
+  "opaque_ivar_reads": 27,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/erubi",
+  "scanned_paths": [
+    "lib"
+  ],
+  "parameter_inference": false,
+  "precise": 423,
+  "precision_ratio": 0.4885,
+  "named_receiver_opaque_pairs": {
+    "/\\A[ \\t]*\\z/#send": {
+      "count": 2,
+      "examples": [
+        "lib/erubi.rb:153",
+        "lib/erubi.rb:158"
+      ]
+    },
+    "Object#escapeHTML": {
+      "count": 1,
+      "examples": [
+        "lib/erubi.rb:33"
+      ]
+    },
+    "singleton(Erubi)#h": {
+      "count": 1,
+      "examples": [
+        "lib/erubi/capture_block.rb:63"
+      ]
+    },
+    "/\\A\\s*\\z/#send": {
+      "count": 1,
+      "examples": [
+        "lib/erubi/capture_block.rb:87"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "<<": 38,
+    "[]": 23,
+    "==": 7,
+    "empty?": 5,
+    "to_s": 4,
+    "fetch": 3,
+    "gsub": 2,
+    "+": 2,
+    "^": 2,
+    "!=": 1,
+    "scan": 1,
+    "rindex": 1,
+    "count": 1,
+    "freeze": 1,
+    "+@": 1,
+    "dup": 1,
+    "gsub!": 1
+  },
+  "implicit_self_methods_top": {
+    "add_text": 12,
+    "with_buffer": 4,
+    "terminate_expression": 4,
+    "concat": 2,
+    "replace": 2,
+    "add_expression_op": 2,
+    "eval": 1,
+    "add_expression": 1,
+    "add_postamble": 1,
+    "_dup_string_if_frozen": 1,
+    "add_expression_result": 1,
+    "add_expression_result_escaped": 1,
+    "h": 1
+  }
+}

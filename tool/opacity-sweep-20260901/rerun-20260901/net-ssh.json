@@ -1,0 +1,711 @@
+{
+  "files": 97,
+  "parse_errors": 0,
+  "total": 19911,
+  "tier_counts": {
+    "constant": 6362,
+    "dynamic_top": 8173,
+    "nominal": 4170,
+    "shaped": 659,
+    "bot": 426,
+    "dynamic_specific": 52,
+    "refined": 62,
+    "top": 7
+  },
+  "opaque_node_classes": {
+    "ModuleNode": 22,
+    "LocalVariableWriteNode": 382,
+    "CallNode": 3453,
+    "LocalVariableReadNode": 2405,
+    "EmbeddedStatementsNode": 232,
+    "IfNode": 205,
+    "CaseNode": 22,
+    "ConstantPathNode": 220,
+    "OrNode": 83,
+    "BeginNode": 27,
+    "YieldNode": 26,
+    "UnlessNode": 18,
+    "IndexOrWriteNode": 2,
+    "BlockNode": 280,
+    "AndNode": 71,
+    "ParenthesesNode": 44,
+    "InstanceVariableWriteNode": 130,
+    "LocalVariableTargetNode": 102,
+    "GlobalVariableReadNode": 10,
+    "InstanceVariableReadNode": 215,
+    "SplatNode": 19,
+    "SuperNode": 9,
+    "ConstantReadNode": 110,
+    "MultiWriteNode": 9,
+    "ConstantOrWriteNode": 2,
+    "ConstantWriteNode": 7,
+    "InstanceVariableOperatorWriteNode": 9,
+    "LocalVariableOrWriteNode": 2,
+    "ForwardingSuperNode": 7,
+    "ClassVariableReadNode": 4,
+    "MultiTargetNode": 4,
+    "InstanceVariableTargetNode": 14,
+    "IndexTargetNode": 2,
+    "IndexAndWriteNode": 1,
+    "RescueModifierNode": 6,
+    "InstanceVariableOrWriteNode": 7,
+    "LocalVariableOperatorWriteNode": 7,
+    "ClassNode": 12
+  },
+  "local_read_buckets": {
+    "def_param": 1288,
+    "assigned_local": 868,
+    "block_param": 249
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 2163,
+    "implicit_self": 981,
+    "precise": 288,
+    "dynamic_specific": 21
+  },
+  "opaque_ivar_reads": 215,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/net-ssh",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 11679,
+  "precision_ratio": 0.5866,
+  "named_receiver_opaque_pairs": {
+    "Net::SSH::Buffer#read_string": {
+      "count": 17,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:129",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:130",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:162"
+      ]
+    },
+    "Net::SSH::Buffer#read_long": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:128",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:227",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/ed25519.rb:60"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:136",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/event_loop.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/event_loop.rb:83"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]]#[]=": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:351",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:352",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:353"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:141",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/event_loop.rb:68",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/packet.rb:97"
+      ]
+    },
+    "Hash[:chars_high | :chars_wide | :modes | :pixels_high | ...#[]": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:226",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:232",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:233"
+      ]
+    },
+    "Proc#[]": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:468",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:469",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:470"
+      ]
+    },
+    "{}#[]": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:462",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:573",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:518"
+      ]
+    },
+    "Net::SSH::Buffer#length": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:217",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:218",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:229"
+      ]
+    },
+    "Net::SSH::Buffer#read_key": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:132",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/key_factory.rb:102",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/known_hosts.rb:211"
+      ]
+    },
+    "singleton(Net::SSH::Transport::CipherFactory)#get": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/ed25519.rb:83",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:477",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:481"
+      ]
+    },
+    "Hash#[]=": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/kex/diffie_hellman_group1_sha1.rb:102",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/kex/diffie_hellman_group1_sha1.rb:103",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/kex/diffie_hellman_group1_sha1.rb:104"
+      ]
+    },
+    "Hash#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/cipher_factory.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/cipher_factory.rb:102",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/kex/diffie_hellman_group1_sha1.rb:103"
+      ]
+    },
+    "{}#[]=": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/event_loop.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/proxy/http.rb:84",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/service/forward.rb:273"
+      ]
+    },
+    "singleton(Net::SSH::Transport::KeyExpander)#expand_key": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/cipher_factory.rb:66",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/cipher_factory.rb:87",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/cipher_factory.rb:91"
+      ]
+    },
+    "singleton(Net::SSH::Transport::HMAC)#get": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:490",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:496",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/state.rb:64"
+      ]
+    },
+    "singleton(Net::SSH::Prompt)#default": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh.rb:300",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/key_factory.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/key_factory.rb:49"
+      ]
+    },
+    "Net::SSH::Buffer#read": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/certificate.rb:169",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:437",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/packet_stream.rb:269"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/service/forward.rb:109",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/service/forward.rb:162",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/service/forward.rb:254"
+      ]
+    },
+    "Socket#send": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/proxy/socks4.rb:54",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/proxy/socks5.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/proxy/socks5.rb:95"
+      ]
+    },
+    "singleton(Net::SSH::KeyFactory)#load_public_key": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/key_manager.rb:251",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/key_manager.rb:296",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/key_manager.rb:299"
+      ]
+    },
+    "bot#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:431",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:433",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:433"
+      ]
+    },
+    "bot#close": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/key_manager.rb:109",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/state.rb:171",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/state.rb:178"
+      ]
+    },
+    "singleton(Net::SSH::Authentication::Pageant::Win)#GetLastError": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:378",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:461",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:485"
+      ]
+    },
+    "singleton(Net::SSH::Authentication::Pageant::Win)#GetTokenInformation": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:358",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:366"
+      ]
+    },
+    "OpenSSL::BN?#-": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/buffer.rb:262",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/buffer.rb:263"
+      ]
+    },
+    "OpenSSL::BN?#%": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/buffer.rb:262",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/buffer.rb:263"
+      ]
+    },
+    "Net::SSH::Buffer#send": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/buffer.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/buffer.rb:58"
+      ]
+    },
+    "singleton(Net::SSH::Authentication::PubKeyFingerprint)#fingerprint": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pub_key_fingerprint.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/kex/abstract.rb:90"
+      ]
+    },
+    "singleton(Net::SSH::Authentication::Pageant::Win)#malloc_ptr": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:449",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/pageant.rb:474"
+      ]
+    },
+    "Net::SSH::Connection::Channel#env": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:680",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/channel.rb:689"
+      ]
+    },
+    "Net::SSH::Connection::Channel#local_maximum_window_size": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:343",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:630"
+      ]
+    },
+    "Net::SSH::Connection::Channel#local_maximum_packet_size": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:344",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:631"
+      ]
+    },
+    "Net::SSH::Connection::Channel#remote_id": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:629",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:639"
+      ]
+    },
+    "[3, String] | [Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:639",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/connection/session.rb:639"
+      ]
+    },
+    "Net::SSH::Authentication::Agent#socket": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/service/forward.rb:413",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/service/forward.rb:416"
+      ]
+    },
+    "singleton(Net::SSH::Test::Extensions::IO)#with_test_extension": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test.rb:88"
+      ]
+    },
+    "Net::SSH::Transport::Algorithms#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:416",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:421"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]]?#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:416",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:420"
+      ]
+    },
+    "singleton(Net::SSH::Transport::HMAC)#key_length": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:436",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:437"
+      ]
+    },
+    "singleton(Net::SSH::Transport::HMAC::MD5) | singleton(Net...#key_length": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/hmac.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/hmac.rb:45"
+      ]
+    },
+    "Net::SSH::HostKeyUnknown#remember_host!": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/verifiers/accept_new.rb:19",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/verifiers/accept_new.rb:27"
+      ]
+    },
+    "Net::SSH::Buffer#read_byte": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:228",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/packet_stream.rb:268"
+      ]
+    },
+    "Net::SSH::Authentication::Certificate#nonce=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/certificate.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/certificate.rb:88"
+      ]
+    },
+    "\"\" | literal-string & non-empty-string#<<": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/ed25519_loader.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/kex/curve25519_sha256_loader.rb:18"
+      ]
+    },
+    "singleton(Net::SSH::KeyFactory)#load_private_key": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/key_manager.rb:185",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/key_manager.rb:302"
+      ]
+    },
+    "Net::SSH::Authentication::Certificate#signature_key=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/certificate.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/certificate.rb:89"
+      ]
+    },
+    "Net::SSH::Buffer#empty?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:178"
+      ]
+    },
+    "Net::SSH::Authentication::Agent#logger=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:78"
+      ]
+    },
+    "Net::SSH::Authentication::Agent#negotiate!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:71"
+      ]
+    },
+    "Net::SSH::Authentication::Agent#connect!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/agent.rb:70"
+      ]
+    },
+    "singleton(Net::SSH::Config)#for": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh.rb:291"
+      ]
+    },
+    "singleton(Net::SSH::Config)#expandable_default_files": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh.rb:286"
+      ]
+    },
+    "non-negative-int#>=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/ctr.rb:79"
+      ]
+    },
+    "nil#setbyte": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/ctr.rb:106"
+      ]
+    },
+    "nil#getbyte": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/ctr.rb:106"
+      ]
+    },
+    "singleton(Net::SSH::Transport::HMAC::MD5) | singleton(Net...#new": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/hmac.rb:39"
+      ]
+    },
+    "Net::SSH::Transport::Session#close": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh.rb:270"
+      ]
+    },
+    "Class?#aead": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/hmac/abstract.rb:14"
+      ]
+    },
+    "{ raw: Dynamic[top] }#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:350"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/algorithms.rb:192"
+      ]
+    },
+    "singleton(Net::SSH::Test::Socket)#sockaddr_in": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/socket.rb:51"
+      ]
+    },
+    "Net::SSH::Test::Channel#remote_id": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/script.rb:42"
+      ]
+    },
+    "Net::SSH::Test::Channel#local_id": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/script.rb:42"
+      ]
+    },
+    "Net::SSH::Test::Channel#local_id=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/script.rb:40"
+      ]
+    },
+    "singleton(Net::SSH::Test::Packet)#registered_channel_requests": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/packet.rb:90"
+      ]
+    },
+    "[:long, :string, :bool]#contact": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/packet.rb:88"
+      ]
+    },
+    "singleton(Net::SSH::Test::Packet)#const_get": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/packet.rb:36"
+      ]
+    },
+    "singleton(Net::SSH::Test::Extensions::IO)#extension_enabled?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/extensions.rb:147"
+      ]
+    },
+    "Net::SSH::Test::Extensions::PacketStream#pos=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/extensions.rb:62"
+      ]
+    },
+    "Net::SSH::Test::Extensions::PacketStream#string": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/test/extensions.rb:61"
+      ]
+    },
+    "Net::SSH::Authentication::Certificate#key=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/certificate.rb:28"
+      ]
+    },
+    "Net::SSH::Exception#message": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/service/forward.rb:419"
+      ]
+    },
+    "Net::SSH::Authentication::Certificate#serial=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/authentication/certificate.rb:29"
+      ]
+    },
+    "Net::SSH::Connection::Session#closed?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh.rb:264"
+      ]
+    },
+    "bot#reset": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/state.rb:177"
+      ]
+    },
+    "bot#finish": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/state.rb:170"
+      ]
+    },
+    "bot#finished?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/state.rb:170"
+      ]
+    },
+    "[Dynamic[BigDecimal | Complex | Float | Integer | Rationa...#min": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/state.rb:160"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#shift": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/net-ssh/lib/net/ssh/transport/session.rb:191"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 389,
+    "==": 84,
+    "[]=": 50,
+    "<<": 49,
+    "length": 47,
+    "new": 45,
+    "to_s": 44,
+    "each": 38,
+    "+": 37,
+    "!=": 37,
+    "split": 36,
+    "read_string": 33,
+    "type": 31,
+    "to_i": 27,
+    ">": 24,
+    "<": 23,
+    "empty?": 23,
+    "include?": 20,
+    "call": 20,
+    "Integer": 19,
+    "first": 18,
+    "delete": 18,
+    "unpack": 17,
+    "send": 16,
+    "to_blob": 16,
+    "ssh_type": 16,
+    "close": 15,
+    "size": 15,
+    "join": 15,
+    "hmac": 15,
+    "map": 15,
+    "-": 15,
+    "send_message": 14,
+    "block_size": 13,
+    "uniq!": 12,
+    "next_message": 12,
+    "any?": 12,
+    "shift": 12,
+    "key?": 12,
+    "cipher": 11
+  },
+  "implicit_self_methods_top": {
+    "debug": 52,
+    "options": 49,
+    "server": 39,
+    "algorithms": 37,
+    "session": 30,
+    "connection": 27,
+    "info": 27,
+    "client": 25,
+    "data": 22,
+    "logger": 21,
+    "socket": 21,
+    "channels": 21,
+    "events": 19,
+    "script": 19,
+    "error": 17,
+    "cipher": 15,
+    "mac_length": 14,
+    "extern": 14,
+    "output": 14,
+    "transport": 12,
+    "remote_id": 11,
+    "typealias": 11,
+    "send_message": 11,
+    "negotiate": 10,
+    "nonce": 9,
+    "key_length": 9,
+    "key": 8,
+    "digest_class": 8,
+    "known_identities": 7,
+    "read": 6,
+    "length": 6,
+    "key_manager": 6,
+    "agent": 6,
+    "pub_key": 6,
+    "read_available": 6,
+    "pending_requests": 6,
+    "dh": 6,
+    "group": 5,
+    "port": 5,
+    "malloc_ptr": 5
+  }
+}

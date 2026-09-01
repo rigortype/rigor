@@ -1,0 +1,514 @@
+{
+  "files": 256,
+  "parse_errors": 3,
+  "total": 18755,
+  "tier_counts": {
+    "constant": 6332,
+    "dynamic_top": 8551,
+    "bot": 473,
+    "nominal": 2384,
+    "shaped": 815,
+    "dynamic_specific": 186,
+    "refined": 14
+  },
+  "opaque_node_classes": {
+    "LocalVariableWriteNode": 586,
+    "CallNode": 3167,
+    "LocalVariableReadNode": 3469,
+    "IfNode": 141,
+    "LocalVariableOperatorWriteNode": 76,
+    "ParenthesesNode": 255,
+    "LocalVariableTargetNode": 222,
+    "EmbeddedStatementsNode": 83,
+    "BlockNode": 131,
+    "OrNode": 42,
+    "AndNode": 62,
+    "UnlessNode": 8,
+    "IndexOperatorWriteNode": 3,
+    "IndexTargetNode": 20,
+    "MultiWriteNode": 5,
+    "InstanceVariableWriteNode": 68,
+    "InstanceVariableReadNode": 183,
+    "InstanceVariableOperatorWriteNode": 3,
+    "YieldNode": 1,
+    "ClassNode": 2,
+    "SplatNode": 7,
+    "CallOperatorWriteNode": 6,
+    "InstanceVariableTargetNode": 2,
+    "ConstantReadNode": 7,
+    "MultiTargetNode": 2
+  },
+  "local_read_buckets": {
+    "def_param": 2009,
+    "assigned_local": 1255,
+    "block_param": 205
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 2801,
+    "implicit_self": 116,
+    "dynamic_specific": 53,
+    "precise": 197
+  },
+  "opaque_ivar_reads": 183,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/Algorithms-and-Data-Structures-in-Ruby",
+  "scanned_paths": [
+    "."
+  ],
+  "parameter_inference": false,
+  "precise": 10018,
+  "precision_ratio": 0.5342,
+  "named_receiver_opaque_pairs": {
+    "Array#[]": {
+      "count": 23,
+      "examples": [
+        "./arrays/MaxJminusI.rb:11",
+        "./arrays/MaxJminusI.rb:19",
+        "./arrays/MaxJminusI.rb:19"
+      ]
+    },
+    "Array#[]=": {
+      "count": 15,
+      "examples": [
+        "./arrays/CreateProductArray.rb:52",
+        "./arrays/MaxJminusI.rb:9",
+        "./arrays/MaxJminusI.rb:11"
+      ]
+    },
+    "ComplexNumber#imaginary": {
+      "count": 14,
+      "examples": [
+        "./exercism/complex_number.rb:15",
+        "./exercism/complex_number.rb:15",
+        "./exercism/complex_number.rb:22"
+      ]
+    },
+    "ComplexNumber#real": {
+      "count": 14,
+      "examples": [
+        "./exercism/complex_number.rb:14",
+        "./exercism/complex_number.rb:14",
+        "./exercism/complex_number.rb:21"
+      ]
+    },
+    "{}#[]": {
+      "count": 13,
+      "examples": [
+        "./exercism/tournament.rb:12",
+        "./exercism/tournament.rb:13",
+        "./exercism/tournament.rb:15"
+      ]
+    },
+    "Hash#[]": {
+      "count": 11,
+      "examples": [
+        "./arrays/CheckPairWithGivenDiff.rb:36",
+        "./arrays/CheckPairWithGivenDiff.rb:38",
+        "./arrays/ChekPairWithGivenSum.rb:12"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 11,
+      "examples": [
+        "./codility/Stacks and Queues/Fish.rb:8",
+        "./codility/Stacks and Queues/Fish.rb:16",
+        "./codility/Stacks and Queues/Fish.rb:16"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#max": {
+      "count": 9,
+      "examples": [
+        "./arrays/MaxSubarraySum.rb:24",
+        "./arrays/MaxSubarraySum.rb:25",
+        "./arrays/MaximumInBitonicArray.rb:52"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 6,
+      "examples": [
+        "./leetcode/grind75/evaluate_reverse_polish_notation.rb:28",
+        "./leetcode/grind75/min_stack.rb:35",
+        "./leetcode/grind75/min_stack.rb:92"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 6,
+      "examples": [
+        "./exercism/nucleotide_count.rb:19",
+        "./exercism/saddle_points.rb:11",
+        "./leetcode/grind75/climbing_stairs.rb:32"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 5,
+      "examples": [
+        "./arrays/MaxJminusI.rb:11",
+        "./arrays/MedianOf2SortedArrays.rb:14",
+        "./leetcode/grind75/insert_intervals.rb:24"
+      ]
+    },
+    "[]#pop": {
+      "count": 5,
+      "examples": [
+        "./arrays/NextGreatestElement.rb:11",
+        "./exercism/matching_brackets.rb:16",
+        "./leetcode/grind75/backspace_string_compare.rb:17"
+      ]
+    },
+    "[-1, Dynamic[top]]#[]": {
+      "count": 4,
+      "examples": [
+        "./exercism/spiral_matrix.rb:63",
+        "./exercism/spiral_matrix.rb:70",
+        "./exercism/spiral_matrix.rb:74"
+      ]
+    },
+    "Array#last": {
+      "count": 4,
+      "examples": [
+        "./exercism/palindrome_products.rb:22",
+        "./leetcode/insert_delete_get_random_o1.rb:39",
+        "./leetcode/insert_delete_get_random_o1.rb:42"
+      ]
+    },
+    "[0, Dynamic[top]]#max": {
+      "count": 4,
+      "examples": [
+        "./arrays/MaxSumNoAdjacent.rb:10",
+        "./codility/Maximum Slice Problem/MaxDoubleSliceSum.rb:8",
+        "./codility/Maximum Slice Problem/MaxDoubleSliceSum.rb:16"
+      ]
+    },
+    "[Dynamic[top]]#[]": {
+      "count": 3,
+      "examples": [
+        "./leetcode/grind75/merge_intervals.rb:11",
+        "./leetcode/grind75/merge_intervals.rb:12",
+        "./leetcode/grind75/merge_intervals.rb:12"
+      ]
+    },
+    "[]#[]": {
+      "count": 3,
+      "examples": [
+        "./arrays/NextGreatestElement.rb:9",
+        "./exercism/matching_brackets.rb:16",
+        "./leetcode/grind75/valid_parentheses.rb:21"
+      ]
+    },
+    "bot#-": {
+      "count": 3,
+      "examples": [
+        "./codility/Stacks and Queues/Brackets.rb:19",
+        "./codility/Stacks and Queues/Brackets.rb:19",
+        "./codility/Stacks and Queues/Brackets.rb:19"
+      ]
+    },
+    "int#<": {
+      "count": 3,
+      "examples": [
+        "./leetcode/grind75/three_sum.rb:16",
+        "./leetcode/grind75/three_sum.rb:26",
+        "./leetcode/grind75/three_sum.rb:29"
+      ]
+    },
+    "{}#[]=": {
+      "count": 3,
+      "examples": [
+        "./exercism/etl.rb:9",
+        "./exercism/saddle_points.rb:22",
+        "./exercism/saddle_points.rb:34"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 2,
+      "examples": [
+        "./leetcode/grind75/min_stack.rb:49",
+        "./leetcode/grind75/min_stack.rb:102"
+      ]
+    },
+    "Array[Dynamic[top]]#delete_at": {
+      "count": 2,
+      "examples": [
+        "./codility/Stacks and Queues/Fish.rb:20",
+        "./codility/Stacks and Queues/Fish.rb:23"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "./sorting/3wayQuickSort.rb:10",
+        "./sorting/3wayQuickSort.rb:11"
+      ]
+    },
+    "Allergies#list": {
+      "count": 2,
+      "examples": [
+        "./exercism/allergies.rb:22",
+        "./exercism/allergies.rb:54"
+      ]
+    },
+    "Hash#delete": {
+      "count": 1,
+      "examples": [
+        "./leetcode/insert_delete_get_random_o1.rb:45"
+      ]
+    },
+    "Hash#[]=": {
+      "count": 1,
+      "examples": [
+        "./leetcode/insert_delete_get_random_o1.rb:42"
+      ]
+    },
+    "Array#pop": {
+      "count": 1,
+      "examples": [
+        "./leetcode/insert_delete_get_random_o1.rb:46"
+      ]
+    },
+    "Array#sample": {
+      "count": 1,
+      "examples": [
+        "./leetcode/insert_delete_get_random_o1.rb:56"
+      ]
+    },
+    "[0 | Dynamic[top], Dynamic[top]]#max": {
+      "count": 1,
+      "examples": [
+        "./leetcode/maximum_width_ramp.rb:28"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "./leetcode/grind75/min_stack.rb:39"
+      ]
+    },
+    "non-positive-int | positive-int#<": {
+      "count": 1,
+      "examples": [
+        "./sorting/SortInWaveForm.rb:15"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top], Dynamic[top]]#min": {
+      "count": 1,
+      "examples": [
+        "./leetcode/grind75/longest_common_prefix.rb:32"
+      ]
+    },
+    "Proc#call": {
+      "count": 1,
+      "examples": [
+        "./leetcode/grind75/evaluate_reverse_polish_notation.rb:29"
+      ]
+    },
+    "[Dynamic[top], Dynamic[Array[Dynamic[top]] | Dynamic[top]...#max": {
+      "count": 1,
+      "examples": [
+        "./arrays/MaxJminusI.rb:15"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 1,
+      "examples": [
+        "./leetcode/grind75/climbing_stairs.rb:32"
+      ]
+    },
+    "[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "./leetcode/binary_tree_level_order_traversal.rb:30"
+      ]
+    },
+    "Numeric#/": {
+      "count": 1,
+      "examples": [
+        "./hackerRank/ModifiedKaprekarNumber.rb:83"
+      ]
+    },
+    "Bst::NODE(data: Dynamic[top], left: nil, right: nil)#data": {
+      "count": 1,
+      "examples": [
+        "./exercism/binary_search_tree.rb:13"
+      ]
+    },
+    "Bst::NODE(data: Dynamic[top], left: nil, right: nil)#left": {
+      "count": 1,
+      "examples": [
+        "./exercism/binary_search_tree.rb:16"
+      ]
+    },
+    "Bst::NODE(data: Dynamic[top], left: nil, right: nil)#right": {
+      "count": 1,
+      "examples": [
+        "./exercism/binary_search_tree.rb:19"
+      ]
+    },
+    "Bst::NODE(data: Dynamic[top], left: nil, right: nil)#nil?": {
+      "count": 1,
+      "examples": [
+        "./exercism/binary_search_tree.rb:25"
+      ]
+    },
+    "Array[Dynamic[top]]#[]=": {
+      "count": 1,
+      "examples": [
+        "./codility/Stacks and Queues/Fish.rb:19"
+      ]
+    },
+    "Array[1 | 2 | 3 | 4 | 5 | 6]#sum": {
+      "count": 1,
+      "examples": [
+        "./exercism/d&d_characters.rb:29"
+      ]
+    },
+    "Array[Numeric]#sum": {
+      "count": 1,
+      "examples": [
+        "./exercism/difference_of_squares.rb:28"
+      ]
+    },
+    "singleton(ListOps)#arrays": {
+      "count": 1,
+      "examples": [
+        "./exercism/list-ops.rb:15"
+      ]
+    },
+    "singleton(Prime)#first": {
+      "count": 1,
+      "examples": [
+        "./exercism/nth_prime.rb:36"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 1,
+      "examples": [
+        "./exercism/palindrome_products.rb:29"
+      ]
+    },
+    "singleton(PhoneNumber)#valid_area_and_exchange_code": {
+      "count": 1,
+      "examples": [
+        "./exercism/phone_number.rb:13"
+      ]
+    },
+    "bot#to_i": {
+      "count": 1,
+      "examples": [
+        "./exercism/run_length_encoding.rb:31"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | {}#[]": {
+      "count": 1,
+      "examples": [
+        "./exercism/saddle_points.rb:11"
+      ]
+    },
+    "Array[Dynamic[top]?]#[]": {
+      "count": 1,
+      "examples": [
+        "./exercism/seive.rb:33"
+      ]
+    },
+    "[Dynamic[BigDecimal | Complex | Float | Integer | Rationa...#max": {
+      "count": 1,
+      "examples": [
+        "./arrays/MaxSumNoAdjacent.rb:14"
+      ]
+    },
+    "Array[Integer]#sum": {
+      "count": 1,
+      "examples": [
+        "./exercism/sum_of_multiples.rb:10"
+      ]
+    },
+    ":* | :+ | :- | :/ | Proc | nil#call": {
+      "count": 1,
+      "examples": [
+        "./exercism/wordy.rb:32"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 658,
+    "-": 285,
+    "==": 197,
+    "+": 186,
+    "length": 152,
+    ">": 134,
+    "<": 85,
+    "/": 81,
+    "[]=": 60,
+    "next": 45,
+    "%": 44,
+    "<=": 43,
+    "*": 42,
+    ">=": 40,
+    "each": 39,
+    "size": 35,
+    "val": 32,
+    "to_i": 30,
+    "right": 30,
+    "left": 30,
+    "abs": 28,
+    "map": 22,
+    "chars": 22,
+    "!=": 20,
+    "downcase": 20,
+    "&": 20,
+    "downto": 18,
+    "gsub": 15,
+    "nil?": 14,
+    "to_s": 14,
+    "empty?": 14,
+    "**": 13,
+    "quality": 12,
+    "scan": 12,
+    "split": 12,
+    "sort": 11,
+    "join": 10,
+    "tally": 10,
+    "index": 8,
+    "sort!": 8
+  },
+  "implicit_self_methods_top": {
+    "on_earth": 7,
+    "inorder_traversal": 6,
+    "smallest_missing": 5,
+    "items": 4,
+    "invert_tree": 4,
+    "gcd": 4,
+    "triangle?": 3,
+    "reverseArray": 3,
+    "reverse": 3,
+    "get_median": 3,
+    "maximum": 3,
+    "calculate_steps": 3,
+    "is_overlapping": 3,
+    "create_bst": 3,
+    "is_same_tree": 3,
+    "block_swap": 3,
+    "level_order_nodes": 2,
+    "question": 2,
+    "lowest_common_ancestor": 2,
+    "interval": 2,
+    "size": 2,
+    "instructions": 2,
+    "update_backstage_passes": 2,
+    "update_normal_item": 2,
+    "quick_sort": 2,
+    "update_reverse_aging": 2,
+    "sum_of_squares": 2,
+    "d": 2,
+    "swap": 2,
+    "search_for": 2,
+    "arr": 2,
+    "debug": 2,
+    "fact": 1,
+    "partition": 1,
+    "heapify": 1,
+    "reverse_list": 1,
+    "find_floor": 1,
+    "find_ceil": 1,
+    "first": 1,
+    "last": 1
+  }
+}

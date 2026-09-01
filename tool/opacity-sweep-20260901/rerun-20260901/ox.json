@@ -1,0 +1,204 @@
+{
+  "files": 15,
+  "parse_errors": 0,
+  "total": 1752,
+  "tier_counts": {
+    "constant": 550,
+    "nominal": 293,
+    "shaped": 69,
+    "dynamic_top": 789,
+    "bot": 47,
+    "top": 4
+  },
+  "opaque_node_classes": {
+    "CallNode": 287,
+    "LocalVariableReadNode": 295,
+    "BlockNode": 43,
+    "ForwardingSuperNode": 11,
+    "OrNode": 17,
+    "EmbeddedStatementsNode": 7,
+    "LocalVariableWriteNode": 50,
+    "UnlessNode": 8,
+    "IfNode": 37,
+    "SuperNode": 2,
+    "InstanceVariableReadNode": 2,
+    "AndNode": 8,
+    "ParenthesesNode": 9,
+    "CaseNode": 4,
+    "MultiWriteNode": 2,
+    "LocalVariableTargetNode": 4,
+    "InstanceVariableWriteNode": 1,
+    "ConstantPathNode": 4,
+    "ConstantReadNode": 2
+  },
+  "local_read_buckets": {
+    "def_param": 101,
+    "block_param": 57,
+    "assigned_local": 137
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 211,
+    "implicit_self": 37,
+    "precise": 39
+  },
+  "opaque_ivar_reads": 2,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/ox",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/ox/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 959,
+  "precision_ratio": 0.5474,
+  "named_receiver_opaque_pairs": {
+    "Ox::Element#attributes": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:322",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:322",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:324"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#[]": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/hasattrs.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/hasattrs.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/hasattrs.rb:20"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:114",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:114",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:230"
+      ]
+    },
+    "Ox::Element#alocate": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:177",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:333",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:334"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | {}#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/document.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/document.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/hasattrs.rb:37"
+      ]
+    },
+    "Ox::Element | Ox::Instruct#value": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:221",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:221",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:221"
+      ]
+    },
+    "Ox::Element#name": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:307",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:388",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:434"
+      ]
+    },
+    "Ox::Element#del_locate": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:414",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:415",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:417"
+      ]
+    },
+    "Enumerator::Yielder#yield": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:434",
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:436"
+      ]
+    },
+    "singleton(Object)#const_get": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/bag.rb:86"
+      ]
+    },
+    "{}#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/document.rb:13"
+      ]
+    },
+    "Ox::Element#send": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/element.rb:452"
+      ]
+    },
+    "singleton(Ox)#sax_parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/ox/lib/ox/xmlrpc_adapter.rb:29"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 49,
+    "==": 22,
+    "each": 18,
+    "select": 16,
+    "size": 12,
+    "to_s": 10,
+    "to_sym": 10,
+    "empty?": 6,
+    "split": 5,
+    "<=": 4,
+    "-": 4,
+    "value": 4,
+    "length": 3,
+    "to_i": 3,
+    "include?": 2,
+    "delete_if": 2,
+    "+": 2,
+    "-@": 2,
+    "class": 2,
+    "<": 2,
+    "nil?": 2,
+    "between?": 2,
+    "end_with?": 2,
+    "!=": 2,
+    "index": 2,
+    "<<": 2,
+    "start_with?": 2,
+    "compact": 2,
+    "attributes": 2,
+    "map": 2,
+    "tap": 1,
+    "is_a?": 1,
+    "delete": 1,
+    "times": 1,
+    "join": 1,
+    "content": 1,
+    "instance_variables": 1,
+    "instance_variable_get": 1,
+    "each_pair": 1,
+    "nodes": 1
+  },
+  "implicit_self_methods_top": {
+    "nodes": 24,
+    "instance_variable_get": 2,
+    "attributes": 2,
+    "name": 2,
+    "instance_variable_set": 1,
+    "build_enumerator": 1,
+    "alocate": 1,
+    "recursive_children_removal": 1,
+    "del_locate": 1,
+    "content": 1,
+    "value": 1
+  }
+}

@@ -1,0 +1,536 @@
+{
+  "files": 22,
+  "parse_errors": 0,
+  "total": 3103,
+  "tier_counts": {
+    "constant": 1153,
+    "nominal": 692,
+    "dynamic_top": 1126,
+    "bot": 61,
+    "shaped": 67,
+    "dynamic_specific": 4
+  },
+  "opaque_node_classes": {
+    "InstanceVariableOrWriteNode": 2,
+    "CallNode": 439,
+    "ConstantPathNode": 68,
+    "CaseNode": 15,
+    "LocalVariableReadNode": 324,
+    "EmbeddedStatementsNode": 26,
+    "LocalVariableOrWriteNode": 2,
+    "IfNode": 22,
+    "ConstantReadNode": 24,
+    "MultiWriteNode": 1,
+    "LocalVariableTargetNode": 22,
+    "SplatNode": 12,
+    "LocalVariableWriteNode": 38,
+    "BeginNode": 4,
+    "YieldNode": 7,
+    "ConstantWriteNode": 3,
+    "SuperNode": 6,
+    "ForwardingSuperNode": 16,
+    "BlockNode": 39,
+    "MultiTargetNode": 1,
+    "ModuleNode": 4,
+    "InstanceVariableReadNode": 17,
+    "UnlessNode": 4,
+    "InstanceVariableWriteNode": 13,
+    "SelfNode": 1,
+    "AndNode": 2,
+    "GlobalVariableReadNode": 4,
+    "ParenthesesNode": 2,
+    "OrNode": 3,
+    "ClassNode": 1,
+    "ConstantTargetNode": 4
+  },
+  "local_read_buckets": {
+    "def_param": 215,
+    "assigned_local": 68,
+    "block_param": 41
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 116,
+    "dynamic_top": 219,
+    "precise": 102,
+    "dynamic_specific": 2
+  },
+  "opaque_ivar_reads": 17,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/pycall",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/pycall/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 1973,
+  "precision_ratio": 0.6358,
+  "named_receiver_opaque_pairs": {
+    "PyCall::PyObjectWrapper::SwappedOperationAdapter#obj": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:103",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:107",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:111"
+      ]
+    },
+    "PyObjectWrapper#__pyptr__": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall.rb:31",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall.rb:75"
+      ]
+    },
+    "singleton(PyCall::LibPython::PyObjectStruct)#by_ref": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:199",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:208",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:209"
+      ]
+    },
+    "singleton(PyCall)#import_module": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/import.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/import.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/import.rb:65"
+      ]
+    },
+    "singleton(PyCall)#builtins": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/iterable_wrapper.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:160",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:168"
+      ]
+    },
+    "PyCall::PyObjectWrapper#__pyptr__": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:154",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:184",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pytypeobject_wrapper.rb:29"
+      ]
+    },
+    "singleton(PyCall::LibPython::PyObjectStruct)#ptr": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:68",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:69",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:69"
+      ]
+    },
+    "Hash#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/finder.rb:43",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/finder.rb:45",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/finder.rb:47"
+      ]
+    },
+    "PyCall::PyPtr#__ob_type__": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pytypeobject_wrapper.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/wrapper_object_cache.rb:71"
+      ]
+    },
+    "PyTypeObjectWrapper#__pyptr__": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:62",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pytypeobject_wrapper.rb:57"
+      ]
+    },
+    "PyCall::PyObjectWrapper#__send__": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pyobject_wrapper.rb:48"
+      ]
+    },
+    "PyCall::LibPython::PyMethodDef#pointer": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:91",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:96"
+      ]
+    },
+    "PyCall::LibPython::PyMethodDef#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:81",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:82"
+      ]
+    },
+    "singleton(PyCall::LibPython::PyTypeObjectStruct)#by_ref": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pyobject_struct.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:136"
+      ]
+    },
+    "PyCall::PyError#type": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall.rb:117",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/iterable_wrapper.rb:23"
+      ]
+    },
+    "singleton(PyCall::LibPython)#Py_IncRef": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:262"
+      ]
+    },
+    "singleton(PyCall)#len": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/dict.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/list.rb:13"
+      ]
+    },
+    "singleton(PyCall::Import)#instance_variable_set": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/import.rb:11"
+      ]
+    },
+    "singleton(PyCall::LibPython)#PyType_Type": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:240"
+      ]
+    },
+    "singleton(PyCall)#has_stackless_extension": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:244"
+      ]
+    },
+    "singleton(PyCall::LibPython)#find_symbol": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:260"
+      ]
+    },
+    "singleton(PyCall::LibPython)#PyType_Ready": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:261"
+      ]
+    },
+    "singleton(PyCall::PyError)#fetch": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:261"
+      ]
+    },
+    "PyCall::LibPython::PyTypeObjectStruct#pointer": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:269"
+      ]
+    },
+    "PyCall::List#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/list.rb:40"
+      ]
+    },
+    "singleton(PyCall)#getattr": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pymodule_wrapper.rb:10"
+      ]
+    },
+    "singleton(PyCall::WrapperModuleCache)#instance": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pymodule_wrapper.rb:39"
+      ]
+    },
+    "Module#instance_variable_set": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pymodule_wrapper.rb:41"
+      ]
+    },
+    "PyCall::Dict#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/dict.rb:31"
+      ]
+    },
+    "PyCall::PyError#traceback": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall.rb:117"
+      ]
+    },
+    "PyCall::PyError#value": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall.rb:117"
+      ]
+    },
+    "Class#instance_variable_get": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pytypeobject_wrapper.rb:11"
+      ]
+    },
+    "singleton(PyCall::WrapperClassCache)#instance": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pytypeobject_wrapper.rb:102"
+      ]
+    },
+    "singleton(Object)#instance_variable_set": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/pytypeobject_wrapper.rb:104"
+      ]
+    },
+    "singleton(PyCall::LibPython)#PySet_Size": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/set.rb:10"
+      ]
+    },
+    "singleton(PyCall::LibPython)#PySet_Contains": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/set.rb:16"
+      ]
+    },
+    "PyCall::WrapperObjectCache::Key#address": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/wrapper_object_cache.rb:40"
+      ]
+    },
+    "Key#address": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/wrapper_object_cache.rb:40"
+      ]
+    },
+    "singleton(PyCall)#tuple": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/import.rb:40"
+      ]
+    },
+    "singleton(PyCall::Import)#main_object": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/import.rb:87"
+      ]
+    },
+    "PyCall::Import | singleton(Object)#module_eval": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/import.rb:88"
+      ]
+    },
+    "singleton(PyCall::LibPython)#instance_variable_set": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/init.rb:33"
+      ]
+    },
+    "singleton(PyCall::LibPython::Finder)#find_libpython": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/init.rb:33"
+      ]
+    },
+    "singleton(PyCall)#sys": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/init.rb:41"
+      ]
+    },
+    "singleton(PyCall)#hasattr?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/iterable_wrapper.rb:10"
+      ]
+    },
+    "singleton(PyCall::LibPython)#PyCFunction_NewEx": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:77"
+      ]
+    },
+    "RBS::Unnamed::ENVClass#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/finder.rb:51"
+      ]
+    },
+    "Hash#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/finder.rb:153"
+      ]
+    },
+    "singleton(PyCall)#None": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:74"
+      ]
+    },
+    "singleton(PyCall)#none?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pyobject_struct.rb:20"
+      ]
+    },
+    "PyCall::PyObjectWrapper#__pyobj__": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pyobject_struct.rb:24"
+      ]
+    },
+    "PyCall::LibPython::PyMethodDef#ml_name=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:80"
+      ]
+    },
+    "singleton(PyCall::GCGuard)#unregister": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:71"
+      ]
+    },
+    "PyCall::LibPython::PyMethodDef#ml_doc=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:83"
+      ]
+    },
+    "singleton(PyCall::LibPython)#PyWeakref_NewRef": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:60"
+      ]
+    },
+    "singleton(PyCall::LibPython::PyMemberDef)#pointer": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:129"
+      ]
+    },
+    "singleton(PyCall::LibPython::PyMethodDef)#by_ref": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:195"
+      ]
+    },
+    "singleton(PyCall::LibPython::PyMemberDef)#by_ref": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:196"
+      ]
+    },
+    "singleton(PyCall::LibPython::PyGetSetDef)#by_ref": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/libpython/pytypeobject_struct.rb:197"
+      ]
+    },
+    "Key#pyptr": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/pycall/lib/pycall/gc_guard.rb:21"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 21,
+    "__pyptr__": 12,
+    "class": 10,
+    "==": 8,
+    "<<": 6,
+    "tap": 5,
+    "call_object": 5,
+    "hasattr?": 5,
+    "each": 4,
+    "from_string": 4,
+    "put_pointer": 4,
+    "[]=": 4,
+    "length": 4,
+    "pointer": 4,
+    "getattr": 3,
+    "+": 3,
+    "__dict__": 3,
+    "__exit__": 3,
+    "new": 3,
+    "instance_variable_set": 3,
+    "__pyobj__": 2,
+    "__name__": 2,
+    "include?": 2,
+    "define_wrapper_method": 2,
+    "lookup": 2,
+    "<": 2,
+    "import_module": 2,
+    "callable": 2,
+    "dir": 2,
+    "__tp_name__": 2,
+    "===": 2,
+    "__address__": 2,
+    ">=": 2,
+    "tuple": 2,
+    "call": 2,
+    "empty?": 2,
+    "len": 2,
+    "any?": 1,
+    "chomp": 1,
+    "to_s": 1
+  },
+  "implicit_self_methods_top": {
+    "__pyptr__": 26,
+    "builtins": 13,
+    "register_python_object_formatter": 10,
+    "debug_report": 9,
+    "layout": 5,
+    "import_module": 4,
+    "offset_of": 4,
+    "const_set": 3,
+    "append": 2,
+    "windows?": 2,
+    "const_get": 2,
+    "traceback": 2,
+    "define_name": 2,
+    "assoc_array_matcher": 2,
+    "pyptr": 2,
+    "__pyobj__": 2,
+    "register_python_type_mapping": 2,
+    "class_eval": 1,
+    "wrap_pyptr": 1,
+    "format_traceback": 1,
+    "value": 1,
+    "allocate": 1,
+    "type": 1,
+    "ancestors": 1,
+    "length": 1,
+    "instance_variable_set": 1,
+    "check_wrapper_object": 1,
+    "debug?": 1,
+    "remove_suffix_apple": 1,
+    "make_libpaths": 1,
+    "dlopen": 1,
+    "check_iterable": 1,
+    "priority": 1,
+    "match": 1,
+    "constant_name?": 1,
+    "callable?": 1,
+    "module_dict": 1,
+    "register": 1,
+    "weakref_callback": 1,
+    "inject": 1
+  }
+}

@@ -1,0 +1,752 @@
+{
+  "files": 24,
+  "parse_errors": 0,
+  "total": 10071,
+  "tier_counts": {
+    "constant": 2721,
+    "nominal": 2882,
+    "shaped": 249,
+    "dynamic_top": 3985,
+    "bot": 234
+  },
+  "opaque_node_classes": {
+    "CallNode": 1680,
+    "LocalVariableReadNode": 1185,
+    "EmbeddedStatementsNode": 99,
+    "GlobalVariableReadNode": 1,
+    "ModuleNode": 19,
+    "ConstantPathNode": 137,
+    "LocalVariableWriteNode": 292,
+    "IfNode": 99,
+    "OrNode": 51,
+    "InstanceVariableReadNode": 96,
+    "InstanceVariableOrWriteNode": 36,
+    "BlockNode": 77,
+    "YieldNode": 14,
+    "BeginNode": 15,
+    "InstanceVariableWriteNode": 35,
+    "ConstantReadNode": 44,
+    "ClassNode": 16,
+    "AndNode": 13,
+    "ConstantWriteNode": 9,
+    "ForwardingSuperNode": 12,
+    "CaseNode": 11,
+    "ParenthesesNode": 9,
+    "UnlessNode": 12,
+    "LocalVariableOperatorWriteNode": 10,
+    "SplatNode": 9,
+    "LocalVariableOrWriteNode": 1,
+    "IndexOrWriteNode": 3
+  },
+  "local_read_buckets": {
+    "def_param": 565,
+    "assigned_local": 502,
+    "block_param": 118
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 747,
+    "implicit_self": 434,
+    "precise": 499
+  },
+  "opaque_ivar_reads": 96,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/protobuf",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 6086,
+  "precision_ratio": 0.6043,
+  "named_receiver_opaque_pairs": {
+    "Google::Protobuf::FFI::MessageValue#[]": {
+      "count": 38,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:45",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:46",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:51"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#create_arena": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:101",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor_pool.rb:47"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI::MessageValue)#by_value": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:328",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:14"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_field_by_number": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:275",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:279",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:300"
+      ]
+    },
+    "singleton(#<Class>)#descriptor": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:90",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:96",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:109"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_mini_table": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:185"
+      ]
+    },
+    "Google::Protobuf::FFI::MessageValue#[]=": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:287",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:293",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:27"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_subtype_as_message": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:98",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:127",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:217"
+      ]
+    },
+    "Google::Protobuf::Map#send": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:277",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:281",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:283"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_type": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:276",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:280"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_message_value": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:359",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:399",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:435"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI::MiniTable)#by_ref": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:163",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:19"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_msgval_at": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:246",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:602",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:111"
+      ]
+    },
+    "Google::Protobuf::RepeatedField#send": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:290",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:291",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:293"
+      ]
+    },
+    "Method?#call": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:170",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:178",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:75"
+      ]
+    },
+    "Google::Protobuf#values": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:179",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:187"
+      ]
+    },
+    "singleton(Google::Protobuf::Map)#send": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:216",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:323",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:346"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#map_set": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:123",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:326",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:337"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#set_message_field": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:310",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:80",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:84"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI::Status)#by_ref": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor_pool.rb:12",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/ffi.rb:200",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/ffi.rb:201"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_c_type": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:301",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:314",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:742"
+      ]
+    },
+    "Google::Protobuf#fields": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:145",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:154",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:155"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_message_has": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:149",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:422",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:504"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_mutable_message": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:304",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:371",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:411"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_subtype_as_enum": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:96",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:125"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#new_message_from_def": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:97"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_containing_message_def": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:142",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:170"
+      ]
+    },
+    "{}#[]=": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:212",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:237",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:252"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#map_key": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:233",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:316"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#map_value": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:234",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:92",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:317"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_message_file_def": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:33"
+      ]
+    },
+    "Google::Protobuf::RepeatedField#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:60",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:64",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:71"
+      ]
+    },
+    "#<Class>#instance_variable_get": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:206",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:210",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:275"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#encode_message": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:117",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:133"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#error_message": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor_pool.rb:54",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:278",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:311"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#array_size": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:244",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:600",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:175"
+      ]
+    },
+    "singleton(Google::Protobuf::EnumDescriptor)#send": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:110"
+      ]
+    },
+    "Google::Protobuf#seconds": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:77"
+      ]
+    },
+    "Google::Protobuf::RepeatedField#size": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:75",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:93"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#clear_message_field": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:173",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:296",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:653"
+      ]
+    },
+    "Mutex#synchronize": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/internal/object_cache.rb:36",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/internal/object_cache.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/internal/object_cache.rb:78"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#array_frozen?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:185",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:199",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:204"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#array_set": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:145",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:148",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:402"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#file_def_by_raw_service_def": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/method_descriptor.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/service_descriptor.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/service_descriptor.rb:60"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_message_which_oneof": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:531",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:539",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:545"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#map_next": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:231",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:308",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:586"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI::MessageValue)#by_ref": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:26"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#message_frozen?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:84",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:89"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#message_value_hash": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:235",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:236",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:255"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#map_get": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:107",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:129",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:226"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#arena_malloc": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:46",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:279"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#map_frozen?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:166",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:179",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:184"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_enum_fullname": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:47",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:96"
+      ]
+    },
+    "Google::Protobuf::RepeatedField#instance_variable_get": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:262",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:262"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#enum_name": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:121"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#enum_number": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/enum_descriptor.rb:130"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#memcpy": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:281",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:285"
+      ]
+    },
+    "Google::Protobuf::FFI::MessageValue#to_ptr": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:285",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:285"
+      ]
+    },
+    "Hash#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:195",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:229"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#decode_message": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:203",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:619"
+      ]
+    },
+    "singleton(Google::Protobuf::RepeatedField)#replace": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:107",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:123"
+      ]
+    },
+    "singleton(Google::Protobuf::RepeatedField)#to_a": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:105",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/repeated_field.rb:120"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#json_encode_message": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:309",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:318"
+      ]
+    },
+    "Google::Protobuf::FFI::Status#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:310",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:319"
+      ]
+    },
+    "Google::Protobuf#nanos": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:77"
+      ]
+    },
+    "Google::Protobuf#struct_value": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:90"
+      ]
+    },
+    "Google::Protobuf#list_value": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:94",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/well_known_types.rb:96"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#message_value_equal": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/map.rb:227",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:227"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/internal/object_cache.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/internal/object_cache.rb:72"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_message_fullname": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:98"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#is_repeated": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:206"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#is_sub_message": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/field_descriptor.rb:210"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#field_count": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:79",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:738"
+      ]
+    },
+    "singleton(Google::Protobuf::RepeatedField)#send": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/message.rb:385",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf_ffi.rb:32"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_well_known_type": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/descriptor.rb:138",
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/internal/convert.rb:72"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#get_service_full_name": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/service_descriptor.rb:56"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#array_resize": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:337"
+      ]
+    },
+    "{ initial_values: Dynamic[top], name: Dynamic[top], arena...#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:384"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#method_count": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/service_descriptor.rb:64"
+      ]
+    },
+    "singleton(Google::Protobuf::FFI)#create_array": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/protobuf/ruby/lib/google/protobuf/ffi/repeated_field.rb:360"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 66,
+    "send": 63,
+    "new": 51,
+    "null?": 44,
+    "class": 40,
+    "freeze": 32,
+    "==": 30,
+    "read": 26,
+    "instance_variable_get": 25,
+    "read_string_length": 18,
+    "force_encoding": 18,
+    "-": 16,
+    "decode": 16,
+    "descriptor": 15,
+    "!=": 14,
+    "name": 13,
+    "<": 13,
+    "address": 12,
+    "size": 11,
+    "to_s": 9,
+    "each": 8,
+    "nil?": 8,
+    "to_sym": 8,
+    "repeated?": 7,
+    "+": 7,
+    "subtype": 7,
+    "type": 6,
+    "try_add": 6,
+    "get": 6,
+    ">": 6,
+    ">=": 6,
+    "[]=": 6,
+    "write": 5,
+    "zero?": 5,
+    "fuse": 5,
+    "map?": 5,
+    "msgclass": 5,
+    "clear_features": 5,
+    "class_eval": 5,
+    "to_ruby": 5
+  },
+  "implicit_self_methods_top": {
+    "attach_function": 125,
+    "name": 32,
+    "descriptor": 30,
+    "arena": 26,
+    "convert_upb_to_ruby": 22,
+    "array": 18,
+    "value_type": 16,
+    "allocate": 15,
+    "typedef": 15,
+    "key_type": 14,
+    "type": 12,
+    "native_type": 8,
+    "descriptor_from_file_def": 7,
+    "index_assign_internal": 6,
+    "length": 6,
+    "enum": 6,
+    "c_type": 5,
+    "layout": 5,
+    "scalar_create_hash": 4,
+    "subtype": 3,
+    "clear_internal": 3,
+    "repeated_field_from_field_descriptor": 3,
+    "inspect_field": 3,
+    "get_field": 2,
+    "scalar_from_field_descriptor": 2,
+    "message_from_field_descriptor": 2,
+    "map_from_field_descriptor": 2,
+    "get_repeated_field": 2,
+    "get_map_field": 2,
+    "encode_internal": 2,
+    "pop_one": 2,
+    "method_missing_internal": 2,
+    "ffi_lib": 2,
+    "private_constructor": 2,
+    "map_ptr": 2,
+    "internal_dup": 2,
+    "setup_accessors!": 1,
+    "setup_oneof_accessors!": 1,
+    "set_value_on_message": 1,
+    "original_method_missing": 1
+  }
+}

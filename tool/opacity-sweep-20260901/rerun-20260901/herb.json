@@ -1,0 +1,690 @@
+{
+  "files": 42,
+  "parse_errors": 0,
+  "total": 22027,
+  "tier_counts": {
+    "constant": 7543,
+    "nominal": 5122,
+    "shaped": 738,
+    "dynamic_top": 8009,
+    "bot": 337,
+    "top": 53,
+    "refined": 224,
+    "dynamic_specific": 1
+  },
+  "opaque_node_classes": {
+    "LocalVariableTargetNode": 34,
+    "EmbeddedStatementsNode": 452,
+    "LocalVariableReadNode": 2750,
+    "InstanceVariableOrWriteNode": 4,
+    "CallNode": 3083,
+    "InstanceVariableWriteNode": 80,
+    "BeginNode": 19,
+    "LocalVariableWriteNode": 424,
+    "GlobalVariableReadNode": 12,
+    "BlockNode": 298,
+    "GlobalVariableWriteNode": 2,
+    "OrNode": 157,
+    "ParenthesesNode": 32,
+    "MultiWriteNode": 7,
+    "IfNode": 179,
+    "SplatNode": 8,
+    "LocalVariableOrWriteNode": 8,
+    "AndNode": 74,
+    "ConstantPathNode": 33,
+    "ConstantReadNode": 18,
+    "InstanceVariableReadNode": 319,
+    "UnlessNode": 12,
+    "ForwardingSuperNode": 14,
+    "ConstantWriteNode": 3,
+    "LocalVariableOperatorWriteNode": 9,
+    "CaseNode": 13,
+    "InstanceVariableTargetNode": 2,
+    "SuperNode": 8,
+    "YieldNode": 5,
+    "MultiTargetNode": 3
+  },
+  "local_read_buckets": {
+    "assigned_local": 944,
+    "def_param": 1342,
+    "block_param": 464
+  },
+  "call_receiver_tiers": {
+    "precise": 177,
+    "dynamic_top": 2149,
+    "implicit_self": 757
+  },
+  "opaque_ivar_reads": 319,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/herb",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/herb/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 13964,
+  "precision_ratio": 0.6339,
+  "named_receiver_opaque_pairs": {
+    "Hash#[]": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:125",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:132",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:151"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:371",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:620",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:620"
+      ]
+    },
+    "singleton(Herb::Configuration)#load": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb.rb:101",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb.rb:105",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:23"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | {}#[]=": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:677",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:681",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:766"
+      ]
+    },
+    "Herb::Engine#src": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:692",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:702",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:777"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:379",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:400",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/debug_visitor.rb:54"
+      ]
+    },
+    "Array | FalseClass | Float | Hash | Integer | NilClass | ...#dig": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/configuration.rb:81",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/configuration.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/configuration.rb:222"
+      ]
+    },
+    "singleton(Herb)#configuration": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:83"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]] | { file: Dynamic[top] }#[]=": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:1036",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:1037",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:1038"
+      ]
+    },
+    "singleton(JSON)#pretty_generate": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:644",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:293",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/parse_result.rb:42"
+      ]
+    },
+    "Herb::Engine::InvalidRubyError#compiled_source": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:711",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:718",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:718"
+      ]
+    },
+    "singleton(Herb::Dev::ServerEntry)#all": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:94",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:102"
+      ]
+    },
+    "Herb::AST::DocumentNode#accept": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:159",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:164",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/parse_result.rb:47"
+      ]
+    },
+    "singleton(Herb::Engine)#comment?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:276",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:365",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:376"
+      ]
+    },
+    "singleton(Herb::Engine)#heredoc?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:276",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:377",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:672"
+      ]
+    },
+    "Tempfile#close": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:294",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:447"
+      ]
+    },
+    "Tempfile#unlink": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:75",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:306",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:448"
+      ]
+    },
+    "[Dynamic[top], 1]#max": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:132",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/parser_error_overlay.rb:485",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/validation_error_overlay.rb:59"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:133",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/parser_error_overlay.rb:486",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/validation_error_overlay.rb:60"
+      ]
+    },
+    "singleton(FileUtils)#mkdir_p": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/bootstrap.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/server_entry.rb:22",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/server_entry.rb:59"
+      ]
+    },
+    "{}#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:742",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:674",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:763"
+      ]
+    },
+    "singleton(Herb)#ensure_installed": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:787",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:906"
+      ]
+    },
+    "Herb::Engine::ErrorFormatter#format_all": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:423",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:453"
+      ]
+    },
+    "Mutex#synchronize": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/server.rb:181",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/server.rb:190"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#last": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:588",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:589"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#shift": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:575",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:880"
+      ]
+    },
+    "singleton(Herb::Dev::ServerEntry)#find_by_project": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb.rb:116",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:136"
+      ]
+    },
+    "[Dynamic[top], 0]#max": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:153",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/parser_error_overlay.rb:506"
+      ]
+    },
+    "Array | FalseClass | Float | Hash | Integer | NilClass | ...#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/configuration.rb:11",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/configuration.rb:12"
+      ]
+    },
+    "{ label: \"A11y\", color: \"#3b82f6\" } | { label: \"Nesting\",...#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/validation_error_overlay.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/validation_error_overlay.rb:41"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | {}#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:695",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:786"
+      ]
+    },
+    "Herb::Project::ResultTracker#problem_files": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:246",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:274"
+      ]
+    },
+    "Herb::Engine#filename": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:693",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:785"
+      ]
+    },
+    "Herb::Project#analyze!": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:160",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:590"
+      ]
+    },
+    "singleton(Herb)#diff": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:640",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:321"
+      ]
+    },
+    "Herb::Configuration#project_root": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:377",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:415"
+      ]
+    },
+    "[Dynamic[top], 5]#max": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:1049",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:1051"
+      ]
+    },
+    "[Dynamic[top], 4]#max": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:1048",
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:1052"
+      ]
+    },
+    "Array[Dynamic[top]]#max_by": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:1090"
+      ]
+    },
+    "Herb::ActionView::RenderCallVisitor#render_calls": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:756"
+      ]
+    },
+    "Herb::Engine::ParserErrorOverlay#generate_html": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine.rb:513"
+      ]
+    },
+    "[Dynamic[top], 6]#max": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:1050"
+      ]
+    },
+    "Herb::ActionView::RenderCallVisitor#visit": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:755"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/compiler.rb:603"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/debug_visitor.rb:165"
+      ]
+    },
+    "Array[Dynamic[top]]#find": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/debug_visitor.rb:171"
+      ]
+    },
+    "[Dynamic[top]]#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:609"
+      ]
+    },
+    "singleton(Herb)#arena_stats": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:1016"
+      ]
+    },
+    "[Dynamic[top] | String]#shift": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/action_view/render_analyzer.rb:69"
+      ]
+    },
+    "singleton(Herb)#leak_check": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:932"
+      ]
+    },
+    "non-negative-int#+": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/engine/error_formatter.rb:149"
+      ]
+    },
+    "[80, Dynamic[top]]#max": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:790"
+      ]
+    },
+    "\"Compilation errors\" | \"Invalid Ruby output\" | \"Parser cr...#downcase": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:758"
+      ]
+    },
+    "\"Analyze parse errors\" | \"Compilation errors\" | \"Invalid ...#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:708"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]] | { file_path: Dynamic[top] }#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:354"
+      ]
+    },
+    "Herb::Project::ResultTracker#file_contents": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:298"
+      ]
+    },
+    "Herb::Project::ResultTracker#file_diagnostics": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/project.rb:297"
+      ]
+    },
+    "Herb::Project#leak_check=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:159"
+      ]
+    },
+    "Herb::CLI#tool=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:333"
+      ]
+    },
+    "Herb::ActionView::RenderAnalyzer#check!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:401"
+      ]
+    },
+    "Herb::ActionView::RenderAnalyzer#graph_file!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:419"
+      ]
+    },
+    "Herb::ActionView::RenderAnalyzer#graph!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:421"
+      ]
+    },
+    "Herb::Dev::Runner#stop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:600"
+      ]
+    },
+    "Herb::Dev::Runner#restart": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:605"
+      ]
+    },
+    "Herb::Dev::Runner#status": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:610"
+      ]
+    },
+    "Herb::Dev::Runner#run": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:615"
+      ]
+    },
+    "Herb::Project#arena_stats=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:158"
+      ]
+    },
+    "Herb::Project#isolate=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:156"
+      ]
+    },
+    "Herb::Project#verbose=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:155"
+      ]
+    },
+    "Herb::Engine#bufvar": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:694"
+      ]
+    },
+    "Herb::Project#silent=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:154"
+      ]
+    },
+    "Herb::Project#no_timing=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/cli.rb:153"
+      ]
+    },
+    "Herb::Dev::Server#start": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:54"
+      ]
+    },
+    "Herb::Dev::Server#port": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:56"
+      ]
+    },
+    "Herb::Dev::Server#stop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:69"
+      ]
+    },
+    "singleton(FileUtils)#cp_r": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/bootstrap.rb:46"
+      ]
+    },
+    "singleton(Herb::Dev::ServerEntry)#find_by_port": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:149"
+      ]
+    },
+    "singleton(Herb::Dev::Server)#find_available_port": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:152"
+      ]
+    },
+    "singleton(Herb::Dev::Runner)#can_patch?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/runner.rb:327"
+      ]
+    },
+    "Herb::Dev::ServerEntry#save": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/herb/lib/herb/dev/server.rb:44"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 312,
+    "count": 85,
+    "each": 72,
+    "puts": 71,
+    "to_s": 68,
+    "any?": 66,
+    "<<": 66,
+    "==": 65,
+    "value": 49,
+    "gsub": 46,
+    "location": 41,
+    "-": 41,
+    "start": 41,
+    "+": 37,
+    "empty?": 33,
+    "match?": 29,
+    "length": 28,
+    "include?": 28,
+    "line": 26,
+    "column": 26,
+    "positive?": 24,
+    "map": 24,
+    "size": 23,
+    "join": 21,
+    "fetch": 20,
+    "send": 18,
+    "strip": 17,
+    "each_with_index": 17,
+    "type": 16,
+    "content": 14,
+    "split": 14,
+    "children": 13,
+    "[]=": 13,
+    "skipped": 13,
+    "end_with?": 12,
+    "message": 12,
+    "config_path": 11,
+    "start_with?": 11,
+    "=~": 10,
+    "new": 10
+  },
+  "implicit_self_methods_top": {
+    "add_text": 27,
+    "escape_html": 26,
+    "stat": 19,
+    "visit": 17,
+    "visit_all": 16,
+    "silent": 16,
+    "percentage": 14,
+    "create_debug_attribute": 14,
+    "current_context": 13,
+    "tool": 12,
+    "pluralize": 12,
+    "configuration": 11,
+    "json": 11,
+    "visit_erb_control_with_parts": 10,
+    "label": 10,
+    "send": 9,
+    "create_token": 9,
+    "separator": 9,
+    "file_content": 8,
+    "files": 7,
+    "file_display_name": 7,
+    "find_view_root": 7,
+    "strict": 6,
+    "dimmed": 6,
+    "visit_erb_control_node": 6,
+    "with_buffer": 6,
+    "result": 6,
+    "print_partial_tree": 6,
+    "find_erb_files": 5,
+    "arena_stats": 5,
+    "add_diagnostic": 5,
+    "trailing_newline": 5,
+    "find_partial_files": 5,
+    "pid": 5,
+    "partial_path": 4,
+    "add_expression": 4,
+    "template_name": 4,
+    "escape_attr": 4,
+    "remove_trailing_whitespace_from_last_token!": 4,
+    "left_trim?": 4
+  }
+}

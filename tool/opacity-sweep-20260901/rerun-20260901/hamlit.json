@@ -1,0 +1,495 @@
+{
+  "files": 61,
+  "parse_errors": 0,
+  "total": 10000,
+  "tier_counts": {
+    "constant": 3345,
+    "nominal": 1607,
+    "dynamic_top": 4272,
+    "shaped": 571,
+    "bot": 185,
+    "dynamic_specific": 8,
+    "refined": 12
+  },
+  "opaque_node_classes": {
+    "GlobalVariableReadNode": 5,
+    "ConstantPathNode": 38,
+    "ConstantReadNode": 37,
+    "CallNode": 1691,
+    "ForwardingSuperNode": 6,
+    "InstanceVariableWriteNode": 42,
+    "InstanceVariableReadNode": 135,
+    "LocalVariableReadNode": 1456,
+    "IfNode": 101,
+    "BlockNode": 109,
+    "EmbeddedStatementsNode": 156,
+    "SplatNode": 26,
+    "LocalVariableWriteNode": 134,
+    "CaseNode": 21,
+    "LocalVariableOperatorWriteNode": 2,
+    "AndNode": 65,
+    "OrNode": 38,
+    "MultiWriteNode": 18,
+    "LocalVariableTargetNode": 83,
+    "BeginNode": 13,
+    "YieldNode": 17,
+    "UnlessNode": 11,
+    "SuperNode": 4,
+    "ParenthesesNode": 27,
+    "InstanceVariableOperatorWriteNode": 4,
+    "ModuleNode": 5,
+    "ClassNode": 3,
+    "IndexOrWriteNode": 1,
+    "LocalVariableOrWriteNode": 4,
+    "MultiTargetNode": 4,
+    "ClassVariableReadNode": 2,
+    "CallOperatorWriteNode": 2,
+    "InstanceVariableTargetNode": 2,
+    "CallTargetNode": 2,
+    "InstanceVariableOrWriteNode": 3,
+    "CallOrWriteNode": 1,
+    "IndexOperatorWriteNode": 1,
+    "GlobalVariableTargetNode": 1,
+    "GlobalVariableWriteNode": 1,
+    "ConstantWriteNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 891,
+    "block_param": 203,
+    "assigned_local": 362
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 366,
+    "dynamic_top": 1193,
+    "precise": 129,
+    "dynamic_specific": 3
+  },
+  "opaque_ivar_reads": 135,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/hamlit",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 5720,
+  "precision_ratio": 0.572,
+  "named_receiver_opaque_pairs": {
+    "singleton(Hamlit::HamlError)#message": {
+      "count": 26,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:510",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:511",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:533"
+      ]
+    },
+    "{}#[]=": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/attribute_builder.rb:114",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/attribute_builder.rb:116",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/attribute_builder.rb:120"
+      ]
+    },
+    "singleton(Hamlit::HamlUtil)#html_safe": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers/xss_mods.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers/xss_mods.rb:32",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers/xss_mods.rb:37"
+      ]
+    },
+    "singleton(Hamlit::HamlParser::ParseNode)#new": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:311",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:327",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:362"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#last": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:349",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:350",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:351"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/attribute_builder.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/attribute_builder.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/attribute_builder.rb:29"
+      ]
+    },
+    "Hamlit::HamlError#backtrace": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:29",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:39"
+      ]
+    },
+    "singleton(Hamlit::HamlOptions)#defaults": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_options.rb:222",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_options.rb:270"
+      ]
+    },
+    "Hamlit::HamlOptions#escape_html": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:314",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:322",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:395"
+      ]
+    },
+    "singleton(Hamlit::StringSplitter)#compile": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/compiler/script_compiler.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/compiler/tag_compiler.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/filters/plain.rb:17"
+      ]
+    },
+    "Hamlit::HamlError#line": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:154",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:154"
+      ]
+    },
+    "singleton(Hamlit::RubyExpression)#string_literal?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/compiler/script_compiler.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/compiler/tag_compiler.rb:32"
+      ]
+    },
+    "singleton(Hamlit::RailsTemplate)#options": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/rails_template.rb:29",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/rails_template.rb:48"
+      ]
+    },
+    "Hamlit::Engine#call": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/cli.rb:91",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/rails_template.rb:44"
+      ]
+    },
+    "singleton(Hamlit::HamlOptions)#buffer_defaults": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_buffer.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_options.rb:260"
+      ]
+    },
+    "singleton(Hamlit::HamlAttributeBuilder)#merge_attributes!": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_buffer.rb:138",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_buffer.rb:140"
+      ]
+    },
+    "singleton(Hamlit::HamlAttributeBuilder)#build_attributes": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_buffer.rb:141",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:498"
+      ]
+    },
+    "Hamlit::HamlOptions#for_buffer": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_helpers.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_temple_engine.rb:72"
+      ]
+    },
+    "Hamlit::RailsTemplate#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/cli.rb:82"
+      ]
+    },
+    "Hamlit::HamlOptions#mime_type": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:314"
+      ]
+    },
+    "singleton(Hamlit::HamlParser)#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:221"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:371"
+      ]
+    },
+    "singleton(Hamlit::HamlParser)#text": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:196"
+      ]
+    },
+    "Hamlit::HamlOptions#preserve": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:393"
+      ]
+    },
+    "Hamlit::HamlParser::DynamicAttributes(new: nil, old: nil)#new=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:438"
+      ]
+    },
+    "Hamlit::HamlOptions#suppress_eval": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:444"
+      ]
+    },
+    "Hamlit::HamlOptions#autoclose": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:455"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:543"
+      ]
+    },
+    "Hamlit::HamlOptions#remove_whitespace": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:644"
+      ]
+    },
+    "Hamlit::HamlSyntaxError#message": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:673"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:754"
+      ]
+    },
+    "singleton(Hamlit::HamlUtil)#balance": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:824"
+      ]
+    },
+    "Hamlit::RubyExpression#parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/ruby_expression.rb:9"
+      ]
+    },
+    "singleton(Hamlit::Engine)#options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/cli.rb:106"
+      ]
+    },
+    "Hamlit::Filters#compile": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/compiler.rb:71"
+      ]
+    },
+    "singleton(Hamlit::TempleLineCounter)#count_lines": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/compiler/children_compiler.rb:53"
+      ]
+    },
+    "singleton(Hamlit::HamlHelpers)#find_and_preserve": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/compiler/script_compiler.rb:62"
+      ]
+    },
+    "Array[:multi | Dynamic[top] | [:dynamic, String]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/dynamic_merger.rb:28"
+      ]
+    },
+    "singleton(Hamlit::Filters)#registered": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/filters.rb:69"
+      ]
+    },
+    "singleton(Hamlit::Filters::TiltBase)#render": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/filters/tilt_base.rb:33"
+      ]
+    },
+    "singleton(Hamlit::HamlUtil)#check_haml_encoding": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser.rb:34"
+      ]
+    },
+    "singleton(Hamlit::HamlHelpers)#escape_once_without_haml_xss": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_attribute_builder.rb:39"
+      ]
+    },
+    "singleton(Hamlit::HamlHelpers)#html_escape_without_haml_xss": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_attribute_builder.rb:41"
+      ]
+    },
+    "[Dynamic[top], 0]#max": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_buffer.rb:190"
+      ]
+    },
+    "Hamlit::Compiler#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/cli.rb:102"
+      ]
+    },
+    "singleton(Hamlit::HamlTempleEngine)#options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_options.rb:16"
+      ]
+    },
+    "singleton(Hamlit::HamlOptions)#valid_formats": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_options.rb:233"
+      ]
+    },
+    "singleton(Hamlit::HamlOptions)#buffer_option_keys": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_options.rb:258"
+      ]
+    },
+    "Hamlit::HamlOptions#filename": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:154"
+      ]
+    },
+    "Hamlit::HamlOptions#line": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:154"
+      ]
+    },
+    "singleton(Hamlit::HamlParser)#text=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/hamlit/lib/hamlit/parser/haml_parser.rb:195"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 208,
+    "==": 97,
+    "value": 75,
+    "text": 55,
+    "to_s": 43,
+    "empty?": 42,
+    "<<": 34,
+    "index": 24,
+    "+": 21,
+    "each": 20,
+    "shift": 19,
+    "map": 17,
+    "children": 17,
+    "scan": 17,
+    "first": 16,
+    "=~": 16,
+    "gsub!": 14,
+    "include?": 14,
+    "tabs": 14,
+    "type": 14,
+    "!=": 14,
+    "strip!": 13,
+    "gsub": 12,
+    "strip": 12,
+    ">": 12,
+    "join": 11,
+    "-": 11,
+    "dup": 9,
+    "size": 9,
+    "chomp": 8,
+    "count": 8,
+    "split": 8,
+    "rstrip": 8,
+    "options": 8,
+    "length": 8,
+    "line": 7,
+    "nil?": 7,
+    "!": 6,
+    "merge": 6,
+    "whitespace": 6
+  },
+  "implicit_self_methods_top": {
+    "haml_buffer": 26,
+    "options": 24,
+    "push": 24,
+    "eval": 14,
+    "use": 12,
+    "capture_haml": 12,
+    "plain": 10,
+    "haml_internal_concat_raw": 10,
+    "filter": 9,
+    "block_opened?": 8,
+    "option": 7,
+    "escape_html": 6,
+    "next_line": 6,
+    "haml_internal_concat": 5,
+    "haml_xss_html_escape": 5,
+    "compile_children": 5,
+    "compile": 5,
+    "flat?": 5,
+    "desc": 5,
+    "script": 5,
+    "send": 4,
+    "filter_and_join": 4,
+    "escape_once": 4,
+    "nuke_inner_whitespace?": 4,
+    "block_keyword": 3,
+    "defaults": 3,
+    "flat_script": 3,
+    "handle_ruby_multiline": 3,
+    "preserve": 3,
+    "is_ruby_multiline?": 3,
+    "balance": 3,
+    "buffer": 3,
+    "count_lines": 3,
+    "define_options": 3,
+    "engine_options": 3,
+    "literal_for": 3,
+    "pp_object": 2,
+    "old": 2,
+    "div": 2,
+    "generate_code": 2
+  }
+}

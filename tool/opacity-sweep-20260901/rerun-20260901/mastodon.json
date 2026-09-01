@@ -1,0 +1,801 @@
+{
+  "files": 1325,
+  "parse_errors": 0,
+  "total": 150145,
+  "tier_counts": {
+    "dynamic_top": 67649,
+    "nominal": 26694,
+    "constant": 48857,
+    "shaped": 4955,
+    "bot": 1713,
+    "top": 119,
+    "dynamic_specific": 100,
+    "refined": 58
+  },
+  "opaque_node_classes": {
+    "ClassNode": 92,
+    "ConstantPathNode": 1820,
+    "CallNode": 38035,
+    "BlockNode": 1779,
+    "LocalVariableReadNode": 11065,
+    "OrNode": 971,
+    "ModuleNode": 31,
+    "ConstantReadNode": 1965,
+    "UnlessNode": 288,
+    "AndNode": 883,
+    "IfNode": 1605,
+    "InstanceVariableReadNode": 3746,
+    "LocalVariableWriteNode": 1494,
+    "InstanceVariableWriteNode": 965,
+    "ParenthesesNode": 356,
+    "EmbeddedStatementsNode": 986,
+    "CaseNode": 112,
+    "YieldNode": 49,
+    "MultiWriteNode": 58,
+    "LocalVariableTargetNode": 272,
+    "BeginNode": 391,
+    "ForwardingArgumentsNode": 14,
+    "ForwardingSuperNode": 87,
+    "ImplicitNode": 126,
+    "SplatNode": 155,
+    "ConstantWriteNode": 75,
+    "InstanceVariableOrWriteNode": 159,
+    "SuperNode": 31,
+    "LocalVariableOrWriteNode": 31,
+    "LocalVariableOperatorWriteNode": 41,
+    "CallOrWriteNode": 7,
+    "MultiTargetNode": 25,
+    "CallOperatorWriteNode": 20,
+    "GlobalVariableReadNode": 6,
+    "LocalVariableAndWriteNode": 2,
+    "InstanceVariableTargetNode": 22,
+    "IndexOrWriteNode": 4
+  },
+  "local_read_buckets": {
+    "block_param": 2506,
+    "def_param": 5118,
+    "assigned_local": 3441
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 14130,
+    "dynamic_top": 19177,
+    "precise": 4694,
+    "dynamic_specific": 33,
+    "top": 1
+  },
+  "opaque_ivar_reads": 3746,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/mastodon",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/mastodon/app",
+    "/Users/megurine/repo/ruby/rigor-survey/mastodon/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 82277,
+  "precision_ratio": 0.548,
+  "named_receiver_opaque_pairs": {
+    "ActionController::Parameters#[]": {
+      "count": 496,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:63"
+      ]
+    },
+    "ActivityPub::TagManager#uri_for": {
+      "count": 164,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/collections_controller.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/contexts_controller.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/contexts_controller.rb:56"
+      ]
+    },
+    "singleton(Rails)#configuration": {
+      "count": 108,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/base_controller.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/donation_campaigns_controller.rb:26",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/donation_campaigns_controller.rb:57"
+      ]
+    },
+    "singleton(Rails)#cache": {
+      "count": 81,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/donation_campaigns_controller.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/donation_campaigns_controller.rb:37",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/donation_campaigns_controller.rb:44"
+      ]
+    },
+    "Hash#[]": {
+      "count": 61,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:222",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:224"
+      ]
+    },
+    "singleton(Rails)#logger": {
+      "count": 50,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/inboxes_controller.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/media_controller.rb:19",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v2/media_controller.rb:10"
+      ]
+    },
+    "1#day": {
+      "count": 47,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/about_controller.rb:9",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/instances/activity_controller.rb:10",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/instances/peers_controller.rb:15"
+      ]
+    },
+    "Account?#id": {
+      "count": 35,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/account_actions_controller.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:55"
+      ]
+    },
+    "ActionController::Parameters#merge": {
+      "count": 32,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/replies_controller.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/collections_controller.rb:23"
+      ]
+    },
+    "ActionDispatch::Flash::FlashHash#[]=": {
+      "count": 29,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:29",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/collections_controller.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/custom_emojis_controller.rb:43"
+      ]
+    },
+    "singleton(Chewy)#enabled?": {
+      "count": 26,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/peers/search_controller.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/admin/metrics/dimension/software_versions_dimension.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/admin/metrics/dimension/space_usage_dimension.rb:59"
+      ]
+    },
+    "1#hour": {
+      "count": 25,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/donation_campaigns_controller.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/instances/translation_languages_controller.rb:15"
+      ]
+    },
+    "Account?#user": {
+      "count": 25,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:52",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:54"
+      ]
+    },
+    "Request#perform": {
+      "count": 25,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/donation_campaigns_controller.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:251",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:368"
+      ]
+    },
+    "singleton(ActivityPub::DeliveryWorker)#perform_async": {
+      "count": 24,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/feature_request.rb:61",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/follow.rb:43",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/quote_request.rb:35"
+      ]
+    },
+    "5#minutes": {
+      "count": 23,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/fasp/base_controller.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/collections_controller.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/concerns/api/caching_concern.rb:11"
+      ]
+    },
+    "singleton(Rails)#application": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/email_subscriptions/accounts_controller.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/email_subscriptions/setups_controller.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts/email_subscriptions_controller.rb:22"
+      ]
+    },
+    "3#minutes": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/collections_controller.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/contexts_controller.rb:13"
+      ]
+    },
+    "ActiveRecord::Relation#find_each": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/trends.rb:37",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/user.rb:504",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/after_block_domain_from_account_service.rb:47"
+      ]
+    },
+    "singleton(LocalNotificationWorker)#perform_async": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/follow_requests_controller.rb:16",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/announce.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/feature_request.rb:56"
+      ]
+    },
+    "ActivityPub::TagManager#url_for": {
+      "count": 21,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/web/embeds_controller.rb:16",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/redirect/base_controller.rb:9",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/statuses_controller.rb:72"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top] | FalseClass | String | TrueCla...#[]=": {
+      "count": 21,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/serializers/initial_state_serializer.rb:21",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/serializers/initial_state_serializer.rb:22",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/serializers/initial_state_serializer.rb:23"
+      ]
+    },
+    "ActionDispatch::Request#format": {
+      "count": 21,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:12",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:81"
+      ]
+    },
+    "singleton(Mastodon::Snowflake)#id_at": {
+      "count": 20,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/account_reach_finder.rb:54",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/admin/metrics/dimension/base_dimension.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/admin/metrics/measure/base_measure.rb:124"
+      ]
+    },
+    "singleton(Account)#without_suspended": {
+      "count": 19,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/replies_controller.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts/familiar_followers_controller.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts/relationships_controller.rb:9"
+      ]
+    },
+    "30#seconds": {
+      "count": 19,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/about_controller.rb:9",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/feature_authorizations_controller.rb:12"
+      ]
+    },
+    "UnfollowService#call": {
+      "count": 17,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts_controller.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/block.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/block.rb:15"
+      ]
+    },
+    "ActivityPub::TagManager#uri_to_resource": {
+      "count": 17,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity.rb:75",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity.rb:79"
+      ]
+    },
+    "ActionDispatch::Request::Session#[]": {
+      "count": 17,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/auth/registrations_controller.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/auth/registrations_controller.rb:143",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/auth/registrations_controller.rb:143"
+      ]
+    },
+    "TagManager#normalize_domain": {
+      "count": 17,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/domain_blocks_controller.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/instances/moderation_notes_controller.rb:41",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/instances_controller.rb:62"
+      ]
+    },
+    "CSV#<<": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/export_domain_allows_controller.rb:51",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/export_domain_blocks_controller.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/settings/imports_controller.rb:46"
+      ]
+    },
+    "singleton(Account)#find_remote": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/permalink_redirector.rb:19",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/search_query_transformer.rb:207",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/presenters/instance_presenter.rb:17"
+      ]
+    },
+    "[Dynamic[top], 0]#max": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/statuses/favourites_controller.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/statuses/reblogs_controller.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/importer/base_importer.rb:39"
+      ]
+    },
+    "ResolveAccountService#call": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:104",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts/lookup_controller.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/authorize_interactions_controller.rb:40"
+      ]
+    },
+    "singleton(Rails)#env": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/theme_helper.rb:9",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/request.rb:307"
+      ]
+    },
+    "singleton(Mastodon::Feature)#fasp_enabled?": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/fasp/base_controller.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v2/search_controller.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v2/suggestions_controller.rb:29"
+      ]
+    },
+    "singleton(ActivityPub::DeliveryWorker)#push_bulk": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/delete_account_service.rb:118",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/delete_account_service.rb:130",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/delete_account_service.rb:271"
+      ]
+    },
+    "singleton(Account)#representative": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/outboxes_controller.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/instance_actors_controller.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:249"
+      ]
+    },
+    "1#week": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/antispam.rb:6",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/account.rb:69",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/account_statuses_cleanup_policy.rb:26"
+      ]
+    },
+    "Account?#acct": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:62"
+      ]
+    },
+    "TagManager#local_domain?": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/permalink_redirector.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/search_query_transformer.rb:206",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/webfinger_resource.rb:82"
+      ]
+    },
+    "ActionDispatch::Flash::FlashHash#now": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/domain_blocks_controller.rb:51",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/export_domain_blocks_controller.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/export_domain_blocks_controller.rb:46"
+      ]
+    },
+    "singleton(Account)#find_local": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:226",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/account_search_service.rb:213",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/resolve_url_service.rb:105"
+      ]
+    },
+    "singleton(Setting)#registrations_mode": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:26",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:34"
+      ]
+    },
+    "DeleteAccountService#call": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/admin/accounts_controller.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/delete.rb:15"
+      ]
+    },
+    "Thread#[]": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/connection_pool/shared_connection_pool.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/connection_pool/shared_connection_pool.rb:32",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/connection_pool/shared_connection_pool.rb:48"
+      ]
+    },
+    "singleton(ApplicationRecord)#transaction": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/filters_controller.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/filters_controller.rb:32",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/create.rb:70"
+      ]
+    },
+    "ActivityPub::Parser::StatusParser?#edited_at": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/create.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/create.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/create.rb:112"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/request.rb:239",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/request.rb:240",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/user_settings/namespace.rb:18"
+      ]
+    },
+    "Mastodon::UnexpectedResponseError#response": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/activitypub/fetch_remote_actor_service.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/activitypub/fetch_remote_actor_service.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/activitypub/fetch_remote_status_service.rb:90"
+      ]
+    },
+    "singleton(Chewy)#client": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/admin/metrics/dimension/software_versions_dimension.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/admin/metrics/dimension/space_usage_dimension.rb:61",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/admin/metrics/dimension/space_usage_dimension.rb:63"
+      ]
+    },
+    "ActionDispatch::Request#remote_ip": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/fasp/debug/v0/callback/responses_controller.rb:7",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts_controller.rb:36",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts_controller.rb:131"
+      ]
+    },
+    "RBS::Unnamed::ENVClass#fetch": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:41",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/authorized_fetch_helper.rb:5",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/workers/scheduler/ip_cleanup_scheduler.rb:6"
+      ]
+    },
+    "singleton(Time)#zone": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/admin/announcements_helper.rb:9",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:273",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/custom_filter.rb:50"
+      ]
+    },
+    "ActiveRecord::Relation#in_batches": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/vacuum/feeds_vacuum.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/after_block_domain_from_account_service.rb:32",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/after_block_service.rb:26"
+      ]
+    },
+    "ActionDispatch::Request#headers": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/inboxes_controller.rb:81",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/fasp/base_controller.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/fasp/base_controller.rb:44"
+      ]
+    },
+    "15#seconds": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/about_controller.rb:9",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/accounts_controller.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/concerns/api/caching_concern.rb:7"
+      ]
+    },
+    "10#minutes": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/instance_actors_controller.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/media_proxy_controller.rb:60",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/wrapstodon_controller.rb:15"
+      ]
+    },
+    "Account?#nil?": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/move.rb:12",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/status_cache_hydrator.rb:127",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/resolve_url_service.rb:41"
+      ]
+    },
+    "7#days": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/chewy/tags_index.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/instances/translation_languages_controller.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/move.rb:4"
+      ]
+    },
+    "singleton(Status)#arel_table": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/account_statuses_filter.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/account_statuses_filter.rb:79",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/account_statuses_filter.rb:91"
+      ]
+    },
+    "ActiveRecord::Relation#merge!": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/email_domain_blocks_controller.rb:62",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/admin/action_log_filter.rb:101",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/notification.rb:187"
+      ]
+    },
+    "24#hours": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/concerns/api/access_token_tracking_concern.rb:6",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/concerns/session_tracking_concern.rb:6",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/concerns/user_tracking_concern.rb:6"
+      ]
+    },
+    "singleton(ActivityPub::UpdateDistributionWorker)#perform_in": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts/credentials_controller.rb:17",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/profile/avatars_controller.rb:10",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/profile/headers_controller.rb:10"
+      ]
+    },
+    "ActionController::Parameters#fetch": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/featured_collections_controller.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/change_emails_controller.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts/credentials_controller.rb:50"
+      ]
+    },
+    "ActivityPub::FetchRemoteStatusService#call": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity.rb:170",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity.rb:172",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/quote_request.rb:24"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/markers_controller.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:115",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/json_ld_helper.rb:115"
+      ]
+    },
+    "singleton(Rails)#root": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/inline_script_manager.rb:22",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/themes.rb:12",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/privacy_policy.rb:4"
+      ]
+    },
+    "singleton(ActivityPub::DistributionWorker)#perform_async": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/accept.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/announce.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/create.rb:92"
+      ]
+    },
+    "ActiveRecord::Relation#find_in_batches": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/importer/accounts_index_importer.rb:5",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/vacuum/preview_cards_vacuum.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/trends/statuses.rb:48"
+      ]
+    },
+    "Hash[Symbol, String | {}] | { settings: {}, text: String }#[]=": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:222",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:223",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/helpers/application_helper.rb:224"
+      ]
+    },
+    "Hash[:reserve_email | :reserve_username | Dynamic[top], D...#[]": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/delete_account_service.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/delete_account_service.rb:229",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/delete_account_service.rb:230"
+      ]
+    },
+    "{}#[]=": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/markers_controller.rb:22",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/feed_manager.rb:373",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/request.rb:349"
+      ]
+    },
+    "30#minutes": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/well_known/node_info_controller.rb:17",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/well_known/node_info_controller.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/account.rb:301"
+      ]
+    },
+    "FollowService#call": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/api/v1/accounts_controller.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/models/form/account_batch.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/services/bootstrap_timeline_service.rb:16"
+      ]
+    },
+    "ActivityPub::TagManager#replies_uri_for": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/replies_controller.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/replies_controller.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/activitypub/replies_controller.rb:69"
+      ]
+    },
+    "ActiveRecord::Relation#page": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/action_logs_controller.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/custom_emojis_controller.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/disputes/appeals_controller.rb:10"
+      ]
+    },
+    "ActivityPub::TagManager#local_uri?": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/concerns/signature_verification.rb:103",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity.rb:168",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/lib/activitypub/activity/create.rb:425"
+      ]
+    },
+    "singleton(Vite)#tagger": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/lib/vite/tags_helper.rb:6",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/lib/vite/tags_helper.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/lib/vite/tags_helper.rb:18"
+      ]
+    },
+    "singleton(DomainBlock)#rule_for": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/accounts_controller.rb:41",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/domain_blocks_controller.rb:46",
+        "/Users/megurine/repo/ruby/rigor-survey/mastodon/app/controllers/admin/export_domain_blocks_controller.rb:29"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 2125,
+    "id": 758,
+    "present?": 549,
+    "==": 464,
+    "account": 350,
+    "to_s": 300,
+    "map": 256,
+    "blank?": 242,
+    "t": 241,
+    "each": 215,
+    "where": 208,
+    "new": 188,
+    "account_id": 186,
+    "local?": 176,
+    "can?": 171,
+    "to_i": 163,
+    "first": 158,
+    "+": 146,
+    "nil?": 142,
+    "empty?": 125,
+    "merge": 125,
+    "size": 119,
+    "!=": 110,
+    "split": 109,
+    "x": 108,
+    "delete": 107,
+    "add": 105,
+    "user": 98,
+    "-": 96,
+    "[]=": 90,
+    "pluck": 88,
+    "presence": 88,
+    ">": 88,
+    "include?": 88,
+    "ago": 84,
+    "domain": 80,
+    "includes": 77,
+    "find": 76,
+    "uri": 74,
+    "<": 72
+  },
+  "implicit_self_methods_top": {
+    "object": 884,
+    "before_action": 593,
+    "render": 379,
+    "current_account": 336,
+    "authorize": 317,
+    "options": 235,
+    "scope": 229,
+    "current_user": 206,
+    "belongs_to": 201,
+    "attributes": 198,
+    "validates": 193,
+    "has_many": 188,
+    "redirect_to": 185,
+    "role": 173,
+    "account": 168,
+    "say": 167,
+    "redis": 153,
+    "option": 117,
+    "attribute": 115,
+    "has_one": 103,
+    "log_action": 101,
+    "limit_param": 97,
+    "doorkeeper_authorize!": 93,
+    "params": 87,
+    "sidekiq_options": 79,
+    "skip_before_action": 77,
+    "id": 75,
+    "pagination_params": 74,
+    "after_action": 69,
+    "record": 68,
+    "errors": 67,
+    "desc": 63,
+    "included": 60,
+    "value_or_id": 58,
+    "object_uri": 53,
+    "expires_in": 51,
+    "not_found": 50,
+    "target_account": 48,
+    "authorize_if_got_token!": 47,
+    "t": 47
+  }
+}

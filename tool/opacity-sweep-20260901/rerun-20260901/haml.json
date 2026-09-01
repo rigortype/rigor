@@ -1,0 +1,450 @@
+{
+  "files": 51,
+  "parse_errors": 0,
+  "total": 8525,
+  "tier_counts": {
+    "constant": 2891,
+    "nominal": 1444,
+    "dynamic_top": 3449,
+    "shaped": 560,
+    "bot": 166,
+    "dynamic_specific": 7,
+    "refined": 8
+  },
+  "opaque_node_classes": {
+    "GlobalVariableReadNode": 5,
+    "ConstantPathNode": 42,
+    "ConstantReadNode": 42,
+    "CallNode": 1326,
+    "ForwardingSuperNode": 6,
+    "InstanceVariableWriteNode": 29,
+    "InstanceVariableReadNode": 107,
+    "LocalVariableReadNode": 1177,
+    "IfNode": 73,
+    "BlockNode": 91,
+    "EmbeddedStatementsNode": 109,
+    "SplatNode": 20,
+    "LocalVariableWriteNode": 100,
+    "CaseNode": 23,
+    "LocalVariableOperatorWriteNode": 2,
+    "AndNode": 61,
+    "OrNode": 28,
+    "MultiWriteNode": 26,
+    "LocalVariableTargetNode": 100,
+    "BeginNode": 8,
+    "YieldNode": 11,
+    "UnlessNode": 12,
+    "SuperNode": 3,
+    "ParenthesesNode": 23,
+    "InstanceVariableOperatorWriteNode": 2,
+    "ClassNode": 3,
+    "IndexOrWriteNode": 1,
+    "ModuleNode": 5,
+    "MultiTargetNode": 3,
+    "InstanceVariableOrWriteNode": 1,
+    "CallOrWriteNode": 1,
+    "LocalVariableOrWriteNode": 4,
+    "InstanceVariableTargetNode": 1,
+    "IndexOperatorWriteNode": 1,
+    "ConstantWriteNode": 1,
+    "GlobalVariableTargetNode": 1,
+    "GlobalVariableWriteNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 713,
+    "block_param": 145,
+    "assigned_local": 319
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 248,
+    "dynamic_top": 986,
+    "precise": 89,
+    "dynamic_specific": 3
+  },
+  "opaque_ivar_reads": 107,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/haml",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/haml/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 5069,
+  "precision_ratio": 0.5946,
+  "named_receiver_opaque_pairs": {
+    "Hash[Symbol, Dynamic[top]]#[]": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_compiler.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_compiler.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_compiler.rb:28"
+      ]
+    },
+    "{}#[]=": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_builder.rb:106",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_builder.rb:108",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_builder.rb:112"
+      ]
+    },
+    "singleton(Haml::Parser::ParseNode)#new": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:332",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:348",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:383"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_builder.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_builder.rb:17",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_builder.rb:19"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#last": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:370",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:371",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:372"
+      ]
+    },
+    "Haml::Parser::ParserOptions#escape_html": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:335",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:343",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:416"
+      ]
+    },
+    "Haml::Error#line": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:164",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:164"
+      ]
+    },
+    "Haml::Engine#call": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/cli.rb:91",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/rails_template.rb:48"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/cli.rb:115",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:775"
+      ]
+    },
+    "singleton(Haml::RubyExpression)#string_literal?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler/script_compiler.rb:32",
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler/tag_compiler.rb:32"
+      ]
+    },
+    "singleton(Haml::AttributeParser)#available?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/attribute_compiler.rb:25"
+      ]
+    },
+    "non-negative-int#/": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:183"
+      ]
+    },
+    "singleton(Haml::Parser)#text=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:216"
+      ]
+    },
+    "singleton(Haml::Parser)#text": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:217"
+      ]
+    },
+    "singleton(Haml::Parser)#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:242"
+      ]
+    },
+    "Haml::Parser::ParserOptions#mime_type": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:335"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:392"
+      ]
+    },
+    "Haml::Parser::ParserOptions#preserve": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:414"
+      ]
+    },
+    "Haml::Parser::DynamicAttributes(new: nil, old: nil)#new=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:459"
+      ]
+    },
+    "Haml::Parser::ParserOptions#suppress_eval": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:465"
+      ]
+    },
+    "Haml::Parser::ParserOptions#autoclose": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:476"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:564"
+      ]
+    },
+    "Haml::Parser::ParserOptions#remove_whitespace": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:665"
+      ]
+    },
+    "Haml::SyntaxError#message": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:694"
+      ]
+    },
+    "singleton(Haml::Util)#balance": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:845"
+      ]
+    },
+    "Haml::RubyExpression#parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/ruby_expression.rb:9"
+      ]
+    },
+    "Haml::StringSplitter::SyntaxChecker#parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/string_splitter.rb:121"
+      ]
+    },
+    "Haml::RailsTemplate#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/cli.rb:82"
+      ]
+    },
+    "Haml::Compiler#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/cli.rb:102"
+      ]
+    },
+    "singleton(Haml::Engine)#options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/cli.rb:106"
+      ]
+    },
+    "Haml::Compiler::ChildrenCompiler#compile": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler.rb:59"
+      ]
+    },
+    "Haml::Compiler::CommentCompiler#compile": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler.rb:63"
+      ]
+    },
+    "Haml::Filters#compile": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler.rb:71"
+      ]
+    },
+    "Haml::Compiler::ScriptCompiler#compile": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler.rb:79"
+      ]
+    },
+    "Haml::Compiler::SilentScriptCompiler#compile": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler.rb:83"
+      ]
+    },
+    "Haml::Compiler::TagCompiler#compile": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler.rb:87"
+      ]
+    },
+    "singleton(Haml::TempleLineCounter)#count_lines": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler/children_compiler.rb:54"
+      ]
+    },
+    "singleton(Haml::Compiler::ScriptCompiler)#find_and_preserve": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/compiler/script_compiler.rb:71"
+      ]
+    },
+    "Array[:multi | Dynamic[top] | [:dynamic, String]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/dynamic_merger.rb:28"
+      ]
+    },
+    "singleton(Haml::Filters)#registered": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/filters.rb:69"
+      ]
+    },
+    "singleton(Haml::Filters::TiltBase)#render": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/filters/tilt_base.rb:39"
+      ]
+    },
+    "singleton(Haml::Helpers)#preserve": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/helpers.rb:12"
+      ]
+    },
+    "singleton(Haml::Util)#check_haml_encoding": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:113"
+      ]
+    },
+    "Haml::Error#backtrace": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:164"
+      ]
+    },
+    "Haml::Parser::ParserOptions#filename": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:164"
+      ]
+    },
+    "Haml::Parser::ParserOptions#line": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/haml/lib/haml/parser.rb:164"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 181,
+    "==": 86,
+    "value": 65,
+    "text": 54,
+    "empty?": 38,
+    "<<": 32,
+    "to_s": 26,
+    "+": 21,
+    "index": 21,
+    "shift": 17,
+    "scan": 17,
+    "!=": 15,
+    "first": 14,
+    "children": 13,
+    "tabs": 13,
+    "size": 13,
+    "strip!": 12,
+    "type": 12,
+    "strip": 11,
+    "map": 11,
+    "-": 11,
+    "gsub": 9,
+    ">": 9,
+    "each": 9,
+    "include?": 8,
+    "split": 8,
+    "last": 8,
+    "count": 7,
+    "new": 7,
+    "!": 7,
+    "line": 7,
+    "rstrip": 7,
+    "join": 6,
+    "dup": 6,
+    "gsub!": 6,
+    "static?": 6,
+    "html_safe?": 5,
+    "*": 5,
+    "times": 5,
+    "length": 5
+  },
+  "implicit_self_methods_top": {
+    "push": 24,
+    "options": 17,
+    "eval": 13,
+    "use": 11,
+    "plain": 10,
+    "block_opened?": 8,
+    "option": 7,
+    "escape_html": 6,
+    "compile": 6,
+    "compile_children": 5,
+    "script": 5,
+    "capture_haml": 5,
+    "desc": 5,
+    "flat?": 5,
+    "filter": 5,
+    "escape_once": 4,
+    "rstrip_whitespace!": 4,
+    "nuke_inner_whitespace?": 4,
+    "handle_ruby_multiline": 3,
+    "is_ruby_multiline?": 3,
+    "balance": 3,
+    "flat_script": 3,
+    "engine_options": 3,
+    "count_lines": 3,
+    "literal_for": 3,
+    "block_keyword": 3,
+    "registered": 2,
+    "tag": 2,
+    "close": 2,
+    "div": 2,
+    "closes_flat?": 2,
+    "old": 2,
+    "is_multiline?": 2,
+    "define_options": 2,
+    "nuke_prev_whitespace?": 2,
+    "filter_and_join": 2,
+    "preserve": 2,
+    "parse_key!": 2,
+    "class_option": 2,
+    "generate_code": 2
+  }
+}

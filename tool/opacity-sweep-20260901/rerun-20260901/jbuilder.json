@@ -1,0 +1,222 @@
+{
+  "files": 12,
+  "parse_errors": 2,
+  "total": 1481,
+  "tier_counts": {
+    "constant": 417,
+    "nominal": 250,
+    "dynamic_top": 764,
+    "shaped": 38,
+    "bot": 12
+  },
+  "opaque_node_classes": {
+    "ConstantReadNode": 9,
+    "ConstantPathNode": 13,
+    "CallNode": 235,
+    "UnlessNode": 1,
+    "BlockNode": 39,
+    "EmbeddedStatementsNode": 4,
+    "ForwardingSuperNode": 3,
+    "LocalVariableReadNode": 273,
+    "IfNode": 42,
+    "AndNode": 8,
+    "LocalVariableWriteNode": 26,
+    "RescueModifierNode": 1,
+    "ClassVariableReadNode": 2,
+    "InstanceVariableWriteNode": 13,
+    "YieldNode": 12,
+    "ForwardingArgumentsNode": 3,
+    "ClassVariableWriteNode": 2,
+    "InstanceVariableReadNode": 39,
+    "OrNode": 8,
+    "BeginNode": 2,
+    "LocalVariableTargetNode": 5,
+    "InstanceVariableTargetNode": 6,
+    "SuperNode": 6,
+    "SplatNode": 4,
+    "MultiWriteNode": 1,
+    "ParenthesesNode": 1,
+    "IndexOrWriteNode": 3,
+    "LocalVariableOrWriteNode": 1,
+    "ClassNode": 2
+  },
+  "local_read_buckets": {
+    "def_param": 205,
+    "block_param": 31,
+    "assigned_local": 37
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 91,
+    "dynamic_top": 129,
+    "precise": 15
+  },
+  "opaque_ivar_reads": 39,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/jbuilder",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 717,
+  "precision_ratio": 0.4841,
+  "named_receiver_opaque_pairs": {
+    "Jbuilder#attributes!": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder.rb:228",
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder.rb:258"
+      ]
+    },
+    "singleton(Rails)#cache": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/jbuilder_template.rb:190",
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/jbuilder_template.rb:197"
+      ]
+    },
+    "Proc#call": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/key_formatter.rb:20",
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/key_formatter.rb:24"
+      ]
+    },
+    "Rails::Generators::JbuilderGenerator#attributes": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/generators/rails/jbuilder_generator.rb:49"
+      ]
+    },
+    "Jbuilder#target!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder.rb:33"
+      ]
+    },
+    "Jbuilder::DependencyTracker#dependencies": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/jbuilder_dependency_tracker.rb:29"
+      ]
+    },
+    "singleton(JbuilderTemplate)#template_lookup_options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/jbuilder_template.rb:151"
+      ]
+    },
+    "Jbuilder::CollectionRenderer#render_collection_with_partial": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/jbuilder_template.rb:169"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/key_formatter.rb:15"
+      ]
+    },
+    "Mutex#synchronize": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/key_formatter.rb:15"
+      ]
+    },
+    "singleton(Rails::Generators)#configure!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/railtie.rb:29"
+      ]
+    },
+    "singleton(Rails::Generators)#hidden_namespaces": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/jbuilder/lib/jbuilder/railtie.rb:30"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 8,
+    "map": 7,
+    "first": 5,
+    "[]=": 5,
+    "to_s": 5,
+    "each": 4,
+    "present?": 4,
+    "controller": 4,
+    "+": 3,
+    "scan": 3,
+    "uniq": 3,
+    "delete": 3,
+    "fetch": 3,
+    "empty?": 3,
+    "dup": 3,
+    "perform_caching": 2,
+    "render": 2,
+    "<<": 2,
+    "source": 2,
+    "instrument_fragment_cache": 2,
+    "nil?": 2,
+    "has_key?": 2,
+    "on_load": 2,
+    "==": 2,
+    "send": 2,
+    "uniq!": 1,
+    "body": 1,
+    "lookup_context": 1,
+    "key?": 1,
+    "except": 1,
+    "extract_options!": 1,
+    "read": 1,
+    "tap": 1,
+    "write": 1,
+    "config": 1,
+    "slice": 1,
+    "combined_fragment_cache_key": 1,
+    "last": 1,
+    "split": 1,
+    "expand_cache_key": 1
+  },
+  "implicit_self_methods_top": {
+    "_format_keys": 8,
+    "_array": 7,
+    "_render_partial_with_options": 4,
+    "_scope": 4,
+    "controller_file_path": 4,
+    "_set_value": 4,
+    "_extract": 4,
+    "source": 3,
+    "_key": 3,
+    "_merge_values": 3,
+    "template": 3,
+    "_cache_fragment_for": 2,
+    "_set": 2,
+    "helper_method": 2,
+    "singular_table_name": 2,
+    "_merge_block": 2,
+    "_map_collection": 2,
+    "json": 2,
+    "__getobj__": 2,
+    "generators": 1,
+    "initializer": 1,
+    "merge!": 1,
+    "target!": 1,
+    "cattr_accessor": 1,
+    "cache!": 1,
+    "_set_inline_partial": 1,
+    "url_for": 1,
+    "_fragment_name_with_digest": 1,
+    "_write_fragment_cache": 1,
+    "_cache_key": 1,
+    "_read_fragment_cache": 1,
+    "_render_active_model_partial": 1,
+    "resolve_directories": 1,
+    "explicit_dependencies": 1,
+    "indirect_dependencies": 1,
+    "direct_dependencies": 1,
+    "_extract_method_values": 1,
+    "_extract_hash_values": 1,
+    "attributes_names": 1,
+    "hook_for": 1
+  }
+}

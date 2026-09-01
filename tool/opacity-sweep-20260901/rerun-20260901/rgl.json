@@ -1,0 +1,446 @@
+{
+  "files": 28,
+  "parse_errors": 0,
+  "total": 3938,
+  "tier_counts": {
+    "constant": 1071,
+    "nominal": 760,
+    "dynamic_top": 1881,
+    "bot": 83,
+    "shaped": 139,
+    "top": 4
+  },
+  "opaque_node_classes": {
+    "CallNode": 604,
+    "LocalVariableReadNode": 739,
+    "BlockNode": 122,
+    "InstanceVariableWriteNode": 32,
+    "InstanceVariableReadNode": 134,
+    "LocalVariableWriteNode": 35,
+    "ParenthesesNode": 14,
+    "OrNode": 14,
+    "EmbeddedStatementsNode": 47,
+    "AndNode": 15,
+    "IndexOrWriteNode": 1,
+    "UnlessNode": 15,
+    "ForwardingSuperNode": 12,
+    "InstanceVariableTargetNode": 2,
+    "IfNode": 50,
+    "YieldNode": 6,
+    "SuperNode": 16,
+    "SplatNode": 3,
+    "MultiTargetNode": 3,
+    "ConstantPathNode": 7,
+    "ConstantReadNode": 6,
+    "GlobalVariableReadNode": 1,
+    "IndexOperatorWriteNode": 2,
+    "ModuleNode": 2,
+    "CaseNode": 2,
+    "ClassNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 406,
+    "block_param": 253,
+    "assigned_local": 80
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 406,
+    "precise": 91,
+    "implicit_self": 107
+  },
+  "opaque_ivar_reads": 134,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/rgl",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/rgl/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 2053,
+  "precision_ratio": 0.5213,
+  "named_receiver_opaque_pairs": {
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/condensation.rb:45",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/condensation.rb:45",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/condensation.rb:46"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#add_edge": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/adjacency.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/adjacency.rb:188",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bidirectional_adjacency.rb:36"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#add_vertex": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/adjacency.rb:187",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bidirectional_adjacency.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:47"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bipartite.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bipartite.rb:84",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bipartite.rb:85"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#each_adjacent": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bidirectional_adjacency.rb:60",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:78"
+      ]
+    },
+    "RGL::EdgePropertiesMap#edge_property": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bellman_ford.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bellman_ford.rb:81"
+      ]
+    },
+    "[Dynamic[top]]#first": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:47",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:48"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#each_vertex": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:62",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:149"
+      ]
+    },
+    "RGL::Graph#detect": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/traversal.rb:113",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/traversal.rb:173"
+      ]
+    },
+    "RGL::ImplicitGraph#each_adjacent": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:119"
+      ]
+    },
+    "RGL::ImplicitGraph#depth_first_search": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:37",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:117"
+      ]
+    },
+    "RGL::EdmondsKarpAlgorithm::EdmondsKarpBFSIterator#color_map": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:40"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bipartite.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:114"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/connected_components.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/connected_components.rb:80"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#instance_eval": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/adjacency.rb:53"
+      ]
+    },
+    "Proc#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:52"
+      ]
+    },
+    "Array#inject": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/mutable.rb:87"
+      ]
+    },
+    "RGL::MutableGraph#inject": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/mutable.rb:103"
+      ]
+    },
+    "RGL::MutableGraph#cycles_with_vertex": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/mutable.rb:104"
+      ]
+    },
+    "RGL::BFSIterator#include?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/path.rb:14"
+      ]
+    },
+    "RGL::DijkstraAlgorithm#find_shortest_paths": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/prim.rb:33"
+      ]
+    },
+    "singleton(RGL::AdjacencyGraph)#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/prim.rb:34"
+      ]
+    },
+    "{}#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/rdot.rb:206"
+      ]
+    },
+    "Array?#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/topsort.rb:47"
+      ]
+    },
+    "RGL::BFSIterator#set_to_end": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/traversal.rb:132"
+      ]
+    },
+    "RGL::BFSIterator#set_tree_edge_event_handler": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/traversal.rb:128"
+      ]
+    },
+    "RGL::TopsortIterator#length": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/topsort.rb:78"
+      ]
+    },
+    "Enumerator[Dynamic[top], Dynamic[top]]#find": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/transitivity.rb:165"
+      ]
+    },
+    "Array[Dynamic[top]]?#shift": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/traversal.rb:104"
+      ]
+    },
+    "RGL::AdjacencyGraph#add_vertex": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/adjacency.rb:174"
+      ]
+    },
+    "RGL::AdjacencyGraph#add_edge": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/adjacency.rb:175"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#remove_vertex": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bidirectional_adjacency.rb:42"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#remove_edge": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bidirectional_adjacency.rb:48"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#has_edge?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bidirectional_adjacency.rb:53"
+      ]
+    },
+    "RGL::DirectedAdjacencyGraph#out_degree": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bidirectional_adjacency.rb:73"
+      ]
+    },
+    "RGL::BipartiteBFSIterator#finished_vertex?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bipartite.rb:24"
+      ]
+    },
+    "RGL::BipartiteBFSIterator#move_forward_until": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/bipartite.rb:27"
+      ]
+    },
+    "RGL::DFSVisitor#set_finish_vertex_event_handler": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/connected_components.rb:32"
+      ]
+    },
+    "RGL::DFSVisitor#set_start_vertex_event_handler": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/connected_components.rb:34"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/connected_components.rb:84"
+      ]
+    },
+    "RGL::EdgePropertiesMap | RGL::NonNegativeEdgePropertiesMap#edge_property": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/dijkstra.rb:84"
+      ]
+    },
+    "{ \"name\": Dynamic[top], \"fontsize\": \"8\" | Dynamic[top], \"...#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/dot.rb:67"
+      ]
+    },
+    "{ \"from\": Dynamic[top], \"to\": Dynamic[top], \"fontsize\": \"...#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/dot.rb:86"
+      ]
+    },
+    "singleton(File)#open": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/dot.rb:107"
+      ]
+    },
+    "RGL::NonNegativeEdgePropertiesMap#edge_property": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:33"
+      ]
+    },
+    "RGL::EdmondsKarpAlgorithm::EdmondsKarpBFSIterator#move_forward_until": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:38"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rgl/lib/rgl/edmonds_karp.rb:52"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 70,
+    "+": 54,
+    "==": 24,
+    "each": 21,
+    "call": 14,
+    "empty?": 10,
+    "to_s": 9,
+    "[]=": 9,
+    "distance_map": 8,
+    "color_map": 7,
+    "collect": 7,
+    "join": 7,
+    "parents_map": 6,
+    "<<": 6,
+    "directed?": 5,
+    "size": 5,
+    "<": 5,
+    "each_edge": 5,
+    "to_a": 5,
+    "!=": 5,
+    "gsub": 5,
+    "each_adjacent": 5,
+    "key?": 5,
+    "adjacent_iterator": 4,
+    "first": 4,
+    "vertices": 4,
+    "-": 4,
+    "include?": 4,
+    "delete": 4,
+    "=~": 3,
+    "each_vertex": 3,
+    "compact": 3,
+    ">": 3,
+    "fetch": 3,
+    "pop": 3,
+    "push": 3,
+    "new": 3,
+    "vertex_iterator": 3,
+    "source": 3,
+    "handle_examine_edge": 3
+  },
+  "implicit_self_methods_top": {
+    "quote_ID": 15,
+    "source": 8,
+    "target": 8,
+    "color_map": 5,
+    "graph": 5,
+    "label": 3,
+    "name": 3,
+    "relax_edge": 3,
+    "init": 3,
+    "def_event_handlers": 3,
+    "has_vertex?": 3,
+    "num_vertices": 3,
+    "add_vertex": 3,
+    "depth_first_visit": 2,
+    "get_capacity": 2,
+    "cycles_with_vertex_helper": 2,
+    "inject": 2,
+    "validate_property": 2,
+    "quote_label": 2,
+    "handle_tree_edge": 2,
+    "edge_link": 2,
+    "eql_graph?": 1,
+    "add_edge": 1,
+    "next_vertex": 1,
+    "handle_examine_vertex": 1,
+    "handle_examine_edge": 1,
+    "follow_edge?": 1,
+    "handle_back_edge": 1,
+    "handle_forward_edge": 1,
+    "handle_finish_vertex": 1,
+    "def_event_handler": 1,
+    "eql_vertices_set?": 1,
+    "eql_edges_set?": 1,
+    "num_edges": 1,
+    "to_a": 1,
+    "relax_edges": 1,
+    "in_degree": 1,
+    "out_degree": 1,
+    "include?": 1,
+    "min_discover_time": 1
+  }
+}

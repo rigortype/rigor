@@ -1,0 +1,809 @@
+{
+  "files": 346,
+  "parse_errors": 1,
+  "total": 128495,
+  "tier_counts": {
+    "constant": 38542,
+    "nominal": 20082,
+    "dynamic_top": 63832,
+    "bot": 976,
+    "shaped": 4819,
+    "dynamic_specific": 170,
+    "refined": 57,
+    "top": 17
+  },
+  "opaque_node_classes": {
+    "CallNode": 31518,
+    "BeginNode": 174,
+    "IfNode": 2436,
+    "LocalVariableTargetNode": 316,
+    "EmbeddedStatementsNode": 2190,
+    "LocalVariableWriteNode": 2464,
+    "ParenthesesNode": 558,
+    "OrNode": 673,
+    "InstanceVariableWriteNode": 820,
+    "LocalVariableReadNode": 15256,
+    "InstanceVariableReadNode": 2103,
+    "AndNode": 1017,
+    "CallTargetNode": 21,
+    "BlockNode": 2265,
+    "CaseNode": 87,
+    "IndexOrWriteNode": 22,
+    "ConstantPathNode": 477,
+    "ConstantReadNode": 335,
+    "UnlessNode": 210,
+    "YieldNode": 75,
+    "InstanceVariableOrWriteNode": 100,
+    "ForwardingSuperNode": 114,
+    "LocalVariableOrWriteNode": 44,
+    "SplatNode": 119,
+    "InstanceVariableTargetNode": 20,
+    "LocalVariableOperatorWriteNode": 96,
+    "InstanceVariableOperatorWriteNode": 17,
+    "CallOrWriteNode": 34,
+    "MultiWriteNode": 46,
+    "IndexOperatorWriteNode": 14,
+    "GlobalVariableReadNode": 63,
+    "SuperNode": 51,
+    "RescueModifierNode": 10,
+    "ForwardingArgumentsNode": 3,
+    "ModuleNode": 15,
+    "ClassNode": 19,
+    "ClassVariableWriteNode": 2,
+    "LocalVariableAndWriteNode": 2,
+    "ConstantWriteNode": 12,
+    "CallOperatorWriteNode": 3,
+    "ClassVariableReadNode": 24,
+    "EmbeddedVariableNode": 1,
+    "MatchWriteNode": 2,
+    "IndexTargetNode": 2,
+    "ClassVariableOrWriteNode": 18,
+    "MultiTargetNode": 1
+  },
+  "local_read_buckets": {
+    "assigned_local": 4678,
+    "block_param": 3633,
+    "def_param": 6945
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 8748,
+    "precise": 5321,
+    "dynamic_top": 17408,
+    "dynamic_specific": 41
+  },
+  "opaque_ivar_reads": 2103,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/redmine",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/redmine/app",
+    "/Users/megurine/repo/ruby/rigor-survey/redmine/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 64476,
+  "precision_ratio": 0.5018,
+  "named_receiver_opaque_pairs": {
+    "ActionController::Parameters#[]": {
+      "count": 581,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:41",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:85"
+      ]
+    },
+    "singleton(User)#current": {
+      "count": 494,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:47",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:92"
+      ]
+    },
+    "singleton(Issue)#table_name": {
+      "count": 137,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/versions_controller.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/versions_controller.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/my_helper.rb:175"
+      ]
+    },
+    "ActionDispatch::Flash::FlashHash#[]=": {
+      "count": 127,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:93",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:110"
+      ]
+    },
+    "singleton(Project)#table_name": {
+      "count": 98,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/sys_controller.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/versions_controller.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/my_helper.rb:175"
+      ]
+    },
+    "Hash#[]": {
+      "count": 45,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/projects_helper.rb:96",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/versions_helper.rb:60",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/versions_helper.rb:62"
+      ]
+    },
+    "Redmine::Export::PDF::ITCPDF#SetFontStyle": {
+      "count": 44,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:36",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:45"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 43,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:445",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:284",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:363"
+      ]
+    },
+    "singleton(TimeEntry)#table_name": {
+      "count": 40,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/timelog_controller.rb:64",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/my_helper.rb:171",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/my_helper.rb:171"
+      ]
+    },
+    "Redmine::Export::PDF::ITCPDF#RDMCell": {
+      "count": 33,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:122",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:137",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:149"
+      ]
+    },
+    "singleton(Redmine::Configuration)#[]": {
+      "count": 32,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:351",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:358",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:176"
+      ]
+    },
+    "singleton(Journal)#table_name": {
+      "count": 32,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/journals_controller.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:915",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:917"
+      ]
+    },
+    "singleton(Redmine::I18n)#t": {
+      "count": 29,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/plugins/acts_as_attachable/lib/acts_as_attachable.rb:158",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/field_format.rb:51",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/field_format.rb:385"
+      ]
+    },
+    "singleton(Member)#table_name": {
+      "count": 29,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/custom_field.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/custom_field.rb:264",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/group.rb:93"
+      ]
+    },
+    "singleton(Changeset)#table_name": {
+      "count": 28,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/repositories_controller.rb:399",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/repositories_controller.rb:399",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:43"
+      ]
+    },
+    "ActionDispatch::Request#post?": {
+      "count": 28,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:32",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:84"
+      ]
+    },
+    "ActionDispatch::Request::Session#[]": {
+      "count": 27,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:138",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:149"
+      ]
+    },
+    "ActionDispatch::Request#xhr?": {
+      "count": 27,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/activities_controller.rb:69",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/admin_controller.rb:44",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:283"
+      ]
+    },
+    "Redmine::Helpers::Gantt#date_from": {
+      "count": 26,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:381",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:560",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:565"
+      ]
+    },
+    "singleton(Issue)#visible": {
+      "count": 25,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:425",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:597",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/previews_controller.rb:25"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 23,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/imports_controller.rb:199",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:735",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/workflows_controller.rb:40"
+      ]
+    },
+    "singleton(Issue)#where": {
+      "count": 23,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:408",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:277",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/group.rb:119"
+      ]
+    },
+    "singleton(User)#table_name": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:918",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:921",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:921"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/application_helper.rb:1648",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/application_helper.rb:1648",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/application_helper.rb:1649"
+      ]
+    },
+    "singleton(Attachment)#table_name": {
+      "count": 21,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/files_controller.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/files_controller.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/files_controller.rb:35"
+      ]
+    },
+    "ActionDispatch::Flash::FlashHash#now": {
+      "count": 20,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:86",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:119",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:375"
+      ]
+    },
+    "singleton(Setting)#default_language": {
+      "count": 20,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:269",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/users_controller.rb:120",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/users_controller.rb:129"
+      ]
+    },
+    "{}#[]=": {
+      "count": 20,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/context_menus_controller.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/context_menus_controller.rb:114",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/imports_controller.rb:188"
+      ]
+    },
+    "singleton(CustomValue)#table_name": {
+      "count": 19,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/custom_field.rb:359",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/custom_field.rb:360",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/custom_field.rb:361"
+      ]
+    },
+    "singleton(Version)#table_name": {
+      "count": 19,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/attachment.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/attachment.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/attachment.rb:57"
+      ]
+    },
+    "singleton(Setting)#app_title": {
+      "count": 18,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/activities_controller.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:625",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:72"
+      ]
+    },
+    "Redmine::Export::PDF::ITCPDF#ln": {
+      "count": 18,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:150",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:159"
+      ]
+    },
+    "Redmine::Pagination::Paginator#offset": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/admin_controller.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/boards_controller.rb:51",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/groups_controller.rb:41"
+      ]
+    },
+    "Redmine::Helpers::Gantt#date_to": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:381",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:560",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:592"
+      ]
+    },
+    "singleton(Setting)#text_formatting": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/help_controller.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/help_controller.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/help_controller.rb:29"
+      ]
+    },
+    "singleton(Project)#visible": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/watchers_controller.rb:122",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/welcome_controller.rb:30"
+      ]
+    },
+    "singleton(Setting)#notified_events": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/documents_controller.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/files_controller.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/comment.rb:51"
+      ]
+    },
+    "singleton(IssueRelation)#table_name": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:810",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:811",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:812"
+      ]
+    },
+    "singleton(Project)#find": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:346",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:367",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/auto_completes_controller.rb:67"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | {}#[]=": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_import.rb:146",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_import.rb:151",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_import.rb:157"
+      ]
+    },
+    "singleton(Redmine::NestedSet::Traversing)#table_name": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/nested_set/traversing.rb:61",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/nested_set/traversing.rb:61",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/nested_set/traversing.rb:66"
+      ]
+    },
+    "singleton(Project)#where": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/context_menus_controller.rb:123",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:364",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:319"
+      ]
+    },
+    "UserPreference#[]=": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/user_preference.rb:93",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/user_preference.rb:96",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/user_preference.rb:99"
+      ]
+    },
+    "UserPreference#[]": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/user_preference.rb:92",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/user_preference.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/user_preference.rb:98"
+      ]
+    },
+    "Hash[:format | :indent_increment | :render | :top | :top_...#[]": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:225",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:226",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/helpers/gantt.rb:226"
+      ]
+    },
+    "singleton(Tracker)#sorted": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:99",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:106",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:143"
+      ]
+    },
+    "singleton(User)#active": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:79",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:119",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:137"
+      ]
+    },
+    "singleton(Group)#givable": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/context_menus_controller.rb:143",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/context_menus_controller.rb:144",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/users_helper.rb:98"
+      ]
+    },
+    "Redmine::Pagination::Paginator#per_page": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/admin_controller.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/boards_controller.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/groups_controller.rb:41"
+      ]
+    },
+    "ActionDispatch::Request::Session#[]=": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:280",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:281"
+      ]
+    },
+    "singleton(Role)#givable": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/members_controller.rb:94",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/principal_memberships_controller.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/roles_controller.rb:40"
+      ]
+    },
+    "singleton(Message)#table_name": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/boards_controller.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/boards_controller.rb:43",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/boards_controller.rb:44"
+      ]
+    },
+    "singleton(MemberRole)#table_name": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/custom_field.rb:64",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/custom_field.rb:265",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/group.rb:93"
+      ]
+    },
+    "singleton(TreeMixin)#create!": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/plugins/acts_as_tree/test/acts_as_tree_test.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/plugins/acts_as_tree/test/acts_as_tree_test.rb:66",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/plugins/acts_as_tree/test/acts_as_tree_test.rb:67"
+      ]
+    },
+    "Redmine::Export::PDF::ITCPDF#RDMMultiCell": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/export/pdf/issues_pdf_helper.rb:46"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/views/builders/structure.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/views/builders/structure.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/views/builders/structure.rb:51"
+      ]
+    },
+    "Issue#project": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:173",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:424",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:461"
+      ]
+    },
+    "singleton(User)#where": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/context_menus_controller.rb:136",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/repositories_controller.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/principal.rb:54"
+      ]
+    },
+    "Issue#id": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/application_helper.rb:312",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/timelog_helper.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/timelog_helper.rb:84"
+      ]
+    },
+    "singleton(Redmine::MimeType)#of": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/attachments_controller.rb:149",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/attachments_controller.rb:294",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/repositories_controller.rb:166"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/queries_helper.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:576",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:588"
+      ]
+    },
+    "singleton(User)#current=": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:106",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:198",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/jobs/destroy_project_job.rb:20"
+      ]
+    },
+    "singleton(Tracker)#table_name": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/versions_controller.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/versions_controller.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/my_helper.rb:175"
+      ]
+    },
+    "singleton(Redmine::NestedSet::IssueNestedSet)#where": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/nested_set/issue_nested_set.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/nested_set/issue_nested_set.rb:66",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/nested_set/issue_nested_set.rb:79"
+      ]
+    },
+    "Issue?#project": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:116",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:152",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:178"
+      ]
+    },
+    "singleton(TimeEntry)#where": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/context_menus_controller.rb:87",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:436",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/timelog_controller.rb:223"
+      ]
+    },
+    "singleton(IssueCustomField)#sorted": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:98",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:105",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/projects_controller.rb:142"
+      ]
+    },
+    "ActionDispatch::Request#get?": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:125",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/application_controller.rb:276",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/imports_controller.rb:73"
+      ]
+    },
+    "singleton(IssueQuery)#connection": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:613",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:640",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:675"
+      ]
+    },
+    "singleton(Attachment)#where": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/attachment.rb:179",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/attachment.rb:414",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/attachment.rb:470"
+      ]
+    },
+    "AuthSourceLdap#account": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/auth_source_ldap.rb:72",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/auth_source_ldap.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/auth_source_ldap.rb:74"
+      ]
+    },
+    "singleton(Token)#where": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/email_address.rb:147",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/token.rb:92",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/token.rb:147"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/issues_controller.rb:417",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/projects_helper.rb:103",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/watchers_helper.rb:43"
+      ]
+    },
+    "Redmine::Scm::Adapters::Entries#<<": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/scm/adapters/bazaar_adapter.rb:107",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/scm/adapters/cvs_adapter.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/lib/redmine/scm/adapters/cvs_adapter.rb:131"
+      ]
+    },
+    "User#pref": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/account_controller.rb:146",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/users_controller.rb:137",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/journal.rb:361"
+      ]
+    },
+    "singleton(JournalDetail)#table_name": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/journal.rb:58",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/journal.rb:58",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/journal.rb:60"
+      ]
+    },
+    "singleton(Role)#sorted": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/roles_controller.rb:36",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/roles_controller.rb:58",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/controllers/roles_controller.rb:72"
+      ]
+    },
+    "Version#effective_date": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/helpers/application_helper.rb:219",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/version.rb:330",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/version.rb:331"
+      ]
+    },
+    "singleton(Journal)#visible_notes_condition": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:1300",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue.rb:1319",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/issue_query.rb:509"
+      ]
+    },
+    "singleton(Repository)#scm_adapter_class": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/repository.rb:99",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/repository.rb:414",
+        "/Users/megurine/repo/ruby/rigor-survey/redmine/app/models/repository.rb:414"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 1702,
+    "==": 712,
+    "to_s": 631,
+    "id": 477,
+    "+": 395,
+    "present?": 360,
+    "each": 352,
+    "name": 299,
+    "where": 273,
+    "map": 267,
+    "to_i": 218,
+    "first": 217,
+    "blank?": 214,
+    "to_a": 204,
+    "include?": 194,
+    "project": 187,
+    "<<": 183,
+    "-": 167,
+    ">": 150,
+    "any?": 146,
+    "html": 143,
+    "allowed_to?": 134,
+    "select": 123,
+    "!=": 110,
+    "[]=": 106,
+    "size": 104,
+    "api": 103,
+    "join": 96,
+    "custom_field": 93,
+    "collect": 92,
+    "empty?": 92,
+    "try": 87,
+    "=~": 85,
+    "value": 84,
+    "delete": 84,
+    "save": 84,
+    "permission": 82,
+    "add": 77,
+    "class": 76,
+    "split": 73
+  },
+  "implicit_self_methods_top": {
+    "l": 647,
+    "content_tag": 195,
+    "project": 179,
+    "redirect_to": 176,
+    "render": 176,
+    "logger": 155,
+    "respond_to": 151,
+    "before_action": 145,
+    "id": 122,
+    "link_to": 100,
+    "scope": 82,
+    "belongs_to": 82,
+    "add_available_filter": 80,
+    "helper": 78,
+    "where": 73,
+    "errors": 68,
+    "h": 67,
+    "table_name": 66,
+    "has_many": 63,
+    "user": 61,
+    "sprite_icon": 60,
+    "new_record?": 53,
+    "scm": 52,
+    "validates_presence_of": 51,
+    "safe_attributes": 47,
+    "validates_length_of": 46,
+    "assert_equal": 46,
+    "params": 45,
+    "lft": 44,
+    "parent": 41,
+    "head": 41,
+    "send": 40,
+    "render_api_ok": 37,
+    "name": 35,
+    "row_value": 33,
+    "sql_for_field": 33,
+    "scm_iconv": 32,
+    "url_for": 32,
+    "validate": 31,
+    "plugin_path": 30
+  }
+}

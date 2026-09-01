@@ -1,0 +1,767 @@
+{
+  "files": 77,
+  "parse_errors": 0,
+  "total": 32923,
+  "tier_counts": {
+    "constant": 13184,
+    "nominal": 7201,
+    "shaped": 968,
+    "dynamic_top": 10706,
+    "dynamic_specific": 295,
+    "bot": 517,
+    "refined": 37,
+    "top": 15
+  },
+  "opaque_node_classes": {
+    "BlockNode": 627,
+    "CallNode": 4146,
+    "LocalVariableReadNode": 2572,
+    "LocalVariableWriteNode": 496,
+    "ConstantReadNode": 405,
+    "CaseNode": 29,
+    "ClassVariableReadNode": 116,
+    "IfNode": 294,
+    "AndNode": 113,
+    "OrNode": 138,
+    "ClassVariableWriteNode": 5,
+    "EmbeddedStatementsNode": 118,
+    "ConstantPathNode": 44,
+    "InstanceVariableReadNode": 1081,
+    "BeginNode": 40,
+    "YieldNode": 15,
+    "LocalVariableTargetNode": 133,
+    "LocalVariableOrWriteNode": 2,
+    "InstanceVariableTargetNode": 19,
+    "CallOperatorWriteNode": 5,
+    "ParenthesesNode": 73,
+    "CallTargetNode": 1,
+    "InstanceVariableWriteNode": 61,
+    "InstanceVariableOperatorWriteNode": 6,
+    "UnlessNode": 17,
+    "MultiWriteNode": 25,
+    "SplatNode": 24,
+    "GlobalVariableReadNode": 15,
+    "SuperNode": 17,
+    "MultiTargetNode": 7,
+    "ModuleNode": 43,
+    "ConstantWriteNode": 5,
+    "GlobalVariableWriteNode": 2,
+    "ForwardingSuperNode": 9,
+    "LocalVariableOperatorWriteNode": 9,
+    "RescueModifierNode": 4,
+    "IndexOrWriteNode": 3,
+    "ClassNode": 2
+  },
+  "local_read_buckets": {
+    "block_param": 1093,
+    "assigned_local": 1036,
+    "def_param": 443
+  },
+  "call_receiver_tiers": {
+    "dynamic_specific": 80,
+    "dynamic_top": 2853,
+    "precise": 508,
+    "implicit_self": 705
+  },
+  "opaque_ivar_reads": 1081,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/textbringer",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 21907,
+  "precision_ratio": 0.6654,
+  "named_receiver_opaque_pairs": {
+    "Textbringer::Buffer#point": {
+      "count": 34,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:248",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:253"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 31,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:363",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:383",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1784"
+      ]
+    },
+    "Textbringer::Buffer#file_name": {
+      "count": 23,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dired.rb:7",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dired.rb:8",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/files.rb:7"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 18,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1229",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1233",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1237"
+      ]
+    },
+    "Textbringer::Buffer#name": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:107",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:117",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:117"
+      ]
+    },
+    "Textbringer::Buffer#mode": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dired.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:36",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:91"
+      ]
+    },
+    "singleton(Clipboard)#copy": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/clipboard.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/clipboard.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/clipboard.rb:36"
+      ]
+    },
+    "Textbringer::Buffer#keymap": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/completion.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/help.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/help.rb:57"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/color.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:176",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/input_methods/t_code_input_method.rb:426"
+      ]
+    },
+    "Textbringer::Buffer#keymap=": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/backtrace_mode.rb:12",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/buffer_list_mode.rb:8",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/completion_list_mode.rb:12"
+      ]
+    },
+    "Textbringer::DabbrevExtension#[]": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dabbrev.rb:5",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dabbrev.rb:6",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dabbrev.rb:7"
+      ]
+    },
+    "Textbringer::DabbrevExtension#[]=": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dabbrev.rb:46",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dabbrev.rb:47",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/dabbrev.rb:48"
+      ]
+    },
+    "Textbringer::Mark#location": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:822",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:830",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:834"
+      ]
+    },
+    "nil#set_cell": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/tetris_mode.rb:265",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/tetris_mode.rb:266",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/tetris_mode.rb:270"
+      ]
+    },
+    "Textbringer::Controller?#last_key": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:182",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/completion.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/isearch.rb:102"
+      ]
+    },
+    "Textbringer::Face?#instance_variable_get": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/face.rb:64",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/face.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/face.rb:66"
+      ]
+    },
+    "Textbringer::Controller?#overriding_map=": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/completion.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/isearch.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/ispell.rb:128"
+      ]
+    },
+    "Textbringer::Controller?#this_command": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:100",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:158",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/completion.rb:98"
+      ]
+    },
+    "Mutex#synchronize": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/controller.rb:139",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:328",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:346"
+      ]
+    },
+    "bool | Array[json::value[String]] | Float | Hash[String, ...#[]": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1394",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1395",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1395"
+      ]
+    },
+    "Textbringer::Controller?#last_command": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:200",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/buffers.rb:206"
+      ]
+    },
+    "singleton(FileUtils)#mkdir_p": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1403",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/files.rb:167",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/gamegrid.rb:125"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:613",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:87",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:88"
+      ]
+    },
+    "bot#document_open?": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:241"
+      ]
+    },
+    "Array[json::value[String]] | Float | Hash[String, json::v...#key?": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:226",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:228",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:240"
+      ]
+    },
+    "bot#running?": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:19",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:152"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:86",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:339"
+      ]
+    },
+    "Array[Dynamic[top]]#shift": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/controller.rb:140",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/ruby_mode.rb:419",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/ruby_mode.rb:422"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/completion.rb:117",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:417",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:611"
+      ]
+    },
+    "Textbringer::Controller?#overriding_map": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/help.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/help.rb:52",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/isearch.rb:62"
+      ]
+    },
+    "non-negative-int#times": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:704",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:716",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1154"
+      ]
+    },
+    "Textbringer::Face#color_pair": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:700",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:719",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:980"
+      ]
+    },
+    "Textbringer::Face#text_attrs": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:700",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:719",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:980"
+      ]
+    },
+    "{ line: Dynamic[top], character: Dynamic[top] }#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:292",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:293",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:295"
+      ]
+    },
+    "bot#server_capabilities": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:46",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:90",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:104"
+      ]
+    },
+    "bot#initialized?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:19",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:238"
+      ]
+    },
+    "non-negative-int#>": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:566",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1623",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:900"
+      ]
+    },
+    "positive-int#times": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:733",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:739",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/tetris_mode.rb:225"
+      ]
+    },
+    "bool | \"\" | 0#concat": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/isearch.rb:103",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/isearch.rb:119",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/isearch.rb:128"
+      ]
+    },
+    "Textbringer::Mark#location=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:826",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:320",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:324"
+      ]
+    },
+    "Textbringer::Buffer#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/files.rb:44",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/files.rb:47",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/files.rb:50"
+      ]
+    },
+    "{}#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/input_methods/skk_input_method.rb:637",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/input_methods/skk_input_method.rb:639",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/theme.rb:106"
+      ]
+    },
+    "Hash#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/ctags.rb:81",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/ctags.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:201"
+      ]
+    },
+    "[]#pop": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/c_mode.rb:300",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/ruby_mode.rb:394",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/ruby_mode.rb:411"
+      ]
+    },
+    "singleton(Textbringer::Window)#current=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:92",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:118",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:303"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands.rb:41",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:122",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:440"
+      ]
+    },
+    "Array[json::value[String]] | Float | Hash[String, json::v...#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:226",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:230",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:234"
+      ]
+    },
+    "bot#call": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:128",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/controller.rb:77"
+      ]
+    },
+    "Textbringer::Controller?#current_prefix_arg": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:168",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/utils.rb:152"
+      ]
+    },
+    "{ jsonrpc: \"2.0\", id: Dynamic[top] }#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:501",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:503"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#shift": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:932",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:954"
+      ]
+    },
+    "Textbringer::Controller?#recursive_edit_level": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:70"
+      ]
+    },
+    "Textbringer::FloatingWindow#buffer": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:331",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/lsp.rb:332"
+      ]
+    },
+    "bot#language_id": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/server_registry.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/server_registry.rb:77"
+      ]
+    },
+    "Textbringer::Controller?#prefix_arg=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:191",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/misc.rb:205"
+      ]
+    },
+    "Textbringer::Commands::BufferPosition#mark": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/register.rb:21",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/register.rb:58"
+      ]
+    },
+    "Textbringer::Commands::BufferPosition#buffer": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/register.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/register.rb:58"
+      ]
+    },
+    "Textbringer::Window#buffer=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/windows.rb:81",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:602"
+      ]
+    },
+    "singleton(Textbringer::Buffer)#current=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/windows.rb:81",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:58"
+      ]
+    },
+    "singleton(Textbringer::Mode)#syntax_table": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/mode.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/mode.rb:86"
+      ]
+    },
+    "int<-1, max>#downto": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/c_mode.rb:286",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/modes/ruby_mode.rb:374"
+      ]
+    },
+    "bot#-": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:354",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:357"
+      ]
+    },
+    "Array[Dynamic[top]] | non-empty-array[Dynamic[top]]#first": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:378",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:378"
+      ]
+    },
+    "singleton(Bundler)#with_unbundled_env": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/utils.rb:429"
+      ]
+    },
+    "{}?#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:458",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:462"
+      ]
+    },
+    "bot#<=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:353",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:356"
+      ]
+    },
+    "Textbringer::Window::Cursor(y: 0, x: 0)#x": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:515",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:522"
+      ]
+    },
+    "nil#location": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:320",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:324"
+      ]
+    },
+    "Class#enabled?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/global_minor_mode.rb:45",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/global_minor_mode.rb:48"
+      ]
+    },
+    "[Dynamic[top], 0]#max": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/floating_window.rb:290",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/floating_window.rb:296"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#max": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/floating_window.rb:289",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:633"
+      ]
+    },
+    "Textbringer::Window#x": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/floating_window.rb:277",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:642"
+      ]
+    },
+    "Textbringer::Window#cursor": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/floating_window.rb:276",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/floating_window.rb:277"
+      ]
+    },
+    "Queue#push": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/utils.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/utils.rb:80"
+      ]
+    },
+    "Textbringer::Window#y": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/floating_window.rb:276",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:642"
+      ]
+    },
+    "{ textDocument: { uri: Dynamic[top] }, position: { line: ...#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:138",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/lsp/client.rb:159"
+      ]
+    },
+    "Textbringer::Window#window": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/controller.rb:194",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/window.rb:210"
+      ]
+    },
+    "bot#inspect": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/controller.rb:184",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/utils.rb:100"
+      ]
+    },
+    "String#buffer": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:911",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:923"
+      ]
+    },
+    "Textbringer::Buffer#file_format=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/buffer.rb:1397",
+        "/Users/megurine/repo/ruby/rigor-survey/textbringer/lib/textbringer/commands/files.rb:134"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "color": 236,
+    "define_key": 216,
+    "face": 200,
+    "[]": 199,
+    "==": 134,
+    "+": 97,
+    "-": 92,
+    "point": 57,
+    "<": 41,
+    "insert": 38,
+    ">": 37,
+    "size": 36,
+    "!=": 31,
+    "location": 28,
+    "empty?": 26,
+    "goto_char": 21,
+    "beginning_of_line": 21,
+    "save_excursion": 21,
+    "call": 21,
+    ">=": 20,
+    "delete": 20,
+    "looking_at?": 20,
+    "map": 20,
+    "name": 20,
+    "join": 19,
+    "addstr": 19,
+    "forward_char": 17,
+    "key?": 17,
+    "match_string": 17,
+    "each": 16,
+    "char_after": 16,
+    "byteslice": 16,
+    "delete_region": 16,
+    "first": 14,
+    "nil?": 14,
+    "bytesize": 14,
+    "palette": 13,
+    "bytesplice": 13,
+    "to_i": 12,
+    "current_line": 12
+  },
+  "implicit_self_methods_top": {
+    "message": 48,
+    "number_prefix_arg": 25,
+    "define_local_command": 24,
+    "with_target_buffer": 21,
+    "read_from_minibuffer": 18,
+    "insert": 16,
+    "lines": 15,
+    "point": 13,
+    "substring": 13,
+    "columns": 12,
+    "current_prefix_arg": 12,
+    "find_file": 11,
+    "read_file_name": 11,
+    "mark": 11,
+    "display_width": 10,
+    "switch_to_buffer": 10,
+    "current_file_name": 8,
+    "beginning_of_line": 8,
+    "yes_or_no?": 7,
+    "apply_on_rectangle": 7,
+    "forward_char": 7,
+    "read_register": 7,
+    "render_board": 7,
+    "process_romaji": 7,
+    "send": 7,
+    "add_hook": 7,
+    "ensure_ispell_active": 6,
+    "goto_line": 6,
+    "save_excursion": 6,
+    "goto_char": 6,
+    "remove_hook": 6,
+    "push_help_command": 6,
+    "check_read_only_flag": 6,
+    "end_of_line?": 6,
+    "show_help": 6,
+    "active?": 5,
+    "isearch_search": 5,
+    "ispell_forward": 5,
+    "eval": 5,
+    "send_notification": 5
+  }
+}

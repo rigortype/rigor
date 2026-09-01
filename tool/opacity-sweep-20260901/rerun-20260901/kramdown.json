@@ -1,0 +1,712 @@
+{
+  "files": 55,
+  "parse_errors": 0,
+  "total": 21329,
+  "tier_counts": {
+    "constant": 8234,
+    "nominal": 3779,
+    "dynamic_top": 7313,
+    "shaped": 1812,
+    "refined": 43,
+    "bot": 108,
+    "dynamic_specific": 39,
+    "top": 1
+  },
+  "opaque_node_classes": {
+    "CallNode": 2966,
+    "BlockNode": 195,
+    "LocalVariableWriteNode": 251,
+    "IfNode": 263,
+    "OrNode": 130,
+    "LocalVariableReadNode": 1923,
+    "ConstantPathNode": 55,
+    "AndNode": 161,
+    "EmbeddedStatementsNode": 320,
+    "InstanceVariableReadNode": 512,
+    "ParenthesesNode": 140,
+    "ModuleNode": 47,
+    "UnlessNode": 22,
+    "ForwardingSuperNode": 9,
+    "InstanceVariableWriteNode": 20,
+    "ConstantReadNode": 115,
+    "ConstantWriteNode": 3,
+    "LocalVariableTargetNode": 57,
+    "SplatNode": 15,
+    "IndexOperatorWriteNode": 2,
+    "CaseNode": 7,
+    "LocalVariableOrWriteNode": 1,
+    "BeginNode": 7,
+    "MultiWriteNode": 6,
+    "InstanceVariableTargetNode": 26,
+    "InstanceVariableOrWriteNode": 1,
+    "RescueModifierNode": 3,
+    "YieldNode": 3,
+    "CallOperatorWriteNode": 23,
+    "ClassVariableReadNode": 4,
+    "ClassNode": 20,
+    "LocalVariableOperatorWriteNode": 1,
+    "IndexOrWriteNode": 1,
+    "CallTargetNode": 3,
+    "SuperNode": 1,
+    "GlobalVariableReadNode": 1
+  },
+  "local_read_buckets": {
+    "assigned_local": 663,
+    "block_param": 365,
+    "def_param": 895
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 291,
+    "precise": 387,
+    "dynamic_top": 2278,
+    "dynamic_specific": 10
+  },
+  "opaque_ivar_reads": 512,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/kramdown",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 13976,
+  "precision_ratio": 0.6553,
+  "named_receiver_opaque_pairs": {
+    "Kramdown::Element#value": {
+      "count": 58,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/hash_ast.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/hash_ast.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:119"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]]#[]": {
+      "count": 47,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:104",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:51"
+      ]
+    },
+    "Hash[String, Dynamic[top]]#[]": {
+      "count": 34,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:127",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:432",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/kramdown.rb:121"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 26,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:208",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:208",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:203"
+      ]
+    },
+    "Proc#call": {
+      "count": 19,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:489",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:499",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:516"
+      ]
+    },
+    "singleton(Kramdown::Utils::Entities)#entity": {
+      "count": 19,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:250",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:257",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:341"
+      ]
+    },
+    "Hash#[]": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:58",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:111"
+      ]
+    },
+    "Kramdown::Utils::StringScanner?#scan": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:68",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:87"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]]#[]=": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:309",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/codeblock.rb:44"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:315",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/syntax_highlighter/rouge.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:117"
+      ]
+    },
+    "Kramdown::Element?#value": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:91",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:96",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:101"
+      ]
+    },
+    "Kramdown::Utils::StringScanner?#[]": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:72",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:75",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:75"
+      ]
+    },
+    "{}#[]=": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/syntax_highlighter/rouge.rb:54",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/options.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:122"
+      ]
+    },
+    "Kramdown::Utils::StringScanner?#current_line_number": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:118"
+      ]
+    },
+    "Hash[:stack | :text_type | Dynamic[top], :raw_text | Dyna...#[]": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:256",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:257",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:258"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#[]": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:135",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:148",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:149"
+      ]
+    },
+    "Kramdown::Utils::StringScanner#scan": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:302",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:598",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:600"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:261",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:263",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:502"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/html.rb:128",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/lru_cache.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/lru_cache.rb:33"
+      ]
+    },
+    "Kramdown::Utils::StringScanner?#check": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:66",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:203"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | Hash[String, Dynamic[t...#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/options.rb:456",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/options.rb:520",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/options.rb:553"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]] | Hash[String, Dynamic[t...#delete": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/options.rb:456",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/options.rb:520",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/options.rb:553"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]]#dig": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/kramdown.rb:439",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/kramdown.rb:441",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/latex.rb:130"
+      ]
+    },
+    "Kramdown::Utils::StringScanner#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:303",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:303",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:303"
+      ]
+    },
+    "singleton(Kramdown::Parser::Html::ElementConverter)#convert": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:614",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/html.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/html.rb:156"
+      ]
+    },
+    "singleton(Kramdown::Options)#merge": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:102",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/document.rb:97",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/base.rb:54"
+      ]
+    },
+    "Class#send": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/configurable.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/configurable.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/configurable.rb:37"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:73",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/kramdown.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/table.rb:93"
+      ]
+    },
+    "Hash#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:104",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:107",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:152"
+      ]
+    },
+    "singleton(Kramdown::Utils)#deep_const_get": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter.rb:56"
+      ]
+    },
+    "Kramdown::Utils::StringScanner#pos=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/string_scanner.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/string_scanner.rb:70"
+      ]
+    },
+    "Object#instance_variable_set": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:133",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:134"
+      ]
+    },
+    "Kramdown::Utils::StringScanner#pos": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/string_scanner.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/string_scanner.rb:72"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#last": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/toc.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/toc.rb:57"
+      ]
+    },
+    "Kramdown::Utils::StringScanner?#eos?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:64",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:186"
+      ]
+    },
+    "Integer | non-positive-int#==": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/man.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/man.rb:35"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:308",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/syntax_highlighter/rouge.rb:55"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:392",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:392"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/table.rb:92",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/configurable.rb:38"
+      ]
+    },
+    "singleton(Marshal)#load": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:433",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:504"
+      ]
+    },
+    "Hash#delete": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:104",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:107"
+      ]
+    },
+    "Kramdown::Element#block?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/kramdown.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/kramdown.rb:45"
+      ]
+    },
+    "Kramdown::Element#children=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:504",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/html.rb:503"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#pop": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:454",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/toc.rb:61"
+      ]
+    },
+    "Hash[String, Dynamic[top]]#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:498",
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/header.rb:64"
+      ]
+    },
+    "singleton(Kramdown::Parser::Kramdown)#has_parser?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:124"
+      ]
+    },
+    "singleton(Kramdown::Parser::Kramdown)#parser": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:125"
+      ]
+    },
+    "singleton(YAML)#load_file": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/unidecoder.rb:25"
+      ]
+    },
+    "bot#value": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:181"
+      ]
+    },
+    "Kramdown::Utils::StringScanner#skip_until": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/string_scanner.rb:72"
+      ]
+    },
+    "Array[Dynamic[top]]#shift": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/table.rb:92"
+      ]
+    },
+    "{}#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown.rb:277"
+      ]
+    },
+    "singleton(Kramdown::Options)#defined?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/extensions.rb:112"
+      ]
+    },
+    "/(\"|')(?=[_*]{1,2}\\S)/ | /(\"|')(?=\\s|s\\b|$)/ | /(.?)\"/m |...#each": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/smart_quotes.rb:161"
+      ]
+    },
+    "singleton(Kramdown::Options)#parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/extensions.rb:120"
+      ]
+    },
+    "non-negative-int#>": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/lru_cache.rb:35"
+      ]
+    },
+    "{ all: Dynamic[top], text: Dynamic[top], attribute: Dynam...#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils/html.rb:70"
+      ]
+    },
+    "Hash[Symbol, Dynamic[top]]#delete": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:231"
+      ]
+    },
+    "[Dynamic[top], 3]#min": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/list.rb:25"
+      ]
+    },
+    "singleton(Object)#const_get": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/utils.rb:40"
+      ]
+    },
+    "0 | non-negative-int#-": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/table.rb:160"
+      ]
+    },
+    "int#times": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/parser/kramdown/table.rb:152"
+      ]
+    },
+    "bot#respond_to?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:108"
+      ]
+    },
+    "bot#encoding": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:108"
+      ]
+    },
+    "bot#encode!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:109"
+      ]
+    },
+    "singleton(Kramdown::Converter::Kramdown)#data_dir": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:141"
+      ]
+    },
+    "[6 | Dynamic[top], 1]#max": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:170"
+      ]
+    },
+    "[Dynamic[top], 6]#min": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:170"
+      ]
+    },
+    "singleton(Kramdown::Converter)#syntax_highlighter": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:195"
+      ]
+    },
+    "singleton(Kramdown::Converter)#math_engine": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:209"
+      ]
+    },
+    "singleton(Kramdown::Utils::Unidecoder)#decode": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/base.rb:223"
+      ]
+    },
+    "Hash[Symbol, Symbol] | { type: Symbol }#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/hash_ast.rb:24"
+      ]
+    },
+    "Symbol#<<": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/hash_ast.rb:28"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top], Dynamic[top]]?#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:394"
+      ]
+    },
+    "nil#options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:443"
+      ]
+    },
+    "nil#children": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:444"
+      ]
+    },
+    "[]#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/html.rb:448"
+      ]
+    },
+    "Array[Dynamic[top]]#find": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/kramdown.rb:300"
+      ]
+    },
+    "Hash[\"<\" | \">\" | \"[\" | \"\\\\\" | \"]\" | \"^\" | \"|\" | \"~\" | Dyn...#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/latex.rb:620"
+      ]
+    },
+    "Integer | non-positive-int#-": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/kramdown/lib/kramdown/converter/man.rb:34"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 468,
+    "==": 177,
+    "<<": 151,
+    "children": 144,
+    "type": 109,
+    "options": 107,
+    "value": 107,
+    "empty?": 54,
+    "scan": 54,
+    "!=": 45,
+    "attr": 42,
+    "+": 33,
+    "[]=": 33,
+    "current_line_number": 30,
+    "last": 28,
+    "first": 28,
+    "to_s": 27,
+    "each": 26,
+    "strip": 21,
+    "map": 20,
+    "matched_size": 20,
+    "length": 19,
+    "join": 19,
+    "gsub!": 19,
+    "include?": 19,
+    "gsub": 18,
+    "dup": 17,
+    "=~": 16,
+    "match?": 15,
+    "check": 15,
+    "sub!": 13,
+    ">": 13,
+    "size": 13,
+    "key?": 11,
+    "call": 11,
+    "revert_pos": 11,
+    "split": 10,
+    "!": 9,
+    "matched": 9,
+    "pos": 9
+  },
+  "implicit_self_methods_top": {
+    "add_text": 36,
+    "warning": 34,
+    "escape": 16,
+    "send": 10,
+    "newline": 8,
+    "parse_attribute_list": 8,
+    "process_html_element": 7,
+    "escape_html": 7,
+    "html_attributes": 7,
+    "process_children": 6,
+    "parse_blocks": 6,
+    "parse_spans": 6,
+    "entity_to_str": 6,
+    "extract_string": 5,
+    "update_attr_with_ial": 5,
+    "pos": 4,
+    "highlight_code": 4,
+    "after_block_boundary?": 4,
+    "extract_text": 4,
+    "add_link": 4,
+    "extract_code_language": 4,
+    "add_syntax_highlighter": 3,
+    "handle_html_start_tag": 3,
+    "add_math_engine": 3,
+    "parse_raw_html": 3,
+    "update_tree": 3,
+    "replace_abbreviations": 3,
+    "normalize_link_id": 3,
+    "generate_id": 3,
+    "output_header_level": 3,
+    "in_toc?": 3,
+    "handle_kramdown_html_tag": 2,
+    "before_block_boundary?": 2,
+    "source": 2,
+    "adapt_source": 2,
+    "add_header": 2,
+    "entity": 2,
+    "parse_extension_start_tag": 2,
+    "configurables": 2,
+    "remove_text_children": 2
+  }
+}

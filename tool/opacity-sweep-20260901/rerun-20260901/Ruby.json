@@ -1,0 +1,719 @@
+{
+  "files": 188,
+  "parse_errors": 4,
+  "total": 17755,
+  "tier_counts": {
+    "constant": 7406,
+    "shaped": 1135,
+    "dynamic_top": 6238,
+    "nominal": 2640,
+    "bot": 240,
+    "dynamic_specific": 71,
+    "refined": 5,
+    "top": 20
+  },
+  "opaque_node_classes": {
+    "LocalVariableReadNode": 2343,
+    "CallNode": 2729,
+    "OrNode": 42,
+    "ParenthesesNode": 116,
+    "LocalVariableTargetNode": 49,
+    "LocalVariableWriteNode": 262,
+    "BlockNode": 223,
+    "BeginNode": 6,
+    "IfNode": 85,
+    "AndNode": 44,
+    "ConstantPathNode": 36,
+    "ConstantReadNode": 36,
+    "ClassNode": 1,
+    "InstanceVariableWriteNode": 38,
+    "InstanceVariableReadNode": 82,
+    "EmbeddedStatementsNode": 78,
+    "LocalVariableOperatorWriteNode": 21,
+    "InstanceVariableOrWriteNode": 6,
+    "MultiWriteNode": 3,
+    "IndexTargetNode": 22,
+    "UnlessNode": 12,
+    "CallOperatorWriteNode": 1,
+    "MultiTargetNode": 1,
+    "CaseNode": 3,
+    "YieldNode": 1,
+    "LocalVariableAndWriteNode": 1,
+    "GlobalVariableReadNode": 14,
+    "IndexOperatorWriteNode": 1,
+    "SplatNode": 2
+  },
+  "local_read_buckets": {
+    "def_param": 1361,
+    "assigned_local": 636,
+    "block_param": 346
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 1878,
+    "implicit_self": 516,
+    "precise": 309,
+    "dynamic_specific": 23,
+    "top": 3
+  },
+  "opaque_ivar_reads": 82,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/Ruby",
+  "scanned_paths": [
+    "."
+  ],
+  "parameter_inference": false,
+  "precise": 11426,
+  "precision_ratio": 0.6435,
+  "named_receiver_opaque_pairs": {
+    "UnweightedGraph#add_edge": {
+      "count": 26,
+      "examples": [
+        "./data_structures/graphs/bfs_test.rb:8",
+        "./data_structures/graphs/bfs_test.rb:23",
+        "./data_structures/graphs/bfs_test.rb:24"
+      ]
+    },
+    "Array#[]": {
+      "count": 21,
+      "examples": [
+        "./dynamic_programming/coin_change.rb:18",
+        "./dynamic_programming/coin_change.rb:21",
+        "./dynamic_programming/coin_change.rb:21"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 16,
+      "examples": [
+        "./data_structures/arrays/intersection.rb:68",
+        "./data_structures/arrays/strings/jewels_and_stones.rb:71",
+        "./data_structures/arrays/strings/jewels_and_stones.rb:72"
+      ]
+    },
+    "Stack#push": {
+      "count": 12,
+      "examples": [
+        "./data_structures/stacks/stack.rb:53",
+        "./data_structures/stacks/stack.rb:54",
+        "./data_structures/stacks/stack.rb:55"
+      ]
+    },
+    "UnweightedGraph#neighbors": {
+      "count": 10,
+      "examples": [
+        "./data_structures/graphs/unweighted_graph_test.rb:10",
+        "./data_structures/graphs/unweighted_graph_test.rb:11",
+        "./data_structures/graphs/unweighted_graph_test.rb:12"
+      ]
+    },
+    "WeightedGraph#edges": {
+      "count": 10,
+      "examples": [
+        "./data_structures/graphs/weighted_graph_test.rb:10",
+        "./data_structures/graphs/weighted_graph_test.rb:11",
+        "./data_structures/graphs/weighted_graph_test.rb:12"
+      ]
+    },
+    "nil#<": {
+      "count": 9,
+      "examples": [
+        "./data_structures/graphs/topological_sort_test.rb:21",
+        "./data_structures/graphs/topological_sort_test.rb:22",
+        "./data_structures/graphs/topological_sort_test.rb:23"
+      ]
+    },
+    "{}#[]": {
+      "count": 9,
+      "examples": [
+        "./data_structures/arrays/single_number.rb:20",
+        "./data_structures/arrays/strings/jewels_and_stones.rb:63",
+        "./data_structures/hash_table/anagram_checker.rb:125"
+      ]
+    },
+    "non-empty-array[top]#[]": {
+      "count": 8,
+      "examples": [
+        "./searches/interpolation_search.rb:15",
+        "./searches/interpolation_search.rb:15",
+        "./searches/interpolation_search.rb:16"
+      ]
+    },
+    "{}#[]=": {
+      "count": 7,
+      "examples": [
+        "./data_structures/hash_table/anagram_checker.rb:125",
+        "./data_structures/hash_table/anagram_checker.rb:134",
+        "./data_structures/hash_table/isomorphic_strings.rb:50"
+      ]
+    },
+    "SizedQueue#push": {
+      "count": 7,
+      "examples": [
+        "./data_structures/queues/queue.rb:87",
+        "./data_structures/queues/queue.rb:88",
+        "./data_structures/queues/queue.rb:89"
+      ]
+    },
+    "BinarySearchTree#delete_key": {
+      "count": 5,
+      "examples": [
+        "./data_structures/binary_trees/bst_test.rb:64",
+        "./data_structures/binary_trees/bst_test.rb:70",
+        "./data_structures/binary_trees/bst_test.rb:76"
+      ]
+    },
+    "AvlTree#delete_key": {
+      "count": 5,
+      "examples": [
+        "./data_structures/binary_trees/avl_tree_test.rb:64",
+        "./data_structures/binary_trees/avl_tree_test.rb:70",
+        "./data_structures/binary_trees/avl_tree_test.rb:76"
+      ]
+    },
+    "singleton(SquareRoot)#call": {
+      "count": 4,
+      "examples": [
+        "./maths/aliquot_sum.rb:16",
+        "./maths/square_root_test.rb:9",
+        "./maths/square_root_test.rb:14"
+      ]
+    },
+    "DisjointSets#find_set": {
+      "count": 4,
+      "examples": [
+        "./data_structures/disjoint_sets/disjoint_sets.rb:44",
+        "./data_structures/disjoint_sets/disjoint_sets.rb:44",
+        "./data_structures/disjoint_sets/disjoint_sets.rb:46"
+      ]
+    },
+    "Array#[]=": {
+      "count": 4,
+      "examples": [
+        "./data_structures/arrays/get_products_of_all_other_elements.rb:26",
+        "./dynamic_programming/coin_change.rb:8",
+        "./dynamic_programming/house_robber.rb:69"
+      ]
+    },
+    "CircularQueue#add": {
+      "count": 4,
+      "examples": [
+        "./data_structures/queues/circular_queue.rb:68",
+        "./data_structures/queues/circular_queue.rb:69",
+        "./data_structures/queues/circular_queue.rb:70"
+      ]
+    },
+    "Node#next=": {
+      "count": 4,
+      "examples": [
+        "./data_structures/linked_lists/circular_linked_list.rb:27",
+        "./data_structures/linked_lists/circular_linked_list.rb:36",
+        "./data_structures/linked_lists/circular_linked_list.rb:40"
+      ]
+    },
+    "WeightedGraph#nodes": {
+      "count": 3,
+      "examples": [
+        "./data_structures/graphs/weighted_graph_test.rb:9",
+        "./data_structures/graphs/weighted_graph_test.rb:18",
+        "./data_structures/graphs/weighted_graph_test.rb:70"
+      ]
+    },
+    "ArrayQueue#add": {
+      "count": 3,
+      "examples": [
+        "./data_structures/queues/queue.rb:35",
+        "./data_structures/queues/queue.rb:36",
+        "./data_structures/queues/queue.rb:37"
+      ]
+    },
+    "UnweightedGraph#nodes": {
+      "count": 3,
+      "examples": [
+        "./data_structures/graphs/unweighted_graph_test.rb:9",
+        "./data_structures/graphs/unweighted_graph_test.rb:18",
+        "./data_structures/graphs/unweighted_graph_test.rb:64"
+      ]
+    },
+    "Queue#<<": {
+      "count": 3,
+      "examples": [
+        "./data_structures/queues/queue.rb:61",
+        "./data_structures/queues/queue.rb:62",
+        "./data_structures/queues/queue.rb:63"
+      ]
+    },
+    "GraphBfsResult#distances": {
+      "count": 3,
+      "examples": [
+        "./data_structures/graphs/bfs_test.rb:16",
+        "./data_structures/graphs/bfs_test.rb:36",
+        "./data_structures/graphs/bfs_test.rb:60"
+      ]
+    },
+    "GraphBfsResult#parents": {
+      "count": 3,
+      "examples": [
+        "./data_structures/graphs/bfs_test.rb:13",
+        "./data_structures/graphs/bfs_test.rb:30",
+        "./data_structures/graphs/bfs_test.rb:54"
+      ]
+    },
+    "GraphBfsResult#visited": {
+      "count": 3,
+      "examples": [
+        "./data_structures/graphs/bfs_test.rb:12",
+        "./data_structures/graphs/bfs_test.rb:29",
+        "./data_structures/graphs/bfs_test.rb:53"
+      ]
+    },
+    "MaxHeap#to_array": {
+      "count": 3,
+      "examples": [
+        "./data_structures/heaps/max_heap_test.rb:7",
+        "./data_structures/heaps/max_heap_test.rb:33",
+        "./data_structures/heaps/max_heap_test.rb:44"
+      ]
+    },
+    "Queue#pop": {
+      "count": 3,
+      "examples": [
+        "./data_structures/graphs/bfs.rb:46",
+        "./data_structures/queues/queue.rb:65",
+        "./data_structures/queues/queue.rb:68"
+      ]
+    },
+    "Node#rank": {
+      "count": 3,
+      "examples": [
+        "./data_structures/disjoint_sets/disjoint_sets.rb:47",
+        "./data_structures/disjoint_sets/disjoint_sets.rb:47",
+        "./data_structures/disjoint_sets/disjoint_sets.rb:47"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#max": {
+      "count": 3,
+      "examples": [
+        "./dynamic_programming/house_robber.rb:40",
+        "./dynamic_programming/knapsack.rb:21",
+        "./dynamic_programming/ones_and_zeros.rb:38"
+      ]
+    },
+    "MaxHeap#extract_max": {
+      "count": 3,
+      "examples": [
+        "./data_structures/heaps/max_heap_test.rb:32",
+        "./data_structures/heaps/max_heap_test.rb:38",
+        "./strings/max_k_most_frequent_words.rb:34"
+      ]
+    },
+    "[]#[]=": {
+      "count": 3,
+      "examples": [
+        "./data_structures/arrays/sort_squares_of_an_array.rb:69",
+        "./data_structures/arrays/sort_squares_of_an_array.rb:72",
+        "./data_structures/arrays/sort_squares_of_an_array.rb:75"
+      ]
+    },
+    "CircularQueue#peek": {
+      "count": 2,
+      "examples": [
+        "./data_structures/queues/circular_queue.rb:81",
+        "./data_structures/queues/circular_queue.rb:86"
+      ]
+    },
+    "nil#*": {
+      "count": 2,
+      "examples": [
+        "./data_structures/arrays/get_products_of_all_other_elements.rb:56",
+        "./data_structures/arrays/get_products_of_all_other_elements.rb:74"
+      ]
+    },
+    "CircularQueue#pop": {
+      "count": 2,
+      "examples": [
+        "./data_structures/queues/circular_queue.rb:63",
+        "./data_structures/queues/circular_queue.rb:84"
+      ]
+    },
+    "Node#next": {
+      "count": 2,
+      "examples": [
+        "./data_structures/tries/trie.rb:28",
+        "./data_structures/tries/trie.rb:37"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top], Dynamic[top]]#min": {
+      "count": 2,
+      "examples": [
+        "./data_structures/arrays/maximum_product_subarray.rb:36",
+        "./dynamic_programming/editdistance.rb:27"
+      ]
+    },
+    "[Float, Dynamic[top]]#min": {
+      "count": 2,
+      "examples": [
+        "./searches/jump_search.rb:14",
+        "./searches/jump_search.rb:26"
+      ]
+    },
+    "MaxHeap#max": {
+      "count": 2,
+      "examples": [
+        "./data_structures/heaps/max_heap_test.rb:22",
+        "./data_structures/heaps/max_heap_test.rb:27"
+      ]
+    },
+    "MaxHeap#empty?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/heaps/max_heap_test.rb:12",
+        "./data_structures/heaps/max_heap_test.rb:17"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "./dynamic_programming/house_robber.rb:78",
+        "./sorting/heap_sort.rb:10"
+      ]
+    },
+    "WeightedGraph#has_neighbor?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/graphs/weighted_graph_test.rb:51",
+        "./data_structures/graphs/weighted_graph_test.rb:57"
+      ]
+    },
+    "WeightedGraph#include?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/graphs/weighted_graph_test.rb:39",
+        "./data_structures/graphs/weighted_graph_test.rb:45"
+      ]
+    },
+    "WeightedGraph#empty?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/graphs/weighted_graph_test.rb:27",
+        "./data_structures/graphs/weighted_graph_test.rb:33"
+      ]
+    },
+    "Method#call": {
+      "count": 2,
+      "examples": [
+        "./data_structures/binary_trees/avl_tree.rb:127",
+        "./data_structures/binary_trees/bst.rb:113"
+      ]
+    },
+    "UnweightedGraph#has_neighbor?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/graphs/unweighted_graph_test.rb:51",
+        "./data_structures/graphs/unweighted_graph_test.rb:57"
+      ]
+    },
+    "DisjointSets#union_set": {
+      "count": 2,
+      "examples": [
+        "./data_structures/disjoint_sets/disjoint_sets.rb:43",
+        "./data_structures/disjoint_sets/disjoint_sets.rb:45"
+      ]
+    },
+    "singleton(AliquotSum)#call": {
+      "count": 2,
+      "examples": [
+        "./maths/aliquot_sum_test.rb:8",
+        "./maths/aliquot_sum_test.rb:18"
+      ]
+    },
+    "Queue#push": {
+      "count": 2,
+      "examples": [
+        "./data_structures/graphs/bfs.rb:44",
+        "./data_structures/graphs/bfs.rb:53"
+      ]
+    },
+    "BinarySearchTree#empty?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/binary_trees/bst_test.rb:34",
+        "./data_structures/binary_trees/bst_test.rb:39"
+      ]
+    },
+    "singleton(Ceil)#call": {
+      "count": 2,
+      "examples": [
+        "./maths/aliquot_sum.rb:16",
+        "./maths/ceil_test.rb:8"
+      ]
+    },
+    "BinarySearchTree#size": {
+      "count": 2,
+      "examples": [
+        "./data_structures/binary_trees/bst_test.rb:24",
+        "./data_structures/binary_trees/bst_test.rb:29"
+      ]
+    },
+    "non-negative-int#<": {
+      "count": 2,
+      "examples": [
+        "./project_euler/problem_007/sol1.rb:30",
+        "./project_euler/problem_025/sol1.rb:31"
+      ]
+    },
+    "UnweightedGraph#include?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/graphs/unweighted_graph_test.rb:39",
+        "./data_structures/graphs/unweighted_graph_test.rb:45"
+      ]
+    },
+    "AvlTree#empty?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/binary_trees/avl_tree_test.rb:34",
+        "./data_structures/binary_trees/avl_tree_test.rb:39"
+      ]
+    },
+    "UnweightedGraph#empty?": {
+      "count": 2,
+      "examples": [
+        "./data_structures/graphs/unweighted_graph_test.rb:27",
+        "./data_structures/graphs/unweighted_graph_test.rb:33"
+      ]
+    },
+    "AvlTree#size": {
+      "count": 2,
+      "examples": [
+        "./data_structures/binary_trees/avl_tree_test.rb:24",
+        "./data_structures/binary_trees/avl_tree_test.rb:29"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 1,
+      "examples": [
+        "./strings/max_k_most_frequent_words.rb:34"
+      ]
+    },
+    "BadMatchTable#slide_offset": {
+      "count": 1,
+      "examples": [
+        "./strings/boyer_moore_horspool_search.rb:50"
+      ]
+    },
+    "Stack#empty?": {
+      "count": 1,
+      "examples": [
+        "./data_structures/stacks/stack.rb:50"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "./strings/boyer_moore_horspool_search.rb:33"
+      ]
+    },
+    "[1, Dynamic[top]]#max": {
+      "count": 1,
+      "examples": [
+        "./sorting/comb_sort.rb:5"
+      ]
+    },
+    "Array[Integer]#sum": {
+      "count": 1,
+      "examples": [
+        "./maths/aliquot_sum_test.rb:17"
+      ]
+    },
+    "Stack#full?": {
+      "count": 1,
+      "examples": [
+        "./data_structures/stacks/stack.rb:58"
+      ]
+    },
+    "Stack#contains?": {
+      "count": 1,
+      "examples": [
+        "./data_structures/stacks/stack.rb:61"
+      ]
+    },
+    "Stack#pop": {
+      "count": 1,
+      "examples": [
+        "./data_structures/stacks/stack.rb:64"
+      ]
+    },
+    "Stack#peek": {
+      "count": 1,
+      "examples": [
+        "./data_structures/stacks/stack.rb:67"
+      ]
+    },
+    "Stack#size": {
+      "count": 1,
+      "examples": [
+        "./data_structures/stacks/stack.rb:70"
+      ]
+    },
+    "Array[Dynamic[top]]#sum": {
+      "count": 1,
+      "examples": [
+        "./project_euler/problem_021/sol1.rb:57"
+      ]
+    },
+    "[Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil], Dynam...#min": {
+      "count": 1,
+      "examples": [
+        "./dynamic_programming/coin_change.rb:8"
+      ]
+    },
+    "Array[Dynamic[top]]#max": {
+      "count": 1,
+      "examples": [
+        "./sorting/bead_sort.rb:3"
+      ]
+    },
+    "Array[Dynamic[top] | Integer]#sum": {
+      "count": 1,
+      "examples": [
+        "./project_euler/problem_021/sol1.rb:40"
+      ]
+    },
+    "Array[top]#<=": {
+      "count": 1,
+      "examples": [
+        "./searches/interpolation_search.rb:8"
+      ]
+    },
+    "Array[Dynamic[top] | Integer]#max": {
+      "count": 1,
+      "examples": [
+        "./project_euler/problem_003/sol1.rb:26"
+      ]
+    },
+    "Array[0 | Dynamic[top] | Integer]#sum": {
+      "count": 1,
+      "examples": [
+        "./maths/aliquot_sum.rb:10"
+      ]
+    },
+    "[Dynamic[top], Dynamic[Array[Dynamic[top]] | Dynamic[top]...#max": {
+      "count": 1,
+      "examples": [
+        "./dynamic_programming/house_robber.rb:74"
+      ]
+    },
+    "Array[Dynamic[top] | Integer]#delete": {
+      "count": 1,
+      "examples": [
+        "./project_euler/problem_021/sol1.rb:33"
+      ]
+    },
+    "[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "./searches/depth_first_search.rb:12"
+      ]
+    },
+    "Array[Dynamic[top] | [1, 1] | [1]] | [[1]]#[]": {
+      "count": 1,
+      "examples": [
+        "./dynamic_programming/pascal_triangle_ii.rb:67"
+      ]
+    },
+    "ArrayQueue#peek": {
+      "count": 1,
+      "examples": [
+        "./data_structures/queues/queue.rb:47"
+      ]
+    },
+    "BinarySearchTree#max_key": {
+      "count": 1,
+      "examples": [
+        "./data_structures/binary_trees/bst_test.rb:49"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 246,
+    "==": 194,
+    "-": 125,
+    "+": 96,
+    "<": 79,
+    "left": 74,
+    "right": 72,
+    "length": 62,
+    "each": 55,
+    ">": 50,
+    "%": 43,
+    "!=": 42,
+    "key": 38,
+    "*": 37,
+    "/": 36,
+    "next": 35,
+    "count": 31,
+    "to_s": 29,
+    "size": 27,
+    "nil?": 25,
+    "[]=": 24,
+    "times": 19,
+    "parent=": 18,
+    "each_with_index": 18,
+    "empty?": 17,
+    "zero?": 16,
+    "to_set": 15,
+    "map": 15,
+    "<=": 14,
+    "left=": 14,
+    "split": 14,
+    "to_i": 13,
+    "chars": 13,
+    "parent": 12,
+    ">=": 12,
+    "right=": 10,
+    "call": 9,
+    "round": 9,
+    "sort": 8,
+    "height": 8
+  },
+  "implicit_self_methods_top": {
+    "assert": 120,
+    "root": 40,
+    "p": 28,
+    "assert_equal": 27,
+    "count_vowel_strings": 18,
+    "arr": 18,
+    "assert_raises": 11,
+    "traverse": 9,
+    "stack": 8,
+    "decimal_to_binary": 7,
+    "queue": 7,
+    "heap_size": 7,
+    "binary_xor": 6,
+    "adjusted_subtree_after_deletion": 6,
+    "rob": 6,
+    "find_richest_customer_wealth": 6,
+    "binary_count_trailing_zeroes": 6,
+    "size": 5,
+    "hamming_distance": 5,
+    "recursive_double_linear_search": 5,
+    "parent": 5,
+    "n": 5,
+    "gcd": 4,
+    "climb_stairs": 4,
+    "include?": 4,
+    "nodes": 4,
+    "front": 4,
+    "rec_linear_search": 4,
+    "remove": 4,
+    "e": 4,
+    "d": 4,
+    "traverse_postorder": 4,
+    "memoize": 4,
+    "q": 4,
+    "totient": 4,
+    "merge_sort": 3,
+    "get_num": 3,
+    "empty?": 3,
+    "bubble_sort": 3,
+    "add_to_hash": 3
+  }
+}

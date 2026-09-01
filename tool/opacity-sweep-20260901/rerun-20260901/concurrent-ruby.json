@@ -1,0 +1,782 @@
+{
+  "files": 178,
+  "parse_errors": 0,
+  "total": 23757,
+  "tier_counts": {
+    "constant": 7294,
+    "nominal": 5464,
+    "dynamic_top": 9965,
+    "shaped": 439,
+    "bot": 535,
+    "dynamic_specific": 59,
+    "top": 1
+  },
+  "opaque_node_classes": {
+    "CallNode": 3507,
+    "InstanceVariableWriteNode": 221,
+    "BlockNode": 542,
+    "LocalVariableWriteNode": 345,
+    "LocalVariableReadNode": 3208,
+    "InstanceVariableReadNode": 484,
+    "SplatNode": 168,
+    "AndNode": 106,
+    "IfNode": 335,
+    "UnlessNode": 23,
+    "ConstantReadNode": 147,
+    "EmbeddedStatementsNode": 91,
+    "SuperNode": 134,
+    "BeginNode": 49,
+    "MultiWriteNode": 32,
+    "LocalVariableTargetNode": 119,
+    "CaseNode": 25,
+    "OrNode": 74,
+    "YieldNode": 69,
+    "ParenthesesNode": 73,
+    "MultiTargetNode": 3,
+    "ConstantPathNode": 51,
+    "ModuleNode": 28,
+    "ForwardingSuperNode": 75,
+    "ConstantWriteNode": 12,
+    "ClassNode": 2,
+    "InstanceVariableTargetNode": 2,
+    "GlobalVariableReadNode": 17,
+    "InstanceVariableOperatorWriteNode": 4,
+    "ConstantTargetNode": 6,
+    "LocalVariableOrWriteNode": 1,
+    "InstanceVariableOrWriteNode": 2,
+    "IndexTargetNode": 2,
+    "LocalVariableAndWriteNode": 1,
+    "LocalVariableOperatorWriteNode": 7,
+    "IndexOrWriteNode": 1
+  },
+  "local_read_buckets": {
+    "assigned_local": 787,
+    "def_param": 2131,
+    "block_param": 290
+  },
+  "call_receiver_tiers": {
+    "precise": 674,
+    "dynamic_top": 1626,
+    "implicit_self": 1192,
+    "dynamic_specific": 15
+  },
+  "opaque_ivar_reads": 484,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 13732,
+  "precision_ratio": 0.578,
+  "named_receiver_opaque_pairs": {
+    "Mutex#synchronize": {
+      "count": 48,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/channel.rb:102",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/channel.rb:121",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/channel.rb:161"
+      ]
+    },
+    "Concurrent::AtomicFixnum#value": {
+      "count": 30,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:115",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:125",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:146"
+      ]
+    },
+    "singleton(Concurrent)#on_jruby?": {
+      "count": 29,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/array.rb:29",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_boolean.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_fixnum.rb:102"
+      ]
+    },
+    "singleton(Concurrent::Promises)#resolvable_future": {
+      "count": 20,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor.rb:43",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor.rb:86",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/termination.rb:19"
+      ]
+    },
+    "singleton(Concurrent)#on_cruby?": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/array.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_boolean.rb:83",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_fixnum.rb:100"
+      ]
+    },
+    "Concurrent::AtomicFixnum#compare_and_set": {
+      "count": 13,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:129",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:133",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:149"
+      ]
+    },
+    "Concurrent::LockLocalVar#value=": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:172",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:202",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:207"
+      ]
+    },
+    "singleton(Concurrent)#on_truffleruby?": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/array.rb:37",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_reference.rb:8",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_reference.rb:35"
+      ]
+    },
+    "singleton(Concurrent)#global_io_executor": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/context.rb:90",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:295",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/async.rb:292"
+      ]
+    },
+    "singleton(Thread)#pass": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/channel/buffer/buffered.rb:29",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/channel/buffer/buffered.rb:66",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/channel/buffer/timer.rb:26"
+      ]
+    },
+    "singleton(Concurrent::Utility::NativeInteger)#ensure_integer_and_bounds": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/cyclic_barrier.rb:41",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/java_count_down_latch.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/mutex_atomic_fixnum.rb:77"
+      ]
+    },
+    "singleton(Concurrent)#executor": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/throttle.rb:168",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/throttle.rb:173",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:809"
+      ]
+    },
+    "Concurrent::Hash | Hash[Dynamic[top], Dynamic[top]] | nil#[]=": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:26",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:39"
+      ]
+    },
+    "Concurrent::Promises::FactoryMethods#default_executor": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:72",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:118"
+      ]
+    },
+    "Concurrent::Set#delete": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/linking.rb:72",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/utils/broadcast.rb:37",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:775"
+      ]
+    },
+    "Concurrent::LockLocalVar#value": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:163",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:221",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:244"
+      ]
+    },
+    "singleton(Concurrent::LockFreeStack::Node)#[]": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/lock_free_stack.rb:32",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/lock_free_stack.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/lock_free_stack.rb:47"
+      ]
+    },
+    "singleton(Concurrent::Actor)#current": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/linking.rb:48"
+      ]
+    },
+    "singleton(Concurrent::Utility::NativeInteger)#ensure_positive": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/java_count_down_latch.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/mutex_count_down_latch.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/mutex_semaphore.rb:22"
+      ]
+    },
+    "Concurrent::Hash | Hash[Dynamic[top], Dynamic[top]] | nil#fetch": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:47",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:54"
+      ]
+    },
+    "singleton(Concurrent::Options)#executor_from_options": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/delay.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/timer_set.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/future.rb:137"
+      ]
+    },
+    "Concurrent::AtomicFixnum#update": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:211",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:170",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:226"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:817",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:957",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:962"
+      ]
+    },
+    "Concurrent::Event?#set": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:79",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:86"
+      ]
+    },
+    "Concurrent::AtomicReference?#value": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:230",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:241",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:403"
+      ]
+    },
+    "Concurrent::CyclicBarrier::Generation(status: :waiting)?#status": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/cyclic_barrier.rb:69",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/cyclic_barrier.rb:79",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/cyclic_barrier.rb:80"
+      ]
+    },
+    "singleton(Concurrent::Promises::ZipFutureEventPromise)#new_blocked_by2": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:841",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1080",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1103"
+      ]
+    },
+    "Concurrent::Synchronization::Lock#signal": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:152",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:213",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:250"
+      ]
+    },
+    "bot#==": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/exchanger.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/exchanger.rb:81",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/exchanger.rb:110"
+      ]
+    },
+    "Concurrent::AtomicBoolean?#make_false": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/timer_task.rb:322"
+      ]
+    },
+    "Concurrent::AtomicFixnum?#value": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:79",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/timer_task.rb:334"
+      ]
+    },
+    "Thread#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/locals.rb:168",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/locals.rb:173"
+      ]
+    },
+    "Concurrent::Set#add": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/linking.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/linking.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/utils/broadcast.rb:31"
+      ]
+    },
+    "Concurrent::Delay#value": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/utility/processor_counter.rb:19",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/utility/processor_counter.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/utility/processor_counter.rb:42"
+      ]
+    },
+    "Concurrent::AtomicBoolean?#false?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:68",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/timer_task.rb:238"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:799",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:831",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:954"
+      ]
+    },
+    "Concurrent::Array#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tuple.rb:45",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tuple.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tuple.rb:71"
+      ]
+    },
+    "Concurrent::Set#include?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/linking.rb:58",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/utils/broadcast.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:789"
+      ]
+    },
+    "Concurrent::Array#size": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:887",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:2021",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:2022"
+      ]
+    },
+    "singleton(Concurrent)#c_extensions_loaded?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_boolean.rb:83",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_fixnum.rb:100",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/atomic_reference.rb:19"
+      ]
+    },
+    "Concurrent::Transaction#abort": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:109",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:115"
+      ]
+    },
+    "Concurrent::AtomicFixnum#decrement": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/dataflow.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:790",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1713"
+      ]
+    },
+    "Thread#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/core.rb:118",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/thread_safe/util/striped64.rb:181",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:217"
+      ]
+    },
+    "singleton(Concurrent::Transaction)#current": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:31",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:87"
+      ]
+    },
+    "Array[Dynamic[top]]?#shift": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:563",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/ruby_thread_pool_executor.rb:270",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/serialized_execution.rb:99"
+      ]
+    },
+    "Concurrent::Event?#reset": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/timer_set.rb:127",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/timer_set.rb:135",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/timer_set.rb:148"
+      ]
+    },
+    "Concurrent::Delay#value!": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/configuration.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/configuration.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/configuration.rb:74"
+      ]
+    },
+    "Array[Dynamic[top]]#shift": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/buffer.rb:38",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/utils/balancer.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/async.rb:342"
+      ]
+    },
+    "Concurrent::AtomicReference?#value=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:429",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:554",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:578"
+      ]
+    },
+    "Concurrent::Hash | Hash[Dynamic[top], Dynamic[top]] | nil#delete": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:87",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/map/non_concurrent_map_backend.rb:140"
+      ]
+    },
+    "Concurrent::Synchronization::LockableObject#define_struct": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/immutable_struct.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/mutable_struct.rb:217",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/settable_struct.rb:112"
+      ]
+    },
+    "Array[Dynamic[top]]?#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/ruby_non_concurrent_priority_queue.rb:30",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/ruby_non_concurrent_priority_queue.rb:61",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/ruby_non_concurrent_priority_queue.rb:67"
+      ]
+    },
+    "Array[Dynamic[top]]?#pop": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/ruby_non_concurrent_priority_queue.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/collection/ruby_non_concurrent_priority_queue.rb:71",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/ruby_thread_pool_executor.rb:219"
+      ]
+    },
+    "Concurrent::Synchronization::Lock#synchronize": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:198",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:288"
+      ]
+    },
+    "Concurrent::AtomicBoolean?#true?": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/executor/simple_executor_service.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/timer_task.rb:220",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/timer_task.rb:340"
+      ]
+    },
+    "Concurrent::Synchronization::Lock#ns_wait": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:184",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:199",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:292"
+      ]
+    },
+    "Concurrent::Actor::Core#reference": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/root.rb:11"
+      ]
+    },
+    "Concurrent::Synchronization::Lock#wait_until": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:120",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:127",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:179"
+      ]
+    },
+    "singleton(Concurrent::Promises)#resolvable_event": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/cancellation.rb:54",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/throttle.rb:147",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1229"
+      ]
+    },
+    "Concurrent::Promises::ScheduledPromise#event": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:234",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:877",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1110"
+      ]
+    },
+    "singleton(Concurrent::Promises::ZipEventEventPromise)#new_blocked_by2": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:843",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:865",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:878"
+      ]
+    },
+    "Concurrent::FiberLocalVar#value=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/fiber_local_var.rb:89",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/fiber_local_var.rb:93",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/fiber_local_var.rb:103"
+      ]
+    },
+    "Concurrent::ThreadLocalVar#value=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/thread_local_var.rb:91",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/thread_local_var.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/thread_local_var.rb:105"
+      ]
+    },
+    "Concurrent::Promises::DelayPromise#event": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:208",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:864",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1102"
+      ]
+    },
+    "singleton(Concurrent::Promises)#fulfilled_future": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/channel.rb:104",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:681",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:1146"
+      ]
+    },
+    "Concurrent::Promises::Future::FlatShortcuts#then_on": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/promises.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/promises.rb:45"
+      ]
+    },
+    "Concurrent::Set#each": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/behaviour/linking.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/edge/erlang_actor.rb:922"
+      ]
+    },
+    "Concurrent::LockFreeStack#pop": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:801",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:804"
+      ]
+    },
+    "singleton(Concurrent::Promises::FutureWrapperPromise)#new_blocked_by1": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1118",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1549"
+      ]
+    },
+    "{}#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/core.rb:216",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/map.rb:308"
+      ]
+    },
+    "singleton(Concurrent)#atomically": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/tvar.rb:30"
+      ]
+    },
+    "singleton(Concurrent)#global_fast_executor": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:279",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/options.rb:30"
+      ]
+    },
+    "Concurrent::Synchronization::Lock#broadcast": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/read_write_lock.rb:212",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic/reentrant_read_write_lock.rb:341"
+      ]
+    },
+    "Array[String?] | String#start_with?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/utility/processor_counter.rb:67",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/utility/processor_counter.rb:69"
+      ]
+    },
+    "singleton(Concurrent)#global_immediate_executor": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:519",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/options.rb:34"
+      ]
+    },
+    "Numeric#nan?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic_reference/numeric_cas_wrapper.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atomic_reference/numeric_cas_wrapper.rb:20"
+      ]
+    },
+    "Concurrent::Atom#value=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atom.rb:125",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/atom.rb:201"
+      ]
+    },
+    "Array[Dynamic[top]]?#first": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:540",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/agent.rb:544"
+      ]
+    },
+    "singleton(Concurrent::Promises::EventWrapperPromise)#new_blocked_by1": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:900",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby/concurrent/promises.rb:1338"
+      ]
+    },
+    "singleton(Concurrent::Actor)#spawn": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/context.rb:118",
+        "/Users/megurine/repo/ruby/rigor-survey/concurrent-ruby/lib/concurrent-ruby-edge/concurrent/actor/root.rb:21"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "==": 137,
+    "[]": 85,
+    "call": 50,
+    "!=": 42,
+    "fetch": 37,
+    "+": 35,
+    ">": 32,
+    "future": 30,
+    "send": 26,
+    "each": 25,
+    "util": 24,
+    "message": 21,
+    "<": 21,
+    "-": 21,
+    "concurrent": 21,
+    "value": 21,
+    "&": 20,
+    "resolved?": 20,
+    "post": 18,
+    "first": 17,
+    "size": 17,
+    "map": 17,
+    ">=": 16,
+    "length": 16,
+    "empty?": 15,
+    "sender": 15,
+    "to_f": 15,
+    "to_i": 15,
+    "tell": 14,
+    "===": 13,
+    "<<": 13,
+    "set": 12,
+    "new": 12,
+    "to_s": 11,
+    "internal_state": 11,
+    "reference": 11,
+    "class": 10,
+    "shift": 10,
+    "push": 10,
+    "fulfilled?": 10
+  },
+  "implicit_self_methods_top": {
+    "synchronize": 186,
+    "safe_initialization!": 29,
+    "java": 26,
+    "log": 24,
+    "internal_state": 23,
+    "core": 22,
+    "resolve_with": 19,
+    "Type!": 18,
+    "reference": 15,
+    "envelope": 14,
+    "buffer": 14,
+    "observers": 13,
+    "default_executor": 12,
+    "apply_deref_options": 10,
+    "attr_atomic": 10,
+    "value": 10,
+    "compare_and_set_head": 10,
+    "pass": 10,
+    "running?": 9,
+    "ns_closed?": 9,
+    "cells": 9,
+    "head": 9,
+    "capacity": 8,
+    "each_pair": 8,
+    "wait_until_resolved": 8,
+    "running_writer?": 8,
+    "compare_and_set_state": 8,
+    "rejected?": 7,
+    "putting": 7,
+    "stopped_event": 7,
+    "state": 7,
+    "broadcast": 7,
+    "class_eval": 7,
+    "size": 6,
+    "empty?": 6,
+    "running_readers": 6,
+    "reason": 6,
+    "ns_wait_until": 6,
+    "ns_initialize": 6,
+    "compare_and_set": 6
+  }
+}

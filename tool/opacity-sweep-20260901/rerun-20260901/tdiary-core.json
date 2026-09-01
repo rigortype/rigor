@@ -1,0 +1,698 @@
+{
+  "files": 69,
+  "parse_errors": 0,
+  "total": 19942,
+  "tier_counts": {
+    "constant": 6672,
+    "nominal": 3980,
+    "shaped": 595,
+    "dynamic_top": 8433,
+    "bot": 194,
+    "dynamic_specific": 2,
+    "top": 24,
+    "refined": 42
+  },
+  "opaque_node_classes": {
+    "InstanceVariableTargetNode": 18,
+    "LocalVariableReadNode": 1629,
+    "IfNode": 242,
+    "CallNode": 3383,
+    "LocalVariableWriteNode": 215,
+    "InstanceVariableReadNode": 1299,
+    "EmbeddedStatementsNode": 499,
+    "ConstantPathNode": 74,
+    "ConstantReadNode": 37,
+    "MultiWriteNode": 18,
+    "LocalVariableTargetNode": 54,
+    "BlockNode": 340,
+    "ModuleNode": 3,
+    "ConstantWriteNode": 2,
+    "GlobalVariableReadNode": 28,
+    "InstanceVariableWriteNode": 157,
+    "ClassVariableReadNode": 2,
+    "ClassVariableWriteNode": 1,
+    "ForwardingSuperNode": 68,
+    "BeginNode": 29,
+    "ParenthesesNode": 49,
+    "OrNode": 87,
+    "UnlessNode": 23,
+    "AndNode": 105,
+    "CaseNode": 7,
+    "SplatNode": 21,
+    "InstanceVariableOperatorWriteNode": 1,
+    "InstanceVariableOrWriteNode": 1,
+    "ClassNode": 1,
+    "YieldNode": 21,
+    "LocalVariableOperatorWriteNode": 21,
+    "EmbeddedVariableNode": 9,
+    "IndexOrWriteNode": 1,
+    "GlobalVariableWriteNode": 1,
+    "RescueModifierNode": 1,
+    "SuperNode": 3,
+    "CallOperatorWriteNode": 1,
+    "CallOrWriteNode": 6
+  },
+  "local_read_buckets": {
+    "def_param": 732,
+    "assigned_local": 511,
+    "block_param": 386
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 2534,
+    "implicit_self": 645,
+    "precise": 204
+  },
+  "opaque_ivar_reads": 1299,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/tdiary-core",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 11483,
+  "precision_ratio": 0.5758,
+  "named_receiver_opaque_pairs": {
+    "Hash[Dynamic[top], Dynamic[top]] | {}#[]": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:42"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 14,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:46",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/base.rb:66",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin.rb:180"
+      ]
+    },
+    "{}#[]=": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/base.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:134",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin.rb:260"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#[]": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:57",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:57"
+      ]
+    },
+    "singleton(File)#open": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:81"
+      ]
+    },
+    "Hash[String, String] | { \"og:title\": String }#[]=": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/00default.rb:341",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/00default.rb:342",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/00default.rb:343"
+      ]
+    },
+    "singleton(TDiary)#logger": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:110",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:118",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:100"
+      ]
+    },
+    "WEBrick::HTTPServer#mount": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:41",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:43"
+      ]
+    },
+    "{}#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:225",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/pstore.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin.rb:258"
+      ]
+    },
+    "AWS::PAAPI::Market(host: \"webservices.amazon.ae\", region:...#host": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/aws/pa_api.rb:34",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/aws/pa_api.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/aws/pa_api.rb:56"
+      ]
+    },
+    "singleton(FileUtils)#mkdir_p": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:216",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/base.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/default.rb:172"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#delete": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:36",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/referer_manager.rb:63"
+      ]
+    },
+    "singleton(Bundler)#with_clean_env": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cli.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cli.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cli.rb:81"
+      ]
+    },
+    "PStore#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cache/file.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cache/file.rb:44",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/90migrate.rb:25"
+      ]
+    },
+    "Hash[String, String]#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/dispatcher/index_main.rb:42",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/dispatcher/index_main.rb:43",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/dispatcher/index_main.rb:47"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:106",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin.rb:180",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin.rb:312"
+      ]
+    },
+    "TDiary::Response#set_header": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/dispatcher/index_main.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/dispatcher/index_main.rb:73",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/dispatcher/update_main.rb:46"
+      ]
+    },
+    "singleton(TDiary::Rack::Auth::OmniAuth)#config": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth/omniauth.rb:22",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth/omniauth.rb:23",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth/omniauth/authorization.rb:34"
+      ]
+    },
+    "singleton(TDiary)#configuration": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:68",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:72",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:80"
+      ]
+    },
+    "Array[String] | StringIO | Tempfile#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/core_ext.rb:62",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/core_ext.rb:62"
+      ]
+    },
+    "Array[Dynamic[top]]#max": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:58",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:70"
+      ]
+    },
+    "singleton(TDiary::Style)#const_get": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/base.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/base.rb:55"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]?#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:63",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:65"
+      ]
+    },
+    "TDiary::Configuration#class_eval": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:201",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:223"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:31",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/configuration.rb:31"
+      ]
+    },
+    "TDiary::DiaryContainer::FakeCGI#params": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/diary_container.rb:21",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/diary_container.rb:24"
+      ]
+    },
+    "Hash#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/50sp.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/60sf.rb:22"
+      ]
+    },
+    "singleton(TDiary::Filter)#const_get": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/60sf.rb:130",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/view.rb:89"
+      ]
+    },
+    "singleton(TDiary::Extensions)#const_get": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:62",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/50sp.rb:11"
+      ]
+    },
+    "PStore#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cache/file.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cache/file.rb:66"
+      ]
+    },
+    "TDiary::IO::PStore#transaction": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/plugin_pstore.rb:21",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/pstore.rb:23"
+      ]
+    },
+    "singleton(TDiary::Rack::Auth::OmniAuth)#provider_procs": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth/omniauth.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth/omniauth.rb:84"
+      ]
+    },
+    "TDiary::Server#shutdown": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:19",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:20"
+      ]
+    },
+    "singleton(Bundler)#settings": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/environment.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/environment.rb:28"
+      ]
+    },
+    "Array[String?] | []#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/style/tdiary.rb:104",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/style/wiki.rb:132"
+      ]
+    },
+    "singleton(FileUtils)#rm_f": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/90migrate.rb:96",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/90migrate.rb:97"
+      ]
+    },
+    "TDiary::TDiaryDay#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/view.rb:151",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/view.rb:159"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:110",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:73"
+      ]
+    },
+    "AWS::PAAPI::Market(host: \"webservices.amazon.ae\", region:...#region": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/aws/pa_api.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/aws/pa_api.rb:51"
+      ]
+    },
+    "PStore#transaction": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cache/file.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/cache/file.rb:63"
+      ]
+    },
+    "{ \"og:title\": String }#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/00default.rb:333"
+      ]
+    },
+    "Proc#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/style/wiki.rb:75"
+      ]
+    },
+    "Array[Symbol]#inject": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/00default.rb:824"
+      ]
+    },
+    "TDiary::IO::PluginPStore#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/plugin_pstore.rb:28"
+      ]
+    },
+    "TDiary::TDiaryComment#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/view.rb:202"
+      ]
+    },
+    "TDiary::IO::PluginPStore#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/plugin_pstore.rb:25"
+      ]
+    },
+    "TDiary::IO::PluginPStore#roots": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/io/plugin_pstore.rb:34"
+      ]
+    },
+    "TDiary::Style::TdiarySection#body=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/style/tdiary.rb:140"
+      ]
+    },
+    "non-negative-int#<=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:72"
+      ]
+    },
+    "Array[Dynamic[top]]#min": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:73"
+      ]
+    },
+    "RefererDiary#clear_oldest_referer": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/05referer.rb:136"
+      ]
+    },
+    "Array | Hash#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/90migrate.rb:35"
+      ]
+    },
+    "singleton(FileUtils)#mv": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/plugin/90migrate.rb:85"
+      ]
+    },
+    "TDiary::Rack::Auth::Basic | TDiary::Rack::Auth::OmniAuth#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth.rb:16"
+      ]
+    },
+    "TDiary::Rack::Auth::Basic#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth/basic.rb:23"
+      ]
+    },
+    "TDiary::Rack::Auth::PasswordFileNotFound#message": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/rack/auth/basic.rb:25"
+      ]
+    },
+    "TDiary::Style::TdiarySection#subtitle=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/style/tdiary.rb:139"
+      ]
+    },
+    "non-negative-int#>=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/referer_manager.rb:52"
+      ]
+    },
+    "TDiary::Server#start": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:22"
+      ]
+    },
+    "WEBrick::BasicLog#level=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:40"
+      ]
+    },
+    "Array[Dynamic[top]]?#delete_at": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/style.rb:120"
+      ]
+    },
+    "WEBrick::HTTPServer#start": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:49"
+      ]
+    },
+    "WEBrick::HTTPServer#shutdown": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/server.rb:53"
+      ]
+    },
+    "non-negative-int#/": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/filter/spam.rb:246"
+      ]
+    },
+    "TDiary::Plugin#last_modified=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:86"
+      ]
+    },
+    "TDiary::Plugin#date=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:85"
+      ]
+    },
+    "TDiary::Plugin?#cookies": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:67"
+      ]
+    },
+    "TDiary::Plugin#eval_src": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:65"
+      ]
+    },
+    "ArgumentError | Exception | SyntaxError | TDiary::PluginE...#class": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/base.rb:31"
+      ]
+    },
+    "TDiary::TDiaryFormPlugin#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/author_only_base.rb:115"
+      ]
+    },
+    "TDiary::Plugin#__send__": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:115"
+      ]
+    },
+    "TDiary::TDiaryBase#diaries": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:103"
+      ]
+    },
+    "TDiary::Configuration#io_class": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/application.rb:97"
+      ]
+    },
+    "TDiary::TDiaryShowComment#<<": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/admin.rb:206"
+      ]
+    },
+    "TDiary::TDiaryShowComment#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/admin.rb:200"
+      ]
+    },
+    "TDiary::TDiaryReplace#<<": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/admin.rb:183"
+      ]
+    },
+    "TDiary::TDiaryReplace#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/admin.rb:171"
+      ]
+    },
+    "TDiary::TDiaryAppend#<<": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/admin.rb:146"
+      ]
+    },
+    "TDiary::TDiaryAppend#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/admin.rb:145"
+      ]
+    },
+    "TDiary::TDiaryEdit#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/tdiary-core/lib/tdiary/admin.rb:55"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 608,
+    "params": 146,
+    "==": 105,
+    "strftime": 63,
+    "to_i": 51,
+    "options": 49,
+    "each": 47,
+    "index": 45,
+    "sub": 40,
+    "+": 37,
+    "join": 32,
+    "split": 31,
+    "scan": 30,
+    "!=": 29,
+    "[]=": 28,
+    "empty?": 28,
+    "body": 26,
+    "collect": 26,
+    "<<": 24,
+    "call": 24,
+    "include?": 22,
+    "gsub": 22,
+    "keys": 22,
+    ">": 22,
+    "update": 21,
+    "sort": 21,
+    "to_native": 21,
+    "date": 20,
+    "chomp": 19,
+    "dup": 18,
+    "visible?": 17,
+    "new": 17,
+    "referer": 16,
+    "=~": 16,
+    "to_s": 16,
+    "transaction": 15,
+    "latest_limit": 15,
+    "data_path": 15,
+    "style": 14,
+    "length": 13
+  },
+  "implicit_self_methods_top": {
+    "h": 182,
+    "conf": 25,
+    "add_conf_proc": 25,
+    "cgi": 21,
+    "params": 17,
+    "debug": 16,
+    "use": 13,
+    "tdiary": 12,
+    "eval": 11,
+    "date": 11,
+    "options": 11,
+    "base_url": 10,
+    "env_table": 9,
+    "bot?": 9,
+    "run": 8,
+    "cache_path": 8,
+    "each_section": 8,
+    "empty_directory": 7,
+    "sf_option": 7,
+    "say": 7,
+    "sp_option": 7,
+    "method_option": 7,
+    "desc": 7,
+    "strip_subtitle": 6,
+    "map": 6,
+    "request_method": 5,
+    "load_plugins": 5,
+    "add_provider": 4,
+    "hmac": 4,
+    "directory": 4,
+    "limit_size": 4,
+    "provider": 4,
+    "convert_element": 3,
+    "auto_migration_spam_champuru": 3,
+    "init_diary": 3,
+    "latest_day?": 3,
+    "load_plugin": 3,
+    "referer_save_volatile": 3,
+    "apply_plugin": 3,
+    "comment_description": 3
+  }
+}

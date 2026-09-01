@@ -1,0 +1,331 @@
+{
+  "files": 14,
+  "parse_errors": 0,
+  "total": 4076,
+  "tier_counts": {
+    "constant": 952,
+    "nominal": 341,
+    "dynamic_top": 2458,
+    "bot": 89,
+    "shaped": 229,
+    "dynamic_specific": 7
+  },
+  "opaque_node_classes": {
+    "LocalVariableReadNode": 945,
+    "LocalVariableWriteNode": 116,
+    "CallNode": 863,
+    "ParenthesesNode": 66,
+    "IfNode": 59,
+    "BlockNode": 25,
+    "IndexTargetNode": 12,
+    "OrNode": 21,
+    "AndNode": 38,
+    "LocalVariableOperatorWriteNode": 1,
+    "LocalVariableTargetNode": 26,
+    "ClassNode": 6,
+    "InstanceVariableReadNode": 195,
+    "InstanceVariableWriteNode": 34,
+    "YieldNode": 4,
+    "BeginNode": 3,
+    "ConstantPathWriteNode": 3,
+    "ConstantPathNode": 11,
+    "UnlessNode": 3,
+    "InstanceVariableOperatorWriteNode": 1,
+    "CallOperatorWriteNode": 2,
+    "SuperNode": 2,
+    "InstanceVariableTargetNode": 7,
+    "CallTargetNode": 12,
+    "CaseNode": 1,
+    "EmbeddedStatementsNode": 2
+  },
+  "local_read_buckets": {
+    "def_param": 556,
+    "assigned_local": 341,
+    "block_param": 48
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 754,
+    "precise": 46,
+    "implicit_self": 62,
+    "dynamic_specific": 1
+  },
+  "opaque_ivar_reads": 195,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/algorithms",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 1611,
+  "precision_ratio": 0.3952,
+  "named_receiver_opaque_pairs": {
+    "Array[Dynamic[top]]#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:186",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:187",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:204"
+      ]
+    },
+    "Array[Dynamic[top]]#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:203",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:204",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:205"
+      ]
+    },
+    "Containers::Stack#push": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/rb_tree_map.rb:186",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:195"
+      ]
+    },
+    "Containers::Stack#empty?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/rb_tree_map.rb:189",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:198"
+      ]
+    },
+    "Containers::Stack#pop": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/rb_tree_map.rb:190",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:199"
+      ]
+    },
+    "Containers::RubySplayTreeMap::Node(key: Dynamic[top], val...#left=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:54"
+      ]
+    },
+    "Containers::RubySplayTreeMap::Node(key: Dynamic[top], val...#right=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:50",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:53"
+      ]
+    },
+    "Containers::Heap#size": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:176",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/priority_queue.rb:28"
+      ]
+    },
+    "Containers::Heap#instance_variable_get": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:164",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:166"
+      ]
+    },
+    "[]#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:354"
+      ]
+    },
+    "Containers::Heap#pop": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/algorithms/sort.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/priority_queue.rb:91"
+      ]
+    },
+    "Containers::RubySplayTreeMap::Node(key: nil, value: nil, ...#left=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:225"
+      ]
+    },
+    "Containers::RubySplayTreeMap::Node(key: nil, value: nil, ...#right=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:237"
+      ]
+    },
+    "Containers::RubySplayTreeMap::Node(key: nil, value: nil, ...#right": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:246"
+      ]
+    },
+    "Containers::RubySplayTreeMap::Node(key: nil, value: nil, ...#left": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/splay_tree_map.rb:247"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]] | [nil, Dynamic[top]]#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/rb_tree_map.rb:307"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/trie.rb:61"
+      ]
+    },
+    "Containers::Heap#delete": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/priority_queue.rb:109"
+      ]
+    },
+    "Containers::Heap#next": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/priority_queue.rb:76"
+      ]
+    },
+    "Containers::Heap#push": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/priority_queue.rb:38"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/kd_tree.rb:32"
+      ]
+    },
+    "Hash#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/kd_tree.rb:32"
+      ]
+    },
+    "Containers::MinHeap#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:492"
+      ]
+    },
+    "Containers::MinHeap#next": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:479"
+      ]
+    },
+    "Containers::MaxHeap#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:450"
+      ]
+    },
+    "Containers::MaxHeap#next": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:437"
+      ]
+    },
+    "Array[nil]#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:370"
+      ]
+    },
+    "Containers::Heap::Node#left": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:67"
+      ]
+    },
+    "Containers::Heap::Node#left=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:66"
+      ]
+    },
+    "Containers::Heap::Node#right=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/heap.rb:65"
+      ]
+    },
+    "Containers::RubyDeque::Node(left: nil, right: nil, obj: D...#left=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/deque.rb:90"
+      ]
+    },
+    "Containers::RubyDeque::Node(left: nil, right: nil, obj: D...#right=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/algorithms/lib/containers/deque.rb:72"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 92,
+    "left": 74,
+    "right": 68,
+    "==": 44,
+    "key": 36,
+    "+": 32,
+    "-": 29,
+    "<": 28,
+    "size": 27,
+    "<=>": 23,
+    "right=": 22,
+    "left=": 20,
+    "value": 18,
+    "empty?": 15,
+    ">": 13,
+    "red?": 12,
+    "char": 12,
+    "nil?": 11,
+    "length": 9,
+    "[]=": 9,
+    "child": 9,
+    "<=": 9,
+    "chr": 8,
+    "!": 8,
+    "obj": 8,
+    "/": 7,
+    "to_s": 7,
+    "color": 5,
+    ">=": 5,
+    "last": 5,
+    "coords": 4,
+    "rotate_right": 4,
+    "degree": 4,
+    "value=": 4,
+    "<<": 4,
+    "mid": 4,
+    "fixup": 3,
+    "last?": 3,
+    "shift": 3,
+    "first": 3
+  },
+  "implicit_self_methods_top": {
+    "isred": 11,
+    "splay": 6,
+    "prefix_recursive": 4,
+    "push_recursive": 4,
+    "dualpivot": 4,
+    "min_recursive": 4,
+    "get_recursive": 4,
+    "insert": 3,
+    "nearest": 3,
+    "frontUnknown": 3,
+    "front": 3,
+    "check_nearest": 2,
+    "get": 2,
+    "max_recursive": 2,
+    "mergesort": 2,
+    "distance2": 1,
+    "pop": 1,
+    "consolidate": 1,
+    "push": 1,
+    "push_back": 1
+  }
+}

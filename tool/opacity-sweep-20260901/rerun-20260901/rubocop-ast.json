@@ -1,0 +1,430 @@
+{
+  "files": 101,
+  "parse_errors": 0,
+  "total": 11433,
+  "tier_counts": {
+    "constant": 5239,
+    "nominal": 1860,
+    "dynamic_top": 3830,
+    "shaped": 366,
+    "bot": 111,
+    "refined": 22,
+    "dynamic_specific": 3,
+    "top": 2
+  },
+  "opaque_node_classes": {
+    "ModuleNode": 24,
+    "LocalVariableReadNode": 857,
+    "CallNode": 1904,
+    "ConstantPathNode": 72,
+    "ConstantReadNode": 44,
+    "ClassNode": 1,
+    "ConstantWriteNode": 3,
+    "ParenthesesNode": 24,
+    "EmbeddedStatementsNode": 172,
+    "ForwardingSuperNode": 14,
+    "BlockNode": 118,
+    "AndNode": 37,
+    "IndexOrWriteNode": 2,
+    "InstanceVariableReadNode": 91,
+    "LocalVariableWriteNode": 122,
+    "OrNode": 37,
+    "SplatNode": 50,
+    "IfNode": 87,
+    "LocalVariableTargetNode": 49,
+    "CaseNode": 10,
+    "YieldNode": 24,
+    "UnlessNode": 3,
+    "InstanceVariableWriteNode": 48,
+    "MultiWriteNode": 13,
+    "BeginNode": 6,
+    "LocalVariableOrWriteNode": 2,
+    "LocalVariableOperatorWriteNode": 2,
+    "InstanceVariableOrWriteNode": 5,
+    "SuperNode": 7,
+    "CallOrWriteNode": 1,
+    "InstanceVariableTargetNode": 3
+  },
+  "local_read_buckets": {
+    "def_param": 472,
+    "block_param": 152,
+    "assigned_local": 233
+  },
+  "call_receiver_tiers": {
+    "precise": 54,
+    "implicit_self": 883,
+    "dynamic_top": 967
+  },
+  "opaque_ivar_reads": 91,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 7598,
+  "precision_ratio": 0.6646,
+  "named_receiver_opaque_pairs": {
+    "Hash#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/node.rb:70",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/node.rb:200",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/sets.rb:32"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node.rb:200",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/debug.rb:31"
+      ]
+    },
+    "RuboCop::AST::ProcessedSource#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/processed_source.rb:170",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/processed_source.rb:172"
+      ]
+    },
+    "singleton(RuboCop::AST::NodePattern::Compiler::Subcompiler)#registry": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/subcompiler.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/subcompiler.rb:49"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/if_node.rb:123",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/if_node.rb:134"
+      ]
+    },
+    "AST::Node#type?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/descendence.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/descendence.rb:111"
+      ]
+    },
+    "RuboCop::AST::NodePattern::Comment#location": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/comment.rb:33"
+      ]
+    },
+    "singleton(RuboCop::AST::NodePattern::Sets)#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/atom_subcompiler.rb:42"
+      ]
+    },
+    "bot#|": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/binding.rb:59"
+      ]
+    },
+    "RuboCop::AST::NodePattern#as_lambda": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/debug.rb:107"
+      ]
+    },
+    "RuboCop::AST::ProcessedSource#ast": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/debug.rb:114"
+      ]
+    },
+    "Node::Subsequence#children": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/compiler/sequence_subcompiler.rb:380"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/lexer.rex.rb:62"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/lexer.rex.rb:62"
+      ]
+    },
+    "RuboCop::AST::NodePattern::LexerRex#filename=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/lexer.rex.rb:94"
+      ]
+    },
+    "Array#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/lexer.rex.rb:180"
+      ]
+    },
+    "RuboCop::AST::NodePattern::LexerRex#state=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/lexer.rex.rb:180"
+      ]
+    },
+    "Array#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/lexer.rex.rb:180"
+      ]
+    },
+    "singleton(RuboCop::AST::NodePattern::Sets)#const_set": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/sets.rb:10"
+      ]
+    },
+    "Array#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/with_meta.rb:76"
+      ]
+    },
+    "Array[Dynamic[top]]#inject": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern/with_meta.rb:91"
+      ]
+    },
+    "Hash#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/processed_source.rb:220"
+      ]
+    },
+    "nil | singleton(RuboCop::AST::Builder) | singleton(RuboCo...#new": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/processed_source.rb:339"
+      ]
+    },
+    "{ skip: \"\", always: Dynamic[top], nil?: String }#fetch": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/traversal.rb:58"
+      ]
+    },
+    "singleton(RuboCop::AST::AliasNode) | singleton(RuboCop::A...#new": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/builder.rb:102"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node.rb:204"
+      ]
+    },
+    "Enumerator[Dynamic[top], Dynamic[top]] | RuboCop::AST::Node#to_a": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node.rb:321"
+      ]
+    },
+    "Enumerator[Dynamic[top], Dynamic[top]] | RuboCop::AST::Node#filter_map": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node.rb:401"
+      ]
+    },
+    "RuboCop::AST::Node#parent": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node.rb:698"
+      ]
+    },
+    "Enumerator[Dynamic[top], Dynamic[top]] | RuboCop::AST::Ar...#to_a": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/args_node.rb:35"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/block_node.rb:118"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/block_node.rb:125"
+      ]
+    },
+    "Enumerator[Dynamic[top], Dynamic[top]] | RuboCop::AST::Ha...#to_enum": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/hash_node.rb:34"
+      ]
+    },
+    "Enumerator[Dynamic[top], Dynamic[top]] | RuboCop::AST::Co...#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/constant_node.rb:30"
+      ]
+    },
+    "RuboCop::AST::ConstantNode#children": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/constant_node.rb:50"
+      ]
+    },
+    "Enumerator[Dynamic[top], Dynamic[top]] | RuboCop::AST::De...#to_a": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/descendence.rb:73"
+      ]
+    },
+    "AST::Node#visit_descendants": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/descendence.rb:112"
+      ]
+    },
+    "RuboCop::AST::HashElementNode::HashElementDelta#key_delta": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/hash_element_node.rb:44"
+      ]
+    },
+    "RuboCop::AST::HashElementNode::HashElementDelta#value_delta": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/hash_element_node.rb:53"
+      ]
+    },
+    "RuboCop::AST::HashElementNode::HashElementDelta#delimiter_delta": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/hash_element_node.rb:62"
+      ]
+    },
+    "AST::Node#any_def_type?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node/mixin/method_dispatch_node.rb:203"
+      ]
+    },
+    "RuboCop::AST::NodePattern#def_node_matcher": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern.rb:39"
+      ]
+    },
+    "RuboCop::AST::NodePattern#def_node_search": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern.rb:49"
+      ]
+    },
+    "RuboCop::AST::Node#children": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern.rb:66"
+      ]
+    },
+    "RuboCop::AST::NodePattern#ast": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/rubocop-ast/lib/rubocop/ast/node_pattern.rb:92"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 125,
+    "==": 48,
+    "map": 30,
+    "source": 22,
+    "-": 20,
+    "each": 20,
+    "first": 19,
+    "begin": 19,
+    "children": 19,
+    "skip": 18,
+    "new": 18,
+    "size": 17,
+    "line": 16,
+    "to_s": 15,
+    "child": 15,
+    "empty?": 14,
+    "join": 14,
+    "include?": 13,
+    "loc": 13,
+    "expression": 12,
+    "freeze": 12,
+    "end": 10,
+    "any?": 9,
+    "begin_pos": 8,
+    "!=": 8,
+    "is?": 8,
+    "<<": 8,
+    "source_range": 8,
+    "max": 8,
+    "with_temp_variables": 8,
+    "+": 8,
+    "zero?": 8,
+    "last": 7,
+    "arity": 6,
+    "operator": 6,
+    ">": 6,
+    "end_with?": 6,
+    "compile_as_node_pattern": 6,
+    "match?": 6,
+    ">=": 5
+  },
+  "implicit_self_methods_top": {
+    "node_parts": 62,
+    "type": 53,
+    "loc": 46,
+    "node": 41,
+    "children": 37,
+    "ss": 32,
+    "compiler": 30,
+    "parent": 27,
+    "def_callback": 24,
+    "method_name": 19,
+    "def_node_matcher": 19,
+    "action": 17,
+    "loc_is?": 16,
+    "emit": 14,
+    "arguments": 11,
+    "emit_atom": 10,
+    "else_branch": 9,
+    "second": 9,
+    "first": 9,
+    "sibling_index": 8,
+    "n": 8,
+    "receiver": 7,
+    "source_range": 7,
+    "access": 7,
+    "compile": 7,
+    "def_delegators": 7,
+    "ast": 6,
+    "captures": 6,
+    "pairs": 6,
+    "regopt_include?": 6,
+    "compile_remaining": 5,
+    "emit_unary_op": 5,
+    "access_element": 5,
+    "lines": 5,
+    "tokens": 5,
+    "comments": 5,
+    "source": 5,
+    "emit_list": 5,
+    "selector": 5,
+    "sorted_tokens": 5
+  }
+}

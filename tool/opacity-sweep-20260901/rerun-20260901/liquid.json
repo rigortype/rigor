@@ -1,0 +1,677 @@
+{
+  "files": 63,
+  "parse_errors": 0,
+  "total": 10701,
+  "tier_counts": {
+    "constant": 3087,
+    "nominal": 2232,
+    "bot": 245,
+    "dynamic_top": 4652,
+    "shaped": 425,
+    "refined": 3,
+    "dynamic_specific": 57
+  },
+  "opaque_node_classes": {
+    "ForwardingSuperNode": 32,
+    "InstanceVariableWriteNode": 108,
+    "CallNode": 1551,
+    "InstanceVariableReadNode": 228,
+    "LocalVariableReadNode": 1799,
+    "EmbeddedStatementsNode": 78,
+    "CallOperatorWriteNode": 10,
+    "BeginNode": 43,
+    "BlockNode": 98,
+    "InstanceVariableAndWriteNode": 4,
+    "ConstantReadNode": 55,
+    "IfNode": 169,
+    "ParenthesesNode": 45,
+    "LocalVariableWriteNode": 227,
+    "OrNode": 37,
+    "YieldNode": 18,
+    "LocalVariableTargetNode": 23,
+    "AndNode": 56,
+    "CaseNode": 16,
+    "UnlessNode": 8,
+    "ClassVariableReadNode": 2,
+    "IndexOrWriteNode": 2,
+    "ConstantPathNode": 16,
+    "InstanceVariableOrWriteNode": 4,
+    "CallOrWriteNode": 5,
+    "SplatNode": 4,
+    "SuperNode": 2,
+    "MultiWriteNode": 1,
+    "LocalVariableOperatorWriteNode": 1,
+    "InstanceVariableOperatorWriteNode": 6,
+    "ModuleNode": 3,
+    "LocalVariableOrWriteNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 1104,
+    "block_param": 200,
+    "assigned_local": 495
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 317,
+    "dynamic_top": 1037,
+    "precise": 183,
+    "dynamic_specific": 14
+  },
+  "opaque_ivar_reads": 228,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/liquid",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/liquid/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 5992,
+  "precision_ratio": 0.5599,
+  "named_receiver_opaque_pairs": {
+    "singleton(Liquid::Environment)#default": {
+      "count": 16,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:21",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:25",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parse_context.rb:9"
+      ]
+    },
+    "singleton(Liquid::Utils)#to_number": {
+      "count": 12,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:810",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:881",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:881"
+      ]
+    },
+    "singleton(Liquid::Utils)#to_liquid_value": {
+      "count": 11,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:75",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:77",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:183"
+      ]
+    },
+    "{}#[]=": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/for.rb:145",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/include.rb:100",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/include.rb:122"
+      ]
+    },
+    "Liquid::Error#message": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:194",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/lexer.rb:165",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:857"
+      ]
+    },
+    "Proc#call": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:224",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:224",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:550"
+      ]
+    },
+    "singleton(Liquid::Expression)#parse": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parse_context.rb:69",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/range_lookup.rb:6"
+      ]
+    },
+    "Array#[]": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parser.rb:16",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parser.rb:18",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parser.rb:28"
+      ]
+    },
+    "Liquid::Registers#static": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:47",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:48",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:49"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/block_body.rb:178",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:285",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/case.rb:39"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/block_body.rb:224",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:120",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:171"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#sort": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:397",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:402",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:426"
+      ]
+    },
+    "singleton(Liquid::Condition)#parse_expression": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/case.rb:121",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/case.rb:140",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/if.rb:85"
+      ]
+    },
+    "singleton(Liquid::StrainerTemplate)#add_filter": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:103",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:112",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:129"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#fetch": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:232",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:242",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/registers.rb:32"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]?#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:86",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:91"
+      ]
+    },
+    "Liquid::Error#line_number=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parser_switching.rb:61",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parser_switching.rb:69"
+      ]
+    },
+    "Liquid::Condition#attach": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/case.rb:123",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/case.rb:141"
+      ]
+    },
+    "[]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/profiler.rb:92",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/for.rb:155"
+      ]
+    },
+    "singleton(Liquid::Utils)#slice_collection": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/for.rb:142",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:88"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#all?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:400",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:429"
+      ]
+    },
+    "Liquid::Condition#send": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/if.rb:101",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/if.rb:120"
+      ]
+    },
+    "singleton(Liquid::PartialCache)#load": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/include.rb:40",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/render.rb:54"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:232",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/registers.rb:13"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#map": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:549",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:974"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:97",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/for.rb:174"
+      ]
+    },
+    "Liquid::Context#exception_renderer=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:51",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:53"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#uniq": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:514",
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:518"
+      ]
+    },
+    "singleton(Liquid::StrainerTemplate)#invokable?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/strainer_template.rb:51"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#sum": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:986"
+      ]
+    },
+    "Hash | {}#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:959"
+      ]
+    },
+    "Liquid::Error#backtrace": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/strainer_template.rb:59"
+      ]
+    },
+    "Liquid::Tag#parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tag.rb:15"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#reject": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:578"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#concat": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:699"
+      ]
+    },
+    "singleton(Liquid::Tag::Disabler)#disabled_tags": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tag/disabler.rb:7"
+      ]
+    },
+    "singleton(Liquid::Utils)#to_date": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:771"
+      ]
+    },
+    "Liquid::Variable#render": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/assign.rb:41"
+      ]
+    },
+    "Liquid::ElseCondition#attach": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/case.rb:152"
+      ]
+    },
+    "{}#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/for.rb:122"
+      ]
+    },
+    "Liquid::ForloopDrop#send": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/for.rb:165"
+      ]
+    },
+    "Liquid::Condition | Liquid::ElseCondition | nil#attach": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/if.rb:81"
+      ]
+    },
+    "Liquid::TablerowloopDrop#col": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:101"
+      ]
+    },
+    "Liquid::TablerowloopDrop#col_last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:111"
+      ]
+    },
+    "Liquid::TablerowloopDrop#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:111"
+      ]
+    },
+    "Liquid::TablerowloopDrop#row": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:112"
+      ]
+    },
+    "Liquid::TablerowloopDrop#send": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/tags/table_row.rb:115"
+      ]
+    },
+    "Liquid::ParseContext#locale": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/template.rb:103"
+      ]
+    },
+    "Liquid::Document?#nil?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/template.rb:142"
+      ]
+    },
+    "Liquid::Document?#render_to_output_buffer": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/template.rb:192"
+      ]
+    },
+    "Liquid::ParseContext#warnings": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/template.rb:226"
+      ]
+    },
+    "Array[String?] | String#=~": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/variable.rb:54"
+      ]
+    },
+    "Array[String?] | String#scan": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/variable.rb:56"
+      ]
+    },
+    "singleton(Liquid::StrainerTemplate)#filter_method_names": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:141"
+      ]
+    },
+    "Liquid::Environment#exception_renderer=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:47"
+      ]
+    },
+    "Liquid::Environment#error_mode=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:46"
+      ]
+    },
+    "Liquid::Environment#file_system=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:45"
+      ]
+    },
+    "Liquid::Environment#tags=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/environment.rb:44"
+      ]
+    },
+    "singleton(Liquid::Drop)#invokable?": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/drop.rb:40"
+      ]
+    },
+    "nil#strict_variables": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/drop.rb:34"
+      ]
+    },
+    "Liquid::Document#parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/document.rb:7"
+      ]
+    },
+    "Array[Dynamic[top]]#shift": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/context.rb:126"
+      ]
+    },
+    "singleton(Liquid::Condition)#operators": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:186"
+      ]
+    },
+    "Liquid::Condition#child_condition": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:81"
+      ]
+    },
+    "Liquid::Condition#child_relation": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:73"
+      ]
+    },
+    "Liquid::Condition#operator": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:71"
+      ]
+    },
+    "Liquid::Condition#right": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:71"
+      ]
+    },
+    "Liquid::Condition#left": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/condition.rb:71"
+      ]
+    },
+    "singleton(Liquid::BlockBody)#render_node": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/block_body.rb:245"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#compact": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:574"
+      ]
+    },
+    "Liquid::StandardFilters::InputIterator#reverse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:538"
+      ]
+    },
+    "non-negative-int#<=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:276"
+      ]
+    },
+    "non-negative-int#>": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/standardfilters.rb:246"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/registers.rb:25"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/registers.rb:18"
+      ]
+    },
+    "Liquid::Profiler::Timing#children": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/profiler.rb:124"
+      ]
+    },
+    "nil#children": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/profiler.rb:101"
+      ]
+    },
+    "Liquid::Error#template_name=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/partial_cache.rb:22"
+      ]
+    },
+    "singleton(Liquid::ParseTreeVisitor)#for": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parse_tree_visitor.rb:31"
+      ]
+    },
+    "singleton(Liquid::Expression)#safe_parse": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/liquid/lib/liquid/parse_context.rb:54"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 109,
+    "==": 48,
+    "t": 33,
+    "<<": 30,
+    "evaluate": 29,
+    "consume": 27,
+    "[]=": 23,
+    "-": 20,
+    "=~": 19,
+    "to_s": 19,
+    "freeze": 19,
+    "each": 17,
+    "consume?": 16,
+    "scan_byte": 14,
+    "id?": 14,
+    "+": 14,
+    "look": 14,
+    "!=": 12,
+    "empty?": 12,
+    "locale": 12,
+    "render_to_output_buffer": 12,
+    "attachment": 11,
+    "registers": 11,
+    "line_number": 10,
+    "new_parser": 10,
+    "send": 10,
+    "pos": 10,
+    "to_i": 9,
+    "shift": 8,
+    "peek_byte": 8,
+    "byteslice": 8,
+    "scan": 8,
+    "start_with?": 8,
+    "error_mode": 7,
+    "length": 7,
+    ">": 7,
+    "first": 7,
+    "end_with?": 7,
+    "respond_to?": 7,
+    "key?": 7
+  },
+  "implicit_self_methods_top": {
+    "parse_context": 39,
+    "parse_expression": 22,
+    "options": 17,
+    "consume": 13,
+    "safe_parse_expression": 11,
+    "context": 11,
+    "new_body": 8,
+    "lax_parse": 7,
+    "block_name": 6,
+    "line_number": 5,
+    "expression": 5,
+    "filter_array": 5,
+    "apply_operation": 5,
+    "render": 5,
+    "parse_with_selected_parser": 5,
+    "strict2_parse_with_error_context": 4,
+    "look": 4,
+    "children": 4,
+    "maybe_dup_lookup": 4,
+    "lookup_and_evaluate": 4,
+    "registers": 4,
+    "block_delimiter": 4,
+    "instance_assigns": 3,
+    "to_a": 3,
+    "root": 3,
+    "template_name": 3,
+    "assigns": 3,
+    "to_integer": 3,
+    "filter_methods": 3,
+    "lookup_command?": 2,
+    "call_method_literal": 2,
+    "inner_parse": 2,
+    "locale": 2,
+    "nil_safe_casecmp": 2,
+    "global_filter": 2,
+    "nil_safe_compare": 2,
+    "push_block": 2,
+    "strict2_mode?": 2,
+    "set_attribute": 2,
+    "strict_parse_with_error_context": 2
+  }
+}

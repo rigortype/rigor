@@ -1,0 +1,334 @@
+{
+  "files": 27,
+  "parse_errors": 0,
+  "total": 4861,
+  "tier_counts": {
+    "constant": 1599,
+    "nominal": 875,
+    "dynamic_top": 1995,
+    "shaped": 333,
+    "bot": 59
+  },
+  "opaque_node_classes": {
+    "CallNode": 796,
+    "SplatNode": 2,
+    "LocalVariableReadNode": 519,
+    "BlockNode": 55,
+    "IfNode": 65,
+    "AndNode": 32,
+    "LocalVariableTargetNode": 18,
+    "LocalVariableWriteNode": 58,
+    "EmbeddedStatementsNode": 78,
+    "InstanceVariableWriteNode": 19,
+    "ForwardingSuperNode": 16,
+    "InstanceVariableReadNode": 163,
+    "GlobalVariableReadNode": 6,
+    "ConstantPathNode": 33,
+    "ConstantReadNode": 41,
+    "UnlessNode": 9,
+    "OrNode": 21,
+    "ModuleNode": 7,
+    "SuperNode": 4,
+    "InstanceVariableTargetNode": 14,
+    "ClassNode": 4,
+    "IndexOrWriteNode": 1,
+    "ParenthesesNode": 12,
+    "InstanceVariableOrWriteNode": 2,
+    "BeginNode": 5,
+    "YieldNode": 7,
+    "CaseNode": 4,
+    "LocalVariableOperatorWriteNode": 1,
+    "LocalVariableOrWriteNode": 1,
+    "ConstantPathWriteNode": 1,
+    "ConstantWriteNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 311,
+    "block_param": 85,
+    "assigned_local": 123
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 206,
+    "dynamic_top": 520,
+    "precise": 70
+  },
+  "opaque_ivar_reads": 163,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/slim",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/slim/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 2866,
+  "precision_ratio": 0.5896,
+  "named_receiver_opaque_pairs": {
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 20,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:98",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:100"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:28",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:62",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:88"
+      ]
+    },
+    "Array[Dynamic[top]]?#last": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:204",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:218",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:269"
+      ]
+    },
+    "singleton(Slim::Engine)#set_options": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:6",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:44",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:53"
+      ]
+    },
+    "Array[Dynamic[top]] | nil | non-empty-array[Dynamic[top]]#last": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:169",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:194"
+      ]
+    },
+    "Hash#delete": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/embedded.rb:200",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/embedded.rb:201",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/embedded.rb:202"
+      ]
+    },
+    "singleton(Slim::Engine)#after": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/logic_less.rb:6",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/smart.rb:8",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/smart.rb:9"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#delete": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:96",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/splat/builder.rb:48"
+      ]
+    },
+    "Array[Dynamic[top]]?#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/embedded.rb:54",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/translator.rb:71"
+      ]
+    },
+    "Thread#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/include.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/include.rb:41"
+      ]
+    },
+    "Array[Dynamic[top]] | nil | non-empty-array[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:184"
+      ]
+    },
+    "Proc#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:341"
+      ]
+    },
+    "Slim::Parser::SyntaxError#backtrace": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:526"
+      ]
+    },
+    "singleton(Slim::Engine)#replace": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/smart.rb:7"
+      ]
+    },
+    "bot#first": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/smart/filter.rb:60"
+      ]
+    },
+    "bot#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/smart/filter.rb:60"
+      ]
+    },
+    "singleton(Slim::Splat::Filter)#options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/splat/filter.rb:14"
+      ]
+    },
+    "Slim::Translator::DynamicTranslator | Slim::Translator::S...#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/translator.rb:52"
+      ]
+    },
+    "singleton(Slim::Engine)#before": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/translator.rb:119"
+      ]
+    },
+    "singleton(Slim::Embedded)#engines": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/parser.rb:81"
+      ]
+    },
+    "Array[Dynamic[top]]#pop": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/logic_less/context.rb:123"
+      ]
+    },
+    "Array[Dynamic[top]]#last": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/logic_less/context.rb:116"
+      ]
+    },
+    "non-empty-array[Dynamic[top]]#inject": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/logic_less/context.rb:20"
+      ]
+    },
+    "singleton(Slim::Embedded)#create": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/embedded.rb:103"
+      ]
+    },
+    "Slim::Engine#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:102"
+      ]
+    },
+    "Slim::ERBConverter#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:100"
+      ]
+    },
+    "singleton(YAML)#load": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:67"
+      ]
+    },
+    "singleton(Slim::Engine)#options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/slim/lib/slim/command.rb:58"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 123,
+    "<<": 47,
+    "last": 28,
+    "==": 27,
+    "=~": 26,
+    "empty?": 16,
+    "size": 15,
+    "to_s": 15,
+    "+": 12,
+    "!=": 11,
+    "each": 11,
+    "call": 10,
+    "include?": 9,
+    "-": 9,
+    "on": 9,
+    "|": 8,
+    "keys": 8,
+    "first": 8,
+    "to_sym": 8,
+    "new": 7,
+    ">": 5,
+    "slice!": 5,
+    "map": 5,
+    "-@": 4,
+    "render": 4,
+    "!~": 4,
+    "join": 4,
+    "pop": 3,
+    "puts": 3,
+    "lstrip!": 3,
+    "split": 3,
+    "read": 3,
+    "shift": 3,
+    "flatten": 3,
+    "dict=": 2,
+    "gsub": 2,
+    "public_send": 2,
+    "instance_variable_get": 2,
+    "sort_by": 2,
+    "reject": 2
+  },
+  "implicit_self_methods_top": {
+    "options": 46,
+    "compile": 22,
+    "define_options": 16,
+    "use": 10,
+    "unique_name": 9,
+    "scope": 9,
+    "filter": 8,
+    "next_line": 6,
+    "set_options": 5,
+    "empty_exp?": 4,
+    "get_indent": 4,
+    "has_key?": 4,
+    "eval": 3,
+    "hyphen_attr": 3,
+    "escape_html": 3,
+    "new_scope": 3,
+    "attr": 3,
+    "expect_next_line": 3,
+    "parse_broken_line": 3,
+    "html": 3,
+    "parse_attributes": 2,
+    "engines": 2,
+    "parse_tag": 2,
+    "normalize_engine_list": 2,
+    "collect_text": 2,
+    "instance_variable?": 2,
+    "build_attrs": 2,
+    "output_protector": 2,
+    "disable_option_validator!": 2,
+    "after": 2,
+    "find_file": 2,
+    "replace": 2,
+    "capture_block_content": 1,
+    "initializer": 1,
+    "splat?": 1,
+    "code_attr": 1,
+    "parse_line_indicators": 1,
+    "parse_line": 1,
+    "lineno": 1,
+    "file": 1
+  }
+}

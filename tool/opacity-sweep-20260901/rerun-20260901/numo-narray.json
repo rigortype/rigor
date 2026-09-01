@@ -1,0 +1,300 @@
+{
+  "files": 2,
+  "parse_errors": 0,
+  "total": 2324,
+  "tier_counts": {
+    "constant": 514,
+    "refined": 1,
+    "nominal": 321,
+    "dynamic_top": 1322,
+    "shaped": 53,
+    "bot": 39,
+    "dynamic_specific": 74
+  },
+  "opaque_node_classes": {
+    "SplatNode": 43,
+    "CallNode": 497,
+    "LocalVariableReadNode": 474,
+    "CaseNode": 12,
+    "IfNode": 35,
+    "LocalVariableWriteNode": 113,
+    "ParenthesesNode": 28,
+    "BlockNode": 26,
+    "EmbeddedStatementsNode": 6,
+    "YieldNode": 1,
+    "ConstantReadNode": 17,
+    "OrNode": 12,
+    "IndexOperatorWriteNode": 2,
+    "LocalVariableOperatorWriteNode": 7,
+    "MultiWriteNode": 9,
+    "LocalVariableTargetNode": 22,
+    "ConstantPathNode": 12,
+    "AndNode": 5,
+    "UnlessNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 200,
+    "block_param": 44,
+    "assigned_local": 230
+  },
+  "call_receiver_tiers": {
+    "implicit_self": 101,
+    "precise": 67,
+    "dynamic_top": 318,
+    "dynamic_specific": 11
+  },
+  "opaque_ivar_reads": 0,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/numo-narray",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 928,
+  "precision_ratio": 0.3993,
+  "named_receiver_opaque_pairs": {
+    "Numo::NArray#[]": {
+      "count": 18,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:82",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:91",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:100"
+      ]
+    },
+    "singleton(Numo::NArray)#zeros": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:11",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:248",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:388"
+      ]
+    },
+    "singleton(Numo::NArray)#cast": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:167",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:169",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:241"
+      ]
+    },
+    "singleton(Numo::NArray)#array_type": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:113",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:117",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:427"
+      ]
+    },
+    "singleton(Numo::NArray)#asarray": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:362",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:372",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1107"
+      ]
+    },
+    "Numo::NArray#flatten": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:398",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:895",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1197"
+      ]
+    },
+    "Numo::NArray#*": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:26",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:31"
+      ]
+    },
+    "[Dynamic[top], 0]#max": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1244",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1245"
+      ]
+    },
+    "singleton(Numo::NArray)#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:129",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:957"
+      ]
+    },
+    "Numo::NArray#store": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:637",
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:861"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#max": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1246"
+      ]
+    },
+    "singleton(Numo::NArray)#diag_indices": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1062"
+      ]
+    },
+    "singleton(Numo::NArray)#vstack": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1254"
+      ]
+    },
+    "singleton(Numo::NArray)#tril_indices": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1046"
+      ]
+    },
+    "Numo::NArray#tril!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1020"
+      ]
+    },
+    "singleton(Numo::NArray)#triu_indices": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:1007"
+      ]
+    },
+    "Numo::NArray#triu!": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:981"
+      ]
+    },
+    "[Dynamic[top], Dynamic[top]]#min": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:854"
+      ]
+    },
+    "Numo::NArray#shape": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:836"
+      ]
+    },
+    "Numo::NArray#ndim": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:835"
+      ]
+    },
+    "NArray#to_a": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:721"
+      ]
+    },
+    "bot#!=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:460"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:167"
+      ]
+    },
+    "NArray#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:127"
+      ]
+    },
+    "NArray#ndim": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:127"
+      ]
+    },
+    "Numo::NArray#fill": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:21"
+      ]
+    },
+    "singleton(Numo::NArray)#ones": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/numo-narray/lib/numo/narray/extra.rb:16"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 46,
+    "-": 21,
+    "ndim": 19,
+    "+": 18,
+    "*": 15,
+    "<": 13,
+    ">": 13,
+    "shape": 12,
+    "[]=": 10,
+    "==": 9,
+    "map": 9,
+    "new": 8,
+    "seq": 8,
+    "each": 8,
+    "size": 7,
+    "where": 7,
+    "times": 6,
+    ">=": 5,
+    "!=": 5,
+    "ones": 4,
+    "shift": 4,
+    "-@": 4,
+    "cast": 4,
+    "sum": 4,
+    "/": 4,
+    "copy": 3,
+    "flatten": 3,
+    "split": 3,
+    "delete_at": 3,
+    "mulsum": 3,
+    "reshape": 2,
+    "insert": 2,
+    "<=": 2,
+    "dot": 2,
+    "%": 2,
+    "empty?": 2,
+    "reverse": 2,
+    "to_a": 2,
+    "conj": 1,
+    "swapaxes": 1
+  },
+  "implicit_self_methods_top": {
+    "ndim": 26,
+    "shape": 22,
+    "size": 10,
+    "check_axis": 6,
+    "concatenate": 5,
+    "cast": 4,
+    "reshape!": 4,
+    "split": 4,
+    "reverse": 3,
+    "mulsum": 2,
+    "store": 2,
+    "contiguous?": 2,
+    "swapaxes": 2,
+    "_atleast_3d": 1,
+    "_atleast_2d": 1,
+    "tril_indices": 1,
+    "eval": 1,
+    "triu": 1,
+    "triu_indices": 1,
+    "tril": 1,
+    "diagonal": 1,
+    "view": 1
+  }
+}

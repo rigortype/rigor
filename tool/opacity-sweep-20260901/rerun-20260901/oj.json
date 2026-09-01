@@ -1,0 +1,250 @@
+{
+  "files": 11,
+  "parse_errors": 0,
+  "total": 1650,
+  "tier_counts": {
+    "constant": 644,
+    "nominal": 436,
+    "dynamic_top": 497,
+    "shaped": 30,
+    "bot": 37,
+    "dynamic_specific": 6
+  },
+  "opaque_node_classes": {
+    "CallNode": 222,
+    "ConstantPathNode": 3,
+    "ConstantReadNode": 3,
+    "LocalVariableReadNode": 164,
+    "ForwardingSuperNode": 9,
+    "BlockNode": 22,
+    "EmbeddedStatementsNode": 14,
+    "OrNode": 3,
+    "LocalVariableWriteNode": 17,
+    "UnlessNode": 5,
+    "IfNode": 7,
+    "ClassVariableReadNode": 2,
+    "InstanceVariableReadNode": 6,
+    "InstanceVariableWriteNode": 1,
+    "BeginNode": 1,
+    "CaseNode": 1,
+    "SplatNode": 5,
+    "GlobalVariableReadNode": 8,
+    "MultiWriteNode": 1,
+    "LocalVariableTargetNode": 2,
+    "ParenthesesNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 127,
+    "block_param": 14,
+    "assigned_local": 23
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 113,
+    "precise": 40,
+    "implicit_self": 69
+  },
+  "opaque_ivar_reads": 6,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/oj",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/oj/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 1147,
+  "precision_ratio": 0.6952,
+  "named_receiver_opaque_pairs": {
+    "singleton(JSON)#create_id": {
+      "count": 15,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/json.rb:130",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/json.rb:179",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/mimic.rb:105"
+      ]
+    },
+    "Oj::MimicDumpOption#store": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/mimic.rb:60",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/mimic.rb:61",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/mimic.rb:62"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:52",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:56",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:125"
+      ]
+    },
+    "singleton(JSON::GenericObject)#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/json.rb:131",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/json.rb:175"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:98"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#send": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:127"
+      ]
+    },
+    "Array[Dynamic[top]]#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:120"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#store": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:120"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#fetch": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:93"
+      ]
+    },
+    "JSON::Ext::Generator::State#merge": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:18"
+      ]
+    },
+    "JSON::Ext::Generator::State#clear": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/state.rb:17"
+      ]
+    },
+    "Array[Dynamic[top]] | [Dynamic[top]]#max": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/mimic.rb:262"
+      ]
+    },
+    "Oj#set_backtrace": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/mimic.rb:188"
+      ]
+    },
+    "singleton(Oj)#default_options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/mimic.rb:59"
+      ]
+    },
+    "JSON::GenericObject#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/json.rb:139"
+      ]
+    },
+    "Oj::MimicDumpOption#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/json.rb:62"
+      ]
+    },
+    "singleton(Object)#const_get": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/bag.rb:77"
+      ]
+    },
+    "Oj::Bag#instance_variable_set": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/bag.rb:19"
+      ]
+    },
+    "singleton(Oj)#register_odd": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/oj/lib/oj/active_support_helper.rb:14"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 40,
+    "to_sym": 11,
+    "to_s": 11,
+    "each": 5,
+    "size": 4,
+    "<<": 4,
+    "include?": 3,
+    "empty?": 3,
+    "merge": 2,
+    "split": 2,
+    "map": 2,
+    "!=": 2,
+    "to_i": 2,
+    "*": 2,
+    "to_hash": 2,
+    "delete": 2,
+    "dup": 1,
+    "to_ary": 1,
+    "[]=": 1,
+    "/": 1,
+    "to_h": 1,
+    "length": 1,
+    "end_with?": 1,
+    "const_set": 1,
+    "const_get": 1,
+    "const_defined?": 1,
+    "instance_variable_get": 1,
+    "instance_variables": 1,
+    "class": 1,
+    "gmt_offset": 1,
+    "-": 1,
+    "new": 1
+  },
+  "implicit_self_methods_top": {
+    "has_key?": 13,
+    "fetch": 6,
+    "key": 4,
+    "store": 3,
+    "at": 2,
+    "civil": 2,
+    "start": 2,
+    "day": 2,
+    "month": 2,
+    "year": 2,
+    "instance_variable_get": 2,
+    "to_hash": 2,
+    "__send__": 2,
+    "table": 2,
+    "from_hash": 2,
+    "send": 1,
+    "tv_sec": 1,
+    "tv_nsec": 1,
+    "tv_usec": 1,
+    "values": 1,
+    "source": 1,
+    "options": 1,
+    "denominator": 1,
+    "numerator": 1,
+    "exclude_end?": 1,
+    "last": 1,
+    "first": 1,
+    "backtrace": 1,
+    "message": 1,
+    "offset": 1,
+    "sec": 1,
+    "min": 1,
+    "hour": 1,
+    "_dump": 1,
+    "imag": 1,
+    "real": 1
+  }
+}

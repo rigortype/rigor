@@ -1,0 +1,767 @@
+{
+  "files": 111,
+  "parse_errors": 0,
+  "total": 422090,
+  "tier_counts": {
+    "constant": 408008,
+    "nominal": 3855,
+    "shaped": 1177,
+    "dynamic_top": 8404,
+    "refined": 6,
+    "bot": 519,
+    "dynamic_specific": 119,
+    "top": 2
+  },
+  "opaque_node_classes": {
+    "CallNode": 3775,
+    "ClassVariableReadNode": 13,
+    "LocalVariableReadNode": 2415,
+    "BlockNode": 167,
+    "InstanceVariableWriteNode": 81,
+    "IfNode": 454,
+    "LocalVariableWriteNode": 377,
+    "EmbeddedStatementsNode": 139,
+    "OrNode": 67,
+    "ConstantReadNode": 27,
+    "AndNode": 130,
+    "InstanceVariableReadNode": 153,
+    "ForwardingSuperNode": 16,
+    "UnlessNode": 34,
+    "MultiTargetNode": 2,
+    "CaseNode": 43,
+    "ModuleNode": 7,
+    "ConstantPathNode": 67,
+    "InstanceVariableOrWriteNode": 8,
+    "SplatNode": 24,
+    "LocalVariableTargetNode": 100,
+    "BeginNode": 113,
+    "ParenthesesNode": 59,
+    "YieldNode": 18,
+    "LocalVariableOperatorWriteNode": 1,
+    "SuperNode": 26,
+    "MultiWriteNode": 5,
+    "LocalVariableOrWriteNode": 13,
+    "ClassVariableWriteNode": 4,
+    "RescueModifierNode": 15,
+    "GlobalVariableReadNode": 18,
+    "LocalVariableAndWriteNode": 1,
+    "CallOrWriteNode": 5,
+    "IndexOrWriteNode": 1,
+    "InstanceVariableTargetNode": 5,
+    "SingletonClassNode": 1,
+    "GlobalVariableTargetNode": 11,
+    "GlobalVariableWriteNode": 11
+  },
+  "local_read_buckets": {
+    "def_param": 1270,
+    "block_param": 287,
+    "assigned_local": 858
+  },
+  "call_receiver_tiers": {
+    "dynamic_top": 1859,
+    "precise": 757,
+    "implicit_self": 1106,
+    "dynamic_specific": 53
+  },
+  "opaque_ivar_reads": 153,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/mail",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/mail/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 413565,
+  "precision_ratio": 0.9798,
+  "named_receiver_opaque_pairs": {
+    "[]#[]=": {
+      "count": 95,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32103",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32179",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32298"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#local=": {
+      "count": 48,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32048",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32050",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32219"
+      ]
+    },
+    "singleton(Mail::Utilities)#blank?": {
+      "count": 41,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:37",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:157",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:201"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressListStruct(addr...#addresses": {
+      "count": 26,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/address.rb:193",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/address_list.rb:26",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32054"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#group=": {
+      "count": 26,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32058",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32137",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32229"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#domain": {
+      "count": 24,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32047",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32218",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32345"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#raw=": {
+      "count": 24,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32053",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32224",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32351"
+      ]
+    },
+    "Mail::Parsers::EnvelopeFromParser::EnvelopeFromStruct(add...#address=": {
+      "count": 24,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/envelope_from_parser.rb:3280",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/envelope_from_parser.rb:3342",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/envelope_from_parser.rb:3398"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#local": {
+      "count": 24,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32046",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32217",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32344"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#comments": {
+      "count": 23,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32039",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32201",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32211"
+      ]
+    },
+    "[]#[]": {
+      "count": 22,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32114",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32193",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_disposition_parser.rb:680"
+      ]
+    },
+    "Mail::Parsers::ReceivedParser::ReceivedStruct(date: nil, ...#info=": {
+      "count": 18,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:7549",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:7619",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:7685"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#display_name=": {
+      "count": 10,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32065",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32068",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32145"
+      ]
+    },
+    "singleton(Mail::Multibyte::Unicode)#u_unpack": {
+      "count": 9,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/multibyte/chars.rb:114",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/multibyte/chars.rb:127",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/multibyte/chars.rb:130"
+      ]
+    },
+    "Mail::Parsers::ContentTypeParser::ContentTypeStruct(main_...#parameters": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/content_type_element.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_type_parser.rb:790",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_type_parser.rb:861"
+      ]
+    },
+    "Mail::Parsers::ContentDispositionParser::ContentDispositi...#parameters": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/content_disposition_element.rb:12",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_disposition_parser.rb:656",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_disposition_parser.rb:714"
+      ]
+    },
+    "Mail::Parsers::ContentLocationParser::ContentLocationStru...#location=": {
+      "count": 8,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_location_parser.rb:646",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_location_parser.rb:654",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_location_parser.rb:686"
+      ]
+    },
+    "Hash[:content_disposition | :content_transfer_encoding | ...#[]": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:78",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:79"
+      ]
+    },
+    "singleton(Mail::Encodings)#get_encoding": {
+      "count": 7,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:155",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:183",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/encodings/transfer_encoding.rb:36"
+      ]
+    },
+    "Mail::Parsers::MessageIdsParser::MessageIdsStruct(message...#message_ids": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/message_ids_parser.rb:4889",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/message_ids_parser.rb:4944",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/message_ids_parser.rb:4953"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressStruct(raw: nil...#domain=": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32078",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32257",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32340"
+      ]
+    },
+    "singleton(Mail::Encodings)#decode_encode": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:43",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/address.rb:90",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/address.rb:110"
+      ]
+    },
+    "Hash#delete": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:49",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:55"
+      ]
+    },
+    "singleton(Mail::Utilities)#unescape": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32065",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32145",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32242"
+      ]
+    },
+    "Mail::Message#body=": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1260",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1325",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1824"
+      ]
+    },
+    "Mail::Message#body": {
+      "count": 5,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1709",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1712",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1716"
+      ]
+    },
+    "Mail::SmtpEnvelope#message": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/file_delivery.rb:37",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/logger_delivery.rb:14",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/sendmail.rb:73"
+      ]
+    },
+    "singleton(Mail::Header)#maximum_amount": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/header.rb:93",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/header.rb:94",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/header.rb:94"
+      ]
+    },
+    "Mail::Body#decoded": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:91",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:105"
+      ]
+    },
+    "Mail::Parsers::PhraseListsParser::PhraseListsStruct(phras...#phrases": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/phrase_lists_parser.rb:741",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/phrase_lists_parser.rb:792",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/phrase_lists_parser.rb:854"
+      ]
+    },
+    "Array[Dynamic[top]]#first": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/retriever_methods/imap.rb:116",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/retriever_methods/pop3.rb:87",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/retriever_methods/test_retriever.rb:40"
+      ]
+    },
+    "Mail::Parsers::DateTimeParser::DateTimeStruct(date_string...#time_string=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/date_time_parser.rb:730",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/date_time_parser.rb:779",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/date_time_parser.rb:866"
+      ]
+    },
+    "Mail::Parsers::ContentTypeParser::ContentTypeStruct(main_...#sub_type=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_type_parser.rb:759",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_type_parser.rb:821",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_type_parser.rb:995"
+      ]
+    },
+    "singleton(Mail::Encodings)#b_value_encode": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/encodings.rb:113",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/encodings.rb:174",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/encodings.rb:187"
+      ]
+    },
+    "Mail::Parsers::ContentTransferEncodingParser::ContentTran...#encoding=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_transfer_encoding_parser.rb:397",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_transfer_encoding_parser.rb:426",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_transfer_encoding_parser.rb:497"
+      ]
+    },
+    "singleton(Mail::Field)#field_class_for": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/field.rb:208",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/field.rb:294",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/field_list.rb:80"
+      ]
+    },
+    "Mail::SmtpEnvelope#from": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/sendmail.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/sendmail.rb:65",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/smtp_connection.rb:53"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1836",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1837",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1845"
+      ]
+    },
+    "Mail::Parsers::MimeVersionParser::MimeVersionStruct(major...#minor=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/mime_version_parser.rb:369",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/mime_version_parser.rb:411",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/mime_version_parser.rb:488"
+      ]
+    },
+    "Mail#parts": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parts_list.rb:52",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parts_list.rb:66",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parts_list.rb:86"
+      ]
+    },
+    "Mail::Parsers::ReceivedParser::ReceivedStruct(date: nil, ...#time=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:7557",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:7655",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:8757"
+      ]
+    },
+    "Mail::Part#body=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1711",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/part.rb:106",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/part.rb:109"
+      ]
+    },
+    "singleton(Mail::TestMailer)#deliveries": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/matchers/has_sent_mail.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/matchers/has_sent_mail.rb:197",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/test_mailer.rb:41"
+      ]
+    },
+    "Hash#[]": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:66"
+      ]
+    },
+    "Mail::Parsers::AddressListsParser::AddressListStruct(addr...#group_names": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/address_list.rb:27",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32131",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/address_lists_parser.rb:32476"
+      ]
+    },
+    "Hash[Symbol, String] | { content_type: String, content_tr...#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:55",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:60",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:67"
+      ]
+    },
+    "singleton(Mail::Utilities)#underscoreize": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1342",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1388",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2101"
+      ]
+    },
+    "Mail::ParameterHash#length": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/content_disposition_field.rb:35",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/content_disposition_field.rb:40"
+      ]
+    },
+    "Mail::Message#encoded": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:383",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:386"
+      ]
+    },
+    "Mail::Message#header=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:451",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1988"
+      ]
+    },
+    "Mail::ParameterHash#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/content_disposition_field.rb:31",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/content_disposition_field.rb:31"
+      ]
+    },
+    "Mail::Message#raw_source=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2024",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2120"
+      ]
+    },
+    "Mail::Message | Mail::Part#has_content_type?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1668",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1692"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1834",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:1841"
+      ]
+    },
+    "singleton(Mail::Utilities)#decode_utf7": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/utilities.rb:305",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/utilities.rb:316"
+      ]
+    },
+    "Mail::Message#content_transfer_encoding=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2048",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2050"
+      ]
+    },
+    "Mail::ContentTypeField#value": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2070",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2084"
+      ]
+    },
+    "Mail::Message#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:300",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:303"
+      ]
+    },
+    "Array#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/content_type_field.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/content_type_field.rb:25"
+      ]
+    },
+    "singleton(Mail)#delivery_method": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:126",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/yaml.rb:20"
+      ]
+    },
+    "singleton(Mail::Encodings)#param_encode": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/content_type_field.rb:87",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/parameter_hash.rb:48"
+      ]
+    },
+    "Mail::SmtpEnvelope#to": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/file_delivery.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/network/delivery_methods/smtp_connection.rb:53"
+      ]
+    },
+    "singleton(Mail::Multibyte::Unicode)#apply_mapping": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/multibyte/chars.rb:186",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/multibyte/chars.rb:194"
+      ]
+    },
+    "singleton(Mail::Utilities)#quote_token": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/parameter_hash.rb:51",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/parameter_hash.rb:57"
+      ]
+    },
+    "Mail::IndifferentHash#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/indifferent_hash.rb:21",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/indifferent_hash.rb:92"
+      ]
+    },
+    "singleton(Mail::Encodings)#transcode_charset": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/fields/unstructured_field.rb:136",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/message.rb:2156"
+      ]
+    },
+    "Mail::Header#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/header.rb:163",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/header.rb:170"
+      ]
+    },
+    "singleton(Mail::Utilities)#dasherize": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/header.rb:131",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/header.rb:153"
+      ]
+    },
+    "Mail::Parsers::ReceivedParser::ReceivedStruct(date: nil, ...#date=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:7648",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/received_parser.rb:7881"
+      ]
+    },
+    "singleton(Mail::Utilities)#unbracket": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/part.rb:26",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/utilities.rb:361"
+      ]
+    },
+    "Mail::Parsers::EnvelopeFromParser::EnvelopeFromStruct(add...#ctime_date": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/envelope_from_element.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/envelope_from_element.rb:13"
+      ]
+    },
+    "Mail::Parsers::MimeVersionParser::MimeVersionStruct(major...#major=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/mime_version_parser.rb:361",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/mime_version_parser.rb:398"
+      ]
+    },
+    "singleton(Mail::Utilities)#escape_paren": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/address.rb:239",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/utilities.rb:156"
+      ]
+    },
+    "Mail::Parsers::EnvelopeFromParser::EnvelopeFromStruct(add...#ctime_date=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/envelope_from_parser.rb:3563",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/envelope_from_parser.rb:3575"
+      ]
+    },
+    "singleton(Mail::Encodings)#defined?": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:59",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/body.rb:180"
+      ]
+    },
+    "Mail::Parsers::DateTimeParser::DateTimeStruct(date_string...#date_string=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/date_time_parser.rb:772",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/date_time_parser.rb:842"
+      ]
+    },
+    "{ content_type: String, content_transfer_encoding: litera...#[]=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:53",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/attachments_list.rb:74"
+      ]
+    },
+    "singleton(Mail::Utilities)#unparen": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/elements/address.rb:234",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/utilities.rb:350"
+      ]
+    },
+    "Mail::Parsers::ContentDispositionParser::ContentDispositi...#disposition_type=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_disposition_parser.rb:625",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/parsers/content_disposition_parser.rb:848"
+      ]
+    },
+    "singleton(Mail::Utilities)#string_byteslice": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/encodings.rb:303",
+        "/Users/megurine/repo/ruby/rigor-survey/mail/lib/mail/encodings.rb:311"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 296,
+    "<<": 103,
+    "==": 92,
+    "to_s": 73,
+    "[]=": 52,
+    "+": 51,
+    "length": 38,
+    "map": 37,
+    "dup": 34,
+    ">": 33,
+    "rstrip": 31,
+    "-": 28,
+    "force_encoding": 27,
+    "each": 26,
+    "gsub": 25,
+    "first": 25,
+    "=~": 25,
+    "<=": 24,
+    "<": 24,
+    "join": 21,
+    "downcase": 18,
+    "nil?": 18,
+    "!=": 18,
+    "empty?": 16,
+    "encoding": 15,
+    "flatten": 15,
+    "ascii_only?": 15,
+    "strip": 15,
+    "encoded": 14,
+    "include?": 14,
+    "pack": 12,
+    "split": 12,
+    "encode": 12,
+    "ord": 11,
+    "to_sym": 11,
+    "decoded": 11,
+    "body": 10,
+    "===": 10,
+    "parameters": 9,
+    "size": 9
+  },
+  "implicit_self_methods_top": {
+    "chars": 218,
+    "header": 74,
+    "settings": 51,
+    "_trans_keys": 33,
+    "element": 31,
+    "default": 29,
+    "body": 29,
+    "value": 25,
+    "_indicies": 22,
+    "_trans_actions": 22,
+    "name": 19,
+    "start": 17,
+    "database": 14,
+    "delivery_status_part": 14,
+    "charset": 13,
+    "_index_offsets": 11,
+    "_key_spans": 11,
+    "_trans_targs": 11,
+    "raw_source": 11,
+    "_eof_actions": 11,
+    "parse": 11,
+    "parts": 11,
+    "fields": 10,
+    "date_time": 10,
+    "parameters": 10,
+    "boundary": 9,
+    "address": 8,
+    "comments": 8,
+    "retriever_method": 7,
+    "encoding": 7,
+    "convert_key": 6,
+    "get_return_values": 5,
+    "decoded": 5,
+    "decompose_codepoints": 5,
+    "to_utf8": 4,
+    "field": 4,
+    "padding": 4,
+    "charset_encoder": 4,
+    "subject": 4,
+    "groups": 4
+  }
+}

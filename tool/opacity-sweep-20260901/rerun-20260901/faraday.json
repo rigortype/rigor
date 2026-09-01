@@ -1,0 +1,482 @@
+{
+  "files": 33,
+  "parse_errors": 0,
+  "total": 5819,
+  "tier_counts": {
+    "constant": 1659,
+    "nominal": 1037,
+    "shaped": 169,
+    "dynamic_top": 2863,
+    "bot": 75,
+    "refined": 4,
+    "top": 1,
+    "dynamic_specific": 11
+  },
+  "opaque_node_classes": {
+    "LocalVariableWriteNode": 110,
+    "CallNode": 1044,
+    "LocalVariableReadNode": 988,
+    "InstanceVariableWriteNode": 40,
+    "OrNode": 29,
+    "ForwardingSuperNode": 24,
+    "InstanceVariableOrWriteNode": 3,
+    "ConstantReadNode": 25,
+    "IfNode": 125,
+    "SplatNode": 9,
+    "InstanceVariableReadNode": 102,
+    "YieldNode": 20,
+    "BlockNode": 93,
+    "UnlessNode": 14,
+    "LocalVariableTargetNode": 25,
+    "EmbeddedStatementsNode": 74,
+    "MultiWriteNode": 9,
+    "AndNode": 42,
+    "ParenthesesNode": 16,
+    "IndexOrWriteNode": 4,
+    "ConstantPathNode": 15,
+    "CaseNode": 7,
+    "SuperNode": 15,
+    "CallOrWriteNode": 2,
+    "LocalVariableOrWriteNode": 2,
+    "BeginNode": 6,
+    "SingletonClassNode": 2,
+    "InstanceVariableTargetNode": 4,
+    "ModuleNode": 5,
+    "LocalVariableOperatorWriteNode": 1,
+    "ForwardingArgumentsNode": 8,
+    "GlobalVariableReadNode": 1
+  },
+  "local_read_buckets": {
+    "def_param": 650,
+    "assigned_local": 186,
+    "block_param": 152
+  },
+  "call_receiver_tiers": {
+    "precise": 78,
+    "implicit_self": 305,
+    "dynamic_top": 653,
+    "dynamic_specific": 8
+  },
+  "opaque_ivar_reads": 102,
+  "target": "/Users/megurine/repo/ruby/rigor-survey/faraday",
+  "scanned_paths": [
+    "/Users/megurine/repo/ruby/rigor-survey/faraday/lib"
+  ],
+  "parameter_inference": false,
+  "precise": 2944,
+  "precision_ratio": 0.5059,
+  "named_receiver_opaque_pairs": {
+    "singleton(Faraday::Utils)#URI": {
+      "count": 6,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter/test.rb:173",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:365",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:531"
+      ]
+    },
+    "singleton(Faraday::Utils)#default_params_encoder": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter/test.rb:280",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/response/raise_error.rb:76",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/params_hash.rb:47"
+      ]
+    },
+    "singleton(Faraday::Request)#register_middleware": {
+      "count": 4,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/authorization.rb:54",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/instrumentation.rb:58",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/json.rb:70"
+      ]
+    },
+    "Faraday::Utils::Headers#[]=": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/headers.rb:95",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/headers.rb:142",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/headers.rb:145"
+      ]
+    },
+    "singleton(Faraday::Response)#register_middleware": {
+      "count": 3,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/response/json.rb:74",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/response/logger.rb:39",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/response/raise_error.rb:83"
+      ]
+    },
+    "Class#options_for": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options/connection_options.rb:13",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options/connection_options.rb:15"
+      ]
+    },
+    "singleton(Faraday::Options)#options_for": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options.rb:24",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options.rb:54"
+      ]
+    },
+    "singleton(Faraday)#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options/env.rb:90",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options/env.rb:119"
+      ]
+    },
+    "Mutex#synchronize": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/middleware.rb:31",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/headers.rb:48"
+      ]
+    },
+    "singleton(Faraday)#params": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:86",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:87"
+      ]
+    },
+    "Class#member_set": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options/env.rb:191",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options/env.rb:195"
+      ]
+    },
+    "singleton(Faraday)#path=": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:85",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:123"
+      ]
+    },
+    "singleton(Faraday::Request::UrlEncoded)#mime_type": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/url_encoded.rb:33",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/url_encoded.rb:45"
+      ]
+    },
+    "Monitor#synchronize": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter_registry.rb:15",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter_registry.rb:25"
+      ]
+    },
+    "Faraday::Utils::Headers#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/headers.rb:142",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/headers.rb:143"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter/test.rb:88",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter_registry.rb:16"
+      ]
+    },
+    "singleton(Faraday::Utils)#deep_merge": {
+      "count": 2,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday.rb:98",
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:67"
+      ]
+    },
+    "singleton(Faraday::Adapter)#lookup_middleware": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/rack_builder.rb:118"
+      ]
+    },
+    "singleton(Faraday)#default_adapter_options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/rack_builder.rb:81"
+      ]
+    },
+    "singleton(Timeout)#timeout": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter/test.rb:301"
+      ]
+    },
+    "singleton(Faraday)#http_method=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:120"
+      ]
+    },
+    "singleton(Faraday)#body=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:121"
+      ]
+    },
+    "singleton(Faraday)#headers=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:122"
+      ]
+    },
+    "singleton(Faraday)#params=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:124"
+      ]
+    },
+    "singleton(Faraday)#options=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request.rb:125"
+      ]
+    },
+    "singleton(Faraday::Utils)#basic_header_from": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/authorization.rb:37"
+      ]
+    },
+    "Faraday::Options#from": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/instrumentation.rb:44"
+      ]
+    },
+    "singleton(Faraday::Utils::ParamsHash)#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/request/url_encoded.rb:22"
+      ]
+    },
+    "singleton(Faraday::NestedParamsEncoder)#encode": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils.rb:17"
+      ]
+    },
+    "singleton(Faraday::NestedParamsEncoder)#decode": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils.rb:48"
+      ]
+    },
+    "Faraday::Utils::ParamsHash#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/utils/params_hash.rb:29"
+      ]
+    },
+    "singleton(Faraday::Adapter)#register_middleware": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter/test.rb:319"
+      ]
+    },
+    "singleton(Object)#const_get": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter_registry.rb:20"
+      ]
+    },
+    "Hash[Dynamic[top], Dynamic[top]]#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/adapter_registry.rb:26"
+      ]
+    },
+    "Faraday::Connection#url_prefix=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:84"
+      ]
+    },
+    "Faraday::Connection#path_prefix=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:366"
+      ]
+    },
+    "singleton(Faraday::Request)#create": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:462"
+      ]
+    },
+    "singleton(Faraday)#ignore_env_proxy": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:526"
+      ]
+    },
+    "URI#find_proxy": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/connection.rb:538"
+      ]
+    },
+    "Hash[:bodies | :errors | :headers | :log_level | Dynamic[...#[]": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/logging/formatter.rb:17"
+      ]
+    },
+    "singleton(Faraday::Middleware)#default_options": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/middleware.rb:17"
+      ]
+    },
+    "Proc#call": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/middleware_registry.rb:78"
+      ]
+    },
+    "singleton(Faraday::Options)#fetch_error_class": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options.rb:84"
+      ]
+    },
+    "{}#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options.rb:138"
+      ]
+    },
+    "singleton(Faraday::Options)#memoized_attributes": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options.rb:188"
+      ]
+    },
+    "Faraday::Options#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options.rb:189"
+      ]
+    },
+    "singleton(Faraday)#[]=": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/options/env.rb:123"
+      ]
+    },
+    "Faraday::AdapterRegistry#set": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/rack_builder.rb:37"
+      ]
+    },
+    "Faraday::AdapterRegistry#get": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/rack_builder.rb:44"
+      ]
+    },
+    "Faraday::RackBuilder::Handler#name": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/rack_builder.rb:53"
+      ]
+    },
+    "singleton(Faraday)#default_adapter": {
+      "count": 1,
+      "examples": [
+        "/Users/megurine/repo/ruby/rigor-survey/faraday/lib/faraday/rack_builder.rb:81"
+      ]
+    }
+  },
+  "dynamic_receiver_methods_top": {
+    "[]": 103,
+    "each": 23,
+    "to_s": 22,
+    "[]=": 19,
+    "==": 19,
+    "empty?": 19,
+    "dup": 16,
+    "call": 15,
+    "split": 13,
+    "new": 11,
+    "from": 11,
+    "update": 11,
+    "map": 10,
+    "include?": 10,
+    "params_encoder": 9,
+    "url": 8,
+    "body": 8,
+    "<<": 8,
+    "first": 7,
+    "to_sym": 7,
+    "join": 7,
+    "query": 7,
+    "request_headers": 7,
+    "downcase": 7,
+    "delete": 6,
+    "fetch": 6,
+    "size": 6,
+    "path": 6,
+    "headers": 5,
+    "status": 5,
+    "respond_to?": 5,
+    "index": 5,
+    "password": 4,
+    "user": 4,
+    "start_with?": 4,
+    "response_headers": 4,
+    "adapter": 4,
+    "params": 4,
+    "host": 4,
+    "tap": 4
+  },
+  "implicit_self_methods_top": {
+    "options": 18,
+    "send": 14,
+    "headers": 13,
+    "body": 9,
+    "params": 8,
+    "members": 8,
+    "env": 8,
+    "def_delegators": 7,
+    "escape": 6,
+    "path": 6,
+    "app": 6,
+    "memoized": 5,
+    "public_send": 5,
+    "log_level": 5,
+    "convert_key": 4,
+    "unescape": 4,
+    "status": 4,
+    "custom_members": 4,
+    "const_set": 4,
+    "request": 4,
+    "keys": 4,
+    "uri": 4,
+    "encode_pair": 3,
+    "attribute_options": 3,
+    "apply_filters": 3,
+    "log_headers?": 3,
+    "log_headers": 3,
+    "use_symbol": 3,
+    "log_body?": 3,
+    "log_body": 3,
+    "middleware_mutex": 3,
+    "registered_middleware": 3,
+    "assert_index": 3,
+    "class_eval": 3,
+    "proxy_from_env": 3,
+    "default_connection": 3,
+    "request_type": 2,
+    "process_request?": 2,
+    "match_content_type": 2,
+    "request_timeout": 2
+  }
+}

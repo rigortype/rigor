@@ -7,6 +7,7 @@ require_relative "../reflection"
 require_relative "../ast"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
 require_relative "method_parameter_binder"
@@ -2836,11 +2837,167 @@ module Rigor
         result || dynamic_top
       end
 
+      # The block body's value type — what the dispatcher binds a generic block-return variable to.
+      #
+      # Issue #533 item 9: this pass used to type only the body's LAST statement, in the block's ENTRY scope.
+      # A tail reading a name an earlier statement of the same body binds (`m.synchronize do v = 42; v end`)
+      # therefore never saw the binding and fell through `local_read` to `Dynamic[top]`, while the main pass
+      # — which threads scope statement by statement through `StatementEvaluator` — held `42` for the very
+      # same node. {#threaded_block_body_type} closes that gap by reusing the main pass's evaluator; a decline
+      # keeps the tail-only answer verbatim.
       def type_block_body(block_node, block_scope)
         body = block_node.body
         return Type::Combinator.constant_of(nil) if body.nil?
 
-        block_scope.type_of(body)
+        threaded_block_body_type(body, block_scope) || block_scope.type_of(body)
+      end
+
+      # Re-typing the whole body would be wrong to do unconditionally: this path runs for EVERY block-bearing
+      # call, and the statements ahead of the tail are pure cost whenever the tail does not depend on them.
+      # Three declines keep that cost where the defect actually is, each falling back to the tail-only path:
+      #
+      # - a `nil` or non-`StatementsNode` body (`do … rescue … end` parses as a `BeginNode`) and a
+      #   single-statement body — the overwhelming majority of blocks — pay nothing at all;
+      # - a multi-statement body pays one DFS over its non-tail statements, and threads only when the tail
+      #   READS a variable name one of them WRITES ({#tail_depends_on_body_binding?}). That is exactly the
+      #   diagnosed shape, so a block whose tail does not consume the body's own bindings keeps today's type;
+      # - the fold is not re-entrant. `StatementEvaluator#eval_call` already evaluates each nested block body
+      #   once, plus up to three more times under the ADR-56 `BodyFixpoint` when the block rebinds a captured
+      #   local, so a fold nested inside a fold would multiply that work per block-nesting level. Inside a
+      #   threaded body a nested block-bearing call reverts to the tail-only path — a wider answer in a rare
+      #   shape, never a new false positive.
+      #
+      # ADR-56 interaction: the fold cannot double-apply or fight the captured-local write-back. That
+      # write-back is `StatementEvaluator#write_back_block_captures`, computed from the CALLER's scope into
+      # the caller's continuation; this pass only derives a value type from a throwaway block scope and
+      # discards the exit scope, exactly as the tail-only path did.
+      #
+      # Any failure inside the fold falls back to the tail-only answer rather than propagating: the enclosing
+      # `block_return_type_for` rescue would otherwise report "no block" to the dispatcher, which is a much
+      # larger regression than a wide block return.
+      def threaded_block_body_type(body, block_scope)
+        return nil unless body.is_a?(Prism::StatementsNode)
+
+        statements = body.body
+        return nil if statements.size < 2
+        return nil if block_body_threading_suppressed?
+        return nil unless tail_depends_on_body_binding?(statements)
+
+        without_block_body_threading { block_scope.evaluate(body).first }
+      rescue StandardError
+        nil
+      end
+
+      # Suppression flag for {#threaded_block_body_type} — set while a fold is running (so a fold never nests)
+      # and while the per-element Tuple fold is over its arity cap. Thread-local because block typing is
+      # re-entrant within one thread and the fork-pool workers each own their own.
+      THREADED_BLOCK_BODY_KEY = :__rigor_threaded_block_body__
+      private_constant :THREADED_BLOCK_BODY_KEY
+
+      def block_body_threading_suppressed?
+        Thread.current[THREADED_BLOCK_BODY_KEY] ? true : false
+      end
+
+      # Runs the block with the scope-threading fold suppressed, restoring the previous state (not clearing
+      # it) on the way out, so nesting a suppressed region inside another cannot re-enable threading.
+      def without_block_body_threading
+        previous = Thread.current[THREADED_BLOCK_BODY_KEY]
+        Thread.current[THREADED_BLOCK_BODY_KEY] = true
+        begin
+          yield
+        ensure
+          Thread.current[THREADED_BLOCK_BODY_KEY] = previous
+        end
+      end
+
+      # Every variable-write form whose name `StatementEvaluator` threads into the following statement's
+      # scope, including the multi-assign / pattern targets that appear under a `MultiWriteNode`.
+      VARIABLE_WRITE_NODES = Set[
+        Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode,
+        Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode,
+        Prism::LocalVariableTargetNode,
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
+        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode,
+        Prism::InstanceVariableTargetNode,
+        Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode,
+        Prism::ClassVariableOrWriteNode, Prism::ClassVariableAndWriteNode,
+        Prism::ClassVariableTargetNode,
+        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode,
+        Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
+        Prism::GlobalVariableTargetNode
+      ].freeze
+      private_constant :VARIABLE_WRITE_NODES
+
+      # Every node that OBSERVES a variable binding: the plain reads plus the compound writes, which read
+      # their target before rebinding it (`v += 1` in the tail depends on an earlier `v = 0`).
+      VARIABLE_READ_NODES = (
+        VARIABLE_WRITE_NODES | [
+          Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode,
+          Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+        ]
+      ).freeze
+      private_constant :VARIABLE_READ_NODES
+
+      # A `next` / `break` that leaves THIS block carries a value the fold cannot see: `evaluate(body).first`
+      # is the fall-through value only, and no next-value join into the block return exists (`type_of_jump`
+      # types both as `Bot`). So `m.synchronize do next 5 if flag; v = 42; v end` really can answer 5 at
+      # runtime, and threading would type it `42`. Both forms escape with a value — `next v` is the block's
+      # value for that yield, `break v` is the yielding CALL's value — so both must decline.
+      JUMP_NODES = Set[Prism::NextNode, Prism::BreakNode].freeze
+      private_constant :JUMP_NODES
+
+      # Constructs that RETARGET a `next` / `break` nested inside them, so a jump below one of these says
+      # nothing about our block's value and must not trigger the decline. A nested `BlockNode` / `LambdaNode`
+      # is the jump's own block (`do xs.each { next 1 }; v = 42; v end` threads soundly — the inner `next`
+      # ends the inner iteration); a loop consumes both forms (`while … next 5 … end` continues the loop);
+      # a `DefNode` body is a different method entirely.
+      JUMP_BOUNDARY_NODES = Set[
+        Prism::BlockNode, Prism::LambdaNode, Prism::DefNode,
+        Prism::WhileNode, Prism::UntilNode, Prism::ForNode
+      ].freeze
+      private_constant :JUMP_BOUNDARY_NODES
+
+      # True when the tail statement observes a variable name one of the earlier statements binds — the only
+      # way threading the scope through the body can change the tail's type — AND no earlier statement can
+      # jump out of the block with a value. The name sets are compared sigil-and-all across kinds, so the
+      # answer over-approximates (an `@x` write plus an `x` read threads needlessly); over-approximating only
+      # spends the fold, it never changes an answer.
+      #
+      # Cost is two walks of the body, the second only when the first found a write and no jump — the same
+      # order of cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below
+      # re-typing. The prefix walk is hand-rolled rather than `Source::NodeWalker.each` because the two
+      # questions it answers have different depths: a write is collected at ANY depth (a block is a closure,
+      # so `[1].each { v = 5 }` really does bind the outer `v`), while a jump counts only above the nearest
+      # {JUMP_BOUNDARY_NODES} boundary.
+      def tail_depends_on_body_binding?(statements)
+        written = Set.new
+        statements[0...-1].each do |statement|
+          return false unless prefix_statement_jump_free?(statement, written, false)
+        end
+        return false if written.empty?
+
+        Source::NodeWalker.each(statements.last) do |node|
+          return true if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
+        end
+        false
+      end
+
+      # True when `node` cannot jump out of the block with a value, collecting its variable-write names into
+      # `written` on the way down. `retargeted` is true once the descent has passed a boundary.
+      #
+      # A `Prism::DefinedNode`'s operand is never evaluated, so it is not descended into — the same rule
+      # {Source::NodeWalker} applies, for the same reason: neither a write nor a jump under `defined?` runs.
+      def prefix_statement_jump_free?(node, written, retargeted)
+        return false if !retargeted && JUMP_NODES.include?(node.class)
+
+        written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
+        return true if node.is_a?(Prism::DefinedNode)
+
+        child_retargeted = retargeted || JUMP_BOUNDARY_NODES.include?(node.class)
+        node.rigor_each_child do |child|
+          return false unless prefix_statement_jump_free?(child, written, child_retargeted)
+        end
+        true
       end
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
@@ -2892,13 +3049,32 @@ module Rigor
       #   dispatched as a zero-arg method on each element type.
       #
       # Any other shape (`&proc_local`, `&method(:foo)`, no block) returns `nil` so the fold declines.
+      # Arity cap on the scope-threading fold under this per-element walk. The `Constant<Range>` receivers are
+      # already capped at {PER_ELEMENT_RANGE_LIMIT} positions, but a Tuple's elements come through
+      # {#per_element_elements_of} uncapped — a 40-element array literal is 40 positions, and each one that
+      # threads pays a FULL body evaluation rather than the tail-only typing this walk used to cost. Above the
+      # cap the walk still runs (the fold's own per-position precision is unchanged); only the threading is
+      # suppressed, so a body whose tail reads a body-local answers `Dynamic[top]` at every position instead
+      # of its value. That is the cliff: `[1, …, 8].map do v = e; v end` folds to the values and a ninth
+      # element drops the whole result to `Dynamic[top]` positions. It is set at the Range path's limit so one
+      # number governs both receivers.
+      PER_ELEMENT_THREADING_LIMIT = PER_ELEMENT_RANGE_LIMIT
+      private_constant :PER_ELEMENT_THREADING_LIMIT
+
       def per_element_block_results(block, element_types)
         case block
         when Prism::BlockNode
-          element_types.map { |element_type| type_block_body_with_param(block, [element_type]) }
+          per_element_body_results(block, element_types)
         when Prism::BlockArgumentNode
           per_element_symbol_results(block, element_types)
         end
+      end
+
+      def per_element_body_results(block, element_types)
+        results = -> { element_types.map { |element_type| type_block_body_with_param(block, [element_type]) } }
+        return results.call if element_types.size <= PER_ELEMENT_THREADING_LIMIT
+
+        without_block_body_threading(&results)
       end
 
       def per_element_symbol_results(block_arg, element_types)

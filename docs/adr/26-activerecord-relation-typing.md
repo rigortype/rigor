@@ -217,6 +217,53 @@ still resolves `where` / `each` / `first` precisely.
   contract.** A new optional manifest field; no existing plugin
   breaks; safe within v0.1.x / v0.2.x.
 
+- **WD7 — the exemption covers the signature-reading rules too, for
+  inherited names only.** WD1 exempted `call.undefined-method`, on the
+  ground that a name the RBS cannot enumerate is not evidence of a
+  typo. The same ground disqualifies a *signature* resolved for such a
+  name: `Issue.visible.open` is a declared scope, but `open` is also
+  `Kernel#open`, so resolution walks the Relation's ancestry and checks
+  the call against `(String, ...)`. Found by the #569 corpus run on
+  Redmine — three `call.wrong-arity` errors on working code, plus
+  `call.argument-type-mismatch` on `open(false)`; the collision set is
+  every Object/Kernel name (`open`, `select`, `test`, `format`, `p`,
+  `system`, …), so any project with a scope so named inherits the error
+  the moment the first hop types. The exemption is therefore extended
+  to `call.wrong-arity` and `call.argument-type-mismatch`, and bounded
+  to methods the open class did NOT declare: `Relation#limit` is in the
+  plugin's own bundled RBS, so `relation.limit` with no arguments still
+  fires.
+
+  What this costs is wider than the collision that motivated it, and
+  the cost is accepted knowingly. "Inherited" is a syntactic test on
+  the resolved definition site, not a judgement about whether the
+  method is really there — so a surface the Relation genuinely has
+  *through an ancestor* loses its arity and argument-type checking
+  too. The measured case is `include Enumerable[Elem]` in the bundled
+  relation RBS: `relation.each_slice` with no argument is a real
+  `ArgumentError` at runtime, was caught before this change, and is
+  silent after it. Distinguishing "inherited and delegated" from
+  "inherited and genuinely present" would need per-ancestor knowledge
+  the manifest does not carry. FP outranks FN here — the Kernel
+  collision fires on working code in every project with a scope so
+  named, while the Enumerable case needs a call that is already
+  broken — but the trade is a real loss, not a free one. Narrowing
+  the exemption to the ancestors a plugin actually delegates through
+  (`Object` / `Kernel` / `BasicObject`, or a declared list) is the
+  obvious follow-on if the FN turns out to matter.
+
+- **WD8 — the exemption keys on "unbounded surface", not on
+  `open_receivers` alone.** `CheckRules` reaches both WD1's and WD7's
+  exemptions through `unbounded_receiver_surface?`, whose other half
+  is `RbsLoader#synthesized_type_names` — the stub types Rigor mints
+  for classes it could not find. A stub has no enumerable method
+  table of its own, so every name resolves through an ancestor and
+  both signature rules decline on it. That is the same reasoning
+  (nothing authoritative to check against) reaching the same
+  conclusion; it is called out here because a reader of the plugin
+  manifest field would not otherwise know the exemption has a
+  plugin-independent half.
+
 ## Alternatives rejected
 
 - **`Array[Model]`.** Typing the relation as an array makes every

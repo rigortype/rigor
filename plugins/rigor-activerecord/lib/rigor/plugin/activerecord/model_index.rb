@@ -12,6 +12,15 @@ module Rigor
       #    children plus transitive STI subclasses) and yields a row per model.
       # 2. The plugin combines those rows with the parsed {SchemaTable} to produce this index.
       #
+      # Phase 2's schema is OPTIONAL. A project that ships raw migrations only — the DB-agnostic Rails
+      # pattern, where `db/schema.rb` is gitignored (Redmine) — has no schema to combine, and `schema_table:
+      # nil` then yields the REDUCED index: every {Entry} carries its resolved table name, associations,
+      # enums, scopes, validations, callbacks and aliases, and an EMPTY column set. Only the column-keyed
+      # surface stands down; the schema was never an input to any of the rest. {#columns_known?} tells the
+      # two modes apart — an empty column set means "the schema is unknown", not "this model has no
+      # columns", and consumers that would fire on an unrecognised column must not read the two the same
+      # way.
+      #
       # `table_name_override` is non-nil when the source contained `self.table_name = "..."`. When nil,
       # the table name derives from {Inflector.tableize}.
       #
@@ -29,9 +38,18 @@ module Rigor
         # - `nullable` — Boolean; whether a `:singular` accessor can return `nil`. `has_one` → `true`;
         #              `belongs_to` → `false` (required by default since Rails 5) unless `optional: true`
         #              / `required: false`. Meaningless for `:collection` rows.
-        Entry = Struct.new(:class_name, :table_name, :columns, :associations,
+        #
+        # `table_name_exact` records whether `table_name` is the name the application actually uses, or a
+        # derivation that merely looks right. It is true ONLY when the source declared the name as a String
+        # literal — `self.table_name = "…"` on this class or, walking leaf → root, on an STI ancestor — and
+        # no class in that chain also computes the name at runtime. An {Inflector.tableize} guess is never
+        # exact. Only a true reading licenses pinning the name to a value; see
+        # `Activerecord#table_name_return_type` for why the schema is not admitted as corroboration.
+        Entry = Struct.new(:class_name, :table_name, :table_name_exact, :columns, :associations,
                            :enums, :scopes, :validations, :callbacks, :aliases,
                            keyword_init: true) do
+          def table_name_exact? = table_name_exact == true
+
           def column(name)
             columns.find { |c| c.name == name.to_s }
           end
@@ -75,10 +93,15 @@ module Rigor
 
         attr_reader :entries
 
-        def initialize(entries)
+        def initialize(entries, columns_known: true)
           @entries = entries.freeze
+          @columns_known = columns_known
           freeze
         end
+
+        # Whether a schema was parsed into this index. `false` in the reduced mode (no `db/schema.rb` and no
+        # `db/structure.sql`), where every entry's column set is empty because the columns are UNKNOWN.
+        def columns_known? = @columns_known == true
 
         def find(class_name)
           entries[class_name.to_s]
@@ -88,6 +111,8 @@ module Rigor
         def class_names = entries.keys
         def empty? = entries.empty?
 
+        # `schema_table` may be nil — see the reduced mode described on the class. Every other input is
+        # source-derived, so the entries are identical in both modes apart from `columns`.
         def self.build(model_rows:, schema_table:, type_override_columns: nil)
           rows_by_name = model_rows.to_h { |row| [row.fetch(:class_name), row] }
           overrides = type_override_columns || []
@@ -96,8 +121,9 @@ module Rigor
             class_name = row.fetch(:class_name)
             # The STI ancestry chain, root → self. For a plain (non-STI) model this is just `[row]`.
             chain = sti_chain(row, rows_by_name)
-            table_name = sti_table_name(chain)
-            columns = apply_type_overrides(schema_table.columns_for(table_name) || [], overrides)
+            declared = declared_table_name(chain)
+            table_name = declared || inflected_table_name(chain)
+            columns = apply_type_overrides(schema_table&.columns_for(table_name) || [], overrides)
 
             # STI children inherit their ancestors' declared associations / enums / aliases / scopes /
             # validations / callbacks. Without the merge a `where(<parent-association>: ...)` on the
@@ -105,6 +131,7 @@ module Rigor
             acc[class_name] = Entry.new(
               class_name: class_name,
               table_name: table_name,
+              table_name_exact: table_name_exact?(chain, declared),
               columns: columns.freeze,
               associations: merge_named_rows(chain.flat_map { |r| Array(r[:associations]) }),
               enums: merge_enums(chain),
@@ -114,7 +141,7 @@ module Rigor
               aliases: merge_aliases(chain)
             ).freeze
           end
-          new(entries.freeze)
+          new(entries.freeze, columns_known: !schema_table.nil?)
         end
 
         # Remaps every type-overridden column's `ruby_type` to `"Object"` so instance-side column narrowing
@@ -150,10 +177,41 @@ module Rigor
         # The effective table name for an STI chain: the nearest explicit `self.table_name =` override
         # walking leaf → root, else the name inflected from the root class.
         def self.sti_table_name(chain)
+          declared_table_name(chain) || inflected_table_name(chain)
+        end
+
+        # Whether `table_name` is the name the application actually uses — the condition that licenses
+        # pinning it to a value. DECLARED-ONLY: a String literal `self.table_name =` on this class or an STI
+        # ancestor, and no class in the chain computing the name at runtime (`def self.table_name`, the
+        # `class << self` spelling, a non-literal assignment) — a computed override anywhere beats an
+        # ancestor's literal, because it is what actually answers.
+        #
+        # An inflected name is NEVER exact, not even when the parsed schema has a table by that name.
+        # Existence in the schema is not corroboration: the table can belong to a different model. Under an
+        # `ApplicationRecord` that sets `self.table_name_prefix = "app_"`, `User` really reads `app_users`
+        # while a schema carrying both `users` (another model's, declared) and `app_users` would "confirm"
+        # the inflected `users` — and `User.table_name == "app_users"`, true at runtime, would then fold
+        # always-falsey. Prefix / suffix / namespace derivation is not reachably airtight, so the lane is
+        # dropped rather than patched.
+        def self.table_name_exact?(chain, declared)
+          return false if chain.any? { |row| row[:table_name_computed] }
+
+          !declared.nil?
+        end
+
+        # The nearest explicit `self.table_name = "..."` walking leaf → root, or nil when the chain declared
+        # none. Split out from {sti_table_name} because "was it declared?" is the question
+        # `table_name_exact` answers, and re-deriving it from the resolved name is not possible.
+        def self.declared_table_name(chain)
           chain.reverse_each do |row|
             override = row[:table_name_override]
             return override if override
           end
+          nil
+        end
+
+        # The name inflected from the ROOT class of the chain — an STI child shares its root's table.
+        def self.inflected_table_name(chain)
           Rigor::Plugin::Inflector.tableize(strip_leading_namespace(chain.first.fetch(:class_name)))
         end
 

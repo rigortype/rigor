@@ -162,6 +162,7 @@ module Rigor
             class_name: full_name,
             superclass_name: superclass,
             table_name_override: lookup_table_name_override(node.body),
+            table_name_computed: table_name_computed?(node.body),
             associations: lookup_associations(node.body),
             enums: lookup_enums(node.body),
             scopes: lookup_scopes(node.body),
@@ -266,6 +267,52 @@ module Rigor
             return arg.unescaped if arg.is_a?(Prism::StringNode)
           end
           nil
+        end
+
+        # Whether the class computes its own table name in a way this walker cannot read off the source:
+        # `def self.table_name`, a `table_name` def inside `class << self`, or `self.table_name =` with a
+        # non-literal RHS (`"#{tenant}_users"`).
+        #
+        # The resolved name is unaffected — it still falls back to the inflection, and a wrong inflection
+        # already degrades harmlessly (no matching table → no columns → the analyzer stays silent). What
+        # this flag protects is the {ModelIndex::Entry#table_name_exact?} claim, which licenses PINNING the
+        # name to a value. Without it, a computed override on a class whose inflected name happens to match
+        # some table in the schema would read as corroborated, and `Model.table_name == "..."` would then
+        # fold against a name the application does not use.
+        def table_name_computed?(body)
+          return false if body.nil?
+
+          body.rigor_each_child do |node|
+            return true if singleton_table_name_def?(node)
+            return true if singleton_class_defines_table_name?(node)
+            return true if non_literal_table_name_assignment?(node)
+          end
+          false
+        end
+
+        # `def self.table_name` — a DefNode with an explicit `self` receiver.
+        def singleton_table_name_def?(node)
+          node.is_a?(Prism::DefNode) && node.name == :table_name && node.receiver.is_a?(Prism::SelfNode)
+        end
+
+        # `class << self; def table_name; …; end; end` — the other spelling of the same override.
+        def singleton_class_defines_table_name?(node)
+          return false unless node.is_a?(Prism::SingletonClassNode)
+          return false unless node.body
+
+          node.body.rigor_each_child do |inner|
+            return true if inner.is_a?(Prism::DefNode) && inner.name == :table_name && inner.receiver.nil?
+          end
+          false
+        end
+
+        # `self.table_name = <anything but a String literal>`. The literal form is the one
+        # {#lookup_table_name_override} reads; everything else is a name only the running app knows.
+        def non_literal_table_name_assignment?(node)
+          return false unless node.is_a?(Prism::CallNode) && node.name == :table_name=
+          return false unless node.receiver.is_a?(Prism::SelfNode)
+
+          !node.arguments&.arguments&.first.is_a?(Prism::StringNode)
         end
 
         # Recognised single-instance and collection association DSL methods. The kind drives the eventual

@@ -944,6 +944,49 @@ module Rigor
           loader.synthesized_type_names.include?(class_name.to_s.sub(/\A::/, ""))
         end
 
+        # ADR-26 — the SIGNATURE half of the open-receiver policy. `call.undefined-method` already declines
+        # on an unbounded surface: a plugin vouches that the class answers names its RBS cannot enumerate
+        # (an `ActiveRecord::Relation` delegates every user-declared `scope` to its model). The rules that
+        # read a RESOLVED SIGNATURE — wrong-arity and argument-type-mismatch — must decline on the same
+        # ground, but only where the name resolved through an ANCESTOR rather than the open class itself.
+        #
+        # The failure it closes: `Issue.visible.open` is a declared scope taking `*args`, but `open` is also
+        # `Kernel#open`, so resolution walks the Relation's ancestry, finds the IO opener and checks the
+        # call against `(String, ...)` — `wrong number of arguments (given 0, expected 1..3)` on correct
+        # code, plus `argument type mismatch: expected String, got false` on `open(false)`. The collision
+        # set is every Object/Kernel name, so any project whose scope is called `open`, `select`, `test`,
+        # `format`, `p`, `system`, … inherits the error the moment the first hop types. That is a wrong
+        # signature applied to a method the receiver does not actually run — not a strict reading of a real
+        # one — and it fires on code that works.
+        #
+        # A method the open class DECLARES stays checked: `Relation#limit` is in the plugin's own bundled
+        # RBS, so `relation.limit` with no arguments still fires. The suppression is therefore bounded to
+        # names the open class inherited, where the resolution was never authoritative to begin with.
+        # The RBS method definition this call may be validated against, or nil when there is none worth
+        # trusting: the lookup found nothing, it returned {#lookup_method}'s defensive `true` sentinel, or
+        # the name is one an open receiver INHERITED rather than declared. Shared by the two rules that read
+        # a resolved signature — `call.wrong-arity` and `call.argument-type-mismatch` — so they cannot drift
+        # on which signatures are authoritative.
+        def trustworthy_signature(receiver_type, class_name, call_node, scope)
+          method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
+          return nil if method_def.nil? || method_def == true
+          return nil if unauthoritative_inherited_signature?(class_name, method_def, scope)
+
+          method_def
+        end
+
+        def unauthoritative_inherited_signature?(class_name, method_def, scope)
+          return false unless unbounded_receiver_surface?(class_name, scope)
+          return true unless method_def.respond_to?(:defined_in)
+
+          defined_in = method_def.defined_in
+          return true if defined_in.nil?
+
+          strip_root(defined_in.to_s) != strip_root(class_name)
+        end
+
+        def strip_root(name) = name.to_s.sub(/\A::/, "")
+
         def definition_available?(receiver_type, class_name, scope)
           if receiver_type.is_a?(Type::Singleton)
             !Rigor::Reflection.singleton_definition(class_name, scope: scope).nil?
@@ -1151,8 +1194,8 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
           return nil unless definition_available?(receiver_type, class_name, scope)
 
-          method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
-          return nil if method_def.nil? || method_def == true
+          method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
+          return nil if method_def.nil?
 
           arity_envelope = compute_arity_envelope(method_def)
           return nil if arity_envelope.nil?
@@ -2126,8 +2169,8 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
           return nil unless definition_available?(receiver_type, class_name, scope)
 
-          method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
-          return nil if method_def.nil? || method_def == true
+          method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
+          return nil if method_def.nil?
 
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
           mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides)

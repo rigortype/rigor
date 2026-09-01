@@ -30,7 +30,8 @@ errors_demo.rb:24:1: error: `User.find` expects at least 1 argument, got 0 [plug
 | Recognised `Model.find` / `Model.find_by` / `Model.where` call | `:info` | `plugin.activerecord.model-call` |
 | `Model.find_by(unknown: ...)` / `Model.where(unknown: ...)` | `:error` | `plugin.activerecord.unknown-column` |
 | `Model.find` with 0 args | `:error` | `plugin.activerecord.wrong-arity` |
-| No schema source (`db/schema.rb` or `db/structure.sql`) readable | `:warning` | `plugin.activerecord.load-error` |
+| No schema source (`db/schema.rb` or `db/structure.sql`) present — reduced mode | `:info` | `plugin.activerecord.load-error` |
+| A schema source that exists but cannot be read or parsed | `:warning` | `plugin.activerecord.load-error` |
 
 Did-you-mean suggestions use `DidYouMean` fuzzy matching against
 the resolved table's column names.
@@ -75,6 +76,25 @@ Chained query methods keep the element type, and iteration
 scope invoked on a typed relation (`User.where(...).published`)
 never surfaces a false `call.undefined-method`.
 
+`User.table_name` types as `String`, and as the exact string
+only when your source says the name: a literal
+`self.table_name = "people"` on the class or on an STI ancestor,
+with nothing in that chain computing the name at runtime (a
+`def self.table_name`, a `class << self` version of it, or an
+interpolated assignment all count as computing it). Every other
+name — anything the plugin derived by pluralizing the class name —
+stays plain `String`.
+
+That includes names that look confirmed. A `users` table in your
+schema is not evidence that it is `User`'s table: with a
+`self.table_name_prefix` on the base class, `User` really reads
+`app_users`, and a `users` table belonging to some other model
+would "confirm" the wrong guess. A wrong exact string is worse
+than an honest `String` — code comparing `User.table_name` would
+quietly take the wrong branch — so the plugin pins only what you
+wrote down. `User.quoted_table_name` is always `String`; the
+quoting is up to the database adapter.
+
 ## Limitations
 
 - **Direct-superclass match only.** `class Admin < User` where
@@ -87,6 +107,19 @@ never surfaces a false `call.undefined-method`.
   only; a column whose SQL type has no Ruby mapping (a custom enum,
   `tsvector`, `ltree`) degrades to `Object` (never dropped), and
   non-`public`-schema partition tables are skipped.
+- **No committed schema — reduced mode.** A project that ships raw
+  migrations and gitignores `db/schema.rb` (the DB-agnostic Rails
+  pattern) still gets table names, finders, scopes and associations:
+  those are read from your model source, not from the schema. Only
+  the column-dependent half stands down — column readers stay
+  untyped and `where(col:)` keys are not validated, exactly as they
+  are for a table the schema does not describe. The plugin says so
+  once per run at `:info`. Committing a schema dump (or pointing
+  `schema_file` / `structure_sql_file` at one) turns the column half
+  back on from the next cold run — a warm cache keeps serving the
+  reduced index until it is invalidated, so use `rigor check
+  --no-cache` (or `make cache-clean`) if you want to see the change
+  immediately.
 - **Column reads, not setters.** The plugin types instance-side
   column *reads* (`user.name`, `user.admin?`) and singular
   associations, but not the `name=` setter or the dirty-tracking

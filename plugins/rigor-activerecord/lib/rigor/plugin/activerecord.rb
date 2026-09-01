@@ -34,6 +34,17 @@ module Rigor
     # The per-file `#diagnostics_for_file` hook delegates to {Analyzer}, which walks Prism and emits
     # diagnostics for `Model.find` / `Model.find_by` / `Model.where` calls against the index.
     #
+    # ## Reduced mode (no schema file)
+    #
+    # The schema gates the COLUMN surface and nothing else. When neither file is present — the DB-agnostic
+    # Rails pattern of shipping raw migrations and gitignoring `db/schema.rb`, as Redmine does — the plugin
+    # builds a columns-less {ModelIndex} from {ModelDiscoverer} output alone and keeps typing table names,
+    # finders, scopes and associations off it. Column readers and column-keyed checks then decline exactly
+    # as an unrecognised column does: `Analyzer` already treats an empty column set as "cannot check"
+    # (view-backed models hit the same path on a schema-PRESENT project), and `#column_return_type` finds
+    # no column and contributes nothing. The `:model_index` fact is deliberately NOT published in this mode
+    # — see `#prepare`.
+    #
     # ## Configuration
     #
     #     plugins:
@@ -52,11 +63,22 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
-        # Bumped 2026-05-28 — implicit-self class-side AR call resolution: `select(:uri).group(:uri)` inside
+        # Bumped 2026-09-01 — `table_name` / `quoted_table_name` join the recognised class-side surface, and
+        # `ModelIndex::Entry` gains the `table_name_exact` member that gates value-pinning. A Struct member
+        # addition is not Marshal-compatible with the cached 0.6.0 payload, so the bump (part of the
+        # producer cache key) is what keeps a warm run from loading it.
+        #
+        # 0.6.0, 2026-09-01 — reduced mode: a missing `db/schema.rb` / `db/structure.sql` degrades to a
+        # columns-less {ModelIndex} instead of disabling the plugin. The version is part of the producer
+        # cache KEY, so the bump is what stops a warm run from serving the pre-change payload (which,
+        # having no `columns_known` ivar, would read as reduced mode on a schema-PRESENT project and
+        # withhold the `:model_index` fact).
+        #
+        # 0.5.0, 2026-05-28 — implicit-self class-side AR call resolution: `select(:uri).group(:uri)` inside
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.5.0",
+        version: "0.7.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -148,6 +170,13 @@ module Rigor
       def prepare(services)
         index = model_index
         return if index.nil? || index.empty?
+        # Reduced mode stays UNPUBLISHED. Every consumer reads `columns:` as authoritative and fires on a
+        # key missing from it — rigor-actionpack's `permit(:title)` check and rigor-shoulda-matchers'
+        # `have_db_column(:title)` / `validate_presence_of(:title)` matchers both do — so publishing the
+        # reduced index's empty column set would convert this precision win into a false positive on every
+        # strong-parameter key and every column matcher in the project. Withholding it leaves those
+        # consumers exactly where they are today on a schema-less target: silent.
+        return unless index.columns_known?
 
         services.fact_store.publish(
           plugin_id: manifest.id,
@@ -158,20 +187,13 @@ module Rigor
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = model_index
-        if index.nil?
-          # Project-global error (missing `db/schema.rb`, parse failure, etc.) — emit once per run rather
-          # than once per analyzed file. On a Redmine-shape project that uses migrations only (no
-          # `schema.rb`), the old path produced 346 identical load-errors; on a Solidus monorepo (no
-          # top-level `schema.rb`), 999.
-          return [] if @load_errors_emitted
+        # The schema-load disclosure is independent of whether an index was built: reduced mode still
+        # produces one (and still analyzes), while a genuine index failure produces one and nothing else.
+        diagnostics = consume_load_error_diagnostics(path)
+        return diagnostics if index.nil? || index.empty?
+        return diagnostics if migration_path?(path)
 
-          @load_errors_emitted = true
-          return load_error_diagnostics(path)
-        end
-        return [] if index.empty?
-        return [] if migration_path?(path)
-
-        Analyzer.new(path: path, model_index: index).analyze(root).diagnostics
+        diagnostics.concat(Analyzer.new(path: path, model_index: index).analyze(root).diagnostics)
       end
 
       # Rails migration files (`db/migrate/<timestamp>_*.rb`) and post-migration files
@@ -195,7 +217,10 @@ module Rigor
       # The class-side finder / relation entry-point names `finder_return_type` recognises. Static half of
       # the `dynamic_return` name gate; the run-time half comes from the model index (scopes,
       # associations, columns).
-      FINDER_METHOD_NAMES = %i[find find_by! find_by where all order limit none select].freeze
+      FINDER_METHOD_NAMES = %i[
+        find find_by! find_by where all order limit none select
+        table_name quoted_table_name
+      ].freeze
       private_constant :FINDER_METHOD_NAMES
 
       # Return-type contribution via the run-time `methods:` name gate (ADR-52 slice 5b). `Model.find(id)`
@@ -319,7 +344,39 @@ module Rigor
           # of the query DSL chains through the bundled `ActiveRecord::Relation` RBS once a relation is
           # open.
           relation_of(entry.class_name)
+        when :table_name
+          table_name_return_type(entry)
+        when :quoted_table_name
+          # Quoting is adapter-dependent — `"users"` on PostgreSQL, backticked on MySQL — so unlike
+          # `table_name` the exact string is not derivable from project source even when the bare name is.
+          Rigor::Type::Combinator.nominal_of("String")
         end
+      end
+
+      # `Model.table_name` is a String either way; whether it is safe to VALUE-PIN turns on how the name was
+      # derived. `Entry#table_name_exact?` holds ONLY for a name the source declared as a String literal
+      # (`self.table_name = "…"`, inherited down an STI chain, and not overridden by a computed one). An
+      # inflected name is never pinned, however plausible: a `table_name_prefix` / `table_name_suffix` on
+      # the namespace, an abstract class (whose real answer is `nil`), and a project-custom inflection rule
+      # all silently change the real name, and `Constant["users"]` on any of them is a wrong precise type
+      # that value-dependent folding downstream acts on — `Model.table_name == <real name>` folds
+      # always-falsey, an error on working code.
+      #
+      # The schema is deliberately NOT admitted as corroboration for an inflected name. A table existing
+      # does not make it THIS model's table: with a `table_name_prefix = "app_"`, `User` reads `app_users`
+      # while a `users` table declared by another model would "confirm" the inflection. Prefix / suffix /
+      # namespace derivation is not reachably airtight, and a smaller set of pins beats a wrong one.
+      # Widening to `String` is monotone imprecision — and it still closes the opacity the call site had,
+      # which is the whole measured win.
+      #
+      # `String` rather than `String | nil` for the abstract-class case follows the same call as
+      # `#column_return_type`: under-reporting nil is a false negative, over-reporting it lights up
+      # `possible-nil-receiver` on the ordinary idiom, and this project ranks the latter as the worse
+      # failure.
+      def table_name_return_type(entry)
+        return Rigor::Type::Combinator.nominal_of("String") unless entry.table_name_exact?
+
+        Rigor::Type::Combinator.constant_of(entry.table_name)
       end
 
       # `Post.published` / `Post.recent(5)` — a user-declared `scope` returns a relation of the model
@@ -512,15 +569,17 @@ module Rigor
       def model_index
         return @model_index if @model_index
 
-        table = schema_table_or_nil
-        return nil if table.nil?
-
+        # A missing schema no longer disables the plugin. `schema_table_or_nil` is still called here — not
+        # for its return value (the producer block calls it again, memoised), but because a cache HIT skips
+        # the producer block entirely and the reduced-mode disclosure would then never be recorded on a warm
+        # run.
+        schema_table_or_nil
         # ADR-60 WD3 record-and-validate: the producer's own in-block `ModelDiscoverer` reads are
         # captured into the dependency descriptor after the block runs, and the producer's `watch:` covers
         # model-file additions — so no priming walk is needed (it used to run the discover twice).
         @model_index = cache_for(:model_index, params: {}).call
       rescue StandardError => e
-        @load_errors << "model index build failed: #{e.class}: #{e.message}"
+        @load_errors << { message: "model index build failed: #{e.class}: #{e.message}", severity: :warning }
         nil
       end
 
@@ -539,25 +598,48 @@ module Rigor
         # here.
         @schema_table = cache_for(:schema_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
-        @load_errors << "rigor-activerecord: #{e.message}"
+        @load_errors << { message: "rigor-activerecord: #{e.message}#{REDUCED_MODE_SUFFIX}",
+                          severity: :warning }
         nil
       rescue Errno::ENOENT
-        @load_errors << "rigor-activerecord: schema file `#{@schema_file}` (or `#{@structure_sql_file}`) " \
-                        "not found; AR call checks skipped"
+        # NOT an error: a project that commits raw migrations only and gitignores `db/schema.rb` is the
+        # DB-agnostic Rails pattern, not a misconfiguration. The plugin still types finders, scopes,
+        # associations and table names off the discovered models, so this is a disclosure of REDUCED
+        # capability rather than a failure — `:info`, the grade the plugins use for "here is what I
+        # recognised", not `:warning`, the grade they use for "I could not run".
+        @load_errors << { message: "rigor-activerecord: schema file `#{@schema_file}` (or " \
+                                   "`#{@structure_sql_file}`) not found#{REDUCED_MODE_SUFFIX}",
+                          severity: :info }
         nil
       rescue StandardError => e
-        @load_errors << "rigor-activerecord: failed to parse `#{@schema_file}`: #{e.class}: #{e.message}"
+        # A schema that EXISTS but does not parse is a real, actionable problem — the user meant it to be
+        # read. Reduced mode still applies, but the disclosure stays a warning.
+        @load_errors << { message: "rigor-activerecord: failed to parse `#{@schema_file}`: " \
+                                   "#{e.class}: #{e.message}#{REDUCED_MODE_SUFFIX}",
+                          severity: :warning }
         nil
       end
 
-      def load_error_diagnostics(path)
-        @load_errors.uniq.map do |message|
+      # The half of every schema-load disclosure that says what the plugin still does. Kept as one string so
+      # the three paths above cannot drift on the description of the mode they all land in.
+      REDUCED_MODE_SUFFIX = "; typing models from source only — column checks " \
+                            "(`where(col:)`, column readers) are skipped"
+      private_constant :REDUCED_MODE_SUFFIX
+
+      # Project-global disclosures, emitted once per run on the first analyzed file rather than once per
+      # file. On a Redmine-shape project (migrations only, no `schema.rb`) the per-file form produced 346
+      # identical rows; on a Solidus monorepo, 999.
+      def consume_load_error_diagnostics(path)
+        return [] if @load_errors_emitted
+
+        @load_errors_emitted = true
+        @load_errors.uniq.map do |error|
           Rigor::Analysis::Diagnostic.new(
             path: path,
             line: 1,
             column: 1,
-            message: message,
-            severity: :warning,
+            message: error.fetch(:message),
+            severity: error.fetch(:severity),
             rule: "load-error"
           )
         end

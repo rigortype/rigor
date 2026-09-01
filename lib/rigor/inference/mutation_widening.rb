@@ -244,17 +244,18 @@ module Rigor
         current_scope.with_ivar(var_name, widened)
       end
 
+      # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning
+      # (`t[0] += 5` holds 6 where `Constant[1]` was — issue #560). Adders, removers, and reorderers
+      # leave every surviving slot's value intact, so their widening keeps the pinning; what an ADDER
+      # introduces is covered by the {#join_added_elements} join instead, which is why widening the
+      # SEED's pinning under `<<` (the shape haml's hand-written sigs pin) is not needed either.
+      VALUE_REWRITING_MUTATORS = %i[[]= fill map! collect! replace store merge! update transform_values!].to_set.freeze
+      private_constant :VALUE_REWRITING_MUTATORS
+
       # Returns the widened type for a binding whose receiver is about to be mutated by
       # `method_name`, or `nil` when no widening applies (binding is not a literal-shape
       # carrier, OR the method is not a mutator for that shape, OR the binding is already a
       # nominal — no precision to lose).
-      # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning
-      # (`t[0] += 5` holds 6 where `Constant[1]` was — issue #560). Adders, removers, and reorderers
-      # leave every surviving slot's value intact, so their widening keeps the pinning; an ADDED
-      # value's under-coverage is the value-join half still open on #560.
-      VALUE_REWRITING_MUTATORS = %i[[]= fill map! collect! replace store merge! update transform_values!].to_set.freeze
-      private_constant :VALUE_REWRITING_MUTATORS
-
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
 
@@ -290,6 +291,7 @@ module Rigor
       #
       # Non-adders (removers, reorderers) introduce no element evidence and return the widened
       # carrier untouched.
+      #
       # `seed_elements` is the PRE-STATE literal's own element list, not the widened carrier's —
       # {ContentJoin.admissible_evidence} explains why the two are not interchangeable.
       def join_added_elements(widened, method_name, arg_types, seed_elements)

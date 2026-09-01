@@ -110,6 +110,17 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #544 — the decline side: a receiver whose type carries an untracked (Dynamic) arm can hold
+  # a caller-supplied slot value the `||=` keeps, so the recorded default alone would invent a fact
+  # and fold a reachable branch away (mail's TestRetriever#find).
+  describe "fixtures/indexed_or_narrowing_dynamic_arm.rb — Dynamic-armed receivers decline the record" do
+    let(:harness) { harness_for("indexed_or_narrowing_dynamic_arm") }
+
+    it "does not fold the post-`||=` comparison — the caller's slot value is still live" do
+      expect(harness.errors.map(&:message)).to be_empty
+    end
+  end
+
   describe "fixtures/universal_object_methods.rb — receiver-independent Object/Kernel selectors" do
     let(:harness) { harness_for("universal_object_methods") }
 

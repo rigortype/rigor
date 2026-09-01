@@ -25,6 +25,36 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  # Issue #539 — every fold here executes the BLOCKLESS form against the constant value, so a call
+  # site that passes a block must decline: `SET.any? { |n| lookup(n) }` folded to the blockless
+  # `Set#any?`'s `true` on any non-empty set — a wrong type the runtime contradicts whenever the
+  # block answers falsey everywhere.
+  describe "block-bearing call sites never value-fold" do
+    def fold_with_block(source, value, method_name)
+      call = Prism.parse(source).value.statements.body.first
+      described_class.try_dispatch(cc(
+                                     receiver: Rigor::Type::Combinator.constant_of(value),
+                                     method_name: method_name,
+                                     args: [],
+                                     call_node: call
+                                   ))
+    end
+
+    it "declines any? with a literal block on a folded Set" do
+      expect(fold_with_block("s.any? { |n| lookup(n) }", Set["a", "b"], :any?)).to be_nil
+    end
+
+    it "declines with a `&proc` block argument too" do
+      expect(fold_with_block("s.any?(&pred)", Set["a", "b"], :any?)).to be_nil
+    end
+
+    it "still folds the blockless form (control)" do
+      type = fold(Set["a", "b"], :any?)
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to be(true)
+    end
+  end
+
   describe "per-process-non-reproducible selectors never fold" do
     # `#hash` is SipHash-salted per process; folding `"abc".hash` would bake one process's random value into a Constant
     # (and the on-disk cache), wrong in every other process. The fold must decline so the RBS tier answers with the

@@ -82,8 +82,11 @@ protection +0.30pp from #548. Perf: #547 costs ~+12% cold-check wall on redmine 
   default — both ready-for-human). #532/#533 keep small residuals listed on the issues
   (compound-write widening parity, conditional superclasses, the ragel loop-fixpoint analysis; the
   `Queue`/`SizedQueue` item died on verification — rbs core already ships the class aliases and the
-  engine resolves them — and `Proc#[]` grew into a lambda-literal design note, both on #533); **[#553](https://github.com/rigortype/rigor/issues/553)** is the
-  index-written-Array-param Hash-synthesis inference bug #554's gate unmasked.
+  engine resolves them — and `Proc#[]` grew into a lambda-literal design note, both on #533); **[#553](https://github.com/rigortype/rigor/issues/553)**
+  (the index-written-Array-param Hash-synthesis bug #554's gate unmasked) is FIXED by #559 ·
+  **[#560](https://github.com/rigortype/rigor/issues/560)** filed at the close: `t[0] += 5` keeps
+  stale element evidence `Array[1 | 2]` and fires a false always-falsey on master — 4-line repro +
+  fix bar on the issue.
 
 ## Findings worth more than the numbers
 

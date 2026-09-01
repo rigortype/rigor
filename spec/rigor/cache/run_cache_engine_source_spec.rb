@@ -125,7 +125,12 @@ RSpec.describe "run-result cache invalidation on an engine-source edit" do
     Rigor::Cache::EngineSource.reset_process_identity! # the released gem is a SECOND process (#289)
     released = Rigor::Analysis::RunCacheKey.descriptor(**args)
 
-    expect(released.configs.map(&:key)).to contain_exactly("configuration", "engine", "paths")
+    # The pin is the whole composition, not just the absence: a released gem keeps every other slot and loses
+    # only `engine-source`. `bundler.lockfile` / `rbs_collection.lockfile` are issue #564's lockfile-identity
+    # slots, present in both builds.
+    expect(released.configs.map(&:key)).to contain_exactly(
+      "bundler.lockfile", "configuration", "engine", "paths", "rbs_collection.lockfile"
+    )
     expect(checkout.configs.map(&:key)).to include("engine-source")
     expect(released.to_canonical_hash).not_to eq(checkout.to_canonical_hash)
   end

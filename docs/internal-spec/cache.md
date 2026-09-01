@@ -351,6 +351,56 @@ but the reason the user sees would otherwise be `NO_SNAPSHOT`, which
 tells them to run `rigor check --incremental`, a fix for a different
 problem.
 
+### Project dependency identity in a computed-value key
+
+A cache whose value is a function of what the analyzer computes MUST also
+key on the project's **dependency lockfiles**, for the same reason it keys
+on the engine's source. The locked gem set decides which bundle-shipped
+`sig/` directories load, which `rbs_collection` directories load, which
+[ADR-72](../adr/72-gemfile-lock-gated-rbs-overlays.md) gem overlays apply,
+what the ADR-82 WD9 missing-gem constant index owns, and whether
+`rbs.coverage.missing-gem` fires — yet a lockfile edit touches no analyzed
+source and no `.rbs` file, so nothing else in a run's identity moves with
+it. Keyed without it, a warm run replays the pre-`bundle add` diagnostics:
+a `call.undefined-method` survives the edit that licenses the overlay
+retracting it, and — primed the other way — stays silent after the edit
+that revokes it ([#564](https://github.com/rigortype/rigor/issues/564)).
+
+`Analysis::RunCacheKey.descriptor` carries two config slots for it,
+`bundler.lockfile` and `rbs_collection.lockfile`, each holding a SHA-256
+of the file the corresponding resolver
+(`Environment::LockfileResolver.resolve_lockfile_path` /
+`Environment::RbsCollectionDiscovery.resolve_lockfile_path`) resolves
+under the run's configuration:
+
+- **Content, never the path.** A cache KEY may not carry machine-local
+  data (see `FileEntry`), and a content-only slot is what lets a moved
+  checkout — a CI workspace, a rename — still hit on an identical
+  lockfile.
+- **Absent is a value.** No lockfile resolving carries its own sentinel
+  rather than dropping the slot: "absent" and "present but empty" must not
+  key the same.
+- **A key slot, not a dependency entry.** A recorded dependency descriptor
+  can only say "a file I recorded changed"; it cannot express a lockfile
+  that did not exist when the entry was written and does now, which is the
+  first-`bundle install` case.
+
+Both slots are built inside `descriptor`, from the configuration alone, so
+the miss path (`Analysis::Runner`) and the ADR-87 WD4 boot-slim hit path
+(`Analysis::RunCacheProbe`) obtain them by construction and cannot drift
+out of key agreement — the invariant that module exists to hold. Both
+resolvers are leaf files, so the probe reaches them without loading
+`rigor/environment` or the RBS machinery.
+
+`IncrementalSnapshot.fingerprint` has always hashed the same two
+lockfiles (§ Two-level gating above); this states the rule the other
+computed-value caches are held to as well.
+
+One residual is deliberate rather than closed: a gem installed or removed
+**under the bundle root without a lockfile change** is half-covered. The
+discovered `sig/*.rbs` files are recorded dependencies, so a removal
+invalidates, while an appearance does not.
+
 ### Read fault tolerance
 
 A read encountering any of the following silently returns a

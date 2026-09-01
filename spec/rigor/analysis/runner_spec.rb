@@ -366,6 +366,11 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(budget_diags.first.severity).to eq(:warning)
     end
 
+    # Both coverage examples run on the process-wide shared store rather than `cache_store: nil`. They are alike in
+    # every other run-cache key slot — empty path set, identical configuration — so they are exactly the pair that
+    # used to collide, and the run-cache key's `bundler.lockfile` content slot (issue #564) is what separates them.
+    # Keeping them on the shared store means a regression of that slot fails HERE too, not only in
+    # `spec/rigor/cache/run_cache_lockfile_identity_spec.rb`.
     it "surfaces `rbs.coverage.missing-gem` :info exactly once when locked gems have no RBS (O4 slice 3)" do # rubocop:disable RSpec/ExampleLength
       # Build a tmpdir with Gemfile.lock listing two gems whose RBS is not covered by ANY of the four resolution paths
       # (DEFAULT_LIBRARIES / vendored / bundle / collection).
@@ -393,7 +398,9 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [],
             "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
           )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = described_class.new(
+            configuration: configuration, cache_store: RunnerHelpers.shared_cache_store
+          ).run
           coverage_diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.missing-gem" }
 
           expect(coverage_diags.length).to eq(1)
@@ -429,7 +436,9 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [],
             "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
           )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = described_class.new(
+            configuration: configuration, cache_store: RunnerHelpers.shared_cache_store
+          ).run
           coverage_diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.missing-gem" }
 
           expect(coverage_diags).to be_empty

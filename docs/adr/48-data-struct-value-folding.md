@@ -443,7 +443,13 @@ and is the SAME predicate
 its own file — `StructFolding` `extend`s it, and `module_function` copies
 arrive private through `extend`, so the predicate is callable only under its
 own module name)
-the ADR-48 slice-5 `:self` grant uses. Sharing it is the point: while the two
+the ADR-48 slice-5 `:self` grant uses. One indexing caveat bounds the `.with`
+guard on both consumers alike: `discovered_includes` is not populated for
+BLOCK-form factory bodies, so a module included *inside* `Struct.new(...) do
+include M end` that supplies its own `with` is invisible to the walk — the
+discovery-side fix and the live shape are recorded on
+[issue #599](https://github.com/rigortype/rigor/issues/599). Sharing the
+predicate is the point: while the two
 gates had forked answers, a correctly whitelisted `.with` fold could still fire
 off a receiver the other gate wrongly called fresh
 (`x.dup_self.with(indent: 9).shout`), so the composed shape survived a fix to

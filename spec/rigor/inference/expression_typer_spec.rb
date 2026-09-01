@@ -1544,6 +1544,37 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  # Issue #525 — a `Line = Struct.new(...) do ... end` value is a StructInstance carrier whose
+  # block-def methods are discovered under "Line"; the discovered and user-inference tiers accept the
+  # named member carriers as receivers, so those methods resolve with the carrier itself as `self`.
+  describe "struct-factory block-def resolution" do
+    def statement_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    let(:factory_source) do
+      "Line = Struct.new(:text, :indent) do\n  def describe\n    \"line\"\n  end\nend\n"
+    end
+
+    it "infers a block-def method's return on the struct-instance carrier" do
+      type = statement_type("#{factory_source}Line.new(\"a\", 2).describe\n", 1)
+      expect(type.describe).to eq('"line"')
+    end
+
+    it "keeps member reads projecting on the same carrier (control)" do
+      type = statement_type("#{factory_source}Line.new(\"a\", 2).text\n", 1)
+      expect(type.describe).to eq('"a"')
+    end
+
+    it "stays fail-soft for a method the factory never defines (control)" do
+      type = statement_type("#{factory_source}Line.new(\"a\", 2).missing\n", 1)
+      expect(type.describe(:short)).to eq("Dynamic[top]")
+    end
+  end
+
   # Issue #533 — `x.send(:selector)` with a literal symbol is statically `x.selector` and resolves
   # through the same tiers; `alias_method :new, :old` mirrors the `alias` keyword into the discovered
   # tables with the original def node for return inference.

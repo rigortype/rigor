@@ -28,6 +28,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** Methods defined in a `Struct.new(...) do ... end` block now resolve on the struct's values — `Line.new(text).describe` infers the block def's return instead of reading untyped ([#555](https://github.com/rigortype/rigor/pull/555), [#525](https://github.com/rigortype/rigor/issues/525)).
+
 - **[engine]** Calling your own method with optional, keyword, rest, or block parameters no longer loses its inferred return type — the call-site binder binds each parameter it can identify (defaults included, `options = {}` too) instead of giving up on the whole signature, which also surfaced a real crash path in a survey app the code's own TODO had flagged ([#547](https://github.com/rigortype/rigor/pull/547), [#524](https://github.com/rigortype/rigor/issues/524)).
 
 - **[engine]** `File.read(path)` and `IO.read(path)` without a length now type as `String` instead of `String?` — the no-length form never returns nil, so guards on whole-file reads stop flagging impossible nils ([#547](https://github.com/rigortype/rigor/pull/547)).

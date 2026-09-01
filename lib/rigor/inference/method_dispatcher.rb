@@ -322,9 +322,13 @@ module Rigor
       # on. `Nominal[X]` looks up instance methods on X; `Singleton[X]` looks up singleton
       # methods on X. Other carriers return `[nil, nil]` so the tier declines.
       def discovered_method_lookup(receiver_type)
+        # #525 — the ADR-48 member carriers name their class too: a `Line = Struct.new(...) do ... end`
+        # value is a StructInstance whose block-def methods are discovered under "Line".
         case receiver_type
-        when Type::Nominal then [receiver_type.class_name, :instance]
-        when Type::Singleton then [receiver_type.class_name, :singleton]
+        when Type::Nominal, Type::StructInstance, Type::DataInstance
+          [receiver_type.class_name, :instance]
+        when Type::Singleton, Type::StructClass, Type::DataClass
+          [receiver_type.class_name, :singleton]
         else [nil, nil]
         end
       end

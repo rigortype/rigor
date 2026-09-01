@@ -1596,17 +1596,13 @@ module Rigor
         end
       end
 
-      # Issue #595 — the materialisation test now lives ONCE, in `StructFolding`, because the direct
-      # member-read gate needs the identical answer; see {StructFolding.materialization_call?}. The
-      # ancestor-walking resolver is passed in so the `.with` guard also sees a `with` defined in an included
-      # module, which the scope's own-class table would miss. `method(:…)` is memoised because this runs on
-      # every struct-receiver call, and `ExpressionTyper` is rebuilt per `Scope#type_of`.
+      # Issue #595 — the materialisation test lives ONCE, in
+      # [`struct_materialization.rb`](method_dispatcher/struct_materialization.rb), because the direct
+      # member-read gate ({MethodDispatcher::StructFolding}`#fresh_receiver?`) needs the identical answer;
+      # see {MethodDispatcher::StructMaterialization.materialization_call?}. It resolves its own `.with`
+      # guard through `Scope`, so neither consumer supplies a lookup and neither can answer differently.
       def materialization_call?(node, receiver)
-        MethodDispatcher::StructMaterialization.materialization_call?(node, receiver, scope, user_def_lookup)
-      end
-
-      def user_def_lookup
-        @user_def_lookup ||= method(:resolve_user_def_through_ancestors)
+        MethodDispatcher::StructMaterialization.materialization_call?(node, receiver, scope)
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
@@ -1665,8 +1661,6 @@ module Rigor
       # project-discovered class/module ends that branch. Cross-file: the chain is followed through
       # `Scope#discovered_superclasses` / `#discovered_includes` / `#discovered_def_nodes`, which the runner
       # seeds from the project-wide pre-pass. The walk is breadth-first, cycle-guarded, and node-count-capped.
-      ANCESTOR_WALK_LIMIT = 100
-      private_constant :ANCESTOR_WALK_LIMIT
 
       CLASS_GRAPH_CACHE_KEY = :__rigor_class_graph_cache__
       private_constant :CLASS_GRAPH_CACHE_KEY
@@ -1710,70 +1704,15 @@ module Rigor
         table[key] = compute_user_def_with_owner(class_name, method_name)
       end
 
+      # ADR-24 slice 2 — the walk itself lives on `Scope` ({Scope#user_def_through_ancestors}); it reads
+      # nothing but the frozen discovery index, and the `.with` guard in
+      # {MethodDispatcher::StructMaterialization} needs the SAME answer without threading dispatcher state
+      # through the dispatcher (#598 review). What stays here is the caching: the run-scoped
+      # `(class_name, method_name)` memo above, plus the per-edge name bucket handed to the walk so a class
+      # whose many methods are resolved pays each ancestor edge once.
       def compute_user_def_with_owner(class_name, method_name)
-        queue = [class_name.to_s]
-        seen = {}
-        visited = 0
-        until queue.empty?
-          current = queue.shift
-          next if current.nil? || seen[current]
-
-          seen[current] = true
-          visited += 1
-          if visited > ANCESTOR_WALK_LIMIT
-            BudgetTrace.hit(BudgetTrace::ANCESTOR_WALK_LIMIT)
-            return [nil, nil]
-          end
-
-          found = scope.user_def_for(current, method_name)
-          return [found, current] if found
-
-          enqueue_ancestors(current, queue)
-        end
-        [nil, nil]
-      end
-
-      # Pushes `current`'s direct ancestors onto the BFS queue: included / prepended modules first (Ruby
-      # places mixins nearer than the superclass), then the superclass. Each as-written name is resolved
-      # against `current`'s lexical nesting; names that resolve to no project class/module are dropped
-      # (RBS-known / third-party ancestors).
-      def enqueue_ancestors(current, queue)
-        scope.includes_of(current).each do |raw|
-          resolved = resolve_ancestor_class_name(current, raw)
-          queue.push(resolved) if resolved
-        end
-        raw_super = scope.superclass_of(current)
-        return if raw_super.nil?
-
-        resolved_super = resolve_ancestor_class_name(current, raw_super)
-        queue.push(resolved_super) if resolved_super
-      end
-
-      # Resolves a superclass name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) to a project-discovered
-      # class, following Ruby's `Module.nesting` constant lookup: try the raw name under each enclosing
-      # namespace of the subclass, innermost first, then bare. Returns nil when no candidate names a
-      # discovered user class (e.g. the superclass is an RBS-known or third-party class).
-      def resolve_ancestor_class_name(subclass_qualified, raw_superclass)
-        by_subclass = (class_graph_buckets[:name][subclass_qualified] ||= {})
-        return by_subclass[raw_superclass] if by_subclass.key?(raw_superclass)
-
-        by_subclass[raw_superclass] =
-          compute_ancestor_class_name(subclass_qualified, raw_superclass)
-      end
-
-      def compute_ancestor_class_name(subclass_qualified, raw_superclass)
-        segments = subclass_qualified.split("::")
-        (segments.length - 1).downto(0) do |i|
-          candidate = (segments[0, i] + [raw_superclass]).join("::")
-          return candidate if known_user_class?(candidate)
-        end
-        nil
-      end
-
-      def known_user_class?(name)
-        scope.discovered_superclasses.key?(name) ||
-          scope.discovered_def_nodes.key?(name) ||
-          scope.discovered_includes.key?(name)
+        scope.user_def_through_ancestors(class_name, method_name,
+                                         name_memo: class_graph_buckets[:name])
       end
 
       # ADR-57 N5 — overridable-method adoption gate. A self-call resolved to a project `def` whose owner has
@@ -1876,6 +1815,12 @@ module Rigor
       # `owner` — i.e. `candidate` is a subclass of an owner class or an includer of an owner module. Reuses
       # the same BFS resolver the method-resolution ancestor walk uses, so name resolution (lexical nesting,
       # RBS-known-ancestor pruning) is identical.
+      # Delegates to the shared walk's edge step so this BFS and method resolution resolve ancestor names
+      # identically, sharing the per-edge memo bucket.
+      def enqueue_ancestors(current, queue)
+        scope.enqueue_ancestors(current, queue, class_graph_buckets[:name])
+      end
+
       def related_to_owner?(candidate, owner)
         queue = []
         enqueue_ancestors(candidate, queue)
@@ -1889,7 +1834,7 @@ module Rigor
 
           seen[current] = true
           visited += 1
-          return false if visited > ANCESTOR_WALK_LIMIT
+          return false if visited > Scope::ANCESTOR_WALK_LIMIT
 
           enqueue_ancestors(current, queue)
         end

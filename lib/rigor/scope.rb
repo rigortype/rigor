@@ -647,6 +647,90 @@ module Rigor
       @discovery.discovered_includes[class_name.to_s] || []
     end
 
+    # ADR-24 slice 2 — the user-side ancestor walk: resolves `method_name` against `class_name`'s own `def`s,
+    # then breadth-first through its included / prepended modules (mixins first, as Ruby orders them) and its
+    # superclass chain. Returns `[def_node, owner]`, or `[nil, nil]` when nothing in the project defines it.
+    # RBS-known / third-party ancestors resolve to no discovered class and end that branch.
+    #
+    # It lives HERE, not in a consumer, because it reads nothing but this scope's frozen discovery index
+    # (`user_def_for` / `includes_of` / `superclass_of` / the `discovered_*` tables) — the same property that
+    # lets `ExpressionTyper` memoise its results run-wide. Two callers depend on that single answer:
+    # `ExpressionTyper#compute_user_def_with_owner`, which wraps it in the run-scoped memo for the dispatch hot
+    # path, and {Inference::MethodDispatcher::StructMaterialization}, whose `.with` guard must see a `with`
+    # contributed by an included module. They forked once — the guard resolved own-class-only while the
+    # dispatcher walked ancestors — and answered differently about the same receiver expression (#598 review).
+    #
+    # `name_memo` is a CACHE, not semantics: the per-edge as-written-name resolutions, so a caller resolving
+    # many methods against one class pays each ancestor edge once. Omit it and the walk is identical, just
+    # uncached.
+    def user_def_through_ancestors(class_name, method_name, name_memo: {})
+      queue = [class_name.to_s]
+      seen = {}
+      visited = 0
+      until queue.empty?
+        current = queue.shift
+        next if current.nil? || seen[current]
+
+        seen[current] = true
+        visited += 1
+        return ancestor_walk_gave_up if visited > ANCESTOR_WALK_LIMIT
+
+        found = user_def_for(current, method_name)
+        return [found, current] if found
+
+        enqueue_ancestors(current, queue, name_memo)
+      end
+      [nil, nil]
+    end
+
+    # The BFS node cap; a hierarchy past it gives up rather than walking unboundedly (ADR-41 WD4).
+    ANCESTOR_WALK_LIMIT = 100
+
+    def ancestor_walk_gave_up
+      Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
+      [nil, nil]
+    end
+
+    # Pushes `current`'s direct ancestors onto the BFS queue: included / prepended modules first (Ruby places
+    # mixins nearer than the superclass), then the superclass. Each as-written name is resolved against
+    # `current`'s lexical nesting; names that resolve to no project class/module are dropped.
+    def enqueue_ancestors(current, queue, name_memo)
+      includes_of(current).each do |raw|
+        resolved = resolve_ancestor_class_name(current, raw, name_memo)
+        queue.push(resolved) if resolved
+      end
+      raw_super = superclass_of(current)
+      return if raw_super.nil?
+
+      resolved_super = resolve_ancestor_class_name(current, raw_super, name_memo)
+      queue.push(resolved_super) if resolved_super
+    end
+
+    # Resolves an ancestor name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) to a project-discovered class,
+    # following Ruby's `Module.nesting` constant lookup: try it under each enclosing namespace of the subclass,
+    # innermost first, then bare. nil when no candidate names a discovered user class.
+    def resolve_ancestor_class_name(subclass_qualified, raw_ancestor, name_memo)
+      by_subclass = (name_memo[subclass_qualified] ||= {})
+      return by_subclass[raw_ancestor] if by_subclass.key?(raw_ancestor)
+
+      by_subclass[raw_ancestor] = compute_ancestor_class_name(subclass_qualified, raw_ancestor)
+    end
+
+    def compute_ancestor_class_name(subclass_qualified, raw_ancestor)
+      segments = subclass_qualified.split("::")
+      (segments.length - 1).downto(0) do |i|
+        candidate = (segments[0, i] + [raw_ancestor]).join("::")
+        return candidate if known_user_class?(candidate)
+      end
+      nil
+    end
+
+    def known_user_class?(name)
+      discovered_superclasses.key?(name) || discovered_def_nodes.key?(name) ||
+        discovered_includes.key?(name)
+    end
+    private :ancestor_walk_gave_up, :compute_ancestor_class_name, :known_user_class?
+
     # Records, for a resolved cross-class ancestry read, every file that declares `class_name` (its declaration /
     # reopening / superclass / include sites). The `discovered_class_sources` table it reads is populated only by
     # the cross-file project pre-pass ({Inference::ScopeIndexer.discovered_def_index_for_paths}) and only when

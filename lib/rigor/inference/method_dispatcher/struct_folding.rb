@@ -266,6 +266,18 @@ module Rigor
             fold_safe_self_receiver?(context)
         end
 
+        # A fold-safe stored receiver is a local-variable read whose name the body's fold-safe set (on the
+        # scope) marks as safe to fold — never aliased / escaped, and any mutation a straight-line member
+        # setter the write-back keeps the binding current for.
+        def fold_safe_local_receiver?(context)
+          node = context.call_node
+          receiver = node&.receiver
+          scope = context.scope
+          return false unless receiver.is_a?(Prism::LocalVariableReadNode) && scope
+
+          scope.struct_fold_safe?(receiver.name)
+        end
+
         # Issue #525 — the in-body half. A member read written with no receiver (or `self.member`) inside a
         # method the CALLER resolved on a fold-safe struct receiver: `Line.new("a", 2).shout` re-types
         # `shout`'s body with `self_type` = the caller's `StructInstance`, and the implicit-self `text` read

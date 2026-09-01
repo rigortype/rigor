@@ -439,7 +439,10 @@ Two facts combine: `infer_user_method_return` types a body under a fixed
 and the gate never asked the callee what it returns. The whitelist answers
 both at once — any callee outside it refuses, whatever it does internally —
 and is the SAME predicate
-([`StructFolding.materialization_call?`](../../lib/rigor/inference/method_dispatcher/struct_folding.rb))
+([`StructMaterialization.materialization_call?`](../../lib/rigor/inference/method_dispatcher/struct_materialization.rb),
+its own file — `StructFolding` `extend`s it, and `module_function` copies
+arrive private through `extend`, so the predicate is callable only under its
+own module name)
 the ADR-48 slice-5 `:self` grant uses. Sharing it is the point: while the two
 gates had forked answers, a correctly whitelisted `.with` fold could still fire
 off a receiver the other gate wrongly called fresh
@@ -455,7 +458,11 @@ an identical diagnostic set and an identical `type-scan` coverage (570
 unrecognized, `CallNode` 461/1966). For the loss to bite, the helper's return
 must already infer to a `StructInstance`, and at these sites it does not. The
 richer fix — consult the callee's inferred return and accept it when it is
-provably not a `self` alias — is deferred until a corpus shows a real loss.
+provably not a `self` alias — is tracked as
+[#599](https://github.com/rigortype/rigor/issues/599). Three of this repo's own
+regression guards were written on the factory route and had to be moved onto a
+direct materialisation to stay discriminating, which is the concrete evidence
+for prioritising it.
 
 **Slice plan (Struct):** slice 1 = the `StructClass` carrier + `Struct.new`
 recognition; slice 2 = the `StructInstance` carrier + fresh-chain member
@@ -505,7 +512,7 @@ tied to the exact carrier the grant was issued for.
 
 The materialisation test the grant uses is the SAME one slice 2's
 `fresh_receiver?` uses — one implementation,
-`StructFolding.materialization_call?`. Neither reads a bare chained call as
+`StructMaterialization.materialization_call?`. Neither reads a bare chained call as
 fresh: "chained" stops meaning "fresh" as soon as a method can hand back its own
 receiver, and a self-returning fluent builder is ordinary Ruby.
 `Line.new("a").with_text("z").shout` over `def with_text(v) = (self.text = v;

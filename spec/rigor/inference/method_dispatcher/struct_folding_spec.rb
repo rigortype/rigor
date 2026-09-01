@@ -807,7 +807,7 @@ RSpec.describe "Struct.new value folding", type: :runner do
         # a before/after run over haml's and hamlit's parsers, faraday's Options/Request and mail's
         # received_parser showed an identical diagnostic set and identical `type-scan` coverage, because a
         # helper return at those sites does not infer to a StructInstance in the first place. The richer
-        # fix (consult the callee's return for a self-alias) waits for a corpus that shows a real loss.
+        # fix (consult the callee's return for a self-alias) is issue #599.
         expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
           #{builder_def}
           def make = Line.new("x", 1)
@@ -820,7 +820,7 @@ RSpec.describe "Struct.new value folding", type: :runner do
         # return is genuinely fresh, but the whitelist cannot see through `parse`, so the chain declines and
         # a typo on it goes unreported; written as a direct materialisation the same typo still fires. The
         # loss direction is a missed error, never a diagnostic on correct code — and closing it needs the
-        # callee's return consulted for a `self` alias, which is issue #595's deferred richer half.
+        # callee's return consulted for a `self` alias — issue #599.
         factory = <<~RUBY
           Pair = Struct.new(:label, :items)
           def build = Pair.new("hi", [1, 2])
@@ -834,6 +834,56 @@ RSpec.describe "Struct.new value folding", type: :runner do
     end
 
     describe "a hand-written `with` is not a materialisation" do
+      # The guard resolves `with` through the ancestor walk, so BOTH consumers of the shared predicate — the
+      # direct member read here and the `:self` grant that types a whole body — get the same answer. They
+      # did not while the guard read the own-class table only: an included `with` was invisible to it and a
+      # read folded off a receiver the grant arm refused (#598 review).
+      let(:warm_module) { <<~RUBY }
+        module Warm
+          def with(**)
+            self
+          end
+        end
+      RUBY
+
+      it "declines a member read through a `with` an included module supplies" do
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          #{warm_module}
+          class Line < Struct.new(:text, :indent)
+            include Warm
+          end
+          dump_type(Line.new("a", 2).with(text: "q").text)
+        RUBY
+      end
+
+      it "declines a block-def method call off that same receiver (the grant consumer)" do
+        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+          #{warm_module}
+          class Line < Struct.new(:text, :indent)
+            include Warm
+
+            def shout
+              text.upcase
+            end
+          end
+          dump_type(Line.new("a", 2).with(text: "q").shout)
+        RUBY
+      end
+
+      it "still folds both consumers when no user `with` exists anywhere" do
+        # The must-still-fold sibling: without it the two declines above would be satisfied by a guard that
+        # simply refused every `.with`.
+        expect(dumped_types(<<~RUBY)).to eq(["\"c\"", "\"C\""])
+          class Plain < Struct.new(:text)
+            def shout
+              text.upcase
+            end
+          end
+          dump_type(Plain.new("b").with(text: "c").text)
+          dump_type(Plain.new("b").with(text: "c").shout)
+        RUBY
+      end
+
       it "declines a `.with` the struct defined itself" do
         # A user `with` is free to return `self`, which would reopen the whole family through the one
         # non-`new` name on the whitelist.

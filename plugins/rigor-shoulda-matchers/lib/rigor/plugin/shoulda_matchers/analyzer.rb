@@ -178,9 +178,10 @@ module Rigor
 
         # `entry` is the published fact's per-model Hash: `{ table:, columns:, associations:, ... }`.
         # `columns:` is a flat `Array<String>` (`Activerecord#index_to_published_hash`); `associations:` is
-        # `Array<Hash>` with String `:name` / `:target`, Symbol `:kind` (`:singular` | `:collection`), and
-        # boolean `:nullable` — the same row shape `ModelIndex::Entry#associations` builds, carried through
-        # unchanged.
+        # `Array<Hash>` with String `:name`, Symbol `:kind` (`:singular` | `:collection`), `:nullable`,
+        # `:polymorphic`, and a `:target` that is a String except on polymorphic rows, where it is nil —
+        # the row shape `ModelDiscoverer#build_association_row` publishes. Only `:name` and `:kind` are
+        # read here.
         def column_names(entry) = entry[:columns] || []
         def association_rows(entry) = entry[:associations] || []
         def find_association(entry, name) = association_rows(entry).find { |a| a[:name] == name.to_s }

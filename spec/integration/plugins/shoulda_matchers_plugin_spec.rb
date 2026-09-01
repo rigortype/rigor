@@ -42,9 +42,9 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
       table: "users",
       columns: %w[id email name created_at],
       associations: [
-        { name: "author", kind: :singular, target: "User", nullable: false },
-        { name: "posts", kind: :collection, target: "Post", nullable: nil },
-        { name: "profile", kind: :singular, target: "Profile", nullable: true }
+        { name: "author", kind: :singular, target: "User", nullable: false, polymorphic: false },
+        { name: "posts", kind: :collection, target: "Post", nullable: nil, polymorphic: false },
+        { name: "profile", kind: :singular, target: "Profile", nullable: true, polymorphic: false }
       ],
       enums: {},
       scopes: [],
@@ -371,7 +371,9 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
         # Regression guard: `Hash#find(anchor)` (no block) used to return an Enumerator instead of the
         # entry, and calling `#column?` on it raised NoMethodError — which the engine isolates as ONE
         # `runtime-error` diagnostic for the whole file, in place of every real diagnostic below it.
-        expect(diags.map(&:rule)).not_to include("runtime-error")
+        # The raise envelope is stamped `source_family: :plugin_loader`, NOT the plugin's own family,
+        # so this must scan the UNFILTERED diagnostics — the filtered set can never contain it.
+        expect(result.diagnostics.map(&:rule)).not_to include("runtime-error")
       end
     end
 
@@ -383,7 +385,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
       RUBY
         diags = shoulda_diagnostics(result)
         expect(diags.map(&:rule)).not_to include("unknown-column")
-        expect(diags.map(&:rule)).not_to include("runtime-error")
+        expect(result.diagnostics.map(&:rule)).not_to include("runtime-error")
       end
     end
   end

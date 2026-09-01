@@ -24,6 +24,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** A block-taking call on a statically-folded `Set` constant (`NAMES.any? { … }`) no longer answers the blockless method's constant — the block decides the runtime answer, and the wrong fold could flag reachable conditions as always-truthy ([#546](https://github.com/rigortype/rigor/pull/546), [#539](https://github.com/rigortype/rigor/issues/539)).
+
 - **[engine]** Overload selection now sees through alias-declared parameters — an alias expanding to a concrete class rejects a non-matching argument instead of gradually accepting everything and winning by list position ([#558](https://github.com/rigortype/rigor/pull/558), [#529](https://github.com/rigortype/rigor/issues/529)).
 - **[check]** The declared side of `def.return-type-mismatch` and the ADR-35 override rules now sees through RBS type aliases, so a redefinition contradicting an alias-declared signature is reported instead of silently accepted ([#557](https://github.com/rigortype/rigor/pull/557), [#529](https://github.com/rigortype/rigor/issues/529)).
 - **[engine]** RBS type aliases and intersections now translate instead of collapsing to untyped — prism's `type node = Node & _Node` reads as `Prism::Node`, and aliased returns, parameters, and block parameters resolve through the alias table ([#556](https://github.com/rigortype/rigor/pull/556), [#529](https://github.com/rigortype/rigor/issues/529)).

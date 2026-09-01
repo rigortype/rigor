@@ -17,66 +17,54 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**The 2026-09-01 opacity-sweep campaign is fully merged.** All 20 PRs (#535–#559 sweep numbers plus
-#561) landed on master on 2026-09-01; the merge queue is empty (only the pre-existing dependency
-bumps #86/#516/#517 remain open, outside this campaign). The integrated master passed `make verify`
-from a cold cache (#554's `SCHEMA_VERSION` 6→7 bump) with the diagnostics slot re-primed, and the
-`[Unreleased]` section merged clean — 27 entries, no duplicated `###` heading.
+**The 2026-09-01 opacity campaign is merged AND re-measured.** All 20 sweep PRs + ADR-105 landed;
+the sweep probe was then re-run on the merged master over all 30 targets (the handoff's mandatory
+re-run before sizing new levers), with four verification passes on the ambiguous clusters. Full
+numbers and per-cluster verdicts:
+[`docs/notes/20260901-post-campaign-opacity-recheck.md`](notes/20260901-post-campaign-opacity-recheck.md);
+re-run outputs preserved on `opacity-sweep-harness-20260901`
+(`tool/opacity-sweep-20260901/rerun-20260901/`). Headlines: mastodon 48.9→54.8%, redmine
+47.8→50.2%, rigor-lib 59.3→61.3%; the two per-target drops (numo −3.44pp, DSA-in-Ruby −0.54pp) are
+FULLY attributed to #537/#559's intended wrong-precise→honest trades, zero unexplained residue.
 
-Campaign record: 11-target corpus **+39/−70** vs the pre-campaign master (11 true-positive bug finds
-among the additions — mastodon `quote_request.rb` nil-deref ×8, textbringer LSP stderr crashes ×2,
-redmine `diff_table.rb:153` `=` for `==`; every removal a false positive), `lib` precision
-**59.8% → 61.3%** (same-day paired; `make coverage` gate pinned 0.58 since #535). Perf disclosures
-that now apply to master: #547 ~+12% redmine cold-check wall (memo-key headroom on its PR), #556
-~+5.5% lib cold self-check (post-memo; inherent to translating expanded aliases).
-Synthesis: [`docs/notes/20260901-corpus-opacity-attribution.md`](notes/20260901-corpus-opacity-attribution.md);
-sweep harness on branch `opacity-sweep-harness-20260901` (its probe predates #535 — re-run before
-sizing new levers).
+## Backlog, ranked by the re-run (all on GitHub Issues)
 
-**The drain's postmortem landed as [ADR-105](adr/105-pr-landing-flow.md)** (PR #562, merged):
-changelog entries now land as `changelog.d/<section>/<slug>.md` fragments (never direct
-`[Unreleased]` edits — GitHub ignores `merge=union` for PR mergeability), and autonomous sessions
-merge each audited+green PR as they go instead of queueing. Both rules are in AGENTS.md.
+1. **[#569](https://github.com/rigortype/rigor/issues/569)** (new) — rigor-activerecord is
+   all-or-nothing on `db/schema.rb`: redmine gitignores it, so the plugin types NOTHING there
+   (~650 direct sites: `table_name` 517 + first-hop `.where`/`.visible`/`.find`). Columns-less
+   degraded `ModelIndex`; additive by construction. **Best next unit of work.**
+2. **[#534](https://github.com/rigortype/rigor/issues/534)** — Rails plugin batch, ~2,015
+   named-receiver sites: `Parameters#[]`/`expect`/`slice` first (1,077), then Rails readers 288 /
+   Duration 195 / Flash+Session+Request ~350 / sidekiq 64. Each sub-item independently landable.
+3. **[#560](https://github.com/rigortype/rigor/issues/560)** — the ADDED-value join (straight-line
+   mutations never join the added value): the live always-falsey FP family; design fork + corpus
+   census already on the issue. mail's ragel cluster shares the root.
+4. **[#525](https://github.com/rigortype/rigor/issues/525)** — struct factories: re-measured to
+   296 mail sites (was 39); the new comment adds the setter-then-read fold-safety shape to the
+   design pass. `:self`-sentinel design for in-body reads already on the issue.
+5. Small/opportunistic: **[#570](https://github.com/rigortype/rigor/issues/570)** (new,
+   JSON.generate fold), [#533](https://github.com/rigortype/rigor/issues/533) items 1/5/7 + new
+   item 9 (block-return pass reads only `body.last` — repro + decline point on the issue),
+   [#527](https://github.com/rigortype/rigor/issues/527) ancestor-walk design pass,
+   [#530](https://github.com/rigortype/rigor/issues/530) items 1+3. Ready-for-human policy calls
+   unchanged: [#541](https://github.com/rigortype/rigor/issues/541) /
+   [#542](https://github.com/rigortype/rigor/issues/542) /
+   [#531](https://github.com/rigortype/rigor/issues/531).
 
-## What the merge session itself established (worth knowing before touching the same files)
-
-- GitHub ignores `.gitattributes merge=union` for PR mergeability, so every post-first merge needed a
-  local master-merge + CI cycle; the resolutions now live in this clone's **rerere cache**.
-- **rerere replays superseded resolutions**: it re-applied a known-broken `expression_typer.rb`
-  resolution (orphaned `try_user_method_inference` head) that had been recorded before its repair.
-  `git rerere forget <path>` + re-resolving by hand re-records the good one — trust but VERIFY any
-  rerere-resolved hunk against the intended shape before pushing.
-- The three non-keep-both crossings landed as documented: #549+#555 (`method_name:` kwarg + carrier
-  gate), #537+#556 (`join_candidate_returns` threads `alias_expander:`), #537+#558 (array-valued
-  passes + hash-bundle signature).
-
-## Backlog (all on GitHub Issues, with verified repros / designs)
-
-- **[#560](https://github.com/rigortype/rigor/issues/560)** — the remaining ADDED-value half:
-  `u = [1, 2]; u.push(6); u.last == 6` still folds falsey (the slot-rewriting half landed as #561),
-  and mail's ragel cluster (#533 item 8) is the same root on the precision side. Design = option 1
-  on the issue (thread mutator arg types into the straight-line widening the way the block path's
-  `join_array_content` already does). **Next sized lever.**
-- **[#525](https://github.com/rigortype/rigor/issues/525)** — in-body member reads for struct-factory
-  block defs: full executable design on the issue (`:self` sentinel in `struct_fold_safe_locals`,
-  the return-memo-key hazard, the self-setter guard). Stacks on nothing now — #555 is in master.
-- **[#527](https://github.com/rigortype/rigor/issues/527)** ancestor/include walk family
-  (ready-for-human design pass) · **[#530](https://github.com/rigortype/rigor/issues/530)** items
-  1 (superclass-reach tagging) and 3 (no-lockfile degradation) — item 2 answered as environmental ·
-  lambda-literal lane (design note on [#533](https://github.com/rigortype/rigor/issues/533); its
-  `Queue`/`SizedQueue` item died on verification) · **[#534](https://github.com/rigortype/rigor/issues/534)**
-  remaining Rails surfaces (`Parameters#[]` needs a rules-level decision, analysis on the issue).
-- Ready-for-human policy calls: **[#541](https://github.com/rigortype/rigor/issues/541)** attr_writer
-  ivar surface · **[#542](https://github.com/rigortype/rigor/issues/542)** Hash.new default ·
-  **[#531](https://github.com/rigortype/rigor/issues/531)** `Array.new(n, fill)` (~500-site FP trade).
+Verified NON-levers (do not re-derive): `User.current` 494 sites (honest CurrentAttributes
+propagation), `Mutex#synchronize` cluster (65/66 honest; generic X binds fine), `Thread#[]`
+(honest RBS untyped), `Mail::Utilities.blank?`/`chars` (#554 works; bodies are param-Dynamic),
+tuple min/max (element-union fallback already ships). The parameter/ivar lane stays closed
+(ADR-67 gated / ADR-58 settled).
 
 ## Pitfalls that still bind
 
-- The corpus baseline arms in the session scratchpad are now STALE (they predate the merged master):
-  re-collect base arms from a master-pinned worktree before gating the next engine change, and
-  regenerate the two apps' `.rigor-ab.yml` (committed config minus `baseline:`; the tell for a
-  missing one: −787/−2306 with "silenced by baseline" in stderr).
-- Never compare post-#535 coverage ratios to older numbers; `rigor coverage` is plugin-aware now.
-- Read a gate's exit code in its own call; PHASED A/B only for diagnostic sets, never timings.
-- A background corpus arm reads the LIVE checkout — freeze the tree (no stash/checkout) for the
-  whole arm, or point the runner at a detached worktree.
+- The corpus baseline arms in older session scratchpads predate the merged master — re-collect
+  from a master-pinned worktree before gating the next engine change; regenerate the two apps'
+  `.rigor-ab.yml` (tell for a missing one: −787/−2306 with "silenced by baseline" in stderr).
+- **`rigor type-of` cannot see discovery-seeded joins** (phantom-Hash read Dynamic on BOTH arms of
+  an A/B): binding-level claims need the probe's `discovery_seeded_scope` lens or `check` itself.
+- The precision ratio scores `dynamic_top → dynamic_specific` as zero and honest widening as full
+  loss — pair it with the FP tally before ranking any wrong-precise fix (#537 lesson).
+- Never compare post-#535 coverage ratios to older numbers; read a gate's exit code in its own
+  call; a background corpus arm reads the LIVE checkout — freeze the tree for the whole arm.

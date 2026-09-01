@@ -119,6 +119,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-103 | [Effect labels: an opt-in, snapshot-first effect system](103-effect-labels.md) | Proposed (design note landed 2026-08-16; nothing implemented; four items open at Proposed) |
 | ADR-104 | [Boot-slim probe for the effects surfaces](104-effects-boot-slim-probe.md) | Accepted (implemented for the report and the snapshot verbs, with #482's entry split) |
 | ADR-105 | [PR landing flow: sequential merges and changelog fragments](105-pr-landing-flow.md) | Accepted (changelog.d/ mechanism + gate landed with the ADR; norm in AGENTS.md) |
+| ADR-106 | [Migrating the spec suite to minitest](106-minitest-migration.md) | Accepted (declined — the suite stays on RSpec; re-evaluation triggers recorded) |
 
 ## Adding a New ADR
 

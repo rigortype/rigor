@@ -85,8 +85,21 @@ jobs:
           fi
 
   # ── 1. RSpec suite (via binpacker) ──────────────────────────────
+  # The suite is the workflow's critical path, and a runner's core count is
+  # the ceiling on what workers alone can do with it — every other job here
+  # finishes inside 2m30s. So the run is also split across MACHINES: each
+  # shard analyses its own slice with its own workers, and the job's wall
+  # time becomes the slowest shard rather than the whole suite.
+  #
+  # Three shards, because a spec FILE is binpacker's scheduling unit and
+  # cannot be split: a shard can never finish faster than the heaviest file
+  # it holds. Measured at 423 files, the three heaviest are 87s / 51s / 40s
+  # and land in three different shards, so the floor is ~87s while an even
+  # split of the total is ~63s per runner. A fourth shard would buy nothing
+  # but another job's setup. Past that floor the next lever is not more
+  # shards but a cheaper `runner_spec.rb`.
   test:
-    name: Tests (Ruby ${{ matrix.ruby }})
+    name: Tests (Ruby ${{ matrix.ruby }}, shard ${{ matrix.shard }}/3)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -95,6 +108,7 @@ jobs:
       matrix:
         ruby:
           - "4.0"
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -114,23 +128,94 @@ jobs:
       # written at the end of each successful run and picked up by the
       # next. Key is unique per run-id so the post-step always saves
       # fresh timing data; restore-keys prefix-matches the most recent.
+      #
+      # The key carries the shard index because parallel jobs cannot all
+      # save the same key — the first wins and the rest warn. The RESTORE
+      # keys deliberately do NOT: every shard prefix-matches the same
+      # `binpacker-timings-<os>-ruby<v>-` namespace, so all three restore
+      # the same file and therefore cut the same partition. That is not a
+      # nicety — shards agree on which tests are theirs only while they
+      # agree on the timings, and the shard-coverage job below is what
+      # catches it when they do not.
+      #
+      # A shard's saved file stays complete rather than shrinking to its
+      # own slice: binpacker APPENDS samples and compacts to the three most
+      # recent per test, so a shard's write leaves its siblings' entries
+      # untouched.
       - name: Restore binpacker timing file
         uses: actions/cache@v6
         with:
           path: tmp/binpacker.timings
-          key: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}
+          key: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ matrix.shard }}
           restore-keys: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-
 
       - name: Run tests
-        run: make test-binpacker
+        run: >-
+          make test-binpacker
+          BINPACKER_FLAGS="--shard ${{ matrix.shard }}/3 --report tmp/binpacker-report-${{ matrix.shard }}.json"
+
+      # Consumed by the shard-coverage job, which is the only place a
+      # partition that dropped tests can be detected.
+      - name: Upload shard run report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: binpacker-report-${{ matrix.shard }}
+          path: tmp/binpacker-report-${{ matrix.shard }}.json
+          retention-days: 1
 
       # The pool-runner spec is excluded from the default suite (see
       # spec/spec_helper.rb) and runs as its own rspec process. Without
       # this step the gated file has no CI coverage at all — a
       # deterministic failure in it once rotted unnoticed for three
       # weeks (fork-backend default 86ed9129 → fixed 7ebeac08).
+      #
+      # Pinned to one shard: it is a single file outside the sharded set,
+      # so running it in every shard would triple its cost for no coverage.
       - name: Run pool-runner spec
+        if: matrix.shard == 1
         run: make test-ractor-pool
+
+  # ── 1b. Shard coverage ──────────────────────────────────────────
+  # Sharding's one silent failure: shards never coordinate, so each trusts
+  # the others to have cut the identical partition from the identical
+  # timing data. A shard that restored a different timing file partitions
+  # differently, some tests land in NO shard, and every job still reports
+  # success — a shard cannot tell "not mine" from "does not exist".
+  #
+  # `binpacker shards-check` is the fan-in that can: it reads each shard's
+  # run report and fails unless they describe one coherent split of one
+  # suite — same shard count, same whole-suite discovered count, every
+  # index present exactly once, and the slices summing to the whole.
+  #
+  # Runs whenever the matrix was not outright cancelled, so a mismatch
+  # still surfaces when one shard failed.
+  shard-coverage:
+    name: Shard coverage (every test ran)
+    needs: [changes, test]
+    runs-on: ubuntu-latest
+    if: always() && needs.changes.outputs.code == 'true' && needs.test.result != 'cancelled'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Download shard run reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binpacker-report-*
+          merge-multiple: true
+          path: reports
+
+      - name: Assert the shards covered the whole suite
+        run: bundle exec binpacker shards-check reports/binpacker-report-*.json
 
   # ── 2. RBS compatibility (3.x + 4.x) ────────────────────────────
   rbs-compat:
@@ -485,7 +570,7 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [changes, test, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge]
+    needs: [changes, test, shard-coverage, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -493,6 +578,7 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          SHARD_COVERAGE_RESULT: ${{ needs.shard-coverage.result }}
           RBS_COMPAT_RESULT: ${{ needs.rbs-compat.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           SELF_CHECK_RESULT: ${{ needs.self-check.result }}
@@ -508,7 +594,7 @@ jobs:
           fi
           # A gated job that was skipped (Markdown-only PR) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TEST_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT"; do
+          for job_result in "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

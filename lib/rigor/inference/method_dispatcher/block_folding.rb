@@ -185,10 +185,13 @@ module Rigor
         end
 
         def constant_emptiness(value)
-          # Only `Range` constants reach these folds: `Type::Constant` rejects Array / Hash literals (they
-          # become `Tuple` / `HashShape` carriers), and the remaining scalar constants (Integer / Float /
-          # Symbol / String / …) are not Enumerable receivers for the filter or predicate methods folded here.
+          # `Range` constants and folded `Set` values (SetFolding wraps a real frozen ::Set) are the
+          # Enumerable receivers that reach these folds: `Type::Constant` rejects Array / Hash literals
+          # (they become `Tuple` / `HashShape` carriers), and the remaining scalar constants (Integer /
+          # Float / Symbol / String / …) are not Enumerable receivers for the filter or predicate methods
+          # folded here.
           return range_emptiness(value) if value.is_a?(Range)
+          return (value.empty? ? :empty : :non_empty) if value.is_a?(::Set)
 
           :unknown
         end

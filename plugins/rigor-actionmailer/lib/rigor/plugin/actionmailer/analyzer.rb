@@ -53,7 +53,9 @@ module Rigor
           return [] if class_name.nil?
           return [] if RESERVED_CLASS_METHODS.include?(call_node.name)
 
-          class_entry = mailer_index.find(class_name) || mailer_index.find("::#{class_name}")
+          # `MailerIndex#find` de-roots the query itself (#621) — a `::UserMailer.welcome` receiver and a
+          # plain `UserMailer.welcome` reach the same entry with no retry arm here.
+          class_entry = mailer_index.find(class_name)
           return [] if class_entry.nil?
 
           action_entry = class_entry.find_action(call_node.name)

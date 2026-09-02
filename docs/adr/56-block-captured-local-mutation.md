@@ -556,8 +556,6 @@ base without joining the mutator's argument (`if xs.any?; xs << 1` reads
 `Array[String]`). That is #560's family reached through a fourth door,
 and a separate change.
 
-||||||| parent of 59af3ced (Type per-element fold positions at a rebound capture's converged binding)
-
 ### WD2.10 — The per-element fold sees a rebound capture at its converged binding (2026-09-02, issue #587)
 
 Slice A's fixpoint answers the CONTINUATION: what a captured local is

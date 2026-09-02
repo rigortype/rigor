@@ -95,16 +95,28 @@ quietly take the wrong branch — so the plugin pins only what you
 wrote down. `User.quoted_table_name` is always `String`; the
 quoting is up to the database adapter.
 
-A model declared inside a Ruby module (`Blog::Post`) resolves its
-table the way Rails does: the namespace is dropped, not flattened
-into the name, so `Blog::Post` reads `posts`, not `blog_posts`. A
-`table_name_prefix` / `table_name_suffix` the enclosing module
-declares as a literal (`def self.table_name_prefix = "blog_"`, or
-`mattr_accessor :table_name_prefix, default: "blog_"`) is applied on
-top, so the same model reads `blog_posts` once `Blog` sets that. A
-prefix or suffix your module computes instead — anything the plugin
-cannot read off the source as a literal — is not guessed at either;
-the plugin falls back to the plain demodulized name.
+A model declared inside a Ruby module or class (`Blog::Post`)
+resolves its table the way Rails does for the cases below: the
+namespace is dropped, not flattened into the name, so `Blog::Post`
+reads `posts`, not `blog_posts`. A `table_name_prefix` /
+`table_name_suffix` the enclosing namespace declares as a literal
+(`def self.table_name_prefix = "blog_"`, `class << self` with the
+same, or `mattr_accessor :table_name_prefix, default: "blog_"`) is
+applied on top, so the same model reads `blog_posts` once `Blog`
+sets that. `mattr_writer` does not count — it defines no reader, so
+Rails never actually reads the value back, and neither does the
+plugin.
+
+`Blog::Post.table_name` still reads as the plain demodulized name
+(`posts`) when `Blog`'s prefix/suffix is declared in a shape the
+plugin cannot read as a literal (a computed value, two disagreeing
+declarations) — but that string is informational only in this case.
+The plugin does not trust it enough to look up columns against it:
+guessing a bare name is the guess most likely to hit an unrelated
+REAL table in a namespaced app, and a wrong corroboration is worse
+than none, so `Blog::Post`'s column, alias and association checks
+stand down entirely rather than run against a table that might not
+be the real one.
 
 ## Limitations
 
@@ -112,6 +124,23 @@ the plugin falls back to the plain demodulized name.
   `User < ApplicationRecord` is not discovered. Either add `User`
   to `model_base_classes`, or list every concrete model
   explicitly.
+- **A model nested inside ANOTHER model class stands down rather
+  than guesses.** `Post::Comment` where `Post < ApplicationRecord`
+  hits a different Rails naming rule entirely — the parent's own
+  table name is spliced into the middle of the child's, not a
+  prefix/suffix — so the plugin recognises the shape and stands
+  `Comment`'s column / alias / association checks down instead of
+  computing (or guessing at) the real name.
+- **A `table_name_prefix` / `table_name_suffix` the plugin never
+  even SEES is used uncorrected — the guessed bare name is trusted
+  as if nothing were declared.** Three sources of this: a
+  `Rails::Engine.isolate_namespace` declaration, which normally
+  lives in `lib/<engine>/engine.rb`, outside `model_search_paths`;
+  a model declaring `table_name_prefix` on ITSELF rather than on an
+  enclosing namespace; and a base class (e.g. `ApplicationRecord`)
+  setting `self.table_name_prefix` for every model under it. None of
+  these are read today, so a model in one of these shapes can read
+  the wrong table exactly as it did before this section's fix landed.
 - **PostgreSQL `db/structure.sql` fallback.** When `db/schema.rb` is
   absent, the plugin parses `db/structure.sql` (the `schema_format =
   :sql` dump) for the same column/type table. It reads PostgreSQL DDL

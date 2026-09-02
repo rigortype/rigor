@@ -355,7 +355,6 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
   end
 
-
   # Issue #622 — the constant half of the structural tier. A receiver constant that resolves to NOTHING types
   # `Dynamic[top]` and short-circuits *before* the method lookup, so `read_missing(:method, …)` never fired and
   # the read left no edge at all: declaring the constant later never re-checked its readers, and a warm session

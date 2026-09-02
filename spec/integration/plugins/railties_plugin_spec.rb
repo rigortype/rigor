@@ -105,6 +105,32 @@ RSpec.describe "plugins/rigor-railties" do
       )
     end
 
+    it "does not hijack an inherited singleton reader through a rooted nested `::Baz::Rails` (#626)" do
+      # The rooted twin of the unrooted `Foo::Rails` case above. `rails_constant_receiver?` folds onto
+      # `Source::ConstantPath.qualified_name_or_nil`, which renders `::Baz::Rails` down to the full dotted
+      # "Baz::Rails" rather than the bare "Rails", so the gate still declines here. Folding onto
+      # `Source::ConstantPath.rooted?` instead — the naive reading of "re-implements a single-segment slice
+      # of rooted?" — would wrongly pass this receiver too: `rooted?` answers true for every node along a
+      # rooted chain, not only a single segment, so the gate would hijack `LoggerBase.logger`, inherited by
+      # `Baz::Rails`, into the framework's `BroadcastLogger`.
+      source = <<~RUBY
+        class LoggerBase
+          def self.logger
+            "base-logger"
+          end
+        end
+
+        module Baz
+          class Rails < LoggerBase
+          end
+        end
+
+        Rigor.dump_type(::Baz::Rails.logger)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(["dump_type: Dynamic[top]"])
+    end
+
     it "declines the reader the project defines on its own top-level `Rails` (#588)" do
       # The syntactic gate alone retyped the project's own `Rails.logger` to `BroadcastLogger` over the
       # project's definition. Zero diagnostics either way (both nominals are RBS-less), so this is the

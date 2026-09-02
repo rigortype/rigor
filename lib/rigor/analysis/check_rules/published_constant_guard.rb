@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 
 module Rigor
@@ -38,12 +39,19 @@ module Rigor
       #   {InferredParamGuard}, arguments are walked, because a predicate's fold rests on its arguments just
       #   as much as on its receiver
       # - `&&` / `||` / parentheses / `rescue` composition, and `!`, which Prism spells as a `CallNode`
-      # - ONE interprocedural hop: `unless production?`, where `def production?` is a project method whose
-      #   body reads such a constant. The hop is bounded (one level, a node budget) and deliberately coarse —
-      #   ANY published foreign constant anywhere in the callee's body declines, rather than a proof that the
-      #   return value derives from it. Over-declining withholds a warning; under-declining would emit one.
-      #   ADR-58's *Non-transitivity* passage is the precedent for stopping at one hop rather than building a
-      #   provenance channel through the return memo.
+      # - ONE interprocedural hop into a project predicate method whose body reads such a constant, whatever
+      #   spells its owner: `unless production?` (implicit self), `self.prod?`, and — the idiomatic shape, a
+      #   configuration module exposing predicates — `AppConfig.production?`. The hop is bounded (one level,
+      #   a node budget) and deliberately coarse: ANY published foreign constant anywhere in the callee's
+      #   body declines, rather than a proof that the return value derives from it. Over-declining withholds
+      #   a warning; under-declining would emit one. ADR-58's *Non-transitivity* passage is the precedent for
+      #   stopping at one hop rather than building a provenance channel through the return memo.
+      #
+      # Deliberately NOT covered, and a separate change: a value copied into a local (`m = MODE; m == :x`),
+      # into an ivar (`@mode = MODE` in `initialize`), or through a same-file constant alias
+      # (`MODE2 = AppConfig::MODE`). Each needs flow provenance — ADR-58's `r = @x` stamping is the shape —
+      # rather than a syntactic root walk, and approximating it here is exactly the ad-hoc widening ADR-58's
+      # *Non-transitivity* passage forbids. Two hops (`live? -> prod? -> MODE`) also stay uncovered.
       module PublishedConstantGuard
         # A defensive depth cap against a pathological chain (the walk is otherwise linear in chain length).
         MAX_DEPTH = 64
@@ -82,29 +90,30 @@ module Rigor
           end
         end
 
-        # A call is rooted when its receiver is, when any argument is, or — for an implicit-self call — when
-        # the project method it names reads such a constant (the one interprocedural hop).
+        # A call is rooted when its receiver is, when any argument is, or when the project method it names
+        # reads such a constant (the one interprocedural hop).
         def rooted_call?(node, scope, depth)
           return true if rooted?(node.receiver, scope, depth + 1)
           return true if Array(node.arguments&.arguments).any? { |arg| rooted?(arg, scope, depth + 1) }
 
-          node.receiver.nil? && self_call_reads_published_constant?(node, scope)
+          callee_reads_published_constant?(node, scope)
         end
 
-        # A `ConstantPathNode`'s own `name` IS its last segment, which is the granularity
-        # `Scope#published_constant?` matches at.
+        # The reference AS WRITTEN (`AppConfig::MODE`), so `Scope#published_constant?` can match its local
+        # exemption exactly rather than on the last segment. A path that renders no qualified name falls back
+        # to its own last segment, which is all there is to ask about.
         def published_path?(node, scope)
-          name = node.name
-          !name.nil? && scope.published_constant?(name.to_s)
+          rendered = Source::ConstantPath.qualified_name_or_nil(node) || node.name&.to_s
+          !rendered.nil? && scope.published_constant?(rendered)
         end
 
-        # The one hop. Resolves the implicit-self callee through the ordinary `Scope` accessors (so the ADR-46
-        # recorder sees the read and the caller gains an edge to the callee — the conservative direction) and
-        # scans its body. Fails soft to false: a resolution this cannot make is not a reason to withhold.
-        def self_call_reads_published_constant?(node, scope)
+        # The one hop. Resolves the callee through the ordinary `Scope` accessors (so the ADR-46 recorder sees
+        # the read and the caller gains an edge to the callee — the conservative direction) and scans its
+        # body. Fails soft to false: a resolution this cannot make is not a reason to withhold.
+        def callee_reads_published_constant?(node, scope)
           return false if scope.published_constant_names.empty?
 
-          def_node = resolve_self_call(node.name, scope)
+          def_node = resolve_callee(node, scope)
           return false if def_node.nil?
 
           body_reads_published_constant?(def_node.body, scope)
@@ -112,14 +121,35 @@ module Rigor
           false
         end
 
-        def resolve_self_call(method_name, scope)
-          owner = self_class_name(scope)
-          owner ? scope.user_def_for(owner, method_name) : scope.top_level_def_for(method_name)
+        # `foo` / `self.foo` resolve against the enclosing self; `AppConfig.foo` against the named module's
+        # SINGLETON table, which is where a configuration module's predicates live. Any other receiver shape
+        # (a local, a call chain) is not a hop this walk can make.
+        def resolve_callee(node, scope)
+          receiver = node.receiver
+          case receiver
+          when nil, Prism::SelfNode then resolve_self_call(node.name, scope)
+          when Prism::ConstantReadNode then scope.singleton_def_for(receiver.name.to_s, node.name)
+          when Prism::ConstantPathNode then resolve_constant_receiver_call(receiver, node.name, scope)
+          end
         end
 
-        def self_class_name(scope)
+        def resolve_constant_receiver_call(receiver, method_name, scope)
+          owner = Source::ConstantPath.qualified_name_or_nil(receiver)
+          owner ? scope.singleton_def_for(owner, method_name) : nil
+        end
+
+        # A `Singleton[X]` self (a `def self.…` body) names the singleton table; a `Nominal[X]` self names
+        # the instance one; no class at all is the top-level pseudo-class.
+        def resolve_self_call(method_name, scope)
           self_type = scope.self_type
-          self_type.respond_to?(:class_name) ? self_type.class_name : nil
+          owner = self_type.respond_to?(:class_name) ? self_type.class_name : nil
+          return scope.top_level_def_for(method_name) if owner.nil?
+
+          if self_type.is_a?(Type::Singleton)
+            scope.singleton_def_for(owner, method_name)
+          else
+            scope.user_def_for(owner, method_name)
+          end
         end
 
         # An explicit worklist rather than recursion, so the node budget is one loop-carried local instead of

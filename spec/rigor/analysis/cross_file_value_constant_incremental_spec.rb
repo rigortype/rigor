@@ -38,6 +38,18 @@ RSpec.describe "cross-file value constants — incremental" do
     diagnostics.reject { |d| d.severity == :info }.map { |d| "#{File.basename(d.path)}:#{d.rule}" }.sort
   end
 
+  def messages(diagnostics) = messages_of(diagnostics)
+
+  def messages_of(diagnostics)
+    diagnostics.reject { |d| d.severity == :info }.map(&:message).sort
+  end
+
+  def full_diagnostics(dir)
+    Rigor::Analysis::Runner.new(
+      configuration: configuration(dir), cache_store: nil, environment: shared_environment
+    ).run.diagnostics
+  end
+
   def full_run(dir)
     rules(
       Rigor::Analysis::Runner.new(
@@ -176,6 +188,25 @@ RSpec.describe "cross-file value constants — incremental" do
     end
   end
 
+  it "re-checks a reader whose constant resolved through RBS when the project shadows it" do
+    # The name edge is recorded once per reference, BEFORE the resolver ladder, so it covers a reference the
+    # RBS environment answered. Without that, a project file that later assigns `Math::PI` leaves the reader
+    # serving the RBS value — the same staleness as a second declarer, with a different baseline resolver,
+    # and NEW with the publication (on master a project value write never won at a reader).
+    Dir.mktmpdir do |dir|
+      a = File.join(dir, "a.rb")
+      File.write(a, "def probe\n  Math::PI.upcase\nend\n")
+      session = session_for(dir)
+      expect(messages(session.baseline)).to eq(["undefined method `upcase' for 3.141592653589793"])
+
+      File.write(File.join(dir, "b.rb"), "module Math\n  PI = 3\nend\n")
+      recheck = session.recheck
+      expect(recheck.affected).to include(a)
+      expect(messages(recheck.diagnostics)).to eq(["undefined method `upcase' for 3"])
+      expect(messages_of(full_diagnostics(dir))).to eq(["undefined method `upcase' for 3"])
+    end
+  end
+
   describe "Incremental.changed_constant_publications" do
     it "reports a name whose descriptor moved, and nothing for one that did not" do
       before = { "b.rb" => { "KEPT" => [1], "MOVED" => [1] } }
@@ -199,6 +230,14 @@ RSpec.describe "cross-file value constants — incremental" do
     it "reports nothing for a file outside the diffed set" do
       after = { "other.rb" => { "NEW" => [1] } }
       expect(described_module.changed_constant_publications(["b.rb"], {}, after)).to eq(Set.new)
+    end
+
+    it "distinguishes an Integer literal from the equal Float, which `==` would not" do
+      # `[1] == [1.0]` is true, so a `==` comparison would call `LIMIT = 1` -> `LIMIT = 1.0` unchanged while
+      # the published type moved from `Constant[1]` to `Constant[1.0]`.
+      before = { "b.rb" => { "LIMIT" => [1] } }
+      after  = { "b.rb" => { "LIMIT" => [1.0] } }
+      expect(described_module.changed_constant_publications(["b.rb"], before, after)).to eq(Set["LIMIT"])
     end
   end
 end

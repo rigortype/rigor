@@ -55,21 +55,39 @@ module Rigor
     def published_constant_names = @discovery.published_constant_names
     def local_constant_names = @discovery.local_constant_names
 
-    # Issue #644 — true when `name` (a constant's LAST SEGMENT) is published by the cross-file value-constant
-    # table and is NOT assigned by the file being analysed: a value this file's author cannot see the
-    # declaration of. {Analysis::CheckRules::PublishedConstantGuard} is the only caller — a rule MUST ask
-    # through the guard rather than re-derive the question here, exactly as ADR-58's mark is asked through
-    # `DeclarationSourcedGuard`.
+    # Issue #644 — true when the constant reference `name` (as written: `MODE` or `AppConfig::MODE`) is
+    # published by the cross-file value-constant table and is NOT assigned by the file being analysed: a
+    # value this file's author cannot see the declaration of. {Analysis::CheckRules::PublishedConstantGuard}
+    # is the only caller — a rule MUST ask through the guard rather than re-derive the question here, exactly
+    # as ADR-58's mark is asked through `DeclarationSourcedGuard`.
     #
-    # Matching on the last segment (not the qualified name) deliberately over-answers: a reader of a nested
-    # `MyApp::MODE` also answers true for a top-level `MODE`. Over-answering only ever WITHHOLDS a firing,
-    # which is the safe direction and the grammar the ADR-46 negative keys already use.
+    # The two halves match at deliberately different granularities, because the two errors are not
+    # symmetric. The PUBLISHED half matches on the last segment and so over-answers (a reader of a nested
+    # `MyApp::MODE` answers true for a top-level `MODE`) — over-answering only ever WITHHOLDS a firing, the
+    # safe direction, and it is the grammar the ADR-46 negative keys already use. The LOCAL half is an
+    # exemption, so over-answering there would UN-withhold: matching it on the last segment too would let an
+    # unrelated `Local::MODE` in this file make a read of `AppConfig::MODE` fire. It therefore matches the
+    # reference exactly — except for a BARE reference, which resolves through the lexical ladder and so could
+    # legitimately be answered by any of this file's `*::MODE` assignments.
     def published_constant?(name)
       names = @discovery.published_constant_names
       return false if names.empty?
 
-      names.include?(name) && !@discovery.local_constant_names.include?(name)
+      segment = name.split("::").last
+      return false unless names.include?(segment)
+
+      !locally_declared_constant?(name, segment)
     end
+
+    def locally_declared_constant?(reference_name, segment)
+      local = @discovery.local_constant_names
+      return false if local.empty?
+      return true if local.include?(reference_name)
+      return false if reference_name.include?("::")
+
+      local.any? { |name| name.split("::").last == segment }
+    end
+    private :locally_declared_constant?
 
     def data_member_layouts = @discovery.data_member_layouts
     def struct_member_layouts = @discovery.struct_member_layouts

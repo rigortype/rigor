@@ -140,7 +140,10 @@ module Rigor
         paths.each do |path|
           was = before[path] || {}
           now = after[path]  || {}
-          (was.keys | now.keys).each { |name| moved << name if was[name] != now[name] }
+          # `eql?`, not `==`: `[1] == [1.0]` is TRUE, so `LIMIT = 1` becoming `LIMIT = 1.0` would move the
+          # published type (`Constant[1]` -> `Constant[1.0]`) while this diff called it unchanged. The
+          # declaration signature backstops that case today; the producer must not depend on it.
+          (was.keys | now.keys).each { |name| moved << name unless was[name].eql?(now[name]) }
         end
         moved.freeze
       end

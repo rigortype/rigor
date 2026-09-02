@@ -206,6 +206,91 @@ RSpec.describe "cross-file value constants" do
       expect(flow_warnings("b.rb" => config, "a.rb" => reader)).to eq([])
     end
 
+    it "withholds a predicate that reaches the constant through a project predicate method" do
+      # The idiomatic shape: a configuration module exposing `production?`. Every spelling of the callee's
+      # owner is one hop — implicit self, explicit `self.`, and an explicit module receiver.
+      declaring = <<~RUBY
+        module AppConfig
+          MODE = :production
+
+          def self.production?
+            MODE == :production
+          end
+        end
+      RUBY
+      reader = <<~RUBY
+        def via_module
+          AppConfig.production? ? "prod" : "dev"
+        end
+
+        class Runner
+          def self.prod?
+            AppConfig::MODE == :production
+          end
+
+          def self.implicit
+            prod? ? "a" : "b"
+          end
+
+          def self.explicit
+            self.prod? ? "a" : "b"
+          end
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => declaring, "a.rb" => reader)).to eq([])
+    end
+
+    it "does NOT withhold an unrelated same-named constant this file happens to declare" do
+      # The local exemption is an exemption, so over-answering it UN-withholds. A `Local::MODE` here must not
+      # license a firing on a read of `AppConfig::MODE`, which the reader's author still cannot see.
+      declaring = "module AppConfig\n  MODE = :production\nend\n"
+      reader = <<~RUBY
+        module Local
+          MODE = :other
+        end
+
+        def reads_appconfig
+          AppConfig::MODE == :production ? "prod" : "dev"
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => declaring, "a.rb" => reader)).to eq([])
+    end
+
+    it "keeps firing on a namespaced constant this file owns, read bare or qualified" do
+      # The other side of that exactness: an owner reading its OWN nested constant must still fire, whichever
+      # spelling it uses. A qualified-only exemption would lose the bare read, a segment-only one the case
+      # above.
+      source = <<~RUBY
+        module Owner
+          OWNED = :here
+
+          def self.bare
+            OWNED == :here ? "y" : "n"
+          end
+
+          def self.qualified
+            Owner::OWNED == :here ? "y" : "n"
+          end
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => source)).to eq(["b.rb:5", "b.rb:9"])
+    end
+
+    it "reads the local exemption from the CENSUS, so a `self::` write counts as this file's own" do
+      # `self::TAG =` is invisible to the typed per-file constant walk and visible to the census. Deriving
+      # the exemption from the census is what keeps this a same-file firing rather than a withheld one.
+      source = <<~RUBY
+        module SelfOwner
+          self::TAG = :here
+
+          def self.check
+            SelfOwner::TAG == :here ? "y" : "n"
+          end
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => source)).to eq(["b.rb:5"])
+    end
+
     it "keeps firing when the constant is declared in the reader's OWN file" do
       # The must-still-fire pairing: the guard turns on "another file", not on "a constant". A gate that
       # silenced the rule outright would satisfy every expectation above and destroy a real rule.

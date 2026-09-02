@@ -491,16 +491,11 @@ module Rigor
         return if segments.empty?
 
         Analysis::DependencyRecorder.read_missing(:class, segments.last)
-        # Issue #644 — the VALUE half. A `class` / `module` appearing is reported by
-        # `Incremental.appeared_classes`; a plain `FOO = :sym` appearing is not a class declaration and
-        # appears in no class-source table, so it needs its own kind and its own producer
-        # (`Incremental.changed_constant_publications`). Same last-segment key grammar as the class negative:
-        # a qualified `Rails::LOG_LEVEL` resolves only once its final segment is assigned, and simple-name
-        # matching over-invalidates (a nested `MyApp::FOO` also re-checks a reader of the top-level `FOO`),
-        # which is the sound direction. One row per reference — consumers hold `missing` as a Set. The twin
-        # of this call is on the RESOLVED path (`Reflection.record_constant_read`): the same key is recorded
-        # whether or not the reference resolved, because both answers move with the project's write set.
-        Analysis::DependencyRecorder.read_name(:constant, segments.last)
+        # Issue #644's `constant:<last segment>` edge is NOT recorded here. It is recorded once per
+        # reference by `Reflection.resolve_constant_type`, before the resolver ladder runs, so it covers a
+        # reference that resolves through RBS or the class registry as well as one that misses — all three
+        # answers move when the project's constant write set moves. Recording it again on this path would be
+        # a second source of truth for the same key.
       end
 
       # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared

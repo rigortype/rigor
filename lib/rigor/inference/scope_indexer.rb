@@ -109,7 +109,7 @@ module Rigor
         in_source_constants = widen_mutated_constants(
           build_in_source_constants(root, seeded_scope), literal_mutations[:constants]
         )
-        seeded_scope = seed_constant_tables(seeded_scope, default_scope, in_source_constants)
+        seeded_scope = seed_constant_tables(seeded_scope, default_scope, in_source_constants, root)
 
         # Slice 7 phase 12. In-source method discovery. Walks every class/module body for `Prism::DefNode` and
         # recognised `define_method` calls and records the introduced method names. `rigor check` consults the table to
@@ -1496,20 +1496,27 @@ module Rigor
       # `Scope#published_constant?`: a project-published constant the analysed file also assigns is one its
       # author can see, so the truthiness rules keep firing on it. Both are seeded here, where the per-file
       # table is still separable from the project seed it is about to merge over.
-      def seed_constant_tables(seeded_scope, default_scope, in_source_constants)
+      def seed_constant_tables(seeded_scope, default_scope, in_source_constants, root)
         merged = merge_seeded_constants(default_scope.in_source_constants, in_source_constants)
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(in_source_constants: merged,
-                                      local_constant_names: local_constant_name_set(in_source_constants))
+                                      local_constant_names: local_constant_name_set(root, default_scope))
         )
       end
 
-      # The last segments of the file's OWN constant table, frozen. Empty stays the shared
-      # frozen empty set so an ordinary file allocates nothing.
-      def local_constant_name_set(per_file_constants)
-        return Scope::DiscoveryIndex::EMPTY.local_constant_names if per_file_constants.empty?
+      # The QUALIFIED names this file assigns that the project also published, frozen. Read from the same
+      # {#constant_writes_for_file} census the cross-file table is built from, not from the typed per-file
+      # table: the typed walk cannot see a multi-assign / `self::` / operator-write target, so deriving the
+      # exemption from it would be a second source of truth blind to exactly the forms the census exists to
+      # catch. Gated on the project having published anything at all, so a project with no cross-file value
+      # constants pays no extra walk and allocates nothing; the result is filtered to the published names, so
+      # what it holds is bounded by what the exemption can ever be asked about.
+      def local_constant_name_set(root, default_scope)
+        published = default_scope.published_constant_names
+        return Scope::DiscoveryIndex::EMPTY.local_constant_names if published.empty?
 
-        per_file_constants.keys.to_set { |name| name.split("::").last }.freeze
+        names = constant_writes_for_file(root).keys.select { |name| published.include?(name.split("::").last) }
+        names.empty? ? Scope::DiscoveryIndex::EMPTY.local_constant_names : names.to_set.freeze
       end
 
       def merge_seeded_constants(seeded, per_file)

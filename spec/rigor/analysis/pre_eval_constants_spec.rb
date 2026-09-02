@@ -96,10 +96,18 @@ RSpec.describe "pre_eval: constant publication" do
     end
   end
 
-  describe "an unlisted declaring file (today's behaviour, unchanged)" do
-    it "publishes nothing value-shaped across the file boundary" do
-      %w[probe_cross_int probe_cross_str probe_cross_arr
-         probe_cross_hsh probe_cross_alias probe_cross_nested].each do |probe|
+  describe "an unlisted declaring file" do
+    it "publishes the #644 frozen-scalar literals across the file boundary, and nothing else" do
+      # This example used to assert that NOTHING value-shaped crossed without `pre_eval:`. Issue #644 gave
+      # the whole project a literal-constant table, so the two Integer probes cross now — that is the
+      # feature, not a regression.
+      #
+      # The guard the example exists for survives intact in the second half: `pre_eval:` is still what
+      # publishes a String, an Array, a Hash or a class alias, so a change that published unconditionally
+      # would surface here as a non-nil probe.
+      expect(receiver_for(unlisted, "probe_cross_int")).to eq("42")
+      expect(receiver_for(unlisted, "probe_cross_nested")).to eq("7")
+      %w[probe_cross_str probe_cross_arr probe_cross_hsh probe_cross_alias].each do |probe|
         expect(receiver_for(unlisted, probe)).to be_nil, probe
       end
     end
@@ -110,10 +118,29 @@ RSpec.describe "pre_eval: constant publication" do
   end
 
   describe "a listed declaring file" do
-    it "publishes the WIDENED type, never the value-pinned one" do
-      expect(receiver_for(listed, "probe_cross_int")).to eq("Integer")
+    it "widens what the #644 literal table declines, and keeps the value where that table publishes" do
+      # The rule this example used to state — "the WIDENED type, never the value-pinned one" — was written
+      # when `pre_eval:` was the ONLY cross-file constant publisher. Issue #644 added a second one, and where
+      # both answer the literal table wins. Two reasons, both recorded in `PreEvalConstants`' own rationale:
+      #
+      # 1. Its basis is narrower and more certain. `pre_eval:` publishes what an rvalue TYPES TO after the
+      #    walk evaluates it, so it must widen to stay honest about what it evaluated; #644 publishes only a
+      #    syntactic frozen-scalar literal, single-write, single-file — which that rationale names as "a
+      #    strictly later question; it needs its own FP measurement", not as something forbidden. #644 is
+      #    that question, and the measurement is in its own specs and the PR.
+      # 2. The hazards the widening was written against are the composite and mutable literals — a closed
+      #    `HashShape` making `CONFIG.fetch(:b)` fire, a `Tuple` displacing an RBS overload. #644's table
+      #    declines every one of those, so widening its output would spend no false-positive budget and buy
+      #    nothing.
+      #
+      # The alternative — standing the literal table down for a listed file — is incoherent: opting a file
+      # into `pre_eval:` would then make `INT_LIT` read `Integer` where an unlisted project reads `42`, so an
+      # opt-in intended to add cross-file knowledge would remove some.
+      expect(receiver_for(listed, "probe_cross_int")).to eq("42")
+      expect(receiver_for(listed, "probe_cross_nested")).to eq("7")
+      # `String` is the half `pre_eval:` still owns: #644 declines a mutable literal, so the widened class is
+      # what crosses, and it crosses ONLY because the file is listed (the unlisted half above is nil).
       expect(receiver_for(listed, "probe_cross_str")).to eq("String")
-      expect(receiver_for(listed, "probe_cross_nested")).to eq("Integer")
     end
 
     it "erases a Tuple to raw Array and a HashShape to raw Hash" do
@@ -166,7 +193,7 @@ RSpec.describe "pre_eval: constant publication" do
   end
 
   describe "the pool path (ADR-15 sequential equivalence)" do
-    it "seeds a fork-worker scope with the same published table" do
+    def pool_probe_receiver(workers)
       Dir.mktmpdir("rigor-pre-eval-pool-") do |tmpdir|
         lib = File.join(tmpdir, "lib")
         FileUtils.mkdir_p(lib)
@@ -177,12 +204,22 @@ RSpec.describe "pre_eval: constant publication" do
             configuration: Rigor::Configuration.new(
               "paths" => [lib], "pre_eval" => [File.join(lib, "decls.rb")]
             ),
-            cache_store: nil, workers: 2
+            cache_store: nil, workers: workers
           ).run
           messages = result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
-          expect(receiver_for(messages, "probe_pool")).to eq("Integer")
+          receiver_for(messages, "probe_pool")
         end
       end
+    end
+
+    it "seeds a fork-worker scope with the same published table the sequential path uses" do
+      # The property is EQUIVALENCE, so it is asserted as equivalence rather than against a literal the
+      # precedence rule could quietly move: a seed that failed to reach the workers would answer nil here
+      # while the sequential run answered something. The concrete value is pinned too, so an empty table on
+      # BOTH paths cannot pass — and it is `30`, not `Integer`, because the #644 literal table wins over the
+      # `pre_eval:` widening (see "a listed declaring file" above).
+      expect(pool_probe_receiver(2)).to eq(pool_probe_receiver(0))
+      expect(pool_probe_receiver(2)).to eq("30")
     end
   end
 end

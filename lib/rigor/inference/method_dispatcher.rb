@@ -1107,21 +1107,15 @@ module Rigor
       # A fill / block result as an element PARAMETER. Value pinning is dropped, and a literal
       # container widens to its nominal one step in: `Array.new(n) { [] }` builds n INDEPENDENT
       # arrays that the program then appends to, and `Array[Tuple[]]` claims every one of them
-      # stays empty — the adjacency-list idiom would read `adj[i].first` as `nil`.
+      # stays empty — the adjacency-list idiom would read `adj[i].first` as `nil`. Both
+      # conversions go through {MutationWidening}'s own helpers, the single owner of "literal
+      # container → parameterised nominal" that `MemberShapeProjection` already borrows.
       def array_new_element(type)
         case type
-        when Type::Tuple
-          array_seed_of(type.elements.empty? ? Type::Combinator.untyped : element_union_of(type.elements))
-        when Type::HashShape
-          Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
-        else
-          Type::Combinator.widen_value_pinned(type)
+        when Type::Tuple then MutationWidening.widen_tuple(type)
+        when Type::HashShape then MutationWidening.widen_hash_shape(type)
+        else Type::Combinator.widen_value_pinned(type)
         end
-      end
-
-      def element_union_of(elements)
-        widened = elements.map { |e| Type::Combinator.widen_value_pinned(e) }
-        widened.size == 1 ? widened.first : Type::Combinator.union(*widened)
       end
 
       # Whether a `Array.new` size argument is readable as an Integer, which is what rules the

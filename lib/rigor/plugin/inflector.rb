@@ -89,8 +89,9 @@ module Rigor
         invoke(:classify, table_name)
       end
 
-      # `BlogPost` → `blog_posts`; `Admin::User` → `admin_users`. Composed (not delegated) so the namespace
-      # flattens with `_` the way ActiveRecord's table naming does — see {ALLOWED_METHODS}.
+      # `BlogPost` → `blog_posts`; `Admin::User` → `admin_users`. Composed (not delegated) — see
+      # {ALLOWED_METHODS} — to flatten a namespaced String into a plain SQL identifier. This is NOT what
+      # ActiveRecord's table-name computation does with a namespace: see {ALLOWED_METHODS}'s comment above.
       def tableize(class_name)
         underscored = underscore(class_name.to_s.gsub("::", "/")).tr("/", "_")
         pluralize(underscored)

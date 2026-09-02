@@ -2620,6 +2620,14 @@ RSpec.describe "plugins/rigor-activerecord" do
   # schema, so `entry.column_names.empty?` (`Analyzer#validate_column_hash_call`) stood the column / alias
   # / association checks down entirely rather than raising — every namespaced model's query-key
   # assertions passed regardless of whether the key was real.
+  #
+  # The organizing principle, re-affirmed by the review that caught the first pass's own bug: when the
+  # table cannot be determined RELIABLY, the fix stands the column/alias/association checks down — it
+  # never falls back to a bare guessed name. Master's flattened guess was ALSO wrong, but by accident it
+  # sometimes matched a real (prefixed) table and sometimes matched nothing; a demodulized-only guess is
+  # the value most likely to hit an UNRELATED real table in a namespaced app (`Admin::User` / `users`,
+  # `Billing::Account` / `accounts`), so "reliable enough to look up" has to mean more than "we produced
+  # some String" — see `ModelIndex.inflected_table_name_unreliable?`.
   describe "namespaced models — demodulize before tableizing (#623)" do
     context "with no table_name_prefix declared" do
       let(:models) do
@@ -2741,25 +2749,220 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(index.find("Catalog::Post").table_name).to eq("cat_posts")
     end
 
-    it "falls back to the demodulized name rather than guessing an unfoldable prefix" do
+    it "folds the `class << self; def table_name_prefix = literal` spelling too" do
       models = {
         "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
-        "app/models/tenant_scoped.rb" => <<~RUBY,
-          module TenantScoped
-            def self.table_name_prefix
-              Current.tenant_prefix
+        "app/models/singleton_prefix.rb" => <<~RUBY,
+          module SingletonPrefix
+            class << self
+              def table_name_prefix = "sp_"
             end
           end
         RUBY
-        "app/models/tenant_scoped/post.rb" => <<~RUBY
-          module TenantScoped
+        "app/models/singleton_prefix/post.rb" => <<~RUBY
+          module SingletonPrefix
             class Post < ApplicationRecord
             end
           end
         RUBY
       }
       _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
-      expect(index.find("TenantScoped::Post").table_name).to eq("posts")
+      expect(index.find("SingletonPrefix::Post").table_name).to eq("sp_posts")
+    end
+
+    # BLOCKER (#623 review): a decorator this discoverer sees but cannot fold to a literal used to fall
+    # back to a bare demodulized guess — informational-looking, but confidently WRONG, since the real
+    # runtime table almost certainly carries a prefix this walker just could not read. That guess got
+    # looked up in the schema like any other, so a real-but-unrelated `posts` table "corroborated" it and
+    # the column checks ran against the WRONG table's columns — firing on correct code, missing real typos.
+    context "with a table_name_prefix the enclosing module declares but cannot fold" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/tenant_scoped.rb" => <<~RUBY,
+            module TenantScoped
+              def self.table_name_prefix
+                Current.tenant_prefix
+              end
+            end
+          RUBY
+          "app/models/tenant_scoped/post.rb" => <<~RUBY
+            module TenantScoped
+              class Post < ApplicationRecord
+              end
+            end
+          RUBY
+        }
+      end
+
+      # The real runtime table is `<tenant_prefix>posts`, never bare `posts` — this "posts" table is a
+      # decoy a wrong guess could corroborate against, with a column (`decoy`) the real table would not
+      # have (and lacking `headline`, a column the real table might).
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "decoy"
+            end
+          end
+        SCHEMA
+      end
+
+      it "keeps the demodulized name as the informational display value" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("TenantScoped::Post").table_name).to eq("posts")
+      end
+
+      it "stands the column set down instead of matching the decoy table" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("TenantScoped::Post").column_names).to be_empty
+      end
+
+      it "does not fire on the decoy table's own real column (stood down, not confirmed)" do
+        diags = plugin_diagnostics(
+          run_ar("TenantScoped::Post.where(decoy: 'x')\n", schema: schema, models: models)
+        )
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "does not fire on an arbitrary key either — the check is off, not satisfied" do
+        diags = plugin_diagnostics(
+          run_ar("TenantScoped::Post.where(nonexistent_anywhere: 'x')\n", schema: schema, models: models)
+        )
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+    end
+
+    # Regression #1 (#623 review): Rails' `full_table_name_prefix` walks `module_parents` — lexical
+    # nesting — and does not care whether the namespace container was written `module Blog` or
+    # `class Blog`; only modules were being scanned for a declared decorator.
+    it "recognises a decorator declared on a class namespace, not only a module" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/blog.rb" => <<~RUBY,
+          class Blog
+            def self.table_name_prefix = "blg_"
+          end
+        RUBY
+        "app/models/blog/post.rb" => "class Blog::Post < ApplicationRecord\nend\n"
+      }
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
+      expect(index.find("Blog::Post").table_name).to eq("blg_posts")
+    end
+
+    # Regression #2 (#623 review): `compute_table_name` special-cases a model nested inside another MODEL
+    # class — it splices the parent's own (singularized) table name into the middle of the child's,
+    # entirely apart from `table_name_prefix` — a mechanism this discoverer does not attempt. The bare
+    # demodulized guess (`comments`) would match a real, unrelated `comments` table below.
+    context "with a model nested inside another model class" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/post.rb" => <<~RUBY
+            class Post < ApplicationRecord
+              class Comment < ApplicationRecord
+              end
+            end
+          RUBY
+        }
+      end
+
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "title"
+            end
+
+            create_table "comments", force: :cascade do |t|
+              t.string "decoy"
+            end
+          end
+        SCHEMA
+      end
+
+      it "stands the nested model's column set down rather than guessing the bare name" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        entry = index.find("Post::Comment")
+        expect(entry.table_name).to eq("comments")
+        expect(entry.column_names).to be_empty
+      end
+
+      it "does not fire on the unrelated comments table's real column" do
+        diags = plugin_diagnostics(run_ar("Post::Comment.where(decoy: 'x')\n", schema: schema, models: models))
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "leaves the OUTER model's own resolution unaffected" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        entry = index.find("Post")
+        expect(entry.table_name).to eq("posts")
+        expect(entry.column_names).not_to be_empty
+      end
+    end
+
+    # Regression #3 (#623 review): `mattr_writer` (verified against ActiveSupport's own
+    # `attribute_accessors.rb`) defines only the SETTER, never a reader — `respond_to?(:table_name_prefix)`
+    # is `false` for a module that declares only `mattr_writer`, so Rails' ancestor search skips right past
+    # it, exactly as if nothing had been declared at all.
+    context "with table_name_prefix declared only via mattr_writer" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/mattr_only.rb" => <<~RUBY,
+            module MattrOnly
+              mattr_writer :table_name_prefix, default: "mo_"
+            end
+          RUBY
+          "app/models/mattr_only/post.rb" => <<~RUBY
+            module MattrOnly
+              class Post < ApplicationRecord
+              end
+            end
+          RUBY
+        }
+      end
+
+      it "does not apply the write-only default — the model reads the plain schema table" do
+        diags = plugin_diagnostics(
+          run_ar("MattrOnly::Post.where(title: 'x')\n", schema: DEFAULT_SCHEMA, models: models)
+        )
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      # The discrimination sibling: since NOTHING is uncertain here (`mattr_writer` alone establishes no
+      # reader, so this resolves exactly like "no decorator declared" — DEFAULT_SCHEMA's real `users`
+      # table, not a stand-down), the check stays fully active rather than silently passing every key.
+      it "still flags a genuine typo (checks stay active, not stood down)" do
+        diags = plugin_diagnostics(
+          run_ar("MattrOnly::Post.where(titel: 'x')\n", schema: DEFAULT_SCHEMA, models: models)
+        )
+        expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+      end
+    end
+
+    # The deeper form of regression #3: a `self.table_name_prefix = "…"` assignment only PROVES a writer
+    # exists (or the call itself would raise) — it does not prove a READER does, and Rails' walk tests the
+    # reader. `mattr_writer` establishes the former, never the latter, so the assignment must not be
+    # trusted just because it type-checks as valid Ruby.
+    it "does not trust a plain assignment when only mattr_writer established the setter" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/mattr_then_assign.rb" => <<~RUBY,
+          module MattrThenAssign
+            mattr_writer :table_name_prefix
+            self.table_name_prefix = "mta_"
+          end
+        RUBY
+        "app/models/mattr_then_assign/post.rb" => <<~RUBY
+          module MattrThenAssign
+            class Post < ApplicationRecord
+            end
+          end
+        RUBY
+      }
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
+      expect(index.find("MattrThenAssign::Post").table_name).to eq("posts")
     end
   end
 end

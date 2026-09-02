@@ -31,11 +31,14 @@ RSpec.describe Rigor::Plugin::Inflector do
       expect(described_class.singularize("analyses")).to eq("analysis")
     end
 
-    it "flattens namespaced names like Rails" do
+    it "underscores a namespaced name the way Rails does, and tableize flattens rather than pathing" do
       expect(described_class.underscore("Admin::DomainBlocksController"))
         .to eq("admin/domain_blocks_controller")
-      # tableize composes underscore + pluralize with ::->_ flattening, matching AR's real table name (NOT
-      # Inflector.tableize's admin/users).
+      # tableize composes underscore + pluralize with a ::->_ flatten, so it returns a plain identifier
+      # instead of AS's own Inflector.tableize("Admin::User") ("admin/users", a slash-separated path). This
+      # is NOT ActiveRecord's real table name for a namespaced model, though (#623) — AR demodulizes
+      # instead of flattening; see rigor-activerecord's ModelIndex.inflected_table_name, the sole caller,
+      # which never actually passes this method a namespaced String.
       expect(described_class.tableize("Admin::User")).to eq("admin_users")
     end
   end

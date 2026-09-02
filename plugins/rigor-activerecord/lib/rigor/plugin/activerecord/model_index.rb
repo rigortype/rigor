@@ -133,7 +133,20 @@ module Rigor
             chain = sti_chain(row, rows_by_name)
             declared = declared_table_name(chain)
             table_name = declared || inflected_table_name(chain)
-            columns = apply_type_overrides(schema_table&.columns_for(table_name) || [], overrides)
+            # An UNRELIABLE inflected name (see {.inflected_table_name_unreliable?}) is never looked up in
+            # the schema at all — `table_name` is still the best-effort demodulized guess for DISPLAY
+            # (`model-call`'s "table: ..." info diagnostic), but its COLUMNS are the empty set on purpose,
+            # the same stand-down path `Analyzer#validate_column_hash_call` already gives a view-backed
+            # model with no schema-side columns. Looking the guess up anyway risks the corroboration
+            # `table_name_exact?` above already refuses for a MUCH narrower reason: a real, unrelated table
+            # can share the bare demodulized name, and column-checking against it is worse than not
+            # checking at all — a wrong `unknown-column` (or a wrong silence) on correct code either way.
+            columns =
+              if declared.nil? && inflected_table_name_unreliable?(chain)
+                []
+              else
+                apply_type_overrides(schema_table&.columns_for(table_name) || [], overrides)
+              end
 
             # STI children inherit their ancestors' declared associations / enums / aliases / scopes /
             # validations / callbacks. Without the merge a `where(<parent-association>: ...)` on the
@@ -247,13 +260,36 @@ module Rigor
 
         # Reads a `table_name_prefix:` / `table_name_suffix:` decorator ({ModelDiscoverer}'s resolved
         # `:table_name_prefix` / `:table_name_suffix` row field, always present on a discovered row): the
-        # folded literal when the discoverer could read one off the enclosing module, or `""` — both when no
-        # enclosing module declares the name AND when one does but in a shape the discoverer cannot fold.
-        # The second case is deliberately NOT a guess (#623): synthesising some default prefix string would
-        # risk corroborating the WRONG table exactly as easily as guessing none stands the column checks
-        # down safely — see {.table_name_exact?} above for why an inflected name is never pinned regardless.
+        # folded literal when the discoverer could read one off the enclosing namespace, or `""` — both when
+        # no enclosing namespace declares the name AND when one does but in a shape the discoverer cannot
+        # fold. The second case is deliberately NOT a guess at what the real prefix/suffix string is
+        # (#623) — synthesising a default like `"<namespace>_"` would risk corroborating the WRONG table.
+        # What THIS empty string does not by itself do is make the resulting name safe to trust for column
+        # lookup: see {.inflected_table_name_unreliable?}, which is what actually stands the columns down
+        # for this case — the string returned here still feeds `table_name`'s informational display value.
         def self.decorator_literal(decorator)
           (decorator || {}).fetch(:literal, "")
+        end
+
+        # Whether the chain's INFLECTED name (only reached when nothing was `declared_table_name`) is
+        # trustworthy enough to look up in the schema. `false` when either the root's `table_name_prefix` or
+        # `table_name_suffix` decorator is `{ computed: true }` (declared by an enclosing namespace, but not
+        # in a shape the discoverer could fold — see {ModelDiscoverer}'s class doc), or when the root is
+        # nested inside another discovered model class (`table_name_nested_in_model`, a wholly different
+        # Rails naming rule this walker does not attempt — same file). A namespace whose decorator this
+        # discoverer never even SAW (an `isolate_namespace` engine declaration outside `model_search_paths`,
+        # a base-class-level `table_name_prefix`, a model's own `def self.table_name_prefix`) cannot be
+        # flagged here — those are pre-existing, documented gaps ({ModelDiscoverer}'s class doc), not new
+        # ones — but every shape THIS discoverer can recognise as uncertain is refused here rather than
+        # guessed at with a bare name.
+        def self.inflected_table_name_unreliable?(chain)
+          root = chain.first
+          decorator_unreliable?(root[:table_name_prefix]) || decorator_unreliable?(root[:table_name_suffix]) ||
+            root[:table_name_nested_in_model] == true
+        end
+
+        def self.decorator_unreliable?(decorator)
+          !decorator.nil? && decorator[:computed] == true
         end
 
         # Dedups association-style rows by `:name`, keeping the LAST occurrence so a child redeclaration

@@ -1,0 +1,1 @@
+- **[development]** The development bundle now uses RBS 4.2.0 and RuboCop 1.90.0, keeping dependency checks and linting current for contributors. ([#651](https://github.com/rigortype/rigor/pull/651))

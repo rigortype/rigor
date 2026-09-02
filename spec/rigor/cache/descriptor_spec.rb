@@ -439,6 +439,27 @@ RSpec.describe Rigor::Cache::Descriptor do
       d = described_class.new(files: [entry])
       expect(d.fresh?).to be(false)
     end
+
+    # ADR-45 WD1 (#577) — the absence row the IoBoundary records for a probed-but-missing path.
+    it "is fresh for FileEntry.absent while the path stays missing, stale once anything appears there" do
+      path = File.join(dir, "db", "schema.rb")
+      entry = described_class::FileEntry.absent(path: path)
+      expect(entry.comparator).to eq(:exists)
+      expect(entry).to be_absent
+      d = described_class.new(files: [entry])
+      expect(d.fresh?).to be(true)
+
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "A")
+      expect(d.fresh?).to be(false)
+    end
+
+    it "reports absent? only for the absence row, not for a present :exists row or a content row" do
+      present = described_class::FileEntry.new(path: "a.rb", comparator: :exists, value: "true")
+      content = described_class::FileEntry.new(path: "a.rb", comparator: :digest, value: "abc")
+      expect(present).not_to be_absent
+      expect(content).not_to be_absent
+    end
   end
 
   describe "GlobEntry (ADR-60 WD3)" do

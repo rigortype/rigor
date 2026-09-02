@@ -62,6 +62,77 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
+  # ADR-45 WD1 (#577) — a read that finds nothing is an existence probe, and the absence it observed is a
+  # dependency: a value computed on "the schema is missing" must invalidate once the schema appears. The
+  # boundary records that as an absence row; the bounds below (scope first, not-there outcomes only, content
+  # rows kept over absence rows) keep the recording deliberate.
+  describe "#read_file on a path that does not exist (ADR-45 WD1, #577)" do
+    it "raises ENOENT and records an absence row that is fresh while the path is missing, stale once it appears" do
+      path = File.join(tmpdir, "db", "schema.rb")
+
+      expect { boundary.read_file(path) }.to raise_error(Errno::ENOENT)
+
+      descriptor = boundary.cache_descriptor
+      expect(descriptor.files.size).to eq(1)
+      entry = descriptor.files.first
+      expect(entry.path).to eq(File.expand_path(path))
+      expect(entry).to be_absent
+      expect(descriptor.fresh?).to be(true)
+
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "create_table")
+      expect(descriptor.fresh?).to be(false)
+    end
+
+    it "records the absence when a parent component is a regular file (ENOTDIR)" do
+      File.write(File.join(tmpdir, "db"), "not a directory")
+      path = File.join(tmpdir, "db", "schema.rb")
+
+      expect { boundary.read_file(path) }.to raise_error(Errno::ENOTDIR)
+      expect(boundary.cache_descriptor.files.map(&:absent?)).to eq([true])
+    end
+
+    it "lets a later successful read of the same path replace the absence row with the content row" do
+      path = File.join(tmpdir, "late.txt")
+      expect { boundary.read_file(path) }.to raise_error(Errno::ENOENT)
+      File.write(path, "arrived")
+      boundary.read_file(path)
+
+      files = boundary.cache_descriptor.files
+      expect(files.size).to eq(1)
+      expect(files.first.comparator).to eq(:stat)
+      expect(files.first.value.split.first).to eq(Digest::SHA256.hexdigest("arrived"))
+    end
+
+    it "keeps an earlier content row over a later missing-read of the same path" do
+      path = File.join(tmpdir, "gone.txt")
+      File.write(path, "was here")
+      boundary.read_file(path)
+      File.unlink(path)
+      expect { boundary.read_file(path) }.to raise_error(Errno::ENOENT)
+
+      files = boundary.cache_descriptor.files
+      expect(files.size).to eq(1)
+      expect(files.first.comparator).to eq(:stat)
+      # The content row is the one that reads stale while the file is gone — the conservative direction.
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    it "records nothing for a missing path outside the trusted-read scope (the policy check comes first)" do
+      expect { boundary.read_file("/definitely/not/under/the/tmpdir.txt") }
+        .to raise_error(Rigor::Plugin::AccessDeniedError)
+      expect(boundary.cache_descriptor.files).to be_empty
+    end
+
+    it "records nothing for a path that exists but is not a readable file (EISDIR is a failure, not a probe)" do
+      dir = File.join(tmpdir, "schema.rb")
+      FileUtils.mkdir_p(dir)
+
+      expect { boundary.read_file(dir) }.to raise_error(Errno::EISDIR)
+      expect(boundary.cache_descriptor.files).to be_empty
+    end
+  end
+
   describe "#open_url" do
     it "denies every URL while the network policy is :disabled" do
       expect { boundary.open_url("https://example.invalid/api") }.to raise_error(

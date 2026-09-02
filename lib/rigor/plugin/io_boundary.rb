@@ -19,7 +19,9 @@ module Rigor
     # Slice 2 ships a minimal surface:
     #
     # - `#read_file(path)` — validates against the policy, returns the file's contents, and adds a
-    #   digest-keyed {Cache::Descriptor::FileEntry} to the boundary's accumulated descriptor.
+    #   digest-keyed {Cache::Descriptor::FileEntry} to the boundary's accumulated descriptor. A read that
+    #   fails because the path does not exist adds an ABSENCE row instead (ADR-45 WD1, #577), so a result
+    #   computed on the file being missing invalidates once it appears.
     # - `#open_url(url)` — fetches the URL when the policy permits it (`network_policy: :allowlist` plus an
     #   `allowed_url_hosts` match) and raises {AccessDeniedError} otherwise. v0.1.2 ships the allowlist
     #   surface; the default project policy still has `network_policy: :disabled` so plugins that want network
@@ -46,8 +48,18 @@ module Rigor
       end
 
       # Reads the file at `path` after validating it against the policy. Raises {AccessDeniedError} when the
-      # path is outside every allowed read root. Records a `:digest` {FileEntry} so the resulting cache slice
-      # invalidates on content change.
+      # path is outside every allowed read root. Records a `:stat` {Cache::Descriptor::FileEntry} so the
+      # resulting cache slice invalidates on content change.
+      #
+      # ADR-45 WD1 (#577) — a read that fails because the path does NOT exist (`Errno::ENOENT`, or
+      # `Errno::ENOTDIR` when a parent component is a regular file) is a deliberate existence probe: the
+      # plugin asked for the file and shaped its answer on the file being absent (rigor-activerecord's
+      # reduced mode on a missing `db/schema.rb`). That is a dependency too — "the analysis depended on X
+      # being absent" — so the boundary records an ABSENCE row ({Cache::Descriptor::FileEntry.absent})
+      # before re-raising, and every cache built on this boundary's descriptor (the run-result entry, the
+      # plugin-producer entries) goes stale the moment the path comes into existence. Only the not-there
+      # outcome is recorded: a path that exists but cannot be read (`EISDIR`, `EACCES`) is a failure the
+      # plugin reports, not a probe of absence, and records nothing — as before.
       def read_file(path)
         absolute = File.expand_path(path.to_s)
         unless @policy.allow_read?(absolute)
@@ -59,7 +71,12 @@ module Rigor
           )
         end
 
-        contents = File.binread(absolute)
+        contents = begin
+          File.binread(absolute)
+        rescue Errno::ENOENT, Errno::ENOTDIR
+          record_absence_entry(absolute)
+          raise
+        end
         record_file_entry(absolute, contents)
         contents
       end
@@ -103,7 +120,20 @@ module Rigor
         # we just read; `FileEntry.stat` stats the same path to pack the tuple.
         digest = Digest::SHA256.hexdigest(contents)
         entry = Cache::Descriptor::FileEntry.stat(path: path, digest: digest)
+        # A content row replaces an earlier absence row for the same path outright: the file appeared and
+        # its bytes were consumed, and a content row validates existence as well as content.
         @mutex.synchronize { @file_entries[path] = entry }
+      end
+
+      # ADR-45 WD1 (#577) — the absence row for a probed-but-missing path. A content row already recorded
+      # for the same path is KEPT in preference: two outcomes for one path within one run mean the file
+      # moved under the analysis, and of the two rows the content row is the one whose validation covers
+      # both the content that was read and the file's existence — so it is the one that reads stale while
+      # the file is gone. The reverse order (probed absent, then read once it appeared) is the content
+      # row's replacement above.
+      def record_absence_entry(path)
+        entry = Cache::Descriptor::FileEntry.absent(path: path)
+        @mutex.synchronize { @file_entries[path] ||= entry }
       end
 
       def record_url_entry(url, body)

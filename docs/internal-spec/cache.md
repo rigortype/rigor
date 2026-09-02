@@ -89,6 +89,17 @@ honours the `RIGOR_CI_DETECT=0` kill switch, and an explicit `stat` /
 `digest` always wins (a persistent-workspace CI runner opts back into the
 stat floor with `stat`).
 
+The `:exists` comparator carries `File.exist?`'s answer rendered as
+`"true"` / `"false"` (`FileEntry::PRESENT` / `FileEntry::ABSENT`).
+`FileEntry.absent(path:)` builds the `"false"` row — the
+[ADR-45](../adr/45-unchanged-project-fast-path.md) WD1 (#577) **absence
+dependency** that `Plugin::IoBoundary#read_file` records when a read
+fails because the path is missing, so an entry computed on the file's
+absence reads stale once anything appears there. `#absent?` identifies
+the row. Validation is a single `File.exist?`: there is no stat tuple or
+digest to drift on an unchanged tree, so an absence row never thrashes a
+warm hit.
+
 ### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [], globs: [])`
 
 Constructs a descriptor. Every slot defaults to an empty array;
@@ -129,7 +140,7 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `6` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `8` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
    synthesizing missing `signature_paths:` namespaces; v4 added the
@@ -139,8 +150,13 @@ input + descriptor combination. The key incorporates:
    before `append_stub_declarations` emitted the declaration kind each
    referenced-type stub needs and validated each declaration on its own,
    so a dangling `interface` or type-alias reference no longer discards
-   the whole stub batch (#237)). Bumping this constant invalidates every
-   cached value.
+   the whole stub batch (#237); v7 invalidates def-index seed bundles
+   written before they carried the `:extends` table (#526); v8
+   invalidates run-result and plugin-producer entries written before
+   `IoBoundary#read_file` recorded absence rows for probed-but-missing
+   paths (ADR-45 WD1, #577) — a pre-8 entry would validate fresh across
+   exactly the file-appearance edit those rows exist to catch). Bumping
+   this constant invalidates every cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
 3. `params` (the producer's input hash). Recursively
@@ -259,8 +275,9 @@ the computation** (e.g. a plugin reading a project file mid-analysis).
 The block MUST return `[value, dependency_descriptor]`. On the next
 run the stored dependency descriptor is re-validated against the
 filesystem via `Descriptor#fresh?` — every recorded `FileEntry` /
-`GlobEntry` must still match — and a stale dependency forces a
-recompute. A **disk-side** write failure (permission, disk full, deleted
+`GlobEntry` must still match, an absence row (`FileEntry.absent`, the
+ADR-45 WD1 negative half) matching only while its path is still
+missing — and a stale dependency forces a recompute. A **disk-side** write failure (permission, disk full, deleted
 root, read-only mount) is swallowed: the freshly-computed value is
 returned and the next run recomputes. A **producer contract violation is
 not** — a value `Marshal.dump` cannot serialise, or a custom `serialize:`

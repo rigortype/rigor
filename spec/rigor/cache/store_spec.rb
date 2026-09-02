@@ -363,6 +363,41 @@ RSpec.describe Rigor::Cache::Store do
       expect(result).to eq("v2")
     end
 
+    # ADR-45 WD1 (#577) — the negative half of the dependency set: a value computed on a file's ABSENCE
+    # records an absence row, stays a hit while the file is still missing, and recomputes once it appears.
+    it "serves a hit while a recorded-absent dependency stays missing, and recomputes once it appears" do
+      missing = File.join(tmpdir, "db", "schema.rb")
+      absent_descriptor = Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.absent(path: missing)]
+      )
+      run = lambda do |s|
+        s.fetch_or_validate(
+          producer_id: "p", generation_cap: :unbounded, key_descriptor: Rigor::Cache::Descriptor.new, params: {}
+        ) do
+          if File.exist?(missing)
+            content = File.read(missing)
+            ["full", fresh_descriptor(missing, content)]
+          else
+            ["reduced", absent_descriptor]
+          end
+        end
+      end
+
+      expect(run.call(described_class.new(root: cache_root))).to eq("reduced")
+
+      # No-churn control: nothing changed, so the next process is served the entry — an absence row must
+      # not thrash.
+      unchanged = described_class.new(root: cache_root)
+      expect(run.call(unchanged)).to eq("reduced")
+      expect(unchanged.stats).to include(hits: 1, misses: 0)
+
+      FileUtils.mkdir_p(File.dirname(missing))
+      File.write(missing, "create_table")
+      appeared = described_class.new(root: cache_root)
+      expect(run.call(appeared)).to eq("full")
+      expect(appeared.stats).to include(hits: 0, misses: 1)
+    end
+
     it "increments misses (and writes on success) on every miss, hits on a fresh re-read" do
       3.times do |i|
         described_class.new(root: cache_root).fetch_or_validate(

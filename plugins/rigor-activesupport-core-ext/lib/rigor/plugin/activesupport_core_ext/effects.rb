@@ -53,7 +53,7 @@ module Rigor
         module_function
 
         def attributions
-          clock_rows + zone_rows + current_rows + notification_rows + [in_time_zone_row]
+          clock_rows + zone_rows + current_rows + notification_rows + in_time_zone_rows
         end
 
         def clock_rows
@@ -90,19 +90,34 @@ module Rigor
             row(TIME, :zone=, ["global.write"], singleton: true,
                                                 why: "rewrites the process/fiber's time zone for everything downstream"),
             row(TIME, :use_zone, ["global.write"], singleton: true,
-                                                   why: "swaps the zone around a block; the block's own origins join by containment")
+                                                   why: "swaps the zone around a block; the block's own origins join by containment"),
+            # Issue #658 declares these three in the RBS bundle, so they get their attributions here for
+            # the same reason `DateTime#in_time_zone` did: the impurity is invisible at the signature.
+            row(TIME, :zone_default, ZONE_READ, singleton: true,
+                                                why: "the `attr_accessor` behind `Time.zone`'s fallback — the same mutable process state"),
+            row(TIME, :zone_default=, ["global.write"], singleton: true,
+                                                        why: "rewrites the fallback zone for every fiber that has not set its own"),
+            row(TIME, :days_in_month, CLOCK, singleton: true,
+                                             why: "`year` defaults to `current.year`, so an omitted second argument reads the clock"),
+            row(TIME, :days_in_year, CLOCK, singleton: true, why: "the same default, through `days_in_month`")
           ]
         end
 
-        # `DateTime#in_time_zone` — a gap the #388 `%a{pure}` sweep over `sig/active_support/core_ext.rbs`
+        # `#in_time_zone` — a gap the #388 `%a{pure}` sweep over `sig/active_support/core_ext.rbs`
         # surfaced: `in_time_zone(zone = ::Time.zone)` reads `Time.zone` through its own default argument
         # whenever the caller doesn't pass one explicitly, so it cannot be annotated `%a{pure}` there. It
         # belongs here rather than in the RBS because the label is `global.read` alone (not the
         # `nondet.time` + `global.read` pair `CLOCK` carries) — `in_time_zone` converts an already-fixed
         # instant into a zone, it does not read the clock itself.
-        def in_time_zone_row
-          row("DateTime", :in_time_zone, ZONE_READ,
-              why: "the default argument reads `Time.zone` when the caller doesn't name one explicitly")
+        #
+        # `DateAndTime::Zones` is included into `Time` as well as `Date` and `DateTime`, and #658 declares
+        # the `Time` spelling in the RBS bundle, so it takes the identical row. `Date#in_time_zone` is
+        # absent because the bundle does not declare it yet — see the `Date` block in the RBS.
+        def in_time_zone_rows
+          [TIME, DATETIME].map do |receiver|
+            row(receiver, :in_time_zone, ZONE_READ,
+                why: "the default argument reads `Time.zone` when the caller doesn't name one explicitly")
+          end
         end
 
         def current_rows

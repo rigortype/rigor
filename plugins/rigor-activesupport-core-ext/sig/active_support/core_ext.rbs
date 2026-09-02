@@ -7,17 +7,38 @@
 # which together account for the bulk of the Rails-extension long
 # tail.
 #
-# This file is opt-in: enable by adding the gem's `sig/` directory
-# to `.rigor.yml`'s `signature_paths:`:
+# This file is opt-in: enable it by naming the PLUGIN in `.rigor.yml`:
 #
 #     # .rigor.yml
-#     signature_paths:
-#       - sig
-#       - path/to/rigor-activesupport-core-ext/sig
+#     plugins:
+#       - rigor-activesupport-core-ext
+#
+# Do NOT wire it by pointing `signature_paths:` at this directory. The
+# ADR-72 activesupport gem overlay (`data/gem_overlay/activesupport/`)
+# stands down only when this plugin's ID is in the plugin registry, so
+# on a project whose Gemfile.lock locks activesupport a bare
+# `signature_paths:` entry loads BOTH copies. `Time.current` then has
+# two declarations, `RBS::DefinitionBuilder` raises
+# `DuplicatedMethodDefinitionError`, and the whole `Time` class
+# silently degrades to `Dynamic[top]` — every call into it, a real typo
+# included, stops being witnessed. Same failure mode as #437, reached
+# by a different route.
 #
 # Not exhaustive. ActiveSupport ships many more extensions across
-# Hash / Array / String / Object / Date / Time / Integer / Module
-# than this file covers; PRs welcome to extend.
+# Hash / Array / String / Object / Date / Integer / Module than this
+# file covers; PRs welcome to extend. `Time` is the ONE exception and
+# is audited exhaustively rather than sampled — it is a CORE class, so
+# RBS knows it fully and it is CLOSED, which makes an omission on it a
+# false positive rather than a missed precision opportunity (#658).
+# Twelve names are still left out even there — measured against a real
+# `require "active_support/all"`, ten instance and two singleton — and
+# every one is an `alias_method` artefact of ActiveSupport's own
+# operator overrides: the `plus_with{,out}_duration`,
+# `minus_with{,out}_duration`, `minus_with{,out}_coercion`,
+# `compare_with{,out}_coercion`, `eql_with{,out}_coercion` and
+# `Time.at_with{,out}_coercion` pairs. All are `:nodoc:` in the source
+# and called by nothing outside ActiveSupport. `Date` and `DateTime`
+# are closed for the same reason and are NOT audited yet.
 #
 # ---------------------------------------------------------------
 # Purity (ADR-103 WD10; docs/type-specification/effect-labels.md; issue #388)
@@ -532,6 +553,34 @@ class Time
   def self.zone: () -> untyped # ActiveSupport::TimeZone | nil
   def self.zone=: (String | Symbol | untyped) -> untyped
 
+  # Issue #658, `core_ext/time/zones.rb` + `core_ext/time/calculations.rb`. The rest of the
+  # singleton surface those two files add, none of it typed by rbs.
+  #
+  # `zone_default` is the `attr_accessor` behind `Time.zone`'s fallback; `find_zone!` raises on a
+  # bad zone and `find_zone` rescues to `nil`; `use_zone` swaps the zone around a block and returns
+  # the block's value. All four answer or accept an `ActiveSupport::TimeZone`, which this bundle
+  # does not declare, so they stay `untyped` rather than guessing a carrier.
+  #
+  # NONE of them are `%a{pure}`. `zone_default` / `zone_default=` / `use_zone` are process-state
+  # reads and writes, recorded in the plugin manifest next to `Time.zone` / `Time.zone=`.
+  # `days_in_month` / `days_in_year` default their `year` to `current.year`, so an omitted argument
+  # reads the clock — recorded there too. `find_zone!` / `find_zone` read the memoised
+  # `ActiveSupport::TimeZone` registry and are left unannotated rather than claimed either way.
+  def self.zone_default: () -> untyped
+  def self.zone_default=: (untyped) -> untyped
+  def self.use_zone: (untyped time_zone) { () -> untyped } -> untyped
+  def self.find_zone!: (untyped time_zone) -> untyped
+  def self.find_zone: (untyped time_zone) -> untyped
+  # `COMMON_YEAR_DAYS_IN_MONTH[month]` answers `nil` for a month outside 1..12, but the declared
+  # return stays `Integer`: `Integer?` would make `Time.days_in_month(2, 2024) - 1` — the way every
+  # real call site uses it — a nil-arithmetic diagnostic, which is the more expensive error of the
+  # two on correct code.
+  def self.days_in_month: (Integer month, ?Integer year) -> Integer
+  def self.days_in_year: (?Integer year) -> Integer
+  # `Time.rfc3339(str)` builds a `Time` from the parsed parts, raising `ArgumentError` when the
+  # time or offset component is missing. Distinct from the `rfc3339` INSTANCE alias below.
+  def self.rfc3339: (String str) -> Time
+
   # `core_ext/time/conversions` — nothing to declare. `Time.parse`, `Time.httpdate` and
   # `Time.iso8601` all come from stdlib `time`, which rbs types; ActiveSupport only re-opens them.
   # Declaring them here raised `RBS::DuplicatedMethodDefinitionError` and collapsed the whole `Time`
@@ -588,9 +637,11 @@ class Time
   %a{pure}
   def at_end_of_day: () -> Time
   # NOT %a{pure}: same `Date.beginning_of_week` default-argument read as
-  # `beginning_of_week` / `end_of_week` above.
-  def at_beginning_of_week: () -> Time
-  def at_end_of_week: () -> Time
+  # `beginning_of_week` / `end_of_week` above. They are `alias`es of those two in
+  # `DateAndTime::Calculations`, so they take the same optional `start_day` — declaring them
+  # zero-arity made `time.at_beginning_of_week(:sunday)`, correct Rails, an arity diagnostic.
+  def at_beginning_of_week: (?Symbol start_day) -> Time
+  def at_end_of_week: (?Symbol start_day) -> Time
   %a{pure}
   def at_midnight: () -> Time
   %a{pure}
@@ -612,6 +663,223 @@ class Time
   def advance: (untyped options) -> Time
   %a{pure}
   def all_day: () -> Range[Time]
+
+  # -------------------------------------------------------------
+  # Issue #658 — the rest of the Rails `Time` INSTANCE surface
+  # -------------------------------------------------------------
+  #
+  # `Time` is a CORE class, fully RBS-known from `core/time.rbs`, and therefore CLOSED: a name this
+  # file does not declare is reported `call.undefined-method`. So on a closed class an OMISSION is a
+  # false positive on correct Rails code just as much as a wrong return type is, and there is no
+  # gradual middle — making `Time` an open receiver would suppress the genuine diagnostic
+  # project-wide. Everything below was therefore audited name by name against the vendored
+  # activesupport-8.1.3.1 sources rather than recalled: `core_ext/date_and_time/calculations.rb`
+  # (the module `Time`, `Date` and `DateTime` all include), `core_ext/time/calculations.rb`,
+  # `core_ext/time/conversions.rb`, `core_ext/date_and_time/zones.rb` and
+  # `core_ext/date_and_time/compatibility.rb`.
+  #
+  # Every row was also checked against the assembled environment (`DEFAULT_LIBRARIES` + this `sig/`)
+  # for a name rbs already declares, because a second full declaration of one raises
+  # `RBS::DuplicatedMethodDefinitionError` and collapses the WHOLE class to `Dynamic[top]` — the
+  # #437 failure the `Date#to_time` note below records. That is why `to_time`, `xmlschema`,
+  # `localtime`, `getlocal`, `utc`, `getutc`, `utc?`, `utc_offset`, `usec`, `nsec`, `subsec`, `to_f`
+  # and `to_i` are absent here even though ActiveSupport re-opens some of them: rbs types them already.
+
+  # `core_ext/date_and_time/calculations.rb` — the shared module. Each of these is `advance(...)` /
+  # `change(...)` on the receiver, so on a `Time` receiver each answers `Time`.
+  #
+  # NOT %a{pure}: the five predicates below compare against the CLOCK — `today?` / `tomorrow?` /
+  # `yesterday?` read `::Date.current`, and `past?` / `future?` read `self.class.current`, which is
+  # `Time.current` and therefore reads `Time.zone` as well.
+  def today?: () -> bool
+  def tomorrow?: () -> bool
+  def next_day?: () -> bool
+  def yesterday?: () -> bool
+  def prev_day?: () -> bool
+  def past?: () -> bool
+  def future?: () -> bool
+  # `WEEKEND_DAYS.include?(wday)` — the receiver's own field and a frozen constant.
+  %a{pure}
+  def on_weekend?: () -> bool
+  %a{pure}
+  def on_weekday?: () -> bool
+  # NOT %a{pure}: `self < date_or_time` goes through ActiveSupport's own `<=>` override
+  # (`compare_with_coercion`), which calls `comparable_time` / `to_time` on the ARGUMENT — a
+  # dispatch on a value whose real class this audit cannot see, the `try` problem the file header
+  # calls out. The parameter is `untyped` for the same reason: `Date`, `DateTime`,
+  # `ActiveSupport::TimeWithZone` and `Time` are all accepted at runtime.
+  def before?: (untyped date_or_time) -> bool
+  def after?: (untyped date_or_time) -> bool
+  # `days_ago(n)` … `years_since(n)` are all `advance(unit => ±n)`; the argument is `Numeric` and
+  # not `Integer` because `advance` divmods a fractional `days:` / `weeks:` on purpose.
+  %a{pure}
+  def days_ago: (Numeric days) -> Time
+  %a{pure}
+  def days_since: (Numeric days) -> Time
+  %a{pure}
+  def weeks_ago: (Numeric weeks) -> Time
+  %a{pure}
+  def weeks_since: (Numeric weeks) -> Time
+  %a{pure}
+  def months_ago: (Numeric months) -> Time
+  %a{pure}
+  def months_since: (Numeric months) -> Time
+  %a{pure}
+  def years_ago: (Numeric years) -> Time
+  %a{pure}
+  def years_since: (Numeric years) -> Time
+  # The `at_`-prefixed spellings are `alias`es of the already-declared `beginning_of_*` /
+  # `end_of_*`, and inherit their purity verdict one for one.
+  %a{pure}
+  def at_beginning_of_month: () -> Time
+  %a{pure}
+  def at_beginning_of_year: () -> Time
+  %a{pure}
+  def at_end_of_month: () -> Time
+  %a{pure}
+  def at_end_of_year: () -> Time
+  %a{pure}
+  def beginning_of_quarter: () -> Time
+  %a{pure}
+  def at_beginning_of_quarter: () -> Time
+  %a{pure}
+  def end_of_quarter: () -> Time
+  %a{pure}
+  def at_end_of_quarter: () -> Time
+  # `(month / 3.0).ceil` — `Float#ceil` with no argument is Integer.
+  %a{pure}
+  def quarter: () -> Integer
+  # NOT %a{pure}: `next_week` / `prev_week` / `last_week` / `days_to_week_start` / `all_week`
+  # default their `start_day` to `Date.beginning_of_week`, the fiber-local config read
+  # (`ActiveSupport::IsolatedExecutionState[:beginning_of_week]`) that already keeps
+  # `beginning_of_week` / `end_of_week` above unannotated. `next_weekday` joins them because it
+  # calls `next_week(:monday, same_time: true)`, whose body reaches `beginning_of_week` with NO
+  # argument and `days_span`, both of which read the same config.
+  def next_week: (?Symbol given_day_in_next_week, ?same_time: bool) -> Time
+  def prev_week: (?Symbol start_day, ?same_time: bool) -> Time
+  def last_week: (?Symbol start_day, ?same_time: bool) -> Time
+  def next_weekday: () -> Time
+  def days_to_week_start: (?Symbol start_day) -> Integer
+  def all_week: (?Symbol start_day) -> Range[Time]
+  # `prev_weekday` / `last_weekday` DO stay pure, and the asymmetry with `next_weekday` above is
+  # real rather than an oversight: the body is `prev_day.on_weekend? ? copy_time_to(
+  # beginning_of_week(:friday)) : prev_day`, and `:friday` is passed explicitly, so no default
+  # argument ever reaches `Date.beginning_of_week`.
+  %a{pure}
+  def prev_weekday: () -> Time
+  %a{pure}
+  def last_weekday: () -> Time
+  # `monday` / `sunday` likewise name their start day explicitly (`beginning_of_week(:monday)` /
+  # `end_of_week(:monday)`), so unlike their zero-argument parents they read no config.
+  %a{pure}
+  def monday: () -> Time
+  %a{pure}
+  def sunday: () -> Time
+  %a{pure}
+  def next_quarter: () -> Time
+  %a{pure}
+  def prev_quarter: () -> Time
+  %a{pure}
+  def last_quarter: () -> Time
+  %a{pure}
+  def last_month: () -> Time
+  %a{pure}
+  def last_year: () -> Time
+  %a{pure}
+  def all_month: () -> Range[Time]
+  %a{pure}
+  def all_quarter: () -> Range[Time]
+  %a{pure}
+  def all_year: () -> Range[Time]
+  %a{pure}
+  def next_occurring: (Symbol day_of_week) -> Time
+  %a{pure}
+  def prev_occurring: (Symbol day_of_week) -> Time
+
+  # `core_ext/time/calculations.rb` — the `Time`-only half.
+  #
+  # `seconds_since_midnight` ends in `+ (usec / 1.0e+6)`, so it is Float even at exactly midnight;
+  # `seconds_until_end_of_day` is `end_of_day.to_i - to_i`, Integer. `sec_fraction` is a plain alias
+  # of `subsec`, and carries `subsec`'s own core type rather than a guessed `Rational` — CRuby
+  # answers the Integer `0` for a whole-second receiver.
+  %a{pure}
+  def seconds_since_midnight: () -> Float
+  %a{pure}
+  def seconds_until_end_of_day: () -> Integer
+  %a{pure}
+  def sec_fraction: () -> (0 | Rational)
+  # `middle_of_day` is `change(hour: 12)`, and `midday` / `noon` / `at_noon` (already declared
+  # above) plus `at_midday` / `at_middle_of_day` are its aliases.
+  %a{pure}
+  def middle_of_day: () -> Time
+  %a{pure}
+  def at_midday: () -> Time
+  %a{pure}
+  def at_middle_of_day: () -> Time
+  %a{pure}
+  def at_beginning_of_hour: () -> Time
+  %a{pure}
+  def at_end_of_hour: () -> Time
+  %a{pure}
+  def at_beginning_of_minute: () -> Time
+  %a{pure}
+  def at_end_of_minute: () -> Time
+  # `Time#prev_day` … `#next_year` are `Time`'s OWN redefinitions (`advance(days: -days)` and
+  # friends), taking an optional count — not the zero-argument `Date` methods of the same name that
+  # rbs's `stdlib/date` types. rbs does not declare them on `Time`, so these are additions.
+  %a{pure}
+  def prev_day: (?Numeric days) -> Time
+  %a{pure}
+  def next_day: (?Numeric days) -> Time
+  %a{pure}
+  def prev_month: (?Numeric months) -> Time
+  %a{pure}
+  def next_month: (?Numeric months) -> Time
+  %a{pure}
+  def prev_year: (?Numeric years) -> Time
+  %a{pure}
+  def next_year: (?Numeric years) -> Time
+
+  # `core_ext/time/conversions.rb`.
+  #
+  # NOT %a{pure}: `to_fs` / `to_formatted_s` look the format up in `Time::DATE_FORMATS`, a mutable
+  # process-global hash that applications are documented to extend from an initializer, and a
+  # custom entry may be an arbitrary lambda that is then CALLED. That is the same reason
+  # `Array#to_fs` is unannotated above. Both always answer a String, whatever the formatter
+  # returns: the lambda branch ends in `.to_s` and the fallback is `to_s`.
+  def to_fs: (?Symbol format) -> String
+  def to_formatted_s: (?Symbol format) -> String
+  # `formatted_offset` is `utc? && alternate_utc_string || ActiveSupport::TimeZone
+  # .seconds_to_utc_offset(utc_offset, colon)`, and `seconds_to_utc_offset` is a `format %` over
+  # its two arguments — pure, and String in both branches. `colon` is `boolish` and not `bool`:
+  # the body is `colon ? WITH_COLON : WITHOUT_COLON`, plain truthiness, so `bool` would make
+  # `t.formatted_offset(1)` a `call.argument-type-mismatch` on code that runs.
+  # `alternate_utc_string` is `untyped` because it is returned as-is when the receiver is UTC and
+  # callers pass whatever they want to print there.
+  %a{pure}
+  def formatted_offset: (?boolish colon, ?untyped alternate_utc_string) -> String
+  # `rfc3339` is `alias_method :rfc3339, :xmlschema`, so it takes `xmlschema`'s optional
+  # `fraction_digits`. rbs types `Time#xmlschema` but not `Time#rfc3339`, so this is an addition
+  # rather than a collision.
+  %a{pure}
+  def rfc3339: (?Integer fraction_digits) -> String
+
+  # `core_ext/date_and_time/zones.rb`. Answers an `ActiveSupport::TimeWithZone`, which nothing in
+  # this bundle declares, so the return is `untyped` rather than a guess — the same answer
+  # `DateTime#in_time_zone` gives below. The parameter is `untyped` and not `String | Symbol`
+  # because `Time.find_zone!` also accepts an `ActiveSupport::TimeZone`, a `TZInfo::Timezone`, and
+  # an offset `Duration` (`Time.find_zone! -5.hours` is the documented spelling).
+  #
+  # NOT %a{pure}: `in_time_zone(zone = ::Time.zone)` reads `Time.zone` through its own default
+  # argument. The label is `global.read` alone and it is recorded in the plugin manifest
+  # (`lib/rigor/plugin/activesupport_core_ext/effects.rb`), next to the identical `DateTime` row.
+  def in_time_zone: (?untyped zone) -> untyped
+
+  # `core_ext/date_and_time/compatibility.rb` — `mattr_accessor :utc_to_local_returns_utc_offset_times,
+  # instance_writer: false` defines an instance READER on every class that includes the module.
+  # Rarely called on an instance, but it is public and `Time` is closed, so the omission would be
+  # the false positive. NOT %a{pure}: it reads process-global configuration.
+  def utc_to_local_returns_utc_offset_times: () -> bool
 end
 
 # ---------------------------------------------------------------

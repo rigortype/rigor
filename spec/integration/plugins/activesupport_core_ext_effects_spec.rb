@@ -21,7 +21,36 @@ require "rigor/rbs_extended/envelope_scanner"
 # generated from the file itself at authoring time and then reviewed by hand; a name silently dropped
 # from the RBS (or never annotated) fails `#has every annotated method`, and a name added here without
 # the RBS actually carrying `%a{pure}` fails `#carries no extra annotations`.
-CORE_EXT_PURE_KEYS = %w[
+#
+# The date/time family is a table of its own (and not only to stay under `Metrics/CollectionLiteralLength`):
+# it is the part of the audit that DIVERGES by receiver class for the same method name — `Time#ago` is
+# pure and `Date#ago` is not — so the reviewer wants those rows side by side rather than scattered
+# alphabetically through the rest.
+CORE_EXT_PURE_DATE_AND_TIME_KEYS = %w[
+  Date#acts_like_date? Date#advance Date#beginning_of_month Date#beginning_of_year
+  Date#end_of_month Date#end_of_year Date#to_time Date#tomorrow Date#yesterday
+  DateTime#acts_like_time? DateTime#ago DateTime#beginning_of_day DateTime#beginning_of_hour
+  DateTime#beginning_of_minute DateTime#end_of_day DateTime#end_of_hour DateTime#end_of_minute
+  DateTime#since DateTime#tomorrow DateTime#utc DateTime#yesterday
+  Time#acts_like_time? Time#advance Time#ago Time#all_day Time#at_beginning_of_day
+  Time#at_end_of_day Time#at_midnight Time#at_noon Time#beginning_of_day Time#beginning_of_hour
+  Time#beginning_of_minute Time#beginning_of_month Time#beginning_of_year Time#change Time#end_of_day
+  Time#end_of_hour Time#end_of_minute Time#end_of_month Time#end_of_year Time#in Time#midday
+  Time#midnight Time#noon Time#since Time#tomorrow Time#yesterday
+  Time#all_month Time#all_quarter Time#all_year Time#at_beginning_of_hour
+  Time#at_beginning_of_minute Time#at_beginning_of_month Time#at_beginning_of_quarter
+  Time#at_beginning_of_year Time#at_end_of_hour Time#at_end_of_minute Time#at_end_of_month
+  Time#at_end_of_quarter Time#at_end_of_year Time#at_midday Time#at_middle_of_day
+  Time#beginning_of_quarter Time#days_ago Time#days_since Time#end_of_quarter Time#formatted_offset
+  Time#last_month Time#last_quarter Time#last_weekday Time#last_year Time#middle_of_day Time#monday
+  Time#months_ago Time#months_since Time#next_day Time#next_month Time#next_occurring
+  Time#next_quarter Time#next_year Time#on_weekday? Time#on_weekend? Time#prev_day Time#prev_month
+  Time#prev_occurring Time#prev_quarter Time#prev_weekday Time#prev_year Time#quarter Time#rfc3339
+  Time#sec_fraction Time#seconds_since_midnight Time#seconds_until_end_of_day Time#sunday
+  Time#weeks_ago Time#weeks_since Time#years_ago Time#years_since
+].freeze
+
+CORE_EXT_PURE_OTHER_KEYS = %w[
   ActiveSupport::Duration#in_days ActiveSupport::Duration#in_hours ActiveSupport::Duration#in_minutes
   ActiveSupport::Duration#in_months ActiveSupport::Duration#in_seconds ActiveSupport::Duration#in_weeks
   ActiveSupport::Duration#in_years ActiveSupport::Duration#iso8601 ActiveSupport::Duration#parts
@@ -29,11 +58,6 @@ CORE_EXT_PURE_KEYS = %w[
   Array#compact_blank Array#exclude? Array#fifth Array#forty_two Array#fourth Array#from
   Array#in_groups Array#in_groups_of Array#inquiry Array#second Array#split Array#third Array#to
   Array.wrap
-  Date#acts_like_date? Date#advance Date#beginning_of_month Date#beginning_of_year
-  Date#end_of_month Date#end_of_year Date#to_time Date#tomorrow Date#yesterday
-  DateTime#acts_like_time? DateTime#ago DateTime#beginning_of_day DateTime#beginning_of_hour
-  DateTime#beginning_of_minute DateTime#end_of_day DateTime#end_of_hour DateTime#end_of_minute
-  DateTime#since DateTime#tomorrow DateTime#utc DateTime#yesterday
   Enumerable#compact_blank Enumerable#exclude? Enumerable#excluding Enumerable#including
   Enumerable#index_by Enumerable#index_with Enumerable#maximum Enumerable#minimum Enumerable#pick
   Enumerable#pluck Enumerable#sole Enumerable#without
@@ -59,14 +83,11 @@ CORE_EXT_PURE_KEYS = %w[
   String#starts_with? String#strip_heredoc String#tableize String#titlecase String#titleize
   String#to String#truncate String#truncate_bytes String#truncate_words String#underscore
   String#upcase_first
-  Time#acts_like_time? Time#advance Time#ago Time#all_day Time#at_beginning_of_day
-  Time#at_end_of_day Time#at_midnight Time#at_noon Time#beginning_of_day Time#beginning_of_hour
-  Time#beginning_of_minute Time#beginning_of_month Time#beginning_of_year Time#change Time#end_of_day
-  Time#end_of_hour Time#end_of_minute Time#end_of_month Time#end_of_year Time#in Time#midday
-  Time#midnight Time#noon Time#since Time#tomorrow Time#yesterday
   TrueClass#blank? TrueClass#present?
   ERB::Util.html_escape_once
 ].freeze
+
+CORE_EXT_PURE_KEYS = (CORE_EXT_PURE_OTHER_KEYS + CORE_EXT_PURE_DATE_AND_TIME_KEYS).freeze
 
 # The interesting NOT-pure cases: one per reason a method was skipped, plus every same-named pair that
 # diverges by class (`Time#ago` is pure, `Date#ago` is not; `Time#beginning_of_day` is pure,
@@ -78,6 +99,11 @@ CORE_EXT_NOT_PURE_KEYS = %w[
   String#to_time String#to_date String#to_datetime String#to_hours
   Time.current Time.zone Time.zone=
   Time#beginning_of_week Time#end_of_week Time#at_beginning_of_week Time#at_end_of_week
+  Time#all_week Time#days_to_week_start Time#next_week Time#next_weekday Time#prev_week
+  Time#last_week
+  Time#today? Time#tomorrow? Time#yesterday? Time#next_day? Time#prev_day? Time#past? Time#future?
+  Time#before? Time#after? Time#to_fs Time#to_formatted_s Time#in_time_zone
+  Time#utc_to_local_returns_utc_offset_times
   Date.current Date.yesterday Date.tomorrow
   Date.beginning_of_week Date.end_of_week Date.beginning_of_month Date.end_of_month
   Date.beginning_of_year Date.end_of_year

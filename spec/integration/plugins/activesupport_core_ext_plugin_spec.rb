@@ -130,6 +130,135 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
   end
 
+  # Issue #658. `Time` is a CORE class, RBS-known and therefore CLOSED, and this bundle declared only the
+  # `core_ext/time/calculations` slice of what ActiveSupport adds to it. On a closed receiver an OMISSION
+  # is a false positive on correct Rails code exactly as much as a wrong return type is, so the whole
+  # `DateAndTime::Calculations` / `time/conversions` / `date_and_time/zones` surface is declared now,
+  # audited against the vendored activesupport-8.1.3.1 sources.
+  #
+  # The must-not-fire half alone would pass vacuously if the class had collapsed to `Dynamic[top]` (the
+  # #437 failure above), so every example here is paired with a positive: either a `dump_type` that has to
+  # read a real type, or the still-witnessed typo below.
+  describe "the Rails Time instance surface (#658)" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
+    end
+
+    # The nine calls the issue opened on, verbatim. Each one is `error: undefined method … for Time` on
+    # master with this plugin loaded.
+    let(:issue_source) do
+      <<~RUBY
+        c = Time.current
+        c.to_fs(:db)
+        c.to_formatted_s(:db)
+        c.at_beginning_of_hour
+        c.middle_of_day
+        c.in_time_zone
+        c.past?
+        c.future?
+        c.today?
+        c.formatted_offset
+      RUBY
+    end
+
+    it "reports nothing for the nine Rails Time calls the issue opened on" do
+      expect(undefined_methods(run_plugin(source: issue_source))).to be_empty
+    end
+
+    # The must-still-succeed half, and it is the one that matters: the FP could equally have been "fixed"
+    # by making `Time` an open receiver, which would take the genuine diagnostic with it project-wide.
+    it "still witnesses a genuinely undefined method on a Time receiver" do
+      result = run_plugin(source: "#{issue_source}c.definitely_not_a_method\n")
+
+      expect(undefined_methods(result).size).to eq(1)
+      expect(undefined_methods(result).first).to include("definitely_not_a_method")
+    end
+
+    it "resolves the new surface to real types rather than leaving it Dynamic" do
+      source = <<~RUBY
+        t = Time.current
+        Rigor.dump_type(t.to_fs(:db))
+        Rigor.dump_type(t.formatted_offset)
+        Rigor.dump_type(t.middle_of_day)
+        Rigor.dump_type(t.quarter)
+        Rigor.dump_type(t.seconds_since_midnight)
+        Rigor.dump_type(t.seconds_until_end_of_day)
+        Rigor.dump_type(t.all_quarter)
+        Rigor.dump_type(t.days_ago(3).beginning_of_quarter.to_fs(:db))
+      RUBY
+
+      expect(dumps(run_plugin(source: source))).to eq(
+        [
+          "dump_type: String", "dump_type: String", "dump_type: Time", "dump_type: Integer",
+          "dump_type: Float", "dump_type: Integer", "dump_type: Range[Time]", "dump_type: String"
+        ]
+      )
+    end
+
+    # `at_beginning_of_week` / `at_end_of_week` are `alias`es of `beginning_of_week` / `end_of_week`, so
+    # they take the same optional `start_day`. Declared zero-arity, the second and third lines below were
+    # `call.wrong-arity` on correct Rails code — an FP the #658 audit turned up in rows that were already
+    # here rather than in the missing ones. The last line is the must-still-fire half: a genuinely
+    # over-applied zero-arity method still reports, so this is not the receiver going lenient.
+    it "takes the optional start_day on the at_-prefixed week aliases, and still catches a real overrun" do
+      source = <<~RUBY
+        t = Time.current
+        Rigor.dump_type(t.at_beginning_of_week)
+        Rigor.dump_type(t.at_beginning_of_week(:sunday))
+        Rigor.dump_type(t.at_end_of_week(:sunday))
+        t.beginning_of_day(1, 2)
+      RUBY
+      result = run_plugin(source: source)
+      arity = result.diagnostics.select { |d| d.qualified_rule == "call.wrong-arity" }
+
+      expect(arity.map(&:message)).to eq(
+        ["wrong number of arguments to `beginning_of_day' on Time (given 2, expected 0)"]
+      )
+      expect(dumps(result)).to eq(["dump_type: Time"] * 3)
+    end
+
+    # `formatted_offset(colon = true, …)` branches on plain truthiness (`colon ? WITH_COLON :
+    # WITHOUT_COLON`), which rbs spells `boolish`. Declared `bool` it drew
+    # `call.argument-type-mismatch` on `formatted_offset(1)` — code that runs fine. The last line is
+    # the must-still-fire half: a genuinely wrong argument on the new surface still reports, so this
+    # is `boolish` being exact and not argument checking going quiet.
+    it "takes any truthy colon for formatted_offset, and still catches a genuinely wrong argument" do
+      source = <<~RUBY
+        t = Time.current
+        Rigor.dump_type(t.formatted_offset(1))
+        Rigor.dump_type(t.formatted_offset(false))
+        t.days_ago("3")
+      RUBY
+      result = run_plugin(source: source)
+      mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
+
+      expect(mismatches.map(&:message)).to eq(
+        [%(argument type mismatch at parameter `days' of `days_ago' on Time: expected Numeric, got "3")]
+      )
+      expect(dumps(result)).to eq(["dump_type: String"] * 2)
+    end
+
+    it "declares the Time singletons core_ext/time/zones and time/calculations add" do
+      source = <<~RUBY
+        Time.zone_default
+        Time.use_zone("UTC") { 1 }
+        Time.find_zone!("UTC")
+        Time.find_zone("UTC")
+        Rigor.dump_type(Time.days_in_month(2, 2024))
+        Rigor.dump_type(Time.days_in_year)
+        Rigor.dump_type(Time.rfc3339("1999-12-31T14:00:00-10:00"))
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(["dump_type: Integer", "dump_type: Integer", "dump_type: Time"])
+    end
+  end
+
   # Issue #534 item 3. The multipliers were `() -> untyped` in the RBS bundle, so `1.day` was
   # `Dynamic[top]` on ~265 mastodon sites. They now return the RBS-less `ActiveSupport::Duration`
   # nominal, and the arithmetic rule keeps the operators around it honest.

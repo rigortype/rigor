@@ -20,8 +20,34 @@ in-place extensions to Ruby's built-in classes:
   `#in_months` / `#in_years`, `#iso8601`, `#parts`. NOT `#ago` /
   `#until` / `#before` / `#since` / `#from_now` / `#after` — see
   _Scope and limits_ below
-- `Time` / `Date` — `current`, `yesterday`, `tomorrow`,
-  `beginning_of_*`, `end_of_*`, `ago`, `since`, `in`, `change`
+- `Time` — the Rails instance surface (#658) down to the callable tail, audited against
+  activesupport-8.1.3.1's `core_ext/date_and_time/calculations.rb`,
+  `time/calculations.rb`, `time/conversions.rb`,
+  `date_and_time/zones.rb` and `date_and_time/compatibility.rb`: the
+  predicates (`past?`, `future?`, `today?`, `on_weekend?`, …), the
+  `days_ago` / `months_since` / `next_occurring` families, the quarter
+  and `at_`-prefixed spellings, `all_week` / `all_month` /
+  `all_quarter` / `all_year`, `to_fs` / `to_formatted_s` /
+  `formatted_offset` / `rfc3339`, `in_time_zone`, plus the singletons
+  `days_in_month`, `days_in_year`, `rfc3339`, `use_zone`, `find_zone` /
+  `find_zone!` and `zone_default`. `Time` is a CORE class and therefore
+  CLOSED, so an omission on it is a false positive exactly as much as a
+  wrong return type is — hence an exhaustive audit and not a "top
+  selectors" sample. Measured residual against a real
+  `require "active_support/all"`: twelve names, ten instance and two
+  singleton, every one an `alias_method` artefact of ActiveSupport's own
+  operator overrides — the `plus_with{,out}_duration`,
+  `minus_with{,out}_duration`, `minus_with{,out}_coercion`,
+  `compare_with{,out}_coercion`, `eql_with{,out}_coercion` and
+  `Time.at_with{,out}_coercion` pairs. All are `:nodoc:` in the source
+  and called by nothing outside ActiveSupport, so they stay undeclared
+  on purpose
+- `Date` / `DateTime` — `current`, `yesterday`, `tomorrow`,
+  `beginning_of_*`, `end_of_*`, `ago`, `since`, `in`, `change`. The same
+  shared modules extend them, so they carry the same closed-class gap
+  `Time` just closed (`Date.current.past?` still reports) — a follow-up,
+  because `DateTime` inherits `Date`'s declarations and would need its
+  own overrides for returns that are wrong for it
 - `String` — `underscore`, `camelize`, `classify`, `constantize`,
   `demodulize`, `pluralize`, `singularize`, `humanize`, `tableize`,
   `parameterize`, `squish`, `truncate`, `truncate_words`,
@@ -109,9 +135,9 @@ per project — this one contributing signatures rather than diagnostics.
   Duration receiver regardless of what the class does or doesn't
   declare. `#ago` / `#until` / `#before` / `#since` / `#from_now` /
   `#after` are deliberately NOT part of that surface: they default to
-  `Time.current`, and typing them needs the Rails `Time` instance
-  extensions declared first, which this bundle's `Time` block does not
-  do — see #659 (blocked on #658).
+  `Time.current`, and typing them was blocked on the Rails `Time`
+  instance extensions being declared first, which #658 has now done —
+  see #659 for the remaining half.
 - **`html_safe` returns `String`.** Truly it returns
   `ActiveSupport::SafeBuffer` (a String subclass), but loss of the
   `html_safe?` predicate value is the only practical precision gap.
@@ -121,8 +147,11 @@ per project — this one contributing signatures rather than diagnostics.
 - **Project-private monkey-patches are NOT covered.** The `pre_eval:`
   mechanism (ADR-17) is the path for explicit pre-evaluation of
   project-side monkey-patches; see the survey notes.
-- **Coverage is "top ~40 selectors", not exhaustive.** ActiveSupport
-  has hundreds of extension methods. PRs welcome.
+- **Coverage is "top ~40 selectors", not exhaustive** — except on
+  `Time`, where the closed-core-class argument above makes a sample
+  unsound and the audit is exhaustive but for the twelve `:nodoc:`
+  alias-chain artefacts listed there. ActiveSupport has hundreds of
+  extension methods elsewhere. PRs welcome.
 
 ## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10)
 
@@ -136,6 +165,9 @@ and `CurrentAttributes`.
 | `Time.zone.now` / `today`, `ActiveSupport::TimeZone#now` | `nondet.time` |
 | `n.days.ago`, `n.hours.from_now`, `.until`, `.since` | `nondet.time` + `global.read` |
 | `Time.zone` | `global.read`; `Time.zone=` / `use_zone` | `global.write` |
+| `Time.zone_default` | `global.read`; `Time.zone_default=` | `global.write` |
+| `Time.days_in_month` / `days_in_year` (the `year` default reads the clock) | `nondet.time` + `global.read` |
+| `Time#in_time_zone` / `DateTime#in_time_zone` (the `zone` default reads `Time.zone`) | `global.read` |
 | `Current.set` / `reset` / `attributes` (`ActiveSupport::CurrentAttributes`) | `global.read` / `global.write` + `rails.current.read` / `.write` |
 | `ActiveSupport::Notifications.instrument` / `publish` | `io` + `telemetry`, plus an `opaque-callable` taint |
 | `ActiveSupport::Notifications.subscribe` | `mutate.static` |

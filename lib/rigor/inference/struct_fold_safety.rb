@@ -277,9 +277,26 @@ module Rigor
         true
       end
 
-      # Constructs whose body runs zero-or-many times or is deferred (loops, blocks, lambdas): a single static pass
-      # over the body cannot model a member setter's effect across iterations, so a setter inside one disqualifies the
-      # local. Straight-line conditionals (`if` / `unless` / `case`) are NOT boundaries — their branch scopes join
+      # Constructs a member setter's effect cannot reach the continuation soundly, so a setter inside one
+      # disqualifies the local.
+      #
+      # A block or lambda body is evaluated for its own scope and its bindings do NOT leak, so
+      # `[1].each { s.x = v }; s.x` would read the construction value — verified unsound on #525.
+      #
+      # `for` shares the enclosing locals rather than opening a scope, so the block rationale does not apply
+      # to it; it is a boundary for the same reason `while` is (below), and this comment previously gave the
+      # wrong reason for it.
+      #
+      # `while` / `until` are boundaries because a single static pass cannot model a member setter across
+      # ITERATIONS. Issue #597 tried to lift this: `eval_loop` does join the body's exit scope with the
+      # pre-loop scope, which looks like the per-iteration summary the gate stands in for. It is not one.
+      # That join is a single unrolling, and it is sound only under four side conditions nothing checks —
+      # the setter's RHS must not depend on loop-carried member state (`p.x = p.y; p.y = 5` reads `1 | 2`
+      # where the runtime holds 5), the member must be read only AFTER the loop, the loop must exit through
+      # its predicate rather than a `break`, and no later setter may overwrite what the join recorded.
+      # Details and the probes: ADR-56 § WD2.8.
+      #
+      # Straight-line conditionals (`if` / `unless` / `case`) are NOT boundaries — their branch scopes join
       # soundly, so a setter in one branch is fine.
       def deferred_boundary?(node)
         node.is_a?(Prism::WhileNode) || node.is_a?(Prism::UntilNode) ||

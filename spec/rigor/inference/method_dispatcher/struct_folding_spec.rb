@@ -146,10 +146,11 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
-    # The must-still-decline half, and the reason the grant is computed by a static body scan rather than
-    # inferred at the merge. A setter inside a loop or block cannot be modelled by a single static pass, so
-    # the local is disqualified up front; without that gate the read serves the stale materialisation value
-    # (verified unsound on #525's sibling — it answered `nil` for a member the block had written).
+    # The must-still-decline half. A setter inside a block or a loop is disqualified up front by the static
+    # body scan, for two DIFFERENT reasons that are easy to conflate: a block's bindings never leave its own
+    # scope (#525's sibling verified the read then serves the stale materialisation `nil`), while a loop's
+    # DO reach the continuation, but only as a single unrolling — which is not a per-iteration summary. See
+    # `StructFoldSafety#deferred_boundary?` for the four side conditions that unrolling silently assumes.
     it "does NOT fold a member whose setter sits inside a block" do
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
         Point = Struct.new(:x, :y)

@@ -396,6 +396,70 @@ untouching `if` or `while`, and an ADR-48 slice-4 setter write-back
 surviving one. Reaching mail needs a different lever — modelling an
 in-loop setter's per-iteration effect — not this one.
 
+### WD2.8 — Why the loop join is NOT a per-iteration summary (2026-09-02, issue #597)
+
+WD2.7 leaves every member read of a struct local that takes a setter
+inside a loop answering `Dynamic[top]`, via `StructFoldSafety`'s
+all-or-nothing `deferred_setter` gate. #597 proposed replacing that
+gate with a per-iteration summary. **The attempt was made, measured,
+and withdrawn**; this records why, so it is not re-derived.
+
+The tempting observation is that `eval_loop` already joins the body's
+exit scope with the pre-loop scope, so a setter's effect looks like it
+reaches the continuation as "the loop ran" unioned with "it did not" —
+apparently the summary the gate stands in for. Two changes make that
+readable: stop treating `while` / `until` as deferred boundaries, and
+let a member read see through a union of same-class `StructInstance`s.
+Both were implemented, and on the obvious shapes they do exactly what
+the issue asks (a set member reads `1 | 9`, an unset sibling stays `2`).
+
+**That join is a single unrolling, not a summary**, and the difference
+is not cosmetic. Four probes each fold to a value the program never
+holds — the worst failure class here, because a wrong precise type
+feeds every downstream rule silently:
+
+- **Loop-carried member state.** `p.x = p.y; p.y = 5` in a `while`
+  reads `1 | 2`; the runtime holds 5. `loop_body_local_writes` keys
+  slice-B's fixpoint on local WRITE nodes, so a setter-only body takes
+  the fast path — one unrolling. This is the pre-slice-B `d *= 2`
+  bug ("never reaching 4, 8") recreated one level down, in members.
+- **Later setters, with no loop at all.** `p.x = 9 if cond; p.x = 5`
+  reads `1 | 9`; the runtime is ALWAYS 5.
+  `apply_setter_writeback` no-ops on a union binding, so the union read
+  consults a carrier the writeback never updated. The "if / case merges
+  fold for free" claim ships this.
+- **`break` paths.** Member state on the break edge is dropped: the
+  fast path returns before `join_break_scopes`, and the converged path
+  joins breaks only for rebound LOCALS.
+- **In-body reads.** A read before the setter sees only the pre-loop
+  binding, so it folds iteration 1's value from iteration 2 onward.
+
+So the union-read is sound only under four side conditions nothing
+checks: the setter's RHS must not depend on loop-carried member state,
+the member must be read only after the loop, the loop must exit through
+its predicate, and no later setter may overwrite what the join
+recorded. A real version needs member-setter effects INSIDE the
+fixpoint (fold-safe struct locals as converged names, with member-map
+widening at the cap), a writeback that maps over union arms, break-sink
+scopes contributing struct carriers, and in-body reads consulting the
+converged entry state. That is a slice on the scale of slice B itself,
+not an adjustment.
+
+It was not built, because the motivation does not survive contact with
+the target. #597 exists for mail's ragel cluster, and WD2.7 already
+measured that `address` is disqualified three times over by rules
+upstream of this gate — decisively by being REBOUND 27 times where
+`fold_safe_locals` requires exactly one write. A per-iteration setter
+summary cannot help a local the state machine re-materialises every
+iteration. The gate is a red herring for that file, and the single-write
+requirement is the real bar.
+
+What survived the withdrawal is the corrected reasoning: `for` is a
+boundary for the unrolling reason above, not the block-scope reason its
+comment used to give, and the block and loop cases decline for
+genuinely different reasons rather than one shared "single static pass"
+hand-wave.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

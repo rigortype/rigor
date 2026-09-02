@@ -530,7 +530,9 @@ one a deliberate trade:
   Dynamic[top]]` where it read the closed `Array[1 | 2]`, and a `[x]`
   slot the engine cannot type keeps its arm, which the straight-line
   path's `gradual_seed` fixture already reads the same way. (`Array.new`
-  is NOT in this set: it folds to the empty literal and still closes;
+  is NOT in this set: it types as a bare `Array` with no type args, which the
+  join reads as no elements, and still closes; a `Hash.new(default)` seed types
+  `Hash[Dynamic, V]` and now keeps its key arm (monotone, no diagnostic moves);
   `Array(x)` is wholly `Dynamic` and never reaches the join.)
   Each is a monotone imprecision on a rare spelling — `[]` dominates
   the accumulator idiom — and the alternative, guessing which `Dynamic`

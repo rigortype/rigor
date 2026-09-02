@@ -911,6 +911,14 @@ module Rigor
                 analyse_safe_nav_chain(node, scope)
               end
             return chain_result if chain_result
+
+            # Issue #606 slice 2 — membership. Runs after `analyse_string_predicate`, which owns
+            # the `str.include?(literal)` shape; this one wants the mirror image (a collection
+            # receiver, a bound argument), so the two never contend for the same node.
+            if node.name == :include?
+              membership_result = analyse_membership_predicate(node, scope)
+              return membership_result if membership_result
+            end
           end
 
           # Slice 7 phase 15 — RBS::Extended predicate effects. When the method's RBS signature
@@ -2769,6 +2777,63 @@ module Rigor
           when Type::Nominal then type.class_name != "NilClass"
           when Type::Singleton, Type::Tuple, Type::HashShape then true
           when Type::Union then type.members.all? { |member| provably_non_nil_type?(member) }
+          end
+        end
+
+        # Issue #606 slice 2 — MEMBERSHIP. `collection.include?(x)` answering true proves `x` is one
+        # of the collection's elements, so if none of those can be nil, neither can `x`:
+        #
+        #   unless Redmine::Reaction::REACTABLE_TYPES.include?(object_type)   # redmine reactions_controller.rb
+        #     render_403
+        #     return
+        #   end
+        #   @object = object_type.constantize.find(...)                       # ← fired before this
+        #
+        # The proof lives entirely in the collection, which is why {.nil_free_collection?} answers
+        # only for shapes whose element types are actually known — a literal / `Tuple`, or an
+        # `Array` / `Set` carrying an element type. An untyped collection declines: `Dynamic` may
+        # hold nil, and "we do not know" must not read as "no nil here".
+        #
+        # Only the truthy edge narrows. A false `include?` says nothing about `x` — a nil `x` is
+        # simply not in the list, which is exactly what false means.
+        MEMBERSHIP_COLLECTION_CLASSES = %w[Array Set].freeze
+        private_constant :MEMBERSHIP_COLLECTION_CLASSES
+
+        def analyse_membership_predicate(node, scope)
+          return nil if node.receiver.nil? || node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          argument = node.arguments.arguments.first
+          reader, writer =
+            case argument
+            when Prism::LocalVariableReadNode then %i[local with_local]
+            when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
+            else return nil
+            end
+          return nil unless nil_free_collection?(scope.type_of(node.receiver))
+
+          current = scope.public_send(reader, argument.name)
+          return nil if current.nil?
+
+          non_nil = narrow_non_nil(current)
+          return nil if non_nil.equal?(current)
+
+          [scope.public_send(writer, argument.name, non_nil), scope]
+        end
+
+        # True only when every inhabitant the collection can yield is non-nil. Restricted to
+        # sequence shapes on purpose: `Hash#include?` asks about KEYS and `Range#include?` about
+        # bounds, so neither element story is the one this rule reasons about.
+        def nil_free_collection?(type)
+          case type
+          when Type::Tuple
+            !type.elements.empty? && type.elements.all? { |element| provably_non_nil_type?(element) }
+          when Type::Constant
+            type.value.is_a?(Array) && !type.value.empty? && type.value.none?(&:nil?)
+          when Type::Nominal
+            MEMBERSHIP_COLLECTION_CLASSES.include?(type.class_name) &&
+              type.type_args.size == 1 &&
+              provably_non_nil_type?(type.type_args.first)
           end
         end
 

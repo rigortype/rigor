@@ -99,6 +99,139 @@ RSpec.describe "plugins/rigor-actioncable" do
     end
   end
 
+  # #621 — the discoverer used to key `class ::ChatChannel` as `"::ChatChannel"` (and, nested inside a
+  # module, as the nonsense `"Admin::::ChatChannel"`), and the analyzer papered over the first spelling with
+  # a `find(name) || find("::#{name}")` retry. The base-class match had the mirror bug: a channel written
+  # `< ::ApplicationCable::Channel` was not discovered at all, so its own `broadcast_to` call sites reported
+  # `unknown-channel` on correct code. Keys and base-class names are de-rooted at the producer now, which
+  # makes a rooted declaration and a plain reopen collide on ONE key — so the actions and stream names union
+  # instead of the last file in the glob clobbering the first.
+  describe "rooted declarations and reopens (#621)" do
+    let(:rooted_files) do
+      DEFAULT_CHANNELS.except("app/channels/chat_channel.rb").merge(
+        "app/channels/a_chat_channel.rb" => <<~RUBY
+          class ::ChatChannel < ApplicationCable::Channel
+            def subscribed
+              stream_from "chat_room_5"
+            end
+
+            def speak(data)
+              data
+            end
+          end
+        RUBY
+      )
+    end
+
+    # A later-sorting file reopens the rooted declaration plainly, adding its own stream.
+    let(:reopen_files) do
+      rooted_files.merge(
+        "app/channels/z_chat_channel_ext.rb" => <<~RUBY
+          class ChatChannel < ApplicationCable::Channel
+            def subscribed
+              stream_from "chat_room_9"
+            end
+          end
+        RUBY
+      )
+    end
+
+    it "recognises a rooted channel declaration under its plain spelling" do
+      result = run_plugin(
+        source: %(ChatChannel.broadcast_to(@room, message: "hi")\n),
+        files: rooted_files,
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-channel" }).to be_empty
+      expect(diags.find { |d| d.rule == "broadcast-target" }).not_to be_nil
+    end
+
+    it "recognises a channel whose base class is written rooted" do
+      files = DEFAULT_CHANNELS.merge(
+        "app/channels/rooted_base_channel.rb" => <<~RUBY
+          class RootedBaseChannel < ::ApplicationCable::Channel
+            def subscribed
+              stream_from "rooted_base"
+            end
+          end
+        RUBY
+      )
+      result = run_plugin(
+        source: %(RootedBaseChannel.broadcast_to(@room, message: "hi")\n),
+        files: files,
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-channel" }).to be_empty
+      expect(diags.find { |d| d.rule == "broadcast-target" }).not_to be_nil
+    end
+
+    it "recognises a channel declared rooted INSIDE a module as the top-level constant it names" do
+      files = DEFAULT_CHANNELS.merge(
+        "app/channels/admin_alert_channel.rb" => <<~RUBY
+          module Admin
+            class ::AlertChannel < ApplicationCable::Channel
+              def subscribed
+                stream_from "alerts"
+              end
+            end
+          end
+        RUBY
+      )
+      result = run_plugin(
+        source: %(AlertChannel.broadcast_to(@room, message: "hi")\n),
+        files: files,
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-channel" }).to be_empty
+      expect(diags.find { |d| d.rule == "broadcast-target" }).not_to be_nil
+    end
+
+    it "keeps the rooted declaration's streams when a later file reopens the channel plainly" do
+      result = run_plugin(
+        source: %(ActionCable.server.broadcast("chat_room_5", message: "hi")\n),
+        files: reopen_files,
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-stream" }).to be_empty
+      expect(diags.find { |d| d.rule == "broadcast-stream" }).not_to be_nil
+    end
+
+    it "also keeps the reopen's own stream" do
+      result = run_plugin(
+        source: %(ActionCable.server.broadcast("chat_room_9", message: "hi")\n),
+        files: reopen_files,
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      expect(plugin_diagnostics(result).find { |d| d.rule == "broadcast-stream" }).not_to be_nil
+    end
+
+    it "still flags a stream name no declaration registers" do
+      result = run_plugin(
+        source: %(ActionCable.server.broadcast("chat_room_404", message: "hi")\n),
+        files: reopen_files,
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      err = plugin_diagnostics(result).find { |d| d.rule == "unknown-stream" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("chat_room_404")
+    end
+
+    it "still flags a channel constant no declaration introduces" do
+      result = run_plugin(
+        source: %(NopeChannel.broadcast_to(@room, message: "hi")\n),
+        files: reopen_files,
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      err = plugin_diagnostics(result).find { |d| d.rule == "unknown-channel" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("NopeChannel")
+    end
+  end
+
   describe "ActionCable.server.broadcast recognition" do
     let(:files_with_dynamic_channel) do
       DEFAULT_CHANNELS.merge(

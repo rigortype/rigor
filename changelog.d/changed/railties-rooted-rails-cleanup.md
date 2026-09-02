@@ -1,0 +1,1 @@
+- **[plugins]** `rigor-railties` no longer carries its own special case for a `::Rails` receiver — the engine's rooted constant resolution answers it — so `::Rails.logger` / `.cache` / `.configuration` / `.application` type exactly as before. ([#626](https://github.com/rigortype/rigor/issues/626), [#654](https://github.com/rigortype/rigor/pull/654))

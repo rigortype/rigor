@@ -28,6 +28,7 @@ require_relative "receiver_alias"
 require_relative "singleton_object_constant"
 require_relative "optimistic_origin"
 require_relative "struct_fold_safety"
+require_relative "version_guard"
 
 module Rigor
   module Inference
@@ -655,6 +656,14 @@ module Rigor
       # `Constant[false]` fold one branch; `Union[true, false]`, `Dynamic[T]`, and `Top` keep both branches live.
       def constant_predicate_polarity(predicate)
         return nil if predicate.nil?
+
+        # ADR-47 WD5 — a decidable version guard (#627) answers first, exactly as it does on the scope side
+        # in `StatementEvaluator#branch_certainty`. Both readers ask the same pure function of the AST, so
+        # the expression form (`RUBY_VERSION >= "3.1" ? a : b`) and the statement form cannot disagree about
+        # which arm survives. The verdict rests on literals, so the ADR-101 optimistic-carrier decline below
+        # — which guards an RBS-derived judgment — does not apply to it.
+        guard = VersionGuard.verdict(predicate)
+        return guard if guard
         # ADR-101 — decline on an optimistically nil-free carrier; see
         # `StatementEvaluator#optimistic_carrier?` for why the gate is here and not in `Narrowing`.
         return nil unless optimistic_origin_for(predicate).nil?

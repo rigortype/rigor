@@ -60,7 +60,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-44 | [Per-dispatch / per-narrow allocation churn (Scope, CallContext)](44-dispatch-allocation-churn.md) | Accepted (body-scope collapse + allocation hygiene landed; mutable pooling rejected; field-regrouping downgraded) |
 | ADR-45 | [Unchanged-project fast path (run-result cache)](45-unchanged-project-fast-path.md) | Accepted (record-and-validate run cache landed; naive pre-analysis fingerprint rejected as unsound) |
 | ADR-46 | [Incremental analysis via a cross-file dependency graph](46-incremental-dependency-graph.md) | Accepted (slices 1–4 landed incl. file add/remove; --incremental gated by --verify-incremental in CI) |
-| ADR-47 | [Narrowing-driven clause reachability (`flow.unreachable-clause`)](47-narrowing-driven-clause-reachability.md) | Accepted (WD1–WD3a landed, v0.1.17; WD4 16-corpus sweep zero-firing; WD3b deferred) |
+| ADR-47 | [Narrowing-driven clause reachability (`flow.unreachable-clause`)](47-narrowing-driven-clause-reachability.md) | Accepted (WD1–WD3a landed, v0.1.17; WD4 16-corpus sweep zero-firing; WD5 version-guard arms landed; WD3b deferred) |
 | ADR-48 | [Struct / Data value folding (member-shape carriers)](48-data-struct-value-folding.md) | Accepted (Data.define slices 1–4 landed v0.1.17; Struct slices 1–3 landed, slice 4 deferred) |
 | ADR-49 | [ADR authoring guidelines (a rubric for necessary-and-sufficient ADRs)](49-adr-authoring-guidelines.md) | Accepted (in force; living rubric) |
 | ADR-50 | [Release engineering and stability strategy (v0.2.0 → v1.0.0)](50-release-engineering-and-stability-strategy.md) | Proposed (v0.2.0 release-engineering trial; v1.0.0 hard contract freeze) |

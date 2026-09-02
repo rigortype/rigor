@@ -143,6 +143,9 @@ module Rigor
           render_constant_path(arg)
         end
 
+        # The anchor is the constant path WITHOUT a leading `::` — `describe ::User` anchors on `"User"`,
+        # the same spelling `describe User` produces — because the `:model_index` fact is keyed by the
+        # de-rooted class name however the model was declared (#583; `Activerecord#index_to_published_hash`).
         def render_constant_path(node)
           case node
           when Prism::ConstantReadNode then node.name.to_s
@@ -154,7 +157,7 @@ module Rigor
               current = current.parent
             end
             case current
-            when nil then "::#{parts.join('::')}"
+            when nil then parts.join("::")
             when Prism::ConstantReadNode then "#{current.name}::#{parts.join('::')}"
             end
           end

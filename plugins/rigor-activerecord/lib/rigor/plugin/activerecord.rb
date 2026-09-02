@@ -63,7 +63,16 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
-        # Bumped 2026-09-01 — `table_name` / `quoted_table_name` join the recognised class-side surface, and
+        # 0.8.0, 2026-09-02 — a model declared `class ::User` is keyed by its de-rooted name (`"User"`) in
+        # the {ModelIndex} and the published `:model_index` fact (#583). The version is part of the
+        # producer cache KEY: a cached 0.7.0 index still keys such a model `"::User"`, and `ModelIndex#find`
+        # now normalises every query to the de-rooted spelling, so serving that payload warm would miss the
+        # model on every lookup until an unrelated model edit happened to invalidate the entry. The same
+        # bump covers the second half of the change — a model reopened in a second file is now ONE merged
+        # entry rather than the last declaration's, so a cached 0.7.0 entry can also be missing the DSL
+        # surface the merge restores.
+        #
+        # 0.7.0, 2026-09-01 — `table_name` / `quoted_table_name` join the recognised class-side surface, and
         # `ModelIndex::Entry` gains the `table_name_exact` member that gates value-pinning. A Struct member
         # addition is not Marshal-compatible with the cached 0.6.0 payload, so the bump (part of the
         # producer cache key) is what keeps a warm run from loading it.
@@ -78,7 +87,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.7.0",
+        version: "0.8.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -165,8 +174,10 @@ module Rigor
       #     }
       #
       # Consumers do `services.fact_store.read(plugin_id: "activerecord", name: :model_index)` and look up
-      # by class name. Discovery failures (missing schema, unparseable models) leave the fact unpublished —
-      # the consumer's own degrade path runs (typically a no-op).
+      # by class name — the DE-ROOTED constant path (`"User"`, `"Admin::User"`), never `"::User"`, however
+      # the model was declared (#583; see {ModelDiscoverer}). Discovery failures (missing schema,
+      # unparseable models) leave the fact unpublished — the consumer's own degrade path runs (typically a
+      # no-op).
       def prepare(services)
         index = model_index
         return if index.nil? || index.empty?
@@ -284,7 +295,8 @@ module Rigor
         model_name = constant_receiver_name(call_node.receiver)
         return nil if model_name.nil?
 
-        entry = index.find(model_name) || index.find("::#{model_name}")
+        # A rooted receiver (`::User.find`) renders as `"::User"`; `ModelIndex#find` normalises it.
+        entry = index.find(model_name)
         return nil if entry.nil?
 
         finder_return_type(call_node, entry) ||
@@ -310,7 +322,7 @@ module Rigor
         self_type = scope.self_type
         return nil unless self_type.is_a?(Rigor::Type::Singleton)
 
-        entry = index.find(self_type.class_name) || index.find("::#{self_type.class_name}")
+        entry = index.find(self_type.class_name)
         return nil if entry.nil?
 
         finder_return_type(call_node, entry) ||
@@ -415,7 +427,7 @@ module Rigor
         model_name = relation_element_class_name(scope.type_of(call_node.receiver))
         return nil if model_name.nil?
 
-        entry = index.find(model_name) || index.find("::#{model_name}")
+        entry = index.find(model_name)
         return nil if entry.nil?
         return nil unless entry.scope?(call_node.name)
 
@@ -449,8 +461,7 @@ module Rigor
         receiver_type = scope.type_of(call_node.receiver)
         return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
-        entry = index.find(receiver_type.class_name) ||
-                index.find("::#{receiver_type.class_name}")
+        entry = index.find(receiver_type.class_name)
         return nil if entry.nil?
 
         association_return_type(entry, call_node.name) ||
@@ -549,8 +560,11 @@ module Rigor
       end
 
       # Marshal-clean Hash form for the cross-plugin fact store. Consumers (rigor-actionpack Phase 1,
-      # rigor-factorybot Phase 1 (c), ...) get a flat `class_name → { table:, columns: }` map without
-      # depending on this plugin's `ModelIndex` / `SchemaTable::Column` carrier classes.
+      # rigor-factorybot Phase 1 (c), rigor-shoulda-matchers, ...) get a flat `class_name → { table:,
+      # columns: }` map without depending on this plugin's `ModelIndex` / `SchemaTable::Column` carrier
+      # classes. The keys are the index's own — de-rooted constant paths — and the consumers key into the
+      # Hash directly with the plain rendering of the constant they anchor on, with no two-spelling retry
+      # (#583).
       def index_to_published_hash(index)
         index.entries.transform_values do |entry|
           {

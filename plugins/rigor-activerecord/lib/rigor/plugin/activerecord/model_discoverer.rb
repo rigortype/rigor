@@ -18,10 +18,20 @@ module Rigor
       # Each STI child carries an `sti_parent:` pointer the {ModelIndex} uses to inherit the root model's
       # table and DSL surface.
       #
-      # Returns rows the {ModelIndex} consumes:
+      # Returns rows the {ModelIndex} consumes — exactly ONE per model, whatever the number of source
+      # declarations: a reopened class contributes its DSL surface into the single row for that name
+      # ({#merge_redeclarations}), because a reopen ADDS to a class rather than replacing it.
       #
       #   { class_name: "User", table_name_override: nil, sti_parent: nil, ... }
       #   { class_name: "Admin", table_name_override: nil, sti_parent: "User", ... }
+      #
+      # `class_name` (and `superclass_name`) is the constant path WITHOUT a leading `::` — `class ::User`
+      # yields `"User"`, exactly as `class User` does, and `class ::User` nested inside `module Admin`
+      # yields `"User"` rather than `"Admin::::User"`, because a rooted declaration names the top-level
+      # constant regardless of its lexical nesting. Every downstream key — the {ModelIndex} entries, the
+      # published `:model_index` fact, `Entry#class_name` — inherits this spelling, and every consumer
+      # anchors with the plain constant rendering (#583: the rooted `"::User"` key used to make all three
+      # Hash consumers miss such models silently).
       #
       # Limitations (intentional for v0.1.0 of the plugin):
       #
@@ -29,8 +39,8 @@ module Rigor
       #   (`self.table_name = "#{tenant}_users"`) are skipped.
       # - Modules (`class Admin::User < ApplicationRecord`) are recognised; the resulting class name is
       #   the lexical path (`Admin::User`).
-      # - The STI fixpoint matches a superclass name against model class names tolerating a leading `::`;
-      #   richer constant resolution (relative namespacing) is not modelled.
+      # - The STI fixpoint matches a superclass name against model class names by exact spelling; richer
+      #   constant resolution (relative namespacing) is not modelled.
       class ModelDiscoverer
         # @param io_boundary [Rigor::Plugin::IoBoundary]
         # @param search_paths [Array<String>] absolute or project-relative paths.
@@ -42,7 +52,10 @@ module Rigor
         def initialize(io_boundary:, search_paths:, base_classes:)
           @io_boundary = io_boundary
           @search_paths = search_paths
-          @base_classes = base_classes.to_set
+          # De-rooted for the same reason superclass names are ({#visit_class}): the match is by exact
+          # spelling, so a configured `model_base_classes: ["::ApplicationRecord"]` would otherwise never
+          # match anything a declaration can render.
+          @base_classes = base_classes.to_set { |name| strip_root(name.to_s) }
           # Global set of column names whose declared runtime type overrides the schema scalar
           # (`serialize` / `mount_uploader` / `attribute :x, CustomType`). Collected across every class AND
           # concern module walked — a serialize inside a concern's `included do … end` is invisible to the
@@ -101,21 +114,79 @@ module Rigor
             break unless added
           end
 
-          candidates.filter_map do |candidate|
+          rows = candidates.filter_map do |candidate|
             name = candidate[:class_name]
             next unless model_names.key?(name)
 
             candidate.merge(sti_parent: sti_parent[name])
           end
+          merge_redeclarations(rows)
         end
 
-        # Resolves a superclass NAME against the set of known model class names, tolerating a leading
-        # `::`. Returns the matched model class name, or nil.
-        def model_match(superclass_name, model_names)
-          return superclass_name if model_names.key?(superclass_name)
+        # Collapses the rows that declare the SAME constant into one, so {ModelIndex.build} — which keys
+        # its entries by `class_name` — receives at most one row per model.
+        #
+        # A model is routinely declared more than once: `app/models/user.rb` holds `class User <
+        # ApplicationRecord` and a second file reopens it (`class ::User`, `class User`, or a full
+        # `class User < ApplicationRecord` redeclaration) to add a method. Ruby's own semantics are
+        # ADDITIVE — a reopen contributes what it spells and leaves the rest of the class alone — so the
+        # rows are UNIONed here. Taking the last row instead dropped the real declaration's associations,
+        # scopes, enums, validations, callbacks and `alias_attribute`s whenever the reopen sorted later in
+        # the glob, and `where(<a declared alias>: …)` then surfaced a false `unknown-column` on correct
+        # code; taking the first dropped whatever the reopen added. Neither order loses anything now.
+        #
+        # Merge is by field: the first non-nil `superclass_name` wins (a second declaration is the same
+        # thing, or invalid Ruby); `self.table_name =` is an ASSIGNMENT, so the LATER declaration's
+        # `table_name_override` wins as it does at load time, and when the two declarations disagree the
+        # resolved name is marked computed so no value is pinned — the glob order is not the load order for
+        # two full declarations, and a pinned wrong literal folds `Model.table_name == "…"` on correct code;
+        # `table_name_computed` is otherwise an OR (any computed name in the class makes the resolved one
+        # inexact); name-keyed rows (associations, enums, aliases) let the LAST declaration override an
+        # earlier same-name row exactly as {ModelIndex.merge_named_rows} does across an STI chain, and the
+        # plain lists union.
+        def merge_redeclarations(rows)
+          return rows if rows.length < 2
 
-          stripped = superclass_name.sub(/\A::/, "")
-          model_names.key?(stripped) ? stripped : nil
+          rows.each_with_object({}) do |row, acc|
+            name = row.fetch(:class_name)
+            acc[name] = acc.key?(name) ? merged_row(acc[name], row) : row
+          end.values
+        end
+
+        # `base` is the earlier declaration, `addition` the later one. See {#merge_redeclarations}.
+        def merged_row(base, addition)
+          base.merge(
+            superclass_name: base[:superclass_name] || addition[:superclass_name],
+            sti_parent: base[:sti_parent] || addition[:sti_parent],
+            table_name_override: addition[:table_name_override] || base[:table_name_override],
+            table_name_computed: base[:table_name_computed] || addition[:table_name_computed] ||
+              conflicting_table_names?(base, addition),
+            associations: dedup_named_rows(Array(base[:associations]) + Array(addition[:associations])),
+            enums: (base[:enums] || {}).merge(addition[:enums] || {}),
+            scopes: (Array(base[:scopes]) + Array(addition[:scopes])).uniq,
+            validations: (Array(base[:validations]) + Array(addition[:validations])).uniq,
+            callbacks: (Array(base[:callbacks]) + Array(addition[:callbacks])).uniq,
+            aliases: (base[:aliases] || {}).merge(addition[:aliases] || {})
+          )
+        end
+
+        # Two literal `self.table_name =` assignments that disagree: see {#merge_redeclarations}.
+        def conflicting_table_names?(base, addition)
+          a = base[:table_name_override]
+          b = addition[:table_name_override]
+          !a.nil? && !b.nil? && a != b
+        end
+
+        # Keeps the LAST row per `:name`, matching {ModelIndex.merge_named_rows}'s override rule.
+        def dedup_named_rows(rows)
+          rows.to_h { |row| [row[:name], row] }.values
+        end
+
+        # Resolves a superclass NAME against the set of known model class names. Both sides come out of
+        # {#declared_constant_name}, so neither carries a leading `::` and the match is by exact spelling.
+        # Returns the matched model class name, or nil.
+        def model_match(superclass_name, model_names)
+          model_names.key?(superclass_name) ? superclass_name : nil
         end
 
         def read_safely(path)
@@ -153,8 +224,8 @@ module Rigor
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
 
-          full_name = (lexical_path + [class_local_name]).join("::")
-          superclass = constant_path_name(node.superclass) if node.superclass
+          full_name = declared_constant_name(class_local_name, lexical_path)
+          superclass = strip_root(constant_path_name(node.superclass)) if node.superclass
 
           collect_type_overrides(node.body)
 
@@ -172,8 +243,7 @@ module Rigor
           })
 
           # Recurse into the body in case nested classes exist.
-          inner_path = lexical_path + [class_local_name]
-          walk_for_classes(node.body, inner_path, &) if node.body
+          walk_for_classes(node.body, [full_name], &) if node.body
         end
 
         def visit_module(node, lexical_path, &)
@@ -184,8 +254,23 @@ module Rigor
           # `included do … end` block; collect their overrides even though the module itself is not a model.
           collect_type_overrides(node.body)
 
-          inner_path = lexical_path + [module_local_name]
+          inner_path = [declared_constant_name(module_local_name, lexical_path)]
           walk_for_classes(node.body, inner_path, &) if node.body
+        end
+
+        # The full constant name a `class` / `module` declaration defines, given the rendered local name
+        # and the enclosing lexical path. A ROOTED local name (`class ::User`, `module ::Admin`) names the
+        # top-level constant whatever the nesting, so the lexical path is dropped and the `::` with it;
+        # otherwise the name is appended to the path (`class User` inside `module Admin` → `Admin::User`).
+        def declared_constant_name(local_name, lexical_path)
+          return strip_root(local_name) if local_name.start_with?("::")
+
+          (lexical_path + [local_name]).join("::")
+        end
+
+        # `::User` → `User`; a name without the root marker is returned unchanged (nil stays nil).
+        def strip_root(name)
+          name&.delete_prefix("::")
         end
 
         # Records the column name of every `serialize :col` / `mount_uploader(s) :col` / `attribute :col,
@@ -230,8 +315,9 @@ module Rigor
           type_arg.is_a?(Prism::ConstantReadNode) || type_arg.is_a?(Prism::ConstantPathNode)
         end
 
-        # Renders a constant-path node (`Admin::User`, `::ApplicationRecord`) as a String. Returns nil for
-        # shapes the discoverer chooses not to handle.
+        # Renders a constant-path node (`Admin::User`, `::ApplicationRecord`) as a String, keeping the
+        # leading `::` of a rooted path — {#declared_constant_name} reads it as "reset the lexical path"
+        # before the marker is dropped. Returns nil for shapes the discoverer chooses not to handle.
         def constant_path_name(node)
           return nil if node.nil?
 

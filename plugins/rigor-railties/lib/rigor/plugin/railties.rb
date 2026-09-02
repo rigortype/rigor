@@ -44,9 +44,11 @@ module Rigor
     # `effects:` block ({Rigor::Plugin::Registry#effect_contributions} is lazy). The reader typing costs one
     # `ContributionIndex` name-gate probe per dispatch of a method actually named `logger` / `cache` /
     # `configuration` / `application` (ADR-52 WD1 compiles the `methods:` gate into the registry), and the
-    # block declines on the first check for anything whose receiver is not the `Rails` constant. Its one
-    # type lookup ({#project_defined_reader?}) runs only after that syntactic gate passes, so it is confined
-    # to `Rails.`-shaped sites, and it is skipped outright for `::Rails`.
+    # block declines on the first check for anything whose receiver is not the `Rails` constant. The reader
+    # gate ({#project_defined_reader?}) runs only after that syntactic gate passes, so it is confined to
+    # `Rails.`-shaped sites. It runs for BOTH spellings; what `::Rails` skips is only the `Scope#type_of`
+    # half, because the root-qualified name is answered directly ({#resolved_rails_constant_name}) — the
+    # `discovered_methods` hash read happens either way.
     class Railties < Rigor::Plugin::Base
       manifest(
         id: "railties",
@@ -132,9 +134,13 @@ module Rigor
         Rigor::Type::Combinator.nominal_of(class_name)
       end
 
-      # ADR-88 WD1 — the reader types are a static table, and the effect rows are built from the manifest;
-      # nothing here scans a project file, so the plugin contributes no cross-file state and a project that
-      # enables it stays incremental-capable.
+      # ADR-88 WD1 — the reader types are a static table and the effect rows are built from the manifest, so
+      # the plugin holds no state of its own that a fingerprint would have to observe, and a project that
+      # enables it stays incremental-capable. The one project-derived input is the {#project_defined_reader?}
+      # gate's `discovered_methods` read, and that does NOT need to ride this sentinel: it goes through
+      # `Rigor::Reflection.discovered_method?`, which records the ADR-46 negative dependency on a miss, so a
+      # warm `--incremental` re-check invalidates the gated sites the same way the engine's own cross-file
+      # method reads are invalidated — per consumer and per symbol, not by refusing the snapshot wholesale.
       def incremental_state_fingerprint
         "static-rails-readers"
       end

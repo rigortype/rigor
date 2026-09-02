@@ -12,6 +12,7 @@ require_relative "dependency_recorder"
 require_relative "check_rules/rule_ids"
 require_relative "check_rules/inferred_param_guard"
 require_relative "check_rules/declaration_sourced_guard"
+require_relative "check_rules/dead_version_guard_arms"
 require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
@@ -102,6 +103,11 @@ module Rigor
         COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
           diagnostics.concat(send(builder, path, collectors[role].results))
         end
+        # ADR-47 WD5 — the dead arm of a decidable version guard (#627) reports nothing: it cannot run on
+        # the Ruby being checked with, so a diagnostic there is a false positive. Applied before
+        # `suppression.*` joins the list, which stays reportable inside a dead arm — a malformed
+        # `# rigor:disable` marker is an authoring error regardless of whether its code runs.
+        diagnostics = DeadVersionGuardArms.filter(diagnostics, root)
         # Suppression-marker validation (`suppression.*`) runs BEFORE the filter so its own diagnostics are
         # suppressible like any other rule — `# rigor:disable suppression.unknown-rule` on the offending
         # comment's line works, with no regress (the token itself is known, so it never re-fires).

@@ -25,6 +25,7 @@ require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
+require_relative "version_guard"
 
 module Rigor
   module Inference
@@ -671,19 +672,31 @@ module Rigor
       # non-falsey carriers like `Nominal[Integer]` (Integer is always truthy in Ruby — including 0) also collapse the
       # dead else.
       def live_branch_for_if(node, pred_type, post_pred)
-        verdict = optimistic_carrier?(node.predicate, post_pred) ? nil : Narrowing.predicate_certainty(pred_type)
-        case verdict
+        case branch_certainty(node.predicate, pred_type, post_pred)
         when :truthy then eval_branch_or_nil(node.statements, post_pred)
         when :falsey then eval_branch_or_nil(node.subsequent, post_pred)
         end
       end
 
       def live_branch_for_unless(node, pred_type, post_pred)
-        verdict = optimistic_carrier?(node.predicate, post_pred) ? nil : Narrowing.predicate_certainty(pred_type)
-        case verdict
+        case branch_certainty(node.predicate, pred_type, post_pred)
         when :truthy then eval_branch_or_nil(node.else_clause, post_pred)
         when :falsey then eval_branch_or_nil(node.statements, post_pred)
         end
+      end
+
+      # ADR-47 WD5 — a decidable **version guard** answers first (#627). `RUBY_VERSION >= "3.1"` and the
+      # `Gem::Version.new(…) <cmp> Gem::Version.new(…)` spellings fold from literals the analyzer can read, so the arm
+      # that cannot run on the Ruby being checked with is elided exactly as `if false`'s is: it is never evaluated, so
+      # it contributes no diagnostics and its writes do not join into the post-`if` scope. The guard expression's own
+      # type stays `bool`, which is what keeps `flow.always-truthy-condition` off it — a version guard is intentional,
+      # not a redundant condition. See {VersionGuard} for the folded shapes and the reference-Ruby premise.
+      def branch_certainty(predicate, pred_type, post_pred)
+        guard = VersionGuard.verdict(predicate)
+        return guard if guard
+        return nil if optimistic_carrier?(predicate, post_pred)
+
+        Narrowing.predicate_certainty(pred_type)
       end
 
       # ADR-101 — the branch elision MUST NOT conclude truthiness from a carrier whose nil-freeness rests on

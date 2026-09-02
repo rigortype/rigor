@@ -223,6 +223,31 @@ This specification describes the full pre-plugin surface that the analyzer ultim
 
 Each deferred surface ships incrementally so the shipped behavior stays stable while the larger surface lands.
 
+## Version-guard condition folding
+
+A **version guard** is an `if` / `unless` predicate that compares the running Ruby — or a version constant Rigor can read — against a literal, to select between API generations. Multi-version libraries carry the shape routinely:
+
+```ruby
+if Gem::Version.new(Psych::VERSION) >= Gem::Version.new("3.1.0.pre1")
+  ::YAML.safe_load(yaml, permitted_classes: permitted_classes)
+else
+  ::YAML.safe_load(yaml, permitted_classes)   # the Psych < 3.1 positional form
+end
+```
+
+When both sides of such a comparison are decidable, Rigor MUST fold the guard and treat the arm that cannot run as **unreachable**: the arm MUST NOT produce diagnostics, and its bindings MUST NOT join into the post-`if` scope — exactly the treatment `if false` already receives. Rigor MUST NOT report `flow.always-truthy-condition` (or any other redundant-condition diagnostic) on the guard itself: a version guard is intentional, and reporting it would fire on correct code.
+
+The reference values are read from the Ruby running the analyzer, the same premise under which `RUBY_VERSION` is refined and core/stdlib RBS is loaded. The foldable set is deliberately closed:
+
+- `RUBY_VERSION <cmp> "x.y.z"` for `<`, `<=`, `>`, `>=`, `==`, `!=`. The comparison MUST use **String** semantics, because that is what runs — Ruby compares strings lexically, so `RUBY_VERSION >= "3.10"` is false on 3.9 and Rigor MUST reproduce that rather than an idealised version ordering.
+- `Gem::Version.new(a) <cmp> Gem::Version.new(b)`, with both sides wrapped, compared with `Gem::Version` semantics. A *mixed* comparison (one side wrapped, the other a bare String) MUST NOT fold: `Gem::Version#<=>` answers nil for a non-`Gem::Version` operand, so the comparison raises at runtime and no arm is live.
+- `RUBY_ENGINE == / != "…"`. Ordering comparisons on an engine name are not version guards and MUST NOT fold.
+- `X::VERSION`, only for constants belonging to a **default gem of the running Ruby**. A gem whose version the project resolves through its own `Gemfile.lock` MUST NOT be read from the analyzer's runtime, because the two copies can differ.
+
+Everything else keeps both arms live, which is always the safe answer: `<=>` (it yields an ordering, not a verdict), `RUBY_PLATFORM` (every comparison against it is platform-dependent by construction, and the checking machine need not be the running machine), `defined?`-style capability probes, `!` / `&&` / `||` compositions, `case` subjects, and a comparison between two bare String literals (a constant comparison, not a version guard). A guard with an unreadable operand is undecidable and both of its arms MUST stay live.
+
+Rationale and the false-positive argument: [ADR-47](../adr/47-narrowing-driven-clause-reachability.md) § WD5.
+
 ## Diagnostics
 
 Diagnostics that arise from control-flow analysis live primarily in the `flow.*` family. Strict modes that depend on dynamic-origin provenance live in the `dynamic.*` family. Cutoff diagnostics live in `static.*`. The full identifier taxonomy is in [diagnostic-policy.md](diagnostic-policy.md).

@@ -38,9 +38,14 @@ module Rigor
           freeze
         end
 
+        # Entries are keyed by the de-rooted constant path (`"AccountsController"`,
+        # `"Admin::AccountsController"` — never `"::AccountsController"`; see {ControllerDiscoverer}),
+        # while a QUERY may legitimately arrive rooted. The root marker is dropped at every lookup entry
+        # point, once, so no caller needs a `find(name) || find("::#{name}")` retry (#621).
+        #
         # @return [Entry, nil]
         def find(class_name)
-          @entries[class_name]
+          @entries[strip_leading_namespace(class_name)]
         end
 
         # Resolves the **effective** method set for a controller, including methods contributed by
@@ -56,7 +61,7 @@ module Rigor
           seen_classes = {}
           seen_modules = {}
           methods = []
-          current = class_name
+          current = strip_leading_namespace(class_name)
           while current && !seen_classes[current]
             seen_classes[current] = true
             entry = @entries[current]
@@ -87,6 +92,7 @@ module Rigor
         #   may legitimately contribute the filter (either directly, or via its own ancestor chain which
         #   the static analyzer cannot follow), and there's no way to verify.
         def unresolved_include?(class_name)
+          class_name = strip_leading_namespace(class_name)
           entry = @entries[class_name]
           return false if entry.nil?
 
@@ -132,7 +138,7 @@ module Rigor
         end
 
         def known?(class_name)
-          @entries.key?(class_name)
+          @entries.key?(strip_leading_namespace(class_name))
         end
 
         def class_names
@@ -140,6 +146,10 @@ module Rigor
         end
 
         private
+
+        # `::AccountsController` → `AccountsController`. The query-side half of the key contract — see
+        # {#find}.
+        def strip_leading_namespace(name) = name&.delete_prefix("::")
 
         def collect_methods(name, seen, into)
           return if name.nil?

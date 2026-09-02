@@ -247,10 +247,25 @@ module Rigor
           return nil if class_index.nil?
 
           class_node = ancestors[class_index]
+          # A ROOTED enclosing module (`module ::Admin`) resets the qualifier chain, exactly as it does in
+          # {ControllerDiscoverer} — the two sides must render the same key or the lookup silently misses
+          # (#621).
           enclosing = ancestors[0...class_index]
                       .grep(Prism::ModuleNode)
-                      .flat_map { |n| namespace_segments_for(n) }
+                      .each_with_object([]) do |module_node, chain|
+                        chain.clear if rooted_declaration?(module_node)
+                        chain.concat(namespace_segments_for(module_node))
+                      end
           qualified_name_with_enclosing(class_node.constant_path, enclosing)
+        end
+
+        # True when the declaration's constant path is explicitly rooted (`class ::Foo`, `class ::Foo::Bar`)
+        # — the leftmost segment is a `ConstantPathNode` with no parent. Mirrors
+        # {ControllerDiscoverer#rooted_declaration?}.
+        def rooted_declaration?(declaration_node)
+          node = declaration_node.constant_path
+          node = node.parent while node.is_a?(Prism::ConstantPathNode) && node.parent
+          node.is_a?(Prism::ConstantPathNode)
         end
 
         def namespace_segments_for(declaration_node)
@@ -258,15 +273,16 @@ module Rigor
           path ? path.split("::") : []
         end
 
-        # Resolves a class-name AST node against an enclosing namespace chain. A `ConstantPathNode`
-        # (e.g. `class Admin::Foo`) is already absolute and ignores the chain; a `ConstantReadNode`
-        # (bare `class Foo` inside `module Admin`) is qualified against it.
+        # Resolves a class-name AST node against an enclosing namespace chain. A `ConstantPathNode` is
+        # already absolute and ignores the chain — either because it is qualified (`class Admin::Foo`) or
+        # because it is ROOTED (`class ::Foo`), which names the top-level constant whatever the nesting
+        # (#621). A `ConstantReadNode` (bare `class Foo` inside `module Admin`) is qualified against it.
         def qualified_name_with_enclosing(node, enclosing)
           return nil unless node.is_a?(Prism::Node)
 
           local = qualified_name_for(node)
           return nil if local.nil?
-          return local if node.is_a?(Prism::ConstantPathNode) && !node.parent.nil?
+          return local if node.is_a?(Prism::ConstantPathNode)
           return local if enclosing.empty?
 
           "#{enclosing.join('::')}::#{local}"

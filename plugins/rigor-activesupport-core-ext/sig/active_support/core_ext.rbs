@@ -16,8 +16,12 @@
 #       - path/to/rigor-activesupport-core-ext/sig
 #
 # Not exhaustive. ActiveSupport ships many more extensions across
-# Hash / Array / String / Object / Date / Time / Integer / Module
-# than this file covers; PRs welcome to extend.
+# Hash / Array / String / Object / Date / Integer / Module than this
+# file covers; PRs welcome to extend. `Time` is the ONE exception and
+# is deliberately complete — it is a CORE class, so RBS knows it fully
+# and it is CLOSED, which makes an omission on it a false positive
+# rather than a missed precision opportunity (#658). `Date` and
+# `DateTime` are closed for the same reason and are NOT complete yet.
 #
 # ---------------------------------------------------------------
 # Purity (ADR-103 WD10; docs/type-specification/effect-labels.md; issue #388)

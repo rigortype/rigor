@@ -44,7 +44,9 @@ Roughly the top ~40 selectors plus their close neighbours, across:
   `#constantize`, `#pluralize`, …), filters (`#squish`, `#truncate`),
   `#html_safe`, `#starts_with?` / `#ends_with?`, conversions.
 - **Time / Date / DateTime** — `.current`, `.zone`, `#yesterday`,
-  `#tomorrow`, `#beginning_of_*` / `#end_of_*`, `#ago`, `#since`.
+  `#tomorrow`, `#beginning_of_*` / `#end_of_*`, `#ago`, `#since`. `Time`
+  additionally carries its **whole** Rails instance surface (see below);
+  `Date` and `DateTime` carry the same subset they always did.
 - **Array** — `.wrap`, `#to_sentence`, `#in_groups_of`, `#second` …
   `#fifth`, `#compact_blank`, `#exclude?`.
 - **Hash** — `#symbolize_keys` / `#stringify_keys` (+ deep / bang),
@@ -81,8 +83,9 @@ reader surface — `#to_i` / `#in_seconds`, `#to_f`, `#in_minutes` /
 `#iso8601`, `#parts` — is typed, so `3.hours.in_minutes` is `Float` and
 `1.day.to_i * 2` is `Integer`. `#ago` / `#until` / `#before` / `#since`
 / `#from_now` / `#after` are NOT part of that surface — they default
-to `Time.current`, and typing them needs Rails' `Time` instance
-extensions declared first, which this bundle does not do yet. Every
+to `Time.current`, and typing them was blocked on Rails' `Time`
+instance extensions being declared first, which the section below now
+does; the multipliers themselves are tracked separately. Every
 other member — the arithmetic operators above aside, `==`, and
 anything else Duration forwards through `method_missing` — resolves
 without a diagnostic too, while the site still counts as a concrete
@@ -97,6 +100,40 @@ partial signature on a class whose real surface forwards to
 The multiplier only fires on a receiver Rigor has proven numeric, so
 `created_at.day`, `Date.today.year` and your own object's `#days` keep
 the answers they always had.
+
+## The Rails `Time` instance surface is complete
+
+`Time` is a core Ruby class, so RBS knows it fully and it is **closed**:
+a name the signatures do not declare is reported
+`call.undefined-method`. That makes an omission on `Time` just as much
+of a false positive as a wrong return type, with no gradual middle, so
+this bundle declares the whole surface ActiveSupport adds — audited
+against the gem's own sources, not a "top selectors" sample.
+
+```ruby
+Time.current.to_fs(:db)             # String
+Time.current.formatted_offset       # String
+Time.current.past?                  # bool
+Time.current.at_beginning_of_hour   # Time
+Time.current.days_ago(3).all_week   # Range[Time]
+Time.current.in_time_zone("Hawaii") # untyped (ActiveSupport::TimeWithZone)
+Time.current.definitely_not_here    # still call.undefined-method
+```
+
+That is the predicates (`#past?`, `#future?`, `#today?`, `#on_weekend?`,
+…), the whole `#days_ago` / `#months_since` / `#next_occurring` family,
+the quarter and `at_`-prefixed spellings, the `#all_week` / `#all_month`
+/ `#all_quarter` / `#all_year` ranges, `#to_fs` / `#to_formatted_s` /
+`#formatted_offset` / `#rfc3339`, `#in_time_zone`, and the `Time.`
+singletons `.days_in_month`, `.days_in_year`, `.rfc3339`, `.use_zone`,
+`.find_zone` / `.find_zone!` and `.zone_default`.
+
+Where a return cannot honestly be named it is widened rather than
+guessed: `#in_time_zone` answers an `ActiveSupport::TimeWithZone`, which
+this bundle does not model, so it reads `untyped`.
+
+`Date` and `DateTime` are extended by the same ActiveSupport modules and
+do **not** carry this yet — `Date.current.past?` still reports.
 
 ## No diagnostics, no config
 
@@ -126,8 +163,10 @@ unconditionally when listed under `plugins:`.
 - **Project-private monkey-patches are not covered** — only real
   ActiveSupport extensions. For your own core-class patches see the
   `pre_eval:` mechanism ([ADR-17](../../adr/17-monkey-patch-pre-evaluation.md)).
-- **Top ~40 selectors, not exhaustive.** ActiveSupport ships hundreds of
-  extensions; this covers the head of the real-world distribution.
+- **Top ~40 selectors, not exhaustive** — except on `Time`, where the
+  closed-core-class argument above makes a sample unsound and the
+  surface is complete. Elsewhere ActiveSupport ships hundreds of
+  extensions and this covers the head of the real-world distribution.
 
 ## Plugin internals
 

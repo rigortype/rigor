@@ -1,0 +1,1 @@
+- **[plugins]** rigor-activesupport-core-ext no longer types `30.minutes + Time.now` and the other Duration-on-the-left-of-a-Time/Date expressions, which raise at runtime, as `ActiveSupport::Duration`. ([#588](https://github.com/rigortype/rigor/issues/588))

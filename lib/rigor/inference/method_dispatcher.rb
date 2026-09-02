@@ -1108,7 +1108,24 @@ module Rigor
         fill = block_type || arg_types[1]
         return array_seed_of(Type::Combinator.untyped) if fill.nil?
 
-        array_seed_of(array_new_element(fill))
+        element = array_new_element(fill)
+        # `Array.new(n, nil)` is the same allocate-then-fill idiom as `Array.new(n)`, spelled with the
+        # placeholder made explicit — concurrent-ruby writes `@Resolutions = ::Array.new(count, nil)` and
+        # fills it by index. A nil-only element would be a PERMANENT nil arm (a Nominal carrier's element is
+        # never widened by a later `[]=` / `fill` / `replace`), so every read of a filled slot would draw
+        # `undefined method '…' for nil` on correct code. Same trade as the no-fill form above: the seam
+        # needs an arm, not a precise one.
+        element = Type::Combinator.untyped if nil_only_element?(element)
+        array_seed_of(element)
+      end
+
+      # Whether the widened fill leaves nothing but `nil` behind — see {#array_new_seed}.
+      def nil_only_element?(element)
+        members = element.is_a?(Type::Union) ? element.members : [element]
+        members.all? do |member|
+          (member.is_a?(Type::Constant) && member.value.nil?) ||
+            (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
+        end
       end
 
       def array_seed_of(element)

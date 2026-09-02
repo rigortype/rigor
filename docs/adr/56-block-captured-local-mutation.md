@@ -773,6 +773,15 @@ rather than precision ones:
   rewrite can retract a `Nominal` carrier's element — a `widen_for_mutator`
   change, not a constructor one.
 
+The same reasoning covers the EXPLICIT placeholder: `Array.new(n, nil)`
+is the allocate-then-fill idiom with the `nil` spelled out (concurrent-
+ruby writes `@Resolutions = ::Array.new(count, nil)` and fills it by
+index), so a nil-ONLY element seeds the gradual arm too — it would
+otherwise be permanent for exactly the same reason, and every read of a
+filled slot would draw `undefined method '…' for nil` on correct code.
+A fill that is only partly nil (`flag ? nil : "s"`) keeps both arms:
+the guard reads a nil-only element, not a nil-bearing one.
+
 One consequence of the declared-carrier semantics is recorded rather
 than fixed: the FILL form's class survives a later differently-typed
 store, so `acc = Array.new(n, true); acc[0] = false` stays

@@ -199,6 +199,16 @@ class Grid
     acc.first.upcase # GENUINE-UNDEFINED
   end
 
+  # An EXPLICIT nil fill is the same allocate-then-fill idiom (concurrent-ruby
+  # writes `@Resolutions = ::Array.new(count, nil)` and fills it by index), so
+  # the element stays gradual and a filled slot reads without a nil error.
+  def explicit_nil_fill_is_filled_before_it_is_read(n)
+    slots = Array.new(n, nil)
+    n.times { |i| slots[i] = "s" }
+    assert_type("Array[Dynamic[top]]", slots)
+    slots.each { |slot| slot.upcase }
+  end
+
   # `Array.new` with NO arguments really does build an empty array, so it keeps
   # the elementless carrier and closes exactly as the `[]` literal does.
   def closes_a_zero_arg_constructor(xs)

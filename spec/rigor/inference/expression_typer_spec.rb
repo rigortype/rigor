@@ -781,6 +781,20 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         expect(element_of(sized("Array.new(n)", integer_size))).to be_a(Rigor::Type::Dynamic)
       end
 
+      it "keeps an explicit nil fill gradual too" do
+        # `Array.new(n, nil)` is the same allocate-then-fill idiom with the placeholder spelled out —
+        # concurrent-ruby's `@Resolutions = ::Array.new(count, nil)`, filled by index, then read. A
+        # nil-only element would be permanent for the same reason as the no-fill form, so every read
+        # of a filled slot would draw `undefined method '…' for nil` on correct code.
+        expect(element_of(sized("Array.new(n, nil)", integer_size))).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "keeps a fill that is only PARTLY nil precise" do
+        # The guard fires on a nil-ONLY element; an honest optional keeps its arms.
+        element = element_of(sized("Array.new(n, flag ? nil : \"s\")", integer_size))
+        expect(element.erase_to_rbs).to eq("String | nil")
+      end
+
       it "keeps the element gradual when the size is unreadable" do
         expect(element_of(sized("Array.new(n)", Rigor::Type::Combinator.untyped))).to be_a(Rigor::Type::Dynamic)
       end

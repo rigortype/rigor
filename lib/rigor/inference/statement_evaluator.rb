@@ -81,6 +81,8 @@ module Rigor
         Prism::IndexAndWriteNode => :eval_index_write,
         Prism::IndexOperatorWriteNode => :eval_index_write,
         Prism::MultiWriteNode => :eval_multi_write,
+        Prism::ConstantWriteNode => :eval_constant_write,
+        Prism::ConstantPathWriteNode => :eval_constant_write,
         Prism::IfNode => :eval_if,
         Prism::UnlessNode => :eval_unless,
         Prism::ElseNode => :eval_else,
@@ -311,6 +313,48 @@ module Rigor
       def eval_global_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         [rhs_type, post_rhs.with_global(node.name, rhs_type)]
+      end
+
+      # `Const = rvalue` / `A::Const = rvalue`. The pair is exactly what the default expression path produced before
+      # this handler existed — the expression typer types the rvalue and the scope comes back unchanged, a constant
+      # write binding no local — plus one walk the default path could not make. Issue #590: when the rvalue is a
+      # class-creating meta call with a literal block (`Const = Struct.new(:text) do … end` and its `Data.define` /
+      # `Class.new` / `Module.new` twins) the block is a CLASS BODY, `class_eval`'d on the class the call creates,
+      # and it is entered as one here — the constant-write counterpart of {#evaluate_block_if_present}'s #319 arm.
+      # Left to the default path the body was never walked at all, so `ScopeIndexer.propagate` handed every node
+      # inside the ENCLOSING scope: at file top level a nil `self_type`, which made `Scope#toplevel?` hold inside
+      # every `def` of the body and `call.unresolved-toplevel` fire on the struct's own member reads (and on
+      # `attr_reader`, the very macro #319 silenced at every other position); inside a module, the module's own
+      # `self` — a wrong receiver for every implicit-self call in the body.
+      def eval_constant_write(node)
+        result = [scope.type_of(node, tracer: tracer), scope]
+        context = meta_new_constant_body_context(node)
+        return result if context.nil?
+
+        call_node = node.value
+        enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block), context)
+        result
+      end
+
+      # The class context a meta-new rvalue block is entered under, or nil when the rvalue is not that shape. The
+      # KEY must be the one `ScopeIndexer` filed the body's defs and member layout under, so the two passes agree —
+      # which is why the decision is delegated to the ScopeIndexer's own recognition rather than re-spelled here. A
+      # `Prism::ConstantWriteNode` whose rvalue `ScopeIndexer.meta_new_block_body` recognises is keyed by the
+      # constant's qualified name, one frame appended to the lexical context exactly as a `class Const` keyword body
+      # would be. Every other block form — a constant-PATH write (`A::B = Struct.new do … end`, which has no
+      # constant-keyed registration) or a shape the ScopeIndexer's stricter argument check rejects
+      # (`Const = Struct.new(*names) do … end`) — was registered under the call site's anonymous name and is
+      # entered under that.
+      def meta_new_constant_body_context(node)
+        call_node = node.value
+        return nil unless call_node.is_a?(Prism::CallNode) && call_node.block.is_a?(Prism::BlockNode)
+
+        if node.is_a?(Prism::ConstantWriteNode) && ScopeIndexer.meta_new_block_body(node)
+          return @class_context + [ClassFrame.new(name: node.name.to_s, singleton: false)]
+        end
+
+        anonymous = AnonymousMetaClass.name_for(call_node, scope.source_path)
+        anonymous && [ClassFrame.new(name: anonymous, singleton: false)]
       end
 
       # Slice 7 phase 3 — compound writes (||=, &&=, +=/-=/...) for every variable kind. Each handler:
@@ -1936,8 +1980,17 @@ module Rigor
         anonymous = AnonymousMetaClass.name_for(node, scope.source_path)
         return sub_eval(block, block_entry) if anonymous.nil?
 
-        sub_eval(block, block_entry.with_self_type(Type::Combinator.singleton_of(anonymous)),
-                 class_context: [ClassFrame.new(name: anonymous, singleton: false)])
+        enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
+      end
+
+      # Enters a meta-new `block` as the body of the class `class_context` names: `self_type` is that class's
+      # singleton, so a `def` inside binds an instance method on it through the ordinary
+      # {#self_type_for_method_body} route, while `block_entry` keeps the outer locals visible. Shared by the two
+      # positions such a block is reached from — a statement-level call ({#evaluate_block_if_present}) and a
+      # constant-write rvalue ({#eval_constant_write}) — so the two cannot drift on what a class body's entry is.
+      def enter_meta_class_body(block, block_entry, class_context)
+        sub_eval(block, block_entry.with_self_type(self_type_for_class_body(class_context)),
+                 class_context: class_context)
       end
 
       # Slice 6 phase C sub-phase 3b/3c. When the call carries a block whose receiving method is NOT proven

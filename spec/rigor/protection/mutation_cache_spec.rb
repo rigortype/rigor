@@ -59,7 +59,7 @@ RSpec.describe Rigor::Protection::MutationCache do
       cache: {}, sources: { "a.rb" => Set["dep.rb"], "dep.rb" => Set.new },
       digests: {}, analyzed: ["a.rb", "dep.rb"],
       symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {},
-      missing: {}, class_decls: {}, seed_bundles: {}, plugin_fact_digest: nil,
+      missing: {}, class_decls: {}, constant_decls: {}, seed_bundles: {}, plugin_fact_digest: nil,
       return_summaries: {}, param_table: {},
       effect_collections: {}, effects_identity: nil
     )

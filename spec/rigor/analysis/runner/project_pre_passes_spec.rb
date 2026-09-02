@@ -134,7 +134,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
 
   describe "#discover / #discover_from_bundles / #build_discovery" do
     # rubocop:disable-next RSpec/ExampleLength
-    it "builds every Discovery slot from the matching def_index key, without transposing any of the 12 slots" do
+    it "builds every Discovery slot from the matching def_index key, without transposing any of the 15 slots" do
       index = {
         classes: :classes_marker,
         def_index: {
@@ -145,6 +145,11 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
           superclasses: :superclasses_marker,
           includes: :includes_marker,
           class_sources: :class_sources_marker,
+          # Issue #644 — the three constant slots. Distinct markers like every other key, so a slot wired to
+          # the wrong `def_index` entry still fails here rather than merely satisfying the `fetch`.
+          constant_values: :constant_values_marker,
+          constant_sources: :constant_sources_marker,
+          constant_writes: :constant_writes_marker,
           method_visibilities: :method_visibilities_marker,
           methods: :methods_marker,
           data_member_layouts: :data_member_layouts_marker,
@@ -163,6 +168,9 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
       expect(discovery.discovered_superclasses).to eq(:superclasses_marker)
       expect(discovery.discovered_includes).to eq(:includes_marker)
       expect(discovery.discovered_class_sources).to eq(:class_sources_marker)
+      expect(discovery.constant_values).to eq(:constant_values_marker)
+      expect(discovery.constant_sources).to eq(:constant_sources_marker)
+      expect(discovery.constant_writes).to eq(:constant_writes_marker)
       expect(discovery.discovered_method_visibilities).to eq(:method_visibilities_marker)
       expect(discovery.discovered_methods).to eq(:methods_marker)
       expect(discovery.data_member_layouts).to eq(:data_member_layouts_marker)

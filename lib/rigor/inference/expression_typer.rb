@@ -491,6 +491,11 @@ module Rigor
         return if segments.empty?
 
         Analysis::DependencyRecorder.read_missing(:class, segments.last)
+        # Issue #644's `constant:<last segment>` edge is NOT recorded here. It is recorded once per
+        # reference by `Reflection.resolve_constant_type`, before the resolver ladder runs, so it covers a
+        # reference that resolves through RBS or the class registry as well as one that misses — all three
+        # answers move when the project's constant write set moves. Recording it again on this path would be
+        # a second source of truth for the same key.
       end
 
       # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared

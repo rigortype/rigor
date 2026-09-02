@@ -20,6 +20,7 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       symbol_fingerprints: { "b.rb" => { "Foo#bar" => "abc123" } },
       missing: { "a.rb" => Set["toplevel:helper"] },
       class_decls: { "b.rb" => Set["Foo"] },
+      constant_decls: { "b.rb" => Set["Foo::LIMIT"] },
       seed_bundles: { "b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} } },
       plugin_fact_digest: "fact-digest-abc",
       return_summaries: { ["b.rb", "Foo#bar"] => { keys: [], returns: ["Integer"], effects: [0] } },

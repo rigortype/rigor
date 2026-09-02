@@ -168,15 +168,30 @@ module Rigor
         accumulate_read(accumulator, path, symbol)
       end
 
-      # Records a cross-file lookup of `name` (kind `:method` / `:class` / `:const` / …) that resolved to
-      # nothing — a negative dependency.
-      def read_missing(kind, name)
+      # Records a NAME-KEYED cross-file dependency: this consumer's answer depends on what the project makes
+      # of `name` under `kind`, so a recheck must re-analyze it when that changes. The recorded key is
+      # inverted into `negative_dependents` and matched against the producer for its kind.
+      #
+      # For `:method` / `:class` / `:toplevel` this is recorded only on a MISS ({read_missing}) — a resolved
+      # method or class already carries a positive edge to its definition site, which covers every later
+      # change to it. Issue #644's `:constant` kind is recorded on a HIT as well, because a constant's
+      # published value is a function of the WHOLE project's write set for the name, not of the one file that
+      # currently wins: a second declarer appearing in a file the reader has no edge to must drop the name to
+      # `Dynamic` at that reader, and only a name-keyed edge can see it.
+      def read_name(kind, name)
         accumulator = Thread.current[KEY]
         return if accumulator.nil?
 
         entry = "#{kind}:#{name}"
         Thread.current[CAPTURE_KEY]&.each { |c| c.missing.add(entry) }
         accumulator.missing.add(entry)
+      end
+
+      # The miss-only spelling of {read_name}: a cross-file lookup of `name` (kind `:method` / `:class` /
+      # `:toplevel` / …) that resolved to nothing. Kept as the name the internal spec's negative-edge
+      # contract uses.
+      def read_missing(kind, name)
+        read_name(kind, name)
       end
 
       # The positive-edge aggregation shared by {read_site} and {replay}.

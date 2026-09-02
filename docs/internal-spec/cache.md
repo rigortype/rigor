@@ -650,14 +650,14 @@ full run, so the snapshot can never wedge or stale an analysis.
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`
    is re-analysed and the rest served from `Payload#cache`.
 
-### `Payload` (current `SCHEMA = 12`)
+### `Payload` (current `SCHEMA = 13`)
 
 ```
 Payload :: Data[
   cache, sources, digests, analyzed,          # per-file diagnostics, read-sets, content digests, analyzed set
   symbol_sources, ancestry_sources,           # the ADR-46 dependency edges (method-symbol and class-ancestry)
   symbol_fingerprints,                        # path -> { "Class#method" => sha256 } — per-method source fingerprints
-  missing, class_decls,                       # negative (unresolved) edges + per-file declared-class sets
+  missing, class_decls, constant_decls,        # name-keyed edges + per-file declared-class sets / constant publication census
   seed_bundles,                               # ADR-85 per-file pre-pass contribution (plain data + def-node handles)
   plugin_fact_digest,                         # ADR-88 plugin-fact surface fingerprint (see below)
   return_summaries,                           # ADR-89 observed-key return summaries (see below)
@@ -671,8 +671,13 @@ Schema history worth pinning: `6` stored the seed bundles as
 bundle's comment-stripped `code_fingerprint` for the B1 comment-only gate;
 `9` added `plugin_fact_digest` (ADR-88); `10` added `return_summaries`
 (ADR-89); `11` added `param_table` (ADR-67 WD6c); `12` added the effects
-sidecar (ADR-103 WD13). A blob from an older schema mismatches the `SCHEMA`
-gate and loads as `nil` — a clean cold rebuild, never a migration.
+sidecar (ADR-103 WD13); `13` added `constant_decls` (the per-file
+constant PUBLICATION CENSUS — `{name => [literal] | :unpublishable}`, whose
+diff drives the `constant:` edge's producer) and gave each seed bundle a
+`constant_writes` census of its own
+([#644](https://github.com/rigortype/rigor/issues/644)). A blob
+from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
+clean cold rebuild, never a migration.
 
 ### `plugin_fact_digest` — plugin-fact soundness ([ADR-88](../adr/88-incremental-plugin-fact-soundness.md))
 

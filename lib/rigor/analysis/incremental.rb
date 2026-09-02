@@ -120,6 +120,34 @@ module Rigor
         appeared.freeze
       end
 
+      # Issue #644 — the qualified constant names whose PUBLICATION could have moved in this edit: the names
+      # whose per-file census descriptor differs between the before- and after-state of any file in `paths`.
+      # The value-constant twin of {appeared_classes}, and deliberately NOT its analogue — a class either
+      # exists or does not, whereas a constant's published answer is a function of the whole project's write
+      # set for the name, so a *name* diff is the wrong question. All four ways the answer moves are a
+      # descriptor change and none of them is an appearance:
+      #
+      # - the value edited (`[50]` -> `[7]`),
+      # - the write becoming unpublishable or publishable again (`[50]` <-> `:unpublishable`),
+      # - a SECOND declarer appearing, which drops the name to `Dynamic` (`{}` -> `{NAME => …}` in that file),
+      # - a second declarer going away, which restores the precise answer.
+      #
+      # `paths` MUST therefore include removed files as well as changed and added ones; a removed file's
+      # after-state is simply absent, so its whole before-census counts as changed. Returns a frozen Set of
+      # qualified-name Strings. `before` / `after` map a path to `{name => descriptor}`.
+      def changed_constant_publications(paths, before, after)
+        moved = Set.new
+        paths.each do |path|
+          was = before[path] || {}
+          now = after[path]  || {}
+          # `eql?`, not `==`: `[1] == [1.0]` is TRUE, so `LIMIT = 1` becoming `LIMIT = 1.0` would move the
+          # published type (`Constant[1]` -> `Constant[1.0]`) while this diff called it unchanged. The
+          # declaration signature backstops that case today; the producer must not depend on it.
+          (was.keys | now.keys).each { |name| moved << name unless was[name].eql?(now[name]) }
+        end
+        moved.freeze
+      end
+
       # ADR-46 slice 3 — the consumers to re-check because a name they looked up and *missed* (a negative
       # dependency) now resolves. `keys` is the set of negative-dependency keys (`"toplevel:foo"` /
       # `"method:C#m"`) the appeared symbols would satisfy; `negative_dependents` maps each key to the Set of

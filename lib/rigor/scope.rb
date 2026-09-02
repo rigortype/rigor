@@ -50,6 +50,50 @@ module Rigor
     def discovered_superclasses = @discovery.discovered_superclasses
     def discovered_includes = @discovery.discovered_includes
     def discovered_class_sources = @discovery.discovered_class_sources
+    # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
+    def constant_sources = @discovery.constant_sources
+    def published_constant_names = @discovery.published_constant_names
+    def local_constant_names = @discovery.local_constant_names
+
+    # Issue #644 — true when the constant reference `name` (as written: `MODE` or `AppConfig::MODE`) is
+    # published by the cross-file value-constant table and is NOT assigned by the file being analysed: a
+    # value this file's author cannot see the declaration of. {Analysis::CheckRules::PublishedConstantGuard}
+    # is the only caller — a rule MUST ask through the guard rather than re-derive the question here, exactly
+    # as ADR-58's mark is asked through `DeclarationSourcedGuard`.
+    #
+    # The two halves match at deliberately different granularities, because the two errors are not
+    # symmetric. The PUBLISHED half matches on the last segment and so over-answers (a reader of a nested
+    # `MyApp::MODE` answers true for a top-level `MODE`) — over-answering only ever WITHHOLDS a firing, the
+    # safe direction, and it is the grammar the ADR-46 negative keys already use. The LOCAL half is an
+    # exemption, so over-answering there would UN-withhold: matching it on the last segment too would let an
+    # unrelated `Local::MODE` in this file make a read of `AppConfig::MODE` fire.
+    #
+    # The exemption therefore matches a **suffix relation on qualified names**, not the spelling and not the
+    # last segment: a local assignment exempts a reference when it IS that reference or ENDS with `::` plus
+    # it. That is what a lexically relative spelling resolves to — inside `module AppConfig`, the reference
+    # `Nested::X` is the file's own `AppConfig::Nested::X` — and it subsumes the bare case (`OWNED` matched
+    # by `Owner::OWNED`) without matching the unrelated `Local::MODE` above. It is deliberately a relation
+    # over already-qualified names rather than a second lexical ladder: the engine's ladder
+    # (`Reflection.resolve_constant_type`) answers with a TYPE and not with the candidate that won, and
+    # reimplementing the walk here is the very thing that made the receiver resolution wrong once already.
+    def published_constant?(name)
+      names = @discovery.published_constant_names
+      return false if names.empty?
+      return false unless names.include?(name.split("::").last)
+
+      !locally_declared_constant?(name)
+    end
+
+    def locally_declared_constant?(reference_name)
+      local = @discovery.local_constant_names
+      return false if local.empty?
+      return true if local.include?(reference_name)
+
+      suffix = "::#{reference_name}"
+      local.any? { |name| name.end_with?(suffix) }
+    end
+    private :locally_declared_constant?
+
     def data_member_layouts = @discovery.data_member_layouts
     def struct_member_layouts = @discovery.struct_member_layouts
     # ADR-67 WD3 — call-site-inferred parameter types, keyed by `[class_name, method_name, kind]`.
@@ -744,6 +788,22 @@ module Rigor
       sites.each { |site| Analysis::DependencyRecorder.read_site(site) }
     end
     private :record_class_dependency
+
+    # Issue #644 — the positive ADR-46 edge for a cross-file VALUE constant. `Reflection.constant_type_at`
+    # calls this the moment a candidate resolves through `in_source_constants`, so the reader depends on the
+    # file that wrote the constant: editing the literal, or deleting the file, re-checks the reader. Recorded
+    # WITHOUT a symbol (a file-granularity / ancestry edge) because a constant's published value is a
+    # declaration-level fact of the whole file, which is also the granularity
+    # `ScopeIndexer#append_constant_signature` moves the declaration signature at.
+    #
+    # `constant_sources` is seeded only when dependency recording is on, so on every ordinary run the table
+    # is empty and this is one Hash miss; the caller additionally gates on the recorder being active.
+    def record_constant_dependency(name)
+      sites = @discovery.constant_sources[name]
+      return if sites.nil?
+
+      sites.each { |site| Analysis::DependencyRecorder.read_site(site) }
+    end
 
     # v0.1.2 — per-class table mapping `method_name (Symbol) → :public | :private | :protected`. Populated by
     # `ScopeIndexer` for every `def` it sees inside a class body, with the visibility taken from the surrounding

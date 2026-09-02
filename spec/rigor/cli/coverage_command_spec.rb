@@ -702,7 +702,7 @@ RSpec.describe Rigor::CLI::CoverageCommand do
         payload: Rigor::Cache::IncrementalSnapshot::Payload.new(
           cache: {}, sources: sources, digests: {}, analyzed: sources.keys,
           symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {},
-          missing: {}, class_decls: {}, seed_bundles: {}, plugin_fact_digest: nil,
+          missing: {}, class_decls: {}, constant_decls: {}, seed_bundles: {}, plugin_fact_digest: nil,
           return_summaries: {}, param_table: {},
           effect_collections: {}, effects_identity: nil
         )

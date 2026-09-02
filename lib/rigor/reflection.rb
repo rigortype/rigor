@@ -132,6 +132,14 @@ module Rigor
     # reads it to type a constant read, and `Inference::Narrowing` reads it to recognise a
     # value-pinned `Constant[Regexp]` match-predicate operand.
     def resolve_constant_type(name, scope: Scope.empty, rooted: false)
+      # Issue #644 — the ADR-46 name edge, recorded ONCE PER REFERENCE and BEFORE the ladder, so it does not
+      # depend on which resolver answers. A reference that resolves through RBS (`Math::PI`) or through the
+      # class registry is exactly as dependent on the project's constant write set as one that resolves
+      # through `in_source_constants`: a project file that later assigns the name wins over the RBS answer,
+      # and without this edge the reader keeps serving the pre-assignment type. That staleness is NEW with
+      # the cross-file publication — before it, a project value write never won at a reader, so nothing could
+      # go stale. Over-recording is ADR-46's safe direction.
+      record_constant_reference(name) if Analysis::DependencyRecorder.active?
       return constant_type_at(name, scope) if rooted
 
       prefix = enclosing_class_path(scope)
@@ -178,11 +186,26 @@ module Rigor
       return in_source_class if in_source_class
 
       in_source_value = scope.in_source_constants[candidate]
-      return in_source_value if in_source_value
+      if in_source_value
+        scope.record_constant_dependency(candidate) if Analysis::DependencyRecorder.active?
+        return in_source_value
+      end
 
       env.constant_for_name(candidate)
     end
     private_class_method :constant_type_at
+
+    # Issue #644 — the load-bearing ADR-46 edge for a constant reference: `constant:<last segment>`, keyed on
+    # the NAME rather than on a file. The published value is a function of the whole project's write set for
+    # the name, so it moves when a SECOND file starts or stops assigning it — a file this reader has no other
+    # relationship with, and which no positive edge could reach. Matched against the publication diff
+    # ({Analysis::Incremental.changed_constant_publications}). Gated by the caller on the recorder being
+    # active, so an ordinary run pays one integer read.
+    def record_constant_reference(name)
+      segment = name.delete_prefix("::").split("::").last
+      Analysis::DependencyRecorder.read_name(:constant, segment) if segment
+    end
+    private_class_method :record_constant_reference
 
     # #354 — the project classes and modules whose own constants `class_name` inherits, in Ruby's
     # ancestor order: included / prepended modules before the superclass (Ruby places mixins nearer),

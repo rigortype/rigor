@@ -98,6 +98,10 @@ module Rigor
         @missing = {}              # consumer => Set<"kind:name"> it looked up and missed
         @negative_dependents = {}  # "kind:name" => Set<consumer> (inverted @missing)
         @class_decls = {}          # path => Set<qualified class name declared in the file>
+        # Issue #644 — the value-constant twin: path => { qualified constant name => publication descriptor }.
+        # Diffed on a recheck to find every constant whose PUBLISHED answer could have moved, which satisfies
+        # the `constant:` edges a reader records at every reference, resolved or not.
+        @constant_decls = {}
         # ADR-89 WD2 — per-def observed-key return summaries: [path, symbol] => { keys:, returns:, effects: }.
         # Harvested from the ADR-84 return memo after each run; drives the behavioural-stability gate.
         @return_summaries = {}
@@ -259,6 +263,7 @@ module Rigor
         declaration_signatures = (summary && summary[:declaration_signatures]) || {}
         new_fps = symbol_fingerprints_from_index(scan_index)
         new_class_decls = class_declarations_from_index(scan_index)
+        new_constant_decls = constant_declarations_from_index(scan_index)
         changed_pairs = Incremental.changed_symbol_pairs(changed, @symbol_fingerprints, new_fps)
         # ADR-89 WD1 — a changed file whose DECLARATION signature (per-def parameter shape / visibility /
         # ancestry / member layout / def line, bodies excluded) is byte-identical to the snapshot is
@@ -275,7 +280,8 @@ module Rigor
         # minus those stable pairs, and only it (not `changed_pairs`) drives the symbol-dependent fan-out.
         symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index) | param_pairs
         base = dependents_base(unstable, symbol_pairs)
-        closure = base | changed.to_set | added.to_set | negative_affected(scan, new_fps, new_class_decls)
+        closure = base | changed.to_set | added.to_set |
+                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls)
         closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
@@ -550,12 +556,7 @@ module Rigor
         @symbol_sources    = payload.symbol_sources    || {}
         @ancestry_sources  = payload.ancestry_sources  || {}
         @symbol_fingerprints = payload.symbol_fingerprints || {}
-        # ADR-46 slice 3 — restore negative edges if present (absent in pre-slice-3 snapshots → empty, which
-        # only loses the appeared-symbol re-check refinement; such a snapshot is never loaded by a slice-3+
-        # engine because the engine version + schema is part of the snapshot fingerprint, and
-        # `--verify-incremental` backstops any residual under-capture, so it is never unsound).
-        @missing           = payload.missing || {}
-        @class_decls       = payload.class_decls || {}
+        restore_structural_declarations(payload)
         @return_summaries  = payload.return_summaries || {}
         @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
         # ADR-103 WD13 / #382 — the effects sidecar rides its own identity, so a snapshot whose summaries
@@ -569,12 +570,24 @@ module Rigor
         @negative_dependents = Incremental.invert(@missing)
       end
 
+      # ADR-46 slice 3 / issue #644 — the structural tier's negative-edge state: the per-consumer missed
+      # lookups plus the two per-file DECLARATION sets (`class_decls`, `constant_decls`) whose diff says what
+      # APPEARED in an edit. Absent in an older snapshot → empty, which only loses the appeared-symbol
+      # refinement; such a snapshot is never loaded by a newer engine (the version + SCHEMA are part of the
+      # fingerprint) and `--verify-incremental` backstops any residual under-capture. Extracted to keep
+      # {#restore} under its ABC budget.
+      def restore_structural_declarations(payload)
+        @missing        = payload.missing || {}
+        @class_decls    = payload.class_decls || {}
+        @constant_decls = payload.constant_decls || {}
+      end
+
       def to_payload
         Cache::IncrementalSnapshot::Payload.new(
           cache: @cache, sources: @sources, digests: @digests, analyzed: @analyzed,
           symbol_sources: @symbol_sources, ancestry_sources: @ancestry_sources,
           symbol_fingerprints: @symbol_fingerprints, missing: @missing,
-          class_decls: @class_decls, seed_bundles: @seed_bundles,
+          class_decls: @class_decls, constant_decls: @constant_decls, seed_bundles: @seed_bundles,
           plugin_fact_digest: @plugin_fact_digest,
           return_summaries: marshal_safe_return_summaries,
           param_table: marshal_safe_param_table,
@@ -754,6 +767,7 @@ module Rigor
         # Wholesale replace (the subset runner's pre-pass is complete): a file that lost its last class must
         # drop out of the map so a later re-add registers as an appearance.
         @class_decls = runner.class_declarations
+        @constant_decls = runner.constant_declarations
       end
 
       # Per-symbol body fingerprints from the pre-parsed `index` (the shared scan-summary def-index — Prism
@@ -792,11 +806,18 @@ module Rigor
       # a prior missed lookup. Maps each appeared `"ClassName#method"` to the negative-dependency key it
       # would satisfy (`toplevel:foo` for a top-level def, `method:C#m` otherwise), then unions the recorded
       # negative-dependents of those keys.
-      def negative_affected(changed, new_fingerprints, new_class_decls)
+      def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
         appeared_classes = Incremental.appeared_classes(changed, @class_decls, new_class_decls)
+        # Issue #644 — a constant whose PUBLICATION moved satisfies the `constant:` kind, keyed on the same
+        # last segment the consumer recorded. REMOVED files join the diff here and nowhere else: deleting a
+        # second declarer restores the precise answer, and no other producer input can see that.
+        moved_constants = Incremental.changed_constant_publications(
+          changed + removed, @constant_decls, new_constant_decls
+        )
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
         keys.concat(appeared_classes.map { |klass| "class:#{klass.split('::').last}" })
+        keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents)
       end
 
@@ -808,6 +829,20 @@ module Rigor
         result = Hash.new { |hash, key| hash[key] = Set.new }
         index[:class_sources].each do |class_name, files|
           files.each { |file| result[file] << class_name }
+        end
+        result.transform_values(&:freeze).freeze
+      end
+
+      # Issue #644 — the per-file PUBLICATION CENSUS of the pre-parsed `index`:
+      # `{ path => { constant name => descriptor } }`, the twin of {#class_declarations_from_index}. The
+      # descriptor is what the diff compares — see {Incremental.changed_constant_publications} for why a bare
+      # name set cannot answer the question.
+      def constant_declarations_from_index(index)
+        return {} if index.nil?
+
+        result = Hash.new { |hash, key| hash[key] = {} }
+        index[:constant_writes].each do |name, by_path|
+          by_path.each { |path, descriptor| result[path][name] = descriptor }
         end
         result.transform_values(&:freeze).freeze
       end

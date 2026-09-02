@@ -5,6 +5,7 @@ require "prism"
 require_relative "../../source/node_children"
 require_relative "../../inference/optimistic_origin"
 require_relative "inferred_param_guard"
+require_relative "published_constant_guard"
 
 module Rigor
   module Analysis
@@ -118,6 +119,17 @@ module Rigor
 
           predicate_type = scope.type_of(predicate)
           return unless predicate_type.is_a?(Type::Constant)
+
+          # Issue #644 — a predicate whose constancy rests on a value constant declared in ANOTHER file is
+          # not a logic error the reader's author can see: `if MODE == :production` folds only because the
+          # project-wide table published `MODE`, and a configuration constant read in ten files would put
+          # this warning in all ten. The value stays published (dispatch and argument typing keep it); only
+          # the firing is withheld, which is the direction the carrier discipline allows.
+          #
+          # LAST of the gates on purpose. It is the only one that can resolve a def and walk its body, and a
+          # predicate that does not fold to a `Type::Constant` was never going to fire — so the fold check
+          # above is what keeps the hop off every ordinary `if` in a project that publishes anything at all.
+          return if PublishedConstantGuard.rooted?(predicate, scope)
 
           polarity = predicate_type.value.nil? || predicate_type.value == false ? :falsey : :truthy
           @results << Result.new(node: predicate, polarity: polarity)

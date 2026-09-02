@@ -338,10 +338,12 @@ trade for speed. Defenses:
    once its final segment is declared, and every form that resolves cross-file
    (`class` / `module`, and the constant-assigned `Data.define` / `Struct.new`
    forms) registers in the pre-pass's class sources under its qualified name.
-   A plain value constant resolves in no cross-file read at all today, so a
-   root-segment or `constant:` key would salvage nothing; if that changes the
-   answer is a producer reporting appeared value constants, not a wider key on
-   the consumer side. Matching by simple name over-invalidates — a nested
+   A plain value constant resolved in no cross-file read when this was written,
+   so a root-segment or `constant:` key would have salvaged nothing — superseded
+   by #644, which publishes value constants project-wide and adds the
+   `constant:` kind, its publication-diff producer, and a positive edge to the
+   assigning file (`docs/internal-spec/inference-engine.md` § "Cross-file value
+   constants"). Matching by simple name over-invalidates — a nested
    `MyApp::Rails` re-checks a reader of the top-level `Rails` — which is the
    sound direction and the grammar the class negatives already use; both halves
    are pinned in the spec.

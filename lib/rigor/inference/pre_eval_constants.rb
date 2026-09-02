@@ -54,6 +54,21 @@ module Rigor
     # Value-pinning a *provably* frozen single-write literal cross-file is a strictly later question; it needs
     # its own FP measurement and is deliberately not attempted here.
     #
+    # **Issue #644 asked that later question and answered it.** The discovery pre-pass now publishes a
+    # project-wide table of syntactic frozen-scalar literal assignments (Symbol / Integer / Float / boolean,
+    # written once, in one file), with the FP measurement this paragraph asked for. Where that table and this
+    # one both answer a name, THAT TABLE WINS and the value is not erased — a listed `TIMEOUT = 30` reads
+    # `30`, not `Integer`. Nothing above is wrong; its scope is narrower than it reads. The widening exists
+    # for the rvalues whose basis this collector cannot fully see, and every hazard it names — the closed
+    # `HashShape`, the `Tuple` displacing an RBS overload, the mutable String — is a form #644's table
+    # DECLINES. So the two producers do not overlap where the widening earns its cost, and where they do
+    # overlap the narrower, purely syntactic basis is the better-founded answer. Normative in
+    # `docs/internal-spec/inference-engine.md` § "Cross-file value constants"; pinned by
+    # `spec/rigor/analysis/pre_eval_constants_spec.rb`.
+    #
+    # What this collector still owns alone: every rvalue #644 declines — a String, an Array, a Hash, a class
+    # alias, and anything that needs the rvalue TYPED rather than read off the syntax.
+    #
     # ## The multi-file write rule — widen on conflict, all the way to `Dynamic[top]`
     #
     # Within one file, `ScopeIndexer#record_constant_write` unions repeated writes; that union is widened as a

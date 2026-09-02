@@ -221,6 +221,27 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       expect(dumps(result)).to eq(["dump_type: Time"] * 3)
     end
 
+    # `formatted_offset(colon = true, …)` branches on plain truthiness (`colon ? WITH_COLON :
+    # WITHOUT_COLON`), which rbs spells `boolish`. Declared `bool` it drew
+    # `call.argument-type-mismatch` on `formatted_offset(1)` — code that runs fine. The last line is
+    # the must-still-fire half: a genuinely wrong argument on the new surface still reports, so this
+    # is `boolish` being exact and not argument checking going quiet.
+    it "takes any truthy colon for formatted_offset, and still catches a genuinely wrong argument" do
+      source = <<~RUBY
+        t = Time.current
+        Rigor.dump_type(t.formatted_offset(1))
+        Rigor.dump_type(t.formatted_offset(false))
+        t.days_ago("3")
+      RUBY
+      result = run_plugin(source: source)
+      mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
+
+      expect(mismatches.map(&:message)).to eq(
+        [%(argument type mismatch at parameter `days' of `days_ago' on Time: expected Numeric, got "3")]
+      )
+      expect(dumps(result)).to eq(["dump_type: String"] * 2)
+    end
+
     it "declares the Time singletons core_ext/time/zones and time/calculations add" do
       source = <<~RUBY
         Time.zone_default

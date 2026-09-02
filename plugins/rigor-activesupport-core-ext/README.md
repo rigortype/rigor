@@ -20,7 +20,7 @@ in-place extensions to Ruby's built-in classes:
   `#in_months` / `#in_years`, `#iso8601`, `#parts`. NOT `#ago` /
   `#until` / `#before` / `#since` / `#from_now` / `#after` — see
   _Scope and limits_ below
-- `Time` — the COMPLETE Rails instance surface (#658), audited against
+- `Time` — the Rails instance surface (#658) down to the callable tail, audited against
   activesupport-8.1.3.1's `core_ext/date_and_time/calculations.rb`,
   `time/calculations.rb`, `time/conversions.rb`,
   `date_and_time/zones.rb` and `date_and_time/compatibility.rb`: the
@@ -32,7 +32,16 @@ in-place extensions to Ruby's built-in classes:
   `days_in_month`, `days_in_year`, `rfc3339`, `use_zone`, `find_zone` /
   `find_zone!` and `zone_default`. `Time` is a CORE class and therefore
   CLOSED, so an omission on it is a false positive exactly as much as a
-  wrong return type is — hence "complete" and not "top selectors"
+  wrong return type is — hence an exhaustive audit and not a "top
+  selectors" sample. Measured residual against a real
+  `require "active_support/all"`: twelve names, ten instance and two
+  singleton, every one an `alias_method` artefact of ActiveSupport's own
+  operator overrides — the `plus_with{,out}_duration`,
+  `minus_with{,out}_duration`, `minus_with{,out}_coercion`,
+  `compare_with{,out}_coercion`, `eql_with{,out}_coercion` and
+  `Time.at_with{,out}_coercion` pairs. All are `:nodoc:` in the source
+  and called by nothing outside ActiveSupport, so they stay undeclared
+  on purpose
 - `Date` / `DateTime` — `current`, `yesterday`, `tomorrow`,
   `beginning_of_*`, `end_of_*`, `ago`, `since`, `in`, `change`. The same
   shared modules extend them, so they carry the same closed-class gap
@@ -140,7 +149,8 @@ per project — this one contributing signatures rather than diagnostics.
   project-side monkey-patches; see the survey notes.
 - **Coverage is "top ~40 selectors", not exhaustive** — except on
   `Time`, where the closed-core-class argument above makes a sample
-  unsound and the surface is complete. ActiveSupport has hundreds of
+  unsound and the audit is exhaustive but for the twelve `:nodoc:`
+  alias-chain artefacts listed there. ActiveSupport has hundreds of
   extension methods elsewhere. PRs welcome.
 
 ## Effects ([ADR-103](../../docs/adr/103-effect-labels.md) WD10)

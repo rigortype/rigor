@@ -101,14 +101,14 @@ The multiplier only fires on a receiver Rigor has proven numeric, so
 `created_at.day`, `Date.today.year` and your own object's `#days` keep
 the answers they always had.
 
-## The Rails `Time` instance surface is complete
+## The Rails `Time` instance surface is declared, not sampled
 
 `Time` is a core Ruby class, so RBS knows it fully and it is **closed**:
 a name the signatures do not declare is reported
 `call.undefined-method`. That makes an omission on `Time` just as much
 of a false positive as a wrong return type, with no gradual middle, so
-this bundle declares the whole surface ActiveSupport adds — audited
-against the gem's own sources, not a "top selectors" sample.
+this bundle declares the surface ActiveSupport adds by audit against the
+gem's own sources rather than by a "top selectors" sample.
 
 ```ruby
 Time.current.to_fs(:db)             # String
@@ -131,6 +131,16 @@ singletons `.days_in_month`, `.days_in_year`, `.rfc3339`, `.use_zone`,
 Where a return cannot honestly be named it is widened rather than
 guessed: `#in_time_zone` answers an `ActiveSupport::TimeWithZone`, which
 this bundle does not model, so it reads `untyped`.
+
+What is left out is twelve names, measured against a real
+`require "active_support/all"`: ten instance and two singleton, every one
+an `alias_method` artefact of ActiveSupport's own `+` / `-` / `<=>` /
+`eql?` / `Time.at` overrides — the `plus_with{,out}_duration`,
+`minus_with{,out}_duration`, `minus_with{,out}_coercion`,
+`compare_with{,out}_coercion`, `eql_with{,out}_coercion` and
+`Time.at_with{,out}_coercion` pairs. They are public at runtime and
+`:nodoc:` in the source, and nothing outside ActiveSupport calls them;
+code that does will see them reported.
 
 `Date` and `DateTime` are extended by the same ActiveSupport modules and
 do **not** carry this yet — `Date.current.past?` still reports.
@@ -164,9 +174,10 @@ unconditionally when listed under `plugins:`.
   ActiveSupport extensions. For your own core-class patches see the
   `pre_eval:` mechanism ([ADR-17](../../adr/17-monkey-patch-pre-evaluation.md)).
 - **Top ~40 selectors, not exhaustive** — except on `Time`, where the
-  closed-core-class argument above makes a sample unsound and the
-  surface is complete. Elsewhere ActiveSupport ships hundreds of
-  extensions and this covers the head of the real-world distribution.
+  closed-core-class argument above makes a sample unsound and the audit
+  is exhaustive but for the twelve `:nodoc:` alias-chain artefacts named
+  there. Elsewhere ActiveSupport ships hundreds of extensions and this
+  covers the head of the real-world distribution.
 
 ## Plugin internals
 

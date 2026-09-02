@@ -7,21 +7,38 @@
 # which together account for the bulk of the Rails-extension long
 # tail.
 #
-# This file is opt-in: enable by adding the gem's `sig/` directory
-# to `.rigor.yml`'s `signature_paths:`:
+# This file is opt-in: enable it by naming the PLUGIN in `.rigor.yml`:
 #
 #     # .rigor.yml
-#     signature_paths:
-#       - sig
-#       - path/to/rigor-activesupport-core-ext/sig
+#     plugins:
+#       - rigor-activesupport-core-ext
+#
+# Do NOT wire it by pointing `signature_paths:` at this directory. The
+# ADR-72 activesupport gem overlay (`data/gem_overlay/activesupport/`)
+# stands down only when this plugin's ID is in the plugin registry, so
+# on a project whose Gemfile.lock locks activesupport a bare
+# `signature_paths:` entry loads BOTH copies. `Time.current` then has
+# two declarations, `RBS::DefinitionBuilder` raises
+# `DuplicatedMethodDefinitionError`, and the whole `Time` class
+# silently degrades to `Dynamic[top]` — every call into it, a real typo
+# included, stops being witnessed. Same failure mode as #437, reached
+# by a different route.
 #
 # Not exhaustive. ActiveSupport ships many more extensions across
 # Hash / Array / String / Object / Date / Integer / Module than this
 # file covers; PRs welcome to extend. `Time` is the ONE exception and
-# is deliberately complete — it is a CORE class, so RBS knows it fully
-# and it is CLOSED, which makes an omission on it a false positive
-# rather than a missed precision opportunity (#658). `Date` and
-# `DateTime` are closed for the same reason and are NOT complete yet.
+# is audited exhaustively rather than sampled — it is a CORE class, so
+# RBS knows it fully and it is CLOSED, which makes an omission on it a
+# false positive rather than a missed precision opportunity (#658).
+# Twelve names are still left out even there — measured against a real
+# `require "active_support/all"`, ten instance and two singleton — and
+# every one is an `alias_method` artefact of ActiveSupport's own
+# operator overrides: the `plus_with{,out}_duration`,
+# `minus_with{,out}_duration`, `minus_with{,out}_coercion`,
+# `compare_with{,out}_coercion`, `eql_with{,out}_coercion` and
+# `Time.at_with{,out}_coercion` pairs. All are `:nodoc:` in the source
+# and called by nothing outside ActiveSupport. `Date` and `DateTime`
+# are closed for the same reason and are NOT audited yet.
 #
 # ---------------------------------------------------------------
 # Purity (ADR-103 WD10; docs/type-specification/effect-labels.md; issue #388)
@@ -834,11 +851,13 @@ class Time
   def to_formatted_s: (?Symbol format) -> String
   # `formatted_offset` is `utc? && alternate_utc_string || ActiveSupport::TimeZone
   # .seconds_to_utc_offset(utc_offset, colon)`, and `seconds_to_utc_offset` is a `format %` over
-  # its two arguments — pure, and String in both branches. `alternate_utc_string` is `untyped`
-  # because it is returned as-is when the receiver is UTC and callers pass whatever they want to
-  # print there.
+  # its two arguments — pure, and String in both branches. `colon` is `boolish` and not `bool`:
+  # the body is `colon ? WITH_COLON : WITHOUT_COLON`, plain truthiness, so `bool` would make
+  # `t.formatted_offset(1)` a `call.argument-type-mismatch` on code that runs.
+  # `alternate_utc_string` is `untyped` because it is returned as-is when the receiver is UTC and
+  # callers pass whatever they want to print there.
   %a{pure}
-  def formatted_offset: (?bool colon, ?untyped alternate_utc_string) -> String
+  def formatted_offset: (?boolish colon, ?untyped alternate_utc_string) -> String
   # `rfc3339` is `alias_method :rfc3339, :xmlschema`, so it takes `xmlschema`'s optional
   # `fraction_digits`. rbs types `Time#xmlschema` but not `Time#rfc3339`, so this is an addition
   # rather than a collision.

@@ -1,0 +1,1 @@
+- **[engine]** A `Struct` member assigned inside a loop now reads as the join of its construction value and what the loop assigns, instead of going untyped for every member of that struct — so a sibling member the loop never touches keeps folding too. ([#597](https://github.com/rigortype/rigor/issues/597))

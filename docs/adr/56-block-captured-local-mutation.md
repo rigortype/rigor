@@ -396,6 +396,54 @@ untouching `if` or `while`, and an ADR-48 slice-4 setter write-back
 surviving one. Reaching mail needs a different lever — modelling an
 in-loop setter's per-iteration effect — not this one.
 
+### WD2.8 — An in-loop struct setter summarizes; the gate was self-fulfilling (2026-09-02, issue #597)
+
+WD2.7 left every member read of a struct local that takes a setter
+inside a loop answering `Dynamic[top]`, via `StructFoldSafety`'s
+all-or-nothing `deferred_setter` gate.
+
+The gate was self-fulfilling. `eval_loop` already joins the body's exit
+scope with the pre-loop scope, so a setter's effect DOES reach the
+continuation — as the union of "the loop ran" and "it did not", which
+is precisely the per-iteration summary the gate stood in for. But
+`apply_setter_writeback` declines on a local that is not fold-safe, so
+the gate suppressed the writeback, the body-exit binding kept the
+construction value, and that staleness was then the reason the gate had
+to exist.
+
+Two changes break the circle. `while` / `until` stop being deferred
+boundaries — blocks and lambdas stay, because their bindings genuinely
+do not leak to the continuation (#525 verified that serving the
+construction value there is unsound), and `for` stays because it is not
+routed through `eval_loop`. And a member read off a UNION of same-class
+`StructInstance`s answers the join of the per-arm reads, which is the
+only piece that was missing: the loop already produced
+`P(x: "a", y: 2) | P(x: 1, y: 2)`, and only the read could not use it.
+
+Reading THROUGH the union rather than collapsing the carrier leaves
+every displayed type unchanged and pays on both axes at once: a member
+the loop sets reads `1 | "a"` — never the stale construction value
+alone, which is the #540 always-falsey trap in reverse — and a member
+it does not set reads `2` on both arms, keeping the precision WD2.7
+restored. Struct unions from `if` / `case` merges fold the same way for
+free.
+
+The every-path condition the issue sketched proved unnecessary: a
+setter on only some paths has the not-taken path contribute the
+pre-loop binding, so the same join already covers it.
+
+**And mail is still not the beneficiary** — this closes the last lever
+the ragel cluster was waiting on, and measures zero there. `address` is
+disqualified three times over by rules upstream of the loop gate, the
+decisive one being that the state machine **rebinds it 27 times**;
+`fold_safe_locals` requires exactly one write, and no per-iteration
+setter summary can help a local re-materialised each iteration. It also
+takes 24 bare reads (the escape rule) and 23 `address.comments << …`
+chained member mutations (the WD2.7 disqualifier, firing correctly).
+The `deferred_setter` gate was a red herring for that file from the
+start. Anyone returning to mail should start at the rebind count, not
+here.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

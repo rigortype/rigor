@@ -335,6 +335,7 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       RUBY
       result = run_plugin(source: source)
       expect(rules(result)).not_to include("call.undefined-method")
+      expect(dumps(result).size).to eq(3)
       expect(dumps(result)).to all(eq("dump_type: Dynamic[top]"))
     end
 
@@ -413,6 +414,7 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
           (Date.today + 1.hour).hour
         RUBY
         result = run_plugin(source: source)
+        expect(dumps(result).size).to eq(2)
         expect(dumps(result)).to all(eq("dump_type: Date | Time"))
         expect(rules(result)).not_to include("call.undefined-method")
       end

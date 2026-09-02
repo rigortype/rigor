@@ -120,6 +120,23 @@ module Rigor
         appeared.freeze
       end
 
+      # Issue #644 — the qualified constant names *assigned* in a changed file's after-state that were absent
+      # from its before-state: a value constant that appeared in this edit. The value-constant twin of
+      # {appeared_classes} (a `FOO = :sym` declares no class and so appears in no class-source table), feeding
+      # the `constant:` negative kind. For an added file the before-set is empty, so every constant it
+      # assigns appears. A constant that merely moved files still appears here, but its negative-dependents
+      # are empty, so the over-report costs nothing. `decls_before` / `decls_after` map a path to its Set of
+      # assigned constant names. Returns a frozen Set of qualified-name Strings.
+      def appeared_constants(changed_files, decls_before, decls_after)
+        appeared = Set.new
+        changed_files.each do |path|
+          before = decls_before[path] || Set.new
+          after  = decls_after[path]  || Set.new
+          appeared.merge(after - before)
+        end
+        appeared.freeze
+      end
+
       # ADR-46 slice 3 — the consumers to re-check because a name they looked up and *missed* (a negative
       # dependency) now resolves. `keys` is the set of negative-dependency keys (`"toplevel:foo"` /
       # `"method:C#m"`) the appeared symbols would satisfy; `negative_dependents` maps each key to the Set of

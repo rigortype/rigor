@@ -2645,10 +2645,21 @@ module Rigor
       def declaration_signature(file_index)
         parts = []
         append_ancestry_signature(parts, file_index)
+        append_constant_signature(parts, file_index)
         append_declaration_tables(parts, file_index)
         append_def_signatures(parts, file_index[:def_nodes], "#")
         append_def_signatures(parts, file_index[:singleton_def_nodes], ".")
         Digest::SHA256.hexdigest(parts.join("\x00"))
+      end
+
+      # Issue #644 — the cross-file VALUE-constant surface. Load-bearing for soundness, not precision: a
+      # file's published constants are a declaration-level fact its file-level dependents consume, so
+      # `FOO = :sym` becoming `FOO = :other` MUST move this signature or the reader would be declaration-
+      # stable, dropped from the closure, and served the pre-edit `:sym`. Both halves are here: the write
+      # NAMES (an added / removed / renamed assignment) and the published VALUES (a same-name value edit).
+      def append_constant_signature(parts, file_index)
+        parts.concat((file_index[:constant_sources] || {}).keys.sort.map { |name| "k:#{name}" })
+        parts.concat((file_index[:constant_values] || {}).sort.map { |name, v| "kv:#{name}=#{v.first.inspect}" })
       end
 
       # The class-declaration + ancestry + member-layout surface of the declaration signature (declared class
@@ -2863,6 +2874,17 @@ module Rigor
       def fold_file_index(acc, file_index)
         fold_def_tables(acc, file_index)
         fold_ancestry_tables(acc, file_index)
+        fold_constant_tables(acc, file_index)
+      end
+
+      # Issue #644 — constant values fold later-wins and constant sources union, exactly as
+      # {#merge_constant_literal_tables} folds a freshly walked file. `|| {}` keeps the fold total over a
+      # pre-#644 seed bundle, which carries neither key.
+      def fold_constant_tables(acc, file_index)
+        acc[:constant_values].merge!(file_index[:constant_values] || {})
+        (file_index[:constant_sources] || {}).each do |name, files|
+          (acc[:constant_sources][name] ||= Set.new).merge(files)
+        end
       end
 
       # def_nodes / singleton_def_nodes / method_visibilities / methods fold class-nested later-wins;
@@ -2926,6 +2948,10 @@ module Rigor
           method_visibilities: file_index[:method_visibilities],
           methods: file_index[:methods],
           class_source_names: file_index[:class_sources].keys,
+          # Issue #644 — the file's constant-write attribution (names only; the path is the bundle key) and
+          # the folded literal values. Plain data, so the bundle stays Marshal-clean.
+          constant_source_names: file_index[:constant_sources].keys,
+          constant_values: file_index[:constant_values],
           data_member_layouts: file_index[:data_member_layouts],
           struct_member_layouts: file_index[:struct_member_layouts]
         }
@@ -2949,6 +2975,10 @@ module Rigor
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
+          # Issue #644 — a pre-#644 bundle carries neither key; the SCHEMA bump makes such a blob a cold
+          # rebuild, but default so any in-flight fold stays total.
+          constant_sources: (bundle[:constant_source_names] || []).to_h { |name| [name, Set[path]] },
+          constant_values: bundle[:constant_values] || {},
           data_member_layouts: bundle[:data_member_layouts],
           struct_member_layouts: bundle[:struct_member_layouts]
         }
@@ -2976,11 +3006,15 @@ module Rigor
       def new_def_index_accumulator
         { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
           superclasses: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {}, class_sources: {},
+          constant_values: {}, constant_sources: {},
           data_member_layouts: {}, struct_member_layouts: {} }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
       def finalize_def_index(acc)
+        # Issue #644 — resolve the cross-file constant-reassignment rule here, where the whole project's
+        # write attribution is known, and turn the surviving literals into their published `Type::Constant`.
+        acc[:constant_values] = finalize_constant_values(acc[:constant_values], acc[:constant_sources])
         fold_extends_into_singleton_tables(acc[:extends], acc[:def_nodes], acc[:singleton_def_nodes], acc[:methods])
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
@@ -2989,7 +3023,7 @@ module Rigor
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes method_visibilities
-           methods class_sources].each do |key|
+           methods class_sources constant_sources].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
@@ -3034,8 +3068,18 @@ module Rigor
         accumulate_module_lists(acc[:includes], includes)
         accumulate_module_lists(acc[:extends], build_discovered_extends(root))
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes)
+        merge_constant_literal_tables(acc, root, path)
         merge_class_keyed_index_tables(acc, root, file_methods)
         merge_member_layout_tables(acc, root)
+      end
+
+      # Issue #644 — folds one file's constant-literal contribution into the cross-file accumulator (kept out
+      # of {#accumulate_project_index} to hold its ABC budget). Values merge later-wins and sources union;
+      # the conflict rule that makes the order irrelevant runs at {#finalize_constant_values}.
+      def merge_constant_literal_tables(acc, root, path)
+        values, sources = constant_literals_for_file(root, path)
+        acc[:constant_values].merge!(values)
+        sources.each { |name, files| (acc[:constant_sources][name] ||= Set.new).merge(files) }
       end
 
       # Folds one file's Data + Struct member-layout tables into the cross-file accumulator (kept out of
@@ -3071,6 +3115,114 @@ module Rigor
         names.merge(includes.keys)
         names.merge(file_def_nodes.keys)
         names.each { |name| (class_sources[name] ||= Set.new) << path }
+      end
+
+      # Issue #644 — the cross-file VALUE-constant pre-pass, the twin of {#record_class_sources} for plain
+      # constant ASSIGNMENTS. Returns `[values, sources]` for one file:
+      #
+      # - `sources` — `{qualified name => Set[path]}` over EVERY constant write the file makes, whatever its
+      #   rvalue. It is the attribution the ADR-46 positive edge reads, the producer `appeared_constants`
+      #   inverts, AND the conflict detector: a name two files both write is dropped from the published table
+      #   (see {#finalize_constant_values}), so an unpublishable write in a second file correctly suppresses a
+      #   publishable one here.
+      # - `values` — `{qualified name => [literal]}` for the writes whose rvalue is a **frozen scalar literal**
+      #   the walk can fold without typing anything: a Symbol, Integer, or Float. The one-element Array is the
+      #   presence wrapper, and the raw Ruby value is what rides the ADR-85 seed bundle through `Marshal` —
+      #   {#finalize_constant_values} turns it into the `Type::Constant` the seed carries.
+      #
+      # **Why only those three kinds.** Publishing turns `Dynamic[top]` into a real type at every reader in the
+      # project, which is precisely where a wrong answer becomes a diagnostic on correct code (AGENTS.md
+      # § "Implementation Guidelines"), so the recognised set is the one whose precision is worth that risk.
+      #
+      # - `String` / `Array` / `Hash` literals are MUTABLE. A sibling file's `PATH << "/x"` or `LIST.push(...)`
+      #   moves the value this table pinned, and only the DECLARING file's `widen_mutated_constants` census can
+      #   see such a mutation. The composite two additionally carry the `HashShape` / `Tuple` hazard
+      #   {PreEvalConstants} documents (a closed `HashShape` makes `CONFIG.fetch(:b)` fire; a `Tuple` routes
+      #   through `ShapeDispatch` instead of the RBS overload a call site relied on).
+      # - `nil` declines for {PreEvalConstants}' reason: at declaration position it is a placeholder for a
+      #   value assigned later far more often than it is a genuine `NilClass`.
+      # - `true` / `false` decline because publishing them is **pure cost**. Nobody dispatches on a boolean, so
+      #   the precision buys nothing; what it does buy is a `flow.always-truthy-condition` on every
+      #   `if FEATURE_FLAG` in every other file — a warning on correct code, on the single Ruby idiom whose
+      #   whole point is a constant that is branched on. A `Constant[bool]` predicate keeps firing when the
+      #   flag is declared in the reader's OWN file, which is where the author can see it.
+      #
+      # Everything else — a method call, a constant alias, `ENV[...]`, a `Data.define` — is not a literal and
+      # publishes nothing, so the reader keeps today's `Dynamic[top]`. Declining is always the safe answer.
+      #
+      # A name written TWICE in one file publishes nothing either (the second write drops it), which is what
+      # makes a conditional `X = :a if c` / `X = :b` pair gradual rather than pinned to whichever arm the walk
+      # saw first.
+      def constant_literals_for_file(root, path)
+        values = {}
+        sources = {}
+        walk_constant_literals(root, [], values, sources, Set.new, path)
+        [values, sources]
+      end
+
+      # Mirrors {#walk_constant_writes}'s traversal exactly — the lexical class/module prefix qualifies a bare
+      # `ConstantWriteNode`, a `ConstantPathWriteNode` uses its rendered path as-is, and neither descends into
+      # its own rvalue — so the syntactic table and the per-file typed table agree on WHICH name a write
+      # declares. Only the rvalue treatment differs (a literal fold here, `Scope#type_of` there).
+      def walk_constant_literals(node, qualified_prefix, values, sources, seen, path)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = Source::ConstantPath.qualified_name(node.constant_path)
+          if name
+            child = qualified_prefix + [name]
+            walk_constant_literals(node.body, child, values, sources, seen, path) if node.body
+            return
+          end
+        when Prism::ConstantWriteNode
+          return record_constant_literal(node, qualified_prefix, node.name.to_s, values, sources, seen, path)
+        when Prism::ConstantPathWriteNode
+          full = Source::ConstantPath.qualified_name(node.target)
+          return record_constant_literal(node, [], full, values, sources, seen, path) if full
+        end
+
+        node.rigor_each_child { |child| walk_constant_literals(child, qualified_prefix, values, sources, seen, path) }
+      end
+
+      # Records one constant write. `seen` carries the names this file has already written: a repeat write
+      # retracts the published value (whatever either rvalue was) while still contributing to `sources`, so
+      # neither arm of an in-file reassignment is ever published.
+      def record_constant_literal(node, qualified_prefix, base_name, values, sources, seen, path)
+        full = qualified_prefix.empty? ? base_name : "#{qualified_prefix.join('::')}::#{base_name}"
+        (sources[full] ||= Set.new) << path
+        return values.delete(full) unless seen.add?(full)
+
+        literal = constant_literal_value(node.value)
+        values[full] = literal if literal
+      end
+
+      # The frozen-scalar literal fold: `[value]` for a publishable rvalue, nil to decline. See
+      # {#constant_literals_for_file} for why the recognised set stops here.
+      def constant_literal_value(rvalue)
+        case rvalue
+        when Prism::SymbolNode then symbol_literal_publication(rvalue)
+        when Prism::IntegerNode, Prism::FloatNode then [rvalue.value]
+        end
+      end
+
+      # `Prism::SymbolNode` is the STATIC symbol node (a dynamic `:"#{x}"` parses as
+      # `InterpolatedSymbolNode` and never reaches here), so its unescaped text is the whole value.
+      def symbol_literal_publication(node)
+        text = node.unescaped
+        text.is_a?(String) ? [text.to_sym] : nil
+      end
+
+      # Issue #644 — materialises the published table from the folded accumulator. A name only publishes when
+      # exactly ONE file writes it: two files writing the same qualified name is a cross-file reassignment
+      # whose winner is load order, so the name stays `Dynamic[top]` — the type it already had, and the widest
+      # there is. Runs at finalize (not at fold time) so the fold stays order-independent, which is what lets
+      # the ADR-85 incremental path re-fold a changed file's bundle in place.
+      def finalize_constant_values(values, sources)
+        values.each_with_object({}) do |(name, wrapper), out|
+          files = sources[name]
+          out[name] = Type::Combinator.constant_of(wrapper.first) if files && files.size == 1
+        end
       end
 
       # Merges one file's `class → method → DefNode` map into the cross-file `def_nodes` index and records each method's

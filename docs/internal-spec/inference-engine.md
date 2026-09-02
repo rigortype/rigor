@@ -64,7 +64,7 @@ The fact-store buckets are an internal optimisation boundary. `Scope` may expose
 
 ### Discovery Index (ADR-53 Track A)
 
-Alongside its flow state, every `Rigor::Scope` snapshot carries a single immutable **discovery index** (`Rigor::Scope::DiscoveryIndex`) holding the seed-time discovery tables — `declared_types`, `class_ivars`, `class_cvars`, `program_globals`, `discovered_classes`, `in_source_constants`, `discovered_methods`, `discovered_def_nodes`, `discovered_singleton_def_nodes`, `discovered_def_sources`, `discovered_singleton_def_sources`, `discovered_method_visibilities`, `discovered_superclasses`, `discovered_includes`, `discovered_class_sources`, `data_member_layouts`, `struct_member_layouts`, `param_inferred_types` (the ADR-67 call-site parameter-inference table), and `run_generation` (the ADR-84 per-run identity token the user-method return memo buckets on). Membership is fixed by the criterion in [ADR-53](../adr/53-scope-discovery-index-separation.md): a field belongs in the index **iff no flow transition ever produces a scope whose value for that field differs from its seed**.
+Alongside its flow state, every `Rigor::Scope` snapshot carries a single immutable **discovery index** (`Rigor::Scope::DiscoveryIndex`) holding the seed-time discovery tables — `declared_types`, `class_ivars`, `class_cvars`, `program_globals`, `discovered_classes`, `in_source_constants`, `discovered_methods`, `discovered_def_nodes`, `discovered_singleton_def_nodes`, `discovered_def_sources`, `discovered_singleton_def_sources`, `discovered_method_visibilities`, `discovered_superclasses`, `discovered_includes`, `discovered_class_sources`, `constant_sources` (the [#644](https://github.com/rigortype/rigor/issues/644) constant-write attribution, seeded only on an ADR-46 recording run), `data_member_layouts`, `struct_member_layouts`, `param_inferred_types` (the ADR-67 call-site parameter-inference table), and `run_generation` (the ADR-84 per-run identity token the user-method return memo buckets on). Membership is fixed by the criterion in [ADR-53](../adr/53-scope-discovery-index-separation.md): a field belongs in the index **iff no flow transition ever produces a scope whose value for that field differs from its seed**.
 
 - The index MUST be immutable; it is a frozen `Data` and a seeded index is derived through `DiscoveryIndex#with`.
 - Every flow transition (`with_local`, `with_fact`, `join`, …) MUST carry the receiver's index through to the result by reference, unexamined. `Scope#==` MUST NOT compare the index (it is ambient context, not flow state).
@@ -418,6 +418,28 @@ The following carry no mark and MUST keep firing:
 4. The bare `<name>` MUST be tried last, preserving the pre-walk top-level behaviour.
 5. For each candidate, the typer MUST first consult `Environment#singleton_for_name(candidate)` (resolves a class object → `Type::Singleton[candidate]`), then `Environment#constant_for_name(candidate)` (resolves a non-class RBS constant declaration to its translated `Rigor::Type`). The first hit wins; the walk continues only when both miss for that candidate.
 6. If no candidate resolves through either query, the engine MUST fall through to `fallback_for(node, family: :prism)` exactly as before.
+
+### Cross-file value constants ([#644](https://github.com/rigortype/rigor/issues/644))
+
+The `in_source_constants` table step 5's `constant_type_at` consults is the **merge of two producers**: the analysed file's own constant walk, and a project-wide table the cross-file discovery pre-pass publishes. The per-file half MUST win on collision — the declaring file is the most specific authority for its own name.
+
+The project-wide half is normative as follows.
+
+- The pre-pass MUST collect, per file, the qualified name of **every** constant assignment (`ConstantWriteNode` / `ConstantPathWriteNode`), whatever its rvalue, using the same lexical qualification `Scope`'s per-file walk uses. This attribution (`constant_sources`) is what the rules below are decided against; collecting only the publishable writes would let an unfoldable assignment in a second file go unseen.
+- A name MUST publish **only** when exactly one file assigns it, that file assigns it exactly once, and the rvalue is a **frozen scalar literal** — a Symbol, Integer, or Float. It publishes the value: `Type::Constant[v]`.
+- Every other case MUST publish nothing, leaving the reader at `Dynamic[top]`:
+  - **Reassignment.** Two files assigning the same qualified name, or one file assigning it twice: the surviving value is decided by load order, so the name stays gradual.
+  - **A mutable literal.** `String`, `Array`, `Hash`. The value a table pinned can be moved by a mutation in a file the declaring file's `widen_mutated_constants` census cannot see, and the composite two additionally arrive as a closed `HashShape` / `Tuple` at readers whose author never opened the declaration.
+  - **`nil`.** At declaration position it is a placeholder for a value assigned later far more often than it is a genuine `NilClass`.
+  - **`true` / `false`.** Nothing dispatches on a boolean, so publishing buys no precision; what it buys is `flow.always-truthy-condition` at every `if FEATURE_FLAG` in every other file — a diagnostic on correct code, on the one idiom that exists to be branched on. The rule still fires for a boolean constant declared in the reader's OWN file.
+  - **Any non-literal rvalue.** A method call, a constant alias, a `Data.define`. The pre-pass types nothing, so an unfoldable rvalue is not a guess to be made — it is a decline.
+- The `pre_eval:` publication ([ADR-17](../adr/17-monkey-patch-pre-evaluation.md)) describes the same assignments through a typed walk and erases each value to its class. Where both answer, the literal table MUST win: opting a file into `pre_eval:` must never cost precision.
+
+Two ADR-46 edges carry the table into incremental analysis, and both are load-bearing for soundness rather than speed.
+
+- **Positive.** When a candidate resolves through `in_source_constants`, the reader MUST record a file-granularity dependency on every file `constant_sources` attributes the name to. A deletion of the declaring file then re-checks the reader through the removed-file path.
+- **Negative.** A constant reference resolving to nothing MUST record `constant:<last segment>` alongside the existing `class:<last segment>`, and a recheck MUST widen its closure by the negative-dependents of every constant name that **appeared** in the changed or added set (`Incremental.appeared_constants` over the per-file assigned-name sets). A plain value constant declares no class and appears in no class-source table, so the class producer cannot cover it.
+- A file's **declaration signature** ([ADR-89](../adr/89-semantic-propagation-gates.md) WD1) MUST include both its assigned constant names and its published values. Without the values, `FOO = :sym` becoming `FOO = :other` leaves the file declaration-stable, its file-level dependents are dropped from the closure, and the reader is served the pre-edit answer.
 
 `Environment#constant_for_name(name)` MUST consult the attached `RbsLoader` and return `nil` when the loader is absent or the name has no constant decl. `RbsLoader#constant_type(name)` MUST translate `RBS::AST::Declarations::Constant#type` through `Rigor::Inference::RbsTypeTranslator.translate` and return the resulting `Rigor::Type`, or `nil` when translation produces `Type::Bot` (an empty type). The query MUST NOT raise on malformed inputs; the loader stays fail-soft.
 

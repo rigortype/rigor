@@ -61,6 +61,8 @@ module Rigor
           :discovered_superclasses,
           :discovered_includes,
           :discovered_class_sources,
+          :constant_values,
+          :constant_sources,
           :discovered_method_visibilities,
           :discovered_methods,
           :data_member_layouts,
@@ -162,6 +164,9 @@ module Rigor
             discovered_superclasses: def_index.fetch(:superclasses),
             discovered_includes: def_index.fetch(:includes),
             discovered_class_sources: def_index.fetch(:class_sources),
+            # Issue #644 — the cross-file value-constant publication table and its write attribution.
+            constant_values: def_index.fetch(:constant_values),
+            constant_sources: def_index.fetch(:constant_sources),
             discovered_method_visibilities: def_index.fetch(:method_visibilities),
             discovered_methods: def_index.fetch(:methods),
             data_member_layouts: def_index.fetch(:data_member_layouts),

@@ -54,8 +54,12 @@ module Rigor
       # loads as nil (a clean cold rebuild — no migration). 12: ADR-103 WD13 / issue #382 adds the effects
       # sidecar — `effect_collections` (the per-file {Rigor::Effects::FileCollection}s a collecting run
       # produced) and the `effects_identity` they were produced under; a pre-12 blob mismatches the SCHEMA
-      # gate and loads as nil (a clean cold rebuild — no migration).
-      SCHEMA = 12
+      # gate and loads as nil (a clean cold rebuild — no migration). 13: issue #644 adds `constant_decls`
+      # (the per-file set of qualified constant names a file ASSIGNS, the producer that satisfies the new
+      # `constant:` negative edge) and grows each seed bundle's row grammar by `constant_source_names` +
+      # `constant_values` (the cross-file value-constant publication table); a pre-13 blob mismatches the
+      # SCHEMA gate and loads as nil (a clean cold rebuild — no migration).
+      SCHEMA = 13
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -69,6 +73,9 @@ module Rigor
       # ADR-46 slice 3:
       # `missing` maps a consumer to Set<"kind:name"> it looked up and missed.
       # `class_decls` maps a path to Set<qualified class name> it declares.
+      # Issue #644:
+      # `constant_decls` maps a path to Set<qualified constant name> it ASSIGNS — the producer whose diff
+      # satisfies the `constant:` negative edge a reader records when a constant resolves to nothing.
       # ADR-85 WD2:
       # `seed_bundles` maps an analyzed path to its per-file discovery contribution (plain-data tables +
       # `(node_id, name, fingerprint)` def-node handles + content digest), so a warm recheck rebuilds the
@@ -103,7 +110,7 @@ module Rigor
       # and a vocabulary / catalogue / `effects:` change must invalidate the summaries alone.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
-                            :missing, :class_decls, :seed_bundles, :plugin_fact_digest,
+                            :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,
                             :return_summaries, :param_table,
                             :effect_collections, :effects_identity)
 
@@ -218,6 +225,7 @@ module Rigor
           symbol_fingerprints: data[:symbol_fingerprints] || {},
           missing: data[:missing] || {},
           class_decls: data[:class_decls] || {},
+          constant_decls: data[:constant_decls] || {},
           seed_bundles: data[:seed_bundles] || {},
           plugin_fact_digest: data[:plugin_fact_digest],
           return_summaries: data[:return_summaries] || {},
@@ -241,6 +249,7 @@ module Rigor
           symbol_fingerprints: payload.symbol_fingerprints,
           missing: payload.missing,
           class_decls: payload.class_decls,
+          constant_decls: payload.constant_decls,
           seed_bundles: payload.seed_bundles,
           plugin_fact_digest: payload.plugin_fact_digest,
           return_summaries: payload.return_summaries,

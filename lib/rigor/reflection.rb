@@ -178,7 +178,13 @@ module Rigor
       return in_source_class if in_source_class
 
       in_source_value = scope.in_source_constants[candidate]
-      return in_source_value if in_source_value
+      if in_source_value
+        # Issue #644 — a cross-file value constant resolved here: record the ADR-46 positive edge to the
+        # file that assigned it, so an incremental recheck re-analyses this reader when that literal moves
+        # or its file goes away. No-op unless dependency recording is active (the table is unseeded then).
+        scope.record_constant_dependency(candidate) if Analysis::DependencyRecorder.active?
+        return in_source_value
+      end
 
       env.constant_for_name(candidate)
     end

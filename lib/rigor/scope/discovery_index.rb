@@ -26,6 +26,7 @@ module Rigor
       :discovered_superclasses,
       :discovered_includes,
       :discovered_class_sources,
+      :constant_sources,
       :data_member_layouts,
       :struct_member_layouts,
       :param_inferred_types,
@@ -64,6 +65,11 @@ module Rigor
         discovered_superclasses: EMPTY_TABLE,
         discovered_includes: EMPTY_TABLE,
         discovered_class_sources: EMPTY_TABLE,
+        # Issue #644 — `{qualified constant name => Set[declaring file]}`, the write attribution behind the
+        # cross-file value-constant table. Read only by `Scope#record_constant_dependency` during ADR-46
+        # dependency recording, so the runner seeds it only on a recording run; every other run leaves it
+        # empty and the edge costs one nil check.
+        constant_sources: EMPTY_TABLE,
         data_member_layouts: EMPTY_TABLE,
         struct_member_layouts: EMPTY_TABLE,
         # ADR-67 WD3 — the call-site parameter-inference table, keyed by `[class_name, method_name, kind]` (the

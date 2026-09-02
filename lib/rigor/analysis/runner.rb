@@ -350,6 +350,12 @@ module Rigor
         @project_discovered_superclasses = {}.freeze
         @project_discovered_includes = {}.freeze
         @project_discovered_class_sources = {}.freeze
+        # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
+        # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
+        # every per-file scope so `FOO = :sym` in one file reads as `:sym` in another; the second seeds
+        # `constant_sources` only on an ADR-46 recording run, where it is the positive edge's attribution.
+        @project_constant_values = {}.freeze
+        @project_constant_sources = {}.freeze
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
         @project_data_member_layouts = {}.freeze
@@ -526,6 +532,18 @@ module Rigor
         result = Hash.new { |hash, key| hash[key] = Set.new }
         @project_discovered_class_sources.each do |class_name, files|
           files.each { |file| result[file] << class_name }
+        end
+        result.transform_values(&:freeze).freeze
+      end
+
+      # Issue #644 — per-file set of the qualified constant names ASSIGNED in that file, the value-constant
+      # twin of {#class_declarations}. `Incremental.appeared_constants` diffs it to find a constant that
+      # appeared in an edit, so a reader that looked the name up and missed (the `constant:` negative edge)
+      # is re-checked once the assignment exists.
+      def constant_declarations
+        result = Hash.new { |hash, key| hash[key] = Set.new }
+        @project_constant_sources.each do |name, files|
+          files.each { |file| result[file] << name }
         end
         result.transform_values(&:freeze).freeze
       end
@@ -1191,6 +1209,8 @@ module Rigor
         @project_discovered_superclasses = discovery.discovered_superclasses
         @project_discovered_includes = discovery.discovered_includes
         @project_discovered_class_sources = discovery.discovered_class_sources
+        @project_constant_values = discovery.constant_values
+        @project_constant_sources = discovery.constant_sources
         @project_discovered_method_visibilities = discovery.discovered_method_visibilities
         @project_discovered_methods = discovery.discovered_methods
         @project_data_member_layouts = discovery.data_member_layouts
@@ -1595,12 +1615,20 @@ module Rigor
         tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
         seed_opt_in_pre_pass_tables(tables)
         seed_member_layout_tables(tables)
-        # ADR-46 slice 1 — the class-declaration source map is read only by the ancestry accessors during
-        # dependency recording, so seed it only when recording is on; a normal run never carries it.
-        if @record_dependencies && !@project_discovered_class_sources.empty?
-          tables[:discovered_class_sources] = @project_discovered_class_sources
-        end
+        seed_dependency_attribution_tables(tables)
         tables
+      end
+
+      # ADR-46 slice 1 / issue #644 — the two SOURCE-ATTRIBUTION tables, read only by the recording accessors
+      # (`Scope#record_class_dependency` for the class-declaration map, `Scope#record_constant_dependency`
+      # for the constant-write map). A normal run carries neither. Extracted to keep
+      # {#project_scope_seed_tables} under the complexity budget.
+      def seed_dependency_attribution_tables(tables)
+        return unless @record_dependencies
+
+        tables[:discovered_class_sources] = @project_discovered_class_sources unless
+          @project_discovered_class_sources.empty?
+        tables[:constant_sources] = @project_constant_sources unless @project_constant_sources.empty?
       end
 
       # Issue #260 — the mutable starting point {#project_scope_seed_tables} fills in: a copy of the opt-in
@@ -1622,9 +1650,21 @@ module Rigor
       # Extracted to keep {#project_scope_seed_tables} under the complexity budget.
       def seed_opt_in_pre_pass_tables(tables)
         tables[:param_inferred_types] = @project_param_inferred_types unless @project_param_inferred_types.empty?
-        return if @project_pre_eval_constants.empty?
+        constants = merged_seed_constants
+        tables[:in_source_constants] = constants unless constants.empty?
+      end
 
-        tables[:in_source_constants] = @project_pre_eval_constants
+      # Issue #644 — the seeded `in_source_constants` table, joining the two cross-file constant producers.
+      # The whole-project literal table wins over a `pre_eval:` publication of the same name: both describe
+      # the same assignment, the literal table pins the value the write actually carries while ADR-17's
+      # widener erases it to the class, and listing a file under `pre_eval:` must never LOSE precision. The
+      # per-file table still wins over both (`ScopeIndexer.index`'s merge) — same-file stays the most
+      # specific authority.
+      def merged_seed_constants
+        return @project_constant_values if @project_pre_eval_constants.empty?
+        return @project_pre_eval_constants if @project_constant_values.empty?
+
+        @project_pre_eval_constants.merge(@project_constant_values).freeze
       end
 
       # ADR-46 — seed the instance + singleton `"path:line"` def-source tables (each only when non-empty).

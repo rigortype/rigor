@@ -50,6 +50,8 @@ module Rigor
     def discovered_superclasses = @discovery.discovered_superclasses
     def discovered_includes = @discovery.discovered_includes
     def discovered_class_sources = @discovery.discovered_class_sources
+    # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
+    def constant_sources = @discovery.constant_sources
     def data_member_layouts = @discovery.data_member_layouts
     def struct_member_layouts = @discovery.struct_member_layouts
     # ADR-67 WD3 — call-site-inferred parameter types, keyed by `[class_name, method_name, kind]`.
@@ -744,6 +746,22 @@ module Rigor
       sites.each { |site| Analysis::DependencyRecorder.read_site(site) }
     end
     private :record_class_dependency
+
+    # Issue #644 — the positive ADR-46 edge for a cross-file VALUE constant. `Reflection.constant_type_at`
+    # calls this the moment a candidate resolves through `in_source_constants`, so the reader depends on the
+    # file that wrote the constant: editing the literal, or deleting the file, re-checks the reader. Recorded
+    # WITHOUT a symbol (a file-granularity / ancestry edge) because a constant's published value is a
+    # declaration-level fact of the whole file, which is also the granularity
+    # `ScopeIndexer#append_constant_signature` moves the declaration signature at.
+    #
+    # `constant_sources` is seeded only when dependency recording is on, so on every ordinary run the table
+    # is empty and this is one Hash miss; the caller additionally gates on the recorder being active.
+    def record_constant_dependency(name)
+      sites = @discovery.constant_sources[name]
+      return if sites.nil?
+
+      sites.each { |site| Analysis::DependencyRecorder.read_site(site) }
+    end
 
     # v0.1.2 — per-class table mapping `method_name (Symbol) → :public | :private | :protected`. Populated by
     # `ScopeIndexer` for every `def` it sees inside a class body, with the visibility taken from the surrounding

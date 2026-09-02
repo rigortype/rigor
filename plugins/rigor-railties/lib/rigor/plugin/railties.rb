@@ -44,7 +44,9 @@ module Rigor
     # `effects:` block ({Rigor::Plugin::Registry#effect_contributions} is lazy). The reader typing costs one
     # `ContributionIndex` name-gate probe per dispatch of a method actually named `logger` / `cache` /
     # `configuration` / `application` (ADR-52 WD1 compiles the `methods:` gate into the registry), and the
-    # block declines on the first check for anything whose receiver is not the `Rails` constant.
+    # block declines on the first check for anything whose receiver is not the `Rails` constant. Its one
+    # type lookup ({#project_defined_rails?}) runs only after that syntactic gate passes, so it is confined
+    # to `Rails.`-shaped sites.
     class Railties < Rigor::Plugin::Base
       manifest(
         id: "railties",
@@ -114,12 +116,14 @@ module Rigor
       # define on its own objects, so the receiver gate is syntactic and exact: the literal `Rails` constant,
       # bare or root-qualified (`::Rails`). A `receivers:` gate cannot express it — the `Rails` constant is
       # unresolved in a project with no Rails RBS, so the receiver type is `Dynamic` and
-      # `dynamic_return_receiver_class_name` yields nil.
-      dynamic_return methods: RAILS_SINGLETON_READER_TYPES.keys do |call_node, _scope|
+      # `dynamic_return_receiver_class_name` yields nil. The one thing the type side CAN see is the opposite
+      # case — a `Rails` the project defines itself — and that is the second gate ({#project_defined_rails?}).
+      dynamic_return methods: RAILS_SINGLETON_READER_TYPES.keys do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
         next nil unless call_node.arguments.nil? # `Rails.logger`, not `Rails.logger(x)`
         next nil unless call_node.block.nil?
         next nil unless rails_constant_receiver?(call_node.receiver)
+        next nil if project_defined_rails?(call_node.receiver, scope)
 
         class_name = RAILS_SINGLETON_READER_TYPES[call_node.name]
         next nil if class_name.nil?
@@ -145,6 +149,24 @@ module Rigor
         when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Rails
         else false
         end
+      end
+
+      # #588 — the syntactic gate cannot tell the framework's `Rails` from a `module Rails` the project
+      # declares itself: at top level, or lexically nested so that a bare `Rails` inside `module MyApp`
+      # resolves to `MyApp::Rails`. Listing this plugin beside such a definition is a self-contradictory
+      # configuration (activation is the `plugins:` list alone — no lockfile gate notices the framework is
+      # absent), but the project's own definition is the honest answer for its own constant, and the engine
+      # already has it: the receiver resolves to the `Singleton` of a discovered class. Declining hands the
+      # call back to the project's `def self.logger`. Verified diagnostics-silent either way (the nominal is
+      # RBS-less), so this is precision-honesty — the project's own answer surviving — not a false-positive
+      # fix. The unresolved framework constant types `Dynamic` and passes through; an RBS-declared `Rails`
+      # is not a project definition and keeps the contribution tier's ordinary precedence.
+      def project_defined_rails?(receiver, scope)
+        return false if scope.nil?
+
+        receiver_type = scope.type_of(receiver)
+        receiver_type.is_a?(Rigor::Type::Singleton) &&
+          Rigor::Reflection.discovered_class?(receiver_type.class_name, scope: scope)
       end
     end
 

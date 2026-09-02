@@ -104,6 +104,57 @@ RSpec.describe "plugins/rigor-railties" do
         ['dump_type: "site-logger"', "dump_type: Dynamic[top]", "dump_type: Dynamic[top]"]
       )
     end
+
+    it "declines when the project defines its own `Rails` — top-level or lexically nested (#588)" do
+      # The syntactic gate alone retyped the project's own `Rails.logger` to `BroadcastLogger` over the
+      # project's definition. Zero diagnostics either way (the nominal is RBS-less), so this is the
+      # project's own answer surviving, not an FP fix. `::Rails` resolves to the same discovered module,
+      # and a bare `Rails` inside `MyApp` resolves to `MyApp::Rails` first.
+      source = <<~RUBY
+        module Rails
+          def self.logger
+            "project-logger"
+          end
+        end
+
+        module MyApp
+          module Rails
+            def self.cache
+              :project_cache
+            end
+          end
+
+          def self.probe
+            Rigor.dump_type(Rails.cache)
+          end
+        end
+
+        Rigor.dump_type(Rails.logger)
+        Rigor.dump_type(::Rails.logger)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(
+        ["dump_type: :project_cache", 'dump_type: "project-logger"', 'dump_type: "project-logger"']
+      )
+      expect(rules(result).uniq).to eq(["dump.type"])
+    end
+
+    it "still types the framework `Rails` beside other project-defined modules" do
+      # The must-still-type sibling of the decline above: a discovered module elsewhere in the project is
+      # not a `Rails` definition, and the unresolved framework constant passes the type-side gate.
+      source = <<~RUBY
+        module MyApp
+          def self.probe
+            Rigor.dump_type(Rails.logger)
+          end
+        end
+
+        Rigor.dump_type(Rails.logger)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(["dump_type: ActiveSupport::BroadcastLogger"] * 2)
+      expect(rules(result).uniq).to eq(["dump.type"])
+    end
   end
 
   describe "leniency — the reason the nominals are RBS-less" do

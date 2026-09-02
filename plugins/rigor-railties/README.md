@@ -25,6 +25,9 @@ plugins:
 effects: {}
 ```
 
+Listing the plugin is the whole activation: there is no `Gemfile.lock`
+gate, so nothing checks that the project actually depends on Rails.
+
 ## The `Rails.` singleton readers
 
 `Rails.logger`, `Rails.cache`, `Rails.configuration` and
@@ -60,7 +63,10 @@ For the same reason `Rails.logger` is **not** typed as stdlib
 
 The gate is the literal `Rails` constant (bare or `::Rails`), with no
 arguments and no block. A project's own `logger` method, a nested
-`Foo::Rails.logger`, and `Rails.logger("extra")` are all left alone.
+`Foo::Rails.logger`, and `Rails.logger("extra")` are all left alone. So
+is a `module Rails` the project defines itself, top-level or lexically
+nested: when the receiver resolves to the project's own constant, the
+plugin declines and the project's definition answers.
 
 ## Effects
 

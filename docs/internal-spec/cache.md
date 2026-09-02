@@ -96,9 +96,16 @@ The `:exists` comparator carries `File.exist?`'s answer rendered as
 dependency** that `Plugin::IoBoundary#read_file` records when a read
 fails because the path is missing, so an entry computed on the file's
 absence reads stale once anything appears there. `#absent?` identifies
-the row. Validation is a single `File.exist?`: there is no stat tuple or
-digest to drift on an unchanged tree, so an absence row never thrashes a
-warm hit.
+the row. `FileEntry.present(path:)` builds the `"true"` row — WD1b
+(#613), the same dependency in the other direction, recorded by
+`Plugin::IoBoundary#file?` / `#directory?` when an existence probe found
+what it asked for and the plugin read no bytes (a discovery root it
+globbed, a config file whose presence alone switched a mode). Validation
+either way is a single `File.exist?`: there is no stat tuple or digest to
+drift on an unchanged tree, so an existence row never thrashes a warm
+hit. It is also the weakest file row — a rewrite in place leaves a
+presence row fresh — so it is only ever the row for a dependency that
+really is on existence alone; a read records the `:stat` row over it.
 
 ### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [], globs: [])`
 

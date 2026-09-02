@@ -135,7 +135,7 @@ module Rigor
         # per-environment split has no single transport, and guessing one would be the wrong kind of
         # precision.
         def detect_adapter(io_boundary, root)
-          found = config_files(root).filter_map do |path|
+          found = config_files(io_boundary, root).filter_map do |path|
             io_boundary.read_file(path).force_encoding("UTF-8")[SETTING, 1]
           rescue StandardError
             nil
@@ -143,10 +143,14 @@ module Rigor
           found.length == 1 ? found.first : nil
         end
 
-        def config_files(root)
+        # ADR-45 WD1b (#613) — `config/application.rb` is probed at a fixed path, so its ABSENCE is what
+        # shapes "no adapter" on a project that has none yet; the probe goes through the boundary to record
+        # that. The globbed `config/environments/*.rb` entries exist by enumeration and only pick up the
+        # (immediately superseded) presence row.
+        def config_files(io_boundary, root)
           application = File.join(root, CONFIG_PATHS.first)
           environments = Dir.glob(File.join(root, CONFIG_PATHS.last, "*.rb"))
-          ([application] + environments).select { |path| File.file?(path) }
+          ([application] + environments).select { |path| io_boundary.file?(path) }
         rescue StandardError
           []
         end

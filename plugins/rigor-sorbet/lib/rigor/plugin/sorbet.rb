@@ -450,7 +450,9 @@ module Rigor
       #   `[".rbi"]` for Sorbet RBI tree).
       def harvest_path(root, catalog, sigil_by_path, parse_errors_by_path, extensions)
         absolute = canonicalize(root)
-        if File.directory?(absolute)
+        # ADR-45 WD1b (#613) — boundary-probed: an `sorbet/rbi` tree (or a configured source root) that
+        # does not exist yet is a recorded dependency, so creating it invalidates the warm run.
+        if io_boundary.directory?(absolute)
           extensions.each do |ext|
             # ADR-88 WD2 — deterministic fold order matters now that the catalog VALUE is digested into the
             # incremental fact-surface fingerprint: a duplicate `(class, method, kind)` sig's last-wins winner
@@ -461,7 +463,7 @@ module Rigor
               harvest_file(canonicalize(path), catalog, sigil_by_path, parse_errors_by_path)
             end
           end
-        elsif File.file?(absolute) && extensions.any? { |ext| absolute.end_with?(ext) }
+        elsif io_boundary.file?(absolute) && extensions.any? { |ext| absolute.end_with?(ext) }
           # `paths:` may list individual files (the demos do this); walk them directly rather than skipping.
           harvest_file(absolute, catalog, sigil_by_path, parse_errors_by_path)
         end

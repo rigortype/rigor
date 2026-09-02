@@ -56,7 +56,8 @@ module Rigor
         def ruby_files_under(roots)
           roots.flat_map do |root|
             absolute = File.expand_path(root)
-            next [] unless File.directory?(absolute)
+            # ADR-45 WD1b (#613) — boundary-probed: a root that appears later invalidates the warm run.
+            next [] unless @io_boundary.directory?(absolute)
 
             Dir.glob(File.join(absolute, "**", "*.rb"))
           end

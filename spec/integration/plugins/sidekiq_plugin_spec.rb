@@ -289,4 +289,79 @@ RSpec.describe "plugins/rigor-sidekiq" do
       expect(rules(result)).to include("flow.always-truthy-condition")
     end
   end
+
+  # #613 / ADR-45 WD1b — {ScheduleScan} gated its read on `File.file?(config/sidekiq.yml)`, so on a project
+  # with no schedule the boundary read never happened, no absence row was recorded (#577 records it at the
+  # READ), and the run-result entry carried no edge for the schedule's later appearance: the warm run was
+  # served from cache and never looked at the new file. Every example drives the real Runner against a real
+  # on-disk Store with a FRESH Store per run, so a hit has to come off disk — what the next `rigor check`
+  # process faces.
+  describe "warm-run cache across the appearance of `config/sidekiq.yml` (#613)" do
+    SIDEKIQ_SCHEDULE_YAML = <<~YAML # rubocop:disable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
+      :scheduler:
+        :schedule:
+          nightly_report:
+            cron: "0 0 * * *"
+            class: "ReportWorker"
+    YAML
+
+    # Returns `[result, counters]` — the run-diagnostics slot's `hits:` / `misses:` for this run are the
+    # direct read of whether the run was SERVED or RE-ANALYZED.
+    def run_warm(dir, cache_root)
+      Rigor::Plugin.unregister!
+      store = Rigor::Cache::Store.new(root: cache_root)
+      result = Dir.chdir(dir) do
+        Rigor::Analysis::Runner.new(
+          configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-sidekiq"]),
+          cache_store: store, collect_stats: false, plugin_requirer: build_plugin_requirer
+        ).run
+      end
+      counters = store.stats.fetch(:by_producer)
+                      .fetch(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID) { { hits: 0, misses: 0 } }
+      [result, counters.slice(:hits, :misses)]
+    end
+
+    def with_project
+      Dir.mktmpdir do |dir|
+        Dir.mktmpdir do |cache_root|
+          materialize_files(dir, DEFAULT_WORKERS.merge("demo.rb" => "ReportWorker.perform_async(1)\n"))
+          yield dir, cache_root
+        end
+      end
+    end
+
+    it "re-analyzes the warm run once `config/sidekiq.yml` is ADDED" do
+      with_project do |dir, cache_root|
+        _cold, cold_counters = run_warm(dir, cache_root)
+        expect(cold_counters).to eq(hits: 0, misses: 1)
+
+        materialize_files(dir, "config/sidekiq.yml" => SIDEKIQ_SCHEDULE_YAML)
+        _warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+      end
+    end
+
+    it "serves the warm run from cache when nothing changed (a probe row does not thrash)" do
+      with_project do |dir, cache_root|
+        cold, = run_warm(dir, cache_root)
+
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 1, misses: 0)
+        expect(warm.diagnostics.map { |d| [d.rule, d.line, d.message] })
+          .to eq(cold.diagnostics.map { |d| [d.rule, d.line, d.message] })
+      end
+    end
+
+    it "re-analyzes the warm run once `config/sidekiq.yml` is REMOVED" do
+      with_project do |dir, cache_root|
+        materialize_files(dir, "config/sidekiq.yml" => SIDEKIQ_SCHEDULE_YAML)
+        _cold, cold_counters = run_warm(dir, cache_root)
+        expect(cold_counters).to eq(hits: 0, misses: 1)
+
+        File.unlink(File.join(dir, "config", "sidekiq.yml"))
+        _warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+      end
+    end
+  end
 end

@@ -133,6 +133,108 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
+  # ADR-45 WD1b (#613) — WD1 records the absence at the READ, which never happens on the projects it was
+  # written for: the prevailing plugin shape gates the read on `File.file?` / `File.directory?` first, and a
+  # probe through `File` records nothing. These predicates are the same probe with the row attached.
+  describe "#file? / #directory? (ADR-45 WD1b, #613)" do
+    it "answers true for an existing file and records a presence row, stale once the file is gone" do
+      path = File.join(tmpdir, "sidekiq.yml")
+      File.write(path, ":queues:\n")
+
+      expect(boundary.file?(path)).to be(true)
+
+      descriptor = boundary.cache_descriptor
+      expect(descriptor.files.map { |e| [e.path, e.comparator, e.value] })
+        .to eq([[File.expand_path(path), :exists, Rigor::Cache::Descriptor::FileEntry::PRESENT]])
+      expect(descriptor.fresh?).to be(true)
+
+      File.unlink(path)
+      expect(descriptor.fresh?).to be(false)
+    end
+
+    it "answers false for a missing file and records the absence row, stale once the file appears" do
+      path = File.join(tmpdir, "config", "sidekiq.yml")
+
+      expect(boundary.file?(path)).to be(false)
+
+      descriptor = boundary.cache_descriptor
+      expect(descriptor.files.map(&:absent?)).to eq([true])
+      expect(descriptor.fresh?).to be(true)
+
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, ":queues:\n")
+      expect(descriptor.fresh?).to be(false)
+    end
+
+    it "records nothing when the path exists but is not what the probe asked for" do
+      # The probe observed neither a usable file nor an absence — `#read_file`'s EISDIR bound in probe form.
+      # An absence row here would read stale on every run while the directory stands.
+      dir = File.join(tmpdir, "sidekiq.yml")
+      FileUtils.mkdir_p(dir)
+
+      expect(boundary.file?(dir)).to be(false)
+      expect(boundary.cache_descriptor.files).to be_empty
+    end
+
+    it "records a presence row for a discovery root that exists, so deleting the root invalidates" do
+      root = File.join(tmpdir, "app", "models")
+      FileUtils.mkdir_p(root)
+
+      expect(boundary.directory?(root)).to be(true)
+
+      descriptor = boundary.cache_descriptor
+      expect(descriptor.files.map(&:value)).to eq([Rigor::Cache::Descriptor::FileEntry::PRESENT])
+      expect(descriptor.fresh?).to be(true)
+
+      FileUtils.rm_rf(root)
+      expect(descriptor.fresh?).to be(false)
+    end
+
+    it "records an absence row for a discovery root that does not exist yet" do
+      root = File.join(tmpdir, "app", "models")
+
+      expect(boundary.directory?(root)).to be(false)
+      expect(boundary.cache_descriptor.files.map(&:absent?)).to eq([true])
+
+      FileUtils.mkdir_p(root)
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    it "answers truthfully outside the trusted-read scope and records nothing there" do
+      # The predicates REPLACE a bare `File.file?` in plugin code, so they must not change what the plugin
+      # does — only what it records. The policy gates the row, not the answer.
+      expect(boundary.file?("/etc/hosts")).to eq(File.file?("/etc/hosts"))
+      expect(boundary.directory?("/definitely/not/under/the/tmpdir")).to be(false)
+      expect(boundary.cache_descriptor.files).to be_empty
+    end
+
+    it "lets a later read replace the probe's presence row with the content row" do
+      path = File.join(tmpdir, "sidekiq.yml")
+      File.write(path, ":queues:\n")
+
+      boundary.file?(path)
+      boundary.read_file(path)
+
+      files = boundary.cache_descriptor.files
+      expect(files.size).to eq(1)
+      expect(files.first.comparator).to eq(:stat)
+    end
+
+    it "keeps the first existence row when a later probe of the same path disagrees" do
+      path = File.join(tmpdir, "sidekiq.yml")
+
+      expect(boundary.file?(path)).to be(false)
+      File.write(path, ":queues:\n")
+      expect(boundary.file?(path)).to be(true)
+
+      # The file moved under the analysis. The row that stands describes the world the earlier decision was
+      # shaped on, and it reads stale now — a recompute next run, never a wrong hit.
+      files = boundary.cache_descriptor.files
+      expect(files.map(&:absent?)).to eq([true])
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+  end
+
   describe "#open_url" do
     it "denies every URL while the network policy is :disabled" do
       expect { boundary.open_url("https://example.invalid/api") }.to raise_error(

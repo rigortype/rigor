@@ -415,6 +415,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_IO_BOUNDARY_INSTANCE = %w[
     cache_descriptor()
+    directory?(req:path)
+    file?(req:path)
     open_url(req:url)
     plugin_id()
     policy()

@@ -98,10 +98,16 @@ module Rigor
         fortnight fortnights month months year years
       ].freeze
 
-      # The nominal every multiplier returns. Rigor ships no RBS for it — deliberately, per the comment
-      # above — so it is a *lenient* nominal: the site becomes a concrete receiver that
-      # `coverage --protection` counts, while `1.day.ago`, `5.minutes.from_now`, `1.day.to_i` and the rest
-      # of the Duration surface resolve lenient-to-`Dynamic` rather than to a diagnostic.
+      # The nominal every multiplier returns. It is a *lenient* nominal: the site becomes a concrete
+      # receiver that `coverage --protection` counts, and `call.undefined-method` never fires against it
+      # (ADR-26 `open_receivers:` below) regardless of what its RBS does or doesn't enumerate. Issue #632
+      # gave `ActiveSupport::Duration` an actual (partial) RBS declaration — `sig/active_support/
+      # core_ext.rbs`'s reader surface, `to_i` / `in_seconds` / `to_f` / the `in_minutes` family / `iso8601`
+      # / `parts` — so THOSE now resolve precisely instead of to `Dynamic`. `ago` / `until` / `before` /
+      # `since` / `from_now` / `after` stay undeclared on purpose (issue #659, blocked on #658: typing them
+      # needs the Rails `Time` instance surface first) and the rest of Duration's real API — the arithmetic
+      # operators, `==`, anything `method_missing` forwards to the wrapped numeric — was simply never in
+      # scope. Every one of those still resolves lenient-to-`Dynamic` rather than to a diagnostic.
       DURATION_NOMINAL = "ActiveSupport::Duration"
 
       # The receiver class names the multipliers are real methods on. `Numeric` is included for a receiver

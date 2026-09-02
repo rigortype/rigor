@@ -255,30 +255,29 @@ end
 # `lib/active_support/duration.rb`), so an incomplete declaration would turn every omitted member into a
 # false `call.undefined-method` for every project that locks activesupport. It is safe here only because
 # `ActiveSupport::Duration` is listed in `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`
-# (`lib/rigor/analysis/check_rules.rb`) — an always-on open-receiver membership for exactly this bundle,
-# since this overlay has no plugin manifest of its own for an ADR-26 `open_receivers:` entry to live on.
-# What follows is the reader surface, mirroring `rigor-activesupport-core-ext/sig/active_support/core_ext.rbs`
-# (parity enforced by `spec/rigor/environment/activesupport_overlay_parity_spec.rb`); every method not
-# listed here stays undeclared and silently `Dynamic` rather than guessed.
+# (`lib/rigor/analysis/check_rules.rb`) — an open-receiver membership for exactly this bundle, gated on this
+# overlay directory actually having been loaded, since this overlay has no plugin manifest of its own for
+# an ADR-26 `open_receivers:` entry to live on (issue #660 tracks whether that gap gets a first-class
+# mechanism instead of this constant). What follows is the reader surface, mirroring
+# `rigor-activesupport-core-ext/sig/active_support/core_ext.rbs` (parity enforced by
+# `spec/rigor/environment/activesupport_overlay_parity_spec.rb`); every method not listed here stays
+# undeclared and silently `Dynamic` rather than guessed.
 module ActiveSupport
   class Duration
-    # `since`/`from_now`/`after` and `ago`/`until`/`before` default to `time = ::Time.current`, declared
-    # `() -> Time` above (no `ActiveSupport::TimeWithZone` anywhere in this bundle), so the zero-arg
-    # overload matches. An explicit `time:` argument declines to `untyped` on both ends — the runtime
-    # return depends on the argument's own class AND on whether this duration carries a date-scale part,
-    # which a plain RBS overload cannot express without guessing.
-    def ago: () -> Time
-           | (untyped) -> untyped
-    def until: () -> Time
-             | (untyped) -> untyped
-    def before: () -> Time
-              | (untyped) -> untyped
-    def since: () -> Time
-             | (untyped) -> untyped
-    def from_now: () -> Time
-                | (untyped) -> untyped
-    def after: () -> Time
-             | (untyped) -> untyped
+    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
+    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
+    # and typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`,
+    # `past?`, `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, …) to
+    # already be closed and complete — `Time` is CORE, RBS-known from stdlib, and this bundle's `Time`
+    # block below never declared that instance surface (#658 — already a live FP on master:
+    # `Time.current.to_fs(:db)` fires today, independent of Duration). Answering `ago` with `Time` does not
+    # leave the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN
+    # undeclared members — it fires a false `call.undefined-method` on `to_fs` for `1.hour.ago.to_fs(:db)`,
+    # ordinary Rails, and the same for every other Rails `Time` extension nothing here declares: 9 false
+    # positives on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658
+    # lands: plain `Time`, not a `Time | ActiveSupport::TimeWithZone` union (Rails overrides
+    # `TimeWithZone#is_a?` to answer true for `::Time`, and the union measured to `Dynamic[top]`
+    # everywhere downstream). Do not re-add these until #658 lands the `Time` surface first.
 
     # `to_i` / its `in_seconds` alias return `@value.to_i` — always Integer.
     def to_i: () -> Integer
@@ -299,10 +298,10 @@ module ActiveSupport
     # Always a String.
     def iso8601: (?precision: Integer?) -> String
 
-    # A `dup` of the internal parts hash — Integer-valued for a duration built from Integer multipliers;
-    # a fractional multiplier (`1.5.seconds`) can carry a Float `:seconds` entry, a precision loss this
-    # declaration accepts per #632.
-    def parts: () -> Hash[Symbol, Integer]
+    # A `dup` of the internal parts hash — Integer-valued for a duration built from Integer multipliers,
+    # but real runtime Float for a fractional one (`1.5.seconds.parts == {seconds: 1.5}`); `Integer |
+    # Float` is what stays honest without costing the common `parts[:days] * 2` chain anything.
+    def parts: () -> Hash[Symbol, Integer | Float]
   end
 end
 

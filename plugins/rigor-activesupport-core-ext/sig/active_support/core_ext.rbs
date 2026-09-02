@@ -459,32 +459,24 @@ end
 # are simply outside this issue's scope and remain silently `Dynamic` rather than a guess.
 module ActiveSupport
   class Duration
-    # `since`/`from_now`/`after` are literal aliases of `def since(time = ::Time.current); sum(1, time);
-    # end`; `ago`/`until`/`before` alias `def ago(time = ::Time.current); sum(-1, time); end`. NOT %a{pure}:
-    # both read `Time.current` by default, already attributed `nondet.time`/`global.read` by
-    # `lib/rigor/plugin/activesupport_core_ext/effects.rb`'s `duration_rows` (issue #387/#632).
-    #
-    # The zero-arg overload returns `Time` to match this bundle's own `Time.current: () -> Time` above (no
-    # `ActiveSupport::TimeWithZone` is declared anywhere in this surface, so `Time` is what keeps
-    # `30.minutes.ago.beginning_of_day` chaining instead of degrading at the reader). An explicit `time:`
-    # argument declines to `untyped` on both ends: `sum`'s runtime return depends on the ARGUMENT's own
-    # class AND on whether this duration carries any date-scale part (`@parts.empty?` calls
-    # `time.since(...)`, the non-empty branch calls `time.advance(...)`, and `Date#advance` answers `Date`
-    # while `Date#since` answers `Time` — the same ambiguity the `Date`-arithmetic `dynamic_return` rule
-    # below resolves with a `Date | Time` union for `+`/`-`, not reproducible here as a plain RBS overload
-    # without guessing which shape this duration is).
-    def ago: () -> Time
-           | (untyped) -> untyped
-    def until: () -> Time
-             | (untyped) -> untyped
-    def before: () -> Time
-              | (untyped) -> untyped
-    def since: () -> Time
-             | (untyped) -> untyped
-    def from_now: () -> Time
-                | (untyped) -> untyped
-    def after: () -> Time
-             | (untyped) -> untyped
+    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
+    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
+    # so typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`, `past?`,
+    # `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, and the rest of
+    # `DateAndTime::Calculations` / `Zones` / `Conversions`) to already be closed and complete — `Time` is a
+    # CORE Ruby class, RBS-known from stdlib, and this bundle's own `Time` block above never declared that
+    # instance surface (#658 — already a live FP on master with the plugin loaded, independent of this
+    # class: `Time.current.to_fs(:db)` fires today). Answering `ago` with `Time` therefore does not leave
+    # the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN undeclared
+    # members (open_receivers only protects a receiver of the class it names) — it makes
+    # `1.hour.ago.to_fs(:db)`, ordinary Rails, fire a false `call.undefined-method` for `to_fs` on `Time`,
+    # and the same for every other Rails `Time` extension nothing here declares: 9 false positives measured
+    # on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658 lands so
+    # nobody re-derives it: the return type is plain `Time`, not a `Time | ActiveSupport::TimeWithZone`
+    # union — Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`, so `Time` is the class Rails
+    # ITSELF tells callers a `TimeWithZone` is, and the union was measured and degrades every downstream
+    # chain to `Dynamic[top]`, equivalent to leaving `ago` undeclared. Do not re-add these methods until
+    # #658 lands the `Time` surface first.
 
     # `to_i` returns `@value.to_i` — always Integer, whether `@value` itself is Integer (`1.day`) or Float
     # (`1.5.days`). `in_seconds` is a literal alias.
@@ -518,12 +510,14 @@ module ActiveSupport
     def iso8601: (?precision: Integer?) -> String
 
     # `parts` returns a `dup` of the internal parts hash (`{years:, months:, weeks:, days:, hours:,
-    # minutes:, seconds:}`), Integer-valued for every duration built from an Integer multiplier. A duration
-    # built from a fractional multiplier (`1.5.seconds`) can carry a Float `:seconds` entry — a precision
-    # loss this declaration accepts per #632, the same way `parts` itself is accepted as
-    # `Hash[Symbol, Integer]` there.
+    # minutes:, seconds:}`), Integer-valued for a duration built from an Integer multiplier but real
+    # runtime Float for a fractional one (`1.5.seconds.parts == {seconds: 1.5}`) — `Hash[Symbol, Integer]`
+    # was reviewed and rejected: a `Float`-valued `:seconds` entry read against that type would answer
+    # `Integer`, and `parts[:seconds].nan?` on it would fire a false `call.undefined-method`, silent on
+    # master where `parts` was undeclared. `Integer | Float` costs nothing on the common `parts[:days] * 2`
+    # chain (both arms support `*`) and stays honest on the fractional one.
     %a{pure}
-    def parts: () -> Hash[Symbol, Integer]
+    def parts: () -> Hash[Symbol, Integer | Float]
   end
 end
 

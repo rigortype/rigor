@@ -72,8 +72,6 @@ CORE_EXT_PURE_KEYS = %w[
 # diverges by class (`Time#ago` is pure, `Date#ago` is not; `Time#beginning_of_day` is pure,
 # `Date#beginning_of_day` is not) — the exact shape a careless class-wide annotation would get wrong.
 CORE_EXT_NOT_PURE_KEYS = %w[
-  ActiveSupport::Duration#ago ActiveSupport::Duration#until ActiveSupport::Duration#before
-  ActiveSupport::Duration#since ActiveSupport::Duration#from_now ActiveSupport::Duration#after
   Object#as_json Object#try Object#try!
   String#constantize String#safe_constantize String#parameterize
   String#squish! String#remove! String#indent!

@@ -95,3 +95,95 @@ class TopLevelGuard
     end
   end
 end
+
+# `case`/`when` and `===` did not walk the nesting AT ALL before #635, so
+# even a BARE name in a `when` answered the top-level namesake. That is
+# not only lost precision: `case message when Monitor` inside
+# `Concurrent::ErlangActor` narrowed to the stdlib `::Monitor` and
+# reported `undefined method 'from'` on the very next line, on correct
+# code. `Beacon` below is that shape.
+
+class Beacon
+  def top_level_beacon
+    "top"
+  end
+end
+
+# No namesake anywhere under `Bar`, so the walk must fall through to it.
+class Sentinel
+  def sentinel
+    "sentinel"
+  end
+end
+
+module Bar
+  module Nested
+    class Beacon
+      def nested_beacon
+        "nested"
+      end
+    end
+
+    class BareNameGuard
+      def by_case_when(other)
+        case other
+        when Beacon
+          assert_type('Bar::Nested::Beacon', other)
+          other.nested_beacon
+        end
+      end
+
+      def by_case_equality(other)
+        if Beacon === other
+          assert_type('Bar::Nested::Beacon', other)
+        end
+      end
+
+      # Must-still-succeed: a bare name with no lexically nearer owner
+      # still answers the top level.
+      def unshadowed_bare_name(other)
+        case other
+        when Sentinel
+          assert_type('Sentinel', other)
+          other.sentinel
+        end
+      end
+    end
+  end
+end
+
+# The false-positive arm, in the exact shape concurrent-ruby hit: the
+# shadowed name belongs to a class RBS knows completely, so the
+# dispatcher DOES resolve against it and DOES fire. `Random` stands in
+# for `Monitor`.
+module Bar
+  module Nested
+    class Random
+      def nested_only
+        "nested"
+      end
+    end
+
+    class StdlibShadowGuard
+      def call(other)
+        case other
+        when Random
+          assert_type('Bar::Nested::Random', other)
+          other.nested_only
+        end
+      end
+    end
+  end
+end
+
+# Must-still-succeed: nothing shadows `Random` here, so the core class
+# still answers and its own method still resolves.
+class CoreRandomGuard
+  def call(other)
+    case other
+    when Random
+      assert_type('Random', other)
+      other.rand
+    end
+  end
+end

@@ -395,9 +395,14 @@ RSpec.describe "Rigor type construction (integration)" do
     # fixture stops asserting. Every `assert_type` line MUST still be present and MUST
     # still be the one the resolution rule decides.
     it "still asserts one narrowed type per guard shape" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(7)
+      expect(marked_lines(harness, "assert_type(").size).to eq(12)
     end
 
+    # The false-positive arm. `Bar::Nested::Random` shadows a class RBS knows completely,
+    # so an unwalked `when Random` resolves against core `Random` and fires
+    # `call.undefined-method` on the next line — the concurrent-ruby `Monitor` shape. The
+    # fixture's `CoreRandomGuard` is the must-still-succeed twin: unshadowed, the core
+    # class must still answer and `Random#rand` must still resolve.
     it "leaves no other diagnostic on the narrowed receivers" do
       expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
     end

@@ -61,6 +61,7 @@ Per-plugin helper service constructed by
 | Method | Purpose |
 | --- | --- |
 | `#read_file(path)` | Validates the absolute path against the policy, reads the bytes, and adds a `:stat` (ADR-87 WD1) {Cache::Descriptor::FileEntry} to the boundary's accumulated entries. Raises {Rigor::Plugin::AccessDeniedError} (`reason: :read_outside_scope`) on a denied path. When the read fails because the path does not exist (`Errno::ENOENT`, or `Errno::ENOTDIR` for a parent component that is a regular file) it records an **absence row** (`FileEntry.absent`, ADR-45 WD1 / #577) and re-raises, so every cache built on the boundary's descriptor invalidates once the path appears; any other read failure (`EISDIR`, a permission error) records nothing and propagates. |
+| `#file?(path)` / `#directory?(path)` | The **existence probe** (ADR-45 WD1b / #613). Returns exactly what `File.file?` / `File.directory?` returns — for every path, in scope or out, and never raising — and records the answer as an `:exists` {Cache::Descriptor::FileEntry}: `FileEntry.present` when the probe found what it asked for, `FileEntry.absent` when nothing exists at the path, and **nothing** when something exists there but is not what was asked for (a directory where a file was wanted, the same bound `#read_file` pins for `EISDIR`). Recording — not the answer — is what the policy gates: an out-of-scope path contributes no row, exactly as an out-of-scope read contributes none. Plugin code MUST prefer these over `File.file?` / `File.directory?` on a project path: a bare `File` probe records nothing, so a result shaped by the miss is served again after the file appears. |
 | `#open_url(url)` | Under `:disabled` raises {Rigor::Plugin::AccessDeniedError} (`reason: :network_disabled`). Under `:allowlist` (v0.1.2) performs a GET over HTTPS when the parsed host is in `allowed_url_hosts`, enforcing a request timeout (10 s) and a response-body size cap (10 MB); raises `AccessDeniedError` with `reason:` one of `:invalid_url_scheme`, `:host_not_allowed`, `:http_error`, `:request_timeout`, `:body_too_large` on failure. |
 | `#cache_descriptor` | Returns a fresh frozen {Cache::Descriptor} with the boundary's accumulated `FileEntry` rows. Subsequent reads expand the underlying record table; each call returns a new descriptor reflecting the read history at that moment. |
 
@@ -70,7 +71,13 @@ successful read replaces an earlier absence row for the same path
 (the file appeared and its bytes were consumed); an absence row
 never replaces an earlier content row (two outcomes for one path in
 one run mean the file moved under the analysis, and the content row
-is the one whose validation covers both content and existence).
+is the one whose validation covers both content and existence). The
+same ordering ranks the probe rows: a content row replaces any
+existence row, and between two existence rows for one path the
+first recorded stands — whichever it is, it describes the world the
+earlier decision was shaped on and reads stale the moment the world
+stops matching it, so a mid-run mutation costs a recompute rather
+than a wrong hit.
 
 ### `Rigor::Plugin::AccessDeniedError`
 

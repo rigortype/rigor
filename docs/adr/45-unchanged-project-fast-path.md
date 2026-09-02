@@ -170,6 +170,53 @@ inverse (already sound through the recorded read) and a no-churn control
 boundary, descriptor, store and producer-cache halves pinned in their own
 unit specs.
 
+### WD1b (landed, #613) — the probe is the read
+
+WD1 recorded the absence at `read_file`, which covers a plugin that
+*attempts the read and fails*. Plugins do not all attempt it: the
+prevailing shape gates the read on a `File.file?` / `File.directory?`
+probe first (`return nil unless File.file?(config/sidekiq.yml)`, `next []
+unless File.directory?(app/models)`), and a probe through `File` records
+nothing at all. So on exactly the projects WD1 was written for — the ones
+where the file is missing — the read never happens, no absence row is
+recorded, and the warm run keeps serving the pre-appearance result. The
+recording point was right; the surface was one call too late.
+
+WD1b moves the probe itself onto the boundary. `IoBoundary#file?(path)`
+and `#directory?(path)` return exactly what `File.file?` / `File.directory?`
+return and record the answer as an `:exists` row: `FileEntry.present` when
+the probe found what it asked for, `FileEntry.absent` when nothing exists
+there, and nothing when something exists but is not what was asked for
+(the bound WD1 pins for `EISDIR`, in probe form). Every plugin probe on a
+boundary-managed project path is converted to them.
+
+Two calls are deliberate. The predicates answer truthfully for every path
+and never raise — including outside the trusted-read scope, where they
+record nothing: they replace a bare `File.file?` in plugin code, and a
+predicate that raised, or answered `false` for an out-of-scope path that
+exists, would change what the converted plugin *does* rather than only
+what it records, which is the wrong trade under the false-positive-first
+rule. And the presence row is recorded even though a probe that is
+followed by a read is immediately superseded by the `:stat` content row:
+the probes that are *not* followed by a read — a discovery root that is
+globbed, a config file whose presence alone switches a mode — are exactly
+the ones with no other edge back to the filesystem.
+
+No `SCHEMA_VERSION` bump: WD1b adds no row kind, no comparator and no
+value grammar — `:exists` / `"true"` was already constructible,
+already validated by one `File.exist?`, and already ranked in
+`COMPARATOR_STRICTNESS`. The one thing a bump would buy is retiring
+entries written between WD1 and WD1b, which carry no probe rows; those
+exist only in a mid-cycle developer's `.rigor/cache`, because
+`SCHEMA_VERSION` 8 has not shipped in a release — every released cache is
+≤ 7 and misses on the next upgrade regardless.
+
+Gate: the WD1 three-fixture pattern per converted plugin — rigor-sidekiq's
+`config/sidekiq.yml` probe and rigor-activestorage's discovery-root probe,
+each driven cold → add → warm through the real Runner against a real
+on-disk Store, plus the nothing-changed control and the remove-after-hit
+inverse.
+
 ## Consequences
 
 - **Soundness is the whole game.** The naive design under-invalidates on

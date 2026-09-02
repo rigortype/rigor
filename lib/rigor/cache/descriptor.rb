@@ -104,6 +104,16 @@ module Rigor
           new(path: path, comparator: :exists, value: ABSENT)
         end
 
+        # ADR-45 WD1b (#613) — {.absent}'s positive twin: fresh while `path` exists, stale once it is gone.
+        # {Plugin::IoBoundary#file?} / `#directory?` record one when an existence probe found what it asked
+        # for and the plugin never read the bytes (a discovery root it globbed, a config file whose mere
+        # presence switched a mode). It is the weakest file row — a rewrite in place leaves it fresh — so it
+        # is only ever the row for a dependency that really is on existence alone; a read records the `:stat`
+        # row over it.
+        def self.present(path:)
+          new(path: path, comparator: :exists, value: PRESENT)
+        end
+
         # @return [Boolean] whether this row records the path as absent (see {.absent}).
         def absent?
           comparator == :exists && value == ABSENT

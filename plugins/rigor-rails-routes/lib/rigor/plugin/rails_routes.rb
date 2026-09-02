@@ -164,7 +164,8 @@ module Rigor
       def each_ruby_file(dirs, &)
         dirs.each do |dir|
           absolute = File.expand_path(dir)
-          next unless File.directory?(absolute)
+          # ADR-45 WD1b (#613) — boundary-probed: a root that appears later invalidates the warm run.
+          next unless io_boundary.directory?(absolute)
 
           Dir.glob(File.join(absolute, "**", "*.rb")).each(&)
         end

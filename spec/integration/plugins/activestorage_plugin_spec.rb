@@ -201,4 +201,79 @@ RSpec.describe "plugins/rigor-activestorage" do
       expect(type).to be_nil
     end
   end
+
+  # #613 / ADR-45 WD1b — the discovery walk gated its glob on `File.directory?(app/models)`, so a project
+  # without the root recorded nothing at all: the run-result entry had no edge for the root's appearance and
+  # the warm run kept serving the no-attachments answer. The presence half is the same gap inverted — a root
+  # that exists but holds no files yet leaves no read row either, so its DELETION was invisible too. Fresh
+  # `Cache::Store` per run, so a hit has to come off disk.
+  describe "warm-run cache across the appearance of `app/models` (#613)" do
+    # Returns `[result, counters]` — the run-diagnostics slot's `hits:` / `misses:` say whether this run was
+    # SERVED or RE-ANALYZED.
+    def run_warm(dir, cache_root)
+      Rigor::Plugin.unregister!
+      store = Rigor::Cache::Store.new(root: cache_root)
+      result = Dir.chdir(dir) do
+        Rigor::Analysis::Runner.new(
+          configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activestorage"]),
+          cache_store: store, collect_stats: false, plugin_requirer: build_plugin_requirer
+        ).run
+      end
+      counters = store.stats.fetch(:by_producer)
+                      .fetch(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID) { { hits: 0, misses: 0 } }
+      [result, counters.slice(:hits, :misses)]
+    end
+
+    def attachment_call(result)
+      result.diagnostics.find { |d| d.rule == "attachment-call" }
+    end
+
+    def with_project
+      Dir.mktmpdir do |dir|
+        Dir.mktmpdir do |cache_root|
+          materialize_files(dir, "demo.rb" => "User.avatar\n")
+          yield dir, cache_root
+        end
+      end
+    end
+
+    it "re-analyzes the warm run once the `app/models` root is CREATED: the attachment resolves" do
+      with_project do |dir, cache_root|
+        cold, cold_counters = run_warm(dir, cache_root)
+        expect(cold_counters).to eq(hits: 0, misses: 1)
+        expect(attachment_call(cold)).to be_nil
+
+        materialize_files(dir, "app/models/user.rb" => USER_WITH_ATTACHMENTS)
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+        expect(attachment_call(warm)&.message).to include("ActiveStorage::Attached::One")
+      end
+    end
+
+    it "serves the warm run from cache when nothing changed (a probe row does not thrash)" do
+      with_project do |dir, cache_root|
+        materialize_files(dir, "app/models/user.rb" => USER_WITH_ATTACHMENTS)
+        cold, = run_warm(dir, cache_root)
+
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 1, misses: 0)
+        expect(warm.diagnostics.map { |d| [d.rule, d.line, d.message] })
+          .to eq(cold.diagnostics.map { |d| [d.rule, d.line, d.message] })
+      end
+    end
+
+    it "re-analyzes the warm run once an EMPTY `app/models` root is DELETED (the presence row's direction)" do
+      with_project do |dir, cache_root|
+        # An empty root is the case only the presence row covers: the walk read no file, so there is no
+        # content row to go stale when the root disappears.
+        FileUtils.mkdir_p(File.join(dir, "app", "models"))
+        _cold, cold_counters = run_warm(dir, cache_root)
+        expect(cold_counters).to eq(hits: 0, misses: 1)
+
+        FileUtils.rm_rf(File.join(dir, "app"))
+        _warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+      end
+    end
+  end
 end

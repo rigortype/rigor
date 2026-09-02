@@ -267,6 +267,10 @@ RSpec.describe "plugins/rigor-factorybot" do
         end
         io = Class.new do
           def read_file(path) = File.read(path)
+          # ADR-45 WD1b (#613) — the discoverer probes through the boundary now; the fake answers without
+          # recording, which is all this shape-focused test needs.
+          def file?(path) = File.file?(path)
+          def directory?(path) = File.directory?(path)
         end.new
         Rigor::Plugin::Factorybot::FactoryDiscoverer.new(
           io_boundary: io,

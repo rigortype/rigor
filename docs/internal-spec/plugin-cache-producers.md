@@ -99,7 +99,11 @@ mid-computation) is captured — there is no "read before
 `cache_for`" ordering requirement. `#read_file(path)` records a
 `:stat` `FileEntry` — or, when the path does not exist, an absence
 row (`FileEntry.absent`, ADR-45 WD1 / #577) that reads stale once the
-file appears; `#open_url(url)` records a `ConfigEntry`
+file appears; `#file?(path)` / `#directory?(path)` record the same
+existence dependency for a probe the producer never read
+(`FileEntry.present` / `FileEntry.absent`, WD1b / #613) — a producer
+that gates its work on `File.file?` instead records nothing and is
+served past the file's appearance; `#open_url(url)` records a `ConfigEntry`
 keyed `"url:#{url}"` whose `value_hash` is the response body's
 SHA-256. A `ConfigEntry` (URL read) in the dependency descriptor
 makes the entry never-fresh — a producer that fetched a URL

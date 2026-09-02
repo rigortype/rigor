@@ -68,7 +68,10 @@ module Rigor
 
         def load_document(path)
           absolute = File.expand_path(path.to_s)
-          return nil unless File.file?(absolute)
+          # ADR-45 WD1b (#613) — the probe goes through the boundary so "there is no `config/sidekiq.yml`"
+          # is a recorded dependency; `File.file?` here left the warm run serving the no-schedule answer
+          # after the file appeared.
+          return nil unless @io_boundary.file?(absolute)
 
           contents = read_safely(absolute)
           contents && parse_safely(contents)

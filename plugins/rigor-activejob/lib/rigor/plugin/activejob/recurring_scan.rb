@@ -69,7 +69,9 @@ module Rigor
 
         def load_document(path)
           absolute = File.expand_path(path.to_s)
-          return nil unless File.file?(absolute)
+          # ADR-45 WD1b (#613) — probing through the boundary records the missing `config/recurring.yml`
+          # as a dependency, so adding one invalidates the warm run instead of being served past.
+          return nil unless @io_boundary.file?(absolute)
 
           contents = read_safely(absolute)
           contents && parse_safely(contents)

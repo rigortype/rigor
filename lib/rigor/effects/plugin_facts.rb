@@ -326,7 +326,7 @@ module Rigor
         payload = [
           @labels_by_owner.sort.map { |owner, labels| [owner, labels.sort] },
           @class_rows.keys.sort_by { |singleton| singleton ? 1 : 0 }
-                          .map { |singleton| [singleton, sorted(@class_rows[singleton])] },
+                     .map { |singleton| [singleton, sorted(@class_rows[singleton])] },
           sorted(@path_rows), sorted(@self_rows), sorted(@result_rows),
           @edges.map { |edge| [edge.target.to_s, edge.receiver, edge.selector.to_s, edge.plugin_id] }.sort,
           @entry_points.map(&:to_h).sort_by { |preset| preset["name"] },

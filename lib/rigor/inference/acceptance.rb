@@ -23,7 +23,7 @@ module Rigor
     # `Nominal[Hash, [K, V]]` the shape is projected to its underlying nominal so the existing
     # generic-acceptance pipeline continues to apply; the converse direction (a Tuple receiver accepting a
     # generic Array) stays conservative because the analyzer cannot verify arity from a raw nominal alone.
-    # rubocop:disable Metrics/ModuleLength
+    # rubocop:disable-next Metrics/ModuleLength
     module Acceptance
       module_function
 
@@ -71,7 +71,7 @@ module Rigor
       }.freeze
       private_constant :TYPE_HANDLERS
 
-      # rubocop:disable Metrics/ClassLength
+      # rubocop:disable-next Metrics/ClassLength
       class << self
         private
 
@@ -797,8 +797,6 @@ module Rigor
           nil
         end
       end
-      # rubocop:enable Metrics/ClassLength
     end
-    # rubocop:enable Metrics/ModuleLength
   end
 end

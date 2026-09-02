@@ -151,7 +151,7 @@ module Rigor
       # value actually moves (a new action, a changed sig), which is what a cached diagnostic can depend on;
       # a value-preserving edit keeps the recheck incremental. Returns true when the plugin declared at least
       # one producer (a surface); a producer whose value cannot be digested marks the plugin opaque.
-      # rubocop:disable Naming/PredicateMethod -- reports has-surface AND appends parts (a side-effecting builder)
+      # rubocop:disable-next Naming/PredicateMethod -- reports has-surface AND appends parts (a side-effecting builder)
       def collect_producer_parts(plugin, id, parts, opaque)
         producer_ids = plugin.class.producers.keys
         return false if producer_ids.empty?
@@ -163,7 +163,6 @@ module Rigor
         end
         true
       end
-      # rubocop:enable Naming/PredicateMethod
 
       # Channel (c): the optional {Plugin::Base#incremental_state_fingerprint} hook. Returns true when the
       # plugin defines it (it has a surface).

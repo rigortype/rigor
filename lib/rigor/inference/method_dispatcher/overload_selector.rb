@@ -183,7 +183,7 @@ module Rigor
             matches
           end
 
-          # rubocop:disable Metrics/ParameterLists
+          # rubocop:disable-next Metrics/ParameterLists
           def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
                                      param_overrides:, strict:, alias_expander: nil)
             return [] if strict && arg_types.any? { |t| untyped_arg?(t) }
@@ -205,7 +205,6 @@ module Rigor
 
             overloads.select(&predicate)
           end
-          # rubocop:enable Metrics/ParameterLists
 
           # Whether the overload's block clause is compatible with the call site's block shape: a
           # block-bearing call engages only block-declaring overloads; a block-less call skips overloads

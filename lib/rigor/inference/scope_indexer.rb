@@ -38,7 +38,7 @@ module Rigor
     # Nodes that are not part of the program subtree (e.g. synthesised virtual nodes that the caller looks up after the
     # fact) yield the `default_scope`. The returned Hash is mutable in principle but callers MUST treat it as read-only;
     # the indexer itself never exposes a way to update it past construction.
-    # rubocop:disable Metrics/ModuleLength
+    # rubocop:disable-next Metrics/ModuleLength
     module ScopeIndexer
       module_function
 
@@ -2306,7 +2306,7 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
       def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
         return current_visibility unless node.is_a?(Prism::Node)
 
@@ -2355,7 +2355,6 @@ module Rigor
         end
         current_visibility
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
 
       def record_def_visibility(def_node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
         return if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
@@ -3363,6 +3362,5 @@ module Rigor
         propagate(node.else_clause, table, truthy_scope) if node.else_clause
       end
     end
-    # rubocop:enable Metrics/ModuleLength
   end
 end

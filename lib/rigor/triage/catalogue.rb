@@ -327,7 +327,7 @@ module Rigor
           parser == :toplevel ? d.method_name : parse_undefined_method(d)&.fetch(:method)
         end
         names.tally.sort_by { |method, count| [-count, method] }
-                   .first(limit).map { |method, count| "#{method}×#{count}" }.join(" ")
+             .first(limit).map { |method, count| "#{method}×#{count}" }.join(" ")
       end
 
       def rule_of(diag)

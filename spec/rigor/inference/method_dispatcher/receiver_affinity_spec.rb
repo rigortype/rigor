@@ -16,9 +16,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ReceiverAffinity do
     allow(func).to receive_messages(required_positionals: [param], optional_positionals: [], trailing_positionals: [])
     allow(func).to receive(:respond_to?).with(:required_positionals).and_return(true)
     # RBS::Types::MethodType is not loaded in the spec context
-    # rubocop:disable RSpec/VerifiedDoubles
+    # rubocop:disable-next RSpec/VerifiedDoubles
     double("MethodType", type: func)
-    # rubocop:enable RSpec/VerifiedDoubles
   end
 
   describe ".reorder" do

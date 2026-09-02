@@ -16,7 +16,7 @@ module Rigor
   # #type_of(node), the Rigor counterpart of PHPStan's $scope->getType($node).
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
-  # rubocop:disable Metrics/ClassLength,Metrics/ParameterLists
+  # rubocop:disable-next Metrics/ClassLength,Metrics/ParameterLists
   class Scope
     attr_reader :environment, :locals, :fact_store, :self_type,
                 :ivars, :cvars, :globals,
@@ -1113,5 +1113,4 @@ module Rigor
       filtered.size == @method_chain_narrowings.size ? @method_chain_narrowings : filtered.freeze
     end
   end
-  # rubocop:enable Metrics/ClassLength,Metrics/ParameterLists
 end

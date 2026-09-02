@@ -37,7 +37,7 @@ module Rigor
     #
     # See docs/internal-spec/inference-engine.md (Narrowing) and
     # docs/type-specification/control-flow-analysis.md for the binding contract.
-    # rubocop:disable Metrics/ModuleLength
+    # rubocop:disable-next Metrics/ModuleLength
     module Narrowing
       TRUSTED_EQUALITY_LITERAL_CLASSES = [String, Symbol, Integer, TrueClass, FalseClass, NilClass].freeze
       SINGLETON_LITERAL_CLASSES = [TrueClass, FalseClass, NilClass].freeze
@@ -439,7 +439,7 @@ module Rigor
         end
       end
 
-      # rubocop:disable Metrics/ClassLength
+      # rubocop:disable-next Metrics/ClassLength
       class << self
         private
 
@@ -2897,8 +2897,6 @@ module Rigor
           [truthy_a.join(truthy_b), falsey_b]
         end
       end
-      # rubocop:enable Metrics/ClassLength
     end
-    # rubocop:enable Metrics/ModuleLength
   end
 end

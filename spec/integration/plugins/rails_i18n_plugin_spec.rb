@@ -12,7 +12,7 @@ require "rigor-rails-i18n"
 
 # `%{name}` is the I18n interpolation placeholder syntax — RuboCop's `Style/FormatStringToken` would prefer
 # `%<name>s`, but here the YAML payload is data the plugin parses, not a Ruby format string.
-# rubocop:disable Style/FormatStringToken
+# rubocop:disable-next Style/FormatStringToken
 DEFAULT_LOCALES = {
   "config/locales/en.yml" => <<~YAML,
     en:
@@ -30,7 +30,6 @@ DEFAULT_LOCALES = {
         bye: "さようなら"
   YAML
 }.freeze
-# rubocop:enable Style/FormatStringToken
 
 RSpec.describe "plugins/rigor-rails-i18n" do
   before { Rigor::Plugin.unregister! }
@@ -96,7 +95,7 @@ RSpec.describe "plugins/rigor-rails-i18n" do
       result = run_plugin(
         source: "t('accounts.posts', count: 3)\n",
         files: {
-          # rubocop:disable Style/FormatStringToken -- I18n YAML uses %{count}, not annotated form
+          # rubocop:disable-next Style/FormatStringToken -- I18n YAML uses %{count}, not annotated form
           "config/locales/en.yml" => <<~YAML
             en:
               accounts:
@@ -104,7 +103,6 @@ RSpec.describe "plugins/rigor-rails-i18n" do
                   one: "%{count} post"
                   other: "%{count} posts"
           YAML
-          # rubocop:enable Style/FormatStringToken
         }
       )
       diags = plugin_diagnostics(result)
@@ -276,7 +274,7 @@ RSpec.describe "plugins/rigor-rails-i18n" do
     # producer and the shared cache doesn't know how to invalidate it across different tmpdir-based tests).
     let(:default_run_plugin_cache_store) { nil }
 
-    # rubocop:disable Style/FormatStringToken
+    # rubocop:disable-next Style/FormatStringToken
     let(:view_locales) do
       {
         "config/locales/en.yml" => <<~YAML
@@ -308,7 +306,6 @@ RSpec.describe "plugins/rigor-rails-i18n" do
         YAML
       }
     end
-    # rubocop:enable Style/FormatStringToken
 
     it "expands `t('.title')` in a view to `<scope>.<key>`" do
       result = run_plugin(

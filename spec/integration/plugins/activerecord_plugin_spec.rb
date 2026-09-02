@@ -2944,25 +2944,134 @@ RSpec.describe "plugins/rigor-activerecord" do
     # The deeper form of regression #3: a `self.table_name_prefix = "…"` assignment only PROVES a writer
     # exists (or the call itself would raise) — it does not prove a READER does, and Rails' walk tests the
     # reader. `mattr_writer` establishes the former, never the latter, so the assignment must not be
-    # trusted just because it type-checks as valid Ruby.
-    it "does not trust a plain assignment when only mattr_writer established the setter" do
-      models = {
-        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
-        "app/models/mattr_then_assign.rb" => <<~RUBY,
-          module MattrThenAssign
-            mattr_writer :table_name_prefix
-            self.table_name_prefix = "mta_"
-          end
-        RUBY
-        "app/models/mattr_then_assign/post.rb" => <<~RUBY
-          module MattrThenAssign
-            class Post < ApplicationRecord
+    # trusted just because it type-checks as valid Ruby. (#623 SECOND review — a BLOCKER): the assignment
+    # must not be silently DROPPED either, or the module reads as declaring nothing at all, which is
+    # exactly the state that used to license the bare guess — it stands the checks down instead.
+    context "with only mattr_writer establishing the setter a later assignment goes through" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/mattr_then_assign.rb" => <<~RUBY,
+            module MattrThenAssign
+              mattr_writer :table_name_prefix
+              self.table_name_prefix = "mta_"
+            end
+          RUBY
+          "app/models/mattr_then_assign/post.rb" => "class MattrThenAssign::Post < ApplicationRecord\nend\n"
+        }
+      end
+
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "decoy"
             end
           end
-        RUBY
+        SCHEMA
+      end
+
+      it "does not apply the untrusted prefix — table_name stays the plain demodulized guess" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("MattrThenAssign::Post").table_name).to eq("posts")
+      end
+
+      it "does not trust the guess for columns either — stands down rather than matching the decoy" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("MattrThenAssign::Post").column_names).to be_empty
+      end
+    end
+  end
+
+  # #623 second review — the `readers` gate only tracked `mattr_accessor`, but `respond_to?
+  # (:table_name_prefix)` is `true` (verified against bundled activesupport) for a much wider macro
+  # family. `cattr_*` are literal aliases of `mattr_*`; the `thread_*` variants are the thread-local
+  # siblings; `class_attribute` is Rails' own spelling for `table_name_prefix` on `ActiveRecord::Base`
+  # itself, valid on a class namespace now that class bodies are scanned too (#623's first regression).
+  describe "the wider reader-establishing macro family (#623 second review)" do
+    def scoped_entry(namespace_body, wrapper: "module")
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/scoped.rb" => "#{wrapper} Scoped\n#{namespace_body}end\n",
+        "app/models/scoped/post.rb" => "class Scoped::Post < ApplicationRecord\nend\n"
       }
       _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
-      expect(index.find("MattrThenAssign::Post").table_name).to eq("posts")
+      index.find("Scoped::Post")
+    end
+
+    it "folds cattr_accessor's default (a literal alias of mattr_accessor)" do
+      entry = scoped_entry(%(  cattr_accessor :table_name_prefix, default: "sc_"\n))
+      expect(entry.table_name).to eq("sc_posts")
+    end
+
+    it "folds mattr_reader's default" do
+      entry = scoped_entry(%(  mattr_reader :table_name_prefix, default: "sc_"\n))
+      expect(entry.table_name).to eq("sc_posts")
+    end
+
+    it "folds thread_mattr_accessor's default" do
+      entry = scoped_entry(%(  thread_mattr_accessor :table_name_prefix, default: "sc_"\n))
+      expect(entry.table_name).to eq("sc_posts")
+    end
+
+    it "folds class_attribute's default on a class namespace" do
+      entry = scoped_entry(%(  class_attribute :table_name_prefix, default: "sc_"\n), wrapper: "class")
+      expect(entry.table_name).to eq("sc_posts")
+    end
+
+    it "resolves mattr_reader's established reader plus a later assignment supplying the value" do
+      entry = scoped_entry(<<~RUBY)
+        mattr_reader :table_name_prefix
+        mattr_writer :table_name_prefix
+        self.table_name_prefix = "sc_"
+      RUBY
+      expect(entry.table_name).to eq("sc_posts")
+    end
+  end
+
+  # #623 second review — a BLOCKER: an observed `self.table_name_prefix = "…"` assignment over a reader
+  # spelling this walker does not enumerate by name (`class << self; attr_accessor`, `define_singleton_method`,
+  # `module_function`, `extend self`, a hand-rolled ivar reader) used to be DISCARDED outright — not applied,
+  # but not flagged uncertain either — which reads exactly like "Blog declares nothing," the state that
+  # licenses the bare guess. `class << self; attr_accessor` is the representative case: `attr_accessor` is a
+  # CallNode, not a DefNode, so {ModelDiscoverer#singleton_class_decorator_values} (which only looks for
+  # `DefNode`s) does not track it as a reader, and the assignment must still stand the checks down.
+  describe "an assignment over an unrecognised reader spelling stands down (#623 second review)" do
+    let(:models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/blog.rb" => <<~RUBY,
+          module Blog
+            class << self
+              attr_accessor :table_name_prefix
+            end
+            self.table_name_prefix = "blog_"
+          end
+        RUBY
+        "app/models/blog/post.rb" => "class Blog::Post < ApplicationRecord\nend\n"
+      }
+    end
+
+    # A real `posts` table that would corroborate the bare guess if the assignment's declaration were
+    # (wrongly) read as "nothing" rather than "uncertain" — the exact BLOCKER repro shape.
+    let(:schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "posts", force: :cascade do |t|
+            t.string "decoy"
+          end
+        end
+      SCHEMA
+    end
+
+    it "does not resolve the bare guess with the decoy table's live columns" do
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+      expect(index.find("Blog::Post").column_names).to be_empty
+    end
+
+    it "does not fire on the decoy table's real column (stood down, not confirmed)" do
+      diags = plugin_diagnostics(run_ar("Blog::Post.where(decoy: 'x')\n", schema: schema, models: models))
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
     end
   end
 end

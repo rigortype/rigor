@@ -276,12 +276,16 @@ module Rigor
         # `table_name_suffix` decorator is `{ computed: true }` (declared by an enclosing namespace, but not
         # in a shape the discoverer could fold — see {ModelDiscoverer}'s class doc), or when the root is
         # nested inside another discovered model class (`table_name_nested_in_model`, a wholly different
-        # Rails naming rule this walker does not attempt — same file). A namespace whose decorator this
-        # discoverer never even SAW (an `isolate_namespace` engine declaration outside `model_search_paths`,
-        # a base-class-level `table_name_prefix`, a model's own `def self.table_name_prefix`) cannot be
-        # flagged here — those are pre-existing, documented gaps ({ModelDiscoverer}'s class doc), not new
-        # ones — but every shape THIS discoverer can recognise as uncertain is refused here rather than
-        # guessed at with a bare name.
+        # Rails naming rule this walker does not attempt — same file).
+        #
+        # A namespace whose decorator this discoverer never even SAW cannot be flagged here at all — it
+        # reads as "nothing declared," not "declared but unreadable." {ModelDiscoverer}'s class doc names
+        # three such gaps: a prefix declared outside `model_search_paths` entirely (a `def
+        # self.table_name_prefix` in `lib/blog.rb`, a `Rails::Engine.isolate_namespace` call), a model
+        # declaring `table_name_prefix` on ITSELF, and a base-class-level `table_name_prefix`. The last two
+        # are pre-existing — unpatched code guesses wrong identically. The first is a live, documented gap
+        # this fix does not close (a namespace this discoverer never reads a file for is indistinguishable
+        # from one that genuinely declares nothing), tracked for a follow-up rather than guessed shut.
         def self.inflected_table_name_unreliable?(chain)
           root = chain.first
           decorator_unreliable?(root[:table_name_prefix]) || decorator_unreliable?(root[:table_name_suffix]) ||

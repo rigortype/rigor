@@ -44,18 +44,34 @@ module Rigor
       #   constant resolution (relative namespacing) is not modelled.
       # - An ENCLOSING namespace's (module OR class — Rails' own ancestor search does not care which)
       #   `table_name_prefix` / `table_name_suffix` is recognised as a String literal on `def self.NAME`,
-      #   `class << self; def NAME`, a plain `self.NAME = "..."` assignment, or `mattr_accessor`'s
-      #   `default:` (`mattr_writer` does NOT establish the reader Rails' walk probes, so it is not
-      #   recognised as declaring anything). Any other shape (a computed RHS, disagreeing reopenings) is
-      #   seen but not foldable — and, per {ModelIndex.inflected_table_name_unreliable?}, does NOT fall back
-      #   to a guessed value: the whole model's column/alias/association checks stand down instead, because
-      #   a wrong guess can corroborate a real-but-unrelated table exactly as easily as it can miss.
-      # - Two shapes this walker does NOT attempt, and instead stands down the same way (#623 review):
-      #   a model class NESTED INSIDE ANOTHER MODEL CLASS (`Post::Comment` where `Post < ApplicationRecord`
+      #   `class << self; def NAME`, a plain `self.NAME = "..."` assignment, or one of
+      #   {ACCESSOR_DECLARATION_METHODS}'s `default:` (a `*_writer` macro does NOT establish the reader
+      #   Rails' walk probes, so it is not recognised as declaring anything). Any other shape a reader
+      #   establishment was observed for (a computed RHS, disagreeing reopenings, or a plain assignment with
+      #   no tracked reader — an unrecognised reader spelling such as `define_singleton_method`,
+      #   `module_function`, `extend self`, or a hand-rolled ivar reader all fall into this last case) is
+      #   treated as DECLARED-BUT-UNFOLDABLE — and, per {ModelIndex.inflected_table_name_unreliable?}, does
+      #   NOT fall back to a guessed value: the whole model's column/alias/association checks stand down
+      #   instead, because a wrong guess can corroborate a real-but-unrelated table exactly as easily as it
+      #   can miss.
+      # - A model class NESTED INSIDE ANOTHER MODEL CLASS (`Post::Comment` where `Post < ApplicationRecord`
       #   — Rails splices the parent's own table name into the middle of the child's, a wholly different
-      #   mechanism from prefix/suffix); and a namespace whose decorator lives OUTSIDE `model_search_paths`
-      #   entirely, most commonly a `Rails::Engine.isolate_namespace` call in `lib/<engine>/engine.rb` (this
-      #   walker only reads files under the configured model roots, so it never sees that declaration).
+      #   mechanism from prefix/suffix) is recognised and stands down the same way (#623 review). A model
+      #   nested inside an ABSTRACT model reads its OWN demodulized name in real Rails (the splice only
+      #   applies to a non-abstract parent) but this walker does not track `abstract_class?` and stands it
+      #   down too — a coverage loss, never a false positive.
+      # - A namespace's decorator declared OUTSIDE `model_search_paths` entirely is INVISIBLE, not stood
+      #   down — this walker only reads files under the configured model roots, so a `table_name_prefix`
+      #   anywhere else (a plain `def self.table_name_prefix` in `lib/blog.rb`, a
+      #   `Rails::Engine.isolate_namespace` call in `lib/<engine>/engine.rb`, or any other path
+      #   `model_search_paths` does not cover) resolves the bare demodulized guess uncorrected, exactly as
+      #   if nothing had been declared. `Rigor::Plugin::IoBoundary`'s trust policy would permit reading
+      #   further than `model_search_paths` for this plugin (its `allowed_read_roots` covers the project
+      #   root), so an EXISTENCE-only scan of a wider file set is reachable in principle; it is not
+      #   implemented because the right file set is a real design choice (the whole project root? `lib/`?
+      #   each `engines/*/{app/models,lib}`?) and reading outside `model_search_paths` needs its own cache
+      #   descriptor / `watch:` wiring to invalidate correctly — see the `producer :model_index` call site's
+      #   `watch:` block, keyed on `model_search_paths` today.
       # - NOT modelled at all (pre-existing, unrelated to namespace prefixes): a model declaring
       #   `table_name_prefix` on ITSELF rather than an enclosing namespace, and a base class (e.g.
       #   `ApplicationRecord`) setting `self.table_name_prefix` for every model under it — both already
@@ -515,15 +531,25 @@ module Rigor
         TABLE_NAME_DECORATOR_METHODS = { table_name_prefix: :prefix, table_name_suffix: :suffix }.freeze
         private_constant :TABLE_NAME_DECORATOR_METHODS
 
-        # The Rails/ActiveSupport macro that can declare a `table_name_prefix` / `table_name_suffix` READER
-        # on a module without a hand-written `def self.…`. Rails' walk tests `respond_to?(:table_name_prefix)`
-        # — the READER — so only `mattr_accessor` (reader + writer) counts. `mattr_writer` (write-only) does
-        # NOT establish a reader (verified against ActiveSupport's `attribute_accessors.rb`, which defines
-        # just `self.#{sym}=` for it) and so is invisible to `full_table_name_prefix`'s ancestor search
-        # exactly as if it had declared nothing — a module declaring only `mattr_writer :table_name_prefix`
-        # must not be treated as declaring anything here either.
-        MATTR_DECLARATION_METHODS = %i[mattr_accessor].freeze
-        private_constant :MATTR_DECLARATION_METHODS
+        # The Rails/ActiveSupport macros that can declare a `table_name_prefix` / `table_name_suffix` READER
+        # without a hand-written `def self.…`. Rails' walk tests `respond_to?(:table_name_prefix)` — the
+        # READER — so this is every macro verified (against bundled `activesupport`) to define one:
+        # `mattr_accessor` / `mattr_reader`, their `cattr_*` literal aliases, the `thread_mattr_*` /
+        # `thread_cattr_*` thread-local family, and `class_attribute` (valid on a class namespace now that
+        # {#visit_class} scans class bodies too — it is defined on `Class`, not `Module`). The `*_writer`
+        # spellings (`mattr_writer`, `cattr_writer`, `thread_mattr_writer`, `thread_cattr_writer`) are
+        # deliberately EXCLUDED: each defines only `self.#{sym}=` (verified against ActiveSupport's
+        # `attribute_accessors.rb` / `attribute_accessors_per_thread.rb`), no reader, so a module declaring
+        # only one of those is invisible to `full_table_name_prefix`'s ancestor search exactly as if it had
+        # declared nothing.
+        ACCESSOR_DECLARATION_METHODS = %i[
+          mattr_accessor mattr_reader
+          cattr_accessor cattr_reader
+          thread_mattr_accessor thread_mattr_reader
+          thread_cattr_accessor thread_cattr_reader
+          class_attribute
+        ].freeze
+        private_constant :ACCESSOR_DECLARATION_METHODS
 
         # Scans a module OR class BODY for `table_name_prefix` / `table_name_suffix` declarations and
         # records what it finds into `@namespace_table_name_decorators`, merged with any earlier reopening
@@ -544,14 +570,23 @@ module Rigor
         # assignment order, not a guess: `mattr_accessor :table_name_prefix` (no `default:`, so `computed:
         # true`) followed two lines down by a real `self.table_name_prefix = "blog_"` folds to the literal.
         #
-        # The plain-assignment form (`self.NAME = "…"`) is trusted ONLY when a READER for that name was
-        # ALSO established earlier in this SAME body scan (`readers`, below) — by `def self.NAME`,
-        # `class << self; def NAME`, or `mattr_accessor` (never `mattr_writer`, which does not define one).
-        # Rails' own ancestor search tests `respond_to?(:table_name_prefix)`, the READER; a `self.NAME = …`
-        # call site only proves a WRITER exists (it must, or the assignment itself would raise), which is
-        # not the same fact — `mattr_writer :table_name_prefix; self.table_name_prefix = "blog_"` is valid
-        # Ruby that sets a class variable Rails' reader-only probe never reads back, so it must not be
-        # folded as if the module answered `"blog_"` (#623 review).
+        # The plain-assignment form (`self.NAME = "…"`) is folded to the literal ONLY when a READER for
+        # that name was ALSO established earlier in this SAME body scan (`readers`, below) — by
+        # `def self.NAME`, `class << self; def NAME`, or one of {ACCESSOR_DECLARATION_METHODS} (never a
+        # `*_writer`, none of which define one). Rails' own ancestor search tests
+        # `respond_to?(:table_name_prefix)`, the READER; a `self.NAME = …` call site only proves a WRITER
+        # exists (it must, or the assignment itself would raise), which is not the same fact —
+        # `mattr_writer :table_name_prefix; self.table_name_prefix = "blog_"` is valid Ruby that sets a
+        # class variable Rails' reader-only probe never reads back.
+        #
+        # An assignment with NO tracked reader is still NOT ignored, though (#623 second review — a
+        # BLOCKER): the assignment itself proves the namespace declares the name — an unrecognised reader
+        # spelling (a hand-rolled `def table_name_prefix` inside `class << self` reading an ivar, a
+        # `define_singleton_method`, `module_function`, `extend self` — this walker does not enumerate every
+        # way Ruby can define a method) is far more likely than a genuinely writer-only module, and treating
+        # an observed declaration as "nothing declared" is exactly the state that licenses the bare guess
+        # this whole mechanism exists to refuse. So a keyless-reader assignment folds to `computed: true` —
+        # standing down costs nothing on correct code.
         def table_name_decorators(body)
           return {} if body.nil?
 
@@ -567,9 +602,11 @@ module Rigor
             elsif node.is_a?(Prism::CallNode) && node.receiver.is_a?(Prism::SelfNode) &&
                   node.name.to_s.end_with?("=")
               key = TABLE_NAME_DECORATOR_METHODS[node.name.to_s.delete_suffix("=").to_sym]
-              decorators[key] = literal_assignment_value(node) if key && readers.include?(key)
+              next unless key
+
+              decorators[key] = readers.include?(key) ? literal_assignment_value(node) : { computed: true }
             elsif node.is_a?(Prism::CallNode) && node.receiver.nil? &&
-                  MATTR_DECLARATION_METHODS.include?(node.name)
+                  ACCESSOR_DECLARATION_METHODS.include?(node.name)
               found = mattr_decorator_values(node)
               readers.merge(found.keys)
               decorators.merge!(found)
@@ -622,11 +659,12 @@ module Rigor
           { computed: true }
         end
 
-        # `mattr_accessor :table_name_prefix, :table_name_suffix, default: "blog_"` — one shared `default:`
-        # across every Symbol name the call declares (Rails' own `mattr_accessor` signature). Returns a Hash
-        # keyed by the `:prefix` / `:suffix` names this call actually declares; a name with no literal
-        # `default:` folds to `{ computed: true }` rather than assuming the runtime default of `nil` (a
-        # LATER plain assignment in the same body can still upgrade it — see {#table_name_decorators}).
+        # `mattr_accessor :table_name_prefix, :table_name_suffix, default: "blog_"` — every
+        # {ACCESSOR_DECLARATION_METHODS} macro shares this same call shape: one `default:` across every
+        # Symbol name the call declares. Returns a Hash keyed by the `:prefix` / `:suffix` names this call
+        # actually declares; a name with no literal `default:` folds to `{ computed: true }` rather than
+        # assuming the runtime default of `nil` (a LATER plain assignment in the same body can still upgrade
+        # it — see {#table_name_decorators}).
         def mattr_decorator_values(node)
           args = node.arguments&.arguments
           return {} if args.nil?

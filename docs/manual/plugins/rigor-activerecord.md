@@ -130,17 +130,26 @@ be the real one.
   table name is spliced into the middle of the child's, not a
   prefix/suffix — so the plugin recognises the shape and stands
   `Comment`'s column / alias / association checks down instead of
-  computing (or guessing at) the real name.
-- **A `table_name_prefix` / `table_name_suffix` the plugin never
-  even SEES is used uncorrected — the guessed bare name is trusted
-  as if nothing were declared.** Three sources of this: a
-  `Rails::Engine.isolate_namespace` declaration, which normally
-  lives in `lib/<engine>/engine.rb`, outside `model_search_paths`;
-  a model declaring `table_name_prefix` on ITSELF rather than on an
-  enclosing namespace; and a base class (e.g. `ApplicationRecord`)
-  setting `self.table_name_prefix` for every model under it. None of
-  these are read today, so a model in one of these shapes can read
-  the wrong table exactly as it did before this section's fix landed.
+  computing (or guessing at) the real name. (A model nested inside
+  an *abstract* model reads its own plain demodulized name in real
+  Rails — the splice only applies to a non-abstract parent — but the
+  plugin does not distinguish that case yet and stands it down too;
+  a coverage loss, not a wrong answer.)
+- **Any `table_name_prefix` / `table_name_suffix` declared OUTSIDE
+  `model_search_paths` is invisible, not stood down — the guessed
+  bare name is trusted as if nothing were declared.** The plugin
+  only reads files under the configured model roots, so a plain
+  `def self.table_name_prefix` sitting in, say, `lib/blog.rb`
+  reads exactly the same as no declaration at all — as does a
+  `Rails::Engine.isolate_namespace` call, which normally lives in
+  `lib/<engine>/engine.rb`. Two further sources read wrong the same
+  way regardless of `model_search_paths`: a model declaring
+  `table_name_prefix` on ITSELF rather than on an enclosing
+  namespace, and a base class (e.g. `ApplicationRecord`) setting
+  `self.table_name_prefix` for every model under it. None of these
+  four are read today, so a model in one of these shapes can read
+  the wrong table exactly as it did before this section's fix
+  landed.
 - **PostgreSQL `db/structure.sql` fallback.** When `db/schema.rb` is
   absent, the plugin parses `db/structure.sql` (the `schema_format =
   :sql` dump) for the same column/type table. It reads PostgreSQL DDL

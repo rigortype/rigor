@@ -1335,7 +1335,8 @@ module Rigor
           name = Source::ConstantPath.qualified_name_or_nil(node)
           return nil if name.nil?
 
-          type = Reflection.resolve_constant_type(name, scope: scope)
+          type = Reflection.resolve_constant_type(name, scope: scope,
+                                                        rooted: Source::ConstantPath.rooted?(node))
           return :ambiguous if type.is_a?(Type::Union)
           return nil unless type.is_a?(Type::Constant)
 
@@ -1788,7 +1789,8 @@ module Rigor
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
-          bare_name = static_class_name(node.arguments.arguments.first)
+          argument = node.arguments.arguments.first
+          bare_name = static_class_name(argument)
           return nil if bare_name.nil?
 
           # Resolve `bare_name` through the lexical-scope chain so a name shadowed by the
@@ -1797,7 +1799,15 @@ module Rigor
           # `Rigor::Type::Singleton#==`, `is_a?(Singleton)` should resolve to
           # `Rigor::Type::Singleton`, not the top-level stdlib `Singleton` mixin (which would
           # surface as a spurious `undefined-method` on subsequent `other.class_name` calls).
-          class_name = resolve_class_name_lexically(bare_name, scope)
+          #
+          # A leading `::` opts out of that walk (#614): `static_class_name` de-roots the
+          # argument, so without the marker the guard answered the shadow while the READ
+          # `::Foo.new` answered the top-level class — the guard and the value it guards
+          # disagreeing about the same spelling. When no top-level class owns the name we
+          # DECLINE (nil) rather than pass the unknown name down: keeping the pre-state is the
+          # conservative answer, and narrowing to the shadow is the one answer that is wrong.
+          class_name = rooted_class_predicate_name(argument, bare_name, scope)
+          return nil if class_name.nil?
 
           case node.receiver
           when Prism::LocalVariableReadNode
@@ -1805,6 +1815,15 @@ module Rigor
           when Prism::CallNode
             analyse_class_predicate_on_chain(node, scope, class_name, exact)
           end
+        end
+
+        # The class name a `is_a?` / `kind_of?` / `instance_of?` argument denotes: the top-level
+        # `bare_name` when the reference is written `::Foo` (nil when nothing declares it there),
+        # the lexical resolution otherwise. A qualified name (`Foo::Bar`) already skips the walk.
+        def rooted_class_predicate_name(argument, bare_name, scope)
+          return resolve_class_name_lexically(bare_name, scope) unless Source::ConstantPath.rooted?(argument)
+
+          class_known_to_scope?(scope, bare_name) ? bare_name : nil
         end
 
         def analyse_class_predicate_on_local(node, scope, class_name, exact)

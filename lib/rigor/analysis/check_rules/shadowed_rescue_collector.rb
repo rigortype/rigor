@@ -160,21 +160,12 @@ module Rigor
           name = Source::ConstantPath.qualified_name_or_nil(node)
           return nil if name.nil?
 
-          return name if absolute_path?(node)
+          return name if Source::ConstantPath.rooted?(node)
 
           candidates = []
           prefix.size.downto(1) { |i| candidates << (prefix.first(i) + [name]).join("::") }
           candidates << name
           candidates.find { |candidate| known_name?(candidate, scope) }
-        end
-
-        def absolute_path?(node)
-          return false unless node.is_a?(Prism::ConstantPathNode)
-
-          parent = node.parent
-          return true if parent.nil? # `::Foo`
-
-          parent.is_a?(Prism::ConstantPathNode) && absolute_path?(parent)
         end
 
         # Presence check used to pick the lexical candidate — deliberately broader than certification, so a

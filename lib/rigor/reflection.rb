@@ -119,10 +119,21 @@ module Rigor
     # RBS because the user's source is authoritative for its own constants. Returns the matched
     # `Rigor::Type`, or nil when no source knows the constant.
     #
+    # `rooted:` reports that the reference was written with a leading `::` (`::Foo`,
+    # `::Foo::Bar`). Ruby's absolute form names the TOP-LEVEL constant unconditionally, so the
+    # lexical ladder (steps 1 and 2) MUST be skipped and only the bare candidate consulted. The
+    # name itself stays un-rooted — every discovered-constant table is keyed that way — so the
+    # marker travels beside it rather than inside it (#614). When no top-level constant answers,
+    # the result is nil exactly as for an unknown constant: a lexically nearer shadow is never the
+    # answer to `::Foo`, and falling back to it was the bug (`::Rails` inside `module MyApp` typed
+    # as `MyApp::Rails`).
+    #
     # This is the shared owner of the lexical-constant resolution: `Inference::ExpressionTyper`
     # reads it to type a constant read, and `Inference::Narrowing` reads it to recognise a
     # value-pinned `Constant[Regexp]` match-predicate operand.
-    def resolve_constant_type(name, scope: Scope.empty)
+    def resolve_constant_type(name, scope: Scope.empty, rooted: false)
+      return constant_type_at(name, scope) if rooted
+
       prefix = enclosing_class_path(scope)
 
       # Step 1 — `Module.nesting`, innermost first. Each entry contributes only its OWN constants.

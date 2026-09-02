@@ -179,7 +179,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     instance_method_definition(req:class_name,req:method_name,key:scope,key:environment)
     nominal_for_name(req:class_name,key:scope)
     rbs_class_known?(req:class_name,key:scope,key:environment)
-    resolve_constant_type(req:name,key:scope)
+    resolve_constant_type(req:name,key:scope,key:rooted)
     singleton_definition(req:class_name,key:scope,key:environment)
     singleton_for_name(req:class_name,key:scope)
     singleton_method_definition(req:class_name,req:method_name,key:scope,key:environment)

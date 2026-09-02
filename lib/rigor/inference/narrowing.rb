@@ -1819,7 +1819,7 @@ module Rigor
 
         # The class name a `is_a?` / `kind_of?` / `instance_of?` argument denotes: the top-level
         # `bare_name` when the reference is written `::Foo` (nil when nothing declares it there),
-        # the lexical resolution otherwise. A qualified name (`Foo::Bar`) already skips the walk.
+        # the lexical resolution otherwise.
         def rooted_class_predicate_name(argument, bare_name, scope)
           return resolve_class_name_lexically(bare_name, scope) unless Source::ConstantPath.rooted?(argument)
 
@@ -1887,9 +1887,28 @@ module Rigor
         # `<prefix>::<bare_name>` (or bare `<bare_name>` at the top level) that the environment
         # recognises. Falls back to `bare_name` itself when nothing in the chain resolves; the
         # downstream `narrow_class` then yields the conservative answer for unknown receivers.
+        #
+        # A MULTI-SEGMENT spelling is relative too and gets the same walk (#635). `Type::Nominal`
+        # written inside `module Rigor` is not "already qualified": Ruby anchors the path's FIRST
+        # segment through `Module.nesting`, so the constant it names is `Rigor::Type::Nominal`.
+        # Treating any `::` as absolute left every such guard narrowing to a name no environment
+        # knows, and each subsequent reader call on the narrowed receiver degraded to
+        # `Dynamic[top]` — ~300 sites in Rigor's own `lib/` alone. Trying the whole path under
+        # each prefix is the same rule the single-segment case already applies, and it adopts a
+        # candidate only when the scope actually knows it, so a genuinely absolute spelling still
+        # falls through to `bare_name` unchanged.
+        #
+        # NOT `Module.nesting`, though — an APPROXIMATION of it, and the gap is #652's. The chain
+        # comes from `lexical_nesting_for`, which peels `scope.self_type.class_name`; that string
+        # is identical for `class Admin::UsersController` and for `module Admin; class
+        # UsersController`, so the derivation cannot tell a COMPACT definition from a nested one
+        # and hands back `["Admin::UsersController", "Admin"]` for both. Ruby's nesting in the
+        # compact form is `[Admin::UsersController]` alone, so a bare `User` there means `::User`
+        # while this walk answers `Admin::User`. The defect is in the derivation, not in any one
+        # guard shape: fixing `lexical_nesting_for` (and `Reflection.enclosing_class_path`, which
+        # peels the same way) closes it for `is_a?`, `case`/`when` and `===` at once. Until then
+        # `case`/`when` and `===` share the divergence that `is_a?` already had.
         def resolve_class_name_lexically(bare_name, scope)
-          return bare_name if bare_name.include?("::") # Already qualified.
-
           chain = lexical_nesting_for(scope)
           chain.each do |prefix|
             candidate = "#{prefix}::#{bare_name}"
@@ -1977,7 +1996,7 @@ module Rigor
         # Only static class/module receivers narrow here — the Range / Regexp literal receivers
         # (`(1..10) === x.foo`) are not a common method-chain shape and stay deferred.
         def analyse_case_equality_on_chain(receiver, chain_arg, scope)
-          class_name = static_class_name(receiver)
+          class_name = lexical_class_name(receiver, scope)
           return nil if class_name.nil?
 
           address = stable_chain_address(chain_arg)
@@ -1995,7 +2014,7 @@ module Rigor
         end
 
         def analyse_case_equality_receiver(receiver, scope, local_name, current)
-          if (class_name = static_class_name(receiver))
+          if (class_name = lexical_class_name(receiver, scope))
             return class_predicate_scopes(scope, local_name, current, class_name, exact: false)
           end
 
@@ -2235,7 +2254,7 @@ module Rigor
             return integer_literal_when_result(current, int_literal, falsey_acc)
           end
 
-          target = static_class_name(condition) || case_equality_target_class(condition)
+          target = lexical_class_name(condition, scope) || case_equality_target_class(condition)
           return class_when_result(scope, current, target, falsey_acc) if target
 
           nil
@@ -2345,6 +2364,25 @@ module Rigor
 
             "#{parent_name}::#{node.name}"
           end
+        end
+
+        # The class a constant reference denotes at THIS point in the source (#635). `case t when
+        # Type::Union` inside `module Rigor` names `Rigor::Type::Union`, and narrowing to the
+        # source spelling instead left the guarded receiver an unknown nominal whose every reader
+        # dispatched to `Dynamic[top]`. The resolution APPROXIMATES Ruby's — see
+        # {#resolve_class_name_lexically} for where the derived nesting chain diverges (#652).
+        #
+        # Shared by the case-equality shapes (`Class === x`, `case/when`) so one spelling narrows
+        # to one name whichever guard it is written in; `is_a?` / `kind_of?` / `instance_of?` go
+        # through {#rooted_class_predicate_name}, which layers #614's extra decline on top of the
+        # same walk. A rooted `::Foo` names the top level and never a lexically nearer shadow, so
+        # it keeps the un-walked spelling. nil for any non-constant shape, as before.
+        def lexical_class_name(node, scope)
+          bare_name = static_class_name(node)
+          return nil if bare_name.nil?
+          return bare_name if Source::ConstantPath.rooted?(node)
+
+          resolve_class_name_lexically(bare_name, scope)
         end
 
         # ----- narrow_class / narrow_not_class helpers -----

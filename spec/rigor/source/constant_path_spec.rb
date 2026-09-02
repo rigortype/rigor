@@ -65,4 +65,30 @@ RSpec.describe Rigor::Source::ConstantPath do
       expect(described_class.qualified_name_or_nil(nil)).to be_nil
     end
   end
+
+  # #614 — the rendered name is un-rooted on purpose (the discovery tables are keyed that way), so the
+  # leading `::` has to travel out of band. Prism spells the root as a nil `parent` at the LEFTMOST
+  # segment, which is why the predicate walks rather than inspecting the outermost node.
+  describe ".rooted?" do
+    it "reports a leading `::` on a single-segment reference" do
+      expect(described_class.rooted?(node("::Foo"))).to be(true)
+    end
+
+    it "reports a leading `::` through every segment of a multi-segment path" do
+      path = node("::Foo::Bar::Baz")
+      expect(described_class.rooted?(path)).to be(true)
+      expect(described_class.rooted?(path.parent)).to be(true)
+    end
+
+    it "is false for a relative path and for a bare constant read" do
+      expect(described_class.rooted?(node("Foo::Bar"))).to be(false)
+      expect(described_class.rooted?(node("Foo"))).to be(false)
+    end
+
+    it "is false for a dynamic base and for a non-constant node" do
+      expect(described_class.rooted?(dynamic_base_path)).to be(false)
+      expect(described_class.rooted?(node("foo"))).to be(false)
+      expect(described_class.rooted?(nil)).to be(false)
+    end
+  end
 end

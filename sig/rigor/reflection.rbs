@@ -6,7 +6,7 @@ module Rigor
     def self?.nominal_for_name: (String | Symbol class_name, ?scope: Scope) -> Type::Nominal?
     def self?.singleton_for_name: (String | Symbol class_name, ?scope: Scope) -> Type::Singleton?
     def self?.constant_type_for: (String | Symbol constant_name, ?scope: Scope) -> Type::t?
-    def self?.resolve_constant_type: (String | Symbol name, ?scope: Scope) -> Type::t?
+    def self?.resolve_constant_type: (String | Symbol name, ?scope: Scope, ?rooted: bool) -> Type::t?
     def self?.instance_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> untyped
     def self?.singleton_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> untyped
     def self?.instance_definition: (String | Symbol class_name, ?scope: Scope) -> untyped

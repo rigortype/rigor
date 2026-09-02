@@ -14,8 +14,12 @@ module Rigor
     # * {.qualified_name_or_nil} is STRICT — a dynamic base anywhere in the chain yields `nil`, so a caller
     #   that statically names constants can treat the path as opaque rather than guessing.
     #
-    # A leading `::` (absolute root, `::Foo`) renders as `"Foo"` under both policies. A node that is neither
-    # a `ConstantReadNode` nor a `ConstantPathNode` yields `nil` under both.
+    # A leading `::` (absolute root, `::Foo`) renders as `"Foo"` under both policies: the discovered-constant
+    # tables are keyed by un-rooted names, so a rendered `"::Foo"` would miss every one of them. The root
+    # marker is therefore carried OUT OF BAND by {.rooted?}, which a caller performing Ruby's lexical constant
+    # lookup MUST consult — `::Foo` names the top-level `Foo` and never a lexically nearer shadow
+    # ([#614](https://github.com/rigortype/rigor/issues/614)). A node that is neither a `ConstantReadNode`
+    # nor a `ConstantPathNode` yields `nil` under both policies.
     module ConstantPath
       module_function
 
@@ -52,6 +56,20 @@ module Rigor
 
           "#{parent_name}::#{node.name}"
         end
+      end
+
+      # True when the reference is written with a leading `::` — `::Foo`, `::Foo::Bar`. Prism spells the
+      # root as a `ConstantPathNode` with a nil `parent`, so the answer lives at the LEFTMOST segment of the
+      # chain and the walk has to reach it: `::Foo::Bar` is a path node whose parent is itself a path node.
+      # A `ConstantReadNode` is a bare name and is never rooted; a dynamic base (`expr::Bar`) is not a root
+      # either, so the recursion stops at any non-constant parent.
+      def rooted?(node)
+        return false unless node.is_a?(Prism::ConstantPathNode)
+
+        parent = node.parent
+        return true if parent.nil?
+
+        rooted?(parent)
       end
     end
   end

@@ -1721,4 +1721,251 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(project_scope.type_of(parse_expression("RUBY_VERSION.upcase")).describe(:short)).to eq("non-empty-string")
     end
   end
+
+  # Issue #614 — Ruby's leading `::` names the TOP-LEVEL constant unconditionally. The rendered name is
+  # un-rooted (`"Rails"`), so before the fix `::Rails` inside `module MyApp` walked `Module.nesting` like a
+  # bare reference and answered the lexically nearer `MyApp::Rails` — a wrong type on correct code.
+  describe "rooted constant references (#614)" do
+    # Locates the single call named `selector`, typed through a full ScopeIndexer pass so the discovered
+    # classes, the synthesized namespace prefixes (#528) and the singleton-method tiers are all seeded.
+    def probe(source, selector)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      calls = []
+      Rigor::Source::NodeWalker.each(root) { |n| calls << n if n.is_a?(Prism::CallNode) && n.name == selector }
+      raise "expected exactly one `#{selector}` call, found #{calls.size}" unless calls.size == 1
+
+      [index, calls.first]
+    end
+
+    def call_type(source, selector)
+      index, call = probe(source, selector)
+      index[call].type_of(call)
+    end
+
+    def receiver_class_name(source, selector)
+      index, call = probe(source, selector)
+      index[call.receiver].type_of(call.receiver).class_name
+    end
+
+    # The issue's own shape, with the top-level module present so the CORRECT answer is observable
+    # rather than merely "not the shadow".
+    def shadowed_rails
+      <<~RUBY
+        module Rails
+          def self.logger
+            :toplevel
+          end
+        end
+
+        module MyApp
+          module Rails
+            def self.logger
+              :nested
+            end
+          end
+
+          def self.rooted
+            ::Rails.logger
+          end
+
+          def self.lexical
+            Rails.name
+          end
+        end
+      RUBY
+    end
+
+    it "resolves `::Rails` to the top-level module, not the nested shadow" do
+      expect(receiver_class_name(shadowed_rails, :logger)).to eq("Rails")
+      expect(call_type(shadowed_rails, :logger).describe).to eq(":toplevel")
+    end
+
+    it "still resolves a bare `Rails` inside MyApp lexically to the shadow (control)" do
+      expect(receiver_class_name(shadowed_rails, :name)).to eq("MyApp::Rails")
+    end
+
+    # #528 synthesizes a namespace singleton for every proper prefix of a compact class name, so
+    # `MyApp::Rails` exists here with no `module MyApp::Rails` anywhere. It must not capture `::Rails`.
+    def synthesized_prefix
+      <<~RUBY
+        module Rails
+          def self.logger
+            :toplevel
+          end
+        end
+
+        class MyApp::Rails::Engine
+        end
+
+        module MyApp
+          def self.rooted
+            ::Rails.logger
+          end
+
+          def self.lexical
+            Rails.name
+          end
+        end
+      RUBY
+    end
+
+    it "does not let a synthesized namespace prefix capture `::Rails`" do
+      expect(receiver_class_name(synthesized_prefix, :logger)).to eq("Rails")
+      expect(call_type(synthesized_prefix, :logger).describe).to eq(":toplevel")
+    end
+
+    it "keeps the synthesized prefix answering the bare reference (control)" do
+      expect(receiver_class_name(synthesized_prefix, :name)).to eq("MyApp::Rails")
+    end
+
+    it "resolves a rooted MULTI-SEGMENT path from the root" do
+      source = <<~RUBY
+        module Rails
+          class Application
+            def self.config
+              :toplevel_config
+            end
+          end
+        end
+
+        module MyApp
+          module Rails
+            class Application
+              def self.config
+                :nested_config
+              end
+            end
+          end
+
+          def self.probe
+            ::Rails::Application.config
+          end
+        end
+      RUBY
+      expect(receiver_class_name(source, :config)).to eq("Rails::Application")
+      expect(call_type(source, :config).describe).to eq(":toplevel_config")
+    end
+
+    # Written out rather than substituted into `shadowed_rails`: a fixture built by `sub` goes vacuous
+    # the moment the base string is reworded, and the vacuous version passes.
+    it "honours the root marker inside a `class << self` body" do
+      source = <<~RUBY
+        module Rails
+          def self.logger
+            :toplevel
+          end
+        end
+
+        module MyApp
+          module Rails
+            def self.logger
+              :nested
+            end
+          end
+
+          class << self
+            def probe
+              ::Rails.logger
+            end
+          end
+        end
+      RUBY
+      expect(receiver_class_name(source, :logger)).to eq("Rails")
+      expect(call_type(source, :logger).describe).to eq(":toplevel")
+    end
+
+    it "honours the root marker inside a block" do
+      source = <<~RUBY
+        module Rails
+          def self.logger
+            :toplevel
+          end
+        end
+
+        module MyApp
+          module Rails
+            def self.logger
+              :nested
+            end
+          end
+
+          def self.probe
+            [1].map { ::Rails.logger }
+          end
+        end
+      RUBY
+      expect(receiver_class_name(source, :logger)).to eq("Rails")
+      expect(call_type(source, :logger).describe).to eq(":toplevel")
+    end
+
+    # The RBS-declared side of the same question: `::String` must reach the core class even where the
+    # namespace declares its own `String`.
+    def shadowed_core
+      <<~RUBY
+        module MyApp
+          class String
+            def self.build
+              :nested_string
+            end
+          end
+
+          def self.rooted
+            ::String.new
+          end
+
+          def self.lexical
+            String.build
+          end
+        end
+      RUBY
+    end
+
+    it "resolves `::String` to the core class over a namespace's own String" do
+      expect(receiver_class_name(shadowed_core, :new)).to eq("String")
+      expect(call_type(shadowed_core, :new).describe(:short)).to eq("String")
+    end
+
+    it "still resolves a bare `String` inside MyApp to the namespace's own class (control)" do
+      expect(receiver_class_name(shadowed_core, :build)).to eq("MyApp::String")
+      expect(call_type(shadowed_core, :build).describe).to eq(":nested_string")
+    end
+
+    # A rooted reference to a name no top-level constant owns is UNRESOLVED, never the shadow: the
+    # fail-soft direction is Dynamic, which fires nothing.
+    it "falls back to Dynamic when only the nested shadow exists" do
+      source = <<~RUBY
+        module MyApp
+          module Rails
+            def self.logger
+              :nested
+            end
+          end
+
+          def self.probe
+            ::Rails.logger
+          end
+        end
+      RUBY
+      expect(call_type(source, :logger).describe(:short)).to eq("Dynamic[top]")
+    end
+
+    # The unrooted-world control: with no shadow anywhere, a rooted reference behaves exactly as before.
+    it "leaves a genuinely top-level-only constant unchanged (control)" do
+      source = <<~RUBY
+        module Rails
+          def self.logger
+            :toplevel
+          end
+        end
+
+        module MyApp
+          def self.probe
+            ::Rails.logger
+          end
+        end
+      RUBY
+      expect(call_type(source, :logger).describe).to eq(":toplevel")
+    end
+  end
 end

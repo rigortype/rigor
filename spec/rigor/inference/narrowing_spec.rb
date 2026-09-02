@@ -1807,4 +1807,67 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(body.global(:$1)).to be_nil
     end
   end
+
+  # Issue #614 — `static_class_name` de-roots the `is_a?` argument, so a rooted `::Foo` used to walk the
+  # lexical nesting like a bare name. The guard then disagreed with the value it guards: `::Foo.new` typed
+  # as the top-level `Foo` while `if x.is_a?(::Foo)` narrowed to `MyApp::Foo`.
+  describe "rooted `is_a?` arguments (#614)" do
+    # `class Foo` at top level AND `MyApp::Foo` shadowing it. Declared in RBS rather than only in
+    # `discovered_classes` because the narrowing itself consults `class_ordering`, which is environment-level.
+    def with_shadowed_foo_env(toplevel: true)
+      nested = <<~RBS
+        module MyApp
+          class Foo
+          end
+        end
+      RBS
+      shadow = toplevel ? "class Foo\nend\n#{nested}" : nested
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "shadow.rbs"), shadow)
+        yield Rigor::Environment.for_project(signature_paths: [dir])
+      end
+    end
+
+    # `self` is `MyApp`, and `x` could be either `Foo`, so a correct narrowing has something to choose.
+    def scope_inside_myapp(environment)
+      Rigor::Scope.empty(environment: environment)
+                  .with_self_type(Rigor::Type::Combinator.nominal_of("MyApp"))
+                  .with_local(
+                    :x,
+                    Rigor::Type::Combinator.union(
+                      Rigor::Type::Combinator.nominal_of("Foo"),
+                      Rigor::Type::Combinator.nominal_of("MyApp::Foo"),
+                      Rigor::Type::Combinator.nominal_of("String")
+                    )
+                  )
+    end
+
+    it "narrows `x.is_a?(::Foo)` to the top-level class, not the shadow" do
+      with_shadowed_foo_env do |env|
+        bound = scope_inside_myapp(env)
+        truthy, = described_class.predicate_scopes(parse_predicate("x.is_a?(::Foo)"), bound)
+        expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("Foo"))
+      end
+    end
+
+    it "still narrows a bare `x.is_a?(Foo)` lexically to the shadow (control)" do
+      with_shadowed_foo_env do |env|
+        bound = scope_inside_myapp(env)
+        truthy, = described_class.predicate_scopes(parse_predicate("x.is_a?(Foo)"), bound)
+        expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("MyApp::Foo"))
+      end
+    end
+
+    # No top-level `Foo` at all: the answer is to DECLINE, keeping the pre-state on both edges. Narrowing
+    # to the shadow would be the one wrong answer, and it is what the un-marked walk produced.
+    it "declines narrowing when no top-level class owns the rooted name" do
+      with_shadowed_foo_env(toplevel: false) do |env|
+        bound = scope_inside_myapp(env)
+        entry = bound.local(:x)
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("x.is_a?(::Foo)"), bound)
+        expect(truthy.local(:x)).to eq(entry)
+        expect(falsey.local(:x)).to eq(entry)
+      end
+    end
+  end
 end

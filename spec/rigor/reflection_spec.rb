@@ -184,6 +184,78 @@ RSpec.describe Rigor::Reflection do
       end
     end
 
+    # #614 — `::Foo` is Ruby's escape hatch out of the lexical ladder. The name reaching the resolver is
+    # un-rooted (`"Rails"`), so the marker is a separate argument; without it the walk answered the
+    # lexically nearer shadow.
+    describe "rooted references (#614)" do
+      # `module MyApp` with a nested `MyApp::Rails` shadowing a top-level `Rails`.
+      def shadowed_scope
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: {
+            "Rails" => Rigor::Type::Combinator.constant_of(:toplevel),
+            "MyApp::Rails" => Rigor::Type::Combinator.constant_of(:nested)
+          }
+        )
+        Rigor::Scope.empty
+                    .with_self_type(Rigor::Type::Combinator.nominal_of("MyApp"))
+                    .with_discovery(index)
+      end
+
+      it "answers the top-level constant, not the lexically nearer shadow" do
+        expect(described_class.resolve_constant_type("Rails", scope: shadowed_scope, rooted: true))
+          .to eq(Rigor::Type::Combinator.constant_of(:toplevel))
+      end
+
+      it "still resolves the bare name lexically to the shadow (control)" do
+        expect(described_class.resolve_constant_type("Rails", scope: shadowed_scope))
+          .to eq(Rigor::Type::Combinator.constant_of(:nested))
+      end
+
+      # The shadow must not answer through the back door either: with no top-level constant of that
+      # name, a rooted reference is UNRESOLVED, which types Dynamic downstream rather than wrong.
+      it "returns nil when only the nested shadow exists" do
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: { "MyApp::Rails" => Rigor::Type::Combinator.constant_of(:nested) }
+        )
+        scope = Rigor::Scope.empty
+                            .with_self_type(Rigor::Type::Combinator.nominal_of("MyApp"))
+                            .with_discovery(index)
+        expect(described_class.resolve_constant_type("Rails", scope: scope, rooted: true)).to be_nil
+      end
+
+      # `class Sub < Base`, the #354 shape. Step 2's ancestor ladder is skipped by a rooted reference
+      # too, not just step 1's nesting walk.
+      def inheriting_scope(in_source)
+        discovered = {
+          "Sub" => Rigor::Type::Combinator.singleton_of("Sub"),
+          "Base" => Rigor::Type::Combinator.singleton_of("Base")
+        }
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: in_source,
+          discovered_classes: discovered,
+          discovered_superclasses: { "Sub" => "Base" }
+        )
+        Rigor::Scope.empty
+                    .with_self_type(Rigor::Type::Combinator.nominal_of("Sub"))
+                    .with_discovery(index)
+      end
+
+      it "skips the ancestor step as well" do
+        pinned = Rigor::Type::Combinator.constant_of(42)
+        scope = inheriting_scope({ "Base::KEY" => pinned })
+        expect(described_class.resolve_constant_type("KEY", scope: scope, rooted: true)).to be_nil
+        expect(described_class.resolve_constant_type("KEY", scope: scope)).to eq(pinned)
+      end
+
+      it "leaves a genuinely top-level-only constant unchanged" do
+        pinned = Rigor::Type::Combinator.constant_of("top-level")
+        scope = inheriting_scope({ "ONLY_TOPLEVEL" => pinned })
+        expect(described_class.resolve_constant_type("ONLY_TOPLEVEL", scope: scope, rooted: true))
+          .to eq(pinned)
+        expect(described_class.resolve_constant_type("ONLY_TOPLEVEL", scope: scope)).to eq(pinned)
+      end
+    end
+
     describe "RBS-backed lookups under cache_store (v0.0.9 group A slice 4)" do
       let(:tmpdir) { Dir.mktmpdir("rigor-reflection-cache-spec-") }
       let(:store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

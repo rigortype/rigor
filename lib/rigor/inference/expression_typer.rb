@@ -429,11 +429,16 @@ module Rigor
         resolve_constant_name(node.name.to_s) || unresolved_constant_fallback(node, node.name.to_s)
       end
 
+      # A leading `::` (`::Rails`, `::Rails::Application`) is Ruby's escape hatch out of the lexical ladder:
+      # it names the top-level constant whatever the enclosing nesting defines. The rendered name is
+      # deliberately un-rooted (the discovery tables are keyed that way), so the marker rides alongside it
+      # into the resolver (#614).
       def type_of_constant_path(node)
         full_name = Source::ConstantPath.qualified_name_or_nil(node)
         return fallback_for(node, family: :prism) if full_name.nil?
 
-        resolve_constant_name(full_name) || unresolved_constant_fallback(node, full_name)
+        resolve_constant_name(full_name, rooted: Source::ConstantPath.rooted?(node)) ||
+          unresolved_constant_fallback(node, full_name)
       end
 
       # ADR-82 WD9 — an unresolved constant whose root name a locked, RBS-less gem declares carries the
@@ -459,8 +464,8 @@ module Rigor
       # in-source value, RBS constant, across the peeled `::` prefix candidates) is reused by
       # `Inference::Narrowing`'s `Constant[Regexp]` match-operand recognition. Returns the matched
       # `Rigor::Type` or nil; the caller decides whether to fall back.
-      def resolve_constant_name(name)
-        Reflection.resolve_constant_type(name, scope: scope)
+      def resolve_constant_name(name, rooted: false)
+        Reflection.resolve_constant_type(name, scope: scope, rooted: rooted)
       end
 
       # Slice 5 phase 1 upgrades hash literals to `HashShape{...}` when every entry is a static `AssocNode`

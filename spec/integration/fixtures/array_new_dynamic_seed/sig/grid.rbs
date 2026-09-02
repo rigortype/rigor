@@ -1,0 +1,30 @@
+class Grid
+  # A signature-pinned `Integer` size changes nothing: the no-fill element stays
+  # gradual, because a `Nominal` seed's arm is never retracted by a rewrite.
+  def sized_form_stays_gradual: (Integer n) -> untyped
+
+  # The allocate-then-fill idiom the `nil` element used to break.
+  def dp_recurrence: (Array[Integer] xs) -> untyped
+  def oversize_buffer_is_filled_before_it_is_read: () -> untyped
+  def whole_array_rewrites_are_readable: (Integer n) -> untyped
+
+  def block_form_widens_a_union_of_containers: (untyped n, bool flag) -> untyped
+  def fill_form_widens_a_mixed_union: (untyped n, bool flag) -> untyped
+
+  # The recursive walk: a container nested inside the fill / block result.
+  def block_form_widens_a_nested_container: (untyped n) -> untyped
+  def fill_form_widens_a_nested_container: (untyped n) -> untyped
+  def block_form_widens_a_nested_hash: (untyped n) -> untyped
+  def block_form_widens_a_union_of_nested_containers: (untyped n, bool flag) -> untyped
+  def single_container_result_stays_precise: (untyped n) -> untyped
+
+  def fill_form_survives_the_block_seam: (untyped n) -> String
+  def fill_form_survives_the_loop_seam: (untyped n) -> String
+  def bare_form_keeps_a_gradual_arm: (untyped n) -> untyped
+  def block_form_seeds_the_block_result: (untyped n) -> untyped
+  def block_form_widens_a_container_result: (untyped n) -> untyped
+  def copy_overload_is_not_a_nil_fill: () -> untyped
+  def literal_size_keeps_the_tuple_fold: () -> untyped
+  def closes_a_fresh_seed: (Array[String] xs) -> untyped
+  def closes_a_zero_arg_constructor: (Array[String] xs) -> untyped
+end

@@ -530,8 +530,10 @@ one a deliberate trade:
   Dynamic[top]]` where it read the closed `Array[1 | 2]`, and a `[x]`
   slot the engine cannot type keeps its arm, which the straight-line
   path's `gradual_seed` fixture already reads the same way. (`Array.new`
-  is NOT in this set: it types as a bare `Array` with no type args, which the
-  join reads as no elements, and still closes; a `Hash.new(default)` seed types
+  WAS not in this set: it typed as a bare `Array` with no type args, which
+  the join read as no elements, and still closed — and that turned out to be
+  the bug WD2.10 fixes rather than a case this rule excludes; a
+  `Hash.new(default)` seed types
   `Hash[Dynamic, V]` and now keeps its key arm (monotone, no diagnostic moves);
   `Array(x)` is wholly `Dynamic` and never reaches the join.)
   Each is a monotone imprecision on a rare spelling — `[]` dominates
@@ -686,6 +688,119 @@ that must still close (exact `assert_type`s — a rule that kept carriers
 would read `Array[1 | 3] | Array[2 | 3]` there), and the refuted nil arm
 with its `call.possible-nil-receiver` line set. Restoring the drop turns
 the must-not-fire half red and nothing else.
+
+### WD2.12 — A constructor that fills slots is never an elementless seed (2026-09-02, issue #615)
+
+WD2.9's own parenthetical named `Array.new` as a carrier the rule does
+not reach, and reading it as an exclusion was the mistake. A bare
+`Array` is not "a seed with a gradual arm the join must keep"; it is a
+carrier with **no element arm at all**, which is the exact shape the
+seams read as an ELEMENTLESS seed — a fresh accumulator whose every
+store they saw — so they close it over the block's own stores. The
+constructor that produced it, though, fills `n` slots the block never
+touched:
+
+    acc = Array.new(n, "x")
+    [1].each { acc.push(1) }
+    acc.first.upcase          # correct Ruby
+
+read `Array[1]` and drew `undefined method 'upcase' for 1`, and the
+no-fill form folded `acc.first == 1` always-truthy over an array of
+nils. Both are wrong-precise, not imprecise, and both are the #586 rule
+meeting the constructor fold's dynamic-size answer (#531).
+
+The seam is not what changes. The **constructor** is: `Array.new` with a
+non-literal size now seeds a real element parameter — the fill value's
+or block result's type for `Array.new(n, v)` / `Array.new(n) { … }`, a
+gradual element for the no-fill form — so it reaches the seams as a
+declared-like `Nominal[Array, [E]]` and WD2.9 keeps that arm through the
+join unchanged. A small literal size keeps its per-position `Tuple`
+fold; the zero-argument `Array.new` really does build an empty array, so
+it keeps the elementless carrier and closes exactly as the `[]` literal
+does.
+
+Three element choices are load-bearing, and all three are FP judgments
+rather than precision ones:
+
+- **The element is value-pin widened**, `hash_new_lift`'s reason: the
+  slots are rewritten over the array's lifetime, so `Array["x"]` would
+  let a later `acc[i] == "x"` constant-fold. A literal *container*
+  result widens as well — `Array.new(n) { [] }` builds `n` INDEPENDENT
+  arrays that the program then appends to, and `Array[Tuple[]]` claims
+  every one of them stays empty, which reads `adj[i].first` as `nil` on
+  the adjacency-list idiom. It widens **recursively**, through a
+  container's own elements and a hash shape's own values: every nested
+  position is a fresh object per constructed slot too, so stopping at
+  the outermost level merely moved the wrong-precise answer one level in
+  (`Array.new(n) { [[1]] }` stayed `Array[Array[[1]]]` and folded
+  `a[0][0].last == 5` always-falsey after `a[0][0] << 5`). The walk is
+  bounded by the source literal's own nesting — a `Type` carrier is
+  assembled bottom-up and cannot contain itself — with a defensive
+  depth cap behind that.
+- **A `Union` fill widens MEMBERWISE.** Judged wholesale,
+  `Array.new(n) { flag ? [1] : [2] }` stayed `Array[[1] | [2]]` and every
+  arm was still a fixed-arity tuple, so `a[0] << 5` then
+  `a[0].last == 5` folded always-falsey on correct code. Each container
+  member takes the same recursive widening; non-container members pass
+  through, so `Array.new(n, flag ? [] : "s")` reads
+  `Array[Array[untyped] | String]`.
+- **The no-fill form seeds the GRADUAL element, NOT `nil`** — even when
+  the size argument is provably an `Integer`, and even for the
+  oversize-literal fallback. `Array.new(n)` really does put a `nil` in
+  every slot, so `nil` is the honest reading of the value; it is not the
+  honest reading of the *carrier*. A `Nominal` seed gets DECLARED-carrier
+  semantics downstream: WD2.9's join keeps a seed arm forever, and
+  `MutationWidening#widen_for_mutator` declines a `Nominal` outright, so
+  no whole-array rewrite — `[]=`, `fill`, `map!`, `replace`, `concat` —
+  can ever retract the placeholder. `nil` therefore stops being "what is
+  in the array before you fill it" and becomes a permanent nil
+  possibility over the allocate-then-fill idiom that is the whole point
+  of the constructor:
+
+        dp = Array.new(xs.size); dp[0] = 1
+        (1...n).each { |i| dp[i] = dp[i - 1] + xs[i] }   # `undefined method '+' for nil`
+
+        buf = Array.new(256); 256.times { |i| buf[i] = i.to_s }
+        buf.each { |c| c.upcase }                        # possible nil receiver
+
+  Both are correct Ruby, both went from quiet to an ERROR on the `nil`
+  seed, and the prefix-sum and sieve shapes go the same way. The true
+  positive `nil` would buy — `Array.new(n).first.upcase` on an array
+  nothing ever wrote — does not pay for the dominant idiom. Gradual is
+  still an ARM, which is all the seams need, and it absorbs Ruby's
+  array-convertible COPY overload for free (`Array.new([1, 2])` is
+  `[1, 2]`, not two nils). Seeding `nil` becomes admissible only once a
+  rewrite can retract a `Nominal` carrier's element — a `widen_for_mutator`
+  change, not a constructor one.
+
+The same reasoning covers the EXPLICIT placeholder: `Array.new(n, nil)`
+is the allocate-then-fill idiom with the `nil` spelled out (concurrent-
+ruby writes `@Resolutions = ::Array.new(count, nil)` and fills it by
+index), so a nil-ONLY element seeds the gradual arm too — it would
+otherwise be permanent for exactly the same reason, and every read of a
+filled slot would draw `undefined method '…' for nil` on correct code.
+A fill that is only partly nil (`flag ? nil : "s"`) keeps both arms:
+the guard reads a nil-only element, not a nil-bearing one.
+
+One consequence of the declared-carrier semantics is recorded rather
+than fixed: the FILL form's class survives a later differently-typed
+store, so `acc = Array.new(n, true); acc[0] = false` stays
+`Array[TrueClass]`. It is silent — the read does not fold `acc[0]` to a
+constant, so no always-truthy verdict follows — and repairing it is the
+same `widen_for_mutator` change the bullet above names.
+
+Gate: the `array_new_dynamic_seed` fixture pins what every constructor
+form seeds and carries it through both seams (must-not-fire), carries
+the DP recurrence and the `256.times { buf[i] = … }` buffer as the
+allocate-then-fill idiom, and holds the union-fill and nested-container
+shapes — against the
+fresh-seed siblings (the `[]` literal and the zero-argument `Array.new`)
+that must still close and still fire the exact `call.undefined-method`
+line set. Restoring the bare-`Array` answer turns the seam examples red;
+restoring the `nil` seed turns the idiom examples red; judging a union
+fill wholesale, or stopping the container walk at the outermost level,
+turns the container examples red. The literal-size tuple fold is
+untouched by all four.
 
 ### WD3 — One mechanism, shared
 

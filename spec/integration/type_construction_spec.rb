@@ -232,6 +232,41 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/array_new_dynamic_seed/ — Array.new with a non-literal size seeds an element arm" do
+    let(:harness) { harness_for("array_new_dynamic_seed") }
+
+    # Issue #615. A bare `Array` carries no element arm, and the ADR-56 seams read exactly that
+    # as an elementless seed — a fresh accumulator whose every store they saw — so they closed
+    # the constructor's carrier over the block's own stores. `Array.new(n, "x")` then read
+    # `Array[1]` under `[1].each { acc.push(1) }` and drew `undefined method 'upcase'` on the
+    # correct `acc.first.upcase`. The fixture's `assert_type` lines pin what each constructor
+    # form now seeds, block and loop seam alike, together with the `Integer`-size gate that
+    # keeps Ruby's array-convertible COPY overload (`Array.new([1, 2])` is `[1, 2]`, not two
+    # nils) out of the `nil` answer.
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # The must-fire half is the exact line set. A FRESH seed — the `[]` literal and the
+    # zero-argument `Array.new`, which really does build an empty array — carries no arm to
+    # keep, the seam saw every store, and the parameter rightly closes; without these markers
+    # the example above would pass on a fold that had gone gradual everywhere.
+    it "still closes a fresh seed, constructor and literal alike" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+
+    # The user-visible half of the container widening. Every `puts "hit" if …` in the fixture
+    # appends to a constructed slot and compares the value back — correct Ruby that a fill kept
+    # at its literal arity folds away. A container the walk stopped short of (the outermost only,
+    # a union arm, a nested literal) turns these red without touching the `assert_type` lines.
+    it "folds no condition away over a constructed-then-appended slot" do
+      folds = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+      expect(folds.map(&:line)).to be_empty
+    end
+  end
+
   describe "fixtures/ivar_mutation_widening.rb — class-ivar Tuple/HashShape widening on mutation" do
     let(:harness) { harness_for("ivar_mutation_widening") }
 

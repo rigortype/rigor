@@ -26,6 +26,10 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     expect(plugin_class.manifest.signature_paths).to eq(["sig"])
   end
 
+  it "declares ActiveSupport::Duration open (#632), matching rigor-activerecord's Relation pattern" do
+    expect(plugin_class.manifest.open_receivers).to eq(["ActiveSupport::Duration"])
+  end
+
   it "contributes the core_ext sig so ActiveSupport selectors type-check" do
     source = <<~RUBY
       a = 3.days
@@ -154,16 +158,51 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       expect(dumps(result)).to eq(["dump_type: ActiveSupport::Duration"])
     end
 
-    it "leaves the Duration surface lenient — no undefined-method on the chain" do
-      # The whole reason `ActiveSupport::Duration` is not declared in the RBS bundle. Every call below is
-      # real Duration API; a declared class would have to enumerate all of it or fire on the remainder.
+    # Issue #632. `ActiveSupport::Duration` IS now declared (`sig/active_support/core_ext.rbs`) — reversing
+    # the #534-era "leaves the Duration surface lenient" test above, which asserted every one of these
+    # stayed `Dynamic[top]`. What keeps the class safe to name is `open_receivers: ["ActiveSupport::Duration"]`
+    # on the manifest (ADR-26): `call.undefined-method` never fires against a Duration receiver, so the
+    # readers below can resolve precisely while the rest of the class (arithmetic, `==`, and anything
+    # `method_missing` forwards to the wrapped numeric) stays undeclared without becoming a false positive.
+    #
+    # `ago`/`until`/`before`/`since`/`from_now`/`after` are deliberately NOT among these readers — see the
+    # `ActiveSupport::Duration` class comment in `sig/active_support/core_ext.rbs` (issue #659, blocked on
+    # #658): they default to `Time.current`, and typing them needs the Rails `Time` instance surface, which
+    # is a CLOSED core class this bundle does not declare, first. A review round caught exactly this: typing
+    # `ago` `() -> Time` fired 9 false positives on real Rails `Time` extension calls
+    # (`.ago.to_fs(:db)`, `.ago.in_time_zone`, …) that read `Dynamic` and silent on master. The with-argument
+    # / undeclared-member test below covers `ago` itself, proving it is back to declining safely.
+    it "resolves the declared reader surface to real types" do
       source = <<~RUBY
-        Rigor.dump_type(1.day.ago)
-        Rigor.dump_type(5.minutes.from_now)
         Rigor.dump_type(1.day.to_i)
         Rigor.dump_type(3.hours.in_minutes)
         Rigor.dump_type(1.week.iso8601)
-        1.day.since(Time.now)
+        Rigor.dump_type(1.day.parts)
+        Rigor.dump_type(1.5.seconds.parts)
+      RUBY
+      result = run_plugin(source: source)
+      expect(rules(result)).not_to include("call.undefined-method")
+      expect(dumps(result)).to eq(
+        [
+          "dump_type: Integer",
+          "dump_type: Float",
+          "dump_type: String",
+          "dump_type: Hash[Symbol, Float | Integer]",
+          "dump_type: Hash[Symbol, Float | Integer]"
+        ]
+      )
+    end
+
+    it "still witnesses no undefined-method for ago/since (undeclared, #659/#658) or a method_missing member" do
+      # `ago` / `since` are real Duration API this declaration does NOT list (issue #659, blocked on #658 —
+      # the Rails `Time` instance surface is a closed core class this bundle doesn't declare). `round` is
+      # real Duration API `method_missing`-forwards to the wrapped numeric — a DIFFERENT reason to stay
+      # undeclared, from `sig/active_support/core_ext.rbs`'s own top-of-block comment. Both shapes decline
+      # to `Dynamic` rather than fire `call.undefined-method`, and open_receivers is what keeps them silent.
+      source = <<~RUBY
+        Rigor.dump_type(1.day.ago)
+        Rigor.dump_type(1.day.since(Time.now))
+        Rigor.dump_type(1.day.round)
       RUBY
       result = run_plugin(source: source)
       expect(rules(result)).not_to include("call.undefined-method")

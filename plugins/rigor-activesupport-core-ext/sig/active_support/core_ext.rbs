@@ -304,16 +304,15 @@ class Integer
   # on the resulting Duration — attributed on `ActiveSupport::Duration` in
   # `lib/rigor/plugin/activesupport_core_ext/effects.rb`, not here.
   #
-  # The `untyped` return is DELIBERATE and must stay (#534). The real
+  # The `untyped` return is DELIBERATE and stays for now (#534). The real
   # answer is `ActiveSupport::Duration`, and the plugin supplies it from
   # `DURATION_MULTIPLIERS`, whose contribution tier sits above RBS
-  # dispatch. Naming the class here instead would force this bundle to
-  # DECLARE `ActiveSupport::Duration`, which makes it RBS-known — and a
-  # known class with an incomplete signature turns every member the
-  # declaration omits into a false `undefined-method`. Duration forwards
-  # to the wrapped numeric through `method_missing`, so incomplete is the
-  # only thing a declaration could be. What this declaration is for is
-  # making `1.day` RESOLVE; the type comes from the plugin.
+  # dispatch. `ActiveSupport::Duration` IS now declared in this bundle
+  # (further down, before `Time`), protected by the manifest's
+  # `open_receivers:` — so naming it here too is no longer blocked the way
+  # it was when #534 landed. Issue #660 tracks moving this return type
+  # into RBS to match; until then, what this declaration is for is
+  # making `1.day` RESOLVE, and the type itself still comes from the plugin.
   %a{pure}
   def second: () -> untyped # ActiveSupport::Duration
   %a{pure}
@@ -441,6 +440,84 @@ class Float
   def gigabyte: () -> Float
   %a{pure}
   def gigabytes: () -> Float
+end
+
+# ---------------------------------------------------------------
+# ActiveSupport::Duration — issue #632
+# ---------------------------------------------------------------
+
+# The multiplier comment on `Integer#seconds` above explains why naming this class in RBS is normally the
+# wrong move: an incomplete signature on a class whose real surface forwards to `method_missing` turns
+# every omitted member into a false `call.undefined-method`. This declaration is the one place that trade
+# is accepted anyway, because the manifest lists `ActiveSupport::Duration` under `open_receivers:` (ADR-26)
+# — the same mechanism `rigor-activerecord` uses for `ActiveRecord::Relation` — so the rule never fires
+# against a Duration receiver regardless of what this class does or doesn't declare. What follows is the
+# reader surface audited against ActiveSupport 8.1.3.1's `lib/active_support/duration.rb`; every method not
+# listed here (the arithmetic operators, `==`/`eql?`/`hash`/`<=>`, `to_s`/`inspect`, …) stays undeclared on
+# purpose — some are already covered by the separate `dynamic_return` rule for `+`/`-`/`*` below, the rest
+# are simply outside this issue's scope and remain silently `Dynamic` rather than a guess.
+module ActiveSupport
+  class Duration
+    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
+    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
+    # so typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`, `past?`,
+    # `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, and the rest of
+    # `DateAndTime::Calculations` / `Zones` / `Conversions`) to already be closed and complete — `Time` is a
+    # CORE Ruby class, RBS-known from stdlib, and this bundle's own `Time` block above never declared that
+    # instance surface (#658 — already a live FP on master with the plugin loaded, independent of this
+    # class: `Time.current.to_fs(:db)` fires today). Answering `ago` with `Time` therefore does not leave
+    # the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN undeclared
+    # members (open_receivers only protects a receiver of the class it names) — it makes
+    # `1.hour.ago.to_fs(:db)`, ordinary Rails, fire a false `call.undefined-method` for `to_fs` on `Time`,
+    # and the same for every other Rails `Time` extension nothing here declares: 9 false positives measured
+    # on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658 lands so
+    # nobody re-derives it: the return type is plain `Time`, not a `Time | ActiveSupport::TimeWithZone`
+    # union — Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`, so `Time` is the class Rails
+    # ITSELF tells callers a `TimeWithZone` is, and the union was measured and degrades every downstream
+    # chain to `Dynamic[top]`, equivalent to leaving `ago` undeclared. Do not re-add these methods until
+    # #658 lands the `Time` surface first.
+
+    # `to_i` returns `@value.to_i` — always Integer, whether `@value` itself is Integer (`1.day`) or Float
+    # (`1.5.days`). `in_seconds` is a literal alias.
+    %a{pure}
+    def to_i: () -> Integer
+    %a{pure}
+    def in_seconds: () -> Integer
+
+    # `to_f` is a real `ActiveSupport::Delegation.generate` accessor (defined at class-load time, not
+    # `method_missing`) — `@value.to_f` is always Float.
+    %a{pure}
+    def to_f: () -> Float
+
+    # `in_minutes` / `in_hours` / `in_days` / `in_weeks` / `in_months` / `in_years` are each
+    # `in_seconds / SECONDS_PER_*.to_f` — Integer divided by Float is always Float.
+    %a{pure}
+    def in_minutes: () -> Float
+    %a{pure}
+    def in_hours: () -> Float
+    %a{pure}
+    def in_days: () -> Float
+    %a{pure}
+    def in_weeks: () -> Float
+    %a{pure}
+    def in_months: () -> Float
+    %a{pure}
+    def in_years: () -> Float
+
+    # `iso8601(precision: nil)` delegates to `ISO8601Serializer#serialize`, which always returns a String.
+    %a{pure}
+    def iso8601: (?precision: Integer?) -> String
+
+    # `parts` returns a `dup` of the internal parts hash (`{years:, months:, weeks:, days:, hours:,
+    # minutes:, seconds:}`), Integer-valued for a duration built from an Integer multiplier but real
+    # runtime Float for a fractional one (`1.5.seconds.parts == {seconds: 1.5}`) — `Hash[Symbol, Integer]`
+    # was reviewed and rejected: a `Float`-valued `:seconds` entry read against that type would answer
+    # `Integer`, and `parts[:seconds].nan?` on it would fire a false `call.undefined-method`, silent on
+    # master where `parts` was undeclared. `Integer | Float` costs nothing on the common `parts[:days] * 2`
+    # chain (both arms support `*`) and stays honest on the fractional one.
+    %a{pure}
+    def parts: () -> Hash[Symbol, Integer | Float]
+  end
 end
 
 # ---------------------------------------------------------------

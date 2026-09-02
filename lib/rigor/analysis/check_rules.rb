@@ -924,16 +924,43 @@ module Rigor
           nil
         end
 
+        # ADR-26's own counterpart, not a use of it — issue #660 tracks whether this deserves a first-class
+        # mechanism of its own rather than living here as a constant. `open_receivers:` (the manifest field,
+        # below) only takes effect once a project LOADS the plugin that names it, but a gem overlay
+        # (`data/gem_overlay/`, ADR-72) is auto-applied to every project that locks the gem WITHOUT opting
+        # into a plugin — there is no manifest in that path for an `open_receivers:` entry to live on. This
+        # is that path's counterpart: the class names a BUNDLED overlay declares knowing the declaration is
+        # partial, protected independent of any plugin manifest.
+        #
+        # MEMBERSHIP ALONE is not enough, though: `unbounded_receiver_surface?` (below) also requires the
+        # overlay directory that made the entry true to have actually LOADED this run — otherwise a project
+        # that never locks the gem, and happens to own a class of the same name itself, would silently lose
+        # `call.undefined-method` (and inherited-name `wrong-arity`) on that class, the exact regression this
+        # gate exists to avoid (ADR-26 WD1: the protection is active exactly when the RBS it protects is).
+        #
+        # `ActiveSupport::Duration` is the first (and, as of #632, only) member: it forwards any method its
+        # own class doesn't define to the wrapped numeric via `method_missing` (audited against
+        # ActiveSupport 8.1.3.1's `lib/active_support/duration.rb` — see
+        # `data/gem_overlay/activesupport/core_ext.rbs`'s `ActiveSupport::Duration` comment for the full
+        # audit), so declaring even its reader surface makes it RBS-known — and, without this, every member
+        # the declaration omits would become a false `call.undefined-method` for every project that locks
+        # activesupport, the overwhelming majority of which never opt into the plugin at all.
+        GEM_OVERLAY_OPEN_RECEIVERS = Set["ActiveSupport::Duration"].freeze
+        private_constant :GEM_OVERLAY_OPEN_RECEIVERS
+
         # ADR-26 — whether `class_name` is declared "open" by a
         # loaded plugin (manifest `open_receivers:`). An open
         # class responds beyond its RBS surface, so the
         # `call.undefined-method` rule must not fire for it.
         # True when the receiver class responds beyond an enumerable
         # RBS method table, so proving a call "undefined" against it is
-        # unsound: a plugin-declared open receiver, or a Rigor-
-        # synthesized stub type (see `RbsLoader#synthesized_type_names`).
+        # unsound: a plugin-declared open receiver, a Rigor-bundled-
+        # overlay open receiver ({GEM_OVERLAY_OPEN_RECEIVERS}) whose
+        # bundled directory this run actually loaded, or a
+        # Rigor-synthesized stub type (see `RbsLoader#synthesized_type_names`).
         def unbounded_receiver_surface?(class_name, scope)
-          open_receiver?(class_name, scope) || synthesized_stub_receiver?(class_name, scope)
+          open_receiver?(class_name, scope) || synthesized_stub_receiver?(class_name, scope) ||
+            (GEM_OVERLAY_OPEN_RECEIVERS.include?(class_name.to_s.sub(/\A::/, "")) && gem_overlay_loaded?(scope))
         end
 
         def open_receiver?(class_name, scope)
@@ -941,6 +968,22 @@ module Rigor
           return false if registry.nil?
 
           registry.open_receiver?(class_name)
+        end
+
+        # Whether THIS run's RBS environment actually includes a `data/gem_overlay/<gem>/` directory —
+        # {GEM_OVERLAY_OPEN_RECEIVERS} membership alone must not grant the exemption (see that constant's
+        # comment). `RbsLoader#signature_paths` is the same list `Environment.for_project` builds from
+        # `resolved_paths + plugin_sig_paths + gem_sig_paths + collection_paths + overlay_paths` — a gem
+        # overlay directory is a member of it if and only if `gem_overlay_paths` picked it (the gem is
+        # locked, `:missing` coverage, and its opt-in plugin twin is NOT loaded — ADR-72), so a prefix match
+        # against `RbsLoader.under_gem_overlay_root?` is exact: no other signature source lives under that
+        # root. When the PLUGIN is loaded instead, this returns false (the overlay stands down) and
+        # `open_receiver?`'s manifest-driven check above is what protects the same class name.
+        def gem_overlay_loaded?(scope)
+          loader = scope.environment&.rbs_loader
+          return false if loader.nil? || !loader.respond_to?(:signature_paths)
+
+          loader.signature_paths.any? { |path| Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) }
         end
 
         def synthesized_stub_receiver?(class_name, scope)

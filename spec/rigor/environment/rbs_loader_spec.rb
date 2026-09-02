@@ -54,6 +54,31 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  # Issue #632/#660 — `CheckRules#gem_overlay_loaded?` calls this instead of reaching for
+  # `GEM_OVERLAY_SIGS_ROOT` directly: that constant is defined inside this class's `class << self` block, so
+  # it is reachable from methods in the SAME block but not as `RbsLoader::GEM_OVERLAY_SIGS_ROOT` from outside
+  # (a `NameError` a plain constant reference doesn't catch — this method is the public seam instead).
+  describe ".under_gem_overlay_root?" do
+    it "is true for a path this method's own gem_overlay_sig_paths would return" do
+      path = described_class.gem_overlay_sig_paths(["activesupport"]).first
+      expect(described_class.under_gem_overlay_root?(path)).to be(true)
+    end
+
+    it "is true for a String path under the root, not only a Pathname" do
+      dir = described_class.gem_overlay_sig_paths(["activesupport"]).first
+      expect(described_class.under_gem_overlay_root?("#{dir}/core_ext.rbs")).to be(true)
+    end
+
+    it "is false for a path outside the gem-overlay root" do
+      expect(described_class.under_gem_overlay_root?("/some/project/sig")).to be(false)
+    end
+
+    it "is false for a differently-named sibling directory that merely shares the prefix" do
+      root = described_class.gem_overlay_sig_paths(["activesupport"]).first.dirname
+      expect(described_class.under_gem_overlay_root?("#{root}_other/activesupport")).to be(false)
+    end
+  end
+
   describe "with stdlib library opt-in" do
     let(:custom_loader) { described_class.new(libraries: ["pathname"]) }
 

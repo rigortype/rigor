@@ -75,14 +75,24 @@ Date.today - 1.week       # Date | Time
 date-part duration gives you back a `Date`, a sub-day one gives you a
 `Time`.
 
-Rigor ships **no signature** for `ActiveSupport::Duration`, on purpose.
-That keeps the whole Duration surface lenient — `1.day.ago`,
-`5.minutes.from_now`, `3.hours.in_minutes` and anything else Duration
-forwards through `method_missing` resolve without a diagnostic — while
-the site still counts as a concrete receiver for
-`rigor coverage --protection`. A partial signature would be worse than
-none: every member it omitted would become a false
-`call.undefined-method`.
+Rigor ships a **partial** signature for `ActiveSupport::Duration`: the
+reader surface — `#to_i` / `#in_seconds`, `#to_f`, `#in_minutes` /
+`#in_hours` / `#in_days` / `#in_weeks` / `#in_months` / `#in_years`,
+`#iso8601`, `#parts` — is typed, so `3.hours.in_minutes` is `Float` and
+`1.day.to_i * 2` is `Integer`. `#ago` / `#until` / `#before` / `#since`
+/ `#from_now` / `#after` are NOT part of that surface — they default
+to `Time.current`, and typing them needs Rails' `Time` instance
+extensions declared first, which this bundle does not do yet. Every
+other member — the arithmetic operators above aside, `==`, and
+anything else Duration forwards through `method_missing` — resolves
+without a diagnostic too, while the site still counts as a concrete
+receiver for `rigor coverage --protection`. Naming
+`ActiveSupport::Duration` at all would normally be the wrong move — a
+partial signature on a class whose real surface forwards to
+`method_missing` turns every omitted member into a false
+`call.undefined-method` — so the plugin lists it under
+`open_receivers:`, the same exemption `rigor-activerecord` gives
+`ActiveRecord::Relation`.
 
 The multiplier only fires on a receiver Rigor has proven numeric, so
 `created_at.day`, `Date.today.year` and your own object's `#days` keep
@@ -99,9 +109,12 @@ unconditionally when listed under `plugins:`.
 - **Conservative return types.** `#html_safe` is typed `String` (not
   `SafeBuffer`) and `#try` / `#try!` return `untyped` — the goal for
   those is to silence undefined-method, not to give precise returns.
-  (The Duration multipliers are the exception: they are declared
-  `untyped` in the bundle and then typed by the plugin, which is the
-  only way to name a class the bundle must not declare.)
+  (The Duration multipliers are one exception: they are declared
+  `untyped` in the bundle and then typed by the plugin instead — not
+  because the bundle can't name `ActiveSupport::Duration` (it does,
+  described above), but because moving the multiplier return itself
+  into RBS to match hasn't happened yet. `ActiveSupport::Duration`'s
+  own reader surface is the other exception, described above.)
 - **`duration / x` is not typed.** `1.day / 2` is a Duration but
   `1.day / 1.hour` is a plain `24`; the answer depends on the operand,
   so Rigor declines rather than guessing.

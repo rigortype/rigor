@@ -549,22 +549,26 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     # ADR-72 — Gemfile.lock-gated bundled RBS overlays.
-    def write_duration_project(tmpdir, lock_gem:)
-      File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+    def gemfile_lock_content(gem_name)
+      <<~LOCK
         GEM
           remote: https://rubygems.org/
           specs:
-            #{lock_gem} (7.1.3)
+            #{gem_name} (7.1.3)
 
         PLATFORMS
           ruby
 
         DEPENDENCIES
-          #{lock_gem}
+          #{gem_name}
 
         BUNDLED WITH
            2.5.6
       LOCK
+    end
+
+    def write_duration_project(tmpdir, lock_gem:)
+      File.write(File.join(tmpdir, "Gemfile.lock"), gemfile_lock_content(lock_gem))
       File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
         ttl  = 3.minutes
         miss = 5.minuets
@@ -597,6 +601,91 @@ RSpec.describe Rigor::Analysis::Runner do
         write_duration_project(tmpdir, lock_gem: "rake")
         names = undefined_methods_for(tmpdir)
         expect(names).to contain_exactly("minutes", "minuets")
+      end
+    end
+
+    # Issue #632 — the overlay now names `ActiveSupport::Duration` too (its reader surface: `to_i`, …),
+    # which is normally unsafe: `Duration` forwards anything its own class doesn't define to the wrapped
+    # numeric via `method_missing`, so a partial declaration would turn every omitted member into a false
+    # `call.undefined-method`. It stays safe here specifically because NO plugin is loaded in this test —
+    # the numeric-multiplier chain (`3.minutes`) never reaches a `Duration` nominal in overlay-only mode
+    # (that requires the plugin's `dynamic_return` rule, #534) — so the receiver here comes from the
+    # project's OWN signature instead, the same way any third-party value with no in-repo `.rb` definition
+    # would. `ActiveRecord::Relation`'s `open_receivers:` protection is a loaded PLUGIN's manifest entry,
+    # which does not exist in this test at all; what protects `Widget.new.ttl.round` here is
+    # `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`, GATED on the loaded RBS actually including
+    # the `data/gem_overlay/activesupport/` directory (`CheckRules#gem_overlay_loaded?`) — which this test's
+    # Gemfile.lock (below) makes true. The must-NOT-protect sibling right after this one locks NO gem at
+    # all and shows the same class name getting NO exemption without that.
+    def run_duration_reader_project(tmpdir)
+      FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+      File.write(File.join(tmpdir, "Gemfile.lock"), gemfile_lock_content("activesupport"))
+      File.write(File.join(tmpdir, "widget.rb"), "class Widget\nend\n")
+      File.write(File.join(tmpdir, "sig", "widget.rbs"), <<~RBS)
+        class Widget
+          def ttl: () -> ActiveSupport::Duration
+        end
+      RBS
+      File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
+        Rigor.dump_type(Widget.new.ttl.to_i)
+        Widget.new.ttl.round
+      RUBY
+
+      Dir.chdir(tmpdir) do
+        configuration = Rigor::Configuration.new(
+          "paths" => [File.join(tmpdir, "widget.rb"), File.join(tmpdir, "code.rb")],
+          "signature_paths" => [File.join(tmpdir, "sig")],
+          "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
+        )
+        described_class.new(configuration: configuration, cache_store: nil).run.diagnostics
+      end
+    end
+
+    it "protects Duration's undeclared surface even with only the overlay loaded, no plugin at all" do
+      Dir.mktmpdir("rigor-as-overlay-duration-") do |tmpdir|
+        diagnostics = run_duration_reader_project(tmpdir)
+        undefined = diagnostics.select { |d| d.rule == "call.undefined-method" }
+        dumps = diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+
+        # `to_i` is declared, so it resolves to Integer; `round` is not (real Duration API,
+        # `method_missing`-forwarded to the wrapped numeric on the real class) and must not fire
+        # `call.undefined-method` regardless.
+        expect(dumps).to eq(["dump_type: Integer"])
+        expect(undefined).to be_empty
+      end
+    end
+
+    # The gating regression the review round caught: `GEM_OVERLAY_OPEN_RECEIVERS` naming a class is not
+    # itself enough (ADR-26 WD1 — the protection must be active exactly when the RBS it protects is). A
+    # project that never locks activesupport and happens to own a class of the exact same qualified name
+    # gets ordinary `call.undefined-method` coverage on it, same as any other project class — the constant
+    # must not leak protection to a project this bundle never reached.
+    it "does NOT protect a project's own ActiveSupport::Duration when no gem overlay ever loaded" do
+      Dir.mktmpdir("rigor-as-overlay-duration-unrelated-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+        # No Gemfile.lock at all here — nothing makes any gem overlay (activesupport's included) eligible,
+        # so `CheckRules#gem_overlay_loaded?` must read false for this run. The project happens to declare
+        # its OWN class under the exact qualified name `ActiveSupport::Duration` — coincidence, not a
+        # dependency on the gem — the same way `sig/`-augmented project classes work anywhere else.
+        File.write(File.join(tmpdir, "sig", "duration.rbs"), <<~RBS)
+          module ActiveSupport
+            class Duration
+              def foo: () -> Integer
+            end
+          end
+        RBS
+        File.write(File.join(tmpdir, "code.rb"), "ActiveSupport::Duration.new.bar\n")
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(tmpdir, "code.rb")],
+            "signature_paths" => [File.join(tmpdir, "sig")]
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+
+          expect(undefined.map(&:method_name)).to eq(["bar"])
+        end
       end
     end
 

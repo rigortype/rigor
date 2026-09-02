@@ -758,6 +758,19 @@ module Rigor
           end
         end
 
+        # @param path [String, Pathname] typically an entry from an {RbsLoader} instance's
+        #   {#signature_paths}.
+        # @return [Boolean] whether `path` sits under the bundled gem-overlay root — what
+        #   `CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`'s gate consults so that a class name's membership in
+        #   that list alone never grants the open-receiver exemption; the overlay directory that made the
+        #   entry true must have actually loaded THIS run too (issue #632, tracked further by #660).
+        #   `GEM_OVERLAY_SIGS_ROOT` is defined inside this `class << self` block, so it is reachable from
+        #   here directly but NOT as `RbsLoader::GEM_OVERLAY_SIGS_ROOT` from outside — this method is the
+        #   public seam callers outside this class use instead of reaching for the constant themselves.
+        def under_gem_overlay_root?(path)
+          path.to_s.start_with?("#{GEM_OVERLAY_SIGS_ROOT}/")
+        end
+
         def vendored_gem_sig_paths
           return [] unless File.directory?(VENDORED_GEM_SIGS_ROOT)
 

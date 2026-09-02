@@ -247,6 +247,65 @@ class Float
 end
 
 # ---------------------------------------------------------------
+# ActiveSupport::Duration — issue #632
+# ---------------------------------------------------------------
+
+# Declaring this class at all is normally the wrong move: `Duration` forwards any method its own class
+# doesn't define to the wrapped numeric via `method_missing` (audited against ActiveSupport 8.1.3.1's
+# `lib/active_support/duration.rb`), so an incomplete declaration would turn every omitted member into a
+# false `call.undefined-method` for every project that locks activesupport. It is safe here only because
+# `ActiveSupport::Duration` is listed in `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`
+# (`lib/rigor/analysis/check_rules.rb`) — an open-receiver membership for exactly this bundle, gated on this
+# overlay directory actually having been loaded, since this overlay has no plugin manifest of its own for
+# an ADR-26 `open_receivers:` entry to live on (issue #660 tracks whether that gap gets a first-class
+# mechanism instead of this constant). What follows is the reader surface, mirroring
+# `rigor-activesupport-core-ext/sig/active_support/core_ext.rbs` (parity enforced by
+# `spec/rigor/environment/activesupport_overlay_parity_spec.rb`); every method not listed here stays
+# undeclared and silently `Dynamic` rather than guessed.
+module ActiveSupport
+  class Duration
+    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
+    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
+    # and typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`,
+    # `past?`, `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, …) to
+    # already be closed and complete — `Time` is CORE, RBS-known from stdlib, and this bundle's `Time`
+    # block below never declared that instance surface (#658 — already a live FP on master:
+    # `Time.current.to_fs(:db)` fires today, independent of Duration). Answering `ago` with `Time` does not
+    # leave the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN
+    # undeclared members — it fires a false `call.undefined-method` on `to_fs` for `1.hour.ago.to_fs(:db)`,
+    # ordinary Rails, and the same for every other Rails `Time` extension nothing here declares: 9 false
+    # positives on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658
+    # lands: plain `Time`, not a `Time | ActiveSupport::TimeWithZone` union (Rails overrides
+    # `TimeWithZone#is_a?` to answer true for `::Time`, and the union measured to `Dynamic[top]`
+    # everywhere downstream). Do not re-add these until #658 lands the `Time` surface first.
+
+    # `to_i` / its `in_seconds` alias return `@value.to_i` — always Integer.
+    def to_i: () -> Integer
+    def in_seconds: () -> Integer
+
+    # `to_f` — always Float.
+    def to_f: () -> Float
+
+    # `in_minutes` / `in_hours` / `in_days` / `in_weeks` / `in_months` / `in_years` — each
+    # `in_seconds / SECONDS_PER_*.to_f`, always Float.
+    def in_minutes: () -> Float
+    def in_hours: () -> Float
+    def in_days: () -> Float
+    def in_weeks: () -> Float
+    def in_months: () -> Float
+    def in_years: () -> Float
+
+    # Always a String.
+    def iso8601: (?precision: Integer?) -> String
+
+    # A `dup` of the internal parts hash — Integer-valued for a duration built from Integer multipliers,
+    # but real runtime Float for a fractional one (`1.5.seconds.parts == {seconds: 1.5}`); `Integer |
+    # Float` is what stays honest without costing the common `parts[:days] * 2` chain anything.
+    def parts: () -> Hash[Symbol, Integer | Float]
+  end
+end
+
+# ---------------------------------------------------------------
 # Time — singleton + instance extensions
 # ---------------------------------------------------------------
 

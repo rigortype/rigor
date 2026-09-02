@@ -15,6 +15,11 @@ in-place extensions to Ruby's built-in classes:
 
 - `Integer` / `Float` — Duration multipliers (`#days`, `#hours`,
   `#minutes`, …) and Bytes multipliers (`#megabytes`, `#gigabytes`, …)
+- `ActiveSupport::Duration` — the reader surface: `#to_i` / `#in_seconds`,
+  `#to_f`, `#in_minutes` / `#in_hours` / `#in_days` / `#in_weeks` /
+  `#in_months` / `#in_years`, `#iso8601`, `#parts`. NOT `#ago` /
+  `#until` / `#before` / `#since` / `#from_now` / `#after` — see
+  _Scope and limits_ below
 - `Time` / `Date` — `current`, `yesterday`, `tomorrow`,
   `beginning_of_*`, `end_of_*`, `ago`, `since`, `in`, `change`
 - `String` — `underscore`, `camelize`, `classify`, `constantize`,
@@ -87,16 +92,26 @@ per project — this one contributing signatures rather than diagnostics.
 
 ## Scope and limits
 
-- **Returns conservative types**, with the Duration multipliers as the
+- **Returns conservative types**, with `ActiveSupport::Duration` as the
   documented exception. `Integer#days` is declared `untyped` in the
   bundle and then typed `ActiveSupport::Duration` by the plugin's
   `DURATION_MULTIPLIERS` rule, together with the `+` / `-` / `*`
   arithmetic around it (`Time - 30.minutes` → `Time`, `2 * 1.day` →
-  Duration, `Date - 1.week` → `Date | Time`). The split exists because
-  naming the class in RBS would force the bundle to DECLARE it, and a
-  declared class with an incomplete signature turns every omitted
-  member into a false `undefined-method` — see the comment on
-  `DURATION_MULTIPLIERS` (#534).
+  Duration, `Date - 1.week` → `Date | Time`) — see the comment on
+  `DURATION_MULTIPLIERS` (#534). `ActiveSupport::Duration` itself IS now
+  named in the bundle (#632), with a partial reader surface (`#to_i` /
+  `#in_seconds`, `#to_f`, the `#in_minutes` family, `#iso8601`,
+  `#parts`): naming a class whose real surface `method_missing`-forwards
+  the rest to the wrapped numeric would normally turn every omitted
+  member into a false `undefined-method`, so the manifest lists it under
+  `open_receivers:` (ADR-26) — the exemption `rigor-activerecord` uses
+  for `ActiveRecord::Relation` — and the rule never fires against a
+  Duration receiver regardless of what the class does or doesn't
+  declare. `#ago` / `#until` / `#before` / `#since` / `#from_now` /
+  `#after` are deliberately NOT part of that surface: they default to
+  `Time.current`, and typing them needs the Rails `Time` instance
+  extensions declared first, which this bundle's `Time` block does not
+  do — see #659 (blocked on #658).
 - **`html_safe` returns `String`.** Truly it returns
   `ActiveSupport::SafeBuffer` (a String subclass), but loss of the
   `html_safe?` predicate value is the only practical precision gap.

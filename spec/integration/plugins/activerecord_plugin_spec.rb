@@ -2611,4 +2611,155 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(diags.count { |d| d.rule == "model-call" }).to eq(1)
     end
   end
+
+  # #623 — `inflected_table_name` used to feed the FULL constant path to `Inflector.tableize`, which
+  # flattens a namespace with `_` (`Blog::Post` → `"blog_posts"`). Rails does something else entirely:
+  # `undecorated_table_name` demodulizes FIRST — the namespace is dropped, not flattened — and only a
+  # `table_name_prefix` / `table_name_suffix` the ENCLOSING MODULE actually declares gets prepended /
+  # appended. The bug was silent, not loud: a namespaced model's guessed table almost never exists in the
+  # schema, so `entry.column_names.empty?` (`Analyzer#validate_column_hash_call`) stood the column / alias
+  # / association checks down entirely rather than raising — every namespaced model's query-key
+  # assertions passed regardless of whether the key was real.
+  describe "namespaced models — demodulize before tableizing (#623)" do
+    context "with no table_name_prefix declared" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/post.rb" => "class Post < ApplicationRecord\nend\n",
+          "app/models/blog/post.rb" => <<~RUBY,
+            module Blog
+              class Post < ApplicationRecord
+                alias_attribute :headline, :title
+              end
+            end
+          RUBY
+          "app/models/blog/featured_post.rb" => "class Blog::FeaturedPost < Blog::Post\nend\n"
+        }
+      end
+
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "title"
+            end
+          end
+        SCHEMA
+      end
+
+      it "demodulizes instead of flattening the namespace into the table name" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Blog::Post").table_name).to eq("posts")
+      end
+
+      it "resolves a namespaced STI child to the same demodulized root table" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Blog::FeaturedPost").table_name).to eq("posts")
+      end
+
+      it "accepts an alias_attribute query key once the real table is matched (must not fire)" do
+        diags = plugin_diagnostics(run_ar("Blog::Post.where(headline: 'x')\n", schema: schema, models: models))
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      # The discrimination sibling for the example above: with the pre-#623 flattened guess
+      # (`"blog_posts"`), this table lookup misses, `column_names` comes back empty, and the check stands
+      # down for EVERY key — so this assertion (unlike the one above) actually fails on the old behaviour.
+      it "still flags a genuine typo once the real table is matched (must fire)" do
+        diags = plugin_diagnostics(run_ar("Blog::Post.where(headlnie: 'x')\n", schema: schema, models: models))
+        expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+      end
+    end
+
+    context "with a literal `def self.table_name_prefix` on the enclosing module" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              def self.table_name_prefix = "vt_"
+            end
+          RUBY
+          "app/models/vault/post.rb" => <<~RUBY
+            module Vault
+              class Post < ApplicationRecord
+              end
+            end
+          RUBY
+        }
+      end
+
+      # Two tables that could each plausibly "confirm" the wrong guess: the demodulized name alone
+      # (`posts`) and the correctly prefixed one (`vt_posts`) — each with a column only IT carries, so a
+      # column check proves WHICH table actually got matched, not just that some table did.
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "decoy"
+            end
+
+            create_table "vt_posts", force: :cascade do |t|
+              t.string "headline"
+            end
+          end
+        SCHEMA
+      end
+
+      it "prepends the declared prefix" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Vault::Post").table_name).to eq("vt_posts")
+      end
+
+      it "matches the prefixed table's own column (must not fire)" do
+        diags = plugin_diagnostics(run_ar("Vault::Post.where(headline: 'x')\n", schema: schema, models: models))
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "does not corroborate against the unrelated same-named table (must fire)" do
+        diags = plugin_diagnostics(run_ar("Vault::Post.where(decoy: 'x')\n", schema: schema, models: models))
+        expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+      end
+    end
+
+    it "folds a `mattr_accessor ..., default:` the same as a `def self.…`" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/catalog.rb" => <<~RUBY,
+          module Catalog
+            mattr_accessor :table_name_prefix, default: "cat_"
+          end
+        RUBY
+        "app/models/catalog/post.rb" => <<~RUBY
+          module Catalog
+            class Post < ApplicationRecord
+            end
+          end
+        RUBY
+      }
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
+      expect(index.find("Catalog::Post").table_name).to eq("cat_posts")
+    end
+
+    it "falls back to the demodulized name rather than guessing an unfoldable prefix" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/tenant_scoped.rb" => <<~RUBY,
+          module TenantScoped
+            def self.table_name_prefix
+              Current.tenant_prefix
+            end
+          end
+        RUBY
+        "app/models/tenant_scoped/post.rb" => <<~RUBY
+          module TenantScoped
+            class Post < ApplicationRecord
+            end
+          end
+        RUBY
+      }
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
+      expect(index.find("TenantScoped::Post").table_name).to eq("posts")
+    end
+  end
 end

@@ -21,8 +21,9 @@ module Rigor
       # columns", and consumers that would fire on an unrecognised column must not read the two the same
       # way.
       #
-      # `table_name_override` is non-nil when the source contained `self.table_name = "..."`. When nil,
-      # the table name derives from {Inflector.tableize}.
+      # `table_name_override` is non-nil when the source contained `self.table_name = "..."`. When nil, the
+      # table name derives from {.inflected_table_name} — demodulize, then {Inflector.tableize}, then a
+      # `table_name_prefix` / `table_name_suffix` the enclosing module declares and the discoverer can fold.
       #
       # Single-table-inheritance subclasses (`class Admin < User`) carry an `sti_parent:` pointer; their
       # {Entry} resolves its table from the root model and inherits the chain's declared associations /
@@ -219,11 +220,40 @@ module Rigor
           nil
         end
 
-        # The name inflected from the ROOT class of the chain — an STI child shares its root's table. The
-        # row's `class_name` is already de-rooted ({ModelDiscoverer#declared_constant_name}), so it feeds
-        # the inflector as is.
+        # The name inflected from the ROOT class of the chain — an STI child shares its root's table. Rails
+        # derives a namespaced model's table from its DEMODULIZED class name — `Blog::Post` → `posts`, the
+        # `Blog::` dropped entirely — and prepends/appends `table_name_prefix` / `table_name_suffix` only
+        # when the ENCLOSING module actually declares one
+        # (`ActiveRecord::ModelSchema::ClassMethods#undecorated_table_name` /
+        # `#full_table_name_prefix`); it never flattens the namespace into the table name the way a naive
+        # `tableize("Blog::Post")` would (`"blog_posts"`, silently wrong for every namespaced model — #623).
+        # The row's `class_name` is already de-rooted ({ModelDiscoverer#declared_constant_name}), so it
+        # feeds the demodulize/inflect/decorate steps as is.
         def self.inflected_table_name(chain)
-          Rigor::Plugin::Inflector.tableize(chain.first.fetch(:class_name))
+          root = chain.first
+          base = Rigor::Plugin::Inflector.tableize(demodulize(root.fetch(:class_name)))
+          prefix = decorator_literal(root[:table_name_prefix])
+          suffix = decorator_literal(root[:table_name_suffix])
+          "#{prefix}#{base}#{suffix}"
+        end
+
+        # `"Blog::Post"` → `"Post"`; a name without a namespace is returned unchanged. Matches
+        # `ActiveSupport::Inflector#demodulize` for a well-formed constant path — a plain String split, no
+        # gem call needed (unlike {Inflector}'s allow-listed methods, there is no real-vs-approximated
+        # divergence risk here to guard against).
+        def self.demodulize(class_name)
+          class_name.to_s.split("::").last
+        end
+
+        # Reads a `table_name_prefix:` / `table_name_suffix:` decorator ({ModelDiscoverer}'s resolved
+        # `:table_name_prefix` / `:table_name_suffix` row field, always present on a discovered row): the
+        # folded literal when the discoverer could read one off the enclosing module, or `""` — both when no
+        # enclosing module declares the name AND when one does but in a shape the discoverer cannot fold.
+        # The second case is deliberately NOT a guess (#623): synthesising some default prefix string would
+        # risk corroborating the WRONG table exactly as easily as guessing none stands the column checks
+        # down safely — see {.table_name_exact?} above for why an inflected name is never pinned regardless.
+        def self.decorator_literal(decorator)
+          (decorator || {}).fetch(:literal, "")
         end
 
         # Dedups association-style rows by `:name`, keeping the LAST occurrence so a child redeclaration

@@ -78,6 +78,8 @@ class NilClass
   def presence: () -> nil
   def try: (*untyped) -> nil
   def try!: (*untyped) -> nil
+  def duplicable?: () -> true
+  def instance_values: () -> Hash[String, untyped]
 end
 
 class TrueClass

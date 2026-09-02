@@ -897,6 +897,30 @@ module Rigor
             # the conservative no-op (falsey could mean nil receiver OR a falsey method result).
             safe_nav_result = analyse_safe_nav_receiver(node, scope)
             return safe_nav_result if safe_nav_result
+
+            # Issue #606 slice 1 — the same proof one call further out, where the `&.` result is
+            # fed to a suffix (`custom&.value.present?`, `backup&.user.nil?`) or compared against
+            # a non-nil operand. Sits after every pre-existing NARROWING path so those keep first claim
+            # on the node (the RBS-extended contribution hook still runs later and can be pre-empted —
+            # no live collision today since arg-free chains carry no argument facts):
+            # each of them returns nil for these shapes today (the predicate analysers require a
+            # local-read receiver, which a chain is not), so this only ever runs on nodes that
+            # were otherwise about to narrow nothing.
+            chain_result =
+              if %i[== !=].include?(node.name)
+                analyse_safe_nav_chain_equality(node, scope)
+              else
+                analyse_safe_nav_chain(node, scope)
+              end
+            return chain_result if chain_result
+
+            # Issue #606 slice 2 — membership. Runs after `analyse_string_predicate`, which owns
+            # the `str.include?(literal)` shape; this one wants the mirror image (a collection
+            # receiver, a bound argument), so the two never contend for the same node.
+            if node.name == :include?
+              membership_result = analyse_membership_predicate(node, scope)
+              return membership_result if membership_result
+            end
           end
 
           # Slice 7 phase 15 — RBS::Extended predicate effects. When the method's RBS signature
@@ -2610,6 +2634,209 @@ module Rigor
           return nil if non_nil.equal?(current)
 
           [scope.public_send(writer, receiver.name, non_nil), scope]
+        end
+
+        # Issue #606 slice 1 — the SAFE-NAV CHAIN forms. {.analyse_safe_nav_receiver} above proves
+        # the receiver non-nil when the `&.` call is itself the predicate (`if v&.foo`). It cannot
+        # see the far more common shape where the `&.` result is fed to one more call:
+        #
+        #   if custom&.value.present?          # mastodon extended_description.rb / privacy_policy.rb
+        #   return true if backup&.user.nil?   # mastodon backup_worker.rb  (the FALL-THROUGH proves it)
+        #
+        # Both were measured firing `call.possible-nil-receiver` on correct code (#574's matrix).
+        #
+        # ## Why a truthy chain proves the root non-nil, and when it does not
+        #
+        # If the root IS nil, `root&.y` is nil and every suffix runs ON nil. Reaching the guarded
+        # branch then requires each of them to have returned — and the outermost to have returned
+        # TRUTHY. Two things can stop that, and only these two are sound to rely on:
+        #
+        # 1. `NilClass` does not define the method. The call raises, so control never reaches the
+        #    branch at all, and narrowing the branch body is vacuously correct.
+        # 2. The method is defined on `NilClass` and documented falsey there — {NIL_FALSEY_SUFFIXES}.
+        #    ActiveSupport's `nil.present?` is `false`, so a truthy answer excludes the nil root.
+        #
+        # Anything else must decline, and the temptation to wave this through is exactly where the
+        # bug would be: most of what `NilClass` DOES define returns something truthy. `nil.to_s` is
+        # `""`, `nil.to_a` is `[]`, `nil.to_i` is `0`, `nil.inspect` is `"nil"` — all truthy — and
+        # `nil.nil?` and `nil.blank?` are literally `true`. Narrowing on `x&.y.nil?`'s TRUTHY edge
+        # would invert the guard's meaning. `nil?` therefore gets the opposite edge instead: a
+        # FALSEY `x&.y.nil?` says `x&.y` is not nil, which no nil root can produce.
+        #
+        # Scoped to chains that actually contain `&.`. The same raise-based argument would license
+        # narrowing a plain `x.y.present?` chain, but there `x.y` is itself the latent nil bug this
+        # rule exists to report, and suppressing it is the opposite of the intent.
+        NIL_FALSEY_SUFFIXES = %i[present?].freeze
+        private_constant :NIL_FALSEY_SUFFIXES
+
+        def analyse_safe_nav_chain(node, scope)
+          chain = safe_nav_chain(node)
+          return nil if chain.nil?
+
+          receiver, suffixes = chain
+          edge = safe_nav_chain_edge(suffixes, scope)
+          return nil if edge.nil?
+
+          narrowed = safe_nav_chain_narrowed_scope(receiver, scope)
+          return nil if narrowed.nil?
+
+          edge == :truthy ? [narrowed, scope] : [scope, narrowed]
+        end
+
+        # Walks a call chain down to its `&.` link, collecting the suffix method names applied
+        # above it (outermost first). Declines unless the chain bottoms out in a `&.` call on a
+        # direct local / ivar read — those are the two bindings a scope can rewrite — and unless
+        # every suffix is a bare reader or predicate, since an argument or a block could make the
+        # answer depend on something other than the receiver.
+        #
+        # `allow_bare:` false keeps the zero-suffix case (`if v&.foo`) with
+        # {.analyse_safe_nav_receiver}, which already owns it; the equality form passes true
+        # because there the `&.` call IS the comparison's receiver.
+        def safe_nav_chain(node, allow_bare: false)
+          suffixes = []
+          current = node
+          while current.is_a?(Prism::CallNode) && !current.safe_navigation?
+            return nil unless argument_free?(current) && current.block.nil?
+
+            suffixes << current.name
+            current = current.receiver
+          end
+          return nil unless current.is_a?(Prism::CallNode) && current.safe_navigation?
+          return nil if suffixes.empty? && !allow_bare
+
+          receiver = current.receiver
+          return nil unless receiver.is_a?(Prism::LocalVariableReadNode) ||
+                            receiver.is_a?(Prism::InstanceVariableReadNode)
+
+          [receiver, suffixes]
+        end
+
+        # Which edge — if either — a chain's outcome narrows on. The inner suffixes (everything
+        # below the outermost) only ever have to NOT return, so they are held to the raise test
+        # alone; the outermost decides the edge per the table in {NIL_FALSEY_SUFFIXES}'s comment.
+        def safe_nav_chain_edge(suffixes, scope)
+          outermost, *inner = suffixes
+          return nil unless inner.all? { |name| !nilclass_method?(name, scope) }
+          return :falsey if outermost == :nil?
+          return :truthy if NIL_FALSEY_SUFFIXES.include?(outermost)
+          return :truthy unless nilclass_method?(outermost, scope)
+
+          nil
+        end
+
+        def safe_nav_chain_narrowed_scope(receiver, scope)
+          reader, writer =
+            case receiver
+            when Prism::LocalVariableReadNode then %i[local with_local]
+            when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
+            else return nil
+            end
+
+          current = scope.public_send(reader, receiver.name)
+          return nil if current.nil?
+
+          non_nil = narrow_non_nil(current)
+          return nil if non_nil.equal?(current)
+
+          scope.public_send(writer, receiver.name, non_nil)
+        end
+
+        # Issue #606 slice 1, second form — a safe-nav chain COMPARED to a value that cannot be
+        # nil: `next unless status&.account_id == @account.id`. A nil root makes the left side nil,
+        # and `nil == <non-nil>` is false, so a true comparison excludes it.
+        #
+        # The whole form turns on proving the OTHER operand non-nil, and `x&.y == nil` is the
+        # counter-example that must never narrow — there a nil root makes the comparison TRUE.
+        # {.provably_non_nil_type?} is deliberately a whitelist rather than "not obviously nil":
+        # an operand typed `Dynamic` may well be nil at runtime, so it declines. That costs the
+        # third corpus site (`@account.id` types opaque there), which is the honest price of not
+        # guessing.
+        #
+        # `!=` takes the opposite edge, for the same reason `nil?` did above: a nil root makes
+        # `nil != <non-nil>` true, so it is the FALSEY edge that proves the root non-nil.
+        def analyse_safe_nav_chain_equality(node, scope)
+          return nil if node.arguments.nil? || node.arguments.arguments.size != 1
+
+          chain = safe_nav_chain(node.receiver, allow_bare: true)
+          return nil if chain.nil?
+
+          receiver, suffixes = chain
+          return nil unless suffixes.all? { |name| !nilclass_method?(name, scope) }
+          return nil unless provably_non_nil_type?(scope.type_of(node.arguments.arguments.first))
+
+          narrowed = safe_nav_chain_narrowed_scope(receiver, scope)
+          return nil if narrowed.nil?
+
+          node.name == :== ? [narrowed, scope] : [scope, narrowed]
+        end
+
+        # Whitelist: true only for types every inhabitant of which is non-nil. `Dynamic` / `Top`
+        # answer FALSE — an untyped operand is exactly the case where nil cannot be excluded —
+        # and so does `Bot`, which has no inhabitants to reason about.
+        def provably_non_nil_type?(type)
+          case type
+          when Type::Constant then !type.value.nil?
+          when Type::Nominal then type.class_name != "NilClass"
+          when Type::Singleton, Type::Tuple, Type::HashShape then true
+          when Type::Union then type.members.all? { |member| provably_non_nil_type?(member) }
+          end
+        end
+
+        # Issue #606 slice 2 — MEMBERSHIP. `collection.include?(x)` answering true proves `x` is one
+        # of the collection's elements, so if none of those can be nil, neither can `x`:
+        #
+        #   unless Redmine::Reaction::REACTABLE_TYPES.include?(object_type)   # redmine reactions_controller.rb
+        #     render_403
+        #     return
+        #   end
+        #   @object = object_type.constantize.find(...)                       # ← fired before this
+        #
+        # The proof lives entirely in the collection, which is why {.nil_free_collection?} answers
+        # only for shapes whose element types are actually known — a literal / `Tuple`, or an
+        # `Array` / `Set` carrying an element type. An untyped collection declines: `Dynamic` may
+        # hold nil, and "we do not know" must not read as "no nil here".
+        #
+        # Only the truthy edge narrows. A false `include?` says nothing about `x` — a nil `x` is
+        # simply not in the list, which is exactly what false means.
+        MEMBERSHIP_COLLECTION_CLASSES = %w[Array Set].freeze
+        private_constant :MEMBERSHIP_COLLECTION_CLASSES
+
+        def analyse_membership_predicate(node, scope)
+          return nil if node.receiver.nil? || node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          argument = node.arguments.arguments.first
+          reader, writer =
+            case argument
+            when Prism::LocalVariableReadNode then %i[local with_local]
+            when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
+            else return nil
+            end
+          return nil unless nil_free_collection?(scope.type_of(node.receiver))
+
+          current = scope.public_send(reader, argument.name)
+          return nil if current.nil?
+
+          non_nil = narrow_non_nil(current)
+          return nil if non_nil.equal?(current)
+
+          [scope.public_send(writer, argument.name, non_nil), scope]
+        end
+
+        # True only when every inhabitant the collection can yield is non-nil. Restricted to
+        # sequence shapes on purpose: `Hash#include?` asks about KEYS and `Range#include?` about
+        # bounds, so neither element story is the one this rule reasons about.
+        def nil_free_collection?(type)
+          case type
+          when Type::Tuple
+            !type.elements.empty? && type.elements.all? { |element| provably_non_nil_type?(element) }
+          when Type::Constant
+            type.value.is_a?(Array) && !type.value.empty? && type.value.none?(&:nil?)
+          when Type::Nominal
+            MEMBERSHIP_COLLECTION_CLASSES.include?(type.class_name) &&
+              type.type_args.size == 1 &&
+              provably_non_nil_type?(type.type_args.first)
+          end
         end
 
         # Layers the safe-nav non-nil truthy narrowing over the edges an existing predicate path

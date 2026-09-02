@@ -1,0 +1,1 @@
+- **[engine]** A block that mutates a captured collection in place and then returns it — `outer = []; m.synchronize do outer.push(1); outer end` — now types the call as the widened `Array[…]` instead of the stale empty literal the block entered with, so downstream rules no longer treat the result as a provably-empty array. ([#587](https://github.com/rigortype/rigor/issues/587))

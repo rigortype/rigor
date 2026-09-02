@@ -21,7 +21,9 @@ require_relative "flow_tracer"
 require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
+require_relative "mutation_widening"
 require_relative "narrowing"
+require_relative "receiver_alias"
 require_relative "singleton_object_constant"
 require_relative "optimistic_origin"
 require_relative "struct_fold_safety"
@@ -2921,8 +2923,9 @@ module Rigor
       # - a `nil` or non-`StatementsNode` body (`do … rescue … end` parses as a `BeginNode`) and a
       #   single-statement body — the overwhelming majority of blocks — pay nothing at all;
       # - a multi-statement body pays one DFS over its non-tail statements, and threads only when the tail
-      #   READS a variable name one of them WRITES ({#tail_depends_on_body_binding?}). That is exactly the
-      #   diagnosed shape, so a block whose tail does not consume the body's own bindings keeps today's type;
+      #   READS a variable name one of them WRITES or MUTATES IN PLACE ({#tail_depends_on_body_binding?}).
+      #   That is exactly the diagnosed shape, so a block whose tail does not consume the body's own
+      #   bindings keeps today's type;
       # - the fold is not re-entrant. `StatementEvaluator#eval_call` already evaluates each nested block body
       #   once, plus up to three more times under the ADR-56 `BodyFixpoint` when the block rebinds a captured
       #   local, so a fold nested inside a fold would multiply that work per block-nesting level. Inside a
@@ -3019,18 +3022,28 @@ module Rigor
       ].freeze
       private_constant :JUMP_BOUNDARY_NODES
 
-      # True when the tail statement observes a variable name one of the earlier statements binds — the only
-      # way threading the scope through the body can change the tail's type — AND no earlier statement can
-      # jump out of the block with a value. The name sets are compared sigil-and-all across kinds, so the
-      # answer over-approximates (an `@x` write plus an `x` read threads needlessly); over-approximating only
-      # spends the fold, it never changes an answer.
+      # True when the tail statement observes a variable name one of the earlier statements binds OR mutates
+      # in place — the two ways threading the scope through the body can change the tail's type — AND no
+      # earlier statement can jump out of the block with a value. The name sets are compared sigil-and-all
+      # across kinds, so the answer over-approximates (an `@x` write plus an `x` read threads needlessly);
+      # over-approximating only spends the fold, it never changes an answer.
+      #
+      # The in-place half is issue #587. `outer = []; m.synchronize do outer.push(1); outer end` binds no
+      # variable in its prefix — `push` is a call, not a write node — so a write-only scan declined and the
+      # tail kept the entry scope's empty `Tuple[]`, a wrong-precise answer (the runtime value is `[1]`) that
+      # hands downstream rules a provably-empty array. Threading is the fix, not a cost: `StatementEvaluator`
+      # runs `MutationWidening.widen_after_call` on the `push`, so the threaded tail reads the widened
+      # `Array[…]`. A call therefore contributes every variable its receiver can evaluate to
+      # ({ReceiverAlias.candidates} — the ternary-selected receiver of issue #277 included) whenever its name
+      # is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
+      # tables is what keeps "the scan says thread" and "threading changes something" the same predicate.
       #
       # Cost is two walks of the body, the second only when the first found a write and no jump — the same
       # order of cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below
       # re-typing. The prefix walk is hand-rolled rather than `Source::NodeWalker.each` because the two
       # questions it answers have different depths: a write is collected at ANY depth (a block is a closure,
-      # so `[1].each { v = 5 }` really does bind the outer `v`), while a jump counts only above the nearest
-      # {JUMP_BOUNDARY_NODES} boundary.
+      # so `[1].each { v = 5 }` really does bind the outer `v`, and `[1].each { outer << 1 }` really does
+      # mutate the outer `outer`), while a jump counts only above the nearest {JUMP_BOUNDARY_NODES} boundary.
       def tail_depends_on_body_binding?(statements)
         written = Set.new
         statements[0...-1].each do |statement|
@@ -3044,8 +3057,10 @@ module Rigor
         false
       end
 
-      # True when `node` cannot jump out of the block with a value, collecting its variable-write names into
-      # `written` on the way down. `retargeted` is true once the descent has passed a boundary.
+      # True when `node` cannot jump out of the block with a value, collecting into `written` the names it
+      # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call, through
+      # every variable its receiver can evaluate to) on the way down. `retargeted` is true once the descent
+      # has passed a boundary.
       #
       # A `Prism::DefinedNode`'s operand is never evaluated, so it is not descended into — the same rule
       # {Source::NodeWalker} applies, for the same reason: neither a write nor a jump under `defined?` runs.
@@ -3053,6 +3068,7 @@ module Rigor
         return false if !retargeted && JUMP_NODES.include?(node.class)
 
         written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
+        collect_mutated_receivers(node, written) if node.is_a?(Prism::CallNode)
         return true if node.is_a?(Prism::DefinedNode)
 
         child_retargeted = retargeted || JUMP_BOUNDARY_NODES.include?(node.class)
@@ -3060,6 +3076,12 @@ module Rigor
           return false unless prefix_statement_jump_free?(child, written, child_retargeted)
         end
         true
+      end
+
+      def collect_mutated_receivers(call_node, written)
+        return unless MutationWidening::SHAPE_MUTATORS.include?(call_node.name)
+
+        ReceiverAlias.candidates(call_node.receiver).each { |read| written << read.name }
       end
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every

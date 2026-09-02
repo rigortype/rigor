@@ -211,6 +211,124 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # Issue #587 (a) — the gate was blind to CONTENT mutation. `push` is a call, not a variable-write node, so a
+  # prefix that only mutates a captured collection in place collected no written name, the fold declined, and
+  # the tail kept the entry scope's literal: `[]` for a block whose runtime value is `[1]`. Threading is the
+  # fix rather than a cost — `StatementEvaluator` widens the receiver at the mutator call, so the threaded
+  # tail reads the honest `Array[…]`. The gate now also fires on a receiver of any name the widening responds
+  # to (`MutationWidening::SHAPE_MUTATORS`), through every variable the receiver can evaluate to.
+  describe "a prefix that mutates a captured collection in place" do
+    it "threads through a content adder on a captured local" do
+      # THE ISSUE'S PROBE. Before the fix this answered `[]`.
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        outer = []
+        dump_type(m.synchronize do
+          outer.push(1)
+          outer
+        end)
+      RUBY
+      expect(type).to start_with("Array[")
+      expect(type).not_to eq("[]")
+    end
+
+    it "threads through a remover, whose widening forgets the literal arity" do
+      # `pop` adds no element evidence, so the widened carrier keeps the seed's value pinning; what it must
+      # not keep is the `Tuple[1]` arity a `.empty?` fold would read as provably non-empty.
+      expect(dumped_type(<<~RUBY)).to eq("Array[1]")
+        m = Mutex.new
+        outer = [1]
+        dump_type(m.synchronize do
+          outer.pop
+          outer
+        end)
+      RUBY
+    end
+
+    it "threads through a hash store" do
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        outer = {}
+        dump_type(m.synchronize do
+          outer[:a] = 1
+          outer
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+      expect(type).not_to eq("{}")
+    end
+
+    it "threads through an adder on a selected receiver" do
+      # The issue #277 receiver shape: the mutation lands on whichever of `a` / `b` the ternary picked, so
+      # both are possible targets and a tail reading either must thread.
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        flag = [true, false].sample
+        a = []
+        b = []
+        dump_type(m.synchronize do
+          (flag ? a : b) << 1
+          a
+        end)
+      RUBY
+      expect(type).to start_with("Array[")
+    end
+
+    it "threads through an adder inside a nested block" do
+      # A block is a closure, so the nested `each`'s `<<` really does mutate the outer `outer` — the scan
+      # collects it at any depth, exactly as it collects a nested variable write.
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        outer = []
+        dump_type(m.synchronize do
+          [1].each { |e| outer << e }
+          outer
+        end)
+      RUBY
+      expect(type).to start_with("Array[")
+    end
+
+    it "threads a mutated block parameter at every per-element position" do
+      type = dumped_type(<<~RUBY)
+        dump_type([[], []].map do |a|
+          a << 1
+          a
+        end)
+      RUBY
+      expect(type).to match(/\A\[Array\[.*\], Array\[.*\]\]\z/)
+    end
+
+    it "leaves a tail reading an unmutated captured local unchanged" do
+      # The control: `b` is never mutated, so its literal is still the truth and the answer must not move.
+      expect(dumped_type(<<~RUBY)).to eq("[]")
+        m = Mutex.new
+        a = []
+        b = []
+        dump_type(m.synchronize do
+          a << 1
+          b
+        end)
+      RUBY
+    end
+
+    it "still declines on a value-carrying `next` ahead of the mutation" do
+      # The jump-decline scan is unchanged: a `next 5` ahead of the `push` still makes the fold decline, and
+      # the decline answers what master answered — the entry literal. That answer is no better than it was
+      # (the runtime value is `[1]` or `5`), but the fold's contract is to never invent a NEW answer under a
+      # jump it cannot join.
+      expect(dumped_type(<<~RUBY)).to eq("[]")
+        m = Mutex.new
+        flag = [true, false].sample
+        outer = []
+        dump_type(m.synchronize do
+          next 5 if flag
+          outer.push(1)
+          outer
+        end)
+      RUBY
+    end
+  end
+
   describe "the per-element Tuple fold's arity cap" do
     it "threads every position at the cap" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 2, 3, 4, 5, 6, 7, 8]")

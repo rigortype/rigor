@@ -60,12 +60,17 @@ Per-plugin helper service constructed by
 
 | Method | Purpose |
 | --- | --- |
-| `#read_file(path)` | Validates the absolute path against the policy, reads the bytes, and adds a `:digest` {Cache::Descriptor::FileEntry} to the boundary's accumulated entries. Raises {Rigor::Plugin::AccessDeniedError} (`reason: :read_outside_scope`) on a denied path. |
+| `#read_file(path)` | Validates the absolute path against the policy, reads the bytes, and adds a `:stat` (ADR-87 WD1) {Cache::Descriptor::FileEntry} to the boundary's accumulated entries. Raises {Rigor::Plugin::AccessDeniedError} (`reason: :read_outside_scope`) on a denied path. When the read fails because the path does not exist (`Errno::ENOENT`, or `Errno::ENOTDIR` for a parent component that is a regular file) it records an **absence row** (`FileEntry.absent`, ADR-45 WD1 / #577) and re-raises, so every cache built on the boundary's descriptor invalidates once the path appears; any other read failure (`EISDIR`, a permission error) records nothing and propagates. |
 | `#open_url(url)` | Under `:disabled` raises {Rigor::Plugin::AccessDeniedError} (`reason: :network_disabled`). Under `:allowlist` (v0.1.2) performs a GET over HTTPS when the parsed host is in `allowed_url_hosts`, enforcing a request timeout (10 s) and a response-body size cap (10 MB); raises `AccessDeniedError` with `reason:` one of `:invalid_url_scheme`, `:host_not_allowed`, `:http_error`, `:request_timeout`, `:body_too_large` on failure. |
 | `#cache_descriptor` | Returns a fresh frozen {Cache::Descriptor} with the boundary's accumulated `FileEntry` rows. Subsequent reads expand the underlying record table; each call returns a new descriptor reflecting the read history at that moment. |
 
 Per-path reads are deduplicated by absolute path; re-reading a
-file with changed content updates the entry's digest in place.
+file with changed content updates the entry's digest in place. A
+successful read replaces an earlier absence row for the same path
+(the file appeared and its bytes were consumed); an absence row
+never replaces an earlier content row (two outcomes for one path in
+one run mean the file moved under the analysis, and the content row
+is the one whose validation covers both content and existence).
 
 ### `Rigor::Plugin::AccessDeniedError`
 

@@ -97,7 +97,9 @@ boundary snapshot is taken **after** the producer block runs, so
 every read the block performs (including reads it discovers
 mid-computation) is captured — there is no "read before
 `cache_for`" ordering requirement. `#read_file(path)` records a
-`:digest` `FileEntry`; `#open_url(url)` records a `ConfigEntry`
+`:stat` `FileEntry` — or, when the path does not exist, an absence
+row (`FileEntry.absent`, ADR-45 WD1 / #577) that reads stale once the
+file appears; `#open_url(url)` records a `ConfigEntry`
 keyed `"url:#{url}"` whose `value_hash` is the response body's
 SHA-256. A `ConfigEntry` (URL read) in the dependency descriptor
 makes the entry never-fresh — a producer that fetched a URL
@@ -190,10 +192,14 @@ class MyRailsPlugin < Rigor::Plugin::Base
 end
 ```
 
-The producer's in-block `read_file` records a `:digest`
+The producer's in-block `read_file` records a `:stat`
 `FileEntry` into the dependency descriptor; if the file changes
 between runs, the recorded digest no longer matches, the entry
-is not fresh, and `cache_for` recomputes. A `watch:` glob digests
+is not fresh, and `cache_for` recomputes. A `read_file` that
+raises because the path is missing records an absence row instead
+(ADR-45 WD1, #577), so a producer that took a fallback on a missing
+file — a `:schema_table` that rescued `Errno::ENOENT` — recomputes
+once the file appears. A `watch:` glob digests
 every matching file, so adding or removing a file under the glob
 also invalidates. `producer_value(id, params:)` (ADR-60 WD4)
 runs the round-trip with a nil-inclusive memo and a

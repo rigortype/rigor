@@ -31,7 +31,10 @@ and the cache architecture in [ADR-6](6-cache-persistence-backend.md).
    controllers); **others are read on demand during per-file analysis**.
    `rigor-pundit` reads a policy file the first time it sees an
    `authorize` call, to check the policy defines the action — i.e. **after**
-   the pre-passes, mid-`analyze_files`.
+   the pre-passes, mid-`analyze_files`. And the files the plugins looked
+   for and did **not** find: a plugin that probes for `db/schema.rb` and
+   gets nothing shapes its result on the absence, a dependency of the
+   opposite sign (WD1).
 4. **The RBS environment** — `Gemfile.lock` gem set, `sig/` files, the
    `rbs` version, `target_ruby`.
 5. **Config** — `severity_profile`, `disabled_rules`, `plugins`, `paths`,
@@ -85,8 +88,8 @@ validate the recorded dependencies by re-reading them.**
   descriptor's `files` are collected **after** the run — analyzed files +
   the RBS `sig` files + every plugin's `io_boundary.cache_descriptor`
   (complete post-run, including analysis-time reads like the Pundit
-  policy). `Diagnostic` is a flat value object, so the pair is
-  `Marshal`-clean.
+  policy and — since WD1 — the paths a plugin probed and found missing).
+  `Diagnostic` is a flat value object, so the pair is `Marshal`-clean.
 - **Lookup:** `Cache::Store#fetch_or_validate` reads the entry at the
   stable key and calls `Descriptor#fresh?`, which re-digests every
   recorded `FileEntry`; **hit** only if all match (else miss → re-run →
@@ -117,6 +120,55 @@ could be masked by a hit. `make check` / `check-plugins` therefore run
 `rigor check --no-cache` — the gate always re-runs the analysis. A
 developer running `rigor check` on a real project after editing `lib/`
 should `--clear-cache` (or `--no-cache`) the same way.
+
+### WD1 (landed, #577) — absence is a dependency too
+
+The record-and-validate set as landed recorded only **successful** reads:
+`IoBoundary#read_file` added a `FileEntry` when the read returned bytes
+and nothing when it raised. A plugin that probes for a file, finds none,
+and shapes its result on the absence — rigor-activerecord's reduced mode on
+a missing `db/schema.rb` (#569) — therefore left no edge for the file's
+later appearance to invalidate: a warm run kept serving the reduced index
+and its now-false "schema not found" disclosure until some other recorded
+input moved (found in #576's review; the attribution probe showed the
+staleness class predates #576). The inverse edit — removing a file a run
+had read — was already caught, because the recorded read row reads stale
+once the file is gone. The dependency set was missing its negative half:
+*the analysis depended on X being absent*.
+
+The fix records the negative half at the same surface. A `read_file` that
+fails because the path does not exist (`Errno::ENOENT`, or `Errno::ENOTDIR`
+for a parent component that is a regular file) records an **absence row**
+— `FileEntry.absent(path:)`, the `:exists` comparator with value `"false"`
+— before re-raising. Nothing else moves: the runner's post-run dependency
+descriptor and each producer's dependency descriptor are both built from
+the boundary's `cache_descriptor.files`, so the one recording point covers
+the whole-run entry and the plugin-producer entries alike, and
+`Descriptor#fresh?` already validated `:exists` rows. An absence row
+validates by one `File.exist?` — no stat tuple, no digest, nothing that can
+drift on an unchanged tree — so it never costs a warm run its hit.
+
+Three bounds keep the recording deliberate. It fires only for the
+not-there outcome: a path that exists but cannot be read (`EISDIR`, a
+permission failure) is a failure the plugin reports, not an existence
+probe, and records nothing, as before. It fires only inside the
+trusted-read scope, because the policy check precedes the read. And within
+one boundary a content row for a path is never replaced by an absence row
+(two outcomes for one path in one run mean the file moved under the
+analysis, and the content row is the one whose validation covers both
+content and existence), while a successful read after a probe replaces the
+absence row. `SCHEMA_VERSION` 7 → 8: a pre-8 entry carries no absence rows
+and would validate fresh across exactly the edit this closes, so the marker
+discipline retires it.
+
+Gate: the rigor-activerecord warm-run fixture in
+`spec/integration/plugins/activerecord_plugin_spec.rb` — a cold schema-less
+run, `db/schema.rb` added, and the warm run re-analyzes (`unknown-column`
+fires, the disclosure retracts) with the cache on; the schema-removed
+inverse (already sound through the recorded read) and a no-churn control
+(a warm run with nothing changed is still served) sit beside it, with the
+boundary, descriptor, store and producer-cache halves pinned in their own
+unit specs.
 
 ## Consequences
 

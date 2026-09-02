@@ -352,6 +352,36 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       expect(calls).to eq(1)
     end
 
+    # ADR-45 WD1 (#577) — the producer-cache half of the absence dependency: a block that probed for a file,
+    # found none, and took its fallback has its answer invalidated once the file appears, while an unchanged
+    # tree still serves the entry.
+    it "recomputes when a file the block probed for and found MISSING appears between sessions (#577)" do
+      schema = File.join(tmpdir, "db", "schema.rb")
+
+      calls = 0
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      target = schema
+      klass.producer(:mode) do |_params|
+        calls += 1
+        io_boundary.read_file(target)
+        :full
+      rescue Errno::ENOENT
+        :reduced
+      end
+
+      expect(klass.new(services: services_with_fresh_store).cache_for(:mode, params: {}).call).to eq(:reduced)
+      # No-churn control: the absence row must not thrash — the unchanged tree is a hit.
+      expect(klass.new(services: services_with_fresh_store).cache_for(:mode, params: {}).call).to eq(:reduced)
+      expect(calls).to eq(1)
+
+      FileUtils.mkdir_p(File.dirname(schema))
+      File.write(schema, "create_table")
+      expect(klass.new(services: services_with_fresh_store).cache_for(:mode, params: {}).call).to eq(:full)
+      expect(calls).to eq(2)
+    end
+
     it "recomputes when a watch:-globbed file is ADDED between sessions (Proc form, instance state)" do
       models = File.join(tmpdir, "app", "models")
       FileUtils.mkdir_p(models)

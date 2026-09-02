@@ -2188,4 +2188,94 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(undefined.message).to include("String")
     end
   end
+
+  # #577 / ADR-45 WD1 — the run-result cache recorded only SUCCESSFUL reads, so a run that probed for
+  # `db/schema.rb`, found nothing, and cached its reduced-mode result had no dependency edge for the schema's
+  # later appearance: a warm run kept serving the reduced index and its now-false "not found" disclosure until
+  # `--no-cache`. Every example drives the real Runner against a real on-disk Store, with a FRESH Store per run
+  # so a hit has to come off disk — what the next `rigor check` process faces — and never bypasses the cache.
+  describe "warm-run cache across the appearance of `db/schema.rb` (#577)" do
+    # A typo'd column: `unknown-column` fires only while the column surface is live, i.e. only with a schema,
+    # so it is the diagnostic that tells a genuine re-analysis from a replayed reduced-mode result.
+    let(:typo_source) { "User.where(emial: 'a')\n" }
+    let(:warm_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => "class User < ApplicationRecord\nend\n"
+      }
+    end
+
+    # Returns `[result, counters]` where the counters are the run-diagnostics slot's `hits:` / `misses:` for
+    # this run — the direct read of whether the run was SERVED or RE-ANALYZED.
+    def run_warm(dir, cache_root)
+      Rigor::Plugin.unregister!
+      store = Rigor::Cache::Store.new(root: cache_root)
+      result = Dir.chdir(dir) do
+        Rigor::Analysis::Runner.new(
+          configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]),
+          cache_store: store, collect_stats: false, plugin_requirer: build_plugin_requirer
+        ).run
+      end
+      counters = store.stats.fetch(:by_producer)
+                      .fetch(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID) { { hits: 0, misses: 0 } }
+      [result, counters.slice(:hits, :misses)]
+    end
+
+    def unknown_column(result)
+      result.diagnostics.find { |d| d.rule == "unknown-column" }
+    end
+
+    def schema_disclosure(result)
+      result.diagnostics.find { |d| d.rule == "load-error" }
+    end
+
+    def with_project
+      Dir.mktmpdir do |dir|
+        Dir.mktmpdir do |cache_root|
+          materialize_files(dir, warm_models.merge("demo.rb" => typo_source))
+          yield dir, cache_root
+        end
+      end
+    end
+
+    it "re-analyzes the warm run once `db/schema.rb` is ADDED: the column check fires and the disclosure retracts" do
+      with_project do |dir, cache_root|
+        cold, = run_warm(dir, cache_root)
+        expect(unknown_column(cold)).to be_nil
+        expect(schema_disclosure(cold)&.message).to include("not found")
+
+        materialize_files(dir, "db/schema.rb" => DEFAULT_SCHEMA)
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+        expect(unknown_column(warm)).not_to be_nil
+        expect(schema_disclosure(warm)).to be_nil
+      end
+    end
+
+    it "serves the warm run from cache when nothing changed (an absence row does not thrash)" do
+      with_project do |dir, cache_root|
+        cold, cold_counters = run_warm(dir, cache_root)
+        expect(cold_counters).to eq(hits: 0, misses: 1)
+
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 1, misses: 0)
+        expect(warm.diagnostics.map { |d| [d.rule, d.line, d.message] })
+          .to eq(cold.diagnostics.map { |d| [d.rule, d.line, d.message] })
+      end
+    end
+
+    it "re-analyzes the warm run once `db/schema.rb` is REMOVED (the recorded read already covers this direction)" do
+      with_project do |dir, cache_root|
+        materialize_files(dir, "db/schema.rb" => DEFAULT_SCHEMA)
+        cold, = run_warm(dir, cache_root)
+        expect(unknown_column(cold)).not_to be_nil
+
+        File.unlink(File.join(dir, "db", "schema.rb"))
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+        expect(unknown_column(warm)).to be_nil
+        expect(schema_disclosure(warm)&.message).to include("not found")
+      end
+    end
+  end
 end

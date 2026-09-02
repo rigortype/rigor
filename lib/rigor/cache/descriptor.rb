@@ -42,7 +42,13 @@ module Rigor
       # bare `module_function`), which `finalize_def_index` folds into the singleton-side method tables. A
       # pre-7 bundle would silently contribute no extends for an unchanged file, so cached bundles must
       # read as misses once and rebuild carrying the slot.
-      SCHEMA_VERSION = 7
+      # v8: #577 / ADR-45 WD1 — a plugin {Plugin::IoBoundary} read that finds its path MISSING now records
+      # an absence row ({FileEntry.absent}: `:exists` / `"false"`) into the run-result and plugin-producer
+      # dependency descriptors, so a file that appears after a run which probed for it (a `db/schema.rb`
+      # added to a schema-less project) invalidates the warm entry. A pre-8 entry carries no absence rows
+      # and would validate fresh across exactly that edit, so cached entries must read as misses once and
+      # rebuild carrying the rows.
+      SCHEMA_VERSION = 8
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.
@@ -57,6 +63,11 @@ module Rigor
         # per-run-nondeterministic stat data); {RbsDescriptor.build}'s env-cache `files` therefore stay
         # `:digest`, while the {Runner} run-dependency descriptor and plugin {IoBoundary} reads use `:stat`.
         VALID_COMPARATORS = %i[digest stat mtime exists].freeze
+
+        # The two `:exists` values — `File.exist?`'s answer rendered with `to_s`, which is what
+        # {Descriptor#file_entry_fresh?} compares the live answer against.
+        PRESENT = "true"
+        ABSENT = "false"
 
         attr_reader :path, :comparator, :value
 
@@ -82,6 +93,20 @@ module Rigor
           return new(path: path, comparator: :digest, value: digest) if packed.nil?
 
           new(path: path, comparator: :stat, value: packed)
+        end
+
+        # ADR-45 WD1 (#577) — the absence row: fresh while `path` does not exist, stale the moment anything
+        # (a file, a directory, a symlink) comes into existence there. {Plugin::IoBoundary#read_file}
+        # records one when a read fails because the path is missing, so a value computed on "X is absent"
+        # invalidates when X appears. Validation is a single `File.exist?` — no stat tuple, no digest,
+        # nothing that can move on an unchanged tree — so an absence row never costs a warm run its hit.
+        def self.absent(path:)
+          new(path: path, comparator: :exists, value: ABSENT)
+        end
+
+        # @return [Boolean] whether this row records the path as absent (see {.absent}).
+        def absent?
+          comparator == :exists && value == ABSENT
         end
 
         def to_h
@@ -284,7 +309,8 @@ module Rigor
       # version) belong in the cache *key*, not the validated dependency set — so a descriptor carrying any
       # non-file slot is never considered fresh (it was built wrong for this use). ADR-60 WD3 adds `globs`
       # alongside `files` as a re-validatable slot: a {GlobEntry} is fresh when re-globbing + re-digesting
-      # reproduces its recorded value.
+      # reproduces its recorded value. ADR-45 WD1 (#577): an absence row ({FileEntry.absent}) is fresh
+      # while its path is still missing — the negative half of the dependency set.
       def fresh?
         return false unless gems.empty? && plugins.empty? && configs.empty? && dependencies.empty?
 

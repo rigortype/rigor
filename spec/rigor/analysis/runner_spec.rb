@@ -549,22 +549,26 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     # ADR-72 — Gemfile.lock-gated bundled RBS overlays.
-    def write_duration_project(tmpdir, lock_gem:)
-      File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+    def gemfile_lock_content(gem_name)
+      <<~LOCK
         GEM
           remote: https://rubygems.org/
           specs:
-            #{lock_gem} (7.1.3)
+            #{gem_name} (7.1.3)
 
         PLATFORMS
           ruby
 
         DEPENDENCIES
-          #{lock_gem}
+          #{gem_name}
 
         BUNDLED WITH
            2.5.6
       LOCK
+    end
+
+    def write_duration_project(tmpdir, lock_gem:)
+      File.write(File.join(tmpdir, "Gemfile.lock"), gemfile_lock_content(lock_gem))
       File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
         ttl  = 3.minutes
         miss = 5.minuets
@@ -613,51 +617,41 @@ RSpec.describe Rigor::Analysis::Runner do
     # the `data/gem_overlay/activesupport/` directory (`CheckRules#gem_overlay_loaded?`) — which this test's
     # Gemfile.lock (below) makes true. The must-NOT-protect sibling right after this one locks NO gem at
     # all and shows the same class name getting NO exemption without that.
+    def run_duration_reader_project(tmpdir)
+      FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+      File.write(File.join(tmpdir, "Gemfile.lock"), gemfile_lock_content("activesupport"))
+      File.write(File.join(tmpdir, "widget.rb"), "class Widget\nend\n")
+      File.write(File.join(tmpdir, "sig", "widget.rbs"), <<~RBS)
+        class Widget
+          def ttl: () -> ActiveSupport::Duration
+        end
+      RBS
+      File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
+        Rigor.dump_type(Widget.new.ttl.to_i)
+        Widget.new.ttl.round
+      RUBY
+
+      Dir.chdir(tmpdir) do
+        configuration = Rigor::Configuration.new(
+          "paths" => [File.join(tmpdir, "widget.rb"), File.join(tmpdir, "code.rb")],
+          "signature_paths" => [File.join(tmpdir, "sig")],
+          "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
+        )
+        described_class.new(configuration: configuration, cache_store: nil).run.diagnostics
+      end
+    end
+
     it "protects Duration's undeclared surface even with only the overlay loaded, no plugin at all" do
       Dir.mktmpdir("rigor-as-overlay-duration-") do |tmpdir|
-        FileUtils.mkdir_p(File.join(tmpdir, "sig"))
-        File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
-          GEM
-            remote: https://rubygems.org/
-            specs:
-              activesupport (7.1.3)
+        diagnostics = run_duration_reader_project(tmpdir)
+        undefined = diagnostics.select { |d| d.rule == "call.undefined-method" }
+        dumps = diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
 
-          PLATFORMS
-            ruby
-
-          DEPENDENCIES
-            activesupport
-
-          BUNDLED WITH
-             2.5.6
-        LOCK
-        File.write(File.join(tmpdir, "widget.rb"), "class Widget\nend\n")
-        File.write(File.join(tmpdir, "sig", "widget.rbs"), <<~RBS)
-          class Widget
-            def ttl: () -> ActiveSupport::Duration
-          end
-        RBS
-        File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
-          Rigor.dump_type(Widget.new.ttl.to_i)
-          Widget.new.ttl.round
-        RUBY
-
-        Dir.chdir(tmpdir) do
-          configuration = Rigor::Configuration.new(
-            "paths" => [File.join(tmpdir, "widget.rb"), File.join(tmpdir, "code.rb")],
-            "signature_paths" => [File.join(tmpdir, "sig")],
-            "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
-          )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
-          undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
-          dumps = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
-
-          # `to_i` is declared, so it resolves to Integer; `round` is not (real Duration API,
-          # `method_missing`-forwarded to the wrapped numeric on the real class) and must not fire
-          # `call.undefined-method` regardless.
-          expect(dumps).to eq(["dump_type: Integer"])
-          expect(undefined).to be_empty
-        end
+        # `to_i` is declared, so it resolves to Integer; `round` is not (real Duration API,
+        # `method_missing`-forwarded to the wrapped numeric on the real class) and must not fire
+        # `call.undefined-method` regardless.
+        expect(dumps).to eq(["dump_type: Integer"])
+        expect(undefined).to be_empty
       end
     end
 

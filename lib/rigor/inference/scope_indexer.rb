@@ -1628,11 +1628,12 @@ module Rigor
         when Prism::ConstantWriteNode
           if meta_new_block_body(node)
             child_prefix = qualified_prefix + [node.name.to_s]
+            record_meta_members(node.value, child_prefix, methods_acc)
             walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc,
                                        source_path)
-            # No anonymous registration here: the constant IS the name, and `StatementEvaluator` never routes a
-            # constant-write rvalue through the block-body narrowing (its scope index still shows `self` as
-            # `Dynamic[top]` inside such a body), so the two passes agree on the constant name alone.
+            # No anonymous registration here: the constant IS the name, and `StatementEvaluator#eval_constant_write`
+            # enters the body under it (#590) by asking THIS recognition (`meta_new_block_body`), so the two passes
+            # agree on the constant name alone.
             return
           end
         when Prism::DefNode
@@ -1686,6 +1687,7 @@ module Rigor
       # synthetic anonymous `name`; the call's other children (receiver, arguments) keep the enclosing prefix.
       def walk_anonymous_meta_block(call_node, name, qualified_prefix, in_singleton_class, methods_acc,
                                     def_nodes_acc, source_path)
+        record_meta_members(call_node, [name], methods_acc)
         call_node.rigor_each_child do |child|
           if child.equal?(call_node.block)
             body = call_node.block.body
@@ -1762,13 +1764,22 @@ module Rigor
       # the subclass that no `def` / `attr_*` declares. Register them in the discovered-methods existence table so an
       # implicit-self read of a member inside the class body is known to exist — both for the existing undefined-method
       # suppression and for the ADR-24 slice-4 self-call recorder, which must treat a synthesized member as an existing
-      # method, not an unresolved call. The block-form (`Const = Data.define(:a) do ... end`) is handled by the
-      # `ConstantWriteNode` branch's block recursion; its members type `self` as `Object`, out of scope here.
+      # method, not an unresolved call.
       def record_meta_superclass_members(class_node, qualified_prefix, accumulator)
-        superclass = class_node.superclass
-        return unless data_define_call?(superclass) || struct_new_call?(superclass)
+        record_meta_members(class_node.superclass, qualified_prefix, accumulator)
+      end
 
-        members = meta_member_names(superclass)
+      # The registration itself, shared with the two BLOCK forms — `Const = Struct.new(:a) do … end` from the
+      # `ConstantWriteNode` branch and the anonymous `Struct.new(:a) do … end` from {#walk_anonymous_meta_block}
+      # (#590). Their bodies are entered as class bodies, so a member read inside one dispatches on the struct's
+      # own class and must find the reader there: a member that shadows a `Kernel` private (`lambda`) otherwise
+      # falls through to `Kernel#lambda`, and `lambda.upcase` reports an undefined method on `Proc` — a wrong-type
+      # diagnostic on correct code. No-op for `Class.new` / `Module.new` and for a factory whose members are not
+      # literal Symbols (nothing to register).
+      def record_meta_members(factory_call, qualified_prefix, accumulator)
+        return unless data_define_call?(factory_call) || struct_new_call?(factory_call)
+
+        members = meta_member_names(factory_call)
         return if members.empty?
 
         class_name = qualified_prefix.join("::")
@@ -1776,8 +1787,9 @@ module Rigor
       end
 
       # The Symbol member names of a `Data.define(*Symbol)` / `Struct.new(*Symbol [, keyword_init:])` call. For
-      # `Struct.new` the optional leading String name and trailing `keyword_init:` hash are stripped by
-      # {#struct_new_positionals}; `Data.define` args are all Symbols already.
+      # `Struct.new` the trailing `keyword_init:` hash is stripped by {#struct_new_positionals}; a leading
+      # String class name is NOT stripped, so `Struct.new("Name", :a) do` registers no members and the body
+      # is entered under the anonymous name (consistent between passes). `Data.define` args are all Symbols.
       def meta_member_names(call_node)
         raw = call_node.arguments&.arguments || []
         symbols = struct_new_call?(call_node) ? (struct_new_positionals(raw) || []) : raw

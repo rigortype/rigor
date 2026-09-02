@@ -200,19 +200,24 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
 
     # `at_beginning_of_week` / `at_end_of_week` are `alias`es of `beginning_of_week` / `end_of_week`, so
-    # they take the same optional `start_day`. Declared zero-arity, the second and third lines drew an
-    # arity diagnostic on correct Rails code — an FP the #658 audit turned up in rows that were already
-    # here rather than in the missing ones.
-    it "takes the optional start_day on the at_-prefixed week aliases" do
+    # they take the same optional `start_day`. Declared zero-arity, the second and third lines below were
+    # `call.wrong-arity` on correct Rails code — an FP the #658 audit turned up in rows that were already
+    # here rather than in the missing ones. The last line is the must-still-fire half: a genuinely
+    # over-applied zero-arity method still reports, so this is not the receiver going lenient.
+    it "takes the optional start_day on the at_-prefixed week aliases, and still catches a real overrun" do
       source = <<~RUBY
         t = Time.current
         Rigor.dump_type(t.at_beginning_of_week)
         Rigor.dump_type(t.at_beginning_of_week(:sunday))
         Rigor.dump_type(t.at_end_of_week(:sunday))
+        t.beginning_of_day(1, 2)
       RUBY
       result = run_plugin(source: source)
+      arity = result.diagnostics.select { |d| d.qualified_rule == "call.wrong-arity" }
 
-      expect(result.diagnostics.map(&:qualified_rule)).not_to include("call.argument-type", "call.arity")
+      expect(arity.map(&:message)).to eq(
+        ["wrong number of arguments to `beginning_of_day' on Time (given 2, expected 0)"]
+      )
       expect(dumps(result)).to eq(["dump_type: Time"] * 3)
     end
 

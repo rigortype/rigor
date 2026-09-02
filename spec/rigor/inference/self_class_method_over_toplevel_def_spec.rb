@@ -65,6 +65,29 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  # The issue's own repro shape. It needs both halves: #619 enters the constant-assigned block as the
+  # class's body (so the call has a `self_type` at all, keyed by the constant) and registers the members as
+  # discovered readers; the veto here is what stops the top-level `def text` being consulted ahead of them.
+  it "reads a struct member inside a `Const = Struct.new(...) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Line = Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a Data member inside a `Const = Data.define(...) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Pt = Data.define(:text) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
   it "reads a struct member declared by the constant spelling and reopened" do
     expect(upcase_errors(<<~RUBY)).to be_empty
       Point = Struct.new(:text)

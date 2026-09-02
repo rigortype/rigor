@@ -355,6 +355,118 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
   end
 
+  # Issue #622 — the constant half of the structural tier. A receiver constant that resolves to NOTHING types
+  # `Dynamic[top]` and short-circuits *before* the method lookup, so `read_missing(:method, …)` never fired and
+  # the read left no edge at all: declaring the constant later never re-checked its readers, and a warm session
+  # kept serving the pre-declaration answer. `ExpressionTyper#unresolved_constant_fallback` now records the
+  # `class:Name` negative edge that `Incremental.appeared_classes` inverts.
+  describe "negative (unresolved-constant) dependencies" do
+    it "re-checks a reader of an unresolved constant when an edit declares it" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "Rails.logger.info(\"x\")\n")
+        File.write(b, "class Placeholder\nend\n")
+
+        session = session_for(configuration(dir))
+        baseline = session.baseline
+        # Baseline: nothing declares `Rails`, so the receiver is Dynamic[top] and nothing fires.
+        expect(baseline.map(&:rule)).not_to include("call.undefined-method")
+
+        # Declare `Rails` in b.rb — `Rails.logger` now answers `:sym`, which has no `info`.
+        File.write(b, "module Rails\n  def self.logger\n    :sym\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(sorted(recheck.diagnostics).map { |h| h["rule"] }).to include("call.undefined-method")
+      end
+    end
+
+    it "re-checks a reader of an unresolved qualified constant when a new file declares it" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "Rails::Config.logger.info(\"x\")\n")
+
+        session = session_for(configuration(dir))
+        baseline = session.baseline
+        expect(baseline.map(&:rule)).not_to include("call.undefined-method")
+
+        # The added file declares the path's LAST segment as a nested class — `appeared_classes` reports it
+        # qualified (`Rails::Config`) and `negative_affected` matches it by simple name.
+        File.write(File.join(dir, "b.rb"),
+                   "module Rails\n  class Config\n    def self.logger\n      :sym\n    end\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(sorted(recheck.diagnostics).map { |h| h["rule"] }).to include("call.undefined-method")
+      end
+    end
+
+    # The last segment is the whole key, which rests on every cross-file-resolvable constant form appearing
+    # in the pre-pass's class sources. The constant-assigned `Data.define` form is the one that looks like a
+    # value assignment and is not, so it is the case that would silently fall out of the key.
+    it "re-checks a reader of a constant-assigned Data class when a new file declares it" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "Rigor.dump_type(Point.new(1, 2))\n")
+
+        session = session_for(configuration(dir))
+        baseline = session.baseline
+        expect(baseline.map(&:message)).to include(a_string_including("Dynamic[top]"))
+
+        File.write(File.join(dir, "b.rb"), "Point = Data.define(:x, :y)\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(recheck.diagnostics.map(&:message)).to include(a_string_including("Point(x: 1, y: 2)"))
+      end
+    end
+
+    it "does not re-check a constant reader when an unrelated class appears" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "Rails.logger.info(\"x\")\n")
+        File.write(b, "class Placeholder\nend\n")
+
+        session = session_for(configuration(dir))
+        session.baseline
+        # a.rb missed `Rails`, not `Unrelated` — the appeared class must not widen the closure to it.
+        File.write(b, "class Placeholder\nend\n\nmodule Unrelated\n  def self.thing\n    1\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).not_to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "re-checks a top-level constant reader when a NESTED class of the same simple name appears" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "Rails.logger.info(\"x\")\n")
+        File.write(b, "class Placeholder\nend\n")
+
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # `MyApp::Rails` cannot satisfy a.rb's top-level `Rails` read (a.rb is outside `MyApp`), but the class
+        # negatives are matched by SIMPLE name — the grammar `CheckRules`'s override-ancestor negatives already
+        # use — so this re-checks a.rb needlessly. Pinned deliberately: over-invalidation is the sound
+        # direction, and the merged diagnostics still equal a full run (the read stays unresolved).
+        File.write(b, "module MyApp\n  module Rails\n    def self.logger\n      :sym\n    end\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(sorted(recheck.diagnostics).map { |h| h["rule"] }).not_to include("call.undefined-method")
+      end
+    end
+  end
+
   # ADR-88 WD3 — `Scope#user_def_site_for` now records the cross-file method edge the sibling `#user_def_for`
   # records, so a caller whose `call.undefined-method` names a project monkey-patch's definition site
   # (`project_definition_site`, a `"path:line"` embedded in the message) re-checks when that site MOVES. A

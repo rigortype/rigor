@@ -450,6 +450,7 @@ module Rigor
       # `Dynamic[top]`, and an unindexed constant (project typo, unanalyzed project path) keeps the generic
       # cause: the fail-open direction is a missing label, never a wrong one.
       def unresolved_constant_fallback(node, full_name)
+        record_missing_constant(full_name) if Analysis::DependencyRecorder.active?
         root = full_name.delete_prefix("::").split("::").first
         owner = root && scope.environment.missing_rbs_gem_owner(root)
         return fallback_for(node, family: :prism) unless owner
@@ -458,6 +459,38 @@ module Rigor
         record_fallback(node, family: :prism, inner_type: inner, origin: DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
         scope.record_dynamic_origin(node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
         inner
+      end
+
+      # ADR-46 slice 3 / issue #622 — a constant reference that resolved to NOTHING is a negative cross-file
+      # dependency: a file declaring that constant later must re-check every file that read it as missing.
+      # Without this edge the structural tier had no record of the read at all — `read_missing(:method, …)`
+      # fires only once the receiver constant has RESOLVED and the method lookup misses, so a missing
+      # constant short-circuited before any edge existed, and a warm `--incremental` run kept
+      # `Rails.logger`'s `Dynamic[top]` (and missed the `call.undefined-method` a full run fires) after a
+      # later edit added `module Rails`.
+      #
+      # Reuses the existing `class:Name` negative kind (`CheckRules`'s override-ancestor miss records the
+      # same one) rather than adding a `constant:` kind, because the producer that has to invert it already
+      # exists: `Incremental.appeared_classes` reports a newly declared class / module by its QUALIFIED name
+      # and `negative_affected` matches it by simple (last-segment) name. The snapshot row grammar is
+      # therefore unchanged — no `IncrementalSnapshot::SCHEMA` bump — and a snapshot recorded by an engine
+      # without this edge is already dropped by the fingerprint's engine-source part.
+      #
+      # The LAST segment is the whole key, and one row per reference is the whole cost: a qualified read
+      # resolves only once its final segment is declared, and every constant form that resolves cross-file —
+      # a `class` / `module`, and the constant-assigned `Data.define` / `Struct.new` forms — registers in the
+      # discovery pre-pass's class sources under its qualified name, so its final segment always appears.
+      # (A plain value constant, `FOO = 1` or a `VERSION` nested in a module, resolves in NO cross-file read
+      # today, so there is nothing for a root-segment or a `constant:` key to salvage; if that changes, the
+      # answer is a producer that reports appeared value constants, not a wider key here.) Simple-name
+      # matching over-invalidates — a nested `MyApp::Rails` also re-checks a reader of the top-level `Rails`
+      # — which is the sound direction and the grammar the class negatives already use. Consumers hold
+      # `missing` as a Set, so a name repeated across a file still costs one row.
+      def record_missing_constant(full_name)
+        segments = full_name.delete_prefix("::").split("::")
+        return if segments.empty?
+
+        Analysis::DependencyRecorder.read_missing(:class, segments.last)
       end
 
       # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared

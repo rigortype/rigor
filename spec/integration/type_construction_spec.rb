@@ -391,9 +391,15 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(mismatches).to be_empty
     end
 
-    it "leaves no unresolved-constant or undefined-method fallout on the narrowed receivers" do
-      ids = harness.errors.map(&:rule_id).uniq
-      expect(ids).to be_empty
+    # Guards the assertion above against going quiet: it fails vacuously the moment the
+    # fixture stops asserting. Every `assert_type` line MUST still be present and MUST
+    # still be the one the resolution rule decides.
+    it "still asserts one narrowed type per guard shape" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(7)
+    end
+
+    it "leaves no other diagnostic on the narrowed receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
     end
   end
 

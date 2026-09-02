@@ -39,7 +39,11 @@ module Rigor
         id: "activejob",
         # Bumped — publishes `:reachability_roots` for `rigor unused` (ADR-102 WD3): the jobs Solid Queue's
         # recurring schedule runs by name, which no `perform_later` call site writes down.
-        version: "0.2.0",
+        #
+        # Bumped 2026-09-02 (#621) — job keys are de-rooted at the producer and a reopened class's
+        # `#perform` envelope is merged rather than clobbered, so a cached 0.2.0 index can carry the
+        # any-arity row the merge replaces (and miss a schedule's reachability root under a rooted name).
+        version: "0.3.0",
         description: "Validates ActiveJob `Job.perform_later` argument arity.",
         config_schema: {
           "job_search_paths" => { kind: :array, default: ["app/jobs"] },

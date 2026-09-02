@@ -247,6 +247,66 @@ class Float
 end
 
 # ---------------------------------------------------------------
+# ActiveSupport::Duration — issue #632
+# ---------------------------------------------------------------
+
+# Declaring this class at all is normally the wrong move: `Duration` forwards any method its own class
+# doesn't define to the wrapped numeric via `method_missing` (audited against ActiveSupport 8.1.3.1's
+# `lib/active_support/duration.rb`), so an incomplete declaration would turn every omitted member into a
+# false `call.undefined-method` for every project that locks activesupport. It is safe here only because
+# `ActiveSupport::Duration` is listed in `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`
+# (`lib/rigor/analysis/check_rules.rb`) — an always-on open-receiver membership for exactly this bundle,
+# since this overlay has no plugin manifest of its own for an ADR-26 `open_receivers:` entry to live on.
+# What follows is the reader surface, mirroring `rigor-activesupport-core-ext/sig/active_support/core_ext.rbs`
+# (parity enforced by `spec/rigor/environment/activesupport_overlay_parity_spec.rb`); every method not
+# listed here stays undeclared and silently `Dynamic` rather than guessed.
+module ActiveSupport
+  class Duration
+    # `since`/`from_now`/`after` and `ago`/`until`/`before` default to `time = ::Time.current`, declared
+    # `() -> Time` above (no `ActiveSupport::TimeWithZone` anywhere in this bundle), so the zero-arg
+    # overload matches. An explicit `time:` argument declines to `untyped` on both ends — the runtime
+    # return depends on the argument's own class AND on whether this duration carries a date-scale part,
+    # which a plain RBS overload cannot express without guessing.
+    def ago: () -> Time
+           | (untyped) -> untyped
+    def until: () -> Time
+             | (untyped) -> untyped
+    def before: () -> Time
+              | (untyped) -> untyped
+    def since: () -> Time
+             | (untyped) -> untyped
+    def from_now: () -> Time
+                | (untyped) -> untyped
+    def after: () -> Time
+             | (untyped) -> untyped
+
+    # `to_i` / its `in_seconds` alias return `@value.to_i` — always Integer.
+    def to_i: () -> Integer
+    def in_seconds: () -> Integer
+
+    # `to_f` — always Float.
+    def to_f: () -> Float
+
+    # `in_minutes` / `in_hours` / `in_days` / `in_weeks` / `in_months` / `in_years` — each
+    # `in_seconds / SECONDS_PER_*.to_f`, always Float.
+    def in_minutes: () -> Float
+    def in_hours: () -> Float
+    def in_days: () -> Float
+    def in_weeks: () -> Float
+    def in_months: () -> Float
+    def in_years: () -> Float
+
+    # Always a String.
+    def iso8601: (?precision: Integer?) -> String
+
+    # A `dup` of the internal parts hash — Integer-valued for a duration built from Integer multipliers;
+    # a fractional multiplier (`1.5.seconds`) can carry a Float `:seconds` entry, a precision loss this
+    # declaration accepts per #632.
+    def parts: () -> Hash[Symbol, Integer]
+  end
+end
+
+# ---------------------------------------------------------------
 # Time — singleton + instance extensions
 # ---------------------------------------------------------------
 

@@ -924,16 +924,36 @@ module Rigor
           nil
         end
 
+        # ADR-26 companion, issue #632 — classes Rigor's own BUNDLED overlay RBS (`data/gem_overlay/`,
+        # ADR-72) declares knowing the declaration is partial. `open_receivers:` (below) only takes effect
+        # when a project loads the plugin that names it, but a gem overlay is auto-applied to every project
+        # that locks the gem WITHOUT opting into a plugin — there is no manifest in that path for an
+        # `open_receivers:` entry to live on. This is that path's open-receiver membership: a plain constant,
+        # not a loaded-plugin lookup, so it protects a receiver whether the class reached the RBS environment
+        # through the overlay or through the plugin that mirrors it.
+        #
+        # `ActiveSupport::Duration` is the first (and, as of #632, only) member: it forwards any method its
+        # own class doesn't define to the wrapped numeric via `method_missing` (audited against
+        # ActiveSupport 8.1.3.1's `lib/active_support/duration.rb` — see
+        # `data/gem_overlay/activesupport/core_ext.rbs`'s `ActiveSupport::Duration` comment for the full
+        # audit), so declaring even its reader surface makes it RBS-known — and, without this, every member
+        # the declaration omits would become a false `call.undefined-method` for every project that locks
+        # activesupport, the overwhelming majority of which never opt into the plugin at all.
+        GEM_OVERLAY_OPEN_RECEIVERS = Set["ActiveSupport::Duration"].freeze
+        private_constant :GEM_OVERLAY_OPEN_RECEIVERS
+
         # ADR-26 — whether `class_name` is declared "open" by a
         # loaded plugin (manifest `open_receivers:`). An open
         # class responds beyond its RBS surface, so the
         # `call.undefined-method` rule must not fire for it.
         # True when the receiver class responds beyond an enumerable
         # RBS method table, so proving a call "undefined" against it is
-        # unsound: a plugin-declared open receiver, or a Rigor-
-        # synthesized stub type (see `RbsLoader#synthesized_type_names`).
+        # unsound: a plugin-declared open receiver, a Rigor-bundled-
+        # overlay open receiver ({GEM_OVERLAY_OPEN_RECEIVERS}), or a
+        # Rigor-synthesized stub type (see `RbsLoader#synthesized_type_names`).
         def unbounded_receiver_surface?(class_name, scope)
-          open_receiver?(class_name, scope) || synthesized_stub_receiver?(class_name, scope)
+          open_receiver?(class_name, scope) || synthesized_stub_receiver?(class_name, scope) ||
+            GEM_OVERLAY_OPEN_RECEIVERS.include?(class_name.to_s.sub(/\A::/, ""))
         end
 
         def open_receiver?(class_name, scope)

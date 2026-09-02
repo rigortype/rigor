@@ -600,6 +600,65 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # Issue #632 — the overlay now names `ActiveSupport::Duration` too (its reader surface: `ago`, `to_i`,
+    # …), which is normally unsafe: `Duration` forwards anything its own class doesn't define to the
+    # wrapped numeric via `method_missing`, so a partial declaration would turn every omitted member into a
+    # false `call.undefined-method`. It stays safe here specifically because NO plugin is loaded in this
+    # test — the numeric-multiplier chain (`3.minutes`) never reaches a `Duration` nominal in overlay-only
+    # mode (that requires the plugin's `dynamic_return` rule, #534) — so the receiver here comes from the
+    # project's OWN signature instead, the same way any third-party value with no in-repo `.rb` definition
+    # would. `ActiveRecord::Relation`'s `open_receivers:` protection is a loaded PLUGIN's manifest entry,
+    # which does not exist in this test at all; what protects `Widget.new.ttl.round` here is
+    # `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS` — an always-on membership the bundled
+    # overlay gets independent of plugin state.
+    it "protects Duration's undeclared surface even with only the overlay loaded, no plugin at all" do
+      Dir.mktmpdir("rigor-as-overlay-duration-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+        File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+          GEM
+            remote: https://rubygems.org/
+            specs:
+              activesupport (7.1.3)
+
+          PLATFORMS
+            ruby
+
+          DEPENDENCIES
+            activesupport
+
+          BUNDLED WITH
+             2.5.6
+        LOCK
+        File.write(File.join(tmpdir, "widget.rb"), "class Widget\nend\n")
+        File.write(File.join(tmpdir, "sig", "widget.rbs"), <<~RBS)
+          class Widget
+            def ttl: () -> ActiveSupport::Duration
+          end
+        RBS
+        File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
+          Rigor.dump_type(Widget.new.ttl.to_i)
+          Widget.new.ttl.round
+        RUBY
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(tmpdir, "widget.rb"), File.join(tmpdir, "code.rb")],
+            "signature_paths" => [File.join(tmpdir, "sig")],
+            "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+          dumps = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+
+          # `to_i` is declared, so it resolves to Integer; `round` is not (real Duration API,
+          # `method_missing`-forwarded to the wrapped numeric on the real class) and must not fire
+          # `call.undefined-method` regardless.
+          expect(dumps).to eq(["dump_type: Integer"])
+          expect(undefined).to be_empty
+        end
+      end
+    end
+
     it "emits `rbs.coverage.synthesized-namespace` :info when project RBS omits its namespace" do
       Dir.mktmpdir("rigor-synth-namespace-") do |tmpdir|
         FileUtils.mkdir_p(File.join(tmpdir, "sig"))

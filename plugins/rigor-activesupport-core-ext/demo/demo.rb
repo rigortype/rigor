@@ -10,6 +10,14 @@
 7.days
 2.5.hours
 
+# Duration readers (issue #632)
+30.minutes.ago                # => Time
+1.day.since                   # => Time
+1.day.to_i                    # => Integer
+3.hours.in_minutes            # => Float
+1.week.iso8601                # => String
+2.days.parts                  # => Hash[Symbol, Integer]
+
 # Bytes multipliers
 10.megabytes
 2.gigabytes

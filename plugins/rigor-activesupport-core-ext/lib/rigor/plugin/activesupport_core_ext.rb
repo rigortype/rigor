@@ -16,6 +16,22 @@ module Rigor
     # `5.minutes` an `ActiveSupport::Duration` nominal and keep the arithmetic around it honest. They
     # cannot live in the RBS bundle; see the comment on that constant for why.
     #
+    # Issue #632 — `sig/active_support/core_ext.rbs` now ALSO declares `ActiveSupport::Duration` itself
+    # (the reader surface: `ago`/`until`/`since`/`from_now`/`before`/`after`, `to_i`/`in_seconds`, `to_f`,
+    # `in_minutes`/`in_hours`/`in_days`/`in_weeks`/`in_months`/`in_years`, `iso8601`, `parts`), which is
+    # what lets `30.minutes.ago.iso8601` / `1.day.to_i * 2` resolve past the first reader. That is new: the
+    # multiplier fix above went out of its way NOT to name the class (naming it makes it RBS-known, and a
+    # known class with an incomplete signature turns every member the declaration omits into a false
+    # `call.undefined-method` — Duration forwards everything else to the wrapped numeric via
+    # `method_missing`). Declaring it now is safe because `ActiveSupport::Duration` is protected TWICE:
+    # this manifest's own `open_receivers:` (ADR-26, below — the mechanism `rigor-activerecord` uses for
+    # `ActiveRecord::Relation`) covers the plugin-loaded path, and
+    # `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS` covers the auto-applied
+    # `data/gem_overlay/activesupport/core_ext.rbs` twin (issue #449's overlay-has-no-manifest gap — see that
+    # constant's comment). Either alone would keep `call.undefined-method` from ever firing against a
+    # Duration receiver; both exist because a plugin manifest cannot protect a receiver an unrelated,
+    # manifest-less RBS file also declares.
+    #
     # Activate it like any plugin — no path, no vendoring:
     #
     #   # .rigor.yml
@@ -26,12 +42,20 @@ module Rigor
     class ActivesupportCoreExt < Rigor::Plugin::Base
       manifest(
         id: "activesupport-core-ext",
-        # Bumped 2026-09-01 (#534 item 3) — the Duration multipliers return `ActiveSupport::Duration`
-        # instead of the RBS bundle's `untyped`, and Duration arithmetic keeps its receiver's type.
-        version: "0.3.0",
+        # Bumped 2026-09-02 (#632) — `ActiveSupport::Duration`'s reader surface (`ago`/`to_i`/`iso8601`/…)
+        # is now declared, open_receivers-protected; see the class comment above.
+        version: "0.4.0",
         description: "RBS bundle for the most-frequently-flagged ActiveSupport core_ext extensions, " \
-                     "plus the `ActiveSupport::Duration` type of the numeric time multipliers.",
+                     "plus the `ActiveSupport::Duration` type of the numeric time multipliers and its " \
+                     "reader surface.",
         signature_paths: ["sig"],
+        # ADR-26 — `ActiveSupport::Duration` forwards any method its own class doesn't define to the
+        # wrapped numeric via `method_missing` (audited against ActiveSupport 8.1.3.1's
+        # `lib/active_support/duration.rb`), so `sig/`'s necessarily-partial declaration of it must not let
+        # `call.undefined-method` fire against it. Distinct from the RECEIVER-side FP the multiplier
+        # `dynamic_return` gate guards (`Time#day` vs `Duration#day`, in the class comment above) — this is
+        # the class's OWN unenumerable member set.
+        open_receivers: ["ActiveSupport::Duration"],
         # ADR-103 WD10 (#387) — the IMPURE half of ActiveSupport: the clock, the notification bus and
         # `CurrentAttributes`. The `%a{pure}` sweep over the predicate surface is issue #388 and lands in
         # `sig/`, not here. See {Effects}.

@@ -22,6 +22,10 @@ require "rigor/rbs_extended/envelope_scanner"
 # from the RBS (or never annotated) fails `#has every annotated method`, and a name added here without
 # the RBS actually carrying `%a{pure}` fails `#carries no extra annotations`.
 CORE_EXT_PURE_KEYS = %w[
+  ActiveSupport::Duration#in_days ActiveSupport::Duration#in_hours ActiveSupport::Duration#in_minutes
+  ActiveSupport::Duration#in_months ActiveSupport::Duration#in_seconds ActiveSupport::Duration#in_weeks
+  ActiveSupport::Duration#in_years ActiveSupport::Duration#iso8601 ActiveSupport::Duration#parts
+  ActiveSupport::Duration#to_f ActiveSupport::Duration#to_i
   Array#compact_blank Array#exclude? Array#fifth Array#forty_two Array#fourth Array#from
   Array#in_groups Array#in_groups_of Array#inquiry Array#second Array#split Array#third Array#to
   Array.wrap
@@ -68,6 +72,8 @@ CORE_EXT_PURE_KEYS = %w[
 # diverges by class (`Time#ago` is pure, `Date#ago` is not; `Time#beginning_of_day` is pure,
 # `Date#beginning_of_day` is not) — the exact shape a careless class-wide annotation would get wrong.
 CORE_EXT_NOT_PURE_KEYS = %w[
+  ActiveSupport::Duration#ago ActiveSupport::Duration#until ActiveSupport::Duration#before
+  ActiveSupport::Duration#since ActiveSupport::Duration#from_now ActiveSupport::Duration#after
   Object#as_json Object#try Object#try!
   String#constantize String#safe_constantize String#parameterize
   String#squish! String#remove! String#indent!

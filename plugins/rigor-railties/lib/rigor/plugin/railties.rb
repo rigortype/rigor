@@ -46,9 +46,9 @@ module Rigor
     # `configuration` / `application` (ADR-52 WD1 compiles the `methods:` gate into the registry), and the
     # block declines on the first check for anything whose receiver is not the `Rails` constant. The reader
     # gate ({#project_defined_reader?}) runs only after that syntactic gate passes, so it is confined to
-    # `Rails.`-shaped sites. It runs for BOTH spellings; what `::Rails` skips is only the `Scope#type_of`
-    # half, because the root-qualified name is answered directly ({#resolved_rails_constant_name}) — the
-    # `discovered_methods` hash read happens either way.
+    # `Rails.`-shaped sites. It runs identically for both spellings — bare `Rails` and root-qualified
+    # `::Rails` both resolve through `Scope#type_of` ({#resolved_rails_constant_name}), which the engine's
+    # own rooted constant resolution (#614) answers correctly on its own.
     class Railties < Rigor::Plugin::Base
       manifest(
         id: "railties",
@@ -148,14 +148,13 @@ module Rigor
       private
 
       # True for the `Rails` constant written as a receiver — `Rails.logger` (`ConstantReadNode`) and
-      # `::Rails.logger` (a `ConstantPathNode` with no parent). A nested `Foo::Rails` is deliberately NOT
-      # matched: it is a different constant, and matching it would type someone else's `logger`.
+      # `::Rails.logger` (a root-qualified `ConstantPathNode`). A nested `Foo::Rails` or `::Foo::Rails` is
+      # deliberately NOT matched: it is a different constant, and matching it would type someone else's
+      # `logger`. `Source::ConstantPath.qualified_name_or_nil` already renders both accepted spellings down
+      # to the bare `"Rails"` string, and any multi-segment path down to its full dotted name, so the single
+      # equality check below is the whole gate (#626).
       def rails_constant_receiver?(receiver)
-        case receiver
-        when Prism::ConstantReadNode then receiver.name == :Rails
-        when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Rails
-        else false
-        end
+        Rigor::Source::ConstantPath.qualified_name_or_nil(receiver) == "Rails"
       end
 
       # #588 — the syntactic gate cannot tell the framework's `Rails` from a `Rails` the project declares
@@ -186,19 +185,17 @@ module Rigor
       # project declares (the ordinary case: the framework's `Rails` is unresolved without a Rails RBS, so
       # it types `Dynamic` and no name comes back).
       #
-      # `::Rails` is answered directly rather than through the engine. Ruby resolves a root-qualified
-      # constant at top level whatever the lexical nesting is, but `Source::ConstantPath.qualified_name_or_nil`
-      # renders a parent-less `ConstantPathNode` as the bare `"Rails"` (lib/rigor/source/constant_path.rb),
-      # so `Scope#type_of` then walks it LEXICALLY and answers `MyApp::Rails` for a `::Rails` written inside
-      # `module MyApp`. That engine bug is older than this gate and belongs to the engine; consulting the
-      # top-level name here keeps the plugin from inheriting it and typing `::Rails.logger` as a nested
-      # module's reader. A bare `Rails` goes through `Scope#type_of` precisely so that Ruby's lexical walk
-      # — `Module.nesting` innermost-first, then project ancestors, then top level
-      # ({Rigor::Reflection.resolve_constant_type}) — is the engine's single implementation and not a second
-      # one here.
+      # Both spellings go through `Scope#type_of` — Ruby's lexical walk, `Module.nesting` innermost-first,
+      # then project ancestors, then top level ({Rigor::Reflection.resolve_constant_type}) — which is the
+      # engine's single implementation and not a second one here. A root-qualified `::Rails` used to be
+      # answered directly, bypassing the engine: `Source::ConstantPath.qualified_name_or_nil` renders a
+      # parent-less `ConstantPathNode` as the bare `"Rails"`, and before #614 `Scope#type_of` had no way to
+      # tell that path was rooted, so it walked LEXICALLY and answered `MyApp::Rails` for a `::Rails` written
+      # inside `module MyApp`. #614 taught the engine to carry rootedness alongside the name
+      # (`Reflection.resolve_constant_type(name, scope:, rooted:)`), so `::Rails` now resolves to the
+      # top-level constant through the very same call, and this method no longer needs its own copy (#626).
       def resolved_rails_constant_name(receiver, scope)
         return nil if scope.nil?
-        return "Rails" if receiver.is_a?(Prism::ConstantPathNode) # the gate guarantees `parent.nil?`
 
         receiver_type = scope.type_of(receiver)
         receiver_type.class_name if receiver_type.is_a?(Rigor::Type::Singleton)

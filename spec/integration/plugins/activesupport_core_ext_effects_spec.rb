@@ -46,7 +46,7 @@ CORE_EXT_PURE_KEYS = %w[
   Integer#minutes Integer#month Integer#months Integer#multiple_of? Integer#ordinal
   Integer#ordinalize Integer#petabyte Integer#petabytes Integer#second Integer#seconds
   Integer#terabyte Integer#terabytes Integer#week Integer#weeks Integer#year Integer#years
-  NilClass#blank? NilClass#presence NilClass#present? NilClass#try NilClass#try!
+  NilClass#blank? NilClass#duplicable? NilClass#presence NilClass#present? NilClass#try NilClass#try!
   Object#acts_like? Object#blank? Object#in? Object#presence Object#present?
   String#at String#camelcase String#camelize String#classify String#dasherize String#deconstantize
   String#demodulize String#ends_with? String#exclude? String#first String#foreign_key String#from

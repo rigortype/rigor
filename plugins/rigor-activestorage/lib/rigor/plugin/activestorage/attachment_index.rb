@@ -18,21 +18,31 @@ module Rigor
           freeze
         end
 
+        # Entries are keyed by the de-rooted constant path (`"User"`, `"Admin::User"` — never `"::User"`;
+        # see {AttachmentDiscoverer}), while a QUERY may legitimately arrive rooted: a `Nominal` receiver
+        # for `::User` renders its class name as `"::User"`. The root marker is dropped here, once, so no
+        # caller needs an `attachments_for(name) || attachments_for("::#{name}")` retry (#621).
         def attachments_for(class_name)
-          entries[class_name.to_s]
+          entries[class_name.to_s.delete_prefix("::")]
         end
 
         def class_names = entries.keys
 
         def empty? = entries.empty?
 
+        # Rows that name the SAME class are UNIONed, not replaced. A model is routinely declared more than
+        # once — `app/models/user.rb` holds the real class and a concern or an engine's file reopens it —
+        # and a reopen ADDS attachments rather than replacing the class, so keeping only the last row in the
+        # glob dropped the earlier declaration's `has_one_attached` and left `user.avatar` untyped. A
+        # redeclared attachment NAME resolves to the later row, as it does at load time.
         def self.build(rows:)
           entries = rows.each_with_object({}) do |row, acc|
             class_name = row.fetch(:class_name)
-            attachments = Array(row[:attachments]).map(&:freeze).freeze
-            acc[class_name] = attachments
+            by_name = acc[class_name] || {}
+            Array(row[:attachments]).each { |attachment| by_name[attachment[:name]] = attachment.freeze }
+            acc[class_name] = by_name
           end
-          new(entries.freeze)
+          new(entries.transform_values { |by_name| by_name.values.freeze }.freeze)
         end
       end
     end

@@ -95,6 +95,17 @@ quietly take the wrong branch — so the plugin pins only what you
 wrote down. `User.quoted_table_name` is always `String`; the
 quoting is up to the database adapter.
 
+A model declared inside a Ruby module (`Blog::Post`) resolves its
+table the way Rails does: the namespace is dropped, not flattened
+into the name, so `Blog::Post` reads `posts`, not `blog_posts`. A
+`table_name_prefix` / `table_name_suffix` the enclosing module
+declares as a literal (`def self.table_name_prefix = "blog_"`, or
+`mattr_accessor :table_name_prefix, default: "blog_"`) is applied on
+top, so the same model reads `blog_posts` once `Blog` sets that. A
+prefix or suffix your module computes instead — anything the plugin
+cannot read off the source as a literal — is not guessed at either;
+the plugin falls back to the plain demodulized name.
+
 ## Limitations
 
 - **Direct-superclass match only.** `class Admin < User` where

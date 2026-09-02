@@ -1,6 +1,6 @@
 # ADR-46 — Incremental analysis via a cross-file dependency graph
 
-Status: **Accepted — implemented (body tier). The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this is the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it. `rigor check --incremental` ships the cross-process body tier (slices 1+2): record per-file cross-file deps → invert to `dependents` → on a run, re-analyze only `ΔF ∪ dependents[ΔF]` and serve the rest from a disk snapshot. Soundness is enforced by the mandatory `--verify-incremental` gate (incremental == full `--no-cache`, byte-identical), wired into CI. Measured on Rigor's own `lib` (262 files): warm no-change 0.75s vs 7.2s full (~9.6×), one-file leaf edit 1.15s (~6.3×), diagnostics identical. Slices 3 (structural-tier negative-dependency tracking) and 4 (symbol granularity) are landed, and the structural tier now covers file *addition / removal* incrementally (the snapshot fingerprint is keyed on the analysis roots, not the file list; added files re-check the consumers of their now-defined names via the negative edges, removed files re-check their positive dependents). Slice 3 also closed two warm-session soundness gaps: a missed `helper()` whose definition arrives in a later edit (`call.unresolved-toplevel`), and a subclass whose superclass is defined later (`def.override-*`, whose checker reads the class graph outside the recorder's choke points).**
+Status: **Accepted — implemented (body tier). The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this is the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it. `rigor check --incremental` ships the cross-process body tier (slices 1+2): record per-file cross-file deps → invert to `dependents` → on a run, re-analyze only `ΔF ∪ dependents[ΔF]` and serve the rest from a disk snapshot. Soundness is enforced by the mandatory `--verify-incremental` gate (incremental == full `--no-cache`, byte-identical), wired into CI. Measured on Rigor's own `lib` (262 files): warm no-change 0.75s vs 7.2s full (~9.6×), one-file leaf edit 1.15s (~6.3×), diagnostics identical. Slices 3 (structural-tier negative-dependency tracking) and 4 (symbol granularity) are landed, and the structural tier now covers file *addition / removal* incrementally (the snapshot fingerprint is keyed on the analysis roots, not the file list; added files re-check the consumers of their now-defined names via the negative edges, removed files re-check their positive dependents). Slice 3 also closed three warm-session soundness gaps: a missed `helper()` whose definition arrives in a later edit (`call.unresolved-toplevel`), a subclass whose superclass is defined later (`def.override-*`, whose checker reads the class graph outside the recorder's choke points), and a reader of a constant that resolves to nothing, whose receiver short-circuits before the method lookup that would have recorded an edge (#622).**
 
 ADR-45 made an *unchanged* project fast (record-and-validate whole-run
 cache, ~42× on GitLab). It is deliberately coarse: a single changed file
@@ -285,9 +285,10 @@ trade for speed. Defenses:
    and missed. Most misses are already covered: a missed *class method*
    resolution walks the receiver's ancestry (`superclass_of` / `includes_of`),
    recording a positive ancestry edge to every class on the chain, so adding
-   the method to any of them re-checks the consumer; a missed *constant*
-   produces no diagnostic, so there is nothing to go stale. The gap was the
-   **top-level call** (`call.unresolved-toplevel`, ADR-34): `helper()` has no
+   the method to any of them re-checks the consumer. (A missed *constant* was
+   read the same way — "it produces no diagnostic, so there is nothing to go
+   stale" — which issue #622 disproved; see the third gap below.) The gap was
+   the **top-level call** (`call.unresolved-toplevel`, ADR-34): `helper()` has no
    class ancestry to walk, so a miss recorded no edge — defining `helper`
    elsewhere left the caller's diagnostic stale (a manufactured false
    positive, caught by a probe, not yet by the spec suite). Closed by
@@ -317,6 +318,37 @@ trade for speed. Defenses:
    missing link itself (the re-analysis then walks the rest). `--verify-incremental`
    stays byte-identical; the `IncrementalSnapshot` payload carries `missing` +
    `class_decls` (SCHEMA 4).
+
+   A third gap (issue #622): an **unresolved constant read** recorded nothing
+   at all. The premise above — a missed constant costs no diagnostic — holds
+   only for the constant reference itself; what it feeds does not. `Rails.logger`
+   with no `module Rails` types the receiver `Dynamic[top]` and short-circuits
+   *before* the method lookup, so the `read_missing(:method, …)` that covers a
+   resolved receiver never ran, and declaring `Rails` in a later edit left the
+   reader serving the pre-declaration answer (missing the `call.undefined-method`
+   a full run fires — a stale false *negative*, the mirror of the top-level
+   case's stale false positive). Closed in
+   `ExpressionTyper#unresolved_constant_fallback`, the one point where both
+   `ConstantReadNode` and `ConstantPathNode` observe resolution answering nil:
+   it records the **same `class:Name` negative edge** the override-ancestor miss
+   uses, so the `appeared_classes` producer already inverts it — no new kind, no
+   payload row, no SCHEMA bump (an engine that did not record the edge is
+   already excluded by the fingerprint's `engine-source` part). One row per
+   reference, keyed on the path's LAST segment: a qualified read resolves only
+   once its final segment is declared, and every form that resolves cross-file
+   (`class` / `module`, and the constant-assigned `Data.define` / `Struct.new`
+   forms) registers in the pre-pass's class sources under its qualified name.
+   A plain value constant resolves in no cross-file read at all today, so a
+   root-segment or `constant:` key would salvage nothing; if that changes the
+   answer is a producer reporting appeared value constants, not a wider key on
+   the consumer side. Matching by simple name over-invalidates — a nested
+   `MyApp::Rails` re-checks a reader of the top-level `Rails` — which is the
+   sound direction and the grammar the class negatives already use; both halves
+   are pinned in the spec.
+   `--verify-incremental` cannot see this class of gap at all: its
+   even-indexed subset re-analyses the consumer itself, so the discriminating
+   spec goes through `Analysis::IncrementalSession` (baseline → edit → recheck
+   closure) instead.
 
    **File addition / removal (landed).** The snapshot fingerprint is keyed on
    the analysis *roots* (the path args, e.g. `["lib"]`) rather than the

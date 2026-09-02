@@ -38,9 +38,44 @@ module Rigor
       # - `self.table_name = "..."` recognised only when the RHS is a String literal. Computed names
       #   (`self.table_name = "#{tenant}_users"`) are skipped.
       # - Modules (`class Admin::User < ApplicationRecord`) are recognised; the resulting class name is
-      #   the lexical path (`Admin::User`).
+      #   the lexical path (`Admin::User`). {ModelIndex.inflected_table_name} derives its TABLE name from
+      #   only the demodulized last segment, `table_name_prefix` / `table_name_suffix` (#623).
       # - The STI fixpoint matches a superclass name against model class names by exact spelling; richer
       #   constant resolution (relative namespacing) is not modelled.
+      # - An ENCLOSING namespace's (module OR class — Rails' own ancestor search does not care which)
+      #   `table_name_prefix` / `table_name_suffix` is recognised as a String literal on `def self.NAME`,
+      #   `class << self; def NAME`, a plain `self.NAME = "..."` assignment, or one of
+      #   {ACCESSOR_DECLARATION_METHODS}'s `default:` (a `*_writer` macro does NOT establish the reader
+      #   Rails' walk probes, so it is not recognised as declaring anything). Any other shape a reader
+      #   establishment was observed for (a computed RHS, disagreeing reopenings, or a plain assignment with
+      #   no tracked reader — an unrecognised reader spelling such as `define_singleton_method`,
+      #   `module_function`, `extend self`, or a hand-rolled ivar reader all fall into this last case) is
+      #   treated as DECLARED-BUT-UNFOLDABLE — and, per {ModelIndex.inflected_table_name_unreliable?}, does
+      #   NOT fall back to a guessed value: the whole model's column/alias/association checks stand down
+      #   instead, because a wrong guess can corroborate a real-but-unrelated table exactly as easily as it
+      #   can miss.
+      # - A model class NESTED INSIDE ANOTHER MODEL CLASS (`Post::Comment` where `Post < ApplicationRecord`
+      #   — Rails splices the parent's own table name into the middle of the child's, a wholly different
+      #   mechanism from prefix/suffix) is recognised and stands down the same way (#623 review). A model
+      #   nested inside an ABSTRACT model reads its OWN demodulized name in real Rails (the splice only
+      #   applies to a non-abstract parent) but this walker does not track `abstract_class?` and stands it
+      #   down too — a coverage loss, never a false positive.
+      # - A namespace's decorator declared OUTSIDE `model_search_paths` entirely is INVISIBLE, not stood
+      #   down — this walker only reads files under the configured model roots, so a `table_name_prefix`
+      #   anywhere else (a plain `def self.table_name_prefix` in `lib/blog.rb`, a
+      #   `Rails::Engine.isolate_namespace` call in `lib/<engine>/engine.rb`, or any other path
+      #   `model_search_paths` does not cover) resolves the bare demodulized guess uncorrected, exactly as
+      #   if nothing had been declared. `Rigor::Plugin::IoBoundary`'s trust policy would permit reading
+      #   further than `model_search_paths` for this plugin (its `allowed_read_roots` covers the project
+      #   root), so an EXISTENCE-only scan of a wider file set is reachable in principle; it is not
+      #   implemented because the right file set is a real design choice (the whole project root? `lib/`?
+      #   each `engines/*/{app/models,lib}`?) and reading outside `model_search_paths` needs its own cache
+      #   descriptor / `watch:` wiring to invalidate correctly — see the `producer :model_index` call site's
+      #   `watch:` block, keyed on `model_search_paths` today.
+      # - NOT modelled at all (pre-existing, unrelated to namespace prefixes): a model declaring
+      #   `table_name_prefix` on ITSELF rather than an enclosing namespace, and a base class (e.g.
+      #   `ApplicationRecord`) setting `self.table_name_prefix` for every model under it — both already
+      #   guess wrong identically on unpatched code.
       class ModelDiscoverer
         # @param io_boundary [Rigor::Plugin::IoBoundary]
         # @param search_paths [Array<String>] absolute or project-relative paths.
@@ -63,6 +98,15 @@ module Rigor
           # column name and applied wherever that column appears. Over-suppresses a same-named scalar
           # column elsewhere (a precision cost, never a false positive).
           @type_override_columns = Set.new
+          # `full namespace name => { prefix: decorator?, suffix: decorator? }` — what each walked module OR
+          # class body declares about `table_name_prefix` / `table_name_suffix` (#623; keyed by full name
+          # regardless of whether the source spelled the namespace `module` or `class` — Rails'
+          # `module_parents` ancestor walk does not care either). A `decorator` is `{ literal: }` when
+          # foldable to a String, `{ computed: true }` when the namespace declares the name in a shape this
+          # walker cannot fold. A key absent from the inner Hash means the namespace says nothing about that
+          # name — {#resolve_table_name_decorator} keeps walking outward past it, exactly like Rails' own
+          # `respond_to?(:table_name_prefix)` ancestor search.
+          @namespace_table_name_decorators = {}
         end
 
         attr_reader :type_override_columns
@@ -77,7 +121,10 @@ module Rigor
             tree = Prism.parse(contents).value
             walk_for_classes(tree, []) { |candidate| candidates << candidate }
           end
-          resolve_models(candidates)
+          # Every file is walked (and every module's `table_name_prefix` / `table_name_suffix` recorded)
+          # before any row is resolved — a model's file may sort, and so be visited, before the file that
+          # declares its enclosing module's decorator.
+          attach_table_name_decorators(resolve_models(candidates))
         end
 
         private
@@ -182,6 +229,71 @@ module Rigor
           rows.to_h { |row| [row[:name], row] }.values
         end
 
+        # Resolves each model row's `table_name_prefix:` / `table_name_suffix:` / `table_name_nested_in_model:`
+        # (#623) against every module/class walked and the full discovered model set, once ALL files have
+        # been scanned (so a model resolved from a file earlier in glob order than its enclosing namespace's
+        # file still sees that namespace's decorator, and a model declared before its would-be parent model
+        # sorts still sees it in `model_class_names`).
+        #
+        # Deliberately does NOT fold any of this into `table_name_computed` — that flag gates
+        # `ModelIndex.table_name_exact?`, which only ever matters when a SOURCE-DECLARED literal
+        # (`self.table_name = "…"`) exists, and a literal override bypasses Rails' whole
+        # prefix/suffix/nesting computation at runtime. An unrelated namespace's unreadable decorator has no
+        # bearing on whether that literal is what the app actually uses. What DOES depend on these three
+        # fields is whether {ModelIndex.build} trusts the INFLECTED name enough to look up its columns —
+        # see {ModelIndex.inflected_table_name_unreliable?}.
+        def attach_table_name_decorators(rows)
+          model_class_names = rows.to_h { |row| [row.fetch(:class_name), true] }
+          rows.map do |row|
+            class_name = row.fetch(:class_name)
+            row.merge(
+              table_name_prefix: resolve_table_name_decorator(class_name, :prefix),
+              table_name_suffix: resolve_table_name_decorator(class_name, :suffix),
+              table_name_nested_in_model: nested_in_model_class?(class_name, model_class_names)
+            )
+          end
+        end
+
+        # The decorator (`{ literal: }` / `{ computed: true }`) the NEAREST enclosing namespace (module OR
+        # class — {#visit_class} and {#visit_module} both feed {#record_table_name_decorators}) declares for
+        # `key`, walking outward from the model's immediate namespace — mirroring Rails'
+        # `full_table_name_prefix` / `full_table_name_suffix` ancestor search. Falls back to `{ literal: ""
+        # }` (AR::Base's own default) when no enclosing namespace says anything about `key` at all.
+        def resolve_table_name_decorator(class_name, key)
+          namespace_ancestors(class_name).each do |namespace_name|
+            decorator = @namespace_table_name_decorators[namespace_name]
+            next unless decorator&.key?(key)
+
+            return decorator[key]
+          end
+          { literal: "" }
+        end
+
+        # `"Foo::Bar::Post"` → `["Foo::Bar", "Foo"]`, nearest first; a top-level `"Post"` → `[]`. Derived
+        # purely from the (already de-rooted) class-name String, so it matches regardless of whether the
+        # source nested the containing namespaces (`module Foo; module Bar` … / `class Foo; class Bar` …)
+        # or wrote one compactly (`module Foo::Bar`).
+        def namespace_ancestors(class_name)
+          segments = class_name.split("::")
+          (segments.length - 1).downto(1).map { |n| segments.first(n).join("::") }
+        end
+
+        # Whether `class_name`'s IMMEDIATE lexical parent is itself a discovered model — `Post::Comment`
+        # where `Post < ApplicationRecord`. Rails' `compute_table_name` special-cases exactly this shape: it
+        # splices `"#{parent.table_name.singularize}_"` into the middle of the name, entirely separately
+        # from the `table_name_prefix` / `table_name_suffix` mechanism above (`ActiveRecord::ModelSchema::
+        # ClassMethods#compute_table_name`'s `module_parent < Base && !module_parent.abstract_class?` arm).
+        # This walker does not attempt that computation — it would need the PARENT's own resolved table name
+        # (itself possibly namespaced, prefixed, or STI-derived), compounding uncertainty on uncertainty —
+        # so a model in this shape is reported as unable-to-resolve-reliably instead
+        # ({ModelIndex.inflected_table_name_unreliable?}: an empty column set rather than a wrong guess).
+        def nested_in_model_class?(class_name, model_class_names)
+          segments = class_name.split("::")
+          return false if segments.length < 2
+
+          model_class_names.key?(segments[0..-2].join("::"))
+        end
+
         # Resolves a superclass NAME against the set of known model class names. Both sides come out of
         # {#declared_constant_name}, so neither carries a leading `::` and the match is by exact spelling.
         # Returns the matched model class name, or nil.
@@ -229,6 +341,11 @@ module Rigor
           superclass = strip_root(constant_path_name(node.superclass)) if node.superclass
 
           collect_type_overrides(node.body)
+          # Rails' `full_table_name_prefix` walks `module_parents.detect { respond_to?(:table_name_prefix) }`
+          # — lexical nesting, which does not care whether the namespace container was written `module Blog`
+          # or `class Blog`. A `class` used purely as a namespace holder (or a model class that happens to
+          # ALSO declare a decorator for its own nested classes) must be scanned the same way a module is.
+          record_table_name_decorators(full_name, node.body)
 
           yield({
             class_name: full_name,
@@ -255,7 +372,10 @@ module Rigor
           # `included do … end` block; collect their overrides even though the module itself is not a model.
           collect_type_overrides(node.body)
 
-          inner_path = [declared_constant_name(module_local_name, lexical_path)]
+          full_name = declared_constant_name(module_local_name, lexical_path)
+          record_table_name_decorators(full_name, node.body)
+
+          inner_path = [full_name]
           walk_for_classes(node.body, inner_path, &) if node.body
         end
 
@@ -400,6 +520,194 @@ module Rigor
           return false unless node.receiver.is_a?(Prism::SelfNode)
 
           !node.arguments&.arguments&.first.is_a?(Prism::StringNode)
+        end
+
+        # `table_name_prefix` / `table_name_suffix`, keyed by the setter/reader name a namespace (module OR
+        # class) body can declare either one under (#623). Rails' own table-name computation
+        # (`ActiveRecord::ModelSchema::ClassMethods#full_table_name_prefix` / `#full_table_name_suffix`)
+        # walks a namespaced model's enclosing namespaces outward via `module_parents` and asks each
+        # `respond_to?(:table_name_prefix)` — a plain `Blog::Post` reads `posts` unless `Blog` answers that
+        # question itself, whether `Blog` was declared `module Blog` or `class Blog`.
+        TABLE_NAME_DECORATOR_METHODS = { table_name_prefix: :prefix, table_name_suffix: :suffix }.freeze
+        private_constant :TABLE_NAME_DECORATOR_METHODS
+
+        # The Rails/ActiveSupport macros that can declare a `table_name_prefix` / `table_name_suffix` READER
+        # without a hand-written `def self.…`. Rails' walk tests `respond_to?(:table_name_prefix)` — the
+        # READER — so this is every macro verified (against bundled `activesupport`) to define one:
+        # `mattr_accessor` / `mattr_reader`, their `cattr_*` literal aliases, the `thread_mattr_*` /
+        # `thread_cattr_*` thread-local family, and `class_attribute` (valid on a class namespace now that
+        # {#visit_class} scans class bodies too — it is defined on `Class`, not `Module`). The `*_writer`
+        # spellings (`mattr_writer`, `cattr_writer`, `thread_mattr_writer`, `thread_cattr_writer`) are
+        # deliberately EXCLUDED: each defines only `self.#{sym}=` (verified against ActiveSupport's
+        # `attribute_accessors.rb` / `attribute_accessors_per_thread.rb`), no reader, so a module declaring
+        # only one of those is invisible to `full_table_name_prefix`'s ancestor search exactly as if it had
+        # declared nothing.
+        ACCESSOR_DECLARATION_METHODS = %i[
+          mattr_accessor mattr_reader
+          cattr_accessor cattr_reader
+          thread_mattr_accessor thread_mattr_reader
+          thread_cattr_accessor thread_cattr_reader
+          class_attribute
+        ].freeze
+        private_constant :ACCESSOR_DECLARATION_METHODS
+
+        # Scans a module OR class BODY for `table_name_prefix` / `table_name_suffix` declarations and
+        # records what it finds into `@namespace_table_name_decorators`, merged with any earlier reopening
+        # of the same namespace.
+        def record_table_name_decorators(full_name, body)
+          found = table_name_decorators(body)
+          return if found.empty?
+
+          existing = @namespace_table_name_decorators[full_name]
+          @namespace_table_name_decorators[full_name] =
+            existing.nil? ? found : merge_table_name_decorators(existing, found)
+        end
+
+        # Walks the namespace body's TOP-LEVEL statements only — a decorator declared inside a nested
+        # `module`/`class` belongs to THAT namespace, not this one, and must not be attributed here.
+        # Returns `Hash<:prefix|:suffix => { literal: } | { computed: true }>`, only for the names this body
+        # actually mentions. A later statement overrides an earlier one within the SAME body — real Ruby
+        # assignment order, not a guess: `mattr_accessor :table_name_prefix` (no `default:`, so `computed:
+        # true`) followed two lines down by a real `self.table_name_prefix = "blog_"` folds to the literal.
+        #
+        # The plain-assignment form (`self.NAME = "…"`) is folded to the literal ONLY when a READER for
+        # that name was ALSO established earlier in this SAME body scan (`readers`, below) — by
+        # `def self.NAME`, `class << self; def NAME`, or one of {ACCESSOR_DECLARATION_METHODS} (never a
+        # `*_writer`, none of which define one). Rails' own ancestor search tests
+        # `respond_to?(:table_name_prefix)`, the READER; a `self.NAME = …` call site only proves a WRITER
+        # exists (it must, or the assignment itself would raise), which is not the same fact —
+        # `mattr_writer :table_name_prefix; self.table_name_prefix = "blog_"` is valid Ruby that sets a
+        # class variable Rails' reader-only probe never reads back.
+        #
+        # An assignment with NO tracked reader is still NOT ignored, though (#623 second review — a
+        # BLOCKER): the assignment itself proves the namespace declares the name — an unrecognised reader
+        # spelling (a hand-rolled `def table_name_prefix` inside `class << self` reading an ivar, a
+        # `define_singleton_method`, `module_function`, `extend self` — this walker does not enumerate every
+        # way Ruby can define a method) is far more likely than a genuinely writer-only module, and treating
+        # an observed declaration as "nothing declared" is exactly the state that licenses the bare guess
+        # this whole mechanism exists to refuse. So a keyless-reader assignment folds to `computed: true` —
+        # standing down costs nothing on correct code.
+        def table_name_decorators(body)
+          return {} if body.nil?
+
+          decorators = {}
+          readers = Set.new
+          body.rigor_each_child do |node|
+            if node.is_a?(Prism::DefNode) && node.receiver.is_a?(Prism::SelfNode)
+              key = TABLE_NAME_DECORATOR_METHODS[node.name]
+              next unless key
+
+              decorators[key] = literal_def_value(node.body)
+              readers << key
+            elsif node.is_a?(Prism::CallNode) && node.receiver.is_a?(Prism::SelfNode) &&
+                  node.name.to_s.end_with?("=")
+              key = TABLE_NAME_DECORATOR_METHODS[node.name.to_s.delete_suffix("=").to_sym]
+              next unless key
+
+              decorators[key] = readers.include?(key) ? literal_assignment_value(node) : { computed: true }
+            elsif node.is_a?(Prism::CallNode) && node.receiver.nil? &&
+                  ACCESSOR_DECLARATION_METHODS.include?(node.name)
+              found = mattr_decorator_values(node)
+              readers.merge(found.keys)
+              decorators.merge!(found)
+            elsif node.is_a?(Prism::SingletonClassNode)
+              found = singleton_class_decorator_values(node)
+              readers.merge(found.keys)
+              decorators.merge!(found)
+            end
+          end
+          decorators
+        end
+
+        # `class << self; def table_name_prefix = "blog_"; end; end` — a common idiom, and structurally the
+        # SAME as `def self.table_name_prefix = "blog_"` (a `DefNode` with an implicit-self body in the
+        # singleton class rather than an explicit `self` receiver), so it folds through the identical
+        # {#literal_def_value} check.
+        def singleton_class_decorator_values(node)
+          return {} unless node.body
+
+          decorators = {}
+          node.body.rigor_each_child do |inner|
+            next unless inner.is_a?(Prism::DefNode) && inner.receiver.nil?
+
+            key = TABLE_NAME_DECORATOR_METHODS[inner.name]
+            decorators[key] = literal_def_value(inner.body) if key
+          end
+          decorators
+        end
+
+        # `def self.table_name_prefix = "blog_"` and the equivalent regular-method spelling both parse to a
+        # `DefNode` whose `body` is a one-statement `StatementsNode` — fold when that statement is a String
+        # literal. An empty body (`def self.table_name_prefix; end`), a multi-statement body, or a
+        # non-literal single statement (string interpolation, a method call) all decline: the module DOES
+        # declare the name, this walker just cannot read off its value.
+        def literal_def_value(def_body)
+          return { computed: true } if def_body.nil?
+
+          statements = def_body.body
+          return { computed: true } unless statements.size == 1 && statements.first.is_a?(Prism::StringNode)
+
+          { literal: statements.first.unescaped }
+        end
+
+        # `self.table_name_prefix = "blog_"` — the plain-assignment spelling (with or without a preceding
+        # `mattr_accessor` establishing the writer). Declines to `computed: true` for a non-literal RHS.
+        def literal_assignment_value(node)
+          arg = node.arguments&.arguments&.first
+          return { literal: arg.unescaped } if arg.is_a?(Prism::StringNode)
+
+          { computed: true }
+        end
+
+        # `mattr_accessor :table_name_prefix, :table_name_suffix, default: "blog_"` — every
+        # {ACCESSOR_DECLARATION_METHODS} macro shares this same call shape: one `default:` across every
+        # Symbol name the call declares. Returns a Hash keyed by the `:prefix` / `:suffix` names this call
+        # actually declares; a name with no literal `default:` folds to `{ computed: true }` rather than
+        # assuming the runtime default of `nil` (a LATER plain assignment in the same body can still upgrade
+        # it — see {#table_name_decorators}).
+        def mattr_decorator_values(node)
+          args = node.arguments&.arguments
+          return {} if args.nil?
+
+          keys = args.filter_map do |arg|
+            name = Rigor::Source::Literals.symbol_name(arg)
+            TABLE_NAME_DECORATOR_METHODS[name.to_sym] if name
+          end
+          return {} if keys.empty?
+
+          value = mattr_default_value(args)
+          keys.to_h { |key| [key, value] }
+        end
+
+        def mattr_default_value(args)
+          hash_arg = args.find { |arg| arg.is_a?(Prism::KeywordHashNode) }
+          return { computed: true } if hash_arg.nil?
+
+          pair = hash_arg.elements.find do |el|
+            el.is_a?(Prism::AssocNode) && Rigor::Source::Literals.symbol_named?(el.key, "default")
+          end
+          return { computed: true } if pair.nil? || !pair.value.is_a?(Prism::StringNode)
+
+          { literal: pair.value.unescaped }
+        end
+
+        # Merges the decorator findings of two reopenings of the SAME module. A key present on only one
+        # side wins outright; a key BOTH sides declare wins only when they agree (the same literal) — a
+        # cross-file "later wins" order is not derivable (glob order isn't load order, the same reasoning
+        # {#conflicting_table_names?} applies to `self.table_name =`), so a disagreement folds to
+        # `computed: true` rather than picking one arbitrarily.
+        def merge_table_name_decorators(base, addition)
+          (base.keys | addition.keys).to_h do |key|
+            a = base[key]
+            b = addition[key]
+            value =
+              if a.nil? then b
+              elsif b.nil? then a
+              elsif a == b then a
+              else { computed: true }
+              end
+            [key, value]
+          end
         end
 
         # Recognised single-instance and collection association DSL methods. The kind drives the eventual

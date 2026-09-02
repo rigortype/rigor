@@ -456,10 +456,18 @@ project's source.
   inflection helper for the Rails-family plugins. `underscore` /
   `camelize` / `singularize` / `pluralize` / `classify` delegate to
   the real `ActiveSupport::Inflector` (the fixed `ALLOWED_METHODS`
-  allow-list); `tableize` is deliberately **not** delegated — it
-  composes the AS-backed `underscore` / `pluralize` with the `::` →
-  `_` flattening ActiveRecord's real table-name computation applies,
-  so `Admin::User` → `admin_users`, not AS's `admin/users`. It carries
+  allow-list); `tableize` is deliberately **not** delegated — AS's own
+  `tableize("Admin::User")` returns the slash-separated `"admin/users"`,
+  never a valid SQL identifier, so `.tableize` composes the AS-backed
+  `underscore` / `pluralize` with a `::` → `_` flatten instead. That
+  flatten is **not** ActiveRecord's real table-name computation for a
+  namespaced model, though — AR demodulizes (drops the enclosing module
+  entirely) and applies a `table_name_prefix` / `table_name_suffix` only
+  when the enclosing module declares one, so `Admin::User` reads
+  `users`, not `admin_users`, unless `Admin` sets a prefix. Its sole
+  caller, `rigor-activerecord`'s `ModelIndex.inflected_table_name`,
+  demodulizes a namespaced model's class name before calling `tableize`,
+  so it never actually passes `tableize` a namespaced one. It carries
   **no approximation** (raises when the gem is unreachable, so the
   caller declines to silence). `rigor-rails-routes` /
   `rigor-activerecord` / `rigor-actionpack` / `rigor-actionmailer` /

@@ -21,8 +21,9 @@ module Rigor
       # columns", and consumers that would fire on an unrecognised column must not read the two the same
       # way.
       #
-      # `table_name_override` is non-nil when the source contained `self.table_name = "..."`. When nil,
-      # the table name derives from {Inflector.tableize}.
+      # `table_name_override` is non-nil when the source contained `self.table_name = "..."`. When nil, the
+      # table name derives from {.inflected_table_name} — demodulize, then {Inflector.tableize}, then a
+      # `table_name_prefix` / `table_name_suffix` the enclosing module declares and the discoverer can fold.
       #
       # Single-table-inheritance subclasses (`class Admin < User`) carry an `sti_parent:` pointer; their
       # {Entry} resolves its table from the root model and inherits the chain's declared associations /
@@ -132,7 +133,20 @@ module Rigor
             chain = sti_chain(row, rows_by_name)
             declared = declared_table_name(chain)
             table_name = declared || inflected_table_name(chain)
-            columns = apply_type_overrides(schema_table&.columns_for(table_name) || [], overrides)
+            # An UNRELIABLE inflected name (see {.inflected_table_name_unreliable?}) is never looked up in
+            # the schema at all — `table_name` is still the best-effort demodulized guess for DISPLAY
+            # (`model-call`'s "table: ..." info diagnostic), but its COLUMNS are the empty set on purpose,
+            # the same stand-down path `Analyzer#validate_column_hash_call` already gives a view-backed
+            # model with no schema-side columns. Looking the guess up anyway risks the corroboration
+            # `table_name_exact?` above already refuses for a MUCH narrower reason: a real, unrelated table
+            # can share the bare demodulized name, and column-checking against it is worse than not
+            # checking at all — a wrong `unknown-column` (or a wrong silence) on correct code either way.
+            columns =
+              if declared.nil? && inflected_table_name_unreliable?(chain)
+                []
+              else
+                apply_type_overrides(schema_table&.columns_for(table_name) || [], overrides)
+              end
 
             # STI children inherit their ancestors' declared associations / enums / aliases / scopes /
             # validations / callbacks. Without the merge a `where(<parent-association>: ...)` on the
@@ -219,11 +233,67 @@ module Rigor
           nil
         end
 
-        # The name inflected from the ROOT class of the chain — an STI child shares its root's table. The
-        # row's `class_name` is already de-rooted ({ModelDiscoverer#declared_constant_name}), so it feeds
-        # the inflector as is.
+        # The name inflected from the ROOT class of the chain — an STI child shares its root's table. Rails
+        # derives a namespaced model's table from its DEMODULIZED class name — `Blog::Post` → `posts`, the
+        # `Blog::` dropped entirely — and prepends/appends `table_name_prefix` / `table_name_suffix` only
+        # when the ENCLOSING module actually declares one
+        # (`ActiveRecord::ModelSchema::ClassMethods#undecorated_table_name` /
+        # `#full_table_name_prefix`); it never flattens the namespace into the table name the way a naive
+        # `tableize("Blog::Post")` would (`"blog_posts"`, silently wrong for every namespaced model — #623).
+        # The row's `class_name` is already de-rooted ({ModelDiscoverer#declared_constant_name}), so it
+        # feeds the demodulize/inflect/decorate steps as is.
         def self.inflected_table_name(chain)
-          Rigor::Plugin::Inflector.tableize(chain.first.fetch(:class_name))
+          root = chain.first
+          base = Rigor::Plugin::Inflector.tableize(demodulize(root.fetch(:class_name)))
+          prefix = decorator_literal(root[:table_name_prefix])
+          suffix = decorator_literal(root[:table_name_suffix])
+          "#{prefix}#{base}#{suffix}"
+        end
+
+        # `"Blog::Post"` → `"Post"`; a name without a namespace is returned unchanged. Matches
+        # `ActiveSupport::Inflector#demodulize` for a well-formed constant path — a plain String split, no
+        # gem call needed (unlike {Inflector}'s allow-listed methods, there is no real-vs-approximated
+        # divergence risk here to guard against).
+        def self.demodulize(class_name)
+          class_name.to_s.split("::").last
+        end
+
+        # Reads a `table_name_prefix:` / `table_name_suffix:` decorator ({ModelDiscoverer}'s resolved
+        # `:table_name_prefix` / `:table_name_suffix` row field, always present on a discovered row): the
+        # folded literal when the discoverer could read one off the enclosing namespace, or `""` — both when
+        # no enclosing namespace declares the name AND when one does but in a shape the discoverer cannot
+        # fold. The second case is deliberately NOT a guess at what the real prefix/suffix string is
+        # (#623) — synthesising a default like `"<namespace>_"` would risk corroborating the WRONG table.
+        # What THIS empty string does not by itself do is make the resulting name safe to trust for column
+        # lookup: see {.inflected_table_name_unreliable?}, which is what actually stands the columns down
+        # for this case — the string returned here still feeds `table_name`'s informational display value.
+        def self.decorator_literal(decorator)
+          (decorator || {}).fetch(:literal, "")
+        end
+
+        # Whether the chain's INFLECTED name (only reached when nothing was `declared_table_name`) is
+        # trustworthy enough to look up in the schema. `false` when either the root's `table_name_prefix` or
+        # `table_name_suffix` decorator is `{ computed: true }` (declared by an enclosing namespace, but not
+        # in a shape the discoverer could fold — see {ModelDiscoverer}'s class doc), or when the root is
+        # nested inside another discovered model class (`table_name_nested_in_model`, a wholly different
+        # Rails naming rule this walker does not attempt — same file).
+        #
+        # A namespace whose decorator this discoverer never even SAW cannot be flagged here at all — it
+        # reads as "nothing declared," not "declared but unreadable." {ModelDiscoverer}'s class doc names
+        # three such gaps: a prefix declared outside `model_search_paths` entirely (a `def
+        # self.table_name_prefix` in `lib/blog.rb`, a `Rails::Engine.isolate_namespace` call), a model
+        # declaring `table_name_prefix` on ITSELF, and a base-class-level `table_name_prefix`. The last two
+        # are pre-existing — unpatched code guesses wrong identically. The first is a live, documented gap
+        # this fix does not close (a namespace this discoverer never reads a file for is indistinguishable
+        # from one that genuinely declares nothing), tracked for a follow-up rather than guessed shut.
+        def self.inflected_table_name_unreliable?(chain)
+          root = chain.first
+          decorator_unreliable?(root[:table_name_prefix]) || decorator_unreliable?(root[:table_name_suffix]) ||
+            root[:table_name_nested_in_model] == true
+        end
+
+        def self.decorator_unreliable?(decorator)
+          !decorator.nil? && decorator[:computed] == true
         end
 
         # Dedups association-style rows by `:name`, keeping the LAST occurrence so a child redeclaration

@@ -32,9 +32,17 @@ module Rigor
       # § "safety harness"). The set is fixed and greppable — never a dynamic `public_send`.
       #
       # `tableize` is deliberately NOT delegated: `ActiveSupport::Inflector.tableize("Admin::User")` returns
-      # `"admin/users"`, but ActiveRecord's *actual* table name flattens the namespace to `"admin_users"` (the
-      # table-name computation does more than the pure `tableize` string method). So {.tableize} composes the
-      # AS-backed `underscore` / `pluralize` with the `::`→`_` flattening AR really uses.
+      # `"admin/users"`, a slash-separated path, never a valid SQL table name. {.tableize} composes the
+      # AS-backed `underscore` / `pluralize` with a `::`→`_` flatten instead, so a caller already holding a
+      # BARE (non-namespaced) name gets a plain identifier back rather than a path.
+      #
+      # This is NOT ActiveRecord's actual table-name algorithm for a namespaced model — Rails demodulizes
+      # (drops the enclosing module entirely) rather than flattening it into the name, and prepends /
+      # appends `table_name_prefix` / `table_name_suffix` only when the enclosing module declares one.
+      # `rigor-activerecord`'s `ModelIndex.inflected_table_name` does that demodulize-then-decorate
+      # sequence and calls here only with the already-demodulized (so already namespace-free) local class
+      # name — the `::`→`_` flatten below never actually fires from that caller (#623 fixed a version of
+      # this method that WAS called with the full namespaced path).
       ALLOWED_METHODS = %i[underscore camelize singularize pluralize classify].freeze
 
       # The target library + the constant the allow-listed methods are called on. Passed to {Isolation} so the
@@ -81,8 +89,9 @@ module Rigor
         invoke(:classify, table_name)
       end
 
-      # `BlogPost` → `blog_posts`; `Admin::User` → `admin_users`. Composed (not delegated) so the namespace
-      # flattens with `_` the way ActiveRecord's table naming does — see {ALLOWED_METHODS}.
+      # `BlogPost` → `blog_posts`; `Admin::User` → `admin_users`. Composed (not delegated) — see
+      # {ALLOWED_METHODS} — to flatten a namespaced String into a plain SQL identifier. This is NOT what
+      # ActiveRecord's table-name computation does with a namespace: see {ALLOWED_METHODS}'s comment above.
       def tableize(class_name)
         underscored = underscore(class_name.to_s.gsub("::", "/")).tr("/", "_")
         pluralize(underscored)

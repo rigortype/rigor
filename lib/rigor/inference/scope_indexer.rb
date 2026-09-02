@@ -1787,8 +1787,9 @@ module Rigor
       end
 
       # The Symbol member names of a `Data.define(*Symbol)` / `Struct.new(*Symbol [, keyword_init:])` call. For
-      # `Struct.new` the optional leading String name and trailing `keyword_init:` hash are stripped by
-      # {#struct_new_positionals}; `Data.define` args are all Symbols already.
+      # `Struct.new` the trailing `keyword_init:` hash is stripped by {#struct_new_positionals}; a leading
+      # String class name is NOT stripped, so `Struct.new("Name", :a) do` registers no members and the body
+      # is entered under the anonymous name (consistent between passes). `Data.define` args are all Symbols.
       def meta_member_names(call_node)
         raw = call_node.arguments&.arguments || []
         symbols = struct_new_call?(call_node) ? (struct_new_positionals(raw) || []) : raw

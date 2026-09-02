@@ -277,6 +277,61 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         expect(dumps(result)).to all(eq("dump_type: Dynamic[top]"))
         expect(dumps(result).size).to eq(2)
       end
+
+      # #588 — the rule is consulted on every `+` / `-` / `*` in the project, and its comment promises the
+      # argument gate runs FIRST so a call with no Duration operand costs one type lookup, not two. That
+      # is invisible to a dump (the answer is nil either way), so it is pinned directly against the rule
+      # with a recording scope. The pair below is the discrimination: without the early exit both
+      # examples type the receiver.
+      describe "the argument gate runs before the receiver lookup (#588)" do
+        let(:services) do
+          Rigor::Plugin::Services.new(
+            reflection: Rigor::Reflection, type: Rigor::Type::Combinator, configuration: Rigor::Configuration.new
+          )
+        end
+        let(:plugin) { plugin_class.new(services: services) }
+        let(:asked) { [] }
+
+        # A scope that answers every `type_of` from `answers` (keyed by the queried node) and records the
+        # order it was asked in.
+        def recording_scope(answers)
+          scope = instance_double(Rigor::Scope, environment: nil)
+          allow(scope).to receive(:type_of) do |queried|
+            asked << queried
+            answers.fetch(queried)
+          end
+          scope
+        end
+
+        def binary_call(source)
+          Prism.parse(source).value.statements.body.first
+        end
+
+        it "never types the receiver when the argument is no Duration operand" do
+          node = binary_call('lhs + "s"')
+          argument = node.arguments.arguments.first
+          scope = recording_scope(argument => Rigor::Type::Combinator.constant_of("s"))
+
+          result = plugin.dynamic_return_type(call_node: node, scope: scope, receiver_type: Rigor::Type::Combinator.top)
+
+          expect(result).to be_nil
+          expect(asked).to eq([argument])
+        end
+
+        it "still types the receiver once the argument is a Duration operand" do
+          node = binary_call("lhs + 1.day")
+          argument = node.arguments.arguments.first
+          scope = recording_scope(
+            argument => Rigor::Type::Combinator.nominal_of("ActiveSupport::Duration"),
+            node.receiver => Rigor::Type::Combinator.constant_of(3)
+          )
+
+          result = plugin.dynamic_return_type(call_node: node, scope: scope, receiver_type: Rigor::Type::Combinator.top)
+
+          expect(result).to eq(Rigor::Type::Combinator.nominal_of("ActiveSupport::Duration"))
+          expect(asked).to eq([argument, node.receiver])
+        end
+      end
     end
 
     it "CONTROL: the harness fires undefined-method in this fixture shape" do

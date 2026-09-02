@@ -329,6 +329,127 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # Issue #587 (b) — first-iteration pinning. The per-element Tuple fold typed every position from the same
+  # entry scope, so a body that rebinds a captured outer local answered the FIRST iteration's value at every
+  # position: `[1, 1]` for a block whose runtime values are `[1, 2]`, and `r.first == 1` then folded to
+  # `true`. The fold now runs the ADR-56 `BodyFixpoint` over the rebound names up front and types every
+  # position with them bound to the converged (widened) type — what the local can be in ANY iteration.
+  describe "captured outer locals the body rebinds under the per-element fold" do
+    # Every diagnostic a flow rule produced for `source` — the always-truthy / always-falsey family.
+    def flow_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+    end
+
+    it "widens a rebound counter to its continuation binding at every position" do
+      # THE ISSUE'S PROBE. Before the fix this answered `[1, 1]` (and `[0, 0]` before #584 — a pin either way).
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        total = 0
+        dump_type([1, 2].map do
+          total += 1
+          total
+        end)
+      RUBY
+    end
+
+    it "no longer reports the condition the first-iteration pin used to fold" do
+      # THE HAZARD: `r.first == 1` folded to `Constant[true]` off `[1, 1]` and fired on correct code.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        total = 0
+        r = [1, 2].map do
+          total += 1
+          total
+        end
+        puts "x" if r.first == 1
+      RUBY
+    end
+
+    it "still reports the condition when the fold is exact" do
+      # The must-fire sibling: a body that rebinds nothing keeps its exact per-position values, so the same
+      # condition on `[1, 2]` is genuinely always true and the rule must keep saying so.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        r = [1, 2].map { |e| e }
+        puts "x" if r.first == 1
+      RUBY
+    end
+
+    it "widens an accumulator fed by the block parameter" do
+      # `[1, 3]` at runtime; the pin answered `[1, 2]`, the element itself.
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        total = 0
+        dump_type([1, 2].map do |e|
+          total += e
+          total
+        end)
+      RUBY
+    end
+
+    it "floors a structurally compounding rebind instead of pinning the first shape" do
+      # `x = [x]` never converges (`[1]`, `[[1]]`, …), so the fixpoint floors `x` to `Dynamic[top]` and every
+      # position reads a one-element Tuple of it — which `[[1], [[1]]]` really is. The pin answered `[[1], [1]]`.
+      expect(dumped_type(<<~RUBY)).to eq("[[Dynamic[top]], [Dynamic[top]]]")
+        x = 1
+        dump_type([1, 2].map do
+          x = [x]
+          x
+        end)
+      RUBY
+    end
+
+    it "keeps a position whose tail reads a captured local the body does not rebind" do
+      # Only the rebound names move; `k` is untouched and its literal is still the truth at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[5, 5]")
+        total = 0
+        k = 5
+        dump_type([1, 2].map do |e|
+          total += e
+          k
+        end)
+      RUBY
+    end
+
+    it "keeps a predicate fold that ignores the rebound counter" do
+      # The reason this is not a blanket decline: `e > 1` decides on the element alone, so the `select` fold
+      # still knows exactly which positions survive.
+      expect(dumped_type(<<~RUBY)).to eq("[2]")
+        seen = 0
+        dump_type([1, 2].select do |e|
+          seen += 1
+          e > 1
+        end)
+      RUBY
+    end
+
+    it "still widens past the per-element threading cap" do
+      # The fixpoint binds the parameter to the union of the elements, so its cost does not scale with the
+      # arity and the cap is no reason to keep the stale seed: nine positions read `Integer`, not `0`.
+      expect(dumped_type(<<~RUBY)).to eq("[#{(['Integer'] * 9).join(', ')}]")
+        total = 0
+        dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+          total += e
+          total
+        end)
+      RUBY
+    end
+
+    it "floors the rebound local when the fold is nested inside a threaded body" do
+      # The fold is not re-entrant: under threading suppression the fixpoint's body evaluations are refused
+      # and the rebound name takes the escaping-block floor — wider than `Integer`, but no longer the `[0, 0]`
+      # pin the nested fold answered before.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        m = Mutex.new
+        total = 0
+        dump_type(m.synchronize do
+          v = 1
+          [1, 2].map do
+            total += v
+            total
+          end
+        end)
+      RUBY
+    end
+  end
+
   describe "the per-element Tuple fold's arity cap" do
     it "threads every position at the cap" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 2, 3, 4, 5, 6, 7, 8]")

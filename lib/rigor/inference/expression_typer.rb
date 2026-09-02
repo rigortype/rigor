@@ -13,6 +13,7 @@ require_relative "block_parameter_binder"
 require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
+require_relative "captured_locals"
 require_relative "dynamic_origin"
 require_relative "origin_lookup"
 require_relative "../effects/collector"
@@ -3155,10 +3156,76 @@ module Rigor
       end
 
       def per_element_body_results(block, element_types)
-        results = -> { element_types.map { |element_type| type_block_body_with_param(block, [element_type]) } }
+        captured = per_element_captured_bindings(block, element_types)
+        results = lambda do
+          element_types.map { |element_type| type_block_body_with_param(block, [element_type], captured: captured) }
+        end
         return results.call if element_types.size <= PER_ELEMENT_THREADING_LIMIT
 
         without_block_body_threading(&results)
+      end
+
+      # Issue #587 (b) — first-iteration pinning. Every position of this fold is typed from the SAME entry
+      # scope, so a body that rebinds a captured outer local answers the FIRST iteration's value at every
+      # position: `total = 0; [1, 2].map do total += 1; total end` folded to `[1, 1]` (runtime `[1, 2]`), and
+      # `r.first == 1` then folded to `true` — a live always-truthy on correct code. The ADR-56 fixpoint
+      # (`StatementEvaluator#write_back_block_captures`) already computes the honest binding of such a local
+      # — the join over the pre-call binding and every permitted iteration, value-pin widened, floored to
+      # `Dynamic[top]` on structural compounding (`x = [x]`) — but it runs AFTER the call is typed and feeds
+      # only the continuation. This fold runs the same `BodyFixpoint` over the same name set
+      # ({CapturedLocals.writes}) up front and binds each such local to its converged type in every
+      # position's entry scope, so a position answers what the local can be in ANY iteration
+      # (`[Integer, Integer]`), never what it was in the first.
+      #
+      # Only the rebound names move. A position whose tail reads an untouched captured local or a block-local
+      # keeps its exact fold (`[5, 5]`, `[42, 42]`), and a predicate that ignores the rebound counter still
+      # decides (`select do seen += 1; e > 1 end` still folds to `[2]`); a blanket decline would have lost all
+      # three for nothing. The fixpoint binds the block parameter to the union of the elements, so its cost
+      # is independent of the arity — which is why the per-element threading cap is NOT a reason to floor: a
+      # ninth element keeps `Integer` where it would otherwise keep the stale `0`.
+      #
+      # Under threading suppression — this fold nested inside another threaded body — the fixpoint's body
+      # evaluations are exactly the re-entrant cost the suppression exists to refuse, so the names take the
+      # escaping-block floor (`Dynamic[top]`) instead: cheaper, wider, still sound. A failure inside the
+      # fixpoint takes the same floor rather than the seed — a seed that reaches a position is the pin this
+      # exists to remove.
+      #
+      # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds nothing captured.
+      def per_element_captured_bindings(block, element_types)
+        names = CapturedLocals.writes(block, scope)
+        return nil if names.empty?
+        return captured_floor(names) if block_body_threading_suppressed?
+
+        begin
+          converged_captured_bindings(block, names, element_types)
+        rescue StandardError
+          captured_floor(names)
+        end
+      end
+
+      def captured_floor(names)
+        names.to_h { |name| [name, Type::Combinator.untyped] }
+      end
+
+      def converged_captured_bindings(block, names, element_types)
+        param_types = [Type::Combinator.union(*element_types)]
+        BodyFixpoint.converge(
+          names: names,
+          seed_bindings: names.to_h { |name| [name, scope.local(name)] },
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names) }
+        )
+      end
+
+      # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the
+      # same layering as {#type_block_body_with_param}), returning the per-name exit binding. Threading is
+      # suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
+      def captured_exit_bindings(block, param_types, bindings, names)
+        params = BlockParameterBinder.new(expected_param_types: param_types).bind(block)
+        entry = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = params.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
+        _type, exit_scope = without_block_body_threading { entry.evaluate(block.body) }
+        names.to_h { |name| [name, exit_scope.local(name)] }
       end
 
       def per_element_symbol_results(block_arg, element_types)
@@ -3569,9 +3636,12 @@ module Rigor
         end
       end
 
-      def type_block_body_with_param(block_node, expected_param_types)
+      # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local the body rebinds
+      # ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter still shadows.
+      def type_block_body_with_param(block_node, expected_param_types, captured: nil)
         bindings = BlockParameterBinder.new(expected_param_types: expected_param_types).bind(block_node)
-        block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_scope = bindings.reduce(block_scope) { |acc, (name, type)| acc.with_local(name, type) }
         type_block_body(block_node, block_scope)
       rescue StandardError
         nil

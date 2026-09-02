@@ -556,6 +556,61 @@ base without joining the mutator's argument (`if xs.any?; xs << 1` reads
 `Array[String]`). That is #560's family reached through a fourth door,
 and a separate change.
 
+||||||| parent of 59af3ced (Type per-element fold positions at a rebound capture's converged binding)
+
+### WD2.10 — The per-element fold sees a rebound capture at its converged binding (2026-09-02, issue #587)
+
+Slice A's fixpoint answers the CONTINUATION: what a captured local is
+once the block has run zero or more times. It runs in
+`StatementEvaluator#eval_call` after the call itself is typed, so the
+block-RETURN pass — `ExpressionTyper`, dispatched from inside that call
+typing — never sees its result. For a single-yield method that is
+harmless: `m.synchronize do total += 1; total end` is `1` in its only
+iteration. For the per-element Tuple fold it is a wrong-precise answer
+at every position: the fold re-types the body once per element from
+the same entry scope, so `total = 0; [1, 2].map do total += 1; total
+end` folded to `[1, 1]` (runtime `[1, 2]`), and `r.first == 1` then
+folded to `Constant[true]` — a live always-truthy on correct code (PR
+#584's review, probe 2).
+
+Two fix directions were open. Feeding the continuation bindings back
+into a second call typing from `eval_call` would fix the generic
+`Array[U]` path too, but it re-types the receiver and arguments under
+the widened binding, doubles the call typing for every block that
+rebinds a capture (`sum = 0; xs.each { |x| sum += x }` is the
+archetype), and misses a fold that is not a statement of its own
+(`… .map do … end.first == 1` inside a predicate). Declining the fold
+outright loses folds the pin never touched: `[1, 2].select do seen +=
+1; e > 1 end` decides on the element alone and stays `[2]`, and a tail
+reading an unrebound capture keeps its literal.
+
+The decision is the narrow one: the fold itself runs the WD3 fixpoint
+over the same captured-rebind name set (now `Inference::CapturedLocals`,
+shared with slice A and the sub-phase 3c drop so the three cannot
+drift) before typing any position, and binds each rebound local to the
+converged type in every position's entry scope. The answer is what the
+local can be in ANY iteration — `[Integer, Integer]` — and a
+structurally compounding rebind (`x = [x]`) takes the floor the
+fixpoint already defines. Cost is bounded to the shape that had the
+defect: a Tuple receiver under the fold family whose body rebinds a
+capture, at most CAP + 1 extra body evaluations with the parameter
+bound to the element union, independent of arity. Under the block-body
+threading suppression of #584 (the fold nested in a threaded body) the
+fixpoint is not run and the names take the escaping-block floor.
+
+Two residues are recorded rather than fixed here. The generic
+`Array[U]` path (`xs.map do total += 1; total end` on a nominal
+receiver) still pins `U` to the first iteration — `Array[1]`, with the
+same always-falsey hazard on `r.last == 2` — because the block-return
+pass cannot tell a single-yield method from an iterator and the
+single-yield answer is exact; the fix needs a yield-count signal or the
+`eval_call` reordering above, and belongs to its own issue. And `[1,
+2].map { total += 1 }` still folds to `[1, 1]` even with `total:
+Integer` at entry, because `ExpressionTyper#type_of_assignment_write`
+types every compound write as its RHS — `total += 1` as `1` — a defect
+of the expression typer, not of the fold, and one whose fix reaches
+every `||=` / `&&=` / `op=` expression.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

@@ -11,6 +11,7 @@ require_relative "../source/constant_path"
 require_relative "anonymous_meta_class"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
+require_relative "captured_locals"
 require_relative "dynamic_origin"
 require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "struct_fold_safety"
@@ -1237,7 +1238,7 @@ module Rigor
         pre_existing = []
         body_first = []
         Source::NodeWalker.each(statements) do |descendant|
-          next unless LOCAL_WRITE_NODES.any? { |klass| descendant.is_a?(klass) }
+          next unless CapturedLocals::LOCAL_WRITE_NODES.any? { |klass| descendant.is_a?(klass) }
 
           name = descendant.name
           if base_scope.locals.key?(name)
@@ -2319,40 +2320,10 @@ module Rigor
       # synthesise the union of the block's write types (which the current pass does not yet expose), we discard the
       # narrowed binding altogether. A future sub-phase MAY refine this to the union of the block's actual writes.
       def drop_captured_narrowing(block_node, base_scope)
-        names = captured_local_writes(block_node, base_scope)
+        names = CapturedLocals.writes(block_node, base_scope)
         return base_scope if names.empty?
 
         names.reduce(base_scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
-      end
-
-      # Names of outer locals the block body can REBIND, across every local-write form: plain `=`
-      # (`LocalVariableWriteNode`), the operator / `||=` / `&&=` compound forms, and a multi-assign target (`x, y = ...`
-      # → `LocalVariableTargetNode` under `MultiWriteNode`). Block-introduced names (parameters, numbered params,
-      # `;`-locals) and names not bound in the outer scope are excluded — a write to either is not a captured rebind of
-      # an outer variable.
-      LOCAL_WRITE_NODES = [
-        Prism::LocalVariableWriteNode,
-        Prism::LocalVariableOperatorWriteNode,
-        Prism::LocalVariableOrWriteNode,
-        Prism::LocalVariableAndWriteNode,
-        Prism::LocalVariableTargetNode
-      ].freeze
-      private_constant :LOCAL_WRITE_NODES
-
-      def captured_local_writes(block_node, base_scope)
-        body = block_node.body
-        return [] if body.nil?
-
-        introduced = block_introduced_locals(block_node)
-        outer_writes = []
-        Source::NodeWalker.each(body) do |descendant|
-          next unless LOCAL_WRITE_NODES.any? { |klass| descendant.is_a?(klass) }
-          next if introduced.include?(descendant.name)
-          next unless base_scope.locals.key?(descendant.name)
-
-          outer_writes << descendant.name
-        end
-        outer_writes.uniq
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
@@ -2362,13 +2333,13 @@ module Rigor
       # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
       #
       # Fast path: a block writing no outer local leaves `post_scope` byte-identical (the overwhelming majority of
-      # blocks), so this costs one extra `captured_local_writes` walk and nothing else.
+      # blocks), so this costs one extra `CapturedLocals.writes` walk and nothing else.
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
 
-        names = captured_local_writes(block, scope)
+        names = CapturedLocals.writes(block, scope)
         return post_scope if names.empty?
 
         seed = names.to_h { |name| [name, scope.local(name)] }
@@ -2646,16 +2617,6 @@ module Rigor
         entry = bindings.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
         _type, exit_scope = sub_eval(block, entry)
         names.to_h { |name| [name, exit_scope.local(name)] }
-      end
-
-      # Names introduced by the block itself (parameters, numbered parameters via `BlockParameterBinder`, plus explicit
-      # `;`-prefixed block-locals on `BlockParametersNode`). Writes to these names are local to the block and MUST NOT
-      # be treated as captured rebinds of an outer local.
-      def block_introduced_locals(block_node)
-        introduced = Set.new(BlockParameterBinder.new.bind(block_node).keys)
-        params_root = block_node.parameters
-        params_root.locals.each { |loc| introduced << loc.name } if params_root.is_a?(Prism::BlockParametersNode)
-        introduced
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller

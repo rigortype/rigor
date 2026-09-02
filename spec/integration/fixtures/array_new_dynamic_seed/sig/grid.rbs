@@ -11,6 +11,13 @@ class Grid
   def block_form_widens_a_union_of_containers: (untyped n, bool flag) -> untyped
   def fill_form_widens_a_mixed_union: (untyped n, bool flag) -> untyped
 
+  # The recursive walk: a container nested inside the fill / block result.
+  def block_form_widens_a_nested_container: (untyped n) -> untyped
+  def fill_form_widens_a_nested_container: (untyped n) -> untyped
+  def block_form_widens_a_nested_hash: (untyped n) -> untyped
+  def block_form_widens_a_union_of_nested_containers: (untyped n, bool flag) -> untyped
+  def single_container_result_stays_precise: (untyped n) -> untyped
+
   def fill_form_survives_the_block_seam: (untyped n) -> String
   def fill_form_survives_the_loop_seam: (untyped n) -> String
   def bare_form_keeps_a_gradual_arm: (untyped n) -> untyped

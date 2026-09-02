@@ -128,6 +128,50 @@ class Grid
     a
   end
 
+  # The widening is RECURSIVE, not one level deep. Every nested position is a
+  # fresh object per constructed slot that the program goes on to mutate, so
+  # stopping at the outermost container only moved the wrong-precise answer one
+  # level in: `Array[Array[[1]]]` left the inner tuple fixed-arity, and
+  # `a[0][0].last == 5` folded always-falsey on correct code.
+  def block_form_widens_a_nested_container(n)
+    a = Array.new(n) { [[1]] }
+    assert_type("Array[Array[Array[Integer]]]", a)
+    a[0][0] << 5
+    puts "hit" if a[0][0].last == 5
+  end
+
+  # The fill form's spelling of the same nesting.
+  def fill_form_widens_a_nested_container(n)
+    a = Array.new(n, [[1]])
+    assert_type("Array[Array[Array[Integer]]]", a)
+    a[0][0] << 5
+    puts "hit" if a[0][0].last == 5
+  end
+
+  # And a HashShape reached through a Tuple: the walk crosses carrier kinds.
+  def block_form_widens_a_nested_hash(n)
+    a = Array.new(n) { [{ k: 1 }] }
+    assert_type("Array[Array[Hash[Symbol, Integer]]]", a)
+    a[0][0][:k] = 5
+    puts "hit" if a[0][0][:k] == 5
+  end
+
+  # The nesting and the union axis at once.
+  def block_form_widens_a_union_of_nested_containers(n, flag)
+    a = Array.new(n) { flag ? [[1]] : [[2]] }
+    assert_type("Array[Array[Array[Integer]]]", a)
+    a[0][0] << 5
+    puts "hit" if a[0][0].last == 5
+  end
+
+  # Must-still-succeed: a NON-container nested value is left exactly where it
+  # was, so the recursion costs no precision on the one-level shape.
+  def single_container_result_stays_precise(n)
+    a = Array.new(n) { [1] }
+    assert_type("Array[Array[Integer]]", a)
+    a
+  end
+
   # Ruby's array-convertible COPY overload: `Array.new([1, 2])` is `[1, 2]`, not
   # two nils, which the gradual no-fill element absorbs.
   def copy_overload_is_not_a_nil_fill

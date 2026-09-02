@@ -725,15 +725,23 @@ rather than precision ones:
 - **The element is value-pin widened**, `hash_new_lift`'s reason: the
   slots are rewritten over the array's lifetime, so `Array["x"]` would
   let a later `acc[i] == "x"` constant-fold. A literal *container*
-  result widens one step in as well — `Array.new(n) { [] }` builds `n`
-  INDEPENDENT arrays that the program then appends to, and
-  `Array[Tuple[]]` claims every one of them stays empty, which reads
-  `adj[i].first` as `nil` on the adjacency-list idiom.
+  result widens as well — `Array.new(n) { [] }` builds `n` INDEPENDENT
+  arrays that the program then appends to, and `Array[Tuple[]]` claims
+  every one of them stays empty, which reads `adj[i].first` as `nil` on
+  the adjacency-list idiom. It widens **recursively**, through a
+  container's own elements and a hash shape's own values: every nested
+  position is a fresh object per constructed slot too, so stopping at
+  the outermost level merely moved the wrong-precise answer one level in
+  (`Array.new(n) { [[1]] }` stayed `Array[Array[[1]]]` and folded
+  `a[0][0].last == 5` always-falsey after `a[0][0] << 5`). The walk is
+  bounded by the source literal's own nesting — a `Type` carrier is
+  assembled bottom-up and cannot contain itself — with a defensive
+  depth cap behind that.
 - **A `Union` fill widens MEMBERWISE.** Judged wholesale,
   `Array.new(n) { flag ? [1] : [2] }` stayed `Array[[1] | [2]]` and every
   arm was still a fixed-arity tuple, so `a[0] << 5` then
   `a[0].last == 5` folded always-falsey on correct code. Each container
-  member takes the one-step widening; non-container members pass
+  member takes the same recursive widening; non-container members pass
   through, so `Array.new(n, flag ? [] : "s")` reads
   `Array[Array[untyped] | String]`.
 - **The no-fill form seeds the GRADUAL element, NOT `nil`** — even when
@@ -775,13 +783,15 @@ same `widen_for_mutator` change the bullet above names.
 Gate: the `array_new_dynamic_seed` fixture pins what every constructor
 form seeds and carries it through both seams (must-not-fire), carries
 the DP recurrence and the `256.times { buf[i] = … }` buffer as the
-allocate-then-fill idiom, and holds the union-fill shapes — against the
+allocate-then-fill idiom, and holds the union-fill and nested-container
+shapes — against the
 fresh-seed siblings (the `[]` literal and the zero-argument `Array.new`)
 that must still close and still fire the exact `call.undefined-method`
 line set. Restoring the bare-`Array` answer turns the seam examples red;
 restoring the `nil` seed turns the idiom examples red; judging a union
-fill wholesale turns the container examples red. The literal-size tuple
-fold is untouched by all three.
+fill wholesale, or stopping the container walk at the outermost level,
+turns the container examples red. The literal-size tuple fold is
+untouched by all four.
 
 ### WD3 — One mechanism, shared
 

@@ -830,9 +830,32 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "keeps a single literal container result precise" do
-        # Must-still-succeed: memberwise widening must not flatten the one-arm case to `untyped`.
+        # Must-still-succeed: memberwise widening must not flatten the one-arm case to `untyped`,
+        # and a NON-container nested value stays exactly where it was.
         element = element_of(sized("Array.new(n) { [1] }", Rigor::Type::Combinator.untyped))
         expect(element_of(element)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      end
+
+      it "widens a container nested INSIDE the result, not only the outermost one" do
+        # One level of widening only moved the wrong-precise answer one level in: `Array[Array[[1]]]`
+        # left the inner tuple fixed-arity, so `a[0][0] << 5; a[0][0].last == 5` folded always-falsey.
+        element = element_of(sized("Array.new(n) { [[1]] }", Rigor::Type::Combinator.untyped))
+        expect(element_of(element_of(element))).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      end
+
+      it "widens a HashShape nested inside the result" do
+        element = element_of(sized("Array.new(n) { [{ k: 1 }] }", Rigor::Type::Combinator.untyped))
+        inner = element_of(element)
+        expect(inner).to be_a(Rigor::Type::Nominal)
+        expect(inner.class_name).to eq("Hash")
+        expect(inner.type_args).to eq([Rigor::Type::Combinator.nominal_of("Symbol"),
+                                       Rigor::Type::Combinator.nominal_of("Integer")])
+      end
+
+      it "widens through a HashShape's values into a nested container" do
+        element = element_of(sized("Array.new(n, { k: [1] })", Rigor::Type::Combinator.untyped))
+        expect(element.class_name).to eq("Hash")
+        expect(element_of(element.type_args.last)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
       end
 
       it "leaves the zero-argument constructor elementless" do

@@ -1116,22 +1116,50 @@ module Rigor
       end
 
       # A fill / block result as an element PARAMETER. Value pinning is dropped, and a literal
-      # container widens to its nominal one step in: `Array.new(n) { [] }` builds n INDEPENDENT
-      # arrays that the program then appends to, and `Array[Tuple[]]` claims every one of them
-      # stays empty — the adjacency-list idiom would read `adj[i].first` as `nil`. Both
-      # conversions go through {MutationWidening}'s own helpers, the single owner of "literal
-      # container → parameterised nominal" that `MemberShapeProjection` already borrows.
+      # container widens to its nominal: `Array.new(n) { [] }` builds n INDEPENDENT arrays that
+      # the program then appends to, and `Array[Tuple[]]` claims every one of them stays empty —
+      # the adjacency-list idiom would read `adj[i].first` as `nil`. Both conversions go through
+      # {MutationWidening}'s own helpers, the single owner of "literal container → parameterised
+      # nominal" that `MemberShapeProjection` already borrows.
       #
-      # A `Union` widens MEMBERWISE. Judging it wholesale left `Array.new(n) { flag ? [1] : [2] }`
-      # as `Array[[1] | [2]]`, and each arm is a fixed-arity tuple the program then appends to:
-      # `a[0] << 5; a[0].last == 5` folded always-falsey on correct code.
-      def array_new_element(type)
+      # The walk is **recursive**, through `Union` members and through a container's own elements /
+      # values alike. Every one of those positions is a fresh object per constructed slot that the
+      # program goes on to mutate, so stopping at the outermost level only moved the wrong-precise
+      # answer one level in: `a = Array.new(n) { [[1]] }; a[0][0] << 5` left `Array[Array[[1]]]`
+      # and folded `a[0][0].last == 5` always-falsey on correct code. Judging a `Union` wholesale
+      # was the same defect one axis over — `Array.new(n) { flag ? [1] : [2] }` kept both arms as
+      # fixed-arity tuples.
+      #
+      # `depth` is defensive only. A `Type` carrier is an immutable value object assembled
+      # bottom-up (`Tuple.new(elements)`, `HashShape.new(pairs)`), so it cannot contain itself and
+      # this walk is bounded by the source literal's own nesting; the cap costs nothing on any
+      # literal a person writes and stops a malformed carrier from recursing forever.
+      ARRAY_NEW_FILL_DEPTH_LIMIT = 8
+      private_constant :ARRAY_NEW_FILL_DEPTH_LIMIT
+
+      def array_new_element(type, depth = 0)
+        return Type::Combinator.untyped if depth > ARRAY_NEW_FILL_DEPTH_LIMIT
+
         case type
-        when Type::Tuple then MutationWidening.widen_tuple(type)
-        when Type::HashShape then MutationWidening.widen_hash_shape(type)
-        when Type::Union then Type::Combinator.union(*type.members.map { |m| array_new_element(m) })
+        when Type::Tuple then MutationWidening.widen_tuple(recursed_tuple(type, depth))
+        when Type::HashShape then MutationWidening.widen_hash_shape(recursed_hash_shape(type, depth))
+        when Type::Union then Type::Combinator.union(*type.members.map { |m| array_new_element(m, depth + 1) })
         else Type::Combinator.widen_value_pinned(type)
         end
+      end
+
+      # The same tuple / hash shape with every element / value already widened, so the
+      # {MutationWidening} helper that consumes it sees nominals where the literal had pins. The
+      # rebuilt carrier is a throwaway argument — never surfaced — and the helpers read only
+      # `elements` / `pairs`, so no policy field rides on it.
+      def recursed_tuple(type, depth)
+        Type::Combinator.tuple_of(*type.elements.map { |e| array_new_element(e, depth + 1) })
+      end
+
+      def recursed_hash_shape(type, depth)
+        Type::Combinator.hash_shape_of(
+          type.pairs.transform_values { |v| array_new_element(v, depth + 1) }
+        )
       end
 
       def array_new_size(type)

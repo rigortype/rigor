@@ -23,14 +23,22 @@ module Rigor
       #   { class_name: "User", table_name_override: nil, sti_parent: nil, ... }
       #   { class_name: "Admin", table_name_override: nil, sti_parent: "User", ... }
       #
+      # `class_name` (and `superclass_name`) is the constant path WITHOUT a leading `::` — `class ::User`
+      # yields `"User"`, exactly as `class User` does, and `class ::User` nested inside `module Admin`
+      # yields `"User"` rather than `"Admin::::User"`, because a rooted declaration names the top-level
+      # constant regardless of its lexical nesting. Every downstream key — the {ModelIndex} entries, the
+      # published `:model_index` fact, `Entry#class_name` — inherits this spelling, and every consumer
+      # anchors with the plain constant rendering (#583: the rooted `"::User"` key used to make all three
+      # Hash consumers miss such models silently).
+      #
       # Limitations (intentional for v0.1.0 of the plugin):
       #
       # - `self.table_name = "..."` recognised only when the RHS is a String literal. Computed names
       #   (`self.table_name = "#{tenant}_users"`) are skipped.
       # - Modules (`class Admin::User < ApplicationRecord`) are recognised; the resulting class name is
       #   the lexical path (`Admin::User`).
-      # - The STI fixpoint matches a superclass name against model class names tolerating a leading `::`;
-      #   richer constant resolution (relative namespacing) is not modelled.
+      # - The STI fixpoint matches a superclass name against model class names by exact spelling; richer
+      #   constant resolution (relative namespacing) is not modelled.
       class ModelDiscoverer
         # @param io_boundary [Rigor::Plugin::IoBoundary]
         # @param search_paths [Array<String>] absolute or project-relative paths.
@@ -109,13 +117,11 @@ module Rigor
           end
         end
 
-        # Resolves a superclass NAME against the set of known model class names, tolerating a leading
-        # `::`. Returns the matched model class name, or nil.
+        # Resolves a superclass NAME against the set of known model class names. Both sides come out of
+        # {#declared_constant_name}, so neither carries a leading `::` and the match is by exact spelling.
+        # Returns the matched model class name, or nil.
         def model_match(superclass_name, model_names)
-          return superclass_name if model_names.key?(superclass_name)
-
-          stripped = superclass_name.sub(/\A::/, "")
-          model_names.key?(stripped) ? stripped : nil
+          model_names.key?(superclass_name) ? superclass_name : nil
         end
 
         def read_safely(path)
@@ -153,8 +159,8 @@ module Rigor
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
 
-          full_name = (lexical_path + [class_local_name]).join("::")
-          superclass = constant_path_name(node.superclass) if node.superclass
+          full_name = declared_constant_name(class_local_name, lexical_path)
+          superclass = strip_root(constant_path_name(node.superclass)) if node.superclass
 
           collect_type_overrides(node.body)
 
@@ -172,8 +178,7 @@ module Rigor
           })
 
           # Recurse into the body in case nested classes exist.
-          inner_path = lexical_path + [class_local_name]
-          walk_for_classes(node.body, inner_path, &) if node.body
+          walk_for_classes(node.body, [full_name], &) if node.body
         end
 
         def visit_module(node, lexical_path, &)
@@ -184,8 +189,23 @@ module Rigor
           # `included do … end` block; collect their overrides even though the module itself is not a model.
           collect_type_overrides(node.body)
 
-          inner_path = lexical_path + [module_local_name]
+          inner_path = [declared_constant_name(module_local_name, lexical_path)]
           walk_for_classes(node.body, inner_path, &) if node.body
+        end
+
+        # The full constant name a `class` / `module` declaration defines, given the rendered local name
+        # and the enclosing lexical path. A ROOTED local name (`class ::User`, `module ::Admin`) names the
+        # top-level constant whatever the nesting, so the lexical path is dropped and the `::` with it;
+        # otherwise the name is appended to the path (`class User` inside `module Admin` → `Admin::User`).
+        def declared_constant_name(local_name, lexical_path)
+          return strip_root(local_name) if local_name.start_with?("::")
+
+          (lexical_path + [local_name]).join("::")
+        end
+
+        # `::User` → `User`; a name without the root marker is returned unchanged (nil stays nil).
+        def strip_root(name)
+          name&.delete_prefix("::")
         end
 
         # Records the column name of every `serialize :col` / `mount_uploader(s) :col` / `attribute :col,
@@ -230,8 +250,9 @@ module Rigor
           type_arg.is_a?(Prism::ConstantReadNode) || type_arg.is_a?(Prism::ConstantPathNode)
         end
 
-        # Renders a constant-path node (`Admin::User`, `::ApplicationRecord`) as a String. Returns nil for
-        # shapes the discoverer chooses not to handle.
+        # Renders a constant-path node (`Admin::User`, `::ApplicationRecord`) as a String, keeping the
+        # leading `::` of a rooted path — {#declared_constant_name} reads it as "reset the lexical path"
+        # before the marker is dropped. Returns nil for shapes the discoverer chooses not to handle.
         def constant_path_name(node)
           return nil if node.nil?
 

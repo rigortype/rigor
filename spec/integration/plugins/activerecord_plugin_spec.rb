@@ -2278,4 +2278,128 @@ RSpec.describe "plugins/rigor-activerecord" do
       end
     end
   end
+
+  # #583 — a model declared with a rooted constant path (`class ::User`) used to enter the index keyed
+  # `"::User"`, the spelling the discoverer's nil-parent `constant_path_name` branch renders. The plugin's
+  # own lookups tolerated it through a `find(name) || find("::#{name}")` retry, but the published
+  # `:model_index` fact carried the rooted key too, and none of the three Hash consumers (rigor-actionpack,
+  # rigor-factorybot, rigor-shoulda-matchers) retries — a uniform silent false negative. The key is now the
+  # de-rooted constant path at the producer, and `ModelIndex#find` normalises a rooted QUERY instead, so
+  # no caller carries the retry.
+  describe "rooted class declarations (#583)" do
+    let(:rooted_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => "class ::User < ApplicationRecord\nend\n",
+        "app/models/post.rb" => "class Post < ::ApplicationRecord\nend\n",
+        "app/models/admin.rb" => "class Admin < User\nend\n"
+      }
+    end
+
+    def rooted_index(models = rooted_models)
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
+      index
+    end
+
+    it "keys a `class ::User` model by its de-rooted name" do
+      index = rooted_index
+      expect(index.class_names).to include("User")
+      expect(index.class_names).not_to include("::User")
+      expect(index.find("User").class_name).to eq("User")
+      expect(index.find("User").table_name).to eq("users")
+    end
+
+    it "resolves a rooted query and a plain one to the same entry" do
+      index = rooted_index
+      expect(index.find("::User")).to be(index.find("User"))
+      expect(index.model?("::User")).to be(true)
+      expect(index.model?("::Nope")).to be(false)
+    end
+
+    it "recognises `< ::ApplicationRecord` as the configured base class" do
+      expect(rooted_index.model?("Post")).to be(true)
+    end
+
+    it "discovers an STI child of a rooted-declared parent" do
+      expect(rooted_index.find("Admin").table_name).to eq("users")
+    end
+
+    it "keys a rooted declaration nested in a module by the top-level name" do
+      # `class ::User` inside `module Admin` defines the top-level `::User`, not `Admin::User` — and never
+      # the `"Admin::::User"` the joined lexical path used to spell.
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/admin/user.rb" => "module Admin\n  class ::User < ApplicationRecord\n  end\nend\n"
+      }
+      expect(rooted_index(models).class_names).to eq(["User"])
+    end
+
+    it "publishes the de-rooted key in the :model_index fact" do
+      expect(published_fact_keys(rooted_models)).to contain_exactly("User", "Post", "Admin")
+    end
+
+    it "fires unknown-column on a `class ::User` model from a plain and a rooted receiver (must-fire)" do
+      diags = plugin_diagnostics(run_ar("User.where(emial: 'a')\n::User.where(emial: 'a')\n", models: rooted_models))
+      expect(diags.count { |d| d.rule == "unknown-column" }).to eq(2)
+    end
+
+    it "fires unknown-column from a rooted receiver on a plainly declared model (must-fire)" do
+      diags = plugin_diagnostics(run_ar("::User.where(emial: 'a')\n"))
+      expect(diags.count { |d| d.rule == "unknown-column" }).to eq(1)
+    end
+
+    it "stays silent on a known column of a `class ::User` model (must-not-fire)" do
+      diags = plugin_diagnostics(run_ar("User.where(email: 'a')\n::User.where(email: 'a')\n", models: rooted_models))
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      expect(diags.count { |d| d.rule == "model-call" }).to eq(2)
+    end
+
+    it "names the model without the root marker" do
+      diags = plugin_diagnostics(run_ar("::User.find(1)\n", models: rooted_models))
+      expect(diags.first.message).to eq("`User.find` returns User (table: `users`)")
+    end
+
+    # The fact as a consumer reads it: the Hash's keys, captured from a synthetic consumer's `prepare`.
+    def published_fact_keys(models)
+      published = nil
+      consumer = Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "rooted-consumer", version: "0.1.0",
+          consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
+        )
+      end
+      consumer.define_method(:prepare) do |services|
+        published = services.fact_store.read(plugin_id: "activerecord", name: :model_index)
+      end
+      stub_const("FakeRootedConsumerPlugin", consumer)
+      run_with_rooted_consumer(consumer, models)
+      published&.keys
+    end
+
+    def run_with_rooted_consumer(consumer, models)
+      Rigor::Plugin.unregister!
+      files = models.merge("demo.rb" => "x = 1\n", "db/schema.rb" => DEFAULT_SCHEMA)
+      Dir.mktmpdir do |dir|
+        materialize_files(dir, files)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => %w[rigor-activerecord rigor-rooted-consumer]
+          )
+        )
+        Dir.chdir(dir) do
+          Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              case File.basename(name, ".rb")
+              when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
+              when "rigor-rooted-consumer" then Rigor::Plugin.register(consumer)
+              end
+              true
+            }
+          ).run
+        end
+      end
+    end
+  end
 end

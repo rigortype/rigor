@@ -59,8 +59,8 @@ module Rigor
           model_name = constant_receiver_name(node.receiver)
           return if model_name.nil?
 
-          entry = @model_index.find(model_name) ||
-                  @model_index.find("::#{model_name}")
+          # A rooted receiver (`::User.where(...)`) renders as `"::User"`; `ModelIndex#find` normalises it.
+          entry = @model_index.find(model_name)
           return if entry.nil?
 
           case node.name

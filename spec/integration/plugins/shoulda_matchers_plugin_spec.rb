@@ -248,6 +248,28 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
       RUBY
       expect(diags).to be_empty
     end
+
+    # #583 — the fact is keyed by the de-rooted class name, so a rooted `describe ::User` must anchor on
+    # `"User"` exactly as `describe User` does; a `"::User"` anchor would miss the key silently.
+    it "anchors a rooted `describe ::User` on the de-rooted key (must-fire)" do
+      diags = diagnose(<<~RUBY)
+        RSpec.describe ::User do
+          it { should validate_presence_of(:nme) }
+        end
+      RUBY
+      err = diags.find { |d| d.rule == "unknown-column" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("User")
+    end
+
+    it "stays silent for a known column under a rooted `describe ::User` (must-not-fire)" do
+      diags = diagnose(<<~RUBY)
+        RSpec.describe ::User do
+          it { should validate_presence_of(:email) }
+        end
+      RUBY
+      expect(diags).to be_empty
+    end
   end
 
   describe "no model_index available" do
@@ -386,6 +408,55 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
         diags = shoulda_diagnostics(result)
         expect(diags.map(&:rule)).not_to include("unknown-column")
         expect(result.diagnostics.map(&:rule)).not_to include("runtime-error")
+      end
+    end
+
+    # #583 — a model declared `class ::User` used to reach this consumer keyed `"::User"` in the real fact,
+    # so the `describe User` anchor missed it and every matcher check stood down silently. The producer now
+    # publishes the de-rooted key; this is the end-to-end proof through the real `:model_index` fact.
+    context "with a model declared `class ::User`" do
+      let(:user_model_for_integration) do
+        <<~RUBY
+          class ::User < ApplicationRecord
+          end
+        RUBY
+      end
+
+      it "fires unknown-column through the real fact (must-fire)" do
+        with_real_model_index(<<~RUBY) do |result|
+          RSpec.describe User do
+            it { should have_db_column(:nonexistent) }
+          end
+        RUBY
+          err = shoulda_diagnostics(result).find { |d| d.rule == "unknown-column" }
+          expect(err).not_to be_nil
+          expect(err.message).to include("nonexistent")
+          expect(err.message).to include("User")
+          expect(result.diagnostics.map(&:rule)).not_to include("runtime-error")
+        end
+      end
+
+      it "fires under a rooted `describe ::User` too (must-fire)" do
+        with_real_model_index(<<~RUBY) do |result|
+          RSpec.describe ::User do
+            it { should have_db_column(:nonexistent) }
+          end
+        RUBY
+          err = shoulda_diagnostics(result).find { |d| d.rule == "unknown-column" }
+          expect(err).not_to be_nil
+          expect(err.message).to include("nonexistent")
+        end
+      end
+
+      it "stays silent for a known column (must-not-fire)" do
+        with_real_model_index(<<~RUBY) do |result|
+          RSpec.describe User do
+            it { should have_db_column(:email) }
+          end
+        RUBY
+          expect(shoulda_diagnostics(result).map(&:rule)).not_to include("unknown-column")
+          expect(result.diagnostics.map(&:rule)).not_to include("runtime-error")
+        end
       end
     end
   end

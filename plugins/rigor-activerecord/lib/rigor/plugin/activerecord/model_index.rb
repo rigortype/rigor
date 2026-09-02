@@ -103,11 +103,15 @@ module Rigor
         # `db/structure.sql`), where every entry's column set is empty because the columns are UNKNOWN.
         def columns_known? = @columns_known == true
 
+        # Entries are keyed by the de-rooted constant path (`"User"`, `"Admin::User"` — never `"::User"`;
+        # see {ModelDiscoverer}), while a QUERY may legitimately arrive rooted: `::User.find(1)` renders its
+        # receiver as `"::User"`. The root marker is dropped here, once, so every lookup accepts both
+        # spellings and no caller needs a `find(name) || find("::#{name}")` retry (#583).
         def find(class_name)
-          entries[class_name.to_s]
+          entries[strip_leading_namespace(class_name.to_s)]
         end
 
-        def model?(class_name) = entries.key?(class_name.to_s)
+        def model?(class_name) = entries.key?(strip_leading_namespace(class_name.to_s))
         def class_names = entries.keys
         def empty? = entries.empty?
 
@@ -210,9 +214,11 @@ module Rigor
           nil
         end
 
-        # The name inflected from the ROOT class of the chain — an STI child shares its root's table.
+        # The name inflected from the ROOT class of the chain — an STI child shares its root's table. The
+        # row's `class_name` is already de-rooted ({ModelDiscoverer#declared_constant_name}), so it feeds
+        # the inflector as is.
         def self.inflected_table_name(chain)
-          Rigor::Plugin::Inflector.tableize(strip_leading_namespace(chain.first.fetch(:class_name)))
+          Rigor::Plugin::Inflector.tableize(chain.first.fetch(:class_name))
         end
 
         # Dedups association-style rows by `:name`, keeping the LAST occurrence so a child redeclaration
@@ -238,11 +244,15 @@ module Rigor
           end.freeze
         end
 
-        # `::User` → `User`. The discoverer might prefix with `::` for top-level constants depending on
-        # how it resolved the path; the table-name derivation uses the short form regardless.
+        # `::User` → `User`. The query-side half of the key contract: entries never carry the root marker,
+        # so a rooted lookup name is normalised to the spelling the entries use ({#find} / {#model?}).
         def self.strip_leading_namespace(name)
-          name.start_with?("::") ? name[2..] : name
+          name.delete_prefix("::")
         end
+
+        private
+
+        def strip_leading_namespace(name) = self.class.strip_leading_namespace(name)
       end
     end
   end

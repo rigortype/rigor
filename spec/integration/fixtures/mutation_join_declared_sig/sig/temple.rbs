@@ -11,5 +11,18 @@ class Temple
   # The unreadable-arg door onto the same hand-written element type.
   def compile_all: (untyped nodes) -> Array[:multi]
 
+  # Issue #586 — the BARE declared gradual element / key / value arms.
+  def keeps_declared_untyped_element: (Array[untyped] a) -> String
+  def keeps_declared_untyped_element_in_loop: (Array[untyped] a) -> String
+  def keeps_declared_untyped_hash_arms: (Hash[untyped, untyped] h) -> String
+
+  # The fresh-seed siblings that must still close (and still fire).
+  def closes_a_fresh_seed: (Array[String] xs) -> untyped
+  def closes_a_fresh_seed_in_loop: () -> untyped
+
+  # A `non-empty-array[String]` seed after `xs.any?` narrowing.
+  def appends_into_non_empty_seed: (Array[String] xs) -> untyped
+  def appends_into_non_empty_seed_in_loop: (Array[String] xs) -> untyped
+
   def genuinely_wrong: () -> Array[Symbol]
 end

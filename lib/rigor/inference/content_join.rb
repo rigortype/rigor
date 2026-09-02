@@ -83,29 +83,38 @@ module Rigor
       # Builds the continuation Array type from the pre-state binding and the appended element
       # types. The floor is `Array[Dynamic[top]]` (the sound empty-seed behaviour) when there is no
       # element evidence at all.
+      #
+      # **Every arm the seed carries survives, a `Dynamic` arm included.** A gradual seed element is
+      # a statement about what the collection ALREADY holds — a parameter declared `Array[untyped]`,
+      # a local seeded from a call whose signature returns the same, a literal `[x]` whose slot the
+      # engine could not type — and the stores a body adds are evidence about what the body put in,
+      # never about what was there first. Dropping the
+      # arm once concrete evidence appeared closed a declared `Array[untyped]` parameter to
+      # `Array[Integer]` under `[1, 2].each { a.push(rand(9)) }` and drew `undefined method 'upcase'`
+      # on `a.first.upcase`, which the declaration licenses (issue #586).
+      #
+      # What this method therefore never sees is the arity-forget's OWN floor: `widen_tuple` spells
+      # an empty `[]` as `Array[untyped]`, and read back through here that `untyped` would be
+      # indistinguishable from a declared one. Each caller keeps that floor out at its source by
+      # reading the seed from before the widening ran — the block seam from the pre-widen scope, the
+      # loop seam from the pre-body scope — so an empty literal contributes no element and `out = [];
+      # xs.each { out << x*2 }` still reads `Array[Integer]`. The straight-line seam passes the
+      # widened carrier, and adds the same `Dynamic` as its one-store floor anyway.
       def join_array_content(pre_state, added_elements)
-        seed_elements = collection_element_types(pre_state)
-        added = added_elements.compact
-        # The empty-seed floor element is `Dynamic[top]` (no element evidence). When real appended
-        # evidence exists that floor carries nothing, so drop it — an empty accumulator built by
-        # `out << x*2` reads `Array[Integer]`, not `Array[Integer | Dynamic[top]]`.
-        seed_elements = drop_dynamic(seed_elements) unless added.empty?
-        elements = seed_elements + added
+        elements = collection_element_types(pre_state) + added_elements.compact
         return Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped]) if elements.empty?
 
         Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.union(*elements)])
       end
 
       # Builds the continuation Hash type from the pre-state binding and a list of `[key_type,
-      # value_type]` pairs stored by `[]=` / `store`.
+      # value_type]` pairs stored by `[]=` / `store`. The seed's key and value arms survive on the
+      # same terms as {#join_array_content}'s elements: a declared `Hash[untyped, untyped]` stays
+      # gradual on both sides however many pairs the body stores.
       def join_hash_content(pre_state, added_pairs)
         seed_keys, seed_values = hash_shape_key_values(pre_state)
-        added_keys = added_pairs.map(&:first).compact
-        added_values = added_pairs.map(&:last).compact
-        seed_keys = drop_dynamic(seed_keys) unless added_keys.empty?
-        seed_values = drop_dynamic(seed_values) unless added_values.empty?
-        keys = seed_keys + added_keys
-        values = seed_values + added_values
+        keys = seed_keys + added_pairs.map(&:first).compact
+        values = seed_values + added_pairs.map(&:last).compact
         key_t = keys.empty? ? Type::Combinator.untyped : Type::Combinator.union(*keys)
         value_t = values.empty? ? Type::Combinator.untyped : Type::Combinator.union(*values)
         Type::Combinator.nominal_of("Hash", type_args: [key_t, value_t])
@@ -191,22 +200,15 @@ module Rigor
         type.is_a?(Type::Union) ? type.members : [type]
       end
 
-      # Drops `Dynamic` (incl. `untyped`) constituents from a type list.
-      #
-      # Deliberately NOT recursive into `Union` members. A `Dynamic` nested inside a union is
-      # evidence somebody put there — a declared `Array[Integer | untyped]` parameter says the array
-      # may hold anything — and flattening it away closes the parameter and draws a false
-      # `undefined method` on `a.first.upcase`, which is correct code. Telling a declared `untyped`
-      # from the straight-line join's own floor needs provenance the carriers do not have (issue
-      # #580); until they do, the floor is kept out of this seam at its SOURCE instead — see
-      # {StatementEvaluator#loop_content_writeback}.
-      def drop_dynamic(types)
-        types.grep_v(Type::Dynamic)
-      end
-
       # Element types carried by a collection binding, regardless of which carrier holds them: a
       # `Tuple` lists them, a `Nominal[Array, [E]]` has one element param, a bare `Array` /
       # anything else yields none.
+      #
+      # A `Difference` reads through to its base: `non-empty-array[T]` holds `T`s, and the seams
+      # that read a seed from BEFORE the arity-forget ran (see {#join_array_content}) meet the
+      # refinement carrier itself where they used to meet the base the widening had left. Declining
+      # it there would hand the continuation the widened base ALONE, with every appended arm missing
+      # — a wrong type, not a wide one.
       def collection_element_types(type)
         case type
         when Type::Tuple
@@ -217,13 +219,16 @@ module Rigor
           # A loop's single-pass join can union the widened collection with its un-widened literal
           # seed (`Array[0] | [0]`); pull element evidence from every Array-ish member.
           type.members.flat_map { |m| collection_element_types(m) }
+        when Type::Difference
+          collection_element_types(type.base)
         else
           []
         end
       end
 
       # `[keys, values]` evidence from a Hash-ish pre-state binding — a `HashShape` (literal pairs)
-      # or a `Nominal[Hash, [K, V]]`.
+      # or a `Nominal[Hash, [K, V]]`. A `Difference` (`non-empty-hash[K, V]`) reads through to its
+      # base, as {#collection_element_types} does for the Array side.
       def hash_shape_key_values(type)
         case type
         when Type::HashShape
@@ -238,6 +243,8 @@ module Rigor
             ks.concat(mk)
             vs.concat(mv)
           end
+        when Type::Difference
+          hash_shape_key_values(type.base)
         else
           [[], []]
         end

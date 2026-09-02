@@ -1492,11 +1492,16 @@ module Rigor
         post_scope = widen_callee_escaped_argument_captures(node, post_scope)
         # Same always-safe rationale as `widen_after_call` above — propagates outer-scope local / ivar widening from
         # block body mutations (`items.each { |x| arr << x }`).
+        #
+        # The slice-C join below reads its SEED from here, before the widening runs: `widen_after_block` spells an
+        # empty `[]` as `Array[untyped]`, and read back after the fact that `untyped` is indistinguishable from a
+        # declared one (issue #586 — see {#content_writeback_block_captures}).
+        pre_widen_scope = post_scope
         post_scope = MutationWidening.widen_after_block(call_node: node, outer_scope: post_scope)
         # ADR-56 slice C — receiver-content element-type join. Joins appended / stored element / key / value types into
         # the continuation collection so `out = [0]; arr.each { |x| out << x }` types `Array[0 | Integer]`, not
         # `Array[0]`. Same always-safe rationale (only widens).
-        post_scope = content_writeback_block_captures(node, post_scope)
+        post_scope = content_writeback_block_captures(node, post_scope, seed_scope: pre_widen_scope)
         # Indexed-collection narrowing — drop any `receiver[key] ||= default` narrowing the analyzer recorded earlier
         # when an intervening `[]=` writes the same slot or any other mutator runs against the receiver. Always-safe
         # (only forgets; never invents).
@@ -2330,11 +2335,20 @@ module Rigor
       # collection's parameter, so `out = [0]; arr.each { |x| out << x }` types `out` as `Array[0 | Integer]` (sound)
       # rather than `Array[0]` (the B1 under-approximation: the runtime array is `[0, 1, 2, 3]`).
       #
-      # Pre-state is read from `post_scope` so a local that is BOTH rebound and content-mutated composes: the rebind
-      # fixpoint result feeds the content join. The block body is typed once for argument evidence; the floor is
-      # `Array[Dynamic[top]]` / `Hash[untyped, untyped]` (the sound empty-seed behaviour). Always sound — only ever
-      # widens.
-      def content_writeback_block_captures(call_node, post_scope)
+      # **Pre-state is read from `seed_scope` — the scope as it stood BEFORE `widen_after_block` ran.** The widening
+      # spells an empty `[]` as `Array[untyped]`, and read back after the fact that `untyped` cannot be told from a
+      # DECLARED one: the join used to drop every seed `Dynamic` once the body contributed concrete evidence, which
+      # made `out = []; xs.each { out << x }` read `Array[Integer]` — and closed a parameter declared `Array[untyped]`
+      # to `Array[Integer]` on the same rule, so `a.first.upcase` drew `undefined method` on code the declaration
+      # licenses (issue #586). Read before the widening, an empty literal contributes no element and a declared
+      # gradual arm is just another seed arm the join keeps. The pre-widen scope still carries the slice-A rebind
+      # write-back — so a local that is BOTH rebound and content-mutated composes as before — and every other
+      # post-call effect applied ahead of the widening; the pre-CALL `scope` would carry neither. The loop seam makes
+      # the same choice with `pre_body`; see {#loop_content_writeback}.
+      #
+      # The block body is typed once for argument evidence; the floor is `Array[Dynamic[top]]` /
+      # `Hash[untyped, untyped]` (the sound empty-seed behaviour). Always sound — only ever widens.
+      def content_writeback_block_captures(call_node, post_scope, seed_scope:)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
@@ -2347,7 +2361,7 @@ module Rigor
 
         entry = build_block_entry_scope(call_node, block)
         mutations.reduce(post_scope) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, acc, entry)
+          joined = join_content_for_local(name, calls, seed_scope, entry)
           joined.nil? ? acc : acc.with_local(name, joined)
         end
       end
@@ -2502,11 +2516,15 @@ module Rigor
         INDEX_WRITE_NODES.any? { |k| node.is_a?(k) }
       end
 
+      # A `Difference` (`non-empty-array[T]`) counts as its base. The seams read their seed from before the mutation
+      # widening ran, so they meet the refinement carrier where they used to meet the `Array[T]` it widens to;
+      # declining it would leave the continuation on that widened base with every appended arm missing.
       def arrayish?(type)
         case type
         when Type::Tuple then true
         when Type::Nominal then type.class_name == "Array"
         when Type::Union then type.members.any? { |m| arrayish?(m) }
+        when Type::Difference then arrayish?(type.base)
         else false
         end
       end
@@ -2516,6 +2534,7 @@ module Rigor
         when Type::HashShape then true
         when Type::Nominal then type.class_name == "Hash"
         when Type::Union then type.members.any? { |m| hashish?(m) }
+        when Type::Difference then hashish?(type.base)
         else false
         end
       end

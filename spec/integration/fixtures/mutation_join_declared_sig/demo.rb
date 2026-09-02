@@ -61,6 +61,92 @@ class Temple
     temple
   end
 
+  # Issue #586 — the BARE declared `untyped` element, the shape the
+  # `Integer | untyped` case above could not see. There the declared arm
+  # sits inside a Union and a non-recursive drop leaves it alone; here the
+  # seed element IS the `Dynamic`, and the rederivation dropped it the
+  # moment the body's stores contributed a concrete class. `a` closed to
+  # `Array[Integer]` and `a.first.upcase` — correct Ruby, the declaration
+  # says the array may hold anything — drew a false `undefined method`.
+  # The declared arm is a statement about what the array ALREADY holds;
+  # the body's stores are evidence about what the body added. It survives.
+  def keeps_declared_untyped_element(a)
+    [1, 2].each { a.push(rand(9)) }
+    assert_type("Array[Dynamic[top] | Integer]", a)
+    a.first.upcase
+  end
+
+  # The same declared arm through the LOOP seam, which shares the join.
+  def keeps_declared_untyped_element_in_loop(a)
+    i = 0
+    while i < 2
+      a.push(rand(9))
+      i += 1
+    end
+    assert_type("Array[Dynamic[top] | Integer]", a)
+    a.first.upcase
+  end
+
+  # And the Hash twin: a declared `Hash[untyped, untyped]` keeps both
+  # gradual arms however many pairs the body stores.
+  def keeps_declared_untyped_hash_arms(h)
+    [1, 2].each { |x| h[x] = rand(9) }
+    assert_type("Hash[1 | 2 | Dynamic[top], Dynamic[top] | Integer]", h)
+    h[1].upcase
+  end
+
+  # The must-still-fire siblings. A FRESH empty seed carries no arm to
+  # keep, and the block / loop seams see every store in their body, so
+  # the parameter rightly CLOSES to what was appended and the diagnostic
+  # is right. Without these the three above would pass on a seam that had
+  # simply gone gradual everywhere.
+  def closes_a_fresh_seed(xs)
+    acc = []
+    xs.each { |x| acc.push(x.to_i) }
+    assert_type("Array[Integer]", acc)
+    acc.first.upcase # GENUINE-UNDEFINED
+  end
+
+  def closes_a_fresh_seed_in_loop
+    acc = []
+    i = 0
+    while i < 2
+      acc.push(rand(9))
+      i += 1
+    end
+    assert_type("Array[Integer]", acc)
+    acc.first.upcase # GENUINE-UNDEFINED
+  end
+
+  # A seed that is a `non-empty-array[String]` REFINEMENT. The seams now
+  # read the seed from before the mutation widening turned it into its
+  # `Array[String]` base, so they meet the refinement carrier itself; it
+  # must read through to the base and keep the appended arms. Declining
+  # it would hand the continuation the widened base alone — `Array[String]`
+  # for an array that really holds integers too.
+  def appends_into_non_empty_seed(xs)
+    if xs.any?
+      [1, 2].each { |y| xs << y }
+      assert_type("Array[1 | 2 | String]", xs)
+    end
+    xs
+  end
+
+  # The loop form of the same seed. Before the seams read through the
+  # refinement this read `Array[String] | non-empty-array[String]`, with
+  # the appended `1` missing entirely.
+  def appends_into_non_empty_seed_in_loop(xs)
+    if xs.any?
+      i = 0
+      while i < 2
+        xs << 1
+        i += 1
+      end
+      assert_type("Array[1 | String]", xs)
+    end
+    xs
+  end
+
   # And the rule is still LIVE in this fixture: nothing mutates this
   # array, the body plainly returns integers, and the declared
   # `Array[Symbol]` must still be rejected.

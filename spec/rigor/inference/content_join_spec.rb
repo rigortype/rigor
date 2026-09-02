@@ -40,6 +40,13 @@ RSpec.describe Rigor::Inference::ContentJoin do
     it "returns no elements for a non-collection type" do
       expect(described_class.send(:collection_element_types, Rigor::Type::Combinator.constant_of(1))).to eq([])
     end
+
+    # The seams read their seed from before the mutation widening runs, so a `non-empty-array[T]`
+    # refinement reaches here as itself rather than as the `Array[T]` base the widening leaves.
+    it "reads a non-empty-array refinement through to its base's element type" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(str_type)
+      expect(described_class.send(:collection_element_types, non_empty)).to eq([str_type])
+    end
   end
 
   describe ".hash_shape_key_values" do
@@ -96,21 +103,12 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(keys).to contain_exactly(sym_type, sym_type)
       expect(values).to contain_exactly(int_type, str_type)
     end
-  end
 
-  describe ".drop_dynamic" do
-    it "removes Dynamic constituents while keeping concrete types in order" do
-      int_type = Rigor::Type::Combinator.nominal_of("Integer")
-      str_type = Rigor::Type::Combinator.nominal_of("String")
-      dyn = Rigor::Type::Combinator.untyped
-
-      result = described_class.send(:drop_dynamic, [int_type, dyn, str_type])
-      expect(result).to eq([int_type, str_type])
-    end
-
-    it "is a no-op when there is no Dynamic constituent" do
-      int_type = Rigor::Type::Combinator.nominal_of("Integer")
-      expect(described_class.send(:drop_dynamic, [int_type])).to eq([int_type])
+    it "reads a non-empty-hash refinement through to its base's key and value types" do
+      non_empty = Rigor::Type::Combinator.non_empty_hash(sym_type, int_type)
+      keys, values = described_class.send(:hash_shape_key_values, non_empty)
+      expect(keys).to eq([sym_type])
+      expect(values).to eq([int_type])
     end
   end
 
@@ -165,12 +163,44 @@ RSpec.describe Rigor::Inference::ContentJoin do
     let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
     let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
     let(:zero) { Rigor::Type::Combinator.constant_of(0) }
+    let(:untyped) { Rigor::Type::Combinator.untyped }
 
-    it "unions seed and added element types, dropping the empty-seed Dynamic floor" do
+    it "unions seed and added element types" do
       seed = Rigor::Type::Combinator.tuple_of(zero)
       result = described_class.send(:join_array_content, seed, [int_type])
       expect(result.class_name).to eq("Array")
       expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(zero, int_type))
+    end
+
+    # An EMPTY literal seed has no element to contribute, so the added evidence is the whole answer.
+    # This is how `out = []; xs.each { out << x*2 }` reads `Array[Integer]`: the seams hand this
+    # method the literal, never the `Array[untyped]` the arity-forget spells it as.
+    it "lets added evidence close an empty literal seed" do
+      seed = Rigor::Type::Combinator.tuple_of
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result.type_args.first).to eq(int_type)
+    end
+
+    # Issue #586 — a seed's OWN gradual arm is a statement about what the collection already holds
+    # (a parameter declared `Array[untyped]`, an `Array.new`), and the added evidence says nothing
+    # about that. Dropping it closed a declared `Array[untyped]` parameter to `Array[Integer]` and
+    # drew `undefined method 'upcase'` on `a.first.upcase`, which the declaration licenses.
+    it "keeps a seed's own Dynamic element arm next to added evidence" do
+      seed = Rigor::Type::Combinator.nominal_of("Array", type_args: [untyped])
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(untyped, int_type))
+    end
+
+    it "keeps a Dynamic slot of a literal seed as evidence" do
+      seed = Rigor::Type::Combinator.tuple_of(untyped)
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(untyped, int_type))
+    end
+
+    it "joins onto a non-empty-array refinement's base element type" do
+      seed = Rigor::Type::Combinator.non_empty_array(str_type)
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(str_type, int_type))
     end
 
     it "keeps the seed element type unchanged when there is no added evidence" do
@@ -202,11 +232,34 @@ RSpec.describe Rigor::Inference::ContentJoin do
     let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
     let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
     let(:sym_type) { Rigor::Type::Combinator.nominal_of("Symbol") }
+    let(:untyped) { Rigor::Type::Combinator.untyped }
 
-    it "unions seed and added key/value types, dropping the empty-seed Dynamic floor" do
+    it "unions seed and added key/value types" do
       seed = Rigor::Type::HashShape.new(a: int_type)
       result = described_class.send(:join_hash_content, seed, [[sym_type, str_type]])
       expect(result.class_name).to eq("Hash")
+      expect(result.type_args[0]).to eq(sym_type)
+      expect(result.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
+    end
+
+    it "lets a stored pair close an empty literal seed" do
+      result = described_class.send(:join_hash_content, Rigor::Type::HashShape.new, [[sym_type, str_type]])
+      expect(result.type_args[0]).to eq(sym_type)
+      expect(result.type_args[1]).to eq(str_type)
+    end
+
+    # Issue #586, the Hash twin: a declared `Hash[untyped, untyped]` keeps both gradual arms however
+    # many pairs the body stores.
+    it "keeps a seed's own Dynamic key and value arms next to a stored pair" do
+      seed = Rigor::Type::Combinator.nominal_of("Hash", type_args: [untyped, untyped])
+      result = described_class.send(:join_hash_content, seed, [[sym_type, str_type]])
+      expect(result.type_args[0]).to eq(Rigor::Type::Combinator.union(untyped, sym_type))
+      expect(result.type_args[1]).to eq(Rigor::Type::Combinator.union(untyped, str_type))
+    end
+
+    it "joins onto a non-empty-hash refinement's base key and value types" do
+      seed = Rigor::Type::Combinator.non_empty_hash(sym_type, int_type)
+      result = described_class.send(:join_hash_content, seed, [[sym_type, str_type]])
       expect(result.type_args[0]).to eq(sym_type)
       expect(result.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
     end

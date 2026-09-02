@@ -115,6 +115,18 @@ pushed = []
 [1, 2, 3].each { |x| pushed.push(x) }
 assert_type("Array[1 | 2 | 3]", pushed)
 
+# --- A seed SLOT the engine cannot type is evidence, not the floor:
+# `[x]` holds something, and that arm stays next to what the body
+# appended — the straight-line path's `gradual_seed` reads the same.
+# Only the EMPTY literal contributes nothing (issue #586: the join keeps
+# every seed arm, and the seam reads the seed from before the arity-
+# forget spells `[]` as `Array[untyped]`). ---
+def gradual_seed_slot(x)
+  slot = [x]
+  [1, 2].each { |y| slot << y }
+  assert_type("Array[1 | 2 | Dynamic[top]]", slot)
+end
+
 # --- `concat` of a literal pair joins both elements. ---
 catted = [0]
 [1, 2, 3].each { |x| catted.concat([x, x + 1]) }

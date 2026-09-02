@@ -240,6 +240,53 @@ RSpec.describe "cross-file value constants" do
       expect(flow_warnings("b.rb" => declaring, "a.rb" => reader)).to eq([])
     end
 
+    it "resolves the callee's owner from the receiver's TYPE, not the spelling" do
+      # `Inner.production?` inside `module Outer` is `Outer::Inner`. Keying the singleton table on the bare
+      # `Inner` missed it — a NEW warning on completely ordinary code, and the same defect family #635 fixed
+      # in `Narrowing`. A call-chain receiver falls out of the same resolution: `Nominal[KlassConfig]`.
+      reader = <<~RUBY
+        module Outer
+          module Inner
+            def self.production?
+              AppConfig::MODE == :production
+            end
+          end
+
+          def self.relative = Inner.production? ? 1 : 2
+          def self.qualified = Outer::Inner.production? ? 1 : 2
+        end
+
+        class KlassConfig
+          def production?
+            AppConfig::MODE == :production
+          end
+        end
+
+        def chained = KlassConfig.new.production? ? 1 : 2
+      RUBY
+      expect(flow_warnings("b.rb" => "module AppConfig\n  MODE = :production\nend\n", "a.rb" => reader)).to eq([])
+    end
+
+    it "reads the shadowing module's table, not a same-named top-level one" do
+      # The other direction of the same defect: `Config.ready?` inside `module App` is `App::Config.ready?`,
+      # which reads no published constant, so this MUST keep firing. Resolving by spelling withheld it.
+      reader = <<~RUBY
+        module Config
+          def self.ready? = AppConfig::MODE == :production
+        end
+
+        module App
+          module Config
+            def self.ready? = true
+          end
+
+          def self.check = Config.ready? ? "y" : "n"
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => "module AppConfig\n  MODE = :production\nend\n", "a.rb" => reader))
+        .to eq(["a.rb:10"])
+    end
+
     it "does NOT withhold an unrelated same-named constant this file happens to declare" do
       # The local exemption is an exemption, so over-answering it UN-withholds. A `Local::MODE` here must not
       # license a firing on a read of `AppConfig::MODE`, which the reader's author still cannot see.
@@ -274,6 +321,22 @@ RSpec.describe "cross-file value constants" do
         end
       RUBY
       expect(flow_warnings("b.rb" => source)).to eq(["b.rb:5", "b.rb:9"])
+    end
+
+    it "exempts a relative-qualified read of a constant this file owns" do
+      # The exemption is a suffix relation on qualified names, not the spelling: inside `module AppConfig`
+      # the reference `Nested::X` IS this file's `AppConfig::Nested::X`, so both spellings keep firing.
+      source = <<~RUBY
+        module AppConfig
+          module Nested
+            X = :here
+          end
+
+          def self.relative = Nested::X == :here ? "y" : "n"
+          def self.full = AppConfig::Nested::X == :here ? "y" : "n"
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => source)).to eq(["b.rb:6", "b.rb:7"])
     end
 
     it "reads the local exemption from the CENSUS, so a `self::` write counts as this file's own" do

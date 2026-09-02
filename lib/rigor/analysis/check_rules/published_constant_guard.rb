@@ -40,12 +40,15 @@ module Rigor
       #   as much as on its receiver
       # - `&&` / `||` / parentheses / `rescue` composition, and `!`, which Prism spells as a `CallNode`
       # - ONE interprocedural hop into a project predicate method whose body reads such a constant, whatever
-      #   spells its owner: `unless production?` (implicit self), `self.prod?`, and — the idiomatic shape, a
-      #   configuration module exposing predicates — `AppConfig.production?`. The hop is bounded (one level,
-      #   a node budget) and deliberately coarse: ANY published foreign constant anywhere in the callee's
-      #   body declines, rather than a proof that the return value derives from it. Over-declining withholds
-      #   a warning; under-declining would emit one. ADR-58's *Non-transitivity* passage is the precedent for
-      #   stopping at one hop rather than building a provenance channel through the return memo.
+      #   spells its owner: `unless production?` (implicit self), `self.prod?`, `AppConfig.production?` (the
+      #   idiomatic shape — a configuration module exposing predicates), a lexically relative
+      #   `Inner.production?`, and a call chain `KlassConfig.new.production?`. The owner comes from the
+      #   receiver's inferred TYPE, so every spelling that names the same module lands on the same table. The
+      #   hop is bounded (one level, a node budget) and deliberately coarse: ANY published foreign constant
+      #   anywhere in the callee's body declines, rather than a proof that the return value derives from it.
+      #   Over-declining withholds a warning; under-declining would emit one. ADR-58's *Non-transitivity*
+      #   passage is the precedent for stopping at one hop rather than building a provenance channel through
+      #   the return memo.
       #
       # Deliberately NOT covered, and a separate change: a value copied into a local (`m = MODE; m == :x`),
       # into an ivar (`@mode = MODE` in `initialize`), or through a same-file constant alias
@@ -121,21 +124,29 @@ module Rigor
           false
         end
 
-        # `foo` / `self.foo` resolve against the enclosing self; `AppConfig.foo` against the named module's
-        # SINGLETON table, which is where a configuration module's predicates live. Any other receiver shape
-        # (a local, a call chain) is not a hop this walk can make.
+        # `foo` / `self.foo` resolve against the enclosing self. Every other receiver resolves through its
+        # inferred TYPE, never through the name it was spelled with: `Inner.production?` inside `module Outer`
+        # is `Outer::Inner`, and keying the table on the bare `Inner` both misses that (a new warning on
+        # ordinary code) and, where a top-level `Inner` also exists, reads the WRONG module's methods. That is
+        # the defect family #635 fixed in `Narrowing`, so the engine's own resolver answers it rather than a
+        # walk reimplemented here. Going through the type also covers a call-chain receiver for free —
+        # `KlassConfig.new.production?` types `Nominal[KlassConfig]`, whose instance table is the one to read.
         def resolve_callee(node, scope)
           receiver = node.receiver
-          case receiver
-          when nil, Prism::SelfNode then resolve_self_call(node.name, scope)
-          when Prism::ConstantReadNode then scope.singleton_def_for(receiver.name.to_s, node.name)
-          when Prism::ConstantPathNode then resolve_constant_receiver_call(receiver, node.name, scope)
-          end
+          return resolve_self_call(node.name, scope) if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+          resolve_typed_receiver_call(receiver, node.name, scope)
         end
 
-        def resolve_constant_receiver_call(receiver, method_name, scope)
-          owner = Source::ConstantPath.qualified_name_or_nil(receiver)
-          owner ? scope.singleton_def_for(owner, method_name) : nil
+        # A `Singleton[X]` receiver names the singleton table (`AppConfig.production?`, a module's own
+        # predicates); a `Nominal[X]` receiver names the instance one. Anything else — `Dynamic`, a constant
+        # that resolves to no project class — is not a hop this walk can make.
+        def resolve_typed_receiver_call(receiver, method_name, scope)
+          receiver_type = scope.type_of(receiver)
+          case receiver_type
+          when Type::Singleton then scope.singleton_def_for(receiver_type.class_name, method_name)
+          when Type::Nominal then scope.user_def_for(receiver_type.class_name, method_name)
+          end
         end
 
         # A `Singleton[X]` self (a `def self.…` body) names the singleton table; a `Nominal[X]` self names

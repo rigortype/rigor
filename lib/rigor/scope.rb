@@ -66,26 +66,31 @@ module Rigor
     # `MyApp::MODE` answers true for a top-level `MODE`) — over-answering only ever WITHHOLDS a firing, the
     # safe direction, and it is the grammar the ADR-46 negative keys already use. The LOCAL half is an
     # exemption, so over-answering there would UN-withhold: matching it on the last segment too would let an
-    # unrelated `Local::MODE` in this file make a read of `AppConfig::MODE` fire. It therefore matches the
-    # reference exactly — except for a BARE reference, which resolves through the lexical ladder and so could
-    # legitimately be answered by any of this file's `*::MODE` assignments.
+    # unrelated `Local::MODE` in this file make a read of `AppConfig::MODE` fire.
+    #
+    # The exemption therefore matches a **suffix relation on qualified names**, not the spelling and not the
+    # last segment: a local assignment exempts a reference when it IS that reference or ENDS with `::` plus
+    # it. That is what a lexically relative spelling resolves to — inside `module AppConfig`, the reference
+    # `Nested::X` is the file's own `AppConfig::Nested::X` — and it subsumes the bare case (`OWNED` matched
+    # by `Owner::OWNED`) without matching the unrelated `Local::MODE` above. It is deliberately a relation
+    # over already-qualified names rather than a second lexical ladder: the engine's ladder
+    # (`Reflection.resolve_constant_type`) answers with a TYPE and not with the candidate that won, and
+    # reimplementing the walk here is the very thing that made the receiver resolution wrong once already.
     def published_constant?(name)
       names = @discovery.published_constant_names
       return false if names.empty?
+      return false unless names.include?(name.split("::").last)
 
-      segment = name.split("::").last
-      return false unless names.include?(segment)
-
-      !locally_declared_constant?(name, segment)
+      !locally_declared_constant?(name)
     end
 
-    def locally_declared_constant?(reference_name, segment)
+    def locally_declared_constant?(reference_name)
       local = @discovery.local_constant_names
       return false if local.empty?
       return true if local.include?(reference_name)
-      return false if reference_name.include?("::")
 
-      local.any? { |name| name.split("::").last == segment }
+      suffix = "::#{reference_name}"
+      local.any? { |name| name.end_with?(suffix) }
     end
     private :locally_declared_constant?
 

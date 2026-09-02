@@ -256,6 +256,15 @@ RSpec.describe "Rigor type construction (integration)" do
       undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
       expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
     end
+
+    # The user-visible half of the container widening. Every `puts "hit" if …` in the fixture
+    # appends to a constructed slot and compares the value back — correct Ruby that a fill kept
+    # at its literal arity folds away. A container the walk stopped short of (the outermost only,
+    # a union arm, a nested literal) turns these red without touching the `assert_type` lines.
+    it "folds no condition away over a constructed-then-appended slot" do
+      folds = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+      expect(folds.map(&:line)).to be_empty
+    end
   end
 
   describe "fixtures/ivar_mutation_widening.rb — class-ivar Tuple/HashShape widening on mutation" do

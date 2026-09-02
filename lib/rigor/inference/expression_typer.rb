@@ -1115,9 +1115,19 @@ module Rigor
       # Issue #316 — the lookup goes through the confidence-gated `Scope#bindable_top_level_def_for`, not the
       # raw table: inside a block whose `self` is unmodelled, a top-level `def` from ANOTHER file is not
       # evidence about which method the call reaches, so the bind is declined and the call widens.
+      #
+      # Issue #618 — the binding is a fallback for names the enclosing `self` does NOT answer, not a
+      # first-choice tier. A top-level `def` is a private method on `Object`, the last link of every MRO, so
+      # whenever the call's own `self` carries the name the class wins at runtime and the top-level body is
+      # never reached. Binding regardless of `self_type` inverted that: a top-level `def text` typed the
+      # member read inside `class Line < Struct.new(:text); def shout = text.upcase; end` as the def's `nil`
+      # and fired `undefined method 'upcase' for nil` on correct code. The candidate is still looked up
+      # first — that lookup is a hash probe and owns the ADR-46 cross-file dependency edge — and
+      # {#self_type_answers?} then vetoes the bind for a name the enclosing class answers itself.
       def try_local_def_dispatch(node, receiver, arg_types)
         local_def = node.receiver.nil? ? scope.bindable_top_level_def_for(node.name) : nil
         return nil unless local_def
+        return nil if self_type_answers?(node.name)
 
         local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
         return local_inference if local_inference
@@ -1129,6 +1139,84 @@ module Rigor
         # propagates correctly through downstream call chains without surfacing misleading false-positive
         # diagnostics.
         dynamic_top
+      end
+
+      # Issue #618 — whether the call's enclosing `self` already answers `method_name`. Only a `self` whose
+      # class is KNOWN participates: at genuine top level, and inside a block whose `self` is unmodelled,
+      # `scope.self_type` is nil, the predicate is false, and the historical top-level binding stands — that
+      # is #316's / #319's territory and this veto stays out of it.
+      #
+      # The ADR-48 member carriers answer from their own map first: a `StructInstance` / `DataInstance`
+      # `self` carries the member set the body reads through, and an anonymous `Struct.new(...)` value has no
+      # class name to look anything else up under.
+      def self_type_answers?(method_name)
+        case (self_type = scope.self_type)
+        when Type::Singleton then singleton_self_answers?(self_type.class_name, method_name)
+        when Type::Nominal then instance_self_answers?(self_type.class_name, method_name)
+        when Type::StructInstance, Type::DataInstance
+          self_type.members.key?(method_name.to_sym) || instance_self_answers?(self_type.class_name, method_name)
+        else false
+        end
+      end
+
+      # The instance side of {#self_type_answers?}: the class's own discovered methods (`def`, `attr_*`,
+      # `define_method`, `alias`), its `Struct.new` / `Data.define` member accessors, a `def` reached through
+      # its project ancestors (superclass chain and included modules), and an RBS method declared on the
+      # class ITSELF.
+      #
+      # The RBS arm is own-class only, deliberately. An inherited-declaration test would match every
+      # `Object` / `Kernel` / `Enumerable` name and retract the binding v0.0.3 A exists for — a `def
+      # select(...)` collocated with its DSL-block call site would route straight back through
+      # `Enumerable#select`.
+      def instance_self_answers?(class_name, method_name)
+        return false if class_name.nil?
+        return true if scope.discovered_method?(class_name, method_name, :instance)
+        return true if meta_member?(class_name, method_name)
+        return true if resolve_user_def_through_ancestors(class_name, method_name)
+
+        rbs_declared_on_class?(safe_rbs_method_definition(class_name, method_name, :instance), class_name)
+      end
+
+      # The singleton side: a class-body `self` is `Singleton[Foo]`, where an implicit-self call reaches
+      # `Foo`'s own class methods before `Object`'s private top-level `def`.
+      def singleton_self_answers?(class_name, method_name)
+        return false if class_name.nil?
+        return true if scope.discovered_method?(class_name, method_name, :singleton)
+        return true unless scope.singleton_def_for(class_name, method_name).nil?
+
+        rbs_declared_on_class?(safe_rbs_method_definition(class_name, method_name, :singleton), class_name)
+      end
+
+      # A `Struct.new(:a, :b)` / `Data.define(:a, :b)` member accessor. The layouts are a discovery table of
+      # their own, separate from `discovered_methods`, so the accessor names they imply have to be asked for
+      # explicitly. Only the reader name is tested: a writer is unreachable as an implicit-self call, since
+      # bare `a = v` is a local assignment.
+      def meta_member?(class_name, method_name)
+        layout = scope.struct_member_layout(class_name)
+        members = layout ? layout[:members] : scope.data_member_layout(class_name)
+        !members.nil? && members.include?(method_name.to_sym)
+      end
+
+      def safe_rbs_method_definition(class_name, method_name, kind)
+        if kind == :singleton
+          Rigor::Reflection.singleton_method_definition(class_name, method_name, scope: scope)
+        else
+          Rigor::Reflection.instance_method_definition(class_name, method_name, scope: scope)
+        end
+      rescue StandardError
+        nil
+      end
+
+      # True when the RBS declaration found for the name sits on `class_name` itself rather than on an
+      # ancestor; mirrors `CheckRules#defined_on?` and `SigGen::Generator#declared_on_class_itself?`.
+      def rbs_declared_on_class?(definition, class_name)
+        return false if definition.nil?
+        return false unless definition.respond_to?(:defined_in)
+
+        defined_in = definition.defined_in
+        return false if defined_in.nil?
+
+        defined_in.to_s.delete_prefix("::") == class_name.to_s.delete_prefix("::")
       end
 
       # Issue #520 — Ruby defines the value of an attribute / index assignment (`x.attr = v`, `h[k] = v`)

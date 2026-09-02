@@ -17,7 +17,7 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**Thirteen PRs landed 2026-09-01/02** through the serial landing pipeline (worktree fleet →
+**Nineteen PRs landed 2026-09-01/02** through the serial landing pipeline (worktree fleet →
 corpus arms → independent critical review → draft-PR remote CI → merge). Batch 1 (#571 #576
 #578 #579 #581 #582 #584 #585): redmine 50.2→53.4% (+3.2pp, the #569 AR unlock), mastodon
 54.8→55.5%. Batch 2 (#591 #592 #593) and batch 3 (#596 #598): **correctness-dominated, corpus
@@ -27,6 +27,15 @@ struct fold grants — #589's true mechanism: `Scope#join` dropped `struct_fold_
 `if` revoked exactly as a `while`), plus the request predicates/flash surface (#592) and the
 unreadable-args widening (#593). Every engine PR's review round found at least one verified
 wrong-type FP the corpus arms could NOT see — the two instruments stay mandatory together.
+
+Landed since the thirteen: #603 (join carries `opaque_block_self` + the roster spec that ends
+the join-omission class), #604 (the #597 loop-setter WITHDRAWAL — four unsound folds caught in
+review; ADR-56 WD2.8 is the record and the design bar; #605 = per-generation fold-safety owns
+mail now), #607 (safe-nav-chain + membership narrowing: corpus −6, every removal matching the
+per-site prediction; the 7th site resists by design — opaque `==` operand), #602/#608 (two
+red-master fix-forwards — see the pipeline section's tightened rules). #574's measurement round
+is DONE and awaiting the human call: the witness-gate tightening is refuted (7 FPs removed : 27
+TPs lost), nilable `Parameters#[]` alone costs +2 post-#607 — options on the issue.
 
 ## The struct precision frontier, settled by measurement (do not re-derive)
 
@@ -66,9 +75,11 @@ exactly one binding — append new corners there, don't file fresh).
 - ONE heavy job on the machine at a time (a 4×`make verify` fleet OOM-killed the host at
   200GB+). Workers: single spec files + `--workers=0` fixtures only.
 - Draft-PR remote CI = the post-rebase verification; PRs stay **Draft until every gate is
-  green** (corpus arms + review APPROVE + CI), then `gh pr ready` + merge. Watch the FINAL
-  head's run to completion before merging — one merge slipped through with the last docs-only
-  commit's run still in progress (harmless that time; don't repeat).
+  green**, then `gh pr ready` + merge. TWO red-masters this cycle came from landing-rule drift:
+  (#602) merged with the final head's run in progress on an un-integrated tree; (#608) skipped
+  the final rebase AND misread a checks-not-yet-registered window as green. The rule that holds:
+  rebase → push → ONE chained command that watches the new head's checks by exit code, merges
+  only on 0, and then watches the MASTER merge-commit run to its conclusion.
 - Corpus arms: `check --no-baseline --no-cache --format json --workers=4`; a corpus-neutral
   merge keeps the base arms valid (`landing/` dirs in the session scratchpad).
 - Every engine PR gets an adversarial review with VERIFIED findings; coordinator adjudicates

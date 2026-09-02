@@ -135,11 +135,15 @@ module Rigor
         # the glob, and `where(<a declared alias>: …)` then surfaced a false `unknown-column` on correct
         # code; taking the first dropped whatever the reopen added. Neither order loses anything now.
         #
-        # Merge is by field: the first non-nil `table_name_override` and `superclass_name` win (a second
-        # declaration of either is a redeclaration of the same thing, or invalid Ruby), `table_name_computed`
-        # is an OR (any computed name in the class makes the resolved one inexact), name-keyed rows
-        # (associations, enums, aliases) let the LAST declaration override an earlier same-name row exactly
-        # as {ModelIndex.merge_named_rows} does across an STI chain, and the plain lists union.
+        # Merge is by field: the first non-nil `superclass_name` wins (a second declaration is the same
+        # thing, or invalid Ruby); `self.table_name =` is an ASSIGNMENT, so the LATER declaration's
+        # `table_name_override` wins as it does at load time, and when the two declarations disagree the
+        # resolved name is marked computed so no value is pinned — the glob order is not the load order for
+        # two full declarations, and a pinned wrong literal folds `Model.table_name == "…"` on correct code;
+        # `table_name_computed` is otherwise an OR (any computed name in the class makes the resolved one
+        # inexact); name-keyed rows (associations, enums, aliases) let the LAST declaration override an
+        # earlier same-name row exactly as {ModelIndex.merge_named_rows} does across an STI chain, and the
+        # plain lists union.
         def merge_redeclarations(rows)
           return rows if rows.length < 2
 
@@ -154,8 +158,9 @@ module Rigor
           base.merge(
             superclass_name: base[:superclass_name] || addition[:superclass_name],
             sti_parent: base[:sti_parent] || addition[:sti_parent],
-            table_name_override: base[:table_name_override] || addition[:table_name_override],
-            table_name_computed: base[:table_name_computed] || addition[:table_name_computed],
+            table_name_override: addition[:table_name_override] || base[:table_name_override],
+            table_name_computed: base[:table_name_computed] || addition[:table_name_computed] ||
+              conflicting_table_names?(base, addition),
             associations: dedup_named_rows(Array(base[:associations]) + Array(addition[:associations])),
             enums: (base[:enums] || {}).merge(addition[:enums] || {}),
             scopes: (Array(base[:scopes]) + Array(addition[:scopes])).uniq,
@@ -163,6 +168,13 @@ module Rigor
             callbacks: (Array(base[:callbacks]) + Array(addition[:callbacks])).uniq,
             aliases: (base[:aliases] || {}).merge(addition[:aliases] || {})
           )
+        end
+
+        # Two literal `self.table_name =` assignments that disagree: see {#merge_redeclarations}.
+        def conflicting_table_names?(base, addition)
+          a = base[:table_name_override]
+          b = addition[:table_name_override]
+          !a.nil? && !b.nil? && a != b
         end
 
         # Keeps the LAST row per `:name`, matching {ModelIndex.merge_named_rows}'s override rule.

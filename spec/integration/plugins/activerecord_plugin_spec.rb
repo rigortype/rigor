@@ -2523,6 +2523,56 @@ RSpec.describe "plugins/rigor-activerecord" do
         expect(dumped("Rigor.dump_type(User.recent)\n", rooted_reopen)).to eq(["dump_type: Dynamic[top]"])
       end
     end
+
+    # `self.table_name =` is an assignment: the later declaration wins as it does at load time. When two
+    # declarations disagree the glob order is not a load order, so the resolved name is marked computed and
+    # nothing is pinned — a pinned wrong literal would fold `User.table_name == "people"` on correct code.
+    describe "must not pin — conflicting `self.table_name` literals across a reopen" do
+      let(:two_table_schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define(version: 2026_05_07_000000) do
+            create_table "members", force: :cascade do |t|
+              t.string "email", null: false
+              t.string "handle"
+            end
+
+            create_table "people", force: :cascade do |t|
+              t.string "email", null: false
+              t.string "nickname"
+            end
+          end
+        SCHEMA
+      end
+      let(:conflicting) do
+        reopened_models("  self.table_name = \"people\"\n").merge(
+          "app/models/user.rb" => "class User < ApplicationRecord\n  self.table_name = \"members\"\nend\n"
+        )
+      end
+      let(:agreeing) do
+        reopened_models("  self.table_name = \"members\"\n").merge(
+          "app/models/user.rb" => "class User < ApplicationRecord\n  self.table_name = \"members\"\nend\n"
+        )
+      end
+
+      def table_name_dump(models)
+        run_ar("Rigor.dump_type(User.table_name)\n", models: models, schema: two_table_schema)
+          .diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message.sub("dump_type: ", "") }
+      end
+
+      it "checks columns against the later assignment" do
+        diags = plugin_diagnostics(run_ar("User.where(nickname: 'x')\n", models: conflicting, schema: two_table_schema))
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "drops the value pin when the two literals disagree" do
+        expect(table_name_dump(conflicting)).to eq(["String"])
+      end
+
+      # The must-still-pin sibling: the same literal on both declarations is one declaration, and pins.
+      it "keeps the pin when both declarations spell the same literal" do
+        expect(table_name_dump(agreeing)).to eq(['"members"'])
+      end
+    end
   end
 
   # The configured base-class names are matched against the superclass a declaration renders, and those

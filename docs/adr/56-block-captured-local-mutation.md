@@ -586,7 +586,7 @@ reading an unrebound capture keeps its literal.
 
 The decision is the narrow one: the fold itself runs the WD3 fixpoint
 over the same captured-rebind name set (now `Inference::CapturedLocals`,
-shared with slice A and the sub-phase 3c drop so the three cannot
+shared with slice A and the sub-phase 3c drop so the four cannot
 drift) before typing any position, and binds each rebound local to the
 converged type in every position's entry scope. The answer is what the
 local can be in ANY iteration — `[Integer, Integer]` — and a

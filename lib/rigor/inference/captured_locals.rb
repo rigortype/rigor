@@ -10,7 +10,7 @@ module Rigor
     # The outer locals a block body can REBIND — the one name set that ADR-56's captured-local write-back
     # (`StatementEvaluator#write_back_block_captures`), the escaping-block narrowing drop
     # (`StatementEvaluator#drop_captured_narrowing`) and issue #587's per-element fold
-    # (`ExpressionTyper#per_element_captured_bindings`) all key on. It lives in one place so the three
+    # (`ExpressionTyper#per_element_captured_bindings`) all key on. It lives in one place so the four
     # cannot disagree about what "captured" means.
     #
     # A write counts across every local-write form — plain `=` (`LocalVariableWriteNode`), the operator /

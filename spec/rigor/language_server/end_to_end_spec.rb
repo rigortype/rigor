@@ -30,7 +30,7 @@ LSP_E2E_TIMEOUT_SECONDS = 30
 RSpec.describe "rigor lsp end-to-end session", type: :integration do
   let(:binary) { File.expand_path("../../../exe/rigor", __dir__) }
 
-  # rubocop:disable RSpec/ExampleLength
+  # rubocop:disable-next RSpec/ExampleLength
   it "round-trips a full initialize → didOpen → hover → completion → shutdown → exit session" do
     session_inputs = [
       request(1, "initialize", { capabilities: {} }),
@@ -80,7 +80,6 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
     shutdown_response = request_responses.find { |f| f[:id] == 4 }
     expect(shutdown_response[:result]).to be_nil
   end
-  # rubocop:enable RSpec/ExampleLength
 
   private
 

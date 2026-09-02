@@ -874,7 +874,7 @@ RSpec.describe Rigor::SigGen::Generator do
       config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
       candidates = described_class.new(configuration: config, paths: [path], observations: observations)
                                   .run.select { |c| %i[x y].include?(c.method_name) }
-                                      .to_h { |c| [c.method_name, c.rbs] }
+                                  .to_h { |c| [c.method_name, c.rbs] }
 
       expect(candidates[:x]).to eq("def x: () -> 0")
       expect(candidates[:y]).to eq(%(def y: () -> "origin"))

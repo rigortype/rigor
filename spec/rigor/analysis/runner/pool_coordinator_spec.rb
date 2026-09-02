@@ -736,7 +736,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
   end
 
   describe "#build_runner_environment" do
-    # rubocop:disable RSpec/ExampleLength
+    # rubocop:disable-next RSpec/ExampleLength
     it "threads the configuration, cache_store, injected readers, and source_files into " \
        "Environment.for_project" do
       configuration = Rigor::Configuration.new(
@@ -773,7 +773,6 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         source_files: ["a.rb"]
       )
     end
-    # rubocop:enable RSpec/ExampleLength
 
     it "defaults source_files to an empty Array for callers with no file list yet " \
        "(e.g. a pre-pass-only build path)" do

@@ -254,7 +254,7 @@ module Rigor
         # Mirror of `extract_nullability` but reads the `required:` kwarg, defaulting to `false`
         # (graphql-ruby's argument default — the OPPOSITE polarity of `field`'s `null:` / nullability
         # default).
-        # rubocop:disable Naming/PredicateMethod  -- extractor returns the literal required value
+        # rubocop:disable-next Naming/PredicateMethod  -- extractor returns the literal required value
         def extract_required_flag(args)
           kwargs = args.last
           return false unless kwargs.is_a?(Prism::KeywordHashNode)
@@ -270,7 +270,6 @@ module Rigor
           else false
           end
         end
-        # rubocop:enable Naming/PredicateMethod
         private_class_method :extract_required_flag
 
         # `field :name, Type, null: false` shape. The first positional is a Symbol (field name); the
@@ -331,7 +330,7 @@ module Rigor
 
         # Defaults to `true` (matches graphql-ruby's `field` default nullability). Looks for an explicit
         # `null:` keyword and reads its boolean literal.
-        # rubocop:disable Naming/PredicateMethod  -- extractor returns the literal nullability value
+        # rubocop:disable-next Naming/PredicateMethod  -- extractor returns the literal nullability value
         def extract_nullability(args)
           kwargs = args.last
           return true unless kwargs.is_a?(Prism::KeywordHashNode)
@@ -347,7 +346,6 @@ module Rigor
           else true
           end
         end
-        # rubocop:enable Naming/PredicateMethod
         private_class_method :extract_nullability
 
         # Returns the constant chain as an Array of String segments (`["GraphQL", "Schema", "Object"]`).

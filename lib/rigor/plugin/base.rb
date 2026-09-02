@@ -435,11 +435,10 @@ module Rigor
         # Frozen snapshot of the declared narrowing-facts rules. Memoised for the same reason as
         # {dynamic_returns} — consulted per plugin per dispatch, over an array fixed at class-definition
         # time.
-        # rubocop:disable Naming/MemoizedInstanceVariableName -- see dynamic_returns
+        # rubocop:disable-next Naming/MemoizedInstanceVariableName -- see dynamic_returns
         def narrowing_facts_rules
           @narrowing_facts_rules_snapshot ||= (@narrowing_facts_rules || []).dup.freeze
         end
-        # rubocop:enable Naming/MemoizedInstanceVariableName
       end
 
       attr_reader :services, :config

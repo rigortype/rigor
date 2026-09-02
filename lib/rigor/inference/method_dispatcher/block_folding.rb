@@ -136,7 +136,7 @@ module Rigor
         end
 
         # @return [:always_true, :always_false, :bool, nil]
-        # rubocop:disable Metrics/CyclomaticComplexity
+        # rubocop:disable-next Metrics/CyclomaticComplexity
         def predicate_decision(method_name, truthiness, emptiness)
           case method_name
           when :all?
@@ -159,7 +159,6 @@ module Rigor
             :bool
           end
         end
-        # rubocop:enable Metrics/CyclomaticComplexity
 
         def bool_union
           Type::Combinator.union(

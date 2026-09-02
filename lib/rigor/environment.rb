@@ -190,7 +190,7 @@ module Rigor
       #   {Environment::RbsLoader} so constant lookups (and, in later v0.0.9 slices, other reflection
       #   artefacts) consult the cache. Pass `nil` (the default) to skip caching for this environment.
       # @return [Rigor::Environment]
-      # rubocop:disable Metrics/MethodLength, Metrics/ParameterLists
+      # rubocop:disable-next Metrics/MethodLength, Metrics/ParameterLists
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil,
                       plugin_registry: nil, dependency_source_index: nil,
                       rbs_extended_reporter: nil, boundary_cross_reporter: nil,
@@ -297,7 +297,6 @@ module Rigor
           missing_rbs_bundle_path: bundle_root
         )
       end
-      # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists
 
       private
 

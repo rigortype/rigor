@@ -51,7 +51,7 @@ module Rigor
     #   resolves these to their runtime class for dispatch.
     # - receivers whose class name is NOT registered in the
     #   loader (RBS-blind environments, unknown stdlib).
-    # rubocop:disable Metrics/ModuleLength
+    # rubocop:disable-next Metrics/ModuleLength
     module CheckRules
       # ADR-87 WD4 — the canonical rule-id table lives in the light `check_rules/rule_ids.rb` (required at the
       # top of this file) so {Analysis::RuleCatalog} can read it without loading the engine.
@@ -655,7 +655,7 @@ module Rigor
         resolved.nil? || resolved.empty? ? [token] : resolved
       end
 
-      # rubocop:disable Metrics/ClassLength
+      # rubocop:disable-next Metrics/ClassLength
       class << self
         private
 
@@ -1169,7 +1169,7 @@ module Rigor
         # by `undefined_method_diagnostic`; it returns nil
         # when the call's receiver / RBS coverage / call shape
         # disqualifies the rule.
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+        # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
         def wrong_arity_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
           return nil unless plain_positional_call?(call_node)
@@ -1212,7 +1212,6 @@ module Rigor
 
           build_arity_diagnostic(path, call_node, class_name, min, max, actual)
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
 
         # True for the outer `.new` of a chained `Struct.new(...).new`:
         # `class_name`/`kind` already pin the receiver to
@@ -3161,8 +3160,6 @@ module Rigor
           )
         end
       end
-      # rubocop:enable Metrics/ClassLength
     end
-    # rubocop:enable Metrics/ModuleLength
   end
 end

@@ -23,7 +23,7 @@ module Rigor
     # API stays purely functional.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
-    # rubocop:disable Metrics/ClassLength
+    # rubocop:disable-next Metrics/ClassLength
     class RbsLoader
       # Buffer name stamped on the `module` declarations synthesized by {.synthesize_missing_namespaces}.
       # Re-read off the built env by {#synthesized_namespaces} so the analysis layer can surface an `:info`
@@ -173,7 +173,7 @@ module Rigor
             raise unless env.respond_to?(:unload)
 
             culprits = e.decls.filter_map { |decl| decl.location&.buffer&.name }
-                              .uniq.select { |name| virtual_names.include?(name) }
+                        .uniq.select { |name| virtual_names.include?(name) }
             raise if culprits.empty?
 
             env = env.unload(culprits)
@@ -1695,6 +1695,5 @@ module Rigor
         false
       end
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

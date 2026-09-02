@@ -56,7 +56,7 @@ module Rigor
     #
     # See docs/internal-spec/inference-engine.md for the public contract and docs/adr/4-type-inference-engine.md for the
     # slice rationale.
-    # rubocop:disable Metrics/ClassLength
+    # rubocop:disable-next Metrics/ClassLength
     class StatementEvaluator
       # Hash-based dispatch keeps `evaluate` linear and lets future slices add control-flow node kinds without growing a
       # single case statement past RuboCop's cyclomatic budget. Anonymous Prism subclasses are not expected.
@@ -3259,6 +3259,5 @@ module Rigor
         merged.to_a
       end
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

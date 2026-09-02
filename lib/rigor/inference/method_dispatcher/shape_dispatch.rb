@@ -48,7 +48,7 @@ module Rigor
       #
       # See docs/internal-spec/inference-engine.md (Slice 5 phase 2) and docs/adr/4-type-inference-engine.md
       # for the slice rationale.
-      # rubocop:disable Metrics/ClassLength, Metrics/ModuleLength
+      # rubocop:disable-next Metrics/ClassLength, Metrics/ModuleLength
       module ShapeDispatch
         module_function
 
@@ -1920,7 +1920,6 @@ module Rigor
           end
         end
       end
-      # rubocop:enable Metrics/ClassLength, Metrics/ModuleLength
     end
   end
 end

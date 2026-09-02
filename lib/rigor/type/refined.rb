@@ -77,14 +77,13 @@ module Rigor
       # Recognises a Ruby value against this carrier's predicate. The trinary return is intentional:
       # `true` / `false` when the predicate registry decides, `nil` when the predicate is unknown to the
       # registry, so callers (today {Inference::Acceptance}) can fall through to gradual-mode `:maybe`.
-      # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
+      # rubocop:disable-next Style/ReturnNilInPredicateMethodDefinition
       def matches?(value)
         recogniser = PREDICATES[predicate_id]
         return nil if recogniser.nil?
 
         !!recogniser.call(value)
       end
-      # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
 
       # `predicate_id => recogniser` table. The recogniser is called with a Ruby value (typically the
       # inner `value` of a `Constant`) and returns truthy when the value satisfies the predicate. The

@@ -51,7 +51,7 @@ module Rigor
       #   a rest positional (`*T`), or a keyword parameter is still unbound and degrades to `Dynamic[Top]`.
       #
       # See docs/adr/4-type-inference-engine.md for the broader plan.
-      # rubocop:disable Metrics/ModuleLength
+      # rubocop:disable-next Metrics/ModuleLength
       module RbsDispatch
         module_function
 
@@ -144,7 +144,7 @@ module Rigor
           )
         end
 
-        # rubocop:disable Metrics/ClassLength
+        # rubocop:disable-next Metrics/ClassLength
         class << self
           private
 
@@ -415,7 +415,7 @@ module Rigor
           # `Dynamic[T]` carrier keeps the candidate set visible without that license (ADR-5).
           # A candidate whose return does not translate leaves the join incomplete — decline (fail-soft
           # to Dynamic downstream) rather than answer a join missing an arm the runtime can take.
-          # rubocop:disable Metrics/ParameterLists
+          # rubocop:disable-next Metrics/ParameterLists
           def join_candidate_returns(candidates, self_type:, instance_type:, type_vars:, args:, block_type:,
                                      scope:, call_node:, call_site:, alias_expander: nil)
             returns = candidates.map do |method_type|
@@ -436,7 +436,6 @@ module Rigor
 
             Type::Combinator.dynamic(Type::Combinator.union(*distinct))
           end
-          # rubocop:enable Metrics/ParameterLists
 
           def compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
             vars = compose_block_type_vars(method_type, type_vars, block_type)
@@ -721,9 +720,7 @@ module Rigor
             end
           end
         end
-        # rubocop:enable Metrics/ClassLength
       end
-      # rubocop:enable Metrics/ModuleLength
     end
   end
 end

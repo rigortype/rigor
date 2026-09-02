@@ -57,7 +57,7 @@ module Rigor
     # docs/internal-spec/inference-engine.md. The optional tracer is a Rigor::Inference::FallbackTracer (or
     # any object answering #record_fallback) that receives a Fallback event for each fallback; the tracer
     # MUST NOT change the return value of type_of.
-    # rubocop:disable Metrics/ClassLength
+    # rubocop:disable-next Metrics/ClassLength
     class ExpressionTyper
       # Hash-based dispatch keeps `type_of` linear and lets future slices add node kinds without growing a
       # single case statement past RuboCop's cyclomatic budget. Anonymous Prism subclasses are not expected.
@@ -3782,6 +3782,5 @@ module Rigor
         nil
       end
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

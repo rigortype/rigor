@@ -379,6 +379,24 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #635 — the multi-segment counterpart of the fixture above. A relative constant PATH
+  # (`Nested::Leaf`) is not "already qualified": Ruby anchors its first segment through
+  # `Module.nesting`. The fixture asserts the resolution across every class-membership
+  # shape and pins the rooted / unshadowed / top-level spellings that must not move.
+  describe "fixtures/relative_constant_path_narrowing.rb — relative constant paths in class guards" do
+    let(:harness) { harness_for("relative_constant_path_narrowing") }
+
+    it "resolves `Nested::Leaf` inside `Bar` to `Bar::Nested::Leaf` for is_a? / when / ===" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "leaves no unresolved-constant or undefined-method fallout on the narrowed receivers" do
+      ids = harness.errors.map(&:rule_id).uniq
+      expect(ids).to be_empty
+    end
+  end
+
   describe "fixtures/tuple_access.rb — Tuple element typing" do
     let(:harness) { harness_for("tuple_access") }
 

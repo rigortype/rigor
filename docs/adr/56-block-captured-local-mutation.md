@@ -183,6 +183,10 @@ slice-A/B `MutationWidening` carrier-widening helpers:
    content-mutated composes. The empty-seed `Dynamic[top]` floor is
    dropped once real evidence exists (`out = []; arr.each { |x| out <<
    x*2 }` → `Array[Integer]`, not `Array[Integer | Dynamic[top]]`).
+   *(Superseded by WD2.9: the seed is now read from the scope BEFORE
+   `widen_after_block` runs, so an empty literal contributes no element
+   and nothing is dropped — the same `Array[Integer]` by a route that
+   cannot mistake a declared `untyped` for the floor.)*
 
 2. **Loops** — `eval_loop` overlays `loop_content_writeback` on both the
    fast-path single-pass join and the slice-B fixpoint result; arguments
@@ -289,10 +293,11 @@ derivation on derived output. The shipped fix is at that source:
 the pre-body scope (`post_pred`), so the floor never enters its input;
 a name the loop also rebinds keeps reading `post_loop` (the slice-B/C
 composition), where a surviving floor costs precision, never
-correctness. `ContentJoin.drop_dynamic` stays a plain `grep_v` over
-top-level members. The false path: an earlier head instead flattened
-`Union` members inside `drop_dynamic`, which cleared this seam but
-dropped DECLARATION-sourced gradual arms everywhere else — a declared
+correctness. `ContentJoin.drop_dynamic` stayed a plain `grep_v` over
+top-level members (until WD2.9 removed it outright). The false path:
+an earlier head instead flattened `Union` members inside
+`drop_dynamic`, which cleared this seam but dropped
+DECLARATION-sourced gradual arms everywhere else — a declared
 `Array[Integer | untyped]` parameter closed to `Array[Integer]` under
 block mutation and fired on correct code. The
 `keeps_declared_gradual_arm` fixture pins the survival of such arms;
@@ -459,6 +464,95 @@ boundary for the unrolling reason above, not the block-scope reason its
 comment used to give, and the block and loop cases decline for
 genuinely different reasons rather than one shared "single static pass"
 hand-wave.
+
+### WD2.9 — A seed's own gradual arm survives the rederivation (2026-09-02, issue #586)
+
+WD2.5's B2 note left one spelling of the declared-arm bug in place and
+said so ("the bare `Array[untyped]` adjacency … pre-existing on
+master"). A parameter declared `Array[Integer | untyped]` survived
+because its `untyped` sat INSIDE a `Union` member and the non-recursive
+drop left it alone. A parameter declared `Array[untyped]` did not: its
+seed element IS the `Dynamic`, `join_array_content` dropped every
+top-level `Dynamic` the moment the body's stores contributed a concrete
+class, and
+
+    #: (Array[untyped]) -> String
+    def m(a)
+      [1, 2].each { a.push(rand(9)) }
+      a.first.upcase          # correct: the declaration licenses it
+    end
+
+closed `a` to `Array[Integer]` and drew `undefined method 'upcase'`.
+The `while` form fired identically through `loop_content_writeback`,
+and a declared `Hash[untyped, untyped]` closed on both sides the same
+way. The category error is the one B2 already named for the
+straight-line seam: a declared gradual arm is a statement about what
+the collection ALREADY holds, the body's stores are evidence about what
+the body PUT IN, and a body-complete view is not a world-complete one.
+
+**Decision: the join drops no seed arm, ever.** `drop_dynamic` is gone;
+`join_array_content` / `join_hash_content` union the seed's arms with
+the added evidence and nothing else. The drop existed for exactly one
+producer — `widen_after_block` spells an empty `[]` as `Array[untyped]`
+before the block seam read its seed, and that manufactured `untyped`
+had to be scrubbed back out to keep `out = []; xs.each { out << x*2 }`
+at `Array[Integer]`. Once inside a carrier it is indistinguishable from
+a declared one (the same observation B2 made about `post_loop`), so the
+fix is the one B2 already applied to the loop seam: keep the floor out
+at its SOURCE. `content_writeback_block_captures` now reads its seed
+from the scope as it stood BEFORE `widen_after_block` ran — the
+pre-widen `post_scope`, not the pre-CALL `scope`, so the slice-A rebind
+write-back and every other post-call effect applied ahead of the
+widening are still in it. An empty literal then contributes no element
+and the body's evidence closes it, exactly as before; a declared
+`Array[untyped]`, a local seeded from a call whose signature returns
+the same, or a literal `[x]` slot the engine cannot type contributes
+its arm and keeps it.
+
+Two consequences follow from reading the seed earlier, one a repair and
+one a deliberate trade:
+
+- **The seams now meet a `Difference` where they met its base.** After
+  `xs.any?` narrowing, `xs` is `non-empty-array[String]`; the widening
+  used to convert it to `Array[String]` before the block seam looked.
+  Read pre-widen, the refinement carrier reaches the join itself, so
+  `collection_element_types` / `hash_shape_key_values` and the
+  `arrayish?` / `hashish?` gates read a `Difference` through to its
+  base. Declining it instead would hand the continuation the widened
+  base ALONE with every appended arm missing — and that is what the
+  LOOP seam had been doing since B2 moved it to `pre_body`: `if
+  xs.any?; while …; xs << 1; end` read `Array[String] |
+  non-empty-array[String]`, the `1` gone. Both seams now read
+  `Array[1 | 2 | String]` / `Array[1 | String]`.
+- **A `Dynamic` that may well be "no evidence" but wears a carrier is
+  kept too.** An accumulator seeded from a call whose hand-written
+  signature returns `Array[untyped]` now reads `Array[1 | 2 |
+  Dynamic[top]]` where it read the closed `Array[1 | 2]`, and a `[x]`
+  slot the engine cannot type keeps its arm, which the straight-line
+  path's `gradual_seed` fixture already reads the same way. (`Array.new`
+  is NOT in this set: it folds to the empty literal and still closes;
+  `Array(x)` is wholly `Dynamic` and never reaches the join.)
+  Each is a monotone imprecision on a rare spelling — `[]` dominates
+  the accumulator idiom — and the alternative, guessing which `Dynamic`
+  is "really" empty, is the provenance question #580 owns. FP cost
+  outranks worst-case static reading; the trade is taken.
+
+Gate: the `mutation_join_declared_sig` fixture carries the bare
+declared arm in block, loop, and Hash form (must-not-fire), the
+fresh-seed siblings that still close and still fire (the exact
+`call.undefined-method` line set — a seam that had gone gradual
+everywhere would go quiet there too), and the `Difference` seed in
+block and loop form; `block_path_stays_precise` and the
+`loop_body_fixpoint` `Array[Integer]` snapshot are unchanged; the
+`block_captured_writeback` fixture pins the `[x]` slot. Restoring the
+drop (or reading the seed from `post_scope` again) turns the
+must-not-fire examples red and nothing else.
+
+What this does NOT touch: the straight-line seam's `Difference`
+branch, where `widen_for_mutator` widens `non-empty-array[T]` to its
+base without joining the mutator's argument (`if xs.any?; xs << 1` reads
+`Array[String]`). That is #560's family reached through a fourth door,
+and a separate change.
 
 ### WD3 — One mechanism, shared
 

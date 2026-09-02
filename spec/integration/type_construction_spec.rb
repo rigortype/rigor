@@ -23,6 +23,14 @@ RSpec.describe "Rigor type construction (integration)" do
     Rigor::Type::Combinator.union(constant(true), constant(false))
   end
 
+  # Every 1-indexed line a fixture marks with `marker`, in source order. Read from the source rather than
+  # hard-coded so the fixture stays editable — a hard-coded line number turns any insertion into a false
+  # failure. Asserting a rule's exact line SET is what keeps a "went quiet" half from passing because the
+  # rule stopped firing at all.
+  def marked_lines(harness, marker)
+    harness.source.lines.each_with_index.filter_map { |line, i| i + 1 if line.include?(marker) }
+  end
+
   describe "fixtures/parity.rb — even/odd predicate" do
     let(:harness) { harness_for("parity") }
 
@@ -163,12 +171,6 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/mutation_added_value_join.rb — straight-line mutations join the added value" do
     let(:harness) { harness_for("mutation_added_value_join") }
 
-    # The lines the fixture marks as genuinely wrong. Read from the source rather than hard-coded so
-    # the fixture stays editable — a hard-coded line number turns any insertion into a false failure.
-    def marked_line(harness, marker)
-      harness.source.lines.index { |l| l.include?(marker) } + 1
-    end
-
     it "produces no assert_type mismatches" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
@@ -180,7 +182,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # "went quiet" half from passing because the rule stopped firing at all.
     it "silences the stale folds without silencing the genuine one" do
       flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
-      expect(flow.map(&:line)).to eq([marked_line(harness, "# GENUINE-FALSEY")])
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
     end
 
     # The join's own FP surface, and the reason a straight-line join never CLOSES its parameter.
@@ -193,7 +195,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # right and must survive.
     it "keeps stored-then-read values silent without silencing a genuinely pinned one" do
       undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
-      expect(undefined.map(&:line)).to eq([marked_line(harness, "# GENUINE-UNDEFINED")])
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
     end
   end
 
@@ -210,14 +212,18 @@ RSpec.describe "Rigor type construction (integration)" do
     # draws `def.return-type-mismatch` on correct code; the admissibility gate answers `Dynamic[top]`
     # for a class the seed does not admit, and a union carrying it ACCEPTS. `genuinely_wrong` is the
     # live-rule control — without it this example would pass on a rule that never fires.
-    # A DECLARED gradual arm must survive the slice-C rederivation. `keeps_declared_gradual_arm`'s
-    # signature says the array may hold anything, so `a.first.upcase` is correct code. A draft of
-    # the straight-line floor-scrub flattened Union members before dropping Dynamic, which cannot
-    # tell a declared `untyped` from the join's own floor: it closed the parameter to
-    # `Array[Integer]` and drew a false `undefined method 'upcase' for Integer`.
-    it "keeps a declared gradual arm through the block-capture rederivation" do
+    # A DECLARED gradual arm must survive the slice-C rederivation, in both spellings. The nested
+    # one (`keeps_declared_gradual_arm`, `Array[Integer | untyped]`) fell to a draft that flattened
+    # Union members before dropping Dynamic; the BARE one (`keeps_declared_untyped_element` and its
+    # loop / Hash twins, `Array[untyped]`) fell to the drop itself, which could not tell a declared
+    # `untyped` from the arity-forget's own floor and closed the parameter to `Array[Integer]` once
+    # the body's stores contributed a concrete class (issue #586). Both signatures say the array may
+    # hold anything, so `a.first.upcase` is correct code. The must-fire half is the exact line set:
+    # a FRESH empty seed has no arm to keep and still closes, so its `upcase` is rightly rejected —
+    # without those markers this example would pass on a seam that had gone gradual everywhere.
+    it "keeps a declared gradual arm through the block and loop rederivations, and still closes a fresh seed" do
       undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
-      expect(undefined).to be_empty
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
     end
 
     it "draws a return-type mismatch only where the body is genuinely wrong" do

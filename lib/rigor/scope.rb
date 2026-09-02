@@ -52,6 +52,25 @@ module Rigor
     def discovered_class_sources = @discovery.discovered_class_sources
     # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
     def constant_sources = @discovery.constant_sources
+    def published_constant_names = @discovery.published_constant_names
+    def local_constant_names = @discovery.local_constant_names
+
+    # Issue #644 — true when `name` (a constant's LAST SEGMENT) is published by the cross-file value-constant
+    # table and is NOT assigned by the file being analysed: a value this file's author cannot see the
+    # declaration of. {Analysis::CheckRules::PublishedConstantGuard} is the only caller — a rule MUST ask
+    # through the guard rather than re-derive the question here, exactly as ADR-58's mark is asked through
+    # `DeclarationSourcedGuard`.
+    #
+    # Matching on the last segment (not the qualified name) deliberately over-answers: a reader of a nested
+    # `MyApp::MODE` also answers true for a top-level `MODE`. Over-answering only ever WITHHOLDS a firing,
+    # which is the safe direction and the grammar the ADR-46 negative keys already use.
+    def published_constant?(name)
+      names = @discovery.published_constant_names
+      return false if names.empty?
+
+      names.include?(name) && !@discovery.local_constant_names.include?(name)
+    end
+
     def data_member_layouts = @discovery.data_member_layouts
     def struct_member_layouts = @discovery.struct_member_layouts
     # ADR-67 WD3 — call-site-inferred parameter types, keyed by `[class_name, method_name, kind]`.

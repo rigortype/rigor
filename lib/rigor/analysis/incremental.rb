@@ -120,21 +120,29 @@ module Rigor
         appeared.freeze
       end
 
-      # Issue #644 — the qualified constant names *assigned* in a changed file's after-state that were absent
-      # from its before-state: a value constant that appeared in this edit. The value-constant twin of
-      # {appeared_classes} (a `FOO = :sym` declares no class and so appears in no class-source table), feeding
-      # the `constant:` negative kind. For an added file the before-set is empty, so every constant it
-      # assigns appears. A constant that merely moved files still appears here, but its negative-dependents
-      # are empty, so the over-report costs nothing. `decls_before` / `decls_after` map a path to its Set of
-      # assigned constant names. Returns a frozen Set of qualified-name Strings.
-      def appeared_constants(changed_files, decls_before, decls_after)
-        appeared = Set.new
-        changed_files.each do |path|
-          before = decls_before[path] || Set.new
-          after  = decls_after[path]  || Set.new
-          appeared.merge(after - before)
+      # Issue #644 — the qualified constant names whose PUBLICATION could have moved in this edit: the names
+      # whose per-file census descriptor differs between the before- and after-state of any file in `paths`.
+      # The value-constant twin of {appeared_classes}, and deliberately NOT its analogue — a class either
+      # exists or does not, whereas a constant's published answer is a function of the whole project's write
+      # set for the name, so a *name* diff is the wrong question. All four ways the answer moves are a
+      # descriptor change and none of them is an appearance:
+      #
+      # - the value edited (`[50]` -> `[7]`),
+      # - the write becoming unpublishable or publishable again (`[50]` <-> `:unpublishable`),
+      # - a SECOND declarer appearing, which drops the name to `Dynamic` (`{}` -> `{NAME => …}` in that file),
+      # - a second declarer going away, which restores the precise answer.
+      #
+      # `paths` MUST therefore include removed files as well as changed and added ones; a removed file's
+      # after-state is simply absent, so its whole before-census counts as changed. Returns a frozen Set of
+      # qualified-name Strings. `before` / `after` map a path to `{name => descriptor}`.
+      def changed_constant_publications(paths, before, after)
+        moved = Set.new
+        paths.each do |path|
+          was = before[path] || {}
+          now = after[path]  || {}
+          (was.keys | now.keys).each { |name| moved << name if was[name] != now[name] }
         end
-        appeared.freeze
+        moved.freeze
       end
 
       # ADR-46 slice 3 — the consumers to re-check because a name they looked up and *missed* (a negative

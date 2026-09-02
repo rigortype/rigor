@@ -339,16 +339,11 @@ trade for speed. Defenses:
    (`class` / `module`, and the constant-assigned `Data.define` / `Struct.new`
    forms) registers in the pre-pass's class sources under its qualified name.
    A plain value constant resolved in no cross-file read when this was written,
-   so a root-segment or `constant:` key would have salvaged nothing, and the
-   note recorded that if that changed the answer would be a producer reporting
-   appeared value constants rather than a wider key on the consumer side. Issue
-   #644 changed it — the discovery pre-pass now publishes literal constant
-   assignments project-wide — and that is the shape it took: a second negative
-   kind (`constant:<last segment>`, recorded at this same site) with its own
-   producer (`Incremental.appeared_constants` over per-file assigned-name sets,
-   persisted as `constant_decls` at `IncrementalSnapshot::SCHEMA` 13), plus the
-   positive edge a resolved constant read records against the assigning file.
-   The consumer-side key grammar is unchanged. Matching by simple name over-invalidates — a nested
+   so a root-segment or `constant:` key would have salvaged nothing — superseded
+   by #644, which publishes value constants project-wide and adds the
+   `constant:` kind, its publication-diff producer, and a positive edge to the
+   assigning file (`docs/internal-spec/inference-engine.md` § "Cross-file value
+   constants"). Matching by simple name over-invalidates — a nested
    `MyApp::Rails` re-checks a reader of the top-level `Rails` — which is the
    sound direction and the grammar the class negatives already use; both halves
    are pinned in the spec.

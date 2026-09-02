@@ -32,6 +32,8 @@ RSpec.describe "cross-file value constants — incremental" do
     )
   end
 
+  def described_module = Rigor::Analysis::Incremental
+
   def rules(diagnostics)
     diagnostics.reject { |d| d.severity == :info }.map { |d| "#{File.basename(d.path)}:#{d.rule}" }.sort
   end
@@ -111,21 +113,92 @@ RSpec.describe "cross-file value constants — incremental" do
     end
   end
 
-  describe "Incremental.appeared_constants" do
-    it "reports a constant present only in the after-state, and nothing for an unchanged one" do
-      before = { "b.rb" => Set["KEPT"] }
-      after  = { "b.rb" => Set["KEPT", "NEW"] }
-      expect(Rigor::Analysis::Incremental.appeared_constants(["b.rb"], before, after)).to eq(Set["NEW"])
+  # The three sequences the review found stale. Each turns on a change to the PUBLICATION of a name that is
+  # not an appearance of the name, which is why a producer diffing assigned names alone could not see any of
+  # them, and why `changed_constant_publications` diffs the census descriptor over changed + added + REMOVED.
+  describe "publication changes that are not name appearances" do
+    it "re-checks the reader when a SECOND declarer appears and drops the name to Dynamic" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, reader_source)
+        File.write(File.join(dir, "b.rb"), "FOO = 42\n")
+        session = session_for(dir)
+        expect(rules(session.baseline)).to eq(["a.rb:call.undefined-method"])
+
+        # The reader RESOLVED at baseline, so it recorded no miss; only the hit-side name edge reaches it.
+        File.write(File.join(dir, "c.rb"), "FOO = \"forty-two\"\n")
+        recheck = session.recheck
+        expect(recheck.affected).to include(a)
+        expect(rules(recheck.diagnostics)).to eq([])
+        expect(full_run(dir)).to eq([])
+      end
     end
 
-    it "treats an added file (no before-state) as declaring all of its constants" do
-      after = { "b.rb" => Set["A", "B"] }
-      expect(Rigor::Analysis::Incremental.appeared_constants(["b.rb"], {}, after)).to eq(Set["A", "B"])
+    it "re-checks the reader when the conflicting declarer is DELETED and the precise answer returns" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        c = File.join(dir, "c.rb")
+        File.write(a, reader_source)
+        File.write(File.join(dir, "b.rb"), "FOO = 42\n")
+        File.write(c, "FOO = \"forty-two\"\n")
+        session = session_for(dir)
+        expect(rules(session.baseline)).to eq([])
+
+        # A removed file appears in no scan summary, so its whole before-census is what carries the change.
+        FileUtils.rm(c)
+        recheck = session.recheck
+        expect(recheck.affected).to include(a)
+        expect(rules(recheck.diagnostics)).to eq(["a.rb:call.undefined-method"])
+        expect(full_run(dir)).to eq(["a.rb:call.undefined-method"])
+      end
     end
 
-    it "reports nothing for a file outside the changed set" do
-      after = { "other.rb" => Set["NEW"] }
-      expect(Rigor::Analysis::Incremental.appeared_constants(["b.rb"], {}, after)).to eq(Set.new)
+    it "re-checks the reader across an UNPUBLISHABLE intermediate state" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, reader_source)
+        File.write(b, "FOO = 42\n")
+        session = session_for(dir)
+        expect(rules(session.baseline)).to eq(["a.rb:call.undefined-method"])
+
+        # Step 1 leaves the reader recording only a MISS; the name never appears or vanishes across step 2,
+        # so only a descriptor diff can see it come back.
+        File.write(b, "FOO = \"str\"\n")
+        expect(rules(session.recheck.diagnostics)).to eq([])
+
+        File.write(b, "FOO = 42\n")
+        recheck = session.recheck
+        expect(recheck.affected).to include(a)
+        expect(rules(recheck.diagnostics)).to eq(["a.rb:call.undefined-method"])
+        expect(full_run(dir)).to eq(["a.rb:call.undefined-method"])
+      end
+    end
+  end
+
+  describe "Incremental.changed_constant_publications" do
+    it "reports a name whose descriptor moved, and nothing for one that did not" do
+      before = { "b.rb" => { "KEPT" => [1], "MOVED" => [1] } }
+      after  = { "b.rb" => { "KEPT" => [1], "MOVED" => [2] } }
+      expect(described_module.changed_constant_publications(["b.rb"], before, after)).to eq(Set["MOVED"])
+    end
+
+    it "reports a name whose write became unpublishable, which is no change of NAME at all" do
+      before = { "b.rb" => { "X" => [1] } }
+      after  = { "b.rb" => { "X" => :unpublishable } }
+      expect(described_module.changed_constant_publications(["b.rb"], before, after)).to eq(Set["X"])
+    end
+
+    it "treats an added file's whole census as changed, and a removed file's as changed too" do
+      expect(described_module.changed_constant_publications(["b.rb"], {}, { "b.rb" => { "A" => [1] } }))
+        .to eq(Set["A"])
+      expect(described_module.changed_constant_publications(["c.rb"], { "c.rb" => { "A" => [1] } }, {}))
+        .to eq(Set["A"])
+    end
+
+    it "reports nothing for a file outside the diffed set" do
+      after = { "other.rb" => { "NEW" => [1] } }
+      expect(described_module.changed_constant_publications(["b.rb"], {}, after)).to eq(Set.new)
     end
   end
 end

@@ -27,6 +27,8 @@ module Rigor
       :discovered_includes,
       :discovered_class_sources,
       :constant_sources,
+      :published_constant_names,
+      :local_constant_names,
       :data_member_layouts,
       :struct_member_layouts,
       :param_inferred_types,
@@ -36,7 +38,8 @@ module Rigor
     class DiscoveryIndex
       EMPTY_NODE_TABLE = {}.compare_by_identity.freeze
       EMPTY_TABLE = {}.freeze
-      private_constant :EMPTY_NODE_TABLE, :EMPTY_TABLE
+      EMPTY_NAME_SET = Set.new.freeze
+      private_constant :EMPTY_NODE_TABLE, :EMPTY_TABLE, :EMPTY_NAME_SET
 
       # The third value a `discovered_methods` entry can hold, beside `:instance` and `:singleton`. One name may
       # legitimately be defined on both sides of the same class (`def helper` plus a `class << self` twin), and the
@@ -70,6 +73,14 @@ module Rigor
         # dependency recording, so the runner seeds it only on a recording run; every other run leaves it
         # empty and the edge costs one nil check.
         constant_sources: EMPTY_TABLE,
+        # Issue #644 — the two halves of `Scope#published_constant?`, the question
+        # {Analysis::CheckRules::PublishedConstantGuard} asks. `published_constant_names` is the LAST
+        # SEGMENTS of the project-wide published table (run-wide, seeded by the runner);
+        # `local_constant_names` is the last segments the ANALYSED FILE itself assigns (per file, seeded by
+        # `ScopeIndexer.index`). A name in the first and not the second was declared somewhere the reader's
+        # author cannot see. Both empty outside a runner-seeded scope, which makes the guard a no-op there.
+        published_constant_names: EMPTY_NAME_SET,
+        local_constant_names: EMPTY_NAME_SET,
         data_member_layouts: EMPTY_TABLE,
         struct_member_layouts: EMPTY_TABLE,
         # ADR-67 WD3 — the call-site parameter-inference table, keyed by `[class_name, method_name, kind]` (the

@@ -39,6 +39,9 @@ module Rigor
     def discovered_includes: () -> Hash[String, Array[String]]
     def discovered_class_sources: () -> Hash[String, Set[String]]
     def constant_sources: () -> Hash[String, Set[String]]
+    def published_constant_names: () -> Set[String]
+    def local_constant_names: () -> Set[String]
+    def published_constant?: (String name) -> bool
     def record_constant_dependency: (String name) -> void
     def data_member_layouts: () -> Hash[String, Array[Symbol]]
     def struct_member_layouts: () -> Hash[String, { members: Array[Symbol], keyword_init: bool }]
@@ -66,6 +69,8 @@ module Rigor
       attr_reader discovered_includes: Hash[String, Array[String]]
       attr_reader discovered_class_sources: Hash[String, Set[String]]
       attr_reader constant_sources: Hash[String, Set[String]]
+      attr_reader published_constant_names: Set[String]
+      attr_reader local_constant_names: Set[String]
       attr_reader data_member_layouts: Hash[String, Array[Symbol]]
       attr_reader struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }]
       attr_reader param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
@@ -73,7 +78,7 @@ module Rigor
 
       EMPTY: DiscoveryIndex
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?run_generation: Object?) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?run_generation: Object?) -> DiscoveryIndex
     end
 
     class IndexedKey

@@ -494,11 +494,13 @@ module Rigor
         # Issue #644 — the VALUE half. A `class` / `module` appearing is reported by
         # `Incremental.appeared_classes`; a plain `FOO = :sym` appearing is not a class declaration and
         # appears in no class-source table, so it needs its own kind and its own producer
-        # (`Incremental.appeared_constants`). Same last-segment key grammar as the class negative: a
-        # qualified `Rails::LOG_LEVEL` resolves only once its final segment is assigned, and simple-name
+        # (`Incremental.changed_constant_publications`). Same last-segment key grammar as the class negative:
+        # a qualified `Rails::LOG_LEVEL` resolves only once its final segment is assigned, and simple-name
         # matching over-invalidates (a nested `MyApp::FOO` also re-checks a reader of the top-level `FOO`),
-        # which is the sound direction. One row per reference — consumers hold `missing` as a Set.
-        Analysis::DependencyRecorder.read_missing(:constant, segments.last)
+        # which is the sound direction. One row per reference — consumers hold `missing` as a Set. The twin
+        # of this call is on the RESOLVED path (`Reflection.record_constant_read`): the same key is recorded
+        # whether or not the reference resolved, because both answers move with the project's write set.
+        Analysis::DependencyRecorder.read_name(:constant, segments.last)
       end
 
       # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared

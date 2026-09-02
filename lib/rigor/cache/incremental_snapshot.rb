@@ -55,10 +55,10 @@ module Rigor
       # sidecar — `effect_collections` (the per-file {Rigor::Effects::FileCollection}s a collecting run
       # produced) and the `effects_identity` they were produced under; a pre-12 blob mismatches the SCHEMA
       # gate and loads as nil (a clean cold rebuild — no migration). 13: issue #644 adds `constant_decls`
-      # (the per-file set of qualified constant names a file ASSIGNS, the producer that satisfies the new
-      # `constant:` negative edge) and grows each seed bundle's row grammar by `constant_source_names` +
-      # `constant_values` (the cross-file value-constant publication table); a pre-13 blob mismatches the
-      # SCHEMA gate and loads as nil (a clean cold rebuild — no migration).
+      # (the per-file constant PUBLICATION CENSUS — `{qualified name => [literal] | :unpublishable}` — whose
+      # diff drives the new `constant:` edge's producer) and grows each seed bundle's row grammar by its own
+      # `constant_writes` census; a pre-13 blob mismatches the SCHEMA gate and loads as nil (a clean cold
+      # rebuild — no migration).
       SCHEMA = 13
 
       # The persisted per-file state.
@@ -74,8 +74,11 @@ module Rigor
       # `missing` maps a consumer to Set<"kind:name"> it looked up and missed.
       # `class_decls` maps a path to Set<qualified class name> it declares.
       # Issue #644:
-      # `constant_decls` maps a path to Set<qualified constant name> it ASSIGNS — the producer whose diff
-      # satisfies the `constant:` negative edge a reader records when a constant resolves to nothing.
+      # `constant_decls` maps a path to that file's constant PUBLICATION CENSUS,
+      # `{qualified name => [literal] | :unpublishable}`. The descriptor is what the recheck diffs: a name's
+      # published answer is a function of the whole project's write set for it, so a value edit, a write
+      # becoming unpublishable, or a second declarer appearing / going away all move the answer without
+      # moving the name set.
       # ADR-85 WD2:
       # `seed_bundles` maps an analyzed path to its per-file discovery contribution (plain-data tables +
       # `(node_id, name, fingerprint)` def-node handles + content digest), so a warm recheck rebuilds the

@@ -63,6 +63,7 @@ module Rigor
           :discovered_class_sources,
           :constant_values,
           :constant_sources,
+          :constant_writes,
           :discovered_method_visibilities,
           :discovered_methods,
           :data_member_layouts,
@@ -167,6 +168,7 @@ module Rigor
             # Issue #644 — the cross-file value-constant publication table and its write attribution.
             constant_values: def_index.fetch(:constant_values),
             constant_sources: def_index.fetch(:constant_sources),
+            constant_writes: def_index.fetch(:constant_writes),
             discovered_method_visibilities: def_index.fetch(:method_visibilities),
             discovered_methods: def_index.fetch(:methods),
             data_member_layouts: def_index.fetch(:data_member_layouts),

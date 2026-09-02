@@ -98,9 +98,9 @@ module Rigor
         @missing = {}              # consumer => Set<"kind:name"> it looked up and missed
         @negative_dependents = {}  # "kind:name" => Set<consumer> (inverted @missing)
         @class_decls = {}          # path => Set<qualified class name declared in the file>
-        # Issue #644 — the value-constant twin: path => Set<qualified constant name assigned in the file>.
-        # Diffed on a recheck to find constants that APPEARED, which satisfies the `constant:` negative edges
-        # a reader recorded when the name resolved to nothing.
+        # Issue #644 — the value-constant twin: path => { qualified constant name => publication descriptor }.
+        # Diffed on a recheck to find every constant whose PUBLISHED answer could have moved, which satisfies
+        # the `constant:` edges a reader records at every reference, resolved or not.
         @constant_decls = {}
         # ADR-89 WD2 — per-def observed-key return summaries: [path, symbol] => { keys:, returns:, effects: }.
         # Harvested from the ADR-84 return memo after each run; drives the behavioural-stability gate.
@@ -281,7 +281,7 @@ module Rigor
         symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index) | param_pairs
         base = dependents_base(unstable, symbol_pairs)
         closure = base | changed.to_set | added.to_set |
-                  negative_affected(scan, new_fps, new_class_decls, new_constant_decls)
+                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls)
         closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
@@ -806,15 +806,18 @@ module Rigor
       # a prior missed lookup. Maps each appeared `"ClassName#method"` to the negative-dependency key it
       # would satisfy (`toplevel:foo` for a top-level def, `method:C#m` otherwise), then unions the recorded
       # negative-dependents of those keys.
-      def negative_affected(changed, new_fingerprints, new_class_decls, new_constant_decls)
+      def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
         appeared_classes = Incremental.appeared_classes(changed, @class_decls, new_class_decls)
-        # Issue #644 — a value constant that appeared satisfies the `constant:` negative kind, keyed on the
-        # same last segment the consumer recorded (`ExpressionTyper#record_missing_constant`).
-        appeared_constants = Incremental.appeared_constants(changed, @constant_decls, new_constant_decls)
+        # Issue #644 — a constant whose PUBLICATION moved satisfies the `constant:` kind, keyed on the same
+        # last segment the consumer recorded. REMOVED files join the diff here and nowhere else: deleting a
+        # second declarer restores the precise answer, and no other producer input can see that.
+        moved_constants = Incremental.changed_constant_publications(
+          changed + removed, @constant_decls, new_constant_decls
+        )
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
         keys.concat(appeared_classes.map { |klass| "class:#{klass.split('::').last}" })
-        keys.concat(appeared_constants.map { |name| "constant:#{name.split('::').last}" })
+        keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents)
       end
 
@@ -830,15 +833,16 @@ module Rigor
         result.transform_values(&:freeze).freeze
       end
 
-      # Issue #644 — the qualified constant names ASSIGNED in the pre-parsed `index`, inverted per file from
-      # the pre-pass's constant-write attribution. `{ path => Set<constant name> }`, the twin of
-      # {#class_declarations_from_index}.
+      # Issue #644 — the per-file PUBLICATION CENSUS of the pre-parsed `index`:
+      # `{ path => { constant name => descriptor } }`, the twin of {#class_declarations_from_index}. The
+      # descriptor is what the diff compares — see {Incremental.changed_constant_publications} for why a bare
+      # name set cannot answer the question.
       def constant_declarations_from_index(index)
         return {} if index.nil?
 
-        result = Hash.new { |hash, key| hash[key] = Set.new }
-        index[:constant_sources].each do |name, files|
-          files.each { |file| result[file] << name }
+        result = Hash.new { |hash, key| hash[key] = {} }
+        index[:constant_writes].each do |name, by_path|
+          by_path.each { |path, descriptor| result[path][name] = descriptor }
         end
         result.transform_values(&:freeze).freeze
       end

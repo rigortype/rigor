@@ -173,9 +173,9 @@ module Rigor
       def self?.discovered_project_index_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
       def self?.discovered_project_index_incremental: (Array[String] paths, seed_bundles: Hash[String, untyped], ?buffer: untyped) -> Hash[Symbol, untyped]
       def self?.collect_class_decls: (untyped node, Array[String] qualified_prefix, Hash[String, Type::t] accumulator) -> void
-      def self?.constant_literals_for_file: (untyped root, String path) -> [Hash[String, Array[untyped]], Hash[String, Set[String]]]
+      def self?.constant_writes_for_file: (untyped root) -> Hash[String, untyped]
       def self?.constant_literal_value: (untyped rvalue) -> Array[untyped]?
-      def self?.finalize_constant_values: (Hash[String, Array[untyped]] values, Hash[String, Set[String]] sources) -> Hash[String, Type::t]
+      def self?.finalize_constant_writes: (Hash[String, Hash[String, untyped]] writes) -> [Hash[String, Type::t], Hash[String, Set[String]]]
       def self?.qualified_name_for: (untyped constant_path_node) -> String?
       def self?.render_constant_path: (untyped node) -> String
       def self?.propagate: (untyped node, Hash[untyped, Scope] table, Scope parent_scope) -> void

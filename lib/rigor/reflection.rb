@@ -179,16 +179,32 @@ module Rigor
 
       in_source_value = scope.in_source_constants[candidate]
       if in_source_value
-        # Issue #644 — a cross-file value constant resolved here: record the ADR-46 positive edge to the
-        # file that assigned it, so an incremental recheck re-analyses this reader when that literal moves
-        # or its file goes away. No-op unless dependency recording is active (the table is unseeded then).
-        scope.record_constant_dependency(candidate) if Analysis::DependencyRecorder.active?
+        record_constant_read(candidate, scope) if Analysis::DependencyRecorder.active?
         return in_source_value
       end
 
       env.constant_for_name(candidate)
     end
     private_class_method :constant_type_at
+
+    # Issue #644 — the ADR-46 edges a RESOLVED cross-file value constant records. Two of them, because the
+    # answer depends on two different things:
+    #
+    # - the NAME edge (`constant:<last segment>`, the same key a miss records) is the load-bearing one. The
+    #   published value is a function of the whole project's write set for the name, so it moves when a
+    #   SECOND file starts or stops assigning it — a file this reader has no other relationship with. Only a
+    #   name-keyed edge, matched against the publication diff, re-checks the reader for that.
+    # - the positive FILE edge to each assigning file is the conservative backstop, in ADR-46's
+    #   over-record-never-under-record direction: it keeps the reader in the declaring file's ordinary
+    #   dependents, so a change there re-checks it even if a future producer gap loses the name diff.
+    #
+    # Gated by the caller on the recorder being active; `constant_sources` is seeded only on a recording run,
+    # so an ordinary run pays nothing here.
+    def record_constant_read(candidate, scope)
+      scope.record_constant_dependency(candidate)
+      Analysis::DependencyRecorder.read_name(:constant, candidate.split("::").last)
+    end
+    private_class_method :record_constant_read
 
     # #354 — the project classes and modules whose own constants `class_name` inherits, in Ruby's
     # ancestor order: included / prepended modules before the superclass (Ruby places mixins nearer),

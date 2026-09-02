@@ -356,6 +356,9 @@ module Rigor
         # `constant_sources` only on an ADR-46 recording run, where it is the positive edge's attribution.
         @project_constant_values = {}.freeze
         @project_constant_sources = {}.freeze
+        # ...and the raw per-(name, path) publication census the incremental producer diffs.
+        @project_constant_writes = {}.freeze
+        @published_constant_name_set = nil
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
         @project_data_member_layouts = {}.freeze
@@ -536,14 +539,18 @@ module Rigor
         result.transform_values(&:freeze).freeze
       end
 
-      # Issue #644 — per-file set of the qualified constant names ASSIGNED in that file, the value-constant
-      # twin of {#class_declarations}. `Incremental.appeared_constants` diffs it to find a constant that
-      # appeared in an edit, so a reader that looked the name up and missed (the `constant:` negative edge)
-      # is re-checked once the assignment exists.
+      # Issue #644 — per-file PUBLICATION CENSUS: `{path => {qualified constant name => descriptor}}`, the
+      # value-constant twin of {#class_declarations}. The descriptor (`[literal]` or
+      # `ScopeIndexer::CONSTANT_UNPUBLISHABLE`) is load-bearing and a bare name set is not: a name's published
+      # answer is a function of the WHOLE project's write set for it, so what a recheck has to detect is a
+      # change in the census — a value edit, a write becoming unpublishable, a second declarer appearing or
+      # going away — not merely a name appearing.
+      # {Incremental.changed_constant_publications} diffs it; the reader's `constant:` edge is recorded on
+      # every reference, resolved or not, so the diff reaches it either way.
       def constant_declarations
-        result = Hash.new { |hash, key| hash[key] = Set.new }
-        @project_constant_sources.each do |name, files|
-          files.each { |file| result[file] << name }
+        result = Hash.new { |hash, key| hash[key] = {} }
+        @project_constant_writes.each do |name, by_path|
+          by_path.each { |path, descriptor| result[path][name] = descriptor }
         end
         result.transform_values(&:freeze).freeze
       end
@@ -1210,7 +1217,9 @@ module Rigor
         @project_discovered_includes = discovery.discovered_includes
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
+        @published_constant_name_set = nil
         @project_constant_sources = discovery.constant_sources
+        @project_constant_writes = discovery.constant_writes
         @project_discovered_method_visibilities = discovery.discovered_method_visibilities
         @project_discovered_methods = discovery.discovered_methods
         @project_data_member_layouts = discovery.data_member_layouts
@@ -1651,7 +1660,11 @@ module Rigor
       def seed_opt_in_pre_pass_tables(tables)
         tables[:param_inferred_types] = @project_param_inferred_types unless @project_param_inferred_types.empty?
         constants = merged_seed_constants
-        tables[:in_source_constants] = constants unless constants.empty?
+        return if constants.empty?
+
+        tables[:in_source_constants] = constants
+        names = published_constant_name_set
+        tables[:published_constant_names] = names unless names.empty?
       end
 
       # Issue #644 — the seeded `in_source_constants` table, joining the two cross-file constant producers.
@@ -1660,6 +1673,14 @@ module Rigor
       # widener erases it to the class, and listing a file under `pre_eval:` must never LOSE precision. The
       # per-file table still wins over both (`ScopeIndexer.index`'s merge) — same-file stays the most
       # specific authority.
+      # Issue #644 — the LAST SEGMENTS of the published table, the run-wide half of
+      # `Scope#published_constant?`. Seeded on EVERY run (unlike `constant_sources`, which only a recording
+      # run needs) because {CheckRules::PublishedConstantGuard} asks the question on every `if` / `unless`.
+      def published_constant_name_set
+        @published_constant_name_set ||=
+          @project_constant_values.keys.to_set { |name| name.split("::").last }.freeze
+      end
+
       def merged_seed_constants
         return @project_constant_values if @project_pre_eval_constants.empty?
         return @project_pre_eval_constants if @project_constant_values.empty?

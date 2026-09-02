@@ -40,6 +40,12 @@ module Rigor
     # the indexer itself never exposes a way to update it past construction.
     # rubocop:disable-next Metrics/ModuleLength
     module ScopeIndexer
+      # Issue #644 — the census descriptor for a constant write that publishes no value: an unfoldable or
+      # non-literal rvalue, an operator / multi-assign / dynamic-path form, or a name this file writes twice.
+      # A Symbol, so it is distinguishable from a `[literal]` descriptor by class alone and rides the ADR-85
+      # seed bundle through `Marshal` unchanged.
+      CONSTANT_UNPUBLISHABLE = :unpublishable
+
       module_function
 
       # Build the scope index for a Prism program subtree.
@@ -103,8 +109,7 @@ module Rigor
         in_source_constants = widen_mutated_constants(
           build_in_source_constants(root, seeded_scope), literal_mutations[:constants]
         )
-        merged_constants = merge_seeded_constants(default_scope.in_source_constants, in_source_constants)
-        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(in_source_constants: merged_constants))
+        seeded_scope = seed_constant_tables(seeded_scope, default_scope, in_source_constants)
 
         # Slice 7 phase 12. In-source method discovery. Walks every class/module body for `Prism::DefNode` and
         # recognised `define_method` calls and records the introduced method names. `rigor check` consults the table to
@@ -1486,6 +1491,27 @@ module Rigor
       # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table. Returns the
       # per-file table unchanged (same frozen object) when nothing was seeded, so a run without `pre_eval:`
       # constants allocates and compares exactly what it did before.
+      # Issue #644 — merges the per-file constant table OVER the project seed and records, alongside it,
+      # which of those names THIS FILE declares (as last segments). The second table is the other half of
+      # `Scope#published_constant?`: a project-published constant the analysed file also assigns is one its
+      # author can see, so the truthiness rules keep firing on it. Both are seeded here, where the per-file
+      # table is still separable from the project seed it is about to merge over.
+      def seed_constant_tables(seeded_scope, default_scope, in_source_constants)
+        merged = merge_seeded_constants(default_scope.in_source_constants, in_source_constants)
+        seeded_scope.with_discovery(
+          seeded_scope.discovery.with(in_source_constants: merged,
+                                      local_constant_names: local_constant_name_set(in_source_constants))
+        )
+      end
+
+      # The last segments of the file's OWN constant table, frozen. Empty stays the shared
+      # frozen empty set so an ordinary file allocates nothing.
+      def local_constant_name_set(per_file_constants)
+        return Scope::DiscoveryIndex::EMPTY.local_constant_names if per_file_constants.empty?
+
+        per_file_constants.keys.to_set { |name| name.split("::").last }.freeze
+      end
+
       def merge_seeded_constants(seeded, per_file)
         return per_file if seeded.nil? || seeded.empty?
 
@@ -2658,8 +2684,15 @@ module Rigor
       # stable, dropped from the closure, and served the pre-edit `:sym`. Both halves are here: the write
       # NAMES (an added / removed / renamed assignment) and the published VALUES (a same-name value edit).
       def append_constant_signature(parts, file_index)
-        parts.concat((file_index[:constant_sources] || {}).keys.sort.map { |name| "k:#{name}" })
-        parts.concat((file_index[:constant_values] || {}).sort.map { |name, v| "kv:#{name}=#{v.first.inspect}" })
+        parts.concat((file_index[:constant_writes] || {}).sort.map do |name, by_path|
+          "k:#{name}=#{constant_descriptor_signature(by_path.values.first)}"
+        end)
+      end
+
+      # `[literal]` renders its value; an unpublishable write renders as `?`. Both halves matter: a write
+      # appearing or vanishing moves the signature, and so does the same name's value changing.
+      def constant_descriptor_signature(descriptor)
+        descriptor.is_a?(Array) ? descriptor.first.inspect : "?"
       end
 
       # The class-declaration + ancestry + member-layout surface of the declaration signature (declared class
@@ -2877,13 +2910,12 @@ module Rigor
         fold_constant_tables(acc, file_index)
       end
 
-      # Issue #644 — constant values fold later-wins and constant sources union, exactly as
-      # {#merge_constant_literal_tables} folds a freshly walked file. `|| {}` keeps the fold total over a
-      # pre-#644 seed bundle, which carries neither key.
+      # Issue #644 — the census folds per (name, path), so a re-folded file replaces exactly its own
+      # contribution and the fold stays order-independent. `|| {}` keeps it total over a pre-#644 seed
+      # bundle, which carries no census.
       def fold_constant_tables(acc, file_index)
-        acc[:constant_values].merge!(file_index[:constant_values] || {})
-        (file_index[:constant_sources] || {}).each do |name, files|
-          (acc[:constant_sources][name] ||= Set.new).merge(files)
+        (file_index[:constant_writes] || {}).each do |name, by_path|
+          (acc[:constant_writes][name] ||= {}).merge!(by_path)
         end
       end
 
@@ -2948,10 +2980,9 @@ module Rigor
           method_visibilities: file_index[:method_visibilities],
           methods: file_index[:methods],
           class_source_names: file_index[:class_sources].keys,
-          # Issue #644 — the file's constant-write attribution (names only; the path is the bundle key) and
-          # the folded literal values. Plain data, so the bundle stays Marshal-clean.
-          constant_source_names: file_index[:constant_sources].keys,
-          constant_values: file_index[:constant_values],
+          # Issue #644 — the file's publication census (`name => [literal] | :unpublishable`; the path is
+          # the bundle key). Plain data, so the bundle stays Marshal-clean.
+          constant_writes: file_index[:constant_writes].transform_values { |by_path| by_path.values.first },
           data_member_layouts: file_index[:data_member_layouts],
           struct_member_layouts: file_index[:struct_member_layouts]
         }
@@ -2975,10 +3006,9 @@ module Rigor
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
-          # Issue #644 — a pre-#644 bundle carries neither key; the SCHEMA bump makes such a blob a cold
+          # Issue #644 — a pre-#644 bundle carries no census; the SCHEMA bump makes such a blob a cold
           # rebuild, but default so any in-flight fold stays total.
-          constant_sources: (bundle[:constant_source_names] || []).to_h { |name| [name, Set[path]] },
-          constant_values: bundle[:constant_values] || {},
+          constant_writes: (bundle[:constant_writes] || {}).transform_values { |descriptor| { path => descriptor } },
           data_member_layouts: bundle[:data_member_layouts],
           struct_member_layouts: bundle[:struct_member_layouts]
         }
@@ -3006,15 +3036,15 @@ module Rigor
       def new_def_index_accumulator
         { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
           superclasses: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {}, class_sources: {},
-          constant_values: {}, constant_sources: {},
+          constant_writes: {},
           data_member_layouts: {}, struct_member_layouts: {} }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
       def finalize_def_index(acc)
         # Issue #644 — resolve the cross-file constant-reassignment rule here, where the whole project's
-        # write attribution is known, and turn the surviving literals into their published `Type::Constant`.
-        acc[:constant_values] = finalize_constant_values(acc[:constant_values], acc[:constant_sources])
+        # write census is known, and turn the surviving literals into their published `Type::Constant`.
+        acc[:constant_values], acc[:constant_sources] = finalize_constant_writes(acc[:constant_writes])
         fold_extends_into_singleton_tables(acc[:extends], acc[:def_nodes], acc[:singleton_def_nodes], acc[:methods])
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
@@ -3073,13 +3103,13 @@ module Rigor
         merge_member_layout_tables(acc, root)
       end
 
-      # Issue #644 — folds one file's constant-literal contribution into the cross-file accumulator (kept out
-      # of {#accumulate_project_index} to hold its ABC budget). Values merge later-wins and sources union;
-      # the conflict rule that makes the order irrelevant runs at {#finalize_constant_values}.
+      # Issue #644 — folds one file's publication census into the cross-file accumulator, keyed by
+      # (name, path) (kept out of {#accumulate_project_index} to hold its ABC budget). The conflict rule that
+      # makes the fold order irrelevant runs at {#finalize_constant_writes}.
       def merge_constant_literal_tables(acc, root, path)
-        values, sources = constant_literals_for_file(root, path)
-        acc[:constant_values].merge!(values)
-        sources.each { |name, files| (acc[:constant_sources][name] ||= Set.new).merge(files) }
+        constant_writes_for_file(root).each do |name, descriptor|
+          (acc[:constant_writes][name] ||= {})[path] = descriptor
+        end
       end
 
       # Folds one file's Data + Struct member-layout tables into the cross-file accumulator (kept out of
@@ -3118,21 +3148,26 @@ module Rigor
       end
 
       # Issue #644 — the cross-file VALUE-constant pre-pass, the twin of {#record_class_sources} for plain
-      # constant ASSIGNMENTS. Returns `[values, sources]` for one file:
+      # constant ASSIGNMENTS. Returns one file's **publication census**: `{qualified name => descriptor}`,
+      # where the descriptor is either `[literal]` (a publishable frozen scalar) or {CONSTANT_UNPUBLISHABLE}.
       #
-      # - `sources` — `{qualified name => Set[path]}` over EVERY constant write the file makes, whatever its
-      #   rvalue. It is the attribution the ADR-46 positive edge reads, the producer `appeared_constants`
-      #   inverts, AND the conflict detector: a name two files both write is dropped from the published table
-      #   (see {#finalize_constant_values}), so an unpublishable write in a second file correctly suppresses a
-      #   publishable one here.
-      # - `values` — `{qualified name => [literal]}` for the writes whose rvalue is a **frozen scalar literal**
-      #   the walk can fold without typing anything: a Symbol, Integer, or Float. The one-element Array is the
-      #   presence wrapper, and the raw Ruby value is what rides the ADR-85 seed bundle through `Marshal` —
-      #   {#finalize_constant_values} turns it into the `Type::Constant` the seed carries.
+      # EVERY constant write is censused, whatever its rvalue and whatever its form, because the census is
+      # three things at once and only the first cares about the value:
       #
-      # **Why only those three kinds.** Publishing turns `Dynamic[top]` into a real type at every reader in the
-      # project, which is precisely where a wrong answer becomes a diagnostic on correct code (AGENTS.md
-      # § "Implementation Guidelines"), so the recognised set is the one whose precision is worth that risk.
+      # 1. the published table ({#finalize_constant_writes}: a name publishes only when exactly one file
+      #    writes it and that write is a literal),
+      # 2. the attribution the ADR-46 positive edge reads, and
+      # 3. the producer whose per-file DIFF re-checks readers on an incremental run
+      #    ({Analysis::Incremental.changed_constant_publications}).
+      #
+      # A write the census cannot see does not merely lose precision — it silently bypasses the conflict rule
+      # and publishes a value the program does not have. That is why the operator / multi-assign / chained /
+      # `self::` forms below are censused as unpublishable rather than skipped.
+      #
+      # **Why the publishable set is only Symbol / Integer / Float.** Publishing turns `Dynamic[top]` into a
+      # real type at every reader in the project, which is precisely where a wrong answer becomes a diagnostic
+      # on correct code (AGENTS.md § "Implementation Guidelines"), so the recognised set is the one whose
+      # precision is worth that risk.
       #
       # - `String` / `Array` / `Hash` literals are MUTABLE. A sibling file's `PATH << "/x"` or `LIST.push(...)`
       #   moves the value this table pinned, and only the DECLARING file's `widen_mutated_constants` census can
@@ -3141,68 +3176,118 @@ module Rigor
       #   through `ShapeDispatch` instead of the RBS overload a call site relied on).
       # - `nil` declines for {PreEvalConstants}' reason: at declaration position it is a placeholder for a
       #   value assigned later far more often than it is a genuine `NilClass`.
-      # - `true` / `false` decline because publishing them is **pure cost**. Nobody dispatches on a boolean, so
-      #   the precision buys nothing; what it does buy is a `flow.always-truthy-condition` on every
-      #   `if FEATURE_FLAG` in every other file — a warning on correct code, on the single Ruby idiom whose
-      #   whole point is a constant that is branched on. A `Constant[bool]` predicate keeps firing when the
-      #   flag is declared in the reader's OWN file, which is where the author can see it.
+      # - `true` / `false` DO publish. They are branched on rather than dispatched to, so the value would fuel
+      #   `flow.always-truthy-condition` at every `if FEATURE_FLAG` in another file; that is withheld at the
+      #   rule instead ({Analysis::CheckRules::PublishedConstantGuard}), which is the repo's own answer to a
+      #   value that is real but must not be concluded from, and it keeps the treatment of every published
+      #   kind the same.
       #
-      # Everything else — a method call, a constant alias, `ENV[...]`, a `Data.define` — is not a literal and
-      # publishes nothing, so the reader keeps today's `Dynamic[top]`. Declining is always the safe answer.
+      # Everything else — a method call, a constant alias, `ENV[...]`, a `Data.define` — is not a literal, so
+      # the reader keeps today's `Dynamic[top]`. Declining is always the safe answer.
       #
-      # A name written TWICE in one file publishes nothing either (the second write drops it), which is what
-      # makes a conditional `X = :a if c` / `X = :b` pair gradual rather than pinned to whichever arm the walk
-      # saw first.
-      def constant_literals_for_file(root, path)
-        values = {}
-        sources = {}
-        walk_constant_literals(root, [], values, sources, Set.new, path)
-        [values, sources]
+      # A name written TWICE in one file is unpublishable too, which is what makes a conditional
+      # `X = :a if c` / `X = :b` pair gradual rather than pinned to whichever arm the walk saw first.
+      def constant_writes_for_file(root)
+        writes = {}
+        walk_constant_write_census(root, [], writes, Set.new)
+        writes
       end
 
-      # Mirrors {#walk_constant_writes}'s traversal exactly — the lexical class/module prefix qualifies a bare
-      # `ConstantWriteNode`, a `ConstantPathWriteNode` uses its rendered path as-is, and neither descends into
-      # its own rvalue — so the syntactic table and the per-file typed table agree on WHICH name a write
-      # declares. Only the rvalue treatment differs (a literal fold here, `Scope#type_of` there).
-      def walk_constant_literals(node, qualified_prefix, values, sources, seen, path)
+      # Mirrors {#walk_constant_writes}'s traversal for the forms it shares — the lexical class/module prefix
+      # qualifies a bare `ConstantWriteNode` and a `ConstantPathWriteNode` uses its rendered path as-is — and
+      # extends it to the four forms that walk misses, each censused as unpublishable: an operator / `&&=` /
+      # `||=` constant write, a `ConstantTargetNode` under a `MultiWriteNode` (`A, B = :x, :y`), a `self::X =`
+      # whose target renders no qualified name, and the inner write of a chain (`C = D = :x`), which is why a
+      # `ConstantWriteNode` descends into its own rvalue instead of returning.
+      def walk_constant_write_census(node, qualified_prefix, writes, seen)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
           name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
-            child = qualified_prefix + [name]
-            walk_constant_literals(node.body, child, values, sources, seen, path) if node.body
+            walk_constant_write_census(node.body, qualified_prefix + [name], writes, seen) if node.body
             return
           end
-        when Prism::ConstantWriteNode
-          return record_constant_literal(node, qualified_prefix, node.name.to_s, values, sources, seen, path)
-        when Prism::ConstantPathWriteNode
-          full = Source::ConstantPath.qualified_name(node.target)
-          return record_constant_literal(node, [], full, values, sources, seen, path) if full
+        else
+          census_constant_write(node, qualified_prefix, writes, seen)
         end
 
-        node.rigor_each_child { |child| walk_constant_literals(child, qualified_prefix, values, sources, seen, path) }
+        node.rigor_each_child { |child| walk_constant_write_census(child, qualified_prefix, writes, seen) }
       end
 
-      # Records one constant write. `seen` carries the names this file has already written: a repeat write
-      # retracts the published value (whatever either rvalue was) while still contributing to `sources`, so
-      # neither arm of an in-file reassignment is ever published.
-      def record_constant_literal(node, qualified_prefix, base_name, values, sources, seen, path)
-        full = qualified_prefix.empty? ? base_name : "#{qualified_prefix.join('::')}::#{base_name}"
-        (sources[full] ||= Set.new) << path
-        return values.delete(full) unless seen.add?(full)
-
-        literal = constant_literal_value(node.value)
-        values[full] = literal if literal
+      # Censuses `node` when it is any constant-assigning form. Only a plain `ConstantWriteNode` /
+      # `ConstantPathWriteNode` can contribute a VALUE; every other form is recorded unpublishable, which
+      # suppresses publication of the name exactly as a second file's write would.
+      def census_constant_write(node, qualified_prefix, writes, seen)
+        case node
+        when Prism::ConstantWriteNode
+          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s),
+                                       constant_literal_value(node.value), writes, seen)
+        when Prism::ConstantPathWriteNode
+          record_constant_write_census(constant_path_write_name(node.target, qualified_prefix),
+                                       constant_literal_value(node.value), writes, seen)
+        when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
+          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, writes, seen)
+        when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
+          record_constant_write_census(constant_path_write_name(node.target, qualified_prefix), nil, writes, seen)
+        when Prism::MultiWriteNode
+          census_multi_write_constants(node, qualified_prefix, writes, seen)
+        end
       end
 
-      # The frozen-scalar literal fold: `[value]` for a publishable rvalue, nil to decline. See
-      # {#constant_literals_for_file} for why the recognised set stops here.
+      # `A, B = :x, :y` and `A, *rest = …`. A destructured element's value is a projection of the right-hand
+      # side, which this syntactic walk does not evaluate, so every constant target is censused unpublishable.
+      def census_multi_write_constants(node, qualified_prefix, writes, seen)
+        targets = node.lefts + node.rights
+        targets << node.rest if node.rest
+        targets.each do |target|
+          case target
+          when Prism::ConstantTargetNode
+            record_constant_write_census(qualified_write_name(qualified_prefix, target.name.to_s), nil, writes, seen)
+          when Prism::ConstantPathTargetNode
+            record_constant_write_census(constant_path_write_name(target, qualified_prefix), nil, writes, seen)
+          end
+        end
+      end
+
+      # The qualified name a constant-path write targets. `Foo::BAR = …` renders as written (matching
+      # {#walk_constant_writes}); `self::BAR = …` names the enclosing lexical namespace's `BAR`. Any other
+      # dynamic receiver (`klass::BAR = …`) cannot be attributed to a namespace at all, so it falls back to
+      # the bare last segment: over-suppressing a top-level name is gradual typing, which is the safe
+      # direction, whereas guessing a namespace would suppress the wrong name.
+      def constant_path_write_name(target, qualified_prefix)
+        full = Source::ConstantPath.qualified_name_or_nil(target)
+        return full if full
+
+        base = target.name&.to_s
+        return nil if base.nil?
+
+        target.parent.is_a?(Prism::SelfNode) ? qualified_write_name(qualified_prefix, base) : base
+      end
+
+      def qualified_write_name(qualified_prefix, base_name)
+        qualified_prefix.empty? ? base_name : "#{qualified_prefix.join('::')}::#{base_name}"
+      end
+
+      # Records one censused write. `seen` carries the names this file has already written, so a repeat write
+      # retracts the publishable descriptor whatever either rvalue was — neither arm of an in-file
+      # reassignment is ever published, and the name still counts as written.
+      def record_constant_write_census(full, literal, writes, seen)
+        return if full.nil?
+
+        writes[full] = seen.add?(full) ? (literal || CONSTANT_UNPUBLISHABLE) : CONSTANT_UNPUBLISHABLE
+      end
+
+      # The frozen-scalar literal fold: `[value]` for a publishable rvalue, nil to decline. The one-element
+      # Array is the presence wrapper (`false` is a legitimate published value), and the raw Ruby value is
+      # what rides the ADR-85 seed bundle through `Marshal`.
       def constant_literal_value(rvalue)
         case rvalue
         when Prism::SymbolNode then symbol_literal_publication(rvalue)
         when Prism::IntegerNode, Prism::FloatNode then [rvalue.value]
+        when Prism::TrueNode then [true]
+        when Prism::FalseNode then [false]
         end
       end
 
@@ -3213,16 +3298,26 @@ module Rigor
         text.is_a?(String) ? [text.to_sym] : nil
       end
 
-      # Issue #644 — materialises the published table from the folded accumulator. A name only publishes when
-      # exactly ONE file writes it: two files writing the same qualified name is a cross-file reassignment
-      # whose winner is load order, so the name stays `Dynamic[top]` — the type it already had, and the widest
-      # there is. Runs at finalize (not at fold time) so the fold stays order-independent, which is what lets
-      # the ADR-85 incremental path re-fold a changed file's bundle in place.
-      def finalize_constant_values(values, sources)
-        values.each_with_object({}) do |(name, wrapper), out|
-          files = sources[name]
-          out[name] = Type::Combinator.constant_of(wrapper.first) if files && files.size == 1
+      # Issue #644 — materialises the published table and the write attribution from the folded census.
+      #
+      # A name publishes only when exactly ONE file writes it and that write is a literal. Two files writing
+      # the same qualified name is a cross-file reassignment whose winner is load order, so the name stays
+      # `Dynamic[top]` — the type it already had, and the widest there is. The rule runs at finalize (not at
+      # fold time) so the fold stays order-independent, which is what lets the ADR-85 incremental path re-fold
+      # a changed file's contribution in place.
+      #
+      # @return [Array(Hash, Hash)] `[{name => Type}, {name => Set[path]}]`.
+      def finalize_constant_writes(writes)
+        values = {}
+        sources = {}
+        writes.each do |name, by_path|
+          sources[name] = by_path.keys.to_set.freeze
+          next unless by_path.size == 1
+
+          descriptor = by_path.values.first
+          values[name] = Type::Combinator.constant_of(descriptor.first) if descriptor.is_a?(Array)
         end
+        [values, sources]
       end
 
       # Merges one file's `class → method → DefNode` map into the cross-file `def_nodes` index and records each method's

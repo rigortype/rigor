@@ -5,6 +5,7 @@ require "prism"
 require_relative "../../source/node_children"
 require_relative "../../inference/optimistic_origin"
 require_relative "inferred_param_guard"
+require_relative "published_constant_guard"
 
 module Rigor
   module Analysis
@@ -108,6 +109,13 @@ module Rigor
           # because the seed's lower-bound type pinned it; a wider real caller would not. Declining preserves
           # the precision-additive contract.
           return if InferredParamGuard.rooted?(predicate, scope)
+
+          # Issue #644 — a predicate whose constancy rests on a value constant declared in ANOTHER file is
+          # not a logic error the reader's author can see: `if MODE == :production` folds only because the
+          # project-wide table published `MODE`, and a configuration constant read in ten files would put
+          # this warning in all ten. The value stays published (dispatch and argument typing keep it); only
+          # the firing is withheld, which is the direction the carrier discipline allows.
+          return if PublishedConstantGuard.rooted?(predicate, scope)
 
           # Issue #313 — a predicate whose constancy rests on an optimistically nil-free carrier is a bet, not
           # proof: `MAP[key]` omits `nil` because pessimising the defaulted-Hash idiom costs more false

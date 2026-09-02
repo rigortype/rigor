@@ -900,7 +900,9 @@ module Rigor
 
             # Issue #606 slice 1 — the same proof one call further out, where the `&.` result is
             # fed to a suffix (`custom&.value.present?`, `backup&.user.nil?`) or compared against
-            # a non-nil operand. Sits last so every existing path keeps first claim on the node:
+            # a non-nil operand. Sits after every pre-existing NARROWING path so those keep first claim
+            # on the node (the RBS-extended contribution hook still runs later and can be pre-empted —
+            # no live collision today since arg-free chains carry no argument facts):
             # each of them returns nil for these shapes today (the predicate analysers require a
             # local-read receiver, which a chain is not), so this only ever runs on nodes that
             # were otherwise about to narrow nothing.

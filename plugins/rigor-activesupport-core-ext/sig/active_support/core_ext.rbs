@@ -153,6 +153,9 @@ class NilClass
   def try: (*untyped) -> nil
   %a{pure}
   def try!: (*untyped) -> nil
+  %a{pure}
+  def duplicable?: () -> true
+  def instance_values: () -> Hash[String, untyped]
 end
 
 class TrueClass

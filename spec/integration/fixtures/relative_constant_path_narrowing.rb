@@ -22,6 +22,16 @@ module Outerish
   end
 end
 
+# Reachable only as the as-written spelling from inside `Bar` — nothing
+# under `Bar` shadows `Far`.
+module Far
+  class Thing
+    def far_thing
+      "far"
+    end
+  end
+end
+
 module Bar
   module Nested
     class Leaf
@@ -76,11 +86,27 @@ module Bar
       end
     end
 
-    # Must-still-succeed 2: a path with no lexically nearer owner still
-    # falls through to the spelling as written.
-    def unshadowed_path(other)
-      if other.is_a?(Nested::Leaf)
-        assert_type('Bar::Nested::Leaf', other)
+    # Must-still-succeed 2: the walk's FALL-THROUGH, inside a non-empty
+    # nesting. Nothing under `Bar` owns a `Far`, so every candidate the
+    # chain builds (`Bar::Guard::Far::Thing`, `Bar::Far::Thing`) must miss
+    # and the as-written spelling must survive. Without this the suite has
+    # no multi-segment case where the walk is required to find nothing —
+    # a walk that adopted its first candidate unconditionally would pass
+    # every other example in this fixture.
+    def multi_segment_fall_through(other)
+      if other.is_a?(Far::Thing)
+        assert_type('Far::Thing', other)
+        other.far_thing
+      end
+    end
+
+    # The `when` twin of the same fall-through: this shape resolved nothing
+    # at all before #635, so it is the one most likely to over-resolve now.
+    def multi_segment_fall_through_when(other)
+      case other
+      when Far::Thing
+        assert_type('Far::Thing', other)
+        other.far_thing
       end
     end
   end

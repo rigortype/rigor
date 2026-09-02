@@ -395,7 +395,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # fixture stops asserting. Every `assert_type` line MUST still be present and MUST
     # still be the one the resolution rule decides.
     it "still asserts one narrowed type per guard shape" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(12)
+      expect(marked_lines(harness, "assert_type(").size).to eq(13)
     end
 
     # The false-positive arm. `Bar::Nested::Random` shadows a class RBS knows completely,

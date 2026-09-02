@@ -1897,6 +1897,17 @@ module Rigor
         # each prefix is the same rule the single-segment case already applies, and it adopts a
         # candidate only when the scope actually knows it, so a genuinely absolute spelling still
         # falls through to `bare_name` unchanged.
+        #
+        # NOT `Module.nesting`, though — an APPROXIMATION of it, and the gap is #652's. The chain
+        # comes from `lexical_nesting_for`, which peels `scope.self_type.class_name`; that string
+        # is identical for `class Admin::UsersController` and for `module Admin; class
+        # UsersController`, so the derivation cannot tell a COMPACT definition from a nested one
+        # and hands back `["Admin::UsersController", "Admin"]` for both. Ruby's nesting in the
+        # compact form is `[Admin::UsersController]` alone, so a bare `User` there means `::User`
+        # while this walk answers `Admin::User`. The defect is in the derivation, not in any one
+        # guard shape: fixing `lexical_nesting_for` (and `Reflection.enclosing_class_path`, which
+        # peels the same way) closes it for `is_a?`, `case`/`when` and `===` at once. Until then
+        # `case`/`when` and `===` share the divergence that `is_a?` already had.
         def resolve_class_name_lexically(bare_name, scope)
           chain = lexical_nesting_for(scope)
           chain.each do |prefix|
@@ -2355,10 +2366,11 @@ module Rigor
           end
         end
 
-        # The class a constant reference denotes at THIS point in the source, resolved the way
-        # Ruby resolves it (#635). `case t when Type::Union` inside `module Rigor` names
-        # `Rigor::Type::Union`, and narrowing to the source spelling instead left the guarded
-        # receiver an unknown nominal whose every reader dispatched to `Dynamic[top]`.
+        # The class a constant reference denotes at THIS point in the source (#635). `case t when
+        # Type::Union` inside `module Rigor` names `Rigor::Type::Union`, and narrowing to the
+        # source spelling instead left the guarded receiver an unknown nominal whose every reader
+        # dispatched to `Dynamic[top]`. The resolution APPROXIMATES Ruby's — see
+        # {#resolve_class_name_lexically} for where the derived nesting chain diverges (#652).
         #
         # Shared by the case-equality shapes (`Class === x`, `case/when`) so one spelling narrows
         # to one name whichever guard it is written in; `is_a?` / `kind_of?` / `instance_of?` go

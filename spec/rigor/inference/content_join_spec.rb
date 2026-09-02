@@ -226,6 +226,71 @@ RSpec.describe Rigor::Inference::ContentJoin do
       result = described_class.send(:join_array_content, seed, [int_type])
       expect(result).to be_a(Rigor::Type::Nominal)
     end
+
+    # Issue #631 — WD2.9's rule one level out. The rederived carrier stands only for the members the
+    # mutation applied to AS an Array; a whole-variable `Dynamic` contributes no element evidence
+    # (`collection_element_types` answers `[]` for it) and used to vanish, closing
+    # `out = flag ? u : [2]; [1].each { out << 2 }` to `Array[2]` and drawing `undefined method
+    # 'upcase' for 2` on correct code.
+    it "keeps a whole-variable Dynamic member of a Union seed beside the rederived Array" do
+      seed = Rigor::Type::Combinator.union(untyped, Rigor::Type::Combinator.tuple_of(zero))
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result).to eq(
+        Rigor::Type::Combinator.union(
+          untyped,
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.union(zero, int_type)])
+        )
+      )
+    end
+
+    it "keeps a foreign Nominal member of a Union seed" do
+      seed = Rigor::Type::Combinator.union(str_type, Rigor::Type::Combinator.tuple_of(zero))
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result).to eq(
+        Rigor::Type::Combinator.union(
+          str_type,
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.union(zero, int_type)])
+        )
+      )
+    end
+
+    # The must-still-succeed half: two Array carriers are BOTH absorbed, so the answer stays one
+    # Array. A rule that kept carriers as residue would read `Array[…] | Array[…]` here.
+    it "collapses two Array carriers in a Union seed into one rederived Array" do
+      seed = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.tuple_of(zero),
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      )
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result).to be_a(Rigor::Type::Nominal)
+      expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(zero, str_type, int_type))
+    end
+
+    # `Array.new` types as a BARE `Nominal[Array]`, which yields no element evidence but IS a
+    # carrier — it must be absorbed, not grown into a second arm (issue #615's seed keeps closing).
+    it "absorbs a bare Nominal[Array] member rather than keeping it as residue" do
+      seed = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("Array"),
+        Rigor::Type::Combinator.tuple_of(zero)
+      )
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result).to be_a(Rigor::Type::Nominal)
+      expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(zero, int_type))
+    end
+
+    # `nil` is the one member the mutation itself refutes — `NilClass` defines no content mutator,
+    # so on every path where the body ran the binding was not nil. Keeping it measured out as pure
+    # cost: a `possible-nil-receiver` cascade on the `r ||= []` accumulator idiom, where the live
+    # nil arm is already reported at the mutation.
+    it "drops a nil member of a Union seed" do
+      seed = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(nil),
+        Rigor::Type::Combinator.tuple_of(zero)
+      )
+      result = described_class.send(:join_array_content, seed, [int_type])
+      expect(result).to be_a(Rigor::Type::Nominal)
+      expect(result.type_args.first).to eq(Rigor::Type::Combinator.union(zero, int_type))
+    end
   end
 
   describe ".join_hash_content" do
@@ -283,6 +348,17 @@ RSpec.describe Rigor::Inference::ContentJoin do
       result = described_class.send(:join_hash_content, union_seed, [])
       expect(result.type_args[0]).to eq(sym_type)
       expect(result.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
+    end
+
+    # Issue #631, the Hash twin — `out = flag ? u : { a: 1 }; [1].each { out[:b] = 2 }` dropped the
+    # whole-variable `Dynamic` arm exactly as the Array side did.
+    it "keeps a whole-variable Dynamic member of a Union seed beside the rederived Hash" do
+      seed = Rigor::Type::Combinator.union(untyped, Rigor::Type::HashShape.new(a: int_type))
+      result = described_class.send(:join_hash_content, seed, [[sym_type, str_type]])
+      expect(result).to be_a(Rigor::Type::Union)
+      expect(result.members).to include(untyped)
+      hash = result.members.find { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Hash" }
+      expect(hash.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
     end
   end
 

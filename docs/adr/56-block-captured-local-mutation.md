@@ -609,6 +609,84 @@ types every compound write as its RHS — `total += 1` as `1` — a defect
 of the expression typer, not of the fold, and one whose fix reaches
 every `||=` / `&&=` / `op=` expression.
 
+### WD2.11 — The rederived carrier replaces only the members it stands for (2026-09-02, issue #631)
+
+WD2.9 settled the ELEMENT arm. The whole-VARIABLE arm was still being
+dropped, and dropping it fired:
+
+    def f(flag, u)
+      out = flag ? u : [2]     # Dynamic[top] | [2]
+      [1].each { out << 2 }    # -> Array[2]; the Dynamic arm is gone
+      out.first.upcase         # undefined method `upcase' for 2
+    end
+
+`g`, the same seed read through `out.first == 3`, drew the
+always-falsey twin. Both are correct programs whenever `u` is an array
+of strings, and both were byte-identical on master back to slice C.
+
+The mechanism is one line of the seam's contract nobody had written
+down: `join_array_content` builds ONE fresh `Nominal[Array]` and the
+caller writes it over the whole binding. That is the right answer only
+for the pre-state members the mutation applied to AS an Array of that
+class. `collection_element_types` answers `[]` for every other member —
+a whole-variable `Dynamic`, a foreign `Nominal`, a `Constant` — so they
+contributed nothing and were then overwritten out of existence. The
+straight-line seam never had the bug because `widen_for_mutator`
+declines a `Union` outright and reads it through untouched; the block
+and loop seams were the outliers, not the reference.
+
+**Decision: the join partitions the pre-state.** Members it can read as
+a carrier of the target class are absorbed into the rederived one;
+every other member survives whole, unexamined, beside it. `Dynamic[top]
+| Array[2]` here. Neither half is examined twice, so nothing is
+double-widened, and the partition is spelled by mirroring
+`collection_element_types` / `hash_shape_key_values` recursion for
+recursion (`ContentJoin#array_residue` / `#hash_residue`) so the
+absorbed set and the residue cannot drift apart.
+
+Four things the partition had to settle:
+
+- **A carrier is a carrier whether or not it carries evidence.** A bare
+  `Nominal[Array]` with no type args — `Array.new`, WD2.9's own
+  exception — yields no element and is still absorbed. Treating "no
+  evidence" as "not a carrier" would have grown #615's seed a second
+  arm (`Array | Array[2]`) instead of letting it close.
+- **Two Array carriers still join to ONE Array.** Both are absorbed;
+  `flag ? [1] : [2]` under `out << 3` stays `Array[1 | 2 | 3]`. This is
+  the must-still-succeed half, and the one a residue rule that kept
+  carriers would break loudly rather than imprecisely.
+- **The loop seam gets the rule for free**, because it shares the join.
+  The `while` twin of `f` fired identically and goes quiet with it.
+- **`nil` does NOT survive.** It is the one member the mutation itself
+  refutes: `NilClass` defines no content mutator, so on every path where
+  the body ran the binding was not nil. Only the zero-iteration path
+  keeps the arm, and that path is modelled UPSTREAM — the `while` base
+  scope's nil-injection, slice A's `Constant[nil]` fixpoint seed — not
+  here. Keeping it measured out as pure cost: `r = nil; while …; r ||=
+  []; r << x; end; r.each` gained a `call.possible-nil-receiver` on an
+  idiom Rubyists write deliberately, while the genuinely live nil arm is
+  already reported once, at the mutation, where `r << x` draws the same
+  diagnostic. The general form of that reasoning — drop any member the
+  mutator is undefined on — needs a method lookup this seam has no
+  environment for and would buy only rarer shapes; `nil` is the case it
+  can decide for free. If the zero-iteration nil ever wants revisiting,
+  the place is the injection, not the join.
+
+The residue is a strictly gradual direction for `Dynamic`, which
+absorbs folds and method checks: those sites can only lose diagnostics.
+A foreign `Nominal` or `Constant` member is the one place a NEW firing
+can appear (`flag ? 5 : [2]` under `out << 2`, then `out.first`), and it
+is the honest one — the arm is real, the straight-line twin already
+reads it that way, and inventing an Array in its place was the bug.
+
+Gate: the `union_seed_residue` fixture carries both issue shapes plus
+the loop and Hash twins and the foreign-`Nominal` member
+(must-not-fire), the plain-seed / two-carriers / bare-carrier siblings
+that must still close (exact `assert_type`s — a rule that kept carriers
+would read `Array[1 | 3] | Array[2 | 3]` there), and the refuted nil arm
+with its `call.possible-nil-receiver` line set. Restoring the drop turns
+the must-not-fire half red and nothing else.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

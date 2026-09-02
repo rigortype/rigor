@@ -110,10 +110,11 @@ unconditionally when listed under `plugins:`.
   `SafeBuffer`) and `#try` / `#try!` return `untyped` — the goal for
   those is to silence undefined-method, not to give precise returns.
   (The Duration multipliers are one exception: they are declared
-  `untyped` in the bundle and then typed by the plugin, since the
-  bundle cannot name `ActiveSupport::Duration` there without
-  DECLARING it. `ActiveSupport::Duration`'s own reader surface is the
-  other, described above.)
+  `untyped` in the bundle and then typed by the plugin instead — not
+  because the bundle can't name `ActiveSupport::Duration` (it does,
+  described above), but because moving the multiplier return itself
+  into RBS to match hasn't happened yet. `ActiveSupport::Duration`'s
+  own reader surface is the other exception, described above.)
 - **`duration / x` is not typed.** `1.day / 2` is a Duration but
   `1.day / 1.hour` is a plain `24`; the answer depends on the operand,
   so Rigor declines rather than guessing.

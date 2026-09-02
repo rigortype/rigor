@@ -304,16 +304,15 @@ class Integer
   # on the resulting Duration — attributed on `ActiveSupport::Duration` in
   # `lib/rigor/plugin/activesupport_core_ext/effects.rb`, not here.
   #
-  # The `untyped` return is DELIBERATE and must stay (#534). The real
+  # The `untyped` return is DELIBERATE and stays for now (#534). The real
   # answer is `ActiveSupport::Duration`, and the plugin supplies it from
   # `DURATION_MULTIPLIERS`, whose contribution tier sits above RBS
-  # dispatch. Naming the class here instead would force this bundle to
-  # DECLARE `ActiveSupport::Duration`, which makes it RBS-known — and a
-  # known class with an incomplete signature turns every member the
-  # declaration omits into a false `undefined-method`. Duration forwards
-  # to the wrapped numeric through `method_missing`, so incomplete is the
-  # only thing a declaration could be. What this declaration is for is
-  # making `1.day` RESOLVE; the type comes from the plugin.
+  # dispatch. `ActiveSupport::Duration` IS now declared in this bundle
+  # (further down, before `Time`), protected by the manifest's
+  # `open_receivers:` — so naming it here too is no longer blocked the way
+  # it was when #534 landed. Issue #660 tracks moving this return type
+  # into RBS to match; until then, what this declaration is for is
+  # making `1.day` RESOLVE, and the type itself still comes from the plugin.
   %a{pure}
   def second: () -> untyped # ActiveSupport::Duration
   %a{pure}

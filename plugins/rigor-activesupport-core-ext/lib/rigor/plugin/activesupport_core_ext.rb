@@ -72,14 +72,17 @@ module Rigor
       # ## Why this is a `dynamic_return` and not an RBS return type
       #
       # The obvious fix — changing `core_ext.rbs`'s `def day: () -> untyped` to
-      # `() -> ActiveSupport::Duration` — is not available, and the reason is the whole design here. RBS
-      # cannot name a class it does not declare, so that edit forces the bundle to declare
-      # `ActiveSupport::Duration` too, which makes the class RBS-KNOWN — and a known class with an
-      # incomplete signature is worse than no class at all: `call.undefined-method` stops declining at
-      # `Rigor::Reflection.rbs_class_known?`, so every member the declaration omits becomes a false
-      # positive on working code. `Duration`'s real surface is `method_missing`-forwarded to the wrapped
-      # numeric plus `ago` / `since` / `from_now` / `until` / `before` / `after` / `in_*` / `iso8601` and
-      # every `Numeric` operator, so "omits a member" is guaranteed. The contribution tier sits ABOVE
+      # `() -> ActiveSupport::Duration` — was not available when this rule was written (#534): RBS could
+      # not name a class the bundle did not declare without making it RBS-KNOWN, and a known class with an
+      # incomplete signature was worse than no class at all — `call.undefined-method` would stop declining
+      # at `Rigor::Reflection.rbs_class_known?`, so every member the declaration omitted would become a
+      # false positive on working code. Issue #632 changed that premise: `sig/active_support/core_ext.rbs`
+      # now declares `ActiveSupport::Duration`'s reader surface, protected by `open_receivers:` above
+      # rather than by staying unnamed, so the fix IS available now — #660 tracks moving the multiplier
+      # return itself into RBS to match. This rule stays today's answer because that move hasn't happened
+      # yet, not because RBS still cannot express it. `Duration`'s real surface is `method_missing`-forwarded
+      # to the wrapped numeric plus `ago` / `since` / `from_now` / `until` / `before` / `after` / `in_*` /
+      # `iso8601` and every `Numeric` operator, so "omits a member" is guaranteed. The contribution tier sits ABOVE
       # `RbsDispatch` (`MethodDispatcher#resolve`), so declaring the multiplier in RBS and typing it here
       # is not a contradiction: the RBS declaration is what makes `1.day` resolve at all, and this supplies
       # the answer the declaration deliberately withholds.

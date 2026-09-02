@@ -117,6 +117,11 @@ module Rigor
 
         # `schema_table` may be nil — see the reduced mode described on the class. Every other input is
         # source-derived, so the entries are identical in both modes apart from `columns`.
+        #
+        # `model_rows` is expected UNIQUE by `class_name`: the entry Hash is keyed by that name, so a second
+        # row for a model would replace the first outright. {ModelDiscoverer#merge_redeclarations} is the
+        # single home of that guarantee — a reopened class arrives as one merged row, never as two — and the
+        # de-duplication is deliberately not repeated here, where a second copy could only drift from it.
         def self.build(model_rows:, schema_table:, type_override_columns: nil)
           rows_by_name = model_rows.to_h { |row| [row.fetch(:class_name), row] }
           overrides = type_override_columns || []

@@ -18,7 +18,9 @@ module Rigor
       # Each STI child carries an `sti_parent:` pointer the {ModelIndex} uses to inherit the root model's
       # table and DSL surface.
       #
-      # Returns rows the {ModelIndex} consumes:
+      # Returns rows the {ModelIndex} consumes — exactly ONE per model, whatever the number of source
+      # declarations: a reopened class contributes its DSL surface into the single row for that name
+      # ({#merge_redeclarations}), because a reopen ADDS to a class rather than replacing it.
       #
       #   { class_name: "User", table_name_override: nil, sti_parent: nil, ... }
       #   { class_name: "Admin", table_name_override: nil, sti_parent: "User", ... }
@@ -50,7 +52,10 @@ module Rigor
         def initialize(io_boundary:, search_paths:, base_classes:)
           @io_boundary = io_boundary
           @search_paths = search_paths
-          @base_classes = base_classes.to_set
+          # De-rooted for the same reason superclass names are ({#visit_class}): the match is by exact
+          # spelling, so a configured `model_base_classes: ["::ApplicationRecord"]` would otherwise never
+          # match anything a declaration can render.
+          @base_classes = base_classes.to_set { |name| strip_root(name.to_s) }
           # Global set of column names whose declared runtime type overrides the schema scalar
           # (`serialize` / `mount_uploader` / `attribute :x, CustomType`). Collected across every class AND
           # concern module walked — a serialize inside a concern's `included do … end` is invisible to the
@@ -109,12 +114,60 @@ module Rigor
             break unless added
           end
 
-          candidates.filter_map do |candidate|
+          rows = candidates.filter_map do |candidate|
             name = candidate[:class_name]
             next unless model_names.key?(name)
 
             candidate.merge(sti_parent: sti_parent[name])
           end
+          merge_redeclarations(rows)
+        end
+
+        # Collapses the rows that declare the SAME constant into one, so {ModelIndex.build} — which keys
+        # its entries by `class_name` — receives at most one row per model.
+        #
+        # A model is routinely declared more than once: `app/models/user.rb` holds `class User <
+        # ApplicationRecord` and a second file reopens it (`class ::User`, `class User`, or a full
+        # `class User < ApplicationRecord` redeclaration) to add a method. Ruby's own semantics are
+        # ADDITIVE — a reopen contributes what it spells and leaves the rest of the class alone — so the
+        # rows are UNIONed here. Taking the last row instead dropped the real declaration's associations,
+        # scopes, enums, validations, callbacks and `alias_attribute`s whenever the reopen sorted later in
+        # the glob, and `where(<a declared alias>: …)` then surfaced a false `unknown-column` on correct
+        # code; taking the first dropped whatever the reopen added. Neither order loses anything now.
+        #
+        # Merge is by field: the first non-nil `table_name_override` and `superclass_name` win (a second
+        # declaration of either is a redeclaration of the same thing, or invalid Ruby), `table_name_computed`
+        # is an OR (any computed name in the class makes the resolved one inexact), name-keyed rows
+        # (associations, enums, aliases) let the LAST declaration override an earlier same-name row exactly
+        # as {ModelIndex.merge_named_rows} does across an STI chain, and the plain lists union.
+        def merge_redeclarations(rows)
+          return rows if rows.length < 2
+
+          rows.each_with_object({}) do |row, acc|
+            name = row.fetch(:class_name)
+            acc[name] = acc.key?(name) ? merged_row(acc[name], row) : row
+          end.values
+        end
+
+        # `base` is the earlier declaration, `addition` the later one. See {#merge_redeclarations}.
+        def merged_row(base, addition)
+          base.merge(
+            superclass_name: base[:superclass_name] || addition[:superclass_name],
+            sti_parent: base[:sti_parent] || addition[:sti_parent],
+            table_name_override: base[:table_name_override] || addition[:table_name_override],
+            table_name_computed: base[:table_name_computed] || addition[:table_name_computed],
+            associations: dedup_named_rows(Array(base[:associations]) + Array(addition[:associations])),
+            enums: (base[:enums] || {}).merge(addition[:enums] || {}),
+            scopes: (Array(base[:scopes]) + Array(addition[:scopes])).uniq,
+            validations: (Array(base[:validations]) + Array(addition[:validations])).uniq,
+            callbacks: (Array(base[:callbacks]) + Array(addition[:callbacks])).uniq,
+            aliases: (base[:aliases] || {}).merge(addition[:aliases] || {})
+          )
+        end
+
+        # Keeps the LAST row per `:name`, matching {ModelIndex.merge_named_rows}'s override rule.
+        def dedup_named_rows(rows)
+          rows.to_h { |row| [row[:name], row] }.values
         end
 
         # Resolves a superclass NAME against the set of known model class names. Both sides come out of

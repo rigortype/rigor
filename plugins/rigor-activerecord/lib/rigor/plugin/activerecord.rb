@@ -67,7 +67,10 @@ module Rigor
         # the {ModelIndex} and the published `:model_index` fact (#583). The version is part of the
         # producer cache KEY: a cached 0.7.0 index still keys such a model `"::User"`, and `ModelIndex#find`
         # now normalises every query to the de-rooted spelling, so serving that payload warm would miss the
-        # model on every lookup until an unrelated model edit happened to invalidate the entry.
+        # model on every lookup until an unrelated model edit happened to invalidate the entry. The same
+        # bump covers the second half of the change — a model reopened in a second file is now ONE merged
+        # entry rather than the last declaration's, so a cached 0.7.0 entry can also be missing the DSL
+        # surface the merge restores.
         #
         # 0.7.0, 2026-09-01 — `table_name` / `quoted_table_name` join the recognised class-side surface, and
         # `ModelIndex::Entry` gains the `table_name_exact` member that gates value-pinning. A Struct member

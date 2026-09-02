@@ -2402,4 +2402,163 @@ RSpec.describe "plugins/rigor-activerecord" do
       end
     end
   end
+
+  # A model is routinely declared in more than one file — `app/models/user.rb` holds the real
+  # `class User < ApplicationRecord`, and a second file reopens it to add a method. Every such
+  # declaration used to become its own row, and {ModelIndex.build} keeps the LAST one per class name, so
+  # the reopen's empty DSL surface replaced the real declaration's associations / scopes / aliases
+  # whenever it sorted later in the glob — and `where(<a declared alias>: …)` then fired a
+  # glob-order-dependent `unknown-column` on correct code. De-rooting the key (#583) widened that
+  # pre-existing plain-reopen clobber to the rooted spellings, which used to key separately; the
+  # discoverer now UNIONs same-name rows, matching Ruby's own additive reopen semantics.
+  describe "reopened and redeclared models" do
+    # `user_extension.rb` sorts AFTER `user.rb` in `Dir.glob` — the losing order before the merge.
+    def reopened_models(reopen_body, file: "app/models/user_extension.rb", superclass: "")
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/post.rb" => "class Post < ApplicationRecord\nend\n",
+        "app/models/user.rb" => <<~RUBY,
+          class User < ApplicationRecord
+            has_many :posts
+            alias_attribute :login, :email
+          end
+        RUBY
+        file => "class ::User#{superclass}\n#{reopen_body}end\n"
+      }
+    end
+
+    let(:rooted_reopen) { reopened_models("  def hello = 1\n") }
+    # `aaa_ext.rb` sorts BEFORE `user.rb` — the order that already worked, and must keep working.
+    let(:rooted_reopen_first) { reopened_models("  def hello = 1\n", file: "app/models/aaa_ext.rb") }
+    let(:rooted_redeclare) { reopened_models("  def hello = 1\n", superclass: " < ApplicationRecord") }
+    let(:plain_reopen) do
+      reopened_models("  def hello = 1\n").merge(
+        "app/models/user_extension.rb" => "class User\n  def hello = 1\nend\n"
+      )
+    end
+
+    def unknown_columns(models, source)
+      plugin_diagnostics(run_ar(source, models: models)).select { |d| d.rule == "unknown-column" }
+    end
+
+    def dumped(source, models)
+      run_ar(source, models: models).diagnostics
+                                    .select { |d| d.qualified_rule == "dump.type" }
+                                    .map(&:message)
+    end
+
+    describe "must not fire — a reopen never blanks the real declaration's DSL surface" do
+      it "keeps an `alias_attribute` when a rooted reopen sorts after the model file" do
+        expect(unknown_columns(rooted_reopen, "User.where(login: 'x')\n")).to be_empty
+      end
+
+      it "keeps an `alias_attribute` when a rooted reopen sorts before the model file" do
+        expect(unknown_columns(rooted_reopen_first, "User.where(login: 'x')\n")).to be_empty
+      end
+
+      it "keeps an `alias_attribute` across a `class ::User < ApplicationRecord` redeclaration" do
+        expect(unknown_columns(rooted_redeclare, "User.where(login: 'x')\n")).to be_empty
+      end
+
+      it "keeps an `alias_attribute` across a plain `class User` reopen" do
+        expect(unknown_columns(plain_reopen, "User.where(login: 'x')\n")).to be_empty
+      end
+
+      it "keeps a `has_many` declared alongside the alias" do
+        source = "user = User.find(1)\nRigor.dump_type(user.posts)\n"
+        expect(dumped(source, rooted_reopen)).to eq(["dump_type: ActiveRecord::Relation[Post]"])
+      end
+    end
+
+    describe "must fire — merging widens the accepted set, it does not silence the rule" do
+      it "still reports a genuinely unknown column on the reopened model" do
+        diags = unknown_columns(rooted_reopen, "User.where(emial: 'x')\n")
+        expect(diags.length).to eq(1)
+        expect(diags.first.message).to include("unknown column `emial` on table `users`")
+      end
+
+      it "still reports a genuinely unknown column when the reopen sorts first" do
+        expect(unknown_columns(rooted_reopen_first, "User.where(emial: 'x')\n").length).to eq(1)
+      end
+    end
+
+    describe "must merge — what the reopen itself declares is kept too" do
+      let(:reopen_with_scope) { reopened_models("  scope :recent, -> { order(id: :desc) }\n") }
+      let(:reopen_with_scope_first) do
+        reopened_models("  scope :recent, -> { order(id: :desc) }\n", file: "app/models/aaa_ext.rb")
+      end
+
+      def merged_entry(models)
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
+        index.find("User")
+      end
+
+      it "carries both declarations' surface on the single entry" do
+        entry = merged_entry(reopen_with_scope)
+        expect(entry.scopes).to eq(["recent"])
+        expect(entry.association_names).to eq(["posts"])
+        expect(entry.resolve_alias("login")).to eq("email")
+      end
+
+      it "carries both declarations' surface when the reopen sorts first" do
+        entry = merged_entry(reopen_with_scope_first)
+        expect(entry.scopes).to eq(["recent"])
+        expect(entry.resolve_alias("login")).to eq("email")
+      end
+
+      it "keys the merged entry once, under the de-rooted name" do
+        _result, index = run_ar_with_index("x = 1\n", models: reopen_with_scope, schema: DEFAULT_SCHEMA)
+        expect(index.class_names).to contain_exactly("User", "Post")
+      end
+
+      it "types a scope the reopen added as the model's relation, in either file order" do
+        source = "Rigor.dump_type(User.recent)\n"
+        expect(dumped(source, reopen_with_scope)).to eq(["dump_type: ActiveRecord::Relation[User]"])
+        expect(dumped(source, reopen_with_scope_first)).to eq(["dump_type: ActiveRecord::Relation[User]"])
+      end
+
+      # The discrimination sibling for the example above: with no `scope :recent` anywhere, the same call
+      # types `Dynamic[top]`, so the assertion is reading the merge and not a default.
+      it "leaves an undeclared scope untyped" do
+        expect(dumped("Rigor.dump_type(User.recent)\n", rooted_reopen)).to eq(["dump_type: Dynamic[top]"])
+      end
+    end
+  end
+
+  # The configured base-class names are matched against the superclass a declaration renders, and those
+  # are de-rooted (#583). The configured side is de-rooted with them, so `["::ApplicationRecord"]` still
+  # names the same class it did before — a rooted config entry that matched nothing would be a silent,
+  # configuration-dependent false negative over every model in the project.
+  describe "a rooted `model_base_classes` entry" do
+    let(:custom_base_models) do
+      {
+        "app/models/db_record.rb" => "class DbRecord\nend\n",
+        "app/models/user.rb" => "class User < DbRecord\nend\n",
+        "app/models/post.rb" => "class Post < ::DbRecord\nend\n"
+      }
+    end
+
+    def rooted_base_diagnostics(source)
+      plugin_diagnostics(
+        run_ar(source, models: custom_base_models,
+                       plugin_config: { "model_base_classes" => ["::DbRecord"] })
+      )
+    end
+
+    it "matches a plainly declared superclass (must fire)" do
+      diags = rooted_base_diagnostics("User.where(emial: 'x')\n")
+      expect(diags.count { |d| d.rule == "unknown-column" }).to eq(1)
+    end
+
+    it "matches a rooted superclass (must fire)" do
+      diags = rooted_base_diagnostics("Post.where(titel: 'x')\n")
+      expect(diags.count { |d| d.rule == "unknown-column" }).to eq(1)
+    end
+
+    it "stays silent on a real column of a model discovered that way (must not fire)" do
+      diags = rooted_base_diagnostics("User.where(email: 'x')\n")
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      expect(diags.count { |d| d.rule == "model-call" }).to eq(1)
+    end
+  end
 end

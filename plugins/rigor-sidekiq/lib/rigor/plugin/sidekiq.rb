@@ -57,7 +57,10 @@ module Rigor
         # Bumped 2026-08-16 — publishes `:reachability_roots` for `rigor unused` (ADR-102 WD3): the workers
         # a schedule file enqueues by name, which no `perform_async` call site writes down.
         # Bumped 2026-09-01 (#534 item 4) — the enqueue methods return the jid `String`.
-        version: "0.3.0",
+        # Bumped 2026-09-02 (#621) — worker keys are de-rooted at the producer and a reopened class's
+        # `#perform` envelope is merged rather than clobbered, so a cached 0.3.0 index can carry the
+        # any-arity row the merge replaces (and miss a schedule's reachability root under a rooted name).
+        version: "0.4.0",
         description: "Validates Sidekiq `Worker.perform_async` argument arity and types the jid it returns.",
         config_schema: {
           "worker_search_paths" => { kind: :array, default: ["app/workers", "app/sidekiq"] },
@@ -194,7 +197,8 @@ module Rigor
         # `SomeOtherThing.perform_async` that is not a Sidekiq job keeps its own answer.
         class_name = Analyzer.constant_receiver_name(call_node.receiver)
         next nil if class_name.nil?
-        next nil unless index.known?(class_name) || index.known?("::#{class_name}")
+        # `WorkerIndex#known?` de-roots the query itself (#621) — no retry arm here.
+        next nil unless index.known?(class_name)
 
         Rigor::Type::Combinator.nominal_of(JID_TYPE)
       end

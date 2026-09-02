@@ -1434,6 +1434,46 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # Issue #631 — ADR-56 WD2.11. The seam rederives ONE carrier and writes it over the whole
+    # binding, which is only the right answer for the pre-state members the mutation applied to as a
+    # collection of that class. A `Union` seed's non-carrier members (a whole-variable `Dynamic`, a
+    # foreign `Nominal`) contribute no element evidence and used to vanish with it.
+    describe "fixtures/union_seed_residue.rb — a Union seed's non-carrier members survive the seam" do
+      let(:harness) { harness_for("union_seed_residue") }
+
+      # Both halves in one assertion: the residue arms are present (the four `Dynamic` / `Bag` cases)
+      # AND the carriers still collapse to one Array (`joins_two_array_carriers`,
+      # `absorbs_a_bare_array_carrier`, `closes_a_plain_seed`) — a rule that kept carriers too would
+      # read `Array[1 | 3] | Array[2 | 3]` and fail here, not merely lose precision.
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # The FP the issue reported, and its must-fire control. `out.first.upcase` on the surviving
+      # `Dynamic` arm is correct code the closed `Array[2]` rejected; a seed with nothing to keep
+      # still closes, so ITS `upcase` is rightly refused. Asserting the exact line set is what keeps
+      # the "went quiet" half from passing because the rule stopped firing at all.
+      it "stops firing undefined-method on a surviving arm without going quiet on a closed seed" do
+        undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+        expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+      end
+
+      # The same drop seen from the fold side: `out.first == 3` against a closed `Array[2]` folded to
+      # `Constant[false]` and drew a false always-falsey. No `flow.` diagnostic survives here.
+      it "keeps the constant fold open where the seed carries a gradual arm" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+        expect(flow.map(&:line)).to be_empty
+      end
+
+      # `nil` is the one member the mutation refutes, so it does NOT survive — and the live nil arm
+      # is still reported once, at the mutation itself.
+      it "reports a live nil arm at the mutation and nowhere downstream" do
+        nils = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+        expect(nils.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+      end
+    end
+
     describe "fixtures/reduce_symbol.rb — Symbol-form reduce / inject return types" do
       let(:harness) { harness_for("reduce_symbol") }
 

@@ -100,24 +100,101 @@ module Rigor
       # loop seam from the pre-body scope — so an empty literal contributes no element and `out = [];
       # xs.each { out << x*2 }` still reads `Array[Integer]`. The straight-line seam passes the
       # widened carrier, and adds the same `Dynamic` as its one-store floor anyway.
+      #
+      # **The rederived carrier replaces only the members it stands for** — see {#array_residue}.
       def join_array_content(pre_state, added_elements)
         elements = collection_element_types(pre_state) + added_elements.compact
-        return Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped]) if elements.empty?
-
-        Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.union(*elements)])
+        element_t = elements.empty? ? Type::Combinator.untyped : Type::Combinator.union(*elements)
+        with_residue(Type::Combinator.nominal_of("Array", type_args: [element_t]), array_residue(pre_state))
       end
 
       # Builds the continuation Hash type from the pre-state binding and a list of `[key_type,
       # value_type]` pairs stored by `[]=` / `store`. The seed's key and value arms survive on the
       # same terms as {#join_array_content}'s elements: a declared `Hash[untyped, untyped]` stays
-      # gradual on both sides however many pairs the body stores.
+      # gradual on both sides however many pairs the body stores, and a pre-state member that is not
+      # a Hash carrier at all survives whole ({#hash_residue}).
       def join_hash_content(pre_state, added_pairs)
         seed_keys, seed_values = hash_shape_key_values(pre_state)
         keys = seed_keys + added_pairs.map(&:first).compact
         values = seed_values + added_pairs.map(&:last).compact
         key_t = keys.empty? ? Type::Combinator.untyped : Type::Combinator.union(*keys)
         value_t = values.empty? ? Type::Combinator.untyped : Type::Combinator.union(*values)
-        Type::Combinator.nominal_of("Hash", type_args: [key_t, value_t])
+        with_residue(Type::Combinator.nominal_of("Hash", type_args: [key_t, value_t]), hash_residue(pre_state))
+      end
+
+      # ----------------------------------------------------------------
+      # Union residue — the members the rederived carrier does NOT stand for (issue #631).
+      #
+      # A join REPLACES the binding with one freshly built `Nominal`, and that is the right answer
+      # only for the pre-state members the mutation actually applied to as a collection of that
+      # class. A `Union` seed can carry members that are not collection carriers at all, and those
+      # contribute no element / key / value evidence — `collection_element_types` and
+      # `hash_shape_key_values` both answer "nothing" for them. Before this rule they were simply
+      # gone:
+      #
+      #     out = flag ? u : [2]     # Dynamic[top] | [2]
+      #     [1].each { out << 2 }    # -> Array[2]; the whole-variable Dynamic arm dropped
+      #     out.first.upcase         # undefined method `upcase' for 2 -- on correct code
+      #
+      # This is WD2.9's rule ("a seed's own gradual arm survives the rederivation") one level out:
+      # there the surviving `Dynamic` was an ELEMENT of an Array carrier, here it is the whole
+      # variable. Both say the same thing — the body's stores are evidence about what the body put
+      # in, never about what the variable WAS — and the straight-line seam already reads the union
+      # through untouched, so the block and loop seams were the outliers.
+      #
+      # A member survives whole; it is never re-examined for element evidence, so nothing is
+      # double-counted. `Array.new`'s bare `Nominal[Array]` (no type args) IS a carrier and is
+      # absorbed, so #615's seed keeps closing rather than growing a second arm.
+      #
+      # **`nil` is the one member the mutation itself refutes, and it does not survive.** The rule
+      # above is a rule about ABSENCE of evidence — the seam cannot say a `Dynamic` or a foreign
+      # `Nominal` was mutated as an Array, so it must not rewrite it. `NilClass` defines no content
+      # mutator at all, so on every path where the body ran the binding was not nil; only the
+      # zero-iteration path keeps the arm, and that path is modelled upstream (the `while` base
+      # scope's nil-injection, slice A's `Constant[nil]` fixpoint seed) rather than here. Keeping it
+      # measured out as a pure cost: `r = nil; while …; r ||= []; r << x; end; r.each` gained a
+      # `call.possible-nil-receiver` on an idiom Rubyists write deliberately, while the genuinely
+      # live nil arm is already reported once — at the mutation site, where `r << x` draws the same
+      # diagnostic. This is the only member the join can refute without a method lookup it has no
+      # environment for; the general "the mutator is undefined on this member" rule would buy
+      # rarer shapes for machinery this seam does not have.
+      NON_SURVIVING_CLASSES = %w[NilClass].freeze
+
+      # Pre-state members the rederived Array does not stand for: a whole-variable `Dynamic`, a
+      # non-nil `Constant`, a foreign `Nominal`, a `Refined`. Mirrors {#collection_element_types}'s
+      # recursion so the absorbed set and the residue partition the union exactly. A `Difference` is
+      # absorbed with its base (`non-empty-array[T]` is an Array carrier) and otherwise kept whole,
+      # refinement and all.
+      def array_residue(type)
+        case type
+        when Type::Union then type.members.flat_map { |m| array_residue(m) }
+        when Type::Tuple then []
+        when Type::Nominal then type.class_name == "Array" ? [] : keep_member(type)
+        when Type::Difference then array_residue(type.base).empty? ? [] : [type]
+        else keep_member(type)
+        end
+      end
+
+      # The Hash-side twin of {#array_residue}, mirroring {#hash_shape_key_values}. A bare
+      # `Nominal[Hash]` with no type args is a carrier here even though it yields no key/value
+      # evidence — `Hash.new` must close like `Array.new`, not grow an arm.
+      def hash_residue(type)
+        case type
+        when Type::Union then type.members.flat_map { |m| hash_residue(m) }
+        when Type::HashShape then []
+        when Type::Nominal then type.class_name == "Hash" ? [] : keep_member(type)
+        when Type::Difference then hash_residue(type.base).empty? ? [] : [type]
+        else keep_member(type)
+        end
+      end
+
+      # `[type]`, unless the mutation refutes the member outright — see {NON_SURVIVING_CLASSES}.
+      def keep_member(type)
+        NON_SURVIVING_CLASSES.include?(evidence_class(type)) ? [] : [type]
+      end
+
+      def with_residue(carrier, residue)
+        residue.empty? ? carrier : Type::Combinator.union(*residue, carrier)
       end
 
       # ----------------------------------------------------------------

@@ -17,81 +17,88 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**Twenty-three PRs landed 2026-09-01/02** through the serial landing pipeline (worktree fleet →
-corpus arms → independent critical review → draft-PR remote CI → chained merge). Batch 1 (#571
-#576 #578 #579 #581 #582 #584 #585): redmine 50.2→53.4% (the #569 AR unlock). Batches 2-3 (#591
-#592 #593 #596 #598 #603 #604 #607 + fix-forwards #602 #608): correctness-dominated, corpus flat
-by measurement. Batch 4 (2026-09-02, the recovered engine-bug batch): #612 (absence-edge cache
-dependencies, #577), #616 (a declared/untyped Array carrier survives the block join, #586 — four
-master wrong-precise closes fixed), #619 (constant-assigned `Struct.new … do` bodies entered as
-class bodies, #590 — haml −2 FPs, +1 honest `String?` report), #620 (block returns threaded
-through captured content mutation + per-element folds at the rebound capture's converged
-binding, #587 — CPU delta measured nil on textbringer/redmine). Every engine PR's review found
-at least one wrong-type FP the corpus arms could NOT see — both instruments stay mandatory.
+**Thirty-three PRs landed 2026-09-01/02** through the serial landing pipeline (worktree fleet →
+corpus arms → independent critical review → draft-PR remote CI → chained merge). Batches 1-3
+(#571-#608) are recorded in the git log; the later batches are what a next session needs:
 
-**In flight at handoff:** #624 (#583 de-rooted model keys + reopen merge, delta review APPROVE,
-arms +11 info-only recognition at rooted `::Model` call sites) in its landing chain; the #588
-branch (`rails-surface-follow-ups`, worktree `rigor-wt-f588`) fixed its second-round blocker
-(the railties reader gate now records the ADR-46 negative edge from `Reflection.discovered_method?`)
-and awaits the delta re-check; next batch implementing in worktrees: #613 (`rigor-wt-x613`), #614
-(`rigor-wt-c614`), #615 (`rigor-wt-y615`), #618 (`rigor-wt-s618`) — land each through the same
-chain, one heavy job (corpus arms) at a time.
+- **Batch 4** — #612 (#577 absence-edge cache dependencies), #616 (#586 a declared/untyped Array
+  carrier survives the block join), #619 (#590 constant-assigned `Struct.new … do` bodies entered
+  as class bodies), #620 (#587 block returns threaded through captured content mutation).
+- **Batch 5** — #624 (#583 de-rooted model keys + reopen merge), #628 (#588 Rails-surface
+  follow-ups incl. the railties reader gate's ADR-46 negative edge), #636 (#618 a class's own
+  method beats a same-named top-level `def`), #641 (#613 boundary existence probes record
+  absence rows), #642 (#614 rooted `::Foo` resolves from the top level).
+- **Batch 6** — #646 (#621 rooted keys + reopen merge across six sibling Rails plugins), #647
+  (#627 the dead arm of a decidable version guard is unreachable), #648 (#622 an unresolved
+  constant read records its absence edge), #649 (#631 a Union seed's non-collection arms survive
+  the content seam), #650 (#615 `Array.new(n)` seeds a real element arm).
+
+**Corpus effect of batches 4-6: precision flat, correctness dominant.** The probe on post-#624
+master moved <0.3pp anywhere; what these PRs bought is wrong-type answers on correct code. Every
+engine PR's review round found at least one verified false positive the corpus arms could NOT see,
+and in batch 6 the corpus caught one the reviewers had not (#650's `::Array.new(count, nil)`) —
+**the two instruments stay mandatory together, in both directions**.
+
+**Survey config repaired:** redmine's and mastodon's `.rigor.dist.yml` both omitted
+`rigor-railties`; adding it left diagnostics byte-identical and moved the probe (mastodon
+55.47→55.65, redmine 53.49→53.58). The saved base arms in the session scratchpad were re-collected
+with it. `rigor-survey` is not a git repo — that edit is unversioned.
 
 ## Backlog, ranked
 
-1. **[#574](https://github.com/rigortype/rigor/issues/574)** (ready-for-HUMAN) — witness-gate
-   vacuity, sole blocker on `Parameters#[]` (581 redmine + 496 mastodon). Measurement DONE:
-   tightening refuted (7 FP : 27 TP), nilable `Parameters#[]` alone +2 post-#607; options on the
-   issue. Not agent-adjudicable.
-2. **External user reports, untriaged:** [#610](https://github.com/rigortype/rigor/issues/610)
-   (rigor-activerecord's generic `Relation[Elem]` collides with gem_rbs_collection's non-generic
-   `Relation` → every AR relation degrades to `Dynamic[top]` on a collection-using app; needs a
-   reconciliation design, not a patch), [#609](https://github.com/rigortype/rigor/issues/609)
-   (`sig-gen --write` emits a sig/ the next run cannot load, SystemStackError yet exit 0),
-   [#611](https://github.com/rigortype/rigor/issues/611) (bundle-discovered sig/ skips git-sourced
-   gems).
-3. Engine/plugin bugs with repros, agent-doable, filed from this cycle's reviews:
-   [#617](https://github.com/rigortype/rigor/issues/617) (block-return residues: find/detect
-   first-iteration nil, cap-above-8 mutation, compound-write tails, `String#<<`),
-   [#621](https://github.com/rigortype/rigor/issues/621) (rooted-key + retry on six sibling
-   plugins' own indexes), [#622](https://github.com/rigortype/rigor/issues/622) (unresolved
-   constant receiver records no absence edge), [#623](https://github.com/rigortype/rigor/issues/623)
-   (`Blog::Post` tableizes to `blog_posts`), plus the in-flight four above.
-4. Struct frontier, settled by measurement (do not re-derive): [#597](https://github.com/rigortype/rigor/issues/597)
-   (per-iteration setter modeling = the mail lever), [#599](https://github.com/rigortype/rigor/issues/599),
-   [#601](https://github.com/rigortype/rigor/issues/601) (aliasing umbrella — append corners there).
-5. Design/policy: [#594](https://github.com/rigortype/rigor/issues/594), [#580](https://github.com/rigortype/rigor/issues/580),
-   #541 / #542 / #531 / #527 / #530.
-6. Non-levers verified: mastodon `Rails.*` residue = its survey config omits rigor-railties (fix
-   at the next full sweep — it invalidates saved base arms); `User.current` honest.
+1. **[#574](https://github.com/rigortype/rigor/issues/574)** (ready-for-HUMAN) — the witness-gate
+   vacuity, still the sole blocker on the corpus's biggest pair (`Parameters#[]`, 581 redmine +
+   496 mastodon). Measurement DONE and on the issue: tightening refuted (7 FP : 27 TP), nilable
+   `Parameters#[]` alone costs +2. Not agent-adjudicable.
+2. **Precision levers sized by the 2026-09-02 probe**, both agent-doable:
+   [#635](https://github.com/rigortype/rigor/issues/635) (declared RBS `attr_reader`s on Rigor's
+   own `Type` objects answer `Dynamic` in `lib/` — ~300 sites, and the mechanism covers every
+   `Type::*` reader), [#632](https://github.com/rigortype/rigor/issues/632)
+   (`ActiveSupport::Duration#ago` / `#to_i` and the other readers are undeclared — 93 mastodon
+   sites).
+3. **External user reports, untriaged:** [#610](https://github.com/rigortype/rigor/issues/610)
+   (the plugin's generic `Relation[Elem]` collides with gem_rbs_collection's non-generic
+   `Relation`, degrading every AR relation to `Dynamic` — needs a reconciliation design),
+   [#609](https://github.com/rigortype/rigor/issues/609) (`sig-gen --write` emits a `sig/` the
+   next run cannot load, yet exits 0), [#611](https://github.com/rigortype/rigor/issues/611).
+4. **Filed from batch 5-6 reviews, with repros, agent-doable:** #626 (drop rigor-railties'
+   `::Rails` hard-code — now unblocked, both halves landed), #637 (`class X < ::Base` inherits the
+   shadow), #638 (`class ::Foo` inside a module is keyed `MyApp::Foo`), #644 (cross-file value
+   constants never resolve), #645 / #643 (mutation evidence on Union receivers and nested literal
+   containers), #633 (the own-method veto's inherited-source residues), #617, #623, #629, #630,
+   #634, #639, #640, #625.
+5. Struct frontier, settled by measurement (do not re-derive): #597, #599, #601.
 
 ## The landing pipeline (it caught 10+ FPs the corpus missed this cycle)
 
 - Implementation parallel in worktrees (`.bundle/config` copy + `vendor` symlink; NEVER
   `git stash` — shared stack; COMMIT before any `git checkout <sha> -- <file>` baseline swap).
-  Worker brief = the contract file (Flake, no full gates, spec pairing, fragment grammar).
-- ONE heavy job on the machine at a time (a 4×`make verify` fleet OOM-killed the host at
-  200GB+). Workers: single spec files + `--workers=0` fixtures only; corpus arms are local
-  (CI has none) and serial.
-- Draft-PR remote CI = the post-rebase verification; PRs stay **Draft until every gate is
-  green**. The chain that holds (two red-masters came from drifting off it): rebase →
-  `push --force-with-lease` → ONE `set -e` script that watches the head's checks by exit code
-  (8 = pending; tolerate "no checks reported"), `gh pr ready` + merge only on 0, then watches
-  the MASTER merge-commit run to its conclusion. Serial: the next PR's chain starts after the
-  previous master run concludes. Validate the PR number before writing it into a fragment.
-- Same-day PRs that each APPEND a WD section to one ADR (or a `describe` to one spec file)
-  conflict on rebase — keep both, renumber (WD2.9 → WD2.10), re-rebase after the earlier lands.
+  The worker brief is a contract file (Flake, no full gates, spec pairing, fragment grammar,
+  **never override the commit author**).
+- ONE heavy job on the machine at a time (a 4×`make verify` fleet OOM-killed the host at 200GB+).
+  Workers: single spec files + `--workers=0` fixtures only; corpus arms are local and serial.
+- Draft-PR remote CI is the post-rebase verification; PRs stay **Draft until every gate is green**.
+  The chain that holds: rebase → `push --force-with-lease` → ONE `set -e` script that watches the
+  head's checks by exit code (8 = pending), `gh pr ready` + merge only on 0, then watches the
+  MASTER merge-commit run to its conclusion. Validate a PR number before writing it anywhere.
+- Same-day PRs that each APPEND a section to one ADR (or a `describe` to one spec file) conflict
+  on rebase — keep both, renumber (ADR-56 reached WD2.12 that way), re-rebase after each lands.
+  Strip the diff3 markers cleanly: a leftover blank line failed one Lint job.
 - Every engine PR gets an adversarial review with VERIFIED findings; REQUEST-CHANGES round-trips
-  to the implementing worker; the reviewer's own measurements are sometimes wrong — relay both
-  ways. A delta re-check goes to the SAME reviewer (context intact) via SendMessage.
+  to the implementing worker; a delta re-check goes to the SAME reviewer via SendMessage so its
+  context is intact. Reviewer measurements are sometimes wrong — relay both ways.
+- **When subagents are unavailable** (batch 6 hit an API spend limit mid-flight), the coordinator
+  can self-review and land, but the PR must say so on the record. Every branch's work survived
+  because workers commit as they go.
 
 ## Pitfalls that still bind
 
-- `rigor type-of` can't see discovery-seeded joins; `rigor type-scan` can't see
-  Dynamic→precise changes — pick the instrument per question. The precision ratio under-credits
-  `dynamic_specific`; pair with the FP tally. `model-call` rows are `info` recognition traces.
-- Compound-shell A/B arms inherit `cd` from earlier lines in the same Bash call; one
-  invocation per arm, explicit cwd. A CPU A/B needs the target's `--config` or it measures boot.
-- The fixture auto-formatter strips "useless" if-guards and reassignments — write such
-  fixtures via script, or as spec heredocs.
+- `rigor type-of` can't see discovery-seeded joins; `rigor type-scan` can't see Dynamic→precise
+  changes — pick the instrument per question. The precision ratio under-credits
+  `dynamic_specific`; pair it with the FP tally. `model-call` / `worker-call` rows are `info`
+  recognition traces, not diagnostics.
+- Compound-shell A/B arms inherit `cd` from earlier lines in the same Bash call; one invocation
+  per arm, explicit cwd. A CPU A/B needs the target's `--config` or it measures boot.
+- The fixture auto-formatter strips "useless" if-guards and reassignments, and rewrites
+  `Array.new` to `[]` — write such fixtures via script or heredoc, never an editor tool.
 - GitHub mergeability lags pushes; retry with backoff. Read gate exit codes in their own call.

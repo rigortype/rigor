@@ -135,6 +135,15 @@ module RunnerHelpers
   # @yieldparam dir    [String] the project root.
   # @return [Rigor::Analysis::Result] for callers that prefer
   #   to assert outside the block.
+  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed] via
+  #   {InternalAnalyzerErrorGuard} if the `Result` carries a
+  #   diagnostic from either analyzer-crash rescue site — a check
+  #   rule raising into the `"internal analyzer error"` diagnostic,
+  #   or a plugin raising out of `#diagnostics_for_file` /
+  #   `#prepare` into the `:plugin_loader` / `"runtime-error"`
+  #   diagnostic. Either means a rule or plugin crashed instead of
+  #   running, which an absence assertion would otherwise treat as
+  #   "declined to fire" (issue #665).
   def analyze(source = nil, files: {}, sig: {}, config: {}, explain: false, cache_store: :shared, &)
     effective_cache = cache_store == :shared ? RunnerHelpers.shared_cache_store : cache_store
 
@@ -147,9 +156,10 @@ module RunnerHelpers
       memory_config = Rigor::Configuration.new(
         "bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false }
       )
-      return Rigor::Analysis::Runner.new(
+      result = Rigor::Analysis::Runner.new(
         configuration: memory_config, cache_store: effective_cache, explain: explain
       ).run_source(source: source, path: "code.rb")
+      return InternalAnalyzerErrorGuard.check!(result, context: "RunnerHelpers#analyze")
     end
 
     if shared_workspace_safe?(files: files, config: config)
@@ -192,6 +202,7 @@ module RunnerHelpers
         configuration: configuration, cache_store: cache_store, explain: explain
       ).run
     end
+    InternalAnalyzerErrorGuard.check!(result, context: "RunnerHelpers#analyze")
     yield result, workspace if block_given?
     result
   end
@@ -215,6 +226,7 @@ module RunnerHelpers
           configuration: configuration, cache_store: cache_store, explain: explain
         ).run
       end
+      InternalAnalyzerErrorGuard.check!(result, context: "RunnerHelpers#analyze")
       yield result, dir if block_given?
       result
     end

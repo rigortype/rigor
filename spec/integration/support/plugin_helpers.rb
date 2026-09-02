@@ -35,6 +35,14 @@ module Rigor
     # - `run_plugin_in_dir(dir:, source:, ...)` — lower-level variant that accepts an existing tmpdir, for
     #   specs that need to run multiple analyses against the same project (e.g. cache invalidation tests).
     #
+    # Both `run_plugin` and `run_plugin_in_dir` raise via {InternalAnalyzerErrorGuard} before returning if the
+    # `Result` carries a diagnostic from either analyzer-crash rescue site — a check rule raising into the
+    # `"internal analyzer error"` diagnostic, or a PLUGIN raising out of `#diagnostics_for_file` / `#prepare`
+    # into the `:plugin_loader` / `"runtime-error"` diagnostic (which `plugin_diagnostics` below would
+    # otherwise silently exclude, since its `source_family` never matches `"plugin.<id>"`). Either one means
+    # a rule or plugin crashed instead of running, which an absence assertion would otherwise treat as "the
+    # rule declined to fire" (issue #665).
+    #
     # ## Why not `before { unregister! }` automation?
     #
     # `run_plugin` calls `Rigor::Plugin.unregister!` at the start of every invocation. Specs may STILL declare
@@ -106,13 +114,14 @@ module Rigor
           signature_paths: signature_paths
         )
         effective_cache = resolve_cache_store(cache_store)
-        Dir.chdir(dir) do
+        result = Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
             configuration: configuration,
             cache_store: effective_cache,
             plugin_requirer: build_plugin_requirer
           ).run
         end
+        InternalAnalyzerErrorGuard.check!(result, context: "run_plugin_in_dir")
       end
 
       def resolve_cache_store(cache_store)

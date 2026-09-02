@@ -65,7 +65,10 @@ module Rigor
         # typed surface. `0.9.0`'s successor is `1.0.0`, not `0.10.0`: AGENTS.md's single-digit rule binds
         # recursively at every position, and it applies here because a manifest version is a cache key
         # rather than a gem release (so the no-autonomous-bump rule does not).
-        version: "1.0.0",
+        # Bumped 2026-09-02 (#621) — a reopened controller's `def`s are UNIONed rather than clobbered by
+        # the later file in the glob, so a cached 1.0.0 index can be missing the filter targets the merge
+        # restores.
+        version: "1.1.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
@@ -426,7 +429,8 @@ module Rigor
         return false if name.nil?
 
         index = producer_value(:controller_index)
-        return true if index && (index.find(name) || index.find("::#{name}"))
+        # `ControllerIndex#find` de-roots the query itself (#621) — no retry arm here.
+        return true if index&.find(name)
 
         name.end_with?("Controller")
       end

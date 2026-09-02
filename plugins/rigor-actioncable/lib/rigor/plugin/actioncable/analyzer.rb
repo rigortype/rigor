@@ -56,7 +56,9 @@ module Rigor
           # not ActionCable — pass through silently to avoid flagging unrelated `broadcast_to` methods.
           return [] unless class_name.end_with?("Channel")
 
-          entry = channel_index.find(class_name) || channel_index.find("::#{class_name}")
+          # `ChannelIndex#find` de-roots the query itself (#621) — a `::ChatChannel.broadcast_to` receiver
+          # and a plain `ChatChannel.broadcast_to` reach the same entry with no retry arm here.
+          entry = channel_index.find(class_name)
           return [unknown_channel_violation(class_name, channel_index)] if entry.nil?
 
           [broadcast_target_info(entry)]

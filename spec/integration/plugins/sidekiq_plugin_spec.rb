@@ -158,6 +158,138 @@ RSpec.describe "plugins/rigor-sidekiq" do
     end
   end
 
+  # #621 — the discoverer used to key `class ::WelcomeEmailWorker` as `"::WelcomeEmailWorker"` (and, nested
+  # inside a module, as the nonsense `"Admin::::WelcomeEmailWorker"`), and both consumers papered over the
+  # first spelling with a `known?(name) || known?("::#{name}")` retry. Keys are de-rooted at the producer
+  # now, which makes a rooted declaration and a plain reopen collide on ONE key — so the `#perform` envelope
+  # merges instead of the last file in the glob clobbering the first.
+  describe "rooted declarations and reopens (#621)" do
+    let(:rooted_files) do
+      {
+        "app/workers/a_welcome_email_worker.rb" => <<~RUBY
+          module Sidekiq
+            module Job; end
+          end
+          class ::WelcomeEmailWorker
+            include Sidekiq::Job
+            def perform(user_id)
+              user_id
+            end
+          end
+        RUBY
+      }
+    end
+
+    # A later-sorting file reopens the rooted declaration plainly, adding a helper but no `#perform`.
+    let(:reopen_files) do
+      rooted_files.merge(
+        "app/workers/z_welcome_email_worker_ext.rb" => <<~RUBY
+          module Sidekiq
+            module Job; end
+          end
+          class WelcomeEmailWorker
+            include Sidekiq::Job
+            def notify_admins
+              :ok
+            end
+          end
+        RUBY
+      )
+    end
+
+    it "types a rooted worker's `#perform` envelope under its plain spelling" do
+      result = run_plugin(source: "WelcomeEmailWorker.perform_async(1)\n", files: rooted_files)
+      info = plugin_diagnostics(result).find { |d| d.rule == "worker-call" }
+      expect(info).not_to be_nil
+      expect(plugin_diagnostics(result).select { |d| d.rule == "wrong-arity" }).to be_empty
+    end
+
+    it "recognises a worker that includes the marker module by its rooted name" do
+      files = {
+        "app/workers/rooted_marker_worker.rb" => <<~RUBY
+          module Sidekiq
+            module Job; end
+          end
+          class RootedMarkerWorker
+            include ::Sidekiq::Job
+            def perform(user_id)
+              user_id
+            end
+          end
+        RUBY
+      }
+      result = run_plugin(source: "RootedMarkerWorker.perform_async(1, 2)\n", files: files)
+      err = plugin_diagnostics(result).find { |d| d.rule == "wrong-arity" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("got 2")
+    end
+
+    it "types a worker declared rooted INSIDE a module as the top-level constant it names" do
+      files = {
+        "app/workers/admin_welcome_email_worker.rb" => <<~RUBY
+          module Sidekiq
+            module Job; end
+          end
+          module Admin
+            class ::WelcomeEmailWorker
+              include Sidekiq::Job
+              def perform(user_id)
+                user_id
+              end
+            end
+          end
+        RUBY
+      }
+      result = run_plugin(source: "WelcomeEmailWorker.perform_async(1, 2)\n", files: files)
+      err = plugin_diagnostics(result).find { |d| d.rule == "wrong-arity" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("WelcomeEmailWorker.perform_async")
+      expect(err.message).to include("got 2")
+    end
+
+    it "keeps the rooted declaration's `#perform` envelope when a later file reopens the class plainly" do
+      result = run_plugin(source: "WelcomeEmailWorker.perform_async(1, 2)\n", files: reopen_files)
+      err = plugin_diagnostics(result).find { |d| d.rule == "wrong-arity" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("got 2")
+    end
+
+    it "accepts a call the merged envelope allows" do
+      result = run_plugin(source: "WelcomeEmailWorker.perform_async(1)\n", files: reopen_files)
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "wrong-arity" }).to be_empty
+      expect(diags.find { |d| d.rule == "worker-call" }).not_to be_nil
+    end
+
+    # ADR-5: two declarations that BOTH spell `#perform` disagree about the shape, and the glob order is not
+    # the load order — so the envelope widens rather than pinning either one and firing on correct code.
+    it "widens the envelope when two declarations spell different `#perform` shapes" do
+      files = rooted_files.merge(
+        "app/workers/z_welcome_email_worker_redecl.rb" => <<~RUBY
+          module Sidekiq
+            module Job; end
+          end
+          class WelcomeEmailWorker
+            include Sidekiq::Job
+            def perform(user_id, locale)
+              [user_id, locale]
+            end
+          end
+        RUBY
+      )
+      result = run_plugin(
+        source: "WelcomeEmailWorker.perform_async(1)\nWelcomeEmailWorker.perform_async(1, 'ja')\n",
+        files: files
+      )
+      expect(plugin_diagnostics(result).select { |d| d.rule == "wrong-arity" }).to be_empty
+    end
+
+    it "still ignores a constant no declaration introduces" do
+      result = run_plugin(source: "NotAWorkerAtAll.perform_async(1, 2, 3)\n", files: reopen_files)
+      expect(plugin_diagnostics(result)).to be_empty
+    end
+  end
+
   describe "configuration" do
     let(:custom_files) do
       {

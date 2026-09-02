@@ -35,7 +35,9 @@ module Rigor
           class_name = constant_receiver_name(call_node.receiver)
           return [] if class_name.nil?
 
-          entry = job_index.find(class_name) || job_index.find("::#{class_name}")
+          # `JobIndex#find` de-roots the query itself (#621) — a `::WelcomeJob.perform_later` receiver and a
+          # plain `WelcomeJob.perform_later` reach the same entry with no retry arm here.
+          entry = job_index.find(class_name)
           return [] if entry.nil?
 
           violations = [info_violation(call_node, entry)]

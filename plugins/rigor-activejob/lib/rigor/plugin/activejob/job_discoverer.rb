@@ -26,25 +26,60 @@ module Rigor
         def initialize(io_boundary:, search_paths:, base_classes:)
           @io_boundary = io_boundary
           @search_paths = search_paths
-          @base_classes = base_classes.to_set
+          # De-rooted for the same reason superclass names are ({#visit_class}): the match is by exact
+          # spelling, so a configured `job_base_classes: ["::ApplicationJob"]` would otherwise never match
+          # anything a declaration can render.
+          @base_classes = base_classes.to_set { |name| strip_root(name.to_s) }
         end
 
         # @return [JobIndex]
         def discover
-          entries = []
+          candidates = []
           ruby_files_under(@search_paths).each do |path|
             contents = read_safely(path)
             next if contents.nil?
 
             tree = Prism.parse(contents).value
             walk_for_jobs(tree, []) do |class_name, perform_def|
-              entries << build_entry(class_name, perform_def)
+              candidates << [class_name, perform_def]
             end
           end
-          JobIndex.new(entries)
+          JobIndex.new(merge_redeclarations(candidates))
         end
 
         private
+
+        # Collapses the candidates that declare the SAME constant into one entry, so {JobIndex} — which
+        # keys its rows by `class_name` — receives at most one per job.
+        #
+        # A job is routinely declared more than once: `app/jobs/welcome_job.rb` holds the real class and a
+        # second file reopens it (`class ::WelcomeJob`, `class WelcomeJob`) to add a method. Taking the last
+        # candidate dropped the real `#perform` envelope whenever the reopen sorted later in the glob — the
+        # reopen carries no `#perform`, so the job silently became any-arity and every `perform_later` went
+        # unchecked. The rows are merged instead:
+        #
+        # - The declarations that actually spell `def perform` decide the envelope; a reopen that does not
+        #   contributes nothing rather than erasing it.
+        # - When two declarations BOTH spell it with different shapes, the envelope WIDENS (min of the mins,
+        #   max of the maxes) and the required keywords intersect. The glob order is not the load order, so
+        #   pinning either shape would surface `wrong-arity` on a call the definition Ruby actually loads
+        #   accepts — ADR-5: a missed narrow case costs precision, a wrong one costs correct code.
+        def merge_redeclarations(candidates)
+          candidates.group_by(&:first).map do |class_name, rows|
+            declared = rows.filter_map { |(_, perform_def)| perform_def }
+            entries = declared.empty? ? [build_entry(class_name, nil)] : declared.map { |d| build_entry(class_name, d) }
+            entries.reduce { |base, addition| widen(base, addition) }
+          end
+        end
+
+        # The arity envelope that accepts every call either declaration accepts. See {#merge_redeclarations}.
+        def widen(base, addition)
+          base.with(
+            min_arity: [base.min_arity, addition.min_arity].min,
+            max_arity: [base.max_arity, addition.max_arity].max,
+            keyword_required: base.keyword_required & addition.keyword_required
+          )
+        end
 
         def read_safely(path)
           @io_boundary.read_file(path)
@@ -77,26 +112,41 @@ module Rigor
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
 
-          full_name = (lexical_path + [class_local_name]).join("::")
-          superclass = constant_path_name(node.superclass) if node.superclass
+          full_name = declared_constant_name(class_local_name, lexical_path)
+          superclass = strip_root(constant_path_name(node.superclass)) if node.superclass
           if superclass && @base_classes.include?(superclass)
             perform_def = lookup_perform_def(node.body)
             yield full_name, perform_def
           end
 
-          inner_path = lexical_path + [class_local_name]
-          walk_for_jobs(node.body, inner_path, &) if node.body
+          walk_for_jobs(node.body, [full_name], &) if node.body
         end
 
         def visit_module(node, lexical_path, &)
           module_local_name = constant_path_name(node.constant_path)
           return if module_local_name.nil?
 
-          inner_path = lexical_path + [module_local_name]
+          inner_path = [declared_constant_name(module_local_name, lexical_path)]
           walk_for_jobs(node.body, inner_path, &) if node.body
         end
 
-        # Renders `Foo::Bar` / `::Foo::Bar` as a String.
+        # The full constant name a `class` / `module` declaration defines, given the rendered local name
+        # and the enclosing lexical path. A ROOTED local name (`class ::WelcomeJob`) names the top-level
+        # constant whatever the nesting, so the lexical path is dropped and the `::` with it; otherwise the
+        # name is appended to the path (`class WelcomeJob` inside `module Admin` → `Admin::WelcomeJob`).
+        def declared_constant_name(local_name, lexical_path)
+          return strip_root(local_name) if local_name.start_with?("::")
+
+          (lexical_path + [local_name]).join("::")
+        end
+
+        # `::WelcomeJob` → `WelcomeJob`; a name without the root marker is returned unchanged (nil stays nil).
+        def strip_root(name)
+          name&.delete_prefix("::")
+        end
+
+        # Renders `Foo::Bar` / `::Foo::Bar` as a String, KEEPING the leading `::` of a rooted path —
+        # {#declared_constant_name} reads it as "reset the lexical path" before the marker is dropped.
         def constant_path_name(node)
           return nil if node.nil?
 

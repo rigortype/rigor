@@ -41,8 +41,8 @@ module Rigor
           return unless node.receiver.is_a?(Prism::ConstantReadNode)
 
           owner = node.receiver.name.to_s
-          attachments = @attachment_index.attachments_for(owner) ||
-                        @attachment_index.attachments_for("::#{owner}")
+          # `AttachmentIndex#attachments_for` de-roots the query itself (#621) — no retry arm here.
+          attachments = @attachment_index.attachments_for(owner)
           return if attachments.nil?
 
           # Only flag when the method matches a known attachment name (the `dynamic_return` rule provides

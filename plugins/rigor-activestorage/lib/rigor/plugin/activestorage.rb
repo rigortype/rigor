@@ -37,7 +37,10 @@ module Rigor
     class Activestorage < Rigor::Plugin::Base
       manifest(
         id: "activestorage",
-        version: "0.1.0",
+        # Bumped 2026-09-02 (#621) — attachment owners are keyed by their de-rooted name and a reopened
+        # class's attachments are UNIONed rather than clobbered, so a cached 0.1.0 index can be missing the
+        # attachments the merge restores.
+        version: "0.2.0",
         description: "Types ActiveStorage attachment macros (has_one_attached / has_many_attached) on AR models.",
         config_schema: {
           "model_search_paths" => { kind: :array, default: ["app/models"] }
@@ -91,8 +94,8 @@ module Rigor
         receiver_type = scope.type_of(call_node.receiver)
         next nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
-        attachments = index.attachments_for(receiver_type.class_name) ||
-                      index.attachments_for("::#{receiver_type.class_name}")
+        # `AttachmentIndex#attachments_for` de-roots the query itself (#621) — no retry arm here.
+        attachments = index.attachments_for(receiver_type.class_name)
         next nil if attachments.nil?
 
         attachment = attachments.find { |a| a[:name] == call_node.name.to_s }

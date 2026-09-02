@@ -46,7 +46,10 @@ module Rigor
         def initialize(io_boundary:, search_paths:, base_classes:, views_root: DEFAULT_VIEWS_ROOT)
           @io_boundary = io_boundary
           @search_paths = search_paths
-          @base_classes = base_classes.to_set
+          # De-rooted for the same reason superclass names are ({#visit_class}): the match is by exact
+          # spelling, so a configured `mailer_base_classes: ["::ApplicationMailer"]` would otherwise never
+          # match anything a declaration can render.
+          @base_classes = base_classes.to_set { |name| strip_root(name.to_s) }
           @views_root = views_root
         end
 
@@ -108,16 +111,15 @@ module Rigor
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
 
-          full_name = (lexical_path + [class_local_name]).join("::")
-          superclass = constant_path_name(node.superclass) if node.superclass
+          full_name = declared_constant_name(class_local_name, lexical_path)
+          superclass = strip_root(constant_path_name(node.superclass)) if node.superclass
           if superclass && @base_classes.include?(superclass)
             def_nodes = collect_action_defs(node.body)
             includes = collect_includes(node.body)
             yield full_name, def_nodes, includes
           end
 
-          inner_path = lexical_path + [class_local_name]
-          walk_for_mailers(node.body, inner_path, &) if node.body
+          walk_for_mailers(node.body, [full_name], &) if node.body
         end
 
         # Collects qualified-constant names passed to `include X` calls inside the class body. Used to
@@ -131,8 +133,8 @@ module Rigor
             next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :include
 
             (node.arguments&.arguments || []).each do |arg|
-              name = constant_path_name(arg)
-              names << name.delete_prefix("::") if name
+              name = strip_root(constant_path_name(arg))
+              names << name if name
             end
           end
           names
@@ -149,16 +151,19 @@ module Rigor
             local_name = constant_path_name(node.constant_path)
             return if local_name.nil?
 
-            full_name = (lexical_path + [local_name.delete_prefix("::")]).join("::")
+            full_name = declared_constant_name(local_name, lexical_path)
             if node.body
               def_nodes = collect_action_defs(node.body)
               entries = def_nodes.to_h { |def_node| [def_node.name, build_action_entry(def_node)] }
-              accumulator[full_name] = entries unless entries.empty?
-              collect_module_actions(node.body, lexical_path + [local_name.delete_prefix("::")], accumulator)
+              # UNIONed, never assigned: a concern module reopened in a second file adds actions rather
+              # than replacing the ones the first declaration spelled (same rule as {MailerIndex}'s
+              # per-class merge).
+              accumulator[full_name] = (accumulator[full_name] || {}).merge(entries) unless entries.empty?
+              collect_module_actions(node.body, [full_name], accumulator)
             end
           when Prism::ClassNode
             local_name = constant_path_name(node.constant_path)
-            inner = local_name ? lexical_path + [local_name.delete_prefix("::")] : lexical_path
+            inner = local_name ? [declared_constant_name(local_name, lexical_path)] : lexical_path
             collect_module_actions(node.body, inner, accumulator) if node.body
           else
             node.rigor_each_child { |child| collect_module_actions(child, lexical_path, accumulator) }
@@ -169,10 +174,27 @@ module Rigor
           module_local_name = constant_path_name(node.constant_path)
           return if module_local_name.nil?
 
-          inner_path = lexical_path + [module_local_name]
+          inner_path = [declared_constant_name(module_local_name, lexical_path)]
           walk_for_mailers(node.body, inner_path, &) if node.body
         end
 
+        # The full constant name a `class` / `module` declaration defines, given the rendered local name
+        # and the enclosing lexical path. A ROOTED local name (`class ::UserMailer`) names the top-level
+        # constant whatever the nesting, so the lexical path is dropped and the `::` with it; otherwise the
+        # name is appended to the path (`class UserMailer` inside `module Admin` → `Admin::UserMailer`).
+        def declared_constant_name(local_name, lexical_path)
+          return strip_root(local_name) if local_name.start_with?("::")
+
+          (lexical_path + [local_name]).join("::")
+        end
+
+        # `::UserMailer` → `UserMailer`; a name without the root marker is returned unchanged (nil stays nil).
+        def strip_root(name)
+          name&.delete_prefix("::")
+        end
+
+        # Renders a constant-path node as a String, KEEPING the leading `::` of a rooted path —
+        # {#declared_constant_name} reads it as "reset the lexical path" before the marker is dropped.
         def constant_path_name(node)
           return nil if node.nil?
 
@@ -335,7 +357,9 @@ module Rigor
           # ADR-39: the real ActiveSupport::Inflector resolves the mailer's view directory
           # (`Foo::BarMailer` → `foo/bar_mailer`), so a divergence from Rails' real underscore can't
           # point the missing-view check at the wrong directory.
-          underscore_path = Rigor::Plugin::Inflector.underscore(class_name.delete_prefix("::"))
+          # `class_name` is already de-rooted ({#declared_constant_name}), so no root marker can reach the
+          # inflection.
+          underscore_path = Rigor::Plugin::Inflector.underscore(class_name)
           mailer_dir = File.join(views_root_absolute, underscore_path)
 
           VIEW_FORMATS.any? do |format|

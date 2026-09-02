@@ -26,7 +26,9 @@ module Rigor
       # - Only Symbol-literal attachment names are recognised. `has_one_attached(args)` or computed names
       #   decline.
       # - Modules (`class Admin::User`) are recognised; the resulting class name is the lexical path
-      #   (`Admin::User`).
+      #   (`Admin::User`). A ROOTED declaration (`class ::User`) names the top-level constant whatever its
+      #   nesting, so it yields `"User"` — the same spelling `class User` does, which is what every
+      #   consumer anchors on (#621).
       class AttachmentDiscoverer
         ATTACHMENT_METHODS = {
           has_one_attached: :singular,
@@ -88,20 +90,29 @@ module Rigor
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
 
-          full_name = (lexical_path + [class_local_name]).join("::")
+          full_name = declared_constant_name(class_local_name, lexical_path)
           attachments = collect_attachments(node.body)
           yield full_name, attachments
 
-          inner_path = lexical_path + [class_local_name]
-          walk(node.body, inner_path, &) if node.body
+          walk(node.body, [full_name], &) if node.body
         end
 
         def visit_module(node, lexical_path, &)
           module_local_name = constant_path_name(node.constant_path)
           return if module_local_name.nil?
 
-          inner_path = lexical_path + [module_local_name]
+          inner_path = [declared_constant_name(module_local_name, lexical_path)]
           walk(node.body, inner_path, &) if node.body
+        end
+
+        # The full constant name a `class` / `module` declaration defines, given the rendered local name
+        # and the enclosing lexical path. A ROOTED local name (`class ::User`) names the top-level constant
+        # whatever the nesting, so the lexical path is dropped and the `::` with it; otherwise the name is
+        # appended to the path (`class User` inside `module Admin` → `Admin::User`).
+        def declared_constant_name(local_name, lexical_path)
+          return local_name.delete_prefix("::") if local_name.start_with?("::")
+
+          (lexical_path + [local_name]).join("::")
         end
 
         def collect_attachments(body)
@@ -127,6 +138,8 @@ module Rigor
           Rigor::Source::Literals.symbol_name(node.arguments&.arguments&.first)
         end
 
+        # Renders a constant-path node as a String, KEEPING the leading `::` of a rooted path —
+        # {#declared_constant_name} reads it as "reset the lexical path" before the marker is dropped.
         def constant_path_name(node)
           return nil if node.nil?
 

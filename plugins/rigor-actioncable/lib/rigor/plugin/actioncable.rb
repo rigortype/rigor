@@ -65,7 +65,10 @@ module Rigor
     class Actioncable < Rigor::Plugin::Base
       manifest(
         id: "actioncable",
-        version: "0.1.0",
+        # Bumped 2026-09-02 (#621) — channel keys and base-class names are de-rooted at the producer and a
+        # reopened class's actions and streams are UNIONed rather than clobbered, so a cached 0.1.0 index
+        # can be missing a whole channel (`< ::ApplicationCable::Channel`) or half its stream names.
+        version: "0.2.0",
         description: "Validates ActionCable broadcast call shape against discovered channels.",
         config_schema: {
           "channel_search_paths" => { kind: :array, default: ["app/channels"] },

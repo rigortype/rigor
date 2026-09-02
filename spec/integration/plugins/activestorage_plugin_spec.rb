@@ -114,6 +114,97 @@ RSpec.describe "plugins/rigor-activestorage" do
     end
   end
 
+  # #621 — the discoverer used to key `class ::User` as `"::User"` (and, nested inside a module, as the
+  # nonsense `"Admin::::User"`), and both consumers papered over the first spelling with an
+  # `attachments_for(name) || attachments_for("::#{name}")` retry. Keys are de-rooted at the producer now,
+  # which makes a rooted declaration and a plain reopen collide on ONE key — so the attachment rows union
+  # instead of the last file in the glob clobbering the first.
+  describe "rooted declarations and reopens (#621)" do
+    let(:rooted_models) do
+      {
+        "app/models/application_record.rb" => APPLICATION_RECORD,
+        "app/models/a_user.rb" => "class ::User < ApplicationRecord\n  has_one_attached :avatar\nend\n"
+      }
+    end
+
+    # A later-sorting file reopens the rooted declaration plainly, adding its own attachment.
+    let(:reopen_models) do
+      rooted_models.merge(
+        "app/models/z_user_ext.rb" => "class User < ApplicationRecord\n  has_many_attached :photos\nend\n"
+      )
+    end
+
+    it "keys a rooted declaration under its plain spelling" do
+      _result, index = run_as("x = 1\n", models: rooted_models)
+
+      expect(index.class_names).to include("User")
+      expect(index.class_names).not_to include("::User")
+      expect(index.attachments_for("User")).to include(a_hash_including(name: "avatar", kind: :singular))
+    end
+
+    it "keys a declaration rooted INSIDE a module as the top-level constant it names" do
+      models = {
+        "app/models/application_record.rb" => APPLICATION_RECORD,
+        "app/models/admin_user.rb" => <<~RUBY
+          module Admin
+            class ::User < ApplicationRecord
+              has_one_attached :avatar
+            end
+          end
+        RUBY
+      }
+      result, index = run_as("User.avatar\n", models: models)
+
+      expect(index.class_names).to eq(["User"])
+      info = result.diagnostics.find { |d| d.rule == "attachment-call" }
+      expect(info).not_to be_nil
+      expect(info.message).to include("ActiveStorage::Attached::One")
+    end
+
+    it "keeps the rooted declaration's attachment when a later file reopens the class plainly" do
+      result, index = run_as("User.avatar\n", models: reopen_models)
+
+      expect(index.attachments_for("User").map { |a| a[:name] }).to contain_exactly("avatar", "photos")
+      info = result.diagnostics.find { |d| d.rule == "attachment-call" }
+      expect(info).not_to be_nil
+      expect(info.message).to include("User.avatar")
+      expect(info.message).to include("ActiveStorage::Attached::One")
+    end
+
+    it "keeps the earlier declaration's attachment across a PLAIN reopen too" do
+      models = {
+        "app/models/application_record.rb" => APPLICATION_RECORD,
+        "app/models/a_user.rb" => "class User < ApplicationRecord\n  has_one_attached :avatar\nend\n",
+        "app/models/z_user_ext.rb" => "class User < ApplicationRecord\n  has_many_attached :photos\nend\n"
+      }
+      result, index = run_as("User.avatar\n", models: models)
+
+      expect(index.attachments_for("User").map { |a| a[:name] }).to contain_exactly("avatar", "photos")
+      expect(result.diagnostics.find { |d| d.rule == "attachment-call" }).not_to be_nil
+    end
+
+    it "also keeps the reopen's own attachment" do
+      result, _index = run_as("User.photos\n", models: reopen_models)
+      info = result.diagnostics.find { |d| d.rule == "attachment-call" }
+
+      expect(info).not_to be_nil
+      expect(info.message).to include("ActiveStorage::Attached::Many")
+    end
+
+    it "still stays silent on a name no declaration attaches" do
+      result, _index = run_as("User.nope\n", models: reopen_models)
+
+      expect(result.diagnostics.find { |d| d.rule == "attachment-call" }).to be_nil
+    end
+
+    it "still stays silent on a class no declaration introduces" do
+      result, index = run_as("Nowhere.avatar\n", models: reopen_models)
+
+      expect(index.attachments_for("Nowhere")).to be_nil
+      expect(result.diagnostics.find { |d| d.rule == "attachment-call" }).to be_nil
+    end
+  end
+
   describe "dynamic_return return-type narrowing" do
     it "narrows `user.avatar` to `Nominal[ActiveStorage::Attached::One]`" do
       _result, index = run_as("x = 1\n")

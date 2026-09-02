@@ -224,6 +224,87 @@ RSpec.describe "plugins/rigor-actionmailer" do
     end
   end
 
+  # #621 — the discoverer used to key `class ::UserMailer` as `"::UserMailer"` and the analyzer papered over
+  # it with a `find(name) || find("::#{name}")` retry. Keys are de-rooted at the producer now, which makes a
+  # rooted declaration and a plain reopen collide on ONE key — so the index unions them instead of letting
+  # the last file in the glob clobber the first.
+  describe "rooted declarations and reopens (#621)" do
+    let(:rooted_files) do
+      {
+        "app/mailers/user_mailer.rb" => <<~RUBY,
+          class ApplicationMailer
+          end
+          class ::UserMailer < ApplicationMailer
+            def welcome(user)
+              user
+            end
+          end
+        RUBY
+        "app/views/user_mailer/welcome.html.erb" => "<h1>Welcome</h1>\n"
+      }
+    end
+
+    # A later-sorting file reopens the rooted declaration under the plain spelling.
+    let(:reopen_files) do
+      rooted_files.merge(
+        "app/mailers/z_user_mailer_ext.rb" => <<~RUBY,
+          class ApplicationMailer
+          end
+          class UserMailer < ApplicationMailer
+            def reset_password(user)
+              user
+            end
+          end
+        RUBY
+        "app/views/user_mailer/reset_password.html.erb" => "<a>Reset</a>\n"
+      )
+    end
+
+    it "types a rooted mailer's action surface under its plain spelling" do
+      result = run_plugin(source: "UserMailer.welcome(:alice).deliver_now\n", files: rooted_files)
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-action" }).to be_empty
+      info = diags.find { |d| d.rule == "mailer-call" }
+      expect(info).not_to be_nil
+      expect(info.message).to include("UserMailer.welcome")
+    end
+
+    it "types a rooted mailer's action surface under the rooted spelling too" do
+      result = run_plugin(source: "::UserMailer.welcome(:alice).deliver_now\n", files: rooted_files)
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-action" }).to be_empty
+      expect(diags.find { |d| d.rule == "mailer-call" }).not_to be_nil
+    end
+
+    it "keeps the rooted declaration's actions when a later file reopens the class plainly" do
+      result = run_plugin(
+        source: "UserMailer.welcome(:alice).deliver_now\nUserMailer.reset_password(:alice).deliver_now\n",
+        files: reopen_files
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-action" }.map(&:message)).to be_empty
+      expect(diags.select { |d| d.rule == "mailer-call" }.map(&:message))
+        .to include(a_string_including("UserMailer.welcome"), a_string_including("UserMailer.reset_password"))
+    end
+
+    it "still checks arity against the merged action surface" do
+      result = run_plugin(source: "UserMailer.welcome.deliver_now\n", files: reopen_files)
+      err = plugin_diagnostics(result).find { |d| d.rule == "wrong-arity" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("UserMailer.welcome")
+      expect(err.message).to include("got 0")
+    end
+
+    it "still reports an action neither declaration defines" do
+      result = run_plugin(source: "UserMailer.nope(:alice).deliver_now\n", files: reopen_files)
+      err = plugin_diagnostics(result).find { |d| d.rule == "unknown-action" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("UserMailer.nope")
+      expect(err.message).to include("reset_password")
+      expect(err.message).to include("welcome")
+    end
+  end
+
   describe "configuration" do
     let(:custom_files) do
       {

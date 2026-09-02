@@ -47,7 +47,11 @@ module Rigor
         # `send` / `__send__` / `method` and friends so dynamic-dispatch idioms
         # (`Mailer.respond_to?(action)` / `Mailer.public_send(action)`) stop firing `unknown-action`
         # against the Ruby reflection method.
-        version: "0.4.0",
+        #
+        # Bumped 2026-09-02 (#621) — mailer keys are de-rooted at the producer and a reopened class's
+        # actions are UNIONed rather than clobbered, so a cached 0.4.0 index can be missing actions this
+        # version knows about.
+        version: "0.5.0",
         description: "Validates ActionMailer call shape and view template existence.",
         config_schema: {
           "mailer_search_paths" => { kind: :array, default: ["app/mailers"] },
@@ -120,7 +124,7 @@ module Rigor
             severity: :warning,
             rule: "missing-view",
             message: "`#{class_entry.class_name}##{action_name}` has no view template " \
-                     "under `#{@views_root}/#{Rigor::Plugin::Inflector.underscore(class_entry.class_name.delete_prefix('::'))}/`"
+                     "under `#{@views_root}/#{Rigor::Plugin::Inflector.underscore(class_entry.class_name)}/`"
           )
         end
       end

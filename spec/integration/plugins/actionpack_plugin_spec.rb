@@ -1129,6 +1129,112 @@ RSpec.describe "plugins/rigor-actionpack" do
         expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
       end
     end
+
+    # #621 — `ControllerDiscoverer` ASSIGNED each declaration into the entry Hash, so a controller declared
+    # in two files kept only the one that sorted later in the glob and every filter target the other file
+    # defined surfaced as a false `unknown-filter-method`. The rooted spelling made it worse: `module Admin;
+    # class ::UsersController` was keyed as the nonsense `"Admin::UsersController"`, which the analyzer's
+    # own (identical) qualification could not name either.
+    describe "rooted declarations and reopens (#621)" do
+      it "keeps the earlier declaration's methods when a later file reopens the controller" do
+        with_controllers(controllers: {
+                           "a_users_controller.rb" => <<~RUBY,
+                             class UsersController
+                               before_action :authenticate!
+                               def authenticate!; end
+                             end
+                           RUBY
+                           "z_users_controller_ext.rb" => <<~RUBY
+                             class UsersController
+                               before_action :set_user
+                               def set_user; end
+                             end
+                           RUBY
+                         }) do |result|
+          diags = actionpack_diagnostics(result)
+          expect(diags.select { |d| d.rule == "unknown-filter-method" }.map(&:message)).to be_empty
+          expect(diags.select { |d| d.rule == "filter-call" }.size).to eq(2)
+        end
+      end
+
+      it "merges a ROOTED reopen into the same entry as the plain declaration" do
+        with_controllers(controllers: {
+                           "a_users_controller.rb" => <<~RUBY,
+                             class ::UsersController
+                               before_action :authenticate!
+                               def authenticate!; end
+                             end
+                           RUBY
+                           "z_users_controller_ext.rb" => <<~RUBY
+                             class UsersController
+                               before_action :set_user
+                               def set_user; end
+                             end
+                           RUBY
+                         }) do |result|
+          diags = actionpack_diagnostics(result)
+          expect(diags.select { |d| d.rule == "unknown-filter-method" }.map(&:message)).to be_empty
+          expect(diags.select { |d| d.rule == "filter-call" }.size).to eq(2)
+        end
+      end
+
+      it "keeps the parent class a rooted declaration spells when the reopen omits it" do
+        with_controllers(controllers: {
+                           "application_controller.rb" =>
+                             "class ApplicationController\n  def authenticate!; end\nend\n",
+                           "a_users_controller.rb" => "class ::UsersController < ApplicationController\nend\n",
+                           "z_users_controller_ext.rb" => <<~RUBY
+                             class UsersController
+                               before_action :authenticate!
+                             end
+                           RUBY
+                         }) do |result|
+          diags = actionpack_diagnostics(result)
+          expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
+          expect(diags.select { |d| d.rule == "filter-call" }).not_to be_empty
+        end
+      end
+
+      it "keys a controller declared rooted INSIDE a module as the top-level constant it names" do
+        with_controllers(controllers: {
+                           "admin/users_controller.rb" => <<~RUBY
+                             module Admin
+                               class ::UsersController
+                                 before_action :authenticate!
+                                 def authenticate!; end
+                               end
+                             end
+                           RUBY
+                         }) do |result|
+          diags = actionpack_diagnostics(result)
+          expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
+          expect(diags.select { |d| d.rule == "filter-call" }).not_to be_empty
+        end
+      end
+
+      it "still fires unknown-filter-method for a name neither declaration defines" do
+        with_controllers(controllers: {
+                           "a_users_controller.rb" => <<~RUBY,
+                             class ::UsersController
+                               def authenticate!; end
+                             end
+                           RUBY
+                           "z_users_controller_ext.rb" => <<~RUBY
+                             class UsersController
+                               before_action :authenticat!
+                               def set_user; end
+                             end
+                           RUBY
+                         }) do |result|
+          err = actionpack_diagnostics(result).find { |d| d.rule == "unknown-filter-method" }
+          expect(err).not_to be_nil
+          expect(err.severity).to eq(:error)
+          expect(err.message).to include("authenticat!")
+          # The merged method set is what the suggestion is drawn from — proof the union reached the rule.
+          expect(err.message).to include("Did you mean `:authenticate!`?")
+        end
+      end
+    end
   end
 
   describe "render targets (Phase 3)" do

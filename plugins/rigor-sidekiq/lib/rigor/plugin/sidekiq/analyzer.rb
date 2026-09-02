@@ -44,7 +44,9 @@ module Rigor
           class_name = constant_receiver_name(call_node.receiver)
           return [] if class_name.nil?
 
-          entry = worker_index.find(class_name) || worker_index.find("::#{class_name}")
+          # `WorkerIndex#find` de-roots the query itself (#621) — a `::WelcomeWorker.perform_async` receiver
+          # and a plain `WelcomeWorker.perform_async` reach the same entry with no retry arm here.
+          entry = worker_index.find(class_name)
           return [] if entry.nil?
 
           violations = [info_violation(call_node, entry)]

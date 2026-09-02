@@ -70,10 +70,32 @@ module Rigor
 
           walk_declarations(parse_result.value, namespace: []) do |declaration_node, enclosing|
             entry = build_entry(declaration_node, enclosing)
-            entries[entry.class_name] = entry if entry.class_name
+            next unless entry.class_name
+
+            existing = entries[entry.class_name]
+            entries[entry.class_name] = existing ? merge_entry(existing, entry) : entry
           end
         rescue Plugin::AccessDeniedError, Errno::ENOENT
           nil
+        end
+
+        # Unions two declarations of the SAME constant. A controller or concern is routinely declared more
+        # than once — the real class in `app/controllers/accounts_controller.rb` and a second file reopening
+        # it (`class ::AccountsController`, `class AccountsController`) to add an action or a filter target.
+        # Ruby's own semantics are ADDITIVE, so nothing either declaration spelled is lost. Assigning the
+        # later entry instead dropped the earlier one's `def`s, and `before_action :a_method_the_first_file
+        # _defines` then surfaced a false `unknown-filter-method` on correct code (#621).
+        #
+        # `parent_class_name` takes the first non-nil — a reopen normally omits `< Parent`, and two
+        # declarations that both spell one name the same class. `enclosing_namespace` stays the earlier
+        # declaration's: it is the lexical scope the merged include / parent names resolve against, and an
+        # unresolvable name degrades to {ControllerIndex#unresolved_include?}, which silences the rule.
+        def merge_entry(base, addition)
+          base.with(
+            defined_methods: (base.defined_methods | addition.defined_methods).freeze,
+            parent_class_name: base.parent_class_name || addition.parent_class_name,
+            included_module_names: (base.included_module_names | addition.included_module_names).freeze
+          )
         end
 
         # Walks every `ClassNode` / `ModuleNode` in the AST, yielding `[declaration_node,
@@ -87,7 +109,10 @@ module Rigor
 
           if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
             yield node, namespace
-            inner_namespace = namespace + namespace_segments_for(node)
+            # A ROOTED declaration (`class ::Foo`) names the top-level constant whatever its nesting, so it
+            # RESETS the qualifier chain its body sees rather than extending the enclosing one (#621).
+            inner_namespace = rooted_declaration?(node) ? [] : namespace
+            inner_namespace += namespace_segments_for(node)
             return if node.body.nil?
 
             walk_declarations(node.body, namespace: inner_namespace, &)
@@ -120,19 +145,32 @@ module Rigor
           )
         end
 
-        # Resolves the declared name against the enclosing namespace chain. A `ConstantPathNode` (e.g.
-        # `Admin::Foo` in `class Admin::Foo`) is already absolute and ignores the enclosing chain. A
-        # `ConstantReadNode` (bare `Foo` in `module Admin; class Foo`) is qualified against the chain so
-        # the name becomes `Admin::Foo`.
+        # Resolves the declared name against the enclosing namespace chain. A `ConstantPathNode` is already
+        # absolute and ignores the enclosing chain — either because it is qualified (`Admin::Foo` in
+        # `class Admin::Foo`) or because it is ROOTED (`::Foo`), which names the top-level constant
+        # whatever the nesting (#621). A `ConstantReadNode` (bare `Foo` in `module Admin; class Foo`) is
+        # qualified against the chain so the name becomes `Admin::Foo`.
+        #
+        # {#qualified_name_for} already renders a rooted path WITHOUT its leading `::`, so the entry key is
+        # the plain spelling every consumer anchors on.
         def qualified_name_with_enclosing(node, enclosing)
           return nil unless node.is_a?(Prism::Node)
 
           local = qualified_name_for(node)
           return nil if local.nil?
-          return local if node.is_a?(Prism::ConstantPathNode) && !node.parent.nil?
+          return local if node.is_a?(Prism::ConstantPathNode)
           return local if enclosing.empty?
 
           "#{enclosing.join('::')}::#{local}"
+        end
+
+        # True when the declaration's constant path is explicitly rooted (`class ::Foo`,
+        # `class ::Foo::Bar`) — the leftmost segment is a `ConstantPathNode` with no parent. The analyzer
+        # carries the same predicate, because both sides must agree on the key a call site looks up.
+        def rooted_declaration?(declaration_node)
+          node = declaration_node.constant_path
+          node = node.parent while node.is_a?(Prism::ConstantPathNode) && node.parent
+          node.is_a?(Prism::ConstantPathNode)
         end
 
         def parent_name_for(declaration_node)

@@ -57,9 +57,9 @@ exactly one binding — append new corners there, don't file fresh).
 2. Engine bugs with repros, all agent-doable: [#586](https://github.com/rigortype/rigor/issues/586)
    (likely near-free after a #580-style provenance), [#587](https://github.com/rigortype/rigor/issues/587),
    [#583](https://github.com/rigortype/rigor/issues/583), [#590](https://github.com/rigortype/rigor/issues/590),
-   [#600](https://github.com/rigortype/rigor/issues/600) (`opaque_block_self` join drop — and
-   its suggestion: ONE spec asserting every Scope field survives a join, to end the class),
-   [#577](https://github.com/rigortype/rigor/issues/577), [#588](https://github.com/rigortype/rigor/issues/588).
+   [#577](https://github.com/rigortype/rigor/issues/577), [#588](https://github.com/rigortype/rigor/issues/588),
+   [#606](https://github.com/rigortype/rigor/issues/606)-adjacent follow-ups recorded in #607's
+   review (signature-driven falsey derivation; typed-membership `==` assumption).
 3. Design/policy: [#594](https://github.com/rigortype/rigor/issues/594) (nil-masquerading
    `Mime::NullType`, pairs with #542's carrier property), [#580](https://github.com/rigortype/rigor/issues/580)
    (carrier-level provenance — the scope-side route measured into the method-return wall;

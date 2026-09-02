@@ -1,7 +1,15 @@
 class Grid
-  # The `Integer` size is what rules Ruby's array-convertible COPY overload out,
-  # so this is the one form whose element can honestly be `nil`.
-  def sized_form_seeds_nil: (Integer n) -> untyped
+  # A signature-pinned `Integer` size changes nothing: the no-fill element stays
+  # gradual, because a `Nominal` seed's arm is never retracted by a rewrite.
+  def sized_form_stays_gradual: (Integer n) -> untyped
+
+  # The allocate-then-fill idiom the `nil` element used to break.
+  def dp_recurrence: (Array[Integer] xs) -> untyped
+  def oversize_buffer_is_filled_before_it_is_read: () -> untyped
+  def whole_array_rewrites_are_readable: (Integer n) -> untyped
+
+  def block_form_widens_a_union_of_containers: (untyped n, bool flag) -> untyped
+  def fill_form_widens_a_mixed_union: (untyped n, bool flag) -> untyped
 
   def fill_form_survives_the_block_seam: (untyped n) -> String
   def fill_form_survives_the_loop_seam: (untyped n) -> String

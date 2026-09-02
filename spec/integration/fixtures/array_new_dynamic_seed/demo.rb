@@ -46,15 +46,48 @@ class Grid
     acc.first.upcase
   end
 
-  # The no-fill form with a size the signature pins to `Integer`: the copy
-  # overload is ruled out, so the honest element is the `nil` the constructor
-  # really put in every slot.
-  def sized_form_seeds_nil(n)
+  # The same form with a size the signature pins to `Integer` reads the same
+  # way. `Array.new(n)` really does put a `nil` in every slot, but a `Nominal`
+  # seed gets DECLARED-carrier semantics: the join keeps a seed arm forever and
+  # no whole-array rewrite retracts it, so the placeholder would become a
+  # permanent nil possibility over the allocate-then-fill idiom below.
+  def sized_form_stays_gradual(n)
     acc = Array.new(n)
-    assert_type("Array[nil]", acc)
+    assert_type("Array[Dynamic[top]]", acc)
     [1].each { acc.push(1) }
-    assert_type("Array[1?]", acc)
+    assert_type("Array[1 | Dynamic[top]]", acc)
     acc.first
+  end
+
+  # The idiom the `nil` seed cost: allocate, seed slot 0, fill from the previous
+  # slot. Every line here is correct Ruby, and a `nil` element made the
+  # recurrence read `undefined method '+' for nil`.
+  def dp_recurrence(xs)
+    n = xs.size
+    dp = Array.new(n)
+    dp[0] = 1
+    (1...n).each { |i| dp[i] = dp[i - 1] + xs[i] }
+    dp[n - 1] + 1
+  end
+
+  # The oversize-literal door onto the same idiom — no signature needed, since
+  # `256` is past the tuple cap.
+  def oversize_buffer_is_filled_before_it_is_read
+    buf = Array.new(256)
+    256.times { |i| buf[i] = i.to_s }
+    buf.each(&:upcase)
+    buf.first.upcase
+  end
+
+  # And the straight-line mutators that a `Nominal` carrier never widens:
+  # `[]=`, `fill`, `map!`, `replace`, `concat` all rewrite the whole array.
+  def whole_array_rewrites_are_readable(n)
+    arr = Array.new(n)
+    arr.fill("s")
+    arr.each(&:upcase)
+    other = Array.new(n)
+    other.replace(["a", "b"])
+    other.last.upcase
   end
 
   # The block form — the algorithm-corpus shape of issue #531. The block's
@@ -77,8 +110,26 @@ class Grid
     adj
   end
 
-  # And the copy overload itself must not read as a nil-filled array — this is
-  # the call the `Integer`-size gate above exists for.
+  # A UNION of literal containers widens MEMBERWISE. Judged wholesale, every arm
+  # stayed a fixed-arity tuple, so appending to one and reading it back folded
+  # `a[0].last == 5` always-falsey on correct code.
+  def block_form_widens_a_union_of_containers(n, flag)
+    a = Array.new(n) { flag ? [1] : [2] }
+    assert_type("Array[Array[Integer]]", a)
+    a[0] << 5
+    puts "hit" if a[0].last == 5
+  end
+
+  # The fill form's spelling of the same shape, with a non-container arm that
+  # must pass through untouched.
+  def fill_form_widens_a_mixed_union(n, flag)
+    a = Array.new(n, flag ? [] : "s")
+    assert_type("Array[Array[Dynamic[top]] | String]", a)
+    a
+  end
+
+  # Ruby's array-convertible COPY overload: `Array.new([1, 2])` is `[1, 2]`, not
+  # two nils, which the gradual no-fill element absorbs.
   def copy_overload_is_not_a_nil_fill
     a = Array.new(["x", "y"]) # rubocop:disable Style/RedundantArrayConstructor
     assert_type("Array[Dynamic[top]]", a)

@@ -1086,18 +1086,29 @@ module Rigor
       # lifetime, so pinning the parameter to the literal would let a later `a[i] == "x"`
       # constant-fold.
       #
-      # With no fill the element is `nil` — but only when the argument is provably a SIZE.
-      # `Array.new(x)` is Ruby's COPY form when its single argument is array-convertible
-      # (`Array.new([1, 2])` is `[1, 2]`, not two nils), and that overload exists only for the
-      # one-argument no-block call: `Array.new([1, 2], 0)` raises `TypeError`. So an unreadable
-      # size keeps the gradual arm rather than claiming a nil-filled array the program may never
-      # build.
+      # **The no-fill form seeds the GRADUAL element, not `nil`.** `Array.new(n)` really does put
+      # a `nil` in every slot, but a `Nominal` seed gets DECLARED-carrier semantics downstream:
+      # the #586 join keeps a seed arm forever, and `MutationWidening#widen_for_mutator` declines
+      # a `Nominal` outright, so no whole-array rewrite — `[]=`, `fill`, `map!`, `replace`,
+      # `concat` — can ever retract it. The placeholder would become a permanent nil possibility
+      # over the allocate-then-fill idiom that is the whole point of the constructor:
+      #
+      #     dp = Array.new(xs.size); dp[0] = 1
+      #     (1...n).each { |i| dp[i] = dp[i - 1] + xs[i] }   # `undefined method '+' for nil`
+      #
+      #     buf = Array.new(256); 256.times { |i| buf[i] = i.to_s }
+      #     buf.each { |c| c.upcase }                        # possible nil receiver
+      #
+      # Both are correct Ruby, and both went from quiet to an ERROR on the `nil` seed. The true
+      # positive the `nil` would buy — `Array.new(n).first.upcase` on an array nothing ever wrote
+      # — is not worth the dominant idiom, so the no-fill form stays gradual whatever the size
+      # argument reads as. (That also happens to absorb Ruby's array-convertible COPY overload:
+      # `Array.new([1, 2])` is `[1, 2]`, not two nils.)
       def array_new_seed(arg_types, block_type)
         fill = block_type || arg_types[1]
-        return array_seed_of(array_new_element(fill)) unless fill.nil?
-        return array_seed_of(Type::Combinator.constant_of(nil)) if array_new_integer_size?(arg_types.first)
+        return array_seed_of(Type::Combinator.untyped) if fill.nil?
 
-        array_seed_of(Type::Combinator.untyped)
+        array_seed_of(array_new_element(fill))
       end
 
       def array_seed_of(element)
@@ -1110,25 +1121,16 @@ module Rigor
       # stays empty — the adjacency-list idiom would read `adj[i].first` as `nil`. Both
       # conversions go through {MutationWidening}'s own helpers, the single owner of "literal
       # container → parameterised nominal" that `MemberShapeProjection` already borrows.
+      #
+      # A `Union` widens MEMBERWISE. Judging it wholesale left `Array.new(n) { flag ? [1] : [2] }`
+      # as `Array[[1] | [2]]`, and each arm is a fixed-arity tuple the program then appends to:
+      # `a[0] << 5; a[0].last == 5` folded always-falsey on correct code.
       def array_new_element(type)
         case type
         when Type::Tuple then MutationWidening.widen_tuple(type)
         when Type::HashShape then MutationWidening.widen_hash_shape(type)
+        when Type::Union then Type::Combinator.union(*type.members.map { |m| array_new_element(m) })
         else Type::Combinator.widen_value_pinned(type)
-        end
-      end
-
-      # Whether a `Array.new` size argument is readable as an Integer, which is what rules the
-      # array-convertible COPY overload out. A `Union` must be Integer-ish on EVERY member: one
-      # array-shaped arm is enough to make the copy form live.
-      def array_new_integer_size?(type)
-        case type
-        when Type::Constant then type.value.is_a?(Integer)
-        when Type::Nominal then type.class_name == "Integer"
-        when Type::IntegerRange then true
-        when Type::Refined, Type::Difference then array_new_integer_size?(type.base)
-        when Type::Union then type.members.all? { |m| array_new_integer_size?(m) }
-        else false
         end
       end
 

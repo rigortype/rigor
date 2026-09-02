@@ -713,14 +713,16 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.elements).to eq([Rigor::Type::Combinator.constant_of(nil)] * 3)
     end
 
-    it "falls back to Array[nil] for an oversize Array.new(n)" do
-      # Oversize drops the per-position tuple, not the element evidence: the constructor still
-      # put a `nil` in every slot.
+    it "falls back to Array[untyped] for an oversize Array.new(n)" do
+      # Oversize drops the per-position tuple. The element is GRADUAL rather than the `nil` the
+      # constructor really put there: a `Nominal` seed is never retracted by a later whole-array
+      # rewrite, so `buf = Array.new(256); 256.times { |i| buf[i] = i.to_s }` would carry the
+      # placeholder into every read.
       type = scope.type_of(parse_expression("Array.new(1000)"))
 
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
-      expect(type.type_args).to eq([Rigor::Type::Combinator.constant_of(nil)])
+      expect(type.type_args.first).to be_a(Rigor::Type::Dynamic)
     end
 
     it "resolves Array.new(2) { \"s\" } as Tuple[\"s\", \"s\"] from the block's return (#317)" do
@@ -756,8 +758,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     # own stores.
     describe "Array.new with a non-literal size (#615)" do
       def sized(source, size_type)
-        bound = scope.with_local(:n, size_type)
-        bound.type_of(parse_expression(source, scopes: [[:n]]))
+        bound = scope.with_local(:n, size_type).with_local(:flag, Rigor::Type::Combinator.untyped)
+        bound.type_of(parse_expression(source, scopes: [%i[n flag]]))
       end
 
       def integer_size
@@ -771,19 +773,21 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         type.type_args.first
       end
 
-      it "seeds Array[nil] when the size is readable as an Integer" do
-        expect(element_of(sized("Array.new(n)", integer_size))).to eq(Rigor::Type::Combinator.constant_of(nil))
+      it "keeps the no-fill element gradual even when the size is readable as an Integer" do
+        # `Array.new(n)` really does fill with `nil`, but a `Nominal` seed gets declared-carrier
+        # semantics: the #586 join keeps a seed arm forever and `widen_for_mutator` declines a
+        # `Nominal`, so no `[]=` / `fill` / `map!` / `replace` / `concat` can retract it. The
+        # allocate-then-fill idiom would carry the placeholder into every read.
+        expect(element_of(sized("Array.new(n)", integer_size))).to be_a(Rigor::Type::Dynamic)
       end
 
       it "keeps the element gradual when the size is unreadable" do
-        # `Array.new(x)` is Ruby's COPY overload when its single argument is array-convertible
-        # (`Array.new([1, 2])` is `[1, 2]`, not two nils), and only the one-argument no-block call
-        # has that overload. An unreadable size cannot rule it out, so claiming `nil` would invent
-        # a false receiver; the gradual arm is still an ARM, which is all the seams need.
         expect(element_of(sized("Array.new(n)", Rigor::Type::Combinator.untyped))).to be_a(Rigor::Type::Dynamic)
       end
 
       it "keeps the element gradual for the literal copy form" do
+        # `Array.new(x)` is Ruby's COPY overload when its single argument is array-convertible:
+        # `Array.new([1, 2])` is `[1, 2]`, not two nils.
         expect(element_of(scope.type_of(parse_expression('Array.new(["x", "y"])')))).to be_a(Rigor::Type::Dynamic)
       end
 
@@ -804,6 +808,31 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         # `Array[Tuple[]]` would claim every one of them stays empty, so `adj[i].first` reads nil.
         element = element_of(sized("Array.new(n) { [] }", Rigor::Type::Combinator.untyped))
         expect(element_of(element)).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "widens a UNION of literal containers memberwise" do
+        # Judging the union wholesale left every arm a fixed-arity tuple, so `a[0] << 5` then
+        # `a[0].last == 5` folded always-falsey on correct code. Widened memberwise the two arms
+        # collapse into one `Array[Integer]`.
+        element = element_of(sized("Array.new(n) { flag ? [1] : [2] }", Rigor::Type::Combinator.untyped))
+        expect(element_of(element)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      end
+
+      it "widens only the container members of a mixed union" do
+        # The fill form's spelling of the same shape: the `String` arm is not a container and
+        # passes through, while the empty tuple still widens.
+        element = element_of(sized('Array.new(n, flag ? [] : "s")', Rigor::Type::Combinator.untyped))
+        expect(element).to be_a(Rigor::Type::Union)
+        expect(element.members).to include(Rigor::Type::Combinator.nominal_of("String"))
+        arrays = element.members.grep(Rigor::Type::Nominal).select { |m| m.class_name == "Array" }
+        expect(arrays.size).to eq(1)
+        expect(arrays.first.type_args.first).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "keeps a single literal container result precise" do
+        # Must-still-succeed: memberwise widening must not flatten the one-arm case to `untyped`.
+        element = element_of(sized("Array.new(n) { [1] }", Rigor::Type::Combinator.untyped))
+        expect(element_of(element)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
       end
 
       it "leaves the zero-argument constructor elementless" do

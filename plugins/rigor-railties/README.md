@@ -63,10 +63,21 @@ For the same reason `Rails.logger` is **not** typed as stdlib
 
 The gate is the literal `Rails` constant (bare or `::Rails`), with no
 arguments and no block. A project's own `logger` method, a nested
-`Foo::Rails.logger`, and `Rails.logger("extra")` are all left alone. So
-is a `module Rails` the project defines itself, top-level or lexically
-nested: when the receiver resolves to the project's own constant, the
-plugin declines and the project's definition answers.
+`Foo::Rails.logger`, and `Rails.logger("extra")` are all left alone.
+
+One more case is left alone: a project that defines *this very reader*
+on the `Rails` the call resolves to. If your code has a top-level
+`module Rails` with a `def self.logger`, or a `MyApp::Rails` with one
+that a bare `Rails` inside `MyApp` reaches first, then `Rails.logger`
+at that site keeps your definition's type instead of
+`ActiveSupport::BroadcastLogger`.
+
+Only the reader you defined is yielded, and only on the constant Ruby
+actually resolves. Reopening `module Rails` to hang an initializer or
+an engine extension off it — or declaring a compact
+`class Rails::HealthController` — defines no reader, so all four keep
+their framework types; `::Rails.logger` is always the top-level
+constant's reader, never a nested `Rails` shadowing it.
 
 ## Effects
 

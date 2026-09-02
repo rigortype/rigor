@@ -188,7 +188,13 @@ return and record the answer as an `:exists` row: `FileEntry.present` when
 the probe found what it asked for, `FileEntry.absent` when nothing exists
 there, and nothing when something exists but is not what was asked for
 (the bound WD1 pins for `EISDIR`, in probe form). Every plugin probe on a
-boundary-managed project path is converted to them.
+boundary-managed project path is converted to them, with one named exception:
+rigor-actionpack's `Analyzer` template probes (`locate_template`,
+`abstract_base_controller?`) hold no boundary and try many candidate paths per
+`render`, so their conversion waits on a cardinality decision (#629). A presence
+row validates existence only: a directory replaced by a regular file at the same
+path (or the reverse) stays fresh although the predicate would now answer
+differently — a bound, not a realistic project edit.
 
 Two calls are deliberate. The predicates answer truthfully for every path
 and never raise — including outside the trusted-read scope, where they

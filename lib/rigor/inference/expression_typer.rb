@@ -13,6 +13,7 @@ require_relative "block_parameter_binder"
 require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
+require_relative "captured_locals"
 require_relative "dynamic_origin"
 require_relative "origin_lookup"
 require_relative "../effects/collector"
@@ -21,7 +22,9 @@ require_relative "flow_tracer"
 require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
+require_relative "mutation_widening"
 require_relative "narrowing"
+require_relative "receiver_alias"
 require_relative "singleton_object_constant"
 require_relative "optimistic_origin"
 require_relative "struct_fold_safety"
@@ -2921,8 +2924,9 @@ module Rigor
       # - a `nil` or non-`StatementsNode` body (`do … rescue … end` parses as a `BeginNode`) and a
       #   single-statement body — the overwhelming majority of blocks — pay nothing at all;
       # - a multi-statement body pays one DFS over its non-tail statements, and threads only when the tail
-      #   READS a variable name one of them WRITES ({#tail_depends_on_body_binding?}). That is exactly the
-      #   diagnosed shape, so a block whose tail does not consume the body's own bindings keeps today's type;
+      #   READS a variable name one of them WRITES or MUTATES IN PLACE ({#tail_depends_on_body_binding?}).
+      #   That is exactly the diagnosed shape, so a block whose tail does not consume the body's own
+      #   bindings keeps today's type;
       # - the fold is not re-entrant. `StatementEvaluator#eval_call` already evaluates each nested block body
       #   once, plus up to three more times under the ADR-56 `BodyFixpoint` when the block rebinds a captured
       #   local, so a fold nested inside a fold would multiply that work per block-nesting level. Inside a
@@ -3019,18 +3023,28 @@ module Rigor
       ].freeze
       private_constant :JUMP_BOUNDARY_NODES
 
-      # True when the tail statement observes a variable name one of the earlier statements binds — the only
-      # way threading the scope through the body can change the tail's type — AND no earlier statement can
-      # jump out of the block with a value. The name sets are compared sigil-and-all across kinds, so the
-      # answer over-approximates (an `@x` write plus an `x` read threads needlessly); over-approximating only
-      # spends the fold, it never changes an answer.
+      # True when the tail statement observes a variable name one of the earlier statements binds OR mutates
+      # in place — the two ways threading the scope through the body can change the tail's type — AND no
+      # earlier statement can jump out of the block with a value. The name sets are compared sigil-and-all
+      # across kinds, so the answer over-approximates (an `@x` write plus an `x` read threads needlessly);
+      # over-approximating only spends the fold, it never changes an answer.
+      #
+      # The in-place half is issue #587. `outer = []; m.synchronize do outer.push(1); outer end` binds no
+      # variable in its prefix — `push` is a call, not a write node — so a write-only scan declined and the
+      # tail kept the entry scope's empty `Tuple[]`, a wrong-precise answer (the runtime value is `[1]`) that
+      # hands downstream rules a provably-empty array. Threading is the fix, not a cost: `StatementEvaluator`
+      # runs `MutationWidening.widen_after_call` on the `push`, so the threaded tail reads the widened
+      # `Array[…]`. A call therefore contributes every variable its receiver can evaluate to
+      # ({ReceiverAlias.candidates} — the ternary-selected receiver of issue #277 included) whenever its name
+      # is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
+      # tables is what keeps "the scan says thread" and "threading changes something" the same predicate.
       #
       # Cost is two walks of the body, the second only when the first found a write and no jump — the same
       # order of cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below
       # re-typing. The prefix walk is hand-rolled rather than `Source::NodeWalker.each` because the two
       # questions it answers have different depths: a write is collected at ANY depth (a block is a closure,
-      # so `[1].each { v = 5 }` really does bind the outer `v`), while a jump counts only above the nearest
-      # {JUMP_BOUNDARY_NODES} boundary.
+      # so `[1].each { v = 5 }` really does bind the outer `v`, and `[1].each { outer << 1 }` really does
+      # mutate the outer `outer`), while a jump counts only above the nearest {JUMP_BOUNDARY_NODES} boundary.
       def tail_depends_on_body_binding?(statements)
         written = Set.new
         statements[0...-1].each do |statement|
@@ -3044,8 +3058,10 @@ module Rigor
         false
       end
 
-      # True when `node` cannot jump out of the block with a value, collecting its variable-write names into
-      # `written` on the way down. `retargeted` is true once the descent has passed a boundary.
+      # True when `node` cannot jump out of the block with a value, collecting into `written` the names it
+      # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call, through
+      # every variable its receiver can evaluate to) on the way down. `retargeted` is true once the descent
+      # has passed a boundary.
       #
       # A `Prism::DefinedNode`'s operand is never evaluated, so it is not descended into — the same rule
       # {Source::NodeWalker} applies, for the same reason: neither a write nor a jump under `defined?` runs.
@@ -3053,6 +3069,7 @@ module Rigor
         return false if !retargeted && JUMP_NODES.include?(node.class)
 
         written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
+        collect_mutated_receivers(node, written) if node.is_a?(Prism::CallNode)
         return true if node.is_a?(Prism::DefinedNode)
 
         child_retargeted = retargeted || JUMP_BOUNDARY_NODES.include?(node.class)
@@ -3060,6 +3077,12 @@ module Rigor
           return false unless prefix_statement_jump_free?(child, written, child_retargeted)
         end
         true
+      end
+
+      def collect_mutated_receivers(call_node, written)
+        return unless MutationWidening::SHAPE_MUTATORS.include?(call_node.name)
+
+        ReceiverAlias.candidates(call_node.receiver).each { |read| written << read.name }
       end
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
@@ -3133,10 +3156,76 @@ module Rigor
       end
 
       def per_element_body_results(block, element_types)
-        results = -> { element_types.map { |element_type| type_block_body_with_param(block, [element_type]) } }
+        captured = per_element_captured_bindings(block, element_types)
+        results = lambda do
+          element_types.map { |element_type| type_block_body_with_param(block, [element_type], captured: captured) }
+        end
         return results.call if element_types.size <= PER_ELEMENT_THREADING_LIMIT
 
         without_block_body_threading(&results)
+      end
+
+      # Issue #587 (b) — first-iteration pinning. Every position of this fold is typed from the SAME entry
+      # scope, so a body that rebinds a captured outer local answers the FIRST iteration's value at every
+      # position: `total = 0; [1, 2].map do total += 1; total end` folded to `[1, 1]` (runtime `[1, 2]`), and
+      # `r.first == 1` then folded to `true` — a live always-truthy on correct code. The ADR-56 fixpoint
+      # (`StatementEvaluator#write_back_block_captures`) already computes the honest binding of such a local
+      # — the join over the pre-call binding and every permitted iteration, value-pin widened, floored to
+      # `Dynamic[top]` on structural compounding (`x = [x]`) — but it runs AFTER the call is typed and feeds
+      # only the continuation. This fold runs the same `BodyFixpoint` over the same name set
+      # ({CapturedLocals.writes}) up front and binds each such local to its converged type in every
+      # position's entry scope, so a position answers what the local can be in ANY iteration
+      # (`[Integer, Integer]`), never what it was in the first.
+      #
+      # Only the rebound names move. A position whose tail reads an untouched captured local or a block-local
+      # keeps its exact fold (`[5, 5]`, `[42, 42]`), and a predicate that ignores the rebound counter still
+      # decides (`select do seen += 1; e > 1 end` still folds to `[2]`); a blanket decline would have lost all
+      # three for nothing. The fixpoint binds the block parameter to the union of the elements, so its cost
+      # is independent of the arity — which is why the per-element threading cap is NOT a reason to floor: a
+      # ninth element keeps `Integer` where it would otherwise keep the stale `0`.
+      #
+      # Under threading suppression — this fold nested inside another threaded body — the fixpoint's body
+      # evaluations are exactly the re-entrant cost the suppression exists to refuse, so the names take the
+      # escaping-block floor (`Dynamic[top]`) instead: cheaper, wider, still sound. A failure inside the
+      # fixpoint takes the same floor rather than the seed — a seed that reaches a position is the pin this
+      # exists to remove.
+      #
+      # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds nothing captured.
+      def per_element_captured_bindings(block, element_types)
+        names = CapturedLocals.writes(block, scope)
+        return nil if names.empty?
+        return captured_floor(names) if block_body_threading_suppressed?
+
+        begin
+          converged_captured_bindings(block, names, element_types)
+        rescue StandardError
+          captured_floor(names)
+        end
+      end
+
+      def captured_floor(names)
+        names.to_h { |name| [name, Type::Combinator.untyped] }
+      end
+
+      def converged_captured_bindings(block, names, element_types)
+        param_types = [Type::Combinator.union(*element_types)]
+        BodyFixpoint.converge(
+          names: names,
+          seed_bindings: names.to_h { |name| [name, scope.local(name)] },
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names) }
+        )
+      end
+
+      # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the
+      # same layering as {#type_block_body_with_param}), returning the per-name exit binding. Threading is
+      # suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
+      def captured_exit_bindings(block, param_types, bindings, names)
+        params = BlockParameterBinder.new(expected_param_types: param_types).bind(block)
+        entry = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = params.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
+        _type, exit_scope = without_block_body_threading { entry.evaluate(block.body) }
+        names.to_h { |name| [name, exit_scope.local(name)] }
       end
 
       def per_element_symbol_results(block_arg, element_types)
@@ -3547,9 +3636,12 @@ module Rigor
         end
       end
 
-      def type_block_body_with_param(block_node, expected_param_types)
+      # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local the body rebinds
+      # ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter still shadows.
+      def type_block_body_with_param(block_node, expected_param_types, captured: nil)
         bindings = BlockParameterBinder.new(expected_param_types: expected_param_types).bind(block_node)
-        block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_scope = bindings.reduce(block_scope) { |acc, (name, type)| acc.with_local(name, type) }
         type_block_body(block_node, block_scope)
       rescue StandardError
         nil

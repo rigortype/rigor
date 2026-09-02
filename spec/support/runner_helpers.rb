@@ -135,11 +135,15 @@ module RunnerHelpers
   # @yieldparam dir    [String] the project root.
   # @return [Rigor::Analysis::Result] for callers that prefer
   #   to assert outside the block.
-  # @raise [RuntimeError] via {InternalAnalyzerErrorGuard} if the
-  #   `Result` carries an `"internal analyzer error"` diagnostic —
-  #   a check rule or plugin crashed instead of running, which an
-  #   absence assertion would otherwise treat as "declined to
-  #   fire" (issue #665).
+  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed] via
+  #   {InternalAnalyzerErrorGuard} if the `Result` carries a
+  #   diagnostic from either analyzer-crash rescue site — a check
+  #   rule raising into the `"internal analyzer error"` diagnostic,
+  #   or a plugin raising out of `#diagnostics_for_file` /
+  #   `#prepare` into the `:plugin_loader` / `"runtime-error"`
+  #   diagnostic. Either means a rule or plugin crashed instead of
+  #   running, which an absence assertion would otherwise treat as
+  #   "declined to fire" (issue #665).
   def analyze(source = nil, files: {}, sig: {}, config: {}, explain: false, cache_store: :shared, &)
     effective_cache = cache_store == :shared ? RunnerHelpers.shared_cache_store : cache_store
 

@@ -36,8 +36,12 @@ module Rigor
     #   specs that need to run multiple analyses against the same project (e.g. cache invalidation tests).
     #
     # Both `run_plugin` and `run_plugin_in_dir` raise via {InternalAnalyzerErrorGuard} before returning if the
-    # `Result` carries an `"internal analyzer error"` diagnostic — a check rule or plugin crashed instead of
-    # running, which an absence assertion would otherwise treat as "the rule declined to fire" (issue #665).
+    # `Result` carries a diagnostic from either analyzer-crash rescue site — a check rule raising into the
+    # `"internal analyzer error"` diagnostic, or a PLUGIN raising out of `#diagnostics_for_file` / `#prepare`
+    # into the `:plugin_loader` / `"runtime-error"` diagnostic (which `plugin_diagnostics` below would
+    # otherwise silently exclude, since its `source_family` never matches `"plugin.<id>"`). Either one means
+    # a rule or plugin crashed instead of running, which an absence assertion would otherwise treat as "the
+    # rule declined to fire" (issue #665).
     #
     # ## Why not `before { unregister! }` automation?
     #

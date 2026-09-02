@@ -1045,8 +1045,8 @@ module Rigor
 
       # `Array.new(n, value)` and `Array.new(n)` (no value, default `nil`) lift to a per-position
       # `Tuple[…]` when `n` is a small `Constant<Integer>`. Cap at `ARRAY_NEW_TUPLE_LIMIT` (16)
-      # so a `Array.new(1_000_000)` does not balloon the carrier; oversize calls fall back to
-      # `Nominal[Array]`.
+      # so a `Array.new(1_000_000)` does not balloon the carrier; oversize calls fall through to
+      # the element-parameter seed below.
       #
       # #317 — `Array.new(n) { |i| ... }` fills every slot from the BLOCK's return type instead
       # of the two-arg `(n, default_value)` overload's `nil` fill. The block and the trailing
@@ -1062,10 +1062,80 @@ module Rigor
         return nil if arg_types.empty? || arg_types.size > 2
 
         size = array_new_size(arg_types.first)
-        return nil if size.nil? || size.negative? || size > ARRAY_NEW_TUPLE_LIMIT
+        if size && !size.negative? && size <= ARRAY_NEW_TUPLE_LIMIT
+          return Type::Combinator.tuple_of(*Array.new(size, block_type || array_new_fill(arg_types[1])))
+        end
 
-        fill = block_type || array_new_fill(arg_types[1])
-        Type::Combinator.tuple_of(*Array.new(size, fill))
+        array_new_seed(arg_types, block_type)
+      end
+
+      # The carrier for a constructor whose size is not a small literal — `Array.new(n)`,
+      # `Array.new(n, v)`, `Array.new(n) { … }`.
+      #
+      # This must never be a BARE `Array`. A nominal with no type argument carries no element
+      # arm, and the ADR-56 block/loop seams read exactly that as an ELEMENTLESS seed — a fresh
+      # accumulator whose every store the seam saw — so they CLOSE the carrier over the block's
+      # own stores. `acc = Array.new(n); [1].each { acc.push(1) }` then read `Array[1]` for an
+      # array whose other `n` slots hold `nil`, and `acc = Array.new(n, "x")` read `Array[1]` and
+      # drew `undefined method 'upcase'` on the correct `acc.first.upcase` (issue #615). Handing
+      # the seams a real element arm is what puts the constructor under the #586 rule, which
+      # keeps every seed arm through the join.
+      #
+      # The element itself is the fill value's / block result's type, value-pin widened for the
+      # reason `hash_new_lift` widens its default: the slots are rewritten over the array's
+      # lifetime, so pinning the parameter to the literal would let a later `a[i] == "x"`
+      # constant-fold.
+      #
+      # With no fill the element is `nil` — but only when the argument is provably a SIZE.
+      # `Array.new(x)` is Ruby's COPY form when its single argument is array-convertible
+      # (`Array.new([1, 2])` is `[1, 2]`, not two nils), and that overload exists only for the
+      # one-argument no-block call: `Array.new([1, 2], 0)` raises `TypeError`. So an unreadable
+      # size keeps the gradual arm rather than claiming a nil-filled array the program may never
+      # build.
+      def array_new_seed(arg_types, block_type)
+        fill = block_type || arg_types[1]
+        return array_seed_of(array_new_element(fill)) unless fill.nil?
+        return array_seed_of(Type::Combinator.constant_of(nil)) if array_new_integer_size?(arg_types.first)
+
+        array_seed_of(Type::Combinator.untyped)
+      end
+
+      def array_seed_of(element)
+        Type::Combinator.nominal_of("Array", type_args: [element])
+      end
+
+      # A fill / block result as an element PARAMETER. Value pinning is dropped, and a literal
+      # container widens to its nominal one step in: `Array.new(n) { [] }` builds n INDEPENDENT
+      # arrays that the program then appends to, and `Array[Tuple[]]` claims every one of them
+      # stays empty — the adjacency-list idiom would read `adj[i].first` as `nil`.
+      def array_new_element(type)
+        case type
+        when Type::Tuple
+          array_seed_of(type.elements.empty? ? Type::Combinator.untyped : element_union_of(type.elements))
+        when Type::HashShape
+          Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+        else
+          Type::Combinator.widen_value_pinned(type)
+        end
+      end
+
+      def element_union_of(elements)
+        widened = elements.map { |e| Type::Combinator.widen_value_pinned(e) }
+        widened.size == 1 ? widened.first : Type::Combinator.union(*widened)
+      end
+
+      # Whether a `Array.new` size argument is readable as an Integer, which is what rules the
+      # array-convertible COPY overload out. A `Union` must be Integer-ish on EVERY member: one
+      # array-shaped arm is enough to make the copy form live.
+      def array_new_integer_size?(type)
+        case type
+        when Type::Constant then type.value.is_a?(Integer)
+        when Type::Nominal then type.class_name == "Integer"
+        when Type::IntegerRange then true
+        when Type::Refined, Type::Difference then array_new_integer_size?(type.base)
+        when Type::Union then type.members.all? { |m| array_new_integer_size?(m) }
+        else false
+        end
       end
 
       def array_new_size(type)

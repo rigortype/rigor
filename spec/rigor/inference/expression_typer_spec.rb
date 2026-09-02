@@ -713,11 +713,14 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.elements).to eq([Rigor::Type::Combinator.constant_of(nil)] * 3)
     end
 
-    it "falls back to Nominal[Array] for an oversize Array.new(n)" do
+    it "falls back to Array[nil] for an oversize Array.new(n)" do
+      # Oversize drops the per-position tuple, not the element evidence: the constructor still
+      # put a `nil` in every slot.
       type = scope.type_of(parse_expression("Array.new(1000)"))
 
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
+      expect(type.type_args).to eq([Rigor::Type::Combinator.constant_of(nil)])
     end
 
     it "resolves Array.new(2) { \"s\" } as Tuple[\"s\", \"s\"] from the block's return (#317)" do
@@ -745,6 +748,72 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
       expect(type).to be_a(Rigor::Type::Tuple)
       expect(type.elements).to eq([Rigor::Type::Combinator.constant_of(nil)] * 2)
+    end
+
+    # Issue #615 — a NON-LITERAL size dropped the per-position tuple AND the element evidence,
+    # answering a bare `Array`. That carrier has no element arm at all, which is exactly what the
+    # ADR-56 block / loop seams read as an elementless seed, so they closed it over the block's
+    # own stores.
+    describe "Array.new with a non-literal size (#615)" do
+      def sized(source, size_type)
+        bound = scope.with_local(:n, size_type)
+        bound.type_of(parse_expression(source, scopes: [[:n]]))
+      end
+
+      def integer_size
+        Rigor::Type::Combinator.nominal_of("Integer")
+      end
+
+      def element_of(type)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        expect(type.type_args.size).to eq(1)
+        type.type_args.first
+      end
+
+      it "seeds Array[nil] when the size is readable as an Integer" do
+        expect(element_of(sized("Array.new(n)", integer_size))).to eq(Rigor::Type::Combinator.constant_of(nil))
+      end
+
+      it "keeps the element gradual when the size is unreadable" do
+        # `Array.new(x)` is Ruby's COPY overload when its single argument is array-convertible
+        # (`Array.new([1, 2])` is `[1, 2]`, not two nils), and only the one-argument no-block call
+        # has that overload. An unreadable size cannot rule it out, so claiming `nil` would invent
+        # a false receiver; the gradual arm is still an ARM, which is all the seams need.
+        expect(element_of(sized("Array.new(n)", Rigor::Type::Combinator.untyped))).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "keeps the element gradual for the literal copy form" do
+        expect(element_of(scope.type_of(parse_expression('Array.new(["x", "y"])')))).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "seeds the fill value's class, not its pinned value" do
+        # Value pinning is dropped for `hash_new_lift`'s reason: the slots are rewritten over the
+        # array's lifetime, so `Array["x"]` would let a later `a[i] == "x"` constant-fold.
+        element = element_of(sized('Array.new(n, "x")', Rigor::Type::Combinator.untyped))
+        expect(element).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      end
+
+      it "seeds the block's result for the block form" do
+        element = element_of(sized("Array.new(n) { 0 }", Rigor::Type::Combinator.untyped))
+        expect(element).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      end
+
+      it "widens a literal container result one step in" do
+        # `Array.new(n) { [] }` builds n INDEPENDENT arrays that the program then appends to;
+        # `Array[Tuple[]]` would claim every one of them stays empty, so `adj[i].first` reads nil.
+        element = element_of(sized("Array.new(n) { [] }", Rigor::Type::Combinator.untyped))
+        expect(element_of(element)).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "leaves the zero-argument constructor elementless" do
+        # Must-still-succeed: `Array.new` really does build an EMPTY array, so it carries no
+        # element arm and the seams close it over the block's stores exactly as `[]` is closed.
+        type = scope.type_of(parse_expression("Array.new"))
+
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.type_args).to be_empty
+      end
     end
 
     it "Hash.new(0) lifts to Hash[untyped, Integer] (B9 default-arg fold)" do

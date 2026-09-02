@@ -530,8 +530,10 @@ one a deliberate trade:
   Dynamic[top]]` where it read the closed `Array[1 | 2]`, and a `[x]`
   slot the engine cannot type keeps its arm, which the straight-line
   path's `gradual_seed` fixture already reads the same way. (`Array.new`
-  is NOT in this set: it types as a bare `Array` with no type args, which the
-  join reads as no elements, and still closes; a `Hash.new(default)` seed types
+  WAS not in this set: it typed as a bare `Array` with no type args, which
+  the join read as no elements, and still closed — and that turned out to be
+  the bug WD2.10 fixes rather than a case this rule excludes; a
+  `Hash.new(default)` seed types
   `Hash[Dynamic, V]` and now keeps its key arm (monotone, no diagnostic moves);
   `Array(x)` is wholly `Dynamic` and never reaches the join.)
   Each is a monotone imprecision on a rare spelling — `[]` dominates
@@ -686,6 +688,63 @@ that must still close (exact `assert_type`s — a rule that kept carriers
 would read `Array[1 | 3] | Array[2 | 3]` there), and the refuted nil arm
 with its `call.possible-nil-receiver` line set. Restoring the drop turns
 the must-not-fire half red and nothing else.
+
+### WD2.12 — A constructor that fills slots is never an elementless seed (2026-09-02, issue #615)
+
+WD2.9's own parenthetical named `Array.new` as a carrier the rule does
+not reach, and reading it as an exclusion was the mistake. A bare
+`Array` is not "a seed with a gradual arm the join must keep"; it is a
+carrier with **no element arm at all**, which is the exact shape the
+seams read as an ELEMENTLESS seed — a fresh accumulator whose every
+store they saw — so they close it over the block's own stores. The
+constructor that produced it, though, fills `n` slots the block never
+touched:
+
+    acc = Array.new(n, "x")
+    [1].each { acc.push(1) }
+    acc.first.upcase          # correct Ruby
+
+read `Array[1]` and drew `undefined method 'upcase' for 1`, and the
+no-fill form folded `acc.first == 1` always-truthy over an array of
+nils. Both are wrong-precise, not imprecise, and both are the #586 rule
+meeting the constructor fold's dynamic-size answer (#531).
+
+The seam is not what changes. The **constructor** is: `Array.new` with a
+non-literal size now seeds a real element parameter — the fill value's
+or block result's type for `Array.new(n, v)` / `Array.new(n) { … }`,
+`nil` for the no-fill form — so it reaches the seams as a declared-like
+`Nominal[Array, [E]]` and WD2.9 keeps that arm through the join
+unchanged. A small literal size keeps its per-position `Tuple` fold; the
+zero-argument `Array.new` really does build an empty array, so it keeps
+the elementless carrier and closes exactly as the `[]` literal does.
+
+Two element choices are load-bearing, and both are FP judgments rather
+than precision ones:
+
+- **The element is value-pin widened**, `hash_new_lift`'s reason: the
+  slots are rewritten over the array's lifetime, so `Array["x"]` would
+  let a later `acc[i] == "x"` constant-fold. A literal *container*
+  result widens one step in as well — `Array.new(n) { [] }` builds `n`
+  INDEPENDENT arrays that the program then appends to, and
+  `Array[Tuple[]]` claims every one of them stays empty, which reads
+  `adj[i].first` as `nil` on the adjacency-list idiom.
+- **`nil` is claimed only when the size is readable as an `Integer`.**
+  `Array.new(x)` is Ruby's array-convertible COPY overload when `x`
+  responds to `to_ary` (`Array.new([1, 2])` is `[1, 2]`, not two nils),
+  and only the one-argument no-block call has that overload —
+  `Array.new([1, 2], 0)` raises `TypeError`. An unreadable size cannot
+  rule it out, so the no-fill form keeps a gradual element there rather
+  than inventing a `nil` receiver on a `.first.upcase` the program runs
+  happily. Gradual is still an ARM, which is all the seams need; the
+  `nil` answer is the bonus where the size proves itself.
+
+Gate: the `array_new_dynamic_seed` fixture pins what every constructor
+form seeds and carries it through both seams (must-not-fire), against
+the fresh-seed siblings — the `[]` literal and the zero-argument
+`Array.new` — that must still close and still fire the exact
+`call.undefined-method` line set. Restoring the bare-`Array` answer
+turns the must-not-fire examples red and leaves the literal-size tuple
+fold untouched.
 
 ### WD3 — One mechanism, shared
 

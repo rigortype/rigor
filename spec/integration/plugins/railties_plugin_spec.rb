@@ -104,6 +104,147 @@ RSpec.describe "plugins/rigor-railties" do
         ['dump_type: "site-logger"', "dump_type: Dynamic[top]", "dump_type: Dynamic[top]"]
       )
     end
+
+    it "declines the reader the project defines on its own top-level `Rails` (#588)" do
+      # The syntactic gate alone retyped the project's own `Rails.logger` to `BroadcastLogger` over the
+      # project's definition. Zero diagnostics either way (both nominals are RBS-less), so this is the
+      # project's own answer surviving, not an FP fix. Third dump is the per-reader discrimination: the
+      # project defines `logger` and NOT `cache`, so only `logger` is yielded — a decline keyed on the
+      # constant rather than the reader would have dropped `Rails.cache` to `Dynamic[top]`.
+      source = <<~RUBY
+        module Rails
+          def self.logger
+            "project-logger"
+          end
+        end
+
+        Rigor.dump_type(Rails.logger)
+        Rigor.dump_type(::Rails.logger)
+        Rigor.dump_type(Rails.cache)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(
+        [
+          'dump_type: "project-logger"',
+          'dump_type: "project-logger"',
+          "dump_type: ActiveSupport::Cache::Store"
+        ]
+      )
+      expect(rules(result).uniq).to eq(["dump.type"])
+    end
+
+    it "declines a lexically nested `MyApp::Rails` reader for a bare `Rails` inside `MyApp` (#588)" do
+      # A bare `Rails` inside `module MyApp` is `MyApp::Rails` in Ruby, so the constant whose readers count
+      # is the nested one. Same per-reader discrimination in the second dump: `MyApp::Rails` defines
+      # `cache` only, so `Rails.logger` at that site keeps the framework nominal.
+      source = <<~RUBY
+        module MyApp
+          module Rails
+            def self.cache
+              :project_cache
+            end
+          end
+
+          def self.probe
+            Rigor.dump_type(Rails.cache)
+            Rigor.dump_type(Rails.logger)
+          end
+        end
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(
+        ["dump_type: :project_cache", "dump_type: ActiveSupport::BroadcastLogger"]
+      )
+      expect(rules(result).uniq).to eq(["dump.type"])
+    end
+
+    it "still types a reopened `module Rails` that answers none of the readers (#588)" do
+      # The must-still-type sibling that makes the gate READER-shaped rather than constant-shaped. Both
+      # halves are real Rails apps: mastodon's `lib/rails/engine_extensions.rb` reopens `module Rails` to
+      # hang an extension off it, and a compact `class Rails::HealthController` makes `Rails` a discovered
+      # constant through #528's synthesized namespace prefixes. Nothing in either shape answers
+      # `Rails.logger`, so declining would only give up #534's typing (261 mastodon sites) for `Dynamic[top]`.
+      source = <<~RUBY
+        module Rails
+          module EngineExtensions
+          end
+        end
+
+        class Rails::HealthController
+        end
+
+        Rigor.dump_type(Rails.logger)
+        Rigor.dump_type(Rails.cache)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(
+        ["dump_type: ActiveSupport::BroadcastLogger", "dump_type: ActiveSupport::Cache::Store"]
+      )
+      expect(rules(result).uniq).to eq(["dump.type"])
+    end
+
+    it "resolves `::Rails` at top level, never to a lexically nested shadow (#588)" do
+      # Ruby resolves a root-qualified constant at top level whatever the nesting is, so `::Rails.logger`
+      # inside `MyApp` is the framework's reader and `.info` is valid — even though `MyApp::Rails.logger`
+      # exists and returns a Symbol. Typing the site from the nested module's reader put a
+      # `call.undefined-method` on correct code; the empty-diagnostics assertion is the half that pins it.
+      source = <<~RUBY
+        module MyApp
+          module Rails
+            def self.logger
+              :nested
+            end
+          end
+
+          def self.probe
+            Rigor.dump_type(::Rails.logger)
+            ::Rails.logger.info("x")
+          end
+        end
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(["dump_type: ActiveSupport::BroadcastLogger"])
+      expect(rules(result).uniq).to eq(["dump.type"])
+    end
+
+    it "CONTROL: the nested reader's Symbol DOES raise undefined-method when it is really the receiver" do
+      # The must-fire discrimination for the example above: same nested `MyApp::Rails.logger` returning a
+      # Symbol, but named explicitly so no root-qualification is involved. `call.undefined-method` fires,
+      # proving the previous example's silence is `::Rails` resolving to the framework and not a harness
+      # that cannot report the rule at all.
+      source = <<~RUBY
+        module MyApp
+          module Rails
+            def self.logger
+              :nested
+            end
+          end
+
+          def self.probe
+            MyApp::Rails.logger.info("x")
+          end
+        end
+      RUBY
+      result = run_plugin(source: source)
+      expect(rules(result)).to include("call.undefined-method")
+    end
+
+    it "still types the framework `Rails` beside other project-defined modules" do
+      # The must-still-type sibling of the declines above: a discovered module elsewhere in the project is
+      # not a `Rails` definition, and the unresolved framework constant passes the type-side gate.
+      source = <<~RUBY
+        module MyApp
+          def self.probe
+            Rigor.dump_type(Rails.logger)
+          end
+        end
+
+        Rigor.dump_type(Rails.logger)
+      RUBY
+      result = run_plugin(source: source)
+      expect(dumps(result)).to eq(["dump_type: ActiveSupport::BroadcastLogger"] * 2)
+      expect(rules(result).uniq).to eq(["dump.type"])
+    end
   end
 
   describe "leniency — the reason the nominals are RBS-less" do

@@ -105,6 +105,11 @@ unconditionally when listed under `plugins:`.
 - **`duration / x` is not typed.** `1.day / 2` is a Duration but
   `1.day / 1.hour` is a plain `24`; the answer depends on the operand,
   so Rigor declines rather than guessing.
+- **`duration + Time` is not typed either.** `30.minutes + Time.now`
+  raises at runtime — `Duration#+` cannot coerce a Time, and `-`, `*`,
+  and a `Date` or `DateTime` on the right fail the same way — so Rigor
+  claims nothing for it. `Time.now + 30.minutes` is the form that has a
+  value, and it is typed `Time`.
 - **Project-private monkey-patches are not covered** — only real
   ActiveSupport extensions. For your own core-class patches see the
   `pre_eval:` mechanism ([ADR-17](../../adr/17-monkey-patch-pre-evaluation.md)).

@@ -44,7 +44,11 @@ module Rigor
     # `effects:` block ({Rigor::Plugin::Registry#effect_contributions} is lazy). The reader typing costs one
     # `ContributionIndex` name-gate probe per dispatch of a method actually named `logger` / `cache` /
     # `configuration` / `application` (ADR-52 WD1 compiles the `methods:` gate into the registry), and the
-    # block declines on the first check for anything whose receiver is not the `Rails` constant.
+    # block declines on the first check for anything whose receiver is not the `Rails` constant. The reader
+    # gate ({#project_defined_reader?}) runs only after that syntactic gate passes, so it is confined to
+    # `Rails.`-shaped sites. It runs for BOTH spellings; what `::Rails` skips is only the `Scope#type_of`
+    # half, because the root-qualified name is answered directly ({#resolved_rails_constant_name}) — the
+    # `discovered_methods` hash read happens either way.
     class Railties < Rigor::Plugin::Base
       manifest(
         id: "railties",
@@ -114,12 +118,15 @@ module Rigor
       # define on its own objects, so the receiver gate is syntactic and exact: the literal `Rails` constant,
       # bare or root-qualified (`::Rails`). A `receivers:` gate cannot express it — the `Rails` constant is
       # unresolved in a project with no Rails RBS, so the receiver type is `Dynamic` and
-      # `dynamic_return_receiver_class_name` yields nil.
-      dynamic_return methods: RAILS_SINGLETON_READER_TYPES.keys do |call_node, _scope|
+      # `dynamic_return_receiver_class_name` yields nil. The one thing the type side CAN see is the opposite
+      # case — the project defining this very reader on its own `Rails` — and that is the second gate
+      # ({#project_defined_reader?}).
+      dynamic_return methods: RAILS_SINGLETON_READER_TYPES.keys do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
         next nil unless call_node.arguments.nil? # `Rails.logger`, not `Rails.logger(x)`
         next nil unless call_node.block.nil?
         next nil unless rails_constant_receiver?(call_node.receiver)
+        next nil if project_defined_reader?(call_node, scope)
 
         class_name = RAILS_SINGLETON_READER_TYPES[call_node.name]
         next nil if class_name.nil?
@@ -127,9 +134,13 @@ module Rigor
         Rigor::Type::Combinator.nominal_of(class_name)
       end
 
-      # ADR-88 WD1 — the reader types are a static table, and the effect rows are built from the manifest;
-      # nothing here scans a project file, so the plugin contributes no cross-file state and a project that
-      # enables it stays incremental-capable.
+      # ADR-88 WD1 — the reader types are a static table and the effect rows are built from the manifest, so
+      # the plugin holds no state of its own that a fingerprint would have to observe, and a project that
+      # enables it stays incremental-capable. The one project-derived input is the {#project_defined_reader?}
+      # gate's `discovered_methods` read, and that does NOT need to ride this sentinel: it goes through
+      # `Rigor::Reflection.discovered_method?`, which records the ADR-46 negative dependency on a miss, so a
+      # warm `--incremental` re-check invalidates the gated sites the same way the engine's own cross-file
+      # method reads are invalidated — per consumer and per symbol, not by refusing the snapshot wholesale.
       def incremental_state_fingerprint
         "static-rails-readers"
       end
@@ -145,6 +156,52 @@ module Rigor
         when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Rails
         else false
         end
+      end
+
+      # #588 — the syntactic gate cannot tell the framework's `Rails` from a `Rails` the project declares
+      # itself, and when the project declares `def self.logger` on it, retyping the site to
+      # `BroadcastLogger` buries the project's own answer for its own constant. Listing this plugin beside
+      # such a definition is a self-contradictory configuration (activation is the `plugins:` list alone —
+      # no lockfile gate notices the framework is absent), but the project's definition is the honest type.
+      #
+      # The gate is deliberately the READER, not the constant. "The project has a `Rails` constant" is far
+      # too wide: a real Rails app reopens `module Rails` to hang an initializer or an engine extension off
+      # it (mastodon's `lib/rails/engine_extensions.rb`), and a compact `class Rails::HealthController`
+      # synthesizes the namespace on its own (#528) — in both shapes NOTHING answers `Rails.logger` but the
+      # framework, so declining there would only drop the site back to `Dynamic[top]` and give up #534's
+      # 261 mastodon sites for nothing. Declining only when the project defines the very method being
+      # called keeps the reopen typed and still yields the constant to whoever owns it.
+      #
+      # Diagnostics-silent either way when the project's definition exists (both nominals are RBS-less), so
+      # this half is precision-honesty rather than a false-positive fix; the reader-not-constant narrowing
+      # is what keeps it from being a precision regression.
+      def project_defined_reader?(call_node, scope)
+        owner = resolved_rails_constant_name(call_node.receiver, scope)
+        return false if owner.nil?
+
+        Rigor::Reflection.discovered_method?(owner, call_node.name, kind: :singleton, scope: scope)
+      end
+
+      # The constant name this receiver ACTUALLY resolves to, or nil when it resolves to nothing the
+      # project declares (the ordinary case: the framework's `Rails` is unresolved without a Rails RBS, so
+      # it types `Dynamic` and no name comes back).
+      #
+      # `::Rails` is answered directly rather than through the engine. Ruby resolves a root-qualified
+      # constant at top level whatever the lexical nesting is, but `Source::ConstantPath.qualified_name_or_nil`
+      # renders a parent-less `ConstantPathNode` as the bare `"Rails"` (lib/rigor/source/constant_path.rb),
+      # so `Scope#type_of` then walks it LEXICALLY and answers `MyApp::Rails` for a `::Rails` written inside
+      # `module MyApp`. That engine bug is older than this gate and belongs to the engine; consulting the
+      # top-level name here keeps the plugin from inheriting it and typing `::Rails.logger` as a nested
+      # module's reader. A bare `Rails` goes through `Scope#type_of` precisely so that Ruby's lexical walk
+      # — `Module.nesting` innermost-first, then project ancestors, then top level
+      # ({Rigor::Reflection.resolve_constant_type}) — is the engine's single implementation and not a second
+      # one here.
+      def resolved_rails_constant_name(receiver, scope)
+        return nil if scope.nil?
+        return "Rails" if receiver.is_a?(Prism::ConstantPathNode) # the gate guarantees `parent.nil?`
+
+        receiver_type = scope.type_of(receiver)
+        receiver_type.class_name if receiver_type.is_a?(Rigor::Type::Singleton)
       end
     end
 

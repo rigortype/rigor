@@ -130,13 +130,19 @@ module Rigor
       #
       # `/` is deliberately absent: `1.day / 2` is a Duration but `1.day / 1.hour` is a plain `24`, and the
       # answer depends on the operand kind in a way this table would have to guess at. So is
-      # `Duration * Duration` — not a quantity Rails promises anything about.
+      # `Duration * Duration` — not a quantity Rails promises anything about. So is a Duration RECEIVER
+      # with a `Time` / `DateTime` / `Date` argument (#588): `30.minutes + Time.now` raises, under every
+      # operator — the table types values, and a crashing expression has none.
 
       # Receiver class → what `receiver <op> duration` is. `Time` / `DateTime` keep their own kind; `Date`
       # widens to the two kinds `Duration#since` can produce; a numeric or another Duration is a Duration.
       DURATION_ARITHMETIC_SELF_KINDS = %w[Time DateTime].freeze
       DURATION_ARITHMETIC_NUMERIC_KINDS = %w[Integer Float Numeric].freeze
       DURATION_ARITHMETIC_DATE_KINDS = %w[Date Time].freeze
+
+      # The operand kinds whose arithmetic with a Duration is itself a Duration — on BOTH sides of the
+      # operator. See {#duration_valued_pair?} for why the argument side is checked too.
+      DURATION_VALUED_OPERAND_KINDS = %i[duration numeric].freeze
 
       dynamic_return methods: %i[+ - *] do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
@@ -146,10 +152,14 @@ module Rigor
 
         # The ARGUMENT is checked before the receiver: it is the cheaper of the two on the overwhelmingly
         # common shapes (`i + 1`, `n * 2`), and a call with no Duration operand must cost as little as
-        # possible — this rule is consulted on every `+` / `-` / `*` in the project.
+        # possible — this rule is consulted on every `+` / `-` / `*` in the project. The early exit is
+        # what makes the ordering worth anything: an argument that is no Duration operand at all
+        # (`"a" + b`, `list + other`) declines here and never types its receiver on this rule's behalf.
         argument_kind = duration_operand_kind(scope&.type_of(argument))
+        next nil if argument_kind.nil?
+
         receiver_kind = duration_operand_kind(scope&.type_of(call_node.receiver))
-        next nil if receiver_kind.nil? || argument_kind.nil?
+        next nil if receiver_kind.nil?
 
         duration_arithmetic_result(call_node.name, receiver_kind, argument_kind)
       end
@@ -218,15 +228,27 @@ module Rigor
         elsif receiver_kind == :date
           # `Date` ± Duration → whichever kind the duration's parts make of it.
           return date_arithmetic_union if operator != :*
-        elsif %i[duration numeric].include?(receiver_kind)
+        elsif duration_valued_pair?(operator, receiver_kind, argument_kind)
           # Duration ± Duration, Duration ± numeric, numeric ± Duration, and the `*` forms of each: a
-          # Duration, via `Duration#coerce`'s `Duration::Scalar` wrapper. `Duration * Duration` is
-          # excluded — it is not a meaningful quantity and Rails does not promise one.
-          unless operator == :* && receiver_kind == :duration && argument_kind == :duration
-            return Rigor::Type::Combinator.nominal_of(DURATION_NOMINAL)
-          end
+          # Duration, via `Duration#coerce`'s `Duration::Scalar` wrapper.
+          return Rigor::Type::Combinator.nominal_of(DURATION_NOMINAL)
         end
         nil
+      end
+
+      # The pairs whose value is a Duration: a Duration or numeric on BOTH sides, minus `Duration *
+      # Duration` (not a quantity Rails promises). The argument side of the check is #588 — a Duration
+      # receiver with a `Time` / `DateTime` / `Date` argument is an expression that RAISES:
+      # `30.minutes + Time.now` adds the Time to the seconds part and `Integer#+` cannot coerce it
+      # (TypeError), `30.minutes - Time.now` sends `-@` to the Time (NoMethodError), and `*` is a
+      # TypeError from `Duration#calculate` — 7/7 shapes measured on ActiveSupport 8.1. Claiming
+      # `Duration` there would type crashing code; declining leaves the RBS-less receiver lenient, which
+      # is the honest answer for an expression that has no value.
+      def duration_valued_pair?(operator, receiver_kind, argument_kind)
+        return false unless DURATION_VALUED_OPERAND_KINDS.include?(receiver_kind)
+        return false unless DURATION_VALUED_OPERAND_KINDS.include?(argument_kind)
+
+        !(operator == :* && receiver_kind == :duration && argument_kind == :duration)
       end
 
       def date_arithmetic_union

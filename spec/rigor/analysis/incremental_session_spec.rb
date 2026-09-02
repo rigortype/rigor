@@ -57,6 +57,28 @@ module Rigor
           nil
         end
       end
+
+      # #588 fixture — stands in for rigor-railties' `Rails.` reader gate: a contribution that types
+      # `Widget.build` only while the PROJECT does not define that singleton method itself, asked through
+      # `Rigor::Reflection.discovered_method?`. `incremental_state_fingerprint` mirrors railties so the
+      # fixture is non-opaque (ADR-88 WD1) and its snapshot is reusable, which is the state the staleness
+      # this exercises appears in.
+      class ProjectDefGateProbe < Base
+        manifest(id: "project-def-gate", version: "0.1.0")
+
+        dynamic_return methods: [:build] do |call_node, scope|
+          next nil unless call_node.is_a?(Prism::CallNode)
+          next nil unless call_node.receiver.is_a?(Prism::ConstantReadNode)
+          next nil unless call_node.receiver.name == :Widget
+          next nil if Rigor::Reflection.discovered_method?("Widget", :build, kind: :singleton, scope: scope)
+
+          Rigor::Type::Combinator.nominal_of("PluginGadget")
+        end
+
+        def incremental_state_fingerprint
+          "static-widget-gate"
+        end
+      end
     end
   end
 end
@@ -248,6 +270,87 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
 
         expect(recheck.affected).not_to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+  end
+
+  # #588 — the same negative edge for a PLUGIN's project-definition gate. `Rigor::Reflection.discovered_method?`
+  # is the facade a contribution tier reads to ask "does the project define this method itself?", and a
+  # contribution answers BEFORE dispatch reaches the engine's recording accessors (`Scope#user_def_for` /
+  # `#singleton_def_for`), so nothing else records the miss. Without the edge a warm recheck kept serving the
+  # plugin's answer after the project added the def — rigor-railties' `Rails.logger` gate is the live caller.
+  describe "plugin project-definition gate (#588)" do
+    def gate_requirer
+      lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::ProjectDefGateProbe)
+        true
+      end
+    end
+
+    def gate_config(dir)
+      Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [dir], "plugins" => ["project-def-gate"])
+      )
+    end
+
+    def gate_session(config, dir)
+      Rigor::Plugin.unregister!
+      described_class.new(configuration: config, paths: [dir], plugin_requirer: gate_requirer)
+    end
+
+    # The oracle: a full re-analysis of the edited tree under the same plugin.
+    def gate_full_run(config)
+      Rigor::Plugin.unregister!
+      Rigor::Analysis::Runner.new(
+        configuration: config, cache_store: nil, plugin_requirer: gate_requirer
+      ).run.diagnostics
+    end
+
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    it "re-checks the gated consumer when the project defines the gated method" do
+      Dir.mktmpdir do |dir|
+        definer = File.join(dir, "widget.rb")
+        consumer = File.join(dir, "consumer.rb")
+        File.write(definer, "module Widget\nend\n")
+        File.write(consumer, "Rigor.dump_type(Widget.build)\n")
+
+        config = gate_config(dir)
+        session = gate_session(config, dir)
+        # Baseline: the project defines no `Widget.build`, so the plugin's contribution stands.
+        expect(session.baseline.map(&:message)).to include("dump_type: PluginGadget")
+
+        # The project now answers `Widget.build` itself — the gate declines, so the consumer's cached
+        # answer is stale and only the negative edge can pull it back into the closure.
+        File.write(definer, "module Widget\n  def self.build\n    1\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(consumer)
+        expect(recheck.diagnostics.map(&:message)).not_to include("dump_type: PluginGadget")
+        expect(sorted(recheck.diagnostics)).to eq(sorted(gate_full_run(config)))
+      end
+    end
+
+    it "does not re-check the gated consumer when an unrelated method appears" do
+      Dir.mktmpdir do |dir|
+        definer = File.join(dir, "widget.rb")
+        consumer = File.join(dir, "consumer.rb")
+        File.write(definer, "module Widget\nend\n")
+        File.write(consumer, "Rigor.dump_type(Widget.build)\n")
+
+        config = gate_config(dir)
+        session = gate_session(config, dir)
+        session.baseline
+
+        # `Widget.other` is not the symbol the gate missed, so the consumer must stay served from cache —
+        # the negative edge is per-symbol, not "any edit to a file the gate looked at".
+        File.write(definer, "module Widget\n  def self.other\n    1\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).not_to include(consumer)
+        expect(recheck.diagnostics.map(&:message)).to include("dump_type: PluginGadget")
+        expect(sorted(recheck.diagnostics)).to eq(sorted(gate_full_run(config)))
       end
     end
   end

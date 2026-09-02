@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "type"
+require_relative "analysis/dependency_recorder"
 
 module Rigor
   # Read-side facade over Rigor's three reflection sources:
@@ -340,8 +341,25 @@ module Rigor
     # @param kind [:instance, :singleton]
     # @return [Boolean] true when the ScopeIndexer recorded a `def` for the given method on
     #   the given class with the matching kind.
+    #
+    # ADR-46 — a MISS records a negative cross-file dependency, so a consumer whose analysis
+    # turned on "the project does not define this method" is re-checked once a later edit
+    # defines it. The engine's own dispatch gets that edge from
+    # `Scope#record_cross_file_method`, but this facade is what a PLUGIN gate reads, and a
+    # contribution tier answers before dispatch reaches the engine's recording accessors —
+    # rigor-railties declines its `Rails.logger` typing exactly on this probe. Without the
+    # edge a warm `--incremental` run kept serving the plugin's answer after the project
+    # added `def self.logger`. The key grammar is the one `IncrementalSession#negative_key_for`
+    # inverts against (`Class#method` instance-side, `Class.method` singleton-side), which is
+    # also what `Incremental.appeared_symbols` emits for a newly-defined method.
     def discovered_method?(class_name, method_name, kind: :instance, scope: Scope.empty)
-      scope.discovered_method?(class_name, method_name, kind)
+      return true if scope.discovered_method?(class_name, method_name, kind)
+
+      if Analysis::DependencyRecorder.active?
+        symbol = "#{class_name}#{kind == :singleton ? '.' : '#'}#{method_name}"
+        Analysis::DependencyRecorder.read_missing(:method, symbol)
+      end
+      false
     end
   end
 end

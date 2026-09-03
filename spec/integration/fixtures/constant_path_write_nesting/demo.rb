@@ -126,6 +126,19 @@ module Dyn
 
   holder = Post
   holder::LATE = Post
+
+  # The OVER-EAGER witness (https://github.com/rigortype/rigor/issues/705). A read from
+  # INSIDE the writing module is the only position that can pin this direction: a key
+  # qualified by the enclosing declaration (`Dyn::LATE`) sits on the INNERMOST rung of the
+  # lexical ladder, so it outranks the RBS top-level `LATE` here while a top-level read
+  # never reaches it. Guessing that key answers `singleton(Dyn::Post)` and fires
+  # `undefined method 'top_post'` on this correct call.
+  class Reader
+    def read_dynamic_write_in_namespace
+      assert_type("singleton(Post)", LATE)
+      LATE.new.top_post
+    end
+  end
 end
 
 # The mutation census (#540) rides on the same key. `Table::ROWS[key] = 1` mutates

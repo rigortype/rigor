@@ -492,10 +492,11 @@ RSpec.describe "Rigor type construction (integration)" do
     # fully-qualified one the mis-keying broke and the in-namespace one the rvalue typing
     # broke — plus the arms that must NOT move (a top-level write, an unattributable
     # namespace, a rooted `::Registry`, and the two top-level reads a `self::` or
-    # dynamic-base write must not capture), the innermost-owned pair whose two spellings
-    # must answer alike, and the #540 mutation-widening pair that rides on the same key.
+    # dynamic-base write must not capture), the #705 over-eager witness read from INSIDE
+    # the writing module, the innermost-owned pair whose two spellings must answer alike,
+    # and the #540 mutation-widening pair that rides on the same key.
     it "still asserts every read spelling of the recorded writes" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(13)
+      expect(marked_lines(harness, "assert_type(").size).to eq(14)
     end
 
     # The false-positive arm: every assertion is followed by a call only the correctly

@@ -20,6 +20,9 @@ LATE: singleton(Post)
 module Dyn
   class Post
   end
+
+  class Reader
+  end
 end
 
 module Admin

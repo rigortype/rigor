@@ -139,7 +139,8 @@ module Rigor
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
     def user_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> [untyped?, String?]
-    def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo) -> void
+    def discovered_method_through_ancestors?: (String | Symbol? class_name, String | Symbol method_name, Symbol kind, ?name_memo: Hash[untyped, untyped]) -> bool
+    def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
     def ancestor_name_candidates: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
     def singleton_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?

@@ -742,19 +742,28 @@ module Rigor
           method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
           return nil if method_def
 
-          # Module-mixin fallback (mirror of
-          # `MethodDispatcher#user_class_fallback_receiver`'s module
-          # path): an instance method on a module-mixin like
-          # `PP::ObjectMixin` observes Kernel / Object methods
-          # through every concrete includer's ancestor chain, so an
-          # unresolved `self.inspect` / `self.respond_to?` /
-          # `self.class` MUST NOT fire `undefined-method`. Retry
-          # against Object before the rule fires.
-          return nil if module_mixin_receiver?(receiver_type, scope) &&
-                        lookup_method(receiver_type, "Object", call_node.name, scope)
+          return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind)
 
           definition_site = project_definition_site(scope, class_name, call_node.name, kind)
           build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
+        end
+
+        # The two probes that run only once every cheaper answer has come back "absent", kept together
+        # because they share that position and nothing else.
+        #
+        # - Module-mixin fallback (mirror of `MethodDispatcher#user_class_fallback_receiver`'s module
+        #   path): an instance method on a module-mixin like `PP::ObjectMixin` observes Kernel / Object
+        #   methods through every concrete includer's ancestor chain, so an unresolved `self.inspect` /
+        #   `self.respond_to?` / `self.class` MUST NOT fire. Retry against Object first.
+        # - Issue #723 — the project's own ancestry. Everything above answered "the RBS does not have
+        #   it"; a project ancestor still might, and the typer has already resolved the site through
+        #   exactly this walk. It is last because it is the only probe here that walks the class graph
+        #   (see {#ancestry_declares_method?} for why that placement is load-bearing, not tidiness).
+        def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind)
+          return true if module_mixin_receiver?(receiver_type, scope) &&
+                         lookup_method(receiver_type, "Object", call_node.name, scope)
+
+          ancestry_declares_method?(scope, class_name, call_node.name, kind)
         end
 
         # ADR-17 — when the project itself defines this method on the
@@ -793,6 +802,22 @@ module Rigor
           return true if scope.discovered_method?(class_name, method_name, kind)
 
           project_patched_method?(scope, class_name, method_name, kind)
+        end
+
+        # Issue #723 — the same question as {#source_declared_method?}, asked through the project's own
+        # ANCESTRY rather than the receiver's name alone. A class whose `sig/` declares it without its
+        # project superclass typed `:admin_val` under `dump_type` and drew `undefined method 'admin_val'`
+        # at the same column of the same run: the probe read a name-keyed table while the typer resolved
+        # the call through the class graph.
+        #
+        # It is deliberately NOT folded into `source_declared_method?`, which every `call.*` rule consults
+        # early on its hot path. The walk reads `Scope#superclass_of` / `#includes_of`, and those record an
+        # ADR-46 file-level ancestry edge; running it for every call would have made `Widget.new` — a call
+        # RBS answers, that never reaches a verdict — record an ancestry dependency on `Widget`'s
+        # declaring file, coarsening incremental invalidation for the whole project. Asked HERE, one step
+        # before the diagnostic is built, the edge is recorded exactly where the answer depended on it.
+        def ancestry_declares_method?(scope, class_name, method_name, kind)
+          scope.discovered_method_through_ancestors?(class_name, method_name, kind)
         end
 
         # ADR-17 § "Inference contract" — consults
@@ -1533,8 +1558,11 @@ module Rigor
           return true if scope.discovered_method?(class_name, method_name, :instance)
           return true unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
           return true unless definition_available?(member, class_name, scope)
+          return true if lookup_method(member, class_name, method_name, scope)
 
-          !lookup_method(member, class_name, method_name, scope).nil?
+          # Issue #723 — the arm's own RBS does not have it; its project ancestry still might. Last, for
+          # the reason {#ancestry_declares_method?} carries: this is the probe that walks the class graph.
+          ancestry_declares_method?(scope, class_name, method_name, :instance)
         end
 
         def nil_class_has_method?(method_name, scope)

@@ -1,0 +1,27 @@
+module Ethon
+  class Easy
+    def initialize: (?Hash[Symbol, untyped] options) -> void
+    def url=: (String url) -> String
+    def url: () -> String?
+    def perform: () -> Integer
+    def response_code: () -> Integer
+    def return_code: () -> Symbol
+    def total_time: () -> Float
+    def response_body: () -> String
+    def response_headers: () -> String
+    def handle: () -> FFI::Pointer
+  end
+
+  class Multi
+    def initialize: (?Hash[Symbol, untyped] options) -> void
+    def add: (Easy easy) -> void
+    def perform: () -> void
+  end
+
+  module Curl
+    def self.easy_init: () -> FFI::Pointer
+    def self.easy_cleanup: (FFI::Pointer handle) -> void
+    def self.easy_perform: (FFI::Pointer handle) -> Integer
+    def self.set_option: (Symbol option, untyped value, FFI::Pointer handle) -> Integer
+  end
+end

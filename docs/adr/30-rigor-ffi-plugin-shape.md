@@ -1,6 +1,6 @@
 # ADR-30 — `rigor-ffi` plugin shape
 
-Status: **Proposed, 2026-05-25.**
+Status: **Accepted, 2026-09-03.**
 
 Records the decision to ship a
 core `rigor-ffi` plugin covering the common `ffi` gem machinery

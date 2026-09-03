@@ -1,0 +1,24 @@
+module SassC
+  class Engine
+    def initialize: (String template, ?Hash[Symbol, untyped] options) -> void
+    def render: () -> String
+  end
+
+  module Native
+    class SassDataContextPtr < FFI::Pointer
+    end
+
+    class SassOptionsPtr < FFI::Pointer
+    end
+
+    class SassContextPtr < FFI::Pointer
+    end
+
+    def self.make_data_context: (String src) -> SassDataContextPtr
+    def self.compile_data_context: (SassDataContextPtr dctx) -> Integer
+    def self.data_context_get_options: (SassDataContextPtr dctx) -> SassOptionsPtr
+    def self.data_context_get_context: (SassDataContextPtr dctx) -> SassContextPtr
+    def self.context_get_output_string: (SassContextPtr ctx) -> String
+    def self.delete_data_context: (SassDataContextPtr dctx) -> void
+  end
+end

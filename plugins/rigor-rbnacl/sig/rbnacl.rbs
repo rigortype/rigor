@@ -1,0 +1,22 @@
+module RbNaCl
+  class SecretBox
+    def initialize: (String key) -> void
+    def encrypt: (String nonce, String message) -> String
+    def decrypt: (String nonce, String ciphertext) -> String
+  end
+
+  module Signatures
+    module Ed25519
+      class SigningKey
+        def initialize: (String seed) -> void
+        def sign: (String message) -> String
+        def verify_key: () -> VerifyKey
+      end
+
+      class VerifyKey
+        def initialize: (String key) -> void
+        def verify: (String signature, String message) -> bool
+      end
+    end
+  end
+end

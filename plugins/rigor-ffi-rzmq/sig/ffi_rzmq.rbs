@@ -1,0 +1,29 @@
+module ZMQ
+  REQ: Integer
+  REP: Integer
+  PUB: Integer
+  SUB: Integer
+  DONTWAIT: Integer
+  SNDMORE: Integer
+
+  class Context
+    def self.new: (?Integer io_threads) -> instance
+    def socket: (Integer type) -> Socket?
+    def terminate: () -> Integer
+  end
+
+  class Socket
+    def connect: (String endpoint) -> Integer
+    def bind: (String endpoint) -> Integer
+    def send_string: (String message, ?Integer flags) -> Integer
+    def recv_string: (String message, ?Integer flags) -> Integer
+    def close: () -> Integer
+  end
+end
+
+module LibZMQ
+  def self.zmq_ctx_new: () -> FFI::Pointer
+  def self.zmq_socket: (FFI::Pointer context, Integer type) -> FFI::Pointer
+  def self.zmq_close: (FFI::Pointer socket) -> Integer
+  def self.zmq_msg_init: (FFI::Pointer msg) -> Integer
+end

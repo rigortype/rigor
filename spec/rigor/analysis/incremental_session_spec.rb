@@ -1546,8 +1546,16 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(acc, "class Acc\n  def self.fill(items)\n    items\n  end\nend\n")
         caller = File.join(dir, "caller.rb")
         # `Rigor.dump_type(1)` — see the `write_pair` comment above.
-        File.write(caller,
-                   "class Reader\n  def run\n    Rigor.dump_type(1)\n    a = [1]\n    Acc.fill(a)\n    a.first\n  end\nend\n")
+        File.write(caller, <<~RUBY)
+          class Reader
+            def run
+              Rigor.dump_type(1)
+              a = [1]
+              Acc.fill(a)
+              a.first
+            end
+          end
+        RUBY
         session = session_for(configuration(dir))
         guarded_baseline(session)
 

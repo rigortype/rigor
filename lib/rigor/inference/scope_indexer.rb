@@ -3587,7 +3587,7 @@ module Rigor
                                        constant_literal_value(node.value), writes, seen)
         when Prism::ConstantPathWriteNode
           record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
-                                       constant_literal_value(node.value), writes, seen)
+                                       constant_path_write_literal(node, self_owner), writes, seen)
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, writes, seen)
         when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
@@ -3622,19 +3622,46 @@ module Rigor
       # censuses key a path write differently until that is settled.
       # `self::BAR = …` names whatever `self` is at that point, which the walk carries in `self_owner`
       # ([#705](https://github.com/rigortype/rigor/issues/705)) — the enclosing lexical namespace in an
-      # ordinary body, the receiver inside a `class_eval` block, and nothing nameable where `self` was
-      # rebound to a class no constant names. Any other dynamic receiver (`klass::BAR = …`) cannot be
-      # attributed to a namespace at all, so it falls back to the bare last segment: over-suppressing a
-      # top-level name is gradual typing, which is the safe direction, whereas guessing a namespace would
-      # suppress the wrong name.
+      # ordinary body, the receiver inside a `class_eval` block. Where that `self` is {OPAQUE_SELF}, and for
+      # any other dynamic receiver (`klass::BAR = …`), the target is "some class, then `::BAR`" and the name
+      # falls back to the bare last segment — the one spelling that class could make it, `Object`. Suppressing
+      # a top-level name is gradual typing, which is the safe direction here; the VALUE is what such a write
+      # must not contribute ({#constant_path_write_literal}).
       def constant_path_write_name(target, qualified_prefix, self_owner = nil)
         full = Source::ConstantPath.qualified_name_or_nil(target)
         return full if full
 
         base = target.name&.to_s
         return nil if base.nil?
+        return base unless target.parent.is_a?(Prism::SelfNode)
 
-        target.parent.is_a?(Prism::SelfNode) ? self_write_name(qualified_prefix, self_owner, base) : base
+        self_write_name(qualified_prefix, self_owner, base) || base
+      end
+
+      # The publishable literal a path write contributes — none, whenever its base is not statically
+      # nameable ([#705](https://github.com/rigortype/rigor/issues/705)). `[Foo].each { |k| k::X = 1 }`
+      # renders as the bare `X`, and publishing `1` under it handed every reader of the top-level `X` a value
+      # the program never has: `X == 2` folded to `false`, and in the WRITING file — where
+      # `Scope#local_constant_names` exempts the name from #644's withholding guard —
+      # `flow.always-truthy-condition` then fired on correct code.
+      #
+      # The NAME still enters the census, because a decline means opposite things in the two censuses. In the
+      # typed one, recording no type is gradual. Here, recording nothing would leave ANOTHER file's value for
+      # the name trusted — silence is the risky direction, and the census's own gradual answer is to say the
+      # name was touched and no value for it is safe.
+      def constant_path_write_literal(node, self_owner)
+        return nil unless nameable_write_target?(node.target, self_owner)
+
+        constant_literal_value(node.value)
+      end
+
+      # True when the census can name what the write targets: a static constant path, or a `self::BAR` whose
+      # `self` the walk resolved to a class or module.
+      def nameable_write_target?(target, self_owner)
+        return true if Source::ConstantPath.qualified_name_or_nil(target)
+        return false unless target.parent.is_a?(Prism::SelfNode)
+
+        !self_owner.equal?(OPAQUE_SELF)
       end
 
       def qualified_write_name(qualified_prefix, base_name)

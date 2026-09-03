@@ -1,0 +1,1 @@
+- **[inference]** A constant assigned through a runtime receiver (`[Foo].each { |k| k::X = 1 }`) no longer publishes its value to the whole project under the bare `X`, so a later `if X == 2` in the same file is no longer reported as an always-false condition. ([#705](https://github.com/rigortype/rigor/issues/705))

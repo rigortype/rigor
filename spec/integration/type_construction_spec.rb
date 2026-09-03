@@ -506,6 +506,37 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #681 — the last member of the family, and the one path a stamp could not fix.
+  # `ExpressionTyper#build_user_method_body_scope` rebuilds a CALLEE's body scope from
+  # the receiver's type when it needs that callee's return, so nothing was in hand to
+  # stamp: the def-node index has to carry the chain recorded at the declaration for the
+  # re-walk to reproduce it. Until it did, the same `Post.new` typed one way where the
+  # walk reads it and another way through the value's consumer.
+  describe "fixtures/callee_rewalk_nesting/ — an inferred return keeps the callee's nesting" do
+    let(:harness) { harness_for("callee_rewalk_nesting") }
+
+    it "types a callee's return under the callee's own declaration nesting" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity, and the reason every arm is written as a compact / nested pair: an
+    # implementation that stopped peeling entirely satisfies each compact assertion and
+    # no nested twin, and the peel satisfies the reverse. The cross-class reader is the
+    # third arm — it proves the chain follows the CALLEE's declaration rather than the
+    # caller's, which no same-class pair can discriminate.
+    it "still asserts every inferred return, on both spellings" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(7)
+    end
+
+    # The false-positive arm. Each assertion is followed by a call only the correctly
+    # resolved class owns (`Post#top_post`, `Admin::Post#admin_post`), declared in the
+    # fixture's `sig/` so `call.undefined-method` can fire at all.
+    it "leaves no other diagnostic on the returned receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   describe "fixtures/tuple_access.rb — Tuple element typing" do
     let(:harness) { harness_for("tuple_access") }
 

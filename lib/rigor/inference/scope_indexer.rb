@@ -203,6 +203,8 @@ module Rigor
           seeded_scope.discovery.with(
             discovered_methods: methods_table,
             discovered_def_nodes: def_nodes,
+            discovered_def_nestings: merge_def_nestings(default_scope.discovery.discovered_def_nestings,
+                                                        build_def_nestings(root)),
             discovered_singleton_def_nodes: singleton_def_nodes,
             discovered_superclasses: superclasses,
             discovered_includes: includes,
@@ -211,6 +213,20 @@ module Rigor
             struct_member_layouts: struct_member_layouts
           )
         )
+      end
+
+      # Issue #681 — the per-file nesting table over the cross-file seed. Both are keyed by node identity, so
+      # a same-file declaration and its cross-file twin are distinct keys and the merge order is immaterial;
+      # the copy exists only so the seed stays frozen. Skipped when the file declares no nested `def`, which
+      # keeps a file of plain top-level helpers pointing at the seed itself.
+      def merge_def_nestings(seed, file_nestings)
+        return seed if file_nestings.empty?
+        return file_nestings if seed.empty?
+
+        merged = {}.compare_by_identity
+        merged.merge!(seed)
+        merged.merge!(file_nestings)
+        merged.freeze
       end
 
       # The per-file half of the #526 fold: mutable copies of the merged tables take the extends, and the
@@ -2122,6 +2138,65 @@ module Rigor
         end
       end
 
+      EMPTY_NESTING = [].freeze
+      private_constant :EMPTY_NESTING
+
+      # Issue #681 — `{Prism::DefNode => Module.nesting}` for every `def` the file declares inside a class or
+      # module body, keyed by node IDENTITY so the answer follows the DECLARATION rather than the class a
+      # call happens to dispatch on. `Inference::ExpressionTyper#build_user_method_body_scope` rebuilds a
+      # callee's body scope from the RECEIVER'S TYPE alone when it needs that callee's return, so unlike the
+      # census scopes (#692) there is no prefix in hand to stamp: recording the chain where the declaration is
+      # indexed is what makes the re-walk and the declaration walk agree BY CONSTRUCTION, which is the
+      # argument #685 used to make {Reflection.lexical_nesting_chain} the single owner.
+      #
+      # Keyed on the def node and not on `(class, method)` because an inherited body is re-walked with the
+      # SUBCLASS as receiver: `class Admin::CompactBase` declares `make`, `module Admin; class Child <
+      # CompactBase` calls it, and the bare `Post` inside `make` names `::Post` — the constant the compact
+      # declaration that OWNS the body reaches, not the one the receiver's spelling would suggest.
+      #
+      # A separate descent rather than a leaf of the fused methods/def-nodes walk: it needs the CHAIN
+      # threaded, which the fused walk does not carry (a singleton-class body and a `Class.new` block body
+      # both push a qualified prefix while pushing no `Module.nesting` entry), and threading a second value
+      # through that walk and its anonymous-block twin exceeds their parameter budget. It stops at every
+      # `Prism::DefNode`, so a def-dense file pays only the declaration spine.
+      def build_def_nestings(root)
+        accumulator = {}.compare_by_identity
+        walk_def_nestings(root, EMPTY_NESTING, accumulator)
+        accumulator.freeze
+      end
+
+      # Records `nesting` for every `def` reachable from `node`. Only a `class` / `module` keyword pushes an
+      # entry (qualified against the entry already on top, so a compact `class Admin::X` contributes ONE);
+      # every other body — a singleton class, a `Class.new` / `Module.new` block, any other block — inherits
+      # the chain unchanged, because Ruby pushes no cref for them. A top-level `def` records nothing: an
+      # empty chain is not a recorded chain, and answering it would retract the peel fallback
+      # {Reflection.lexical_nesting_chain} deliberately keeps for a scope built from a self type alone.
+      def walk_def_nestings(node, nesting, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = Source::ConstantPath.qualified_name(node.constant_path)
+          if name
+            walk_def_nestings(node.body, pushed_nesting(nesting, name), accumulator) if node.body
+            return
+          end
+        when Prism::DefNode
+          accumulator[node] = nesting unless nesting.empty?
+          return
+        end
+
+        node.rigor_each_child { |child| walk_def_nestings(child, nesting, accumulator) }
+      end
+
+      # The chain a body gains by entering a declaration whose header spells `name` — the mirror of
+      # `Inference::StatementEvaluator#pushed_nesting`, which records the same chain on the declaration walk.
+      # Ruby pushes ONE entry per declaration keyword, qualified against the entry already on top.
+      def pushed_nesting(nesting, name)
+        outer = nesting.first
+        [outer ? "#{outer}::#{name}" : name, *nesting].freeze
+      end
+
       # Walks a class/module/singleton-class body's direct statements in source order, threading the
       # bare-`module_function` toggle: once a bare `module_function` is seen, every subsequent `def` in the body
       # registers as a singleton method. Nested classes/modules/defs and `module_function :a, :b` named forms recurse /
@@ -3103,6 +3178,10 @@ module Rigor
       # def_sources / singleton_def_sources fold first-wins ({#fold_def_sources}).
       def fold_def_tables(acc, file_index)
         file_index[:def_nodes].each { |cn, methods| (acc[:def_nodes][cn] ||= {}).merge!(methods) }
+        # Issue #681 — a re-walked file contributes live nodes and their chains together; a file restored from
+        # a seed bundle contributes neither (a {DefHandle} is not the node the re-walk is handed), so its defs
+        # keep the peel fallback rather than a chain recorded against the wrong object.
+        acc[:def_nestings].merge!(file_index[:def_nestings] || {})
         file_index[:singleton_def_nodes].each { |cn, methods| (acc[:singleton_def_nodes][cn] ||= {}).merge!(methods) }
         file_index[:method_visibilities].each { |cn, table| (acc[:method_visibilities][cn] ||= {}).merge!(table) }
         file_index[:methods].each { |cn, table| acc[:methods][cn] = merge_method_kinds(acc[:methods][cn] || {}, table) }
@@ -3214,7 +3293,8 @@ module Rigor
 
       # The empty per-run accumulator the def-index passes fold each file into.
       def new_def_index_accumulator
-        { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
+        { def_nodes: {}, def_nestings: {}.compare_by_identity,
+          singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
           superclasses: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {}, class_sources: {},
           constant_writes: {},
           data_member_layouts: {}, struct_member_layouts: {} }
@@ -3266,6 +3346,8 @@ module Rigor
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
         file_methods, file_def_nodes = build_methods_and_def_nodes(root, path)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
+        # Issue #681 — node-identity keyed, so this is a flat union: no two files can contribute the same key.
+        acc[:def_nestings].merge!(build_def_nestings(root))
         # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,
         # the exact mirror of the instance-side `merge_discovered_defs`, so a class/singleton-method body edit
         # produces a changed `"Class.method"` fingerprint pair (and its call sites a symbol edge) instead of

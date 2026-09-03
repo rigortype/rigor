@@ -98,7 +98,7 @@ module Rigor
         def_index = index.fetch(:def_index)
         tables = { discovered_classes: index.fetch(:classes) }
         %i[
-          def_nodes singleton_def_nodes def_sources singleton_def_sources superclasses includes
+          def_nodes def_nestings singleton_def_nodes def_sources singleton_def_sources superclasses includes
           method_visibilities methods data_member_layouts struct_member_layouts
         ].each do |slot|
           tables[seed_key(slot)] = def_index.fetch(slot)

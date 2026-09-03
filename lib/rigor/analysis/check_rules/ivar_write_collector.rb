@@ -69,9 +69,9 @@ module Rigor
 
           case node
           when Prism::ClassNode, Prism::ModuleNode
-            name = Source::ConstantPath.qualified_name(node.constant_path)
-            if name
-              walk(node.body, qualified_prefix + [name]) if node.body
+            child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
+            if child_prefix
+              walk(node.body, child_prefix) if node.body
               return
             end
           when Prism::DefNode

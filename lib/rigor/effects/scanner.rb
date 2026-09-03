@@ -107,10 +107,9 @@ module Rigor
       end
 
       def walk_namespace(node, prefix)
-        name = Source::ConstantPath.qualified_name(node.constant_path)
-        return node.rigor_each_child { |child| walk(child, prefix, false) } if name.nil?
+        nested = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+        return node.rigor_each_child { |child| walk(child, prefix, false) } if nested.nil?
 
-        nested = prefix + [name]
         record_superclass(nested.join("::"), node, prefix) if node.is_a?(Prism::ClassNode)
         walk(node.body, nested, false) if node.body
       end

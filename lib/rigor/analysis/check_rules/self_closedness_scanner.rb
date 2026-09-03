@@ -44,12 +44,12 @@ module Rigor
           case node
           when Prism::ModuleNode
             name = Source::ConstantPath.qualified_name_or_nil(node.constant_path)
-            child_prefix = name ? prefix + [name] : prefix
+            child_prefix = name ? Source::ConstantPath.declaration_prefix(prefix, node.constant_path) : prefix
             names << child_prefix.join("::") if name
             walk(node.body, child_prefix, names) if node.body
           when Prism::ClassNode
             name = Source::ConstantPath.qualified_name_or_nil(node.constant_path)
-            child_prefix = name ? prefix + [name] : prefix
+            child_prefix = name ? Source::ConstantPath.declaration_prefix(prefix, node.constant_path) : prefix
             names << child_prefix.join("::") if name && class_surface_open?(node)
             walk(node.body, child_prefix, names) if node.body
           else

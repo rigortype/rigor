@@ -170,8 +170,7 @@ module Rigor
           def extend_prefix(node, prefix)
             return prefix unless CLASS_OR_MODULE_NODE_CLASSES.any? { |klass| node.is_a?(klass) }
 
-            name = Source::ConstantPath.qualified_name(node.constant_path)
-            name ? prefix + [name] : prefix
+            Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
           end
         end
       end

@@ -1462,10 +1462,19 @@ module Rigor
       # lexical owner. The outer scope is unchanged on exit because Ruby's class definition does not bind any local in
       # the enclosing scope. The class body's value is the value of its last statement (`Constant[nil]` for an empty
       # body); we discard the body's post-scope.
+      #
+      # Issue #708 — a ROOTED header (`class ::Rooted::Bar`) re-anchors at the top level, so the frame stack
+      # RESETS to that class alone rather than gaining a frame under the enclosure. `current_class_path` joins
+      # the stack, so keeping the enclosing frames named the class `Outer::Rooted::Bar` and every `def` in it
+      # registered under a name no caller writes. The nesting CHAIN is not reset the same way — Ruby leaves the
+      # enclosing entries beneath the un-prefixed one — which is why {Source::ConstantPath.pushed_nesting} owns
+      # that half rather than this one deriving it from the frames.
       def eval_class_or_module(node)
-        name = Source::ConstantPath.qualified_name(node.constant_path)
-        new_context = @class_context + [ClassFrame.new(name: name, singleton: false)]
-        body_type, _body_scope = eval_class_body(node, new_context, pushed_nesting(name))
+        path = node.constant_path
+        frame = ClassFrame.new(name: Source::ConstantPath.qualified_name(path), singleton: false)
+        new_context = Source::ConstantPath.rooted?(path) ? [frame] : @class_context + [frame]
+        body_type, _body_scope = eval_class_body(node, new_context,
+                                                 Source::ConstantPath.pushed_nesting(@lexical_nesting, path))
         [body_type, scope]
       end
 
@@ -2972,21 +2981,6 @@ module Rigor
         when Prism::ConstantPathNode
           Source::ConstantPath.render(expression)
         end
-      end
-
-      # Issue #652 — the chain a body gains by entering a declaration whose header spells `name`. Ruby pushes
-      # ONE `Module.nesting` entry per declaration keyword, qualified against the entry already on top, so
-      # `module A::B` pushes the single `"A::B"` and `module A; module B` pushes `"A"` and then `"A::B"`. That
-      # is the whole difference between the compact and the nested spelling, and it is unrecoverable from the
-      # `"A::B"` the two share afterwards. This is the ONLY thing that pushes an entry: a `def`, a block, and a
-      # `class << expr` body each inherit the chain unchanged, because none of them pushes a cref in Ruby. A
-      # header that renders no name yields `nil`, which propagates — the walk cannot qualify anything under an
-      # entry it could not name.
-      def pushed_nesting(name)
-        return nil if @lexical_nesting.nil? || name.nil?
-
-        outer = @lexical_nesting.first
-        [outer ? "#{outer}::#{name}" : name, *@lexical_nesting].freeze
       end
 
       # Stamps a recorded chain onto a body-entry scope. An empty chain (a top-level body) and an unknown one

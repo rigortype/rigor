@@ -1656,10 +1656,16 @@ module Rigor
         namespace
       end
 
-      # True when `name` is a class or module some source declares: a project declaration the indexer
-      # discovered (including the [#528](https://github.com/rigortype/rigor/issues/528) synthesized namespace
-      # prefixes) or an RBS-known class object. The RBS half needs no dependency edge — the loaded signature
-      # set is part of the run fingerprint — but both project answers do; see {#record_namespace_probe}.
+      # True when `name` is a class or module some source declares: a project declaration in
+      # `discovered_classes` or an RBS-known class object. The [#528](https://github.com/rigortype/rigor/issues/528)
+      # synthesized namespace prefixes reach that table for THIS FILE only — the runner's cross-file seed
+      # (`discovered_project_index_for_paths`) returns `collect_class_decls`'s raw declarations without the
+      # synthesis its sibling `discovered_classes_for_paths` applies — so a namespace known only through ANOTHER
+      # file's COMPACT declaration (`class Admin::Holder::Inner`) does not move the key, where an explicit
+      # `module Admin; class Holder` there does. Under-resolution, the direction this probe may err in.
+      #
+      # The RBS half needs no dependency edge — the loaded signature set is part of the run fingerprint — but
+      # both project answers do; see {#record_namespace_probe}.
       def known_namespace?(name, scope)
         if scope.discovered_classes.key?(name)
           record_namespace_probe(name, scope, hit: true)

@@ -2803,11 +2803,17 @@ module Rigor
       # Issue #681 / #707 — the ONE place in `lib/` that answers "what `Module.nesting` was recorded for this
       # def node". `Scope::DiscoveryIndex#discovered_def_nestings` is the owner; the resolver memo is that
       # table's REHYDRATION for the one population it cannot hold — a def served from an ADR-85 seed bundle,
-      # whose node {Inference::DefNodeResolver} mints from its own parse, so no table keyed by the discovery
-      # walk's node identities can contain it. The two key sets are disjoint by construction (see
-      # {Inference::DefNodeResolver.rehydrated_nesting}), so the order here cannot shadow a live answer, and
-      # routing both through one reader is what keeps a cold run and an `--incremental` recheck answering the
-      # same constant for the same body.
+      # whose node {Inference::DefNodeResolver} mints from its own parse, so no table keyed by the identities
+      # the analyzer's own walks produce can contain it.
+      #
+      # The order is safe on OBJECT PROVENANCE, not on any file-level split: the resolver parses separately
+      # and both tables are `compare_by_identity`, so no node is a key in both, and the content-digest gate
+      # makes the two agree where they answer for the same def through different objects. A file can be
+      # bundle-served and walked live in the SAME run (an unchanged file re-analysed as a dependent), which is
+      # exactly why the guarantee has to rest on the parse rather than on the file — see
+      # {Inference::DefNodeResolver.rehydrated_nesting}. Routing both through one reader is what keeps a cold
+      # run and an `--incremental` recheck answering the same constant for the same body; the rehydration half
+      # is populated only inside `DefNodeResolver.with_run`, and outside it this falls back to the peel.
       def recorded_def_nesting(def_node)
         scope.discovery.discovered_def_nestings[def_node] || DefNodeResolver.rehydrated_nesting(def_node)
       end

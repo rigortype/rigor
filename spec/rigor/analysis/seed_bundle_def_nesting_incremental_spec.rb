@@ -159,10 +159,26 @@ RSpec.describe "ADR-85 seed bundles carry the recorded def nesting" do
   end
 
   # A top-level `def` records NO chain (#681: an empty chain would retract the peel fallback, which is the
-  # answer that path must keep). The bundle must carry that absence as an absence — the must-still-succeed
-  # companion to the two examples above, which would also pass if the resolver stamped some chain on
-  # everything.
-  it "records no chain for a top-level def served from a bundle, leaving the peel fallback in place" do
+  # answer that path must keep), and the bundle must carry that absence as an absence.
+  #
+  # **This example does not prove that**, and an earlier comment here claimed it did. Mutating
+  # `DefNodeResolver.record_nesting` to store `nesting || []` leaves all three examples in this file green;
+  # only `spec/rigor/inference/def_node_resolver_spec.rb`'s "records nothing for a top-level def's absent
+  # chain" catches it (`expected: nil / got: []`). That unit example is where the guard lives.
+  #
+  # The absence is not pinnable HERE, and the reason is worth recording rather than working around. A fixture
+  # that discriminates needs the top-level def to READ a constant, and for such a body the recorded-empty
+  # answer and the peel answer are both heuristics rather than one being Ruby's: Ruby's `Module.nesting`
+  # inside a top-level `def` IS empty, so the peel — which resolves the constant against the CALLER's
+  # namespace — is the one #681 deliberately kept for precision, and it can be wrong. Measured on
+  # `def helper = Post.new` at top level, called from inside `module Admin`: both arms report
+  # `undefined method 'top_post' for Admin::Post` where Ruby names `::Post`. Cold equals warm, so it is not
+  # this branch's defect, but asserting it here would pin a wrong answer into a regression gate.
+  #
+  # What this example DOES carry is the non-regression half: a bundle-served top-level def keeps answering
+  # exactly what a full run answers, so carrying the chain for nested defs did not disturb the population
+  # that records none.
+  it "keeps a bundle-served top-level def answering exactly what a full run answers" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, maker), "def helper = 1\n")
       File.write(File.join(dir, reader), "class Reader\n  def read = helper\nend\n")

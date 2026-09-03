@@ -187,12 +187,18 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
-  # Issue #707 — the reason a rehydration memo is NOT a second source for the same fact: the two tables are
-  # keyed by node identity and their key sets are disjoint by construction, because a file is either re-walked
-  # (contributing live nodes to the index) or bundle-served (contributing handles the resolver parses), never
-  # both in one run. That is the load-bearing claim behind the reader's `table || rehydration` order, so it is
-  # COMPUTED here rather than argued: were a resolved node ever also an index key, the fallback could silently
-  # prefer a stale chain over a live one.
+  # Issue #707 — the reason a rehydration memo is NOT a second source for the same fact: OBJECT PROVENANCE.
+  # `DefNodeResolver` runs its own `Prism.parse`, and both tables are `compare_by_identity`, so a node it
+  # mints is never the object one of the analyzer's own walks produced and no node can be a key in both. That
+  # is the load-bearing claim behind the reader's `table || rehydration` order, so it is COMPUTED here rather
+  # than argued: were a resolved node ever also an index key, the fallback could silently prefer a stale chain
+  # over a live one.
+  #
+  # The claim is deliberately about the PARSE and not about files. A file-level version — "a file is either
+  # re-walked or bundle-served, never both in one run" — is FALSE and was asserted before it was measured: an
+  # unchanged file re-analysed as a dependent is bundle-served by this fold AND walked live by
+  # `merge_def_node_tables` for its own per-file index. The example below therefore takes a MIXED run and
+  # checks identities, which is what actually holds.
   it "keeps the index table and the resolver rehydration disjoint over the same run" do
     Dir.mktmpdir do |dir|
       paths = write_project(dir)

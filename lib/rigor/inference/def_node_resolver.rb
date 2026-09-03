@@ -39,6 +39,13 @@ module Rigor
         Thread.current[MEMO_KEY] = previous
       end
 
+      # Whether a per-run memo scope is in force. The rehydrated `Module.nesting` ({.rehydrated_nesting}) is
+      # recorded only inside one, so this names the precondition the internal spec's "within the resolver's
+      # per-run memo scope" clause states — and lets a spec assert that no handle-consuming entry point
+      # resolves outside it, which is the difference between the peel fallback being a documented edge and
+      # being silently reachable from production.
+      def self.run_scope? = !Thread.current[MEMO_KEY].nil?
+
       # Resolves `handle` to a `Prism::DefNode` (the same object across the run for a given (path, node_id)), or
       # nil. A non-handle argument is returned unchanged, so callers can pass a table value that is either a live
       # node (cold / re-walked file) or a handle (unchanged file) without branching.
@@ -60,19 +67,33 @@ module Rigor
       # Issue #707 — the recorded `Module.nesting` for a node this module minted from a {DefHandle}, or nil.
       #
       # This is a REHYDRATION of `Scope::DiscoveryIndex#discovered_def_nestings`, not a rival source for the
-      # same question. The two are keyed by node identity and their key sets are DISJOINT BY CONSTRUCTION: the
-      # discovery table holds nodes from the pre-pass's `Prism.parse` of a re-walked file, this memo holds
-      # nodes from {.build_file_index}'s own parse of a bundle-served one, and a file takes exactly one of
-      # those branches per run. So the single reader
-      # ({Inference::ExpressionTyper#recorded_def_nesting}) can consult the table first and fall through here
-      # without any risk of shadowing a live answer with a stale one. `--verify-incremental` is the standing
-      # detector: it compares the warm and cold diagnostics for the whole project, so were the two ever to
-      # disagree the divergence surfaces as a reported incremental-only / full-only diagnostic rather than as
-      # a silently preferred answer.
+      # same question, and the single reader ({Inference::ExpressionTyper#recorded_def_nesting}) may consult
+      # the table first and fall through here without shadowing a live answer. Two independent facts license
+      # that order, and the tempting third one is FALSE:
       #
-      # Outside a run scope (a runner-less probe: {.with_run} never entered) nothing is recorded and the
-      # reader keeps `Reflection.lexical_nesting_chain`'s peel fallback — the same gradual answer that path
-      # already gives.
+      # 1. OBJECT PROVENANCE — no node can be a key in both. {.build_file_index} runs its OWN `Prism.parse`,
+      #    and both tables are `compare_by_identity`, so a node this module mints is never the object any
+      #    walk over the analyzer's own parse produced. This holds per NODE and needs nothing about files.
+      # 2. AGREEMENT — where both tables answer for the same DEF (through different objects), they answer the
+      #    same chain. A bundle is only reused when the file's content SHA-256 matches
+      #    ({Cache::FileDigest.hexdigest}, the digest tier, not the stat one), and `build_def_nestings` is a
+      #    pure function of that file's AST, so identical bytes yield an identical chain.
+      #
+      # What is NOT true — and was asserted here before it was measured — is that a file takes exactly ONE of
+      # the two branches per run. It does so in the cross-file pre-pass only. An UNCHANGED file re-analysed as
+      # a dependent is served from its bundle there AND walked live by `ScopeIndexer#merge_def_node_tables`
+      # for its own per-file index, contributing keys to both tables in one `Runner#run`. Fact 1 is what makes
+      # that harmless, so a future change must preserve the separate parse, not the file-level split.
+      #
+      # `--verify-incremental` is the standing detector for the whole property: it compares the warm and cold
+      # diagnostics project-wide, so a disagreement surfaces as a reported incremental-only / full-only
+      # diagnostic rather than as a silently preferred answer.
+      #
+      # Outside a run scope ({.with_run} never entered) nothing is recorded and the reader keeps
+      # `Reflection.lexical_nesting_chain`'s peel fallback — the same gradual answer that path already gives.
+      # Every entry point that CONSUMES a handle runs inside `with_run`; `spec/rigor/inference/
+      # def_node_resolver_spec.rb` pins that, so a new one added outside a run scope fails there rather than
+      # silently reverting to the peel.
       def self.rehydrated_nesting(node)
         memo = Thread.current[MEMO_KEY]
         memo && memo[:nestings][node]

@@ -126,6 +126,46 @@ RSpec.describe Rigor::Inference::DefNodeResolver do
       end
     end
 
+    # Issue #707 — the rehydration is populated only inside a run scope, so a handle resolved outside one
+    # silently reverts to the peel: the exact divergence #707 fixed, reintroduced without a failing gate.
+    # `resolve` is REACHED outside a scope by design (a runner-less probe), so the normative claim is
+    # narrower than "never happens" — it is that no path which CONSUMES a handle does so unscoped. That is a
+    # property of the entry points, not of this module, and it is the one a new entry point would break.
+    #
+    # Driven through the real incremental machinery rather than asserted about the call graph, and paired
+    # with a must-still-succeed count: without `expect(handles).to be_positive` the example passes whenever
+    # no handle is resolved at all, which is precisely how a warm run "reports nothing for the wrong reason"
+    # (#665 family).
+    it "is entered by every path that consumes a handle, so the unscoped peel stays unreachable" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a_reader.rb"), "class Reader\n  def read = Maker.new.make.upcase\nend\n")
+        File.write(File.join(dir, "z_maker.rb"), "class Maker\n  def make = \"s\"\nend\n")
+        config = Rigor::Configuration.new("paths" => [dir])
+        environment = Rigor::Environment.for_project
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: config, paths: [dir], environment: environment
+        )
+        guarded_baseline(session)
+
+        handles = 0
+        unscoped = []
+        allow(described_class).to receive(:resolve).and_wrap_original do |original, entry|
+          if entry.is_a?(Rigor::Inference::DefHandle)
+            handles += 1
+            unscoped << entry.name unless described_class.run_scope?
+          end
+          original.call(entry)
+        end
+
+        File.write(File.join(dir, "a_reader.rb"),
+                   "class Reader\n  def read = Maker.new.make.upcase\n  def noise = 1\nend\n")
+        guarded_recheck(session)
+
+        expect(handles).to be_positive
+        expect(unscoped).to be_empty
+      end
+    end
+
     it "does not leak across the run boundary the node identity itself respects" do
       Dir.mktmpdir do |dir|
         _path, handle = write_and_handle(dir, nesting: ["Foo"])

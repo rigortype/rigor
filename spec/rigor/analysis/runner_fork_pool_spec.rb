@@ -28,7 +28,8 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
   def run_check(dir, paths, config: {}, **runner_kwargs)
     configuration = Rigor::Configuration.new({ "paths" => paths }.merge(config))
     Dir.chdir(dir) do
-      Rigor::Analysis::Runner.new(configuration: configuration, **runner_kwargs).run.diagnostics
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, **runner_kwargs)
+      guarded_run(runner).diagnostics
     end
   end
 
@@ -164,7 +165,7 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
         runner = Rigor::Analysis::Runner.new(
           configuration: configuration, record_dependencies: true, **runner_kwargs
         )
-        runner.run
+        guarded_run(runner)
         runner
       end
     end

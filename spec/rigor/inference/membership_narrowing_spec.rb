@@ -12,10 +12,9 @@ require "spec_helper"
 # contract is the absence of a `call.possible-nil-receiver` false positive.
 RSpec.describe "membership narrowing (#606 slice 2)" do
   def nil_receiver_diagnostics(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
-                           .select { |d| d.rule == "call.possible-nil-receiver" }
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    diagnostics = guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
+    diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
   end
 
   describe "must narrow" do

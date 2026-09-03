@@ -19,10 +19,9 @@ require "spec_helper"
 #     the rule exists to report.
 RSpec.describe "safe-nav chain narrowing (#606 slice 1)" do
   def nil_receiver_diagnostics(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
-                           .select { |d| d.rule == "call.possible-nil-receiver" }
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    diagnostics = guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
+    diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
   end
 
   # A project class, so the union's non-nil arm is a genuine witness (`value` / `updated_at` are

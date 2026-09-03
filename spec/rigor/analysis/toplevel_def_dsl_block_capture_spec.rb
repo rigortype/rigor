@@ -19,10 +19,11 @@ RSpec.describe "toplevel def captured by a DSL block" do
       lib = File.join(dir, "lib")
       FileUtils.mkdir_p(lib)
       files.each { |name, source| File.write(File.join(lib, name), source) }
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new("paths" => [lib]),
         cache_store: nil
-      ).run.diagnostics.reject { |d| d.path.to_s.end_with?(".rigor.yml") }
+      )
+      guarded_run(runner).diagnostics.reject { |d| d.path.to_s.end_with?(".rigor.yml") }
     end
   end
 

@@ -21,7 +21,7 @@ RSpec.describe "an effect summary over a union-typed receiver" do
   let(:table) do
     Dir.chdir(fixture) do
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-      runner.run(["lib"])
+      guarded_run(runner, ["lib"])
       runner.effect_table
     end
   end

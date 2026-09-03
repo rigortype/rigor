@@ -16,9 +16,8 @@ require "fileutils"
 # location convention, and the survivors are all `undefined_method` mutations of that one call per builder.
 RSpec.describe "collector diagnostic builders" do
   def diagnostics_for(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
   end
 
   def rule_diagnostics(source, rule)
@@ -158,8 +157,8 @@ RSpec.describe "collector diagnostic builders" do
           FileUtils.mkdir_p("sig")
           File.write(File.join("sig", "void_box.rbs"), rbs)
           File.write("app.rb", source)
-          result = Rigor::Analysis::Runner.new(configuration: config(bleeding_edge: bleeding_edge), cache_store: nil)
-                                          .run(%w[app.rb])
+          runner = Rigor::Analysis::Runner.new(configuration: config(bleeding_edge: bleeding_edge), cache_store: nil)
+          result = guarded_run(runner, %w[app.rb])
           result.diagnostics.select { |d| d.rule == "static.value-use.void" }
         end
       end

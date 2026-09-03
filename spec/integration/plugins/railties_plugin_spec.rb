@@ -69,12 +69,13 @@ RSpec.describe "plugins/rigor-railties" do
       result = Dir.mktmpdir do |dir|
         File.write(File.join(dir, "demo.rb"), source)
         Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: Rigor::Configuration.new(
               configuration.to_h.merge("paths" => [File.join(dir, "demo.rb")])
             ),
             cache_store: nil
-          ).run
+          )
+          guarded_run(runner)
         end
       end
       expect(dumps(result).size).to eq(4)

@@ -45,17 +45,17 @@ RSpec.describe "cross-file value constants — incremental" do
   end
 
   def full_diagnostics(dir)
-    Rigor::Analysis::Runner.new(
+    runner = Rigor::Analysis::Runner.new(
       configuration: configuration(dir), cache_store: nil, environment: shared_environment
-    ).run.diagnostics
+    )
+    guarded_run(runner).diagnostics
   end
 
   def full_run(dir)
-    rules(
-      Rigor::Analysis::Runner.new(
-        configuration: configuration(dir), cache_store: nil, environment: shared_environment
-      ).run.diagnostics
+    runner = Rigor::Analysis::Runner.new(
+      configuration: configuration(dir), cache_store: nil, environment: shared_environment
     )
+    rules(guarded_run(runner).diagnostics)
   end
 
   # The reader is untouched throughout; only the declaring file appears, moves, and vanishes.

@@ -20,9 +20,10 @@ RSpec.describe "Struct member emptiness across files" do
       FileUtils.mkdir_p(lib)
       File.write(File.join(lib, "a.rb"), defining)
       File.write(File.join(lib, "b.rb"), consumer)
-      result = Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new("paths" => [lib]), cache_store: nil
-      ).run
+      )
+      result = guarded_run(runner)
       result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
     end
   end

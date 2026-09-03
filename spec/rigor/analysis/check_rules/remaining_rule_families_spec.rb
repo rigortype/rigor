@@ -33,9 +33,8 @@ require "spec_helper"
 #   test.
 RSpec.describe "remaining check_rules.rb rule families (#135 wave 2)" do
   def diagnostics_for(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
   end
 
   def rule_diagnostics(source, rule)
@@ -139,10 +138,9 @@ RSpec.describe "remaining check_rules.rb rule families (#135 wave 2)" do
           end
         end
       RUBY
-      diags = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-                                     .run_source(source: source, path: "mem.rb")
-                                     .diagnostics
-                                     .select { |d| d.rule == "call.self-undefined-method" }
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+      diags = guarded_run_source(runner, source: source, path: "mem.rb")
+              .diagnostics.select { |d| d.rule == "call.self-undefined-method" }
       expect(diags.size).to eq(1)
       diagnostic = diags.first
       expect(diagnostic.severity).to eq(:warning)

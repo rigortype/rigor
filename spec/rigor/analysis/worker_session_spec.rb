@@ -33,15 +33,16 @@ RSpec.describe Rigor::Analysis::WorkerSession do
         configuration = Rigor::Configuration.new("paths" => [path])
 
         runner_diags = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
 
         session = Dir.chdir(dir) do
           described_class.new(configuration: configuration, cache_store: nil)
         end
-        session_diags = Dir.chdir(dir) { session.analyze(path) }
+        session_diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
 
         expect(diag_keys(session_diags)).to eq(diag_keys(runner_diags))
       end
@@ -54,15 +55,16 @@ RSpec.describe Rigor::Analysis::WorkerSession do
         configuration = Rigor::Configuration.new("paths" => [path])
 
         runner_diags = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
 
         session = Dir.chdir(dir) do
           described_class.new(configuration: configuration, cache_store: nil)
         end
-        session_diags = Dir.chdir(dir) { session.analyze(path) }
+        session_diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
 
         expect(session_diags).not_to be_empty
         expect(diag_keys(session_diags)).to eq(diag_keys(runner_diags))
@@ -76,15 +78,16 @@ RSpec.describe Rigor::Analysis::WorkerSession do
         configuration = Rigor::Configuration.new("paths" => [path])
 
         runner_diags = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil, explain: true
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
 
         session = Dir.chdir(dir) do
           described_class.new(configuration: configuration, cache_store: nil, explain: true)
         end
-        session_diags = Dir.chdir(dir) { session.analyze(path) }
+        session_diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
 
         # The CoverageScanner stream is identical regardless of whether the chosen source happens to trigger any
         # fallback events — equivalence is the contract proof.
@@ -99,7 +102,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
           described_class.new(configuration: configuration, cache_store: nil)
         end
 
-        diags = Dir.chdir(dir) { session.analyze(File.join(dir, "ghost.rb")) }
+        diags = Dir.chdir(dir) { guarded_session_analyze(session, File.join(dir, "ghost.rb")) }
         expect(diags.size).to eq(1)
         expect(diags.first.severity).to eq(:error)
       end
@@ -155,7 +158,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
             plugin_blueprints: [blueprint]
           )
         end
-        diags = Dir.chdir(dir) { session.analyze(path) }
+        diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
 
         plugin_diag = diags.find { |d| d.rule == "session-rule" }
         expect(plugin_diag).not_to be_nil
@@ -212,7 +215,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
             plugin_blueprints: [blueprint]
           )
         end
-        diags = Dir.chdir(dir) { session.analyze(path) }
+        diags = Dir.chdir(dir) { guarded_session_analyze(session, path, allow_plugin_crash: true) }
 
         runtime = diags.find { |d| d.rule == "runtime-error" && d.source_family == :plugin_loader }
         expect(runtime).not_to be_nil
@@ -245,7 +248,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
             plugin_blueprints: [blueprint]
           )
         end
-        diags = Dir.chdir(dir) { session.analyze(path) }
+        diags = Dir.chdir(dir) { guarded_session_analyze(session, path, allow_plugin_crash: true) }
 
         runtime = diags.find { |d| d.rule == "runtime-error" && d.source_family == :plugin_loader }
         expect(runtime).not_to be_nil
@@ -364,7 +367,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
             cache_store: nil, buffer: binding
           )
 
-          diagnostics = session.analyze(logical)
+          diagnostics = guarded_session_analyze(session, logical)
 
           # Parse-error from the BUFFER, attributed to the LOGICAL path.
           expect(diagnostics).not_to be_empty
@@ -415,7 +418,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
         session = Dir.chdir(dir) do
           described_class.new(configuration: configuration, cache_store: nil, explain: true)
         end
-        diags = Dir.chdir(dir) { session.analyze(path) }
+        diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
 
         fallbacks = diags.select { |d| d.rule == "fallback" }
         expect(fallbacks).not_to be_empty
@@ -439,7 +442,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
         session = Dir.chdir(dir) do
           described_class.new(configuration: configuration, cache_store: nil, explain: false)
         end
-        diags = Dir.chdir(dir) { session.analyze(path) }
+        diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
 
         expect(diags.map(&:rule)).not_to include("fallback")
       end

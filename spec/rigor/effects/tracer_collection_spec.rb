@@ -18,7 +18,7 @@ RSpec.describe "effect collection over the tracer fixture" do
 
   def analyze(configuration)
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-    diagnostics = runner.run([fixture]).diagnostics
+    diagnostics = guarded_run(runner, [fixture]).diagnostics
     [runner, diagnostics]
   end
 

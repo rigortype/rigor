@@ -198,14 +198,15 @@ RSpec.describe "rigor-dry-types integration" do
         )
       )
       Dir.chdir(project_dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration,
           cache_store: cache_store,
           plugin_requirer: lambda do |_name|
             Rigor::Plugin.register(plugin_class)
             true
           end
-        ).run
+        )
+        guarded_run(runner)
       end
       [captured_fact_store&.read(plugin_id: "dry-types", name: :dry_type_aliases), cache_store]
     end
@@ -319,14 +320,15 @@ RSpec.describe "rigor-dry-types integration" do
       )
 
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration,
           cache_store: nil,
           plugin_requirer: lambda do |_name|
             Rigor::Plugin.register(plugin_class)
             true
           end
-        ).run
+        )
+        guarded_run(runner)
       end
     end
     captured_store&.read(plugin_id: "dry-types", name: :dry_type_aliases)

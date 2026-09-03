@@ -467,7 +467,7 @@ RSpec.describe "rigor-dry-validation integration" do
     )
 
     Dir.chdir(dir) do
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: configuration, cache_store: nil,
         plugin_requirer: lambda do |name|
           # #194 slice 2 — a bundled plugin arrives as its engine-anchored absolute path; basename
@@ -479,7 +479,8 @@ RSpec.describe "rigor-dry-validation integration" do
           end
           true
         end
-      ).run
+      )
+      guarded_run(runner)
     end
   end
 
@@ -505,13 +506,14 @@ RSpec.describe "rigor-dry-validation integration" do
       )
 
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration, cache_store: nil,
           plugin_requirer: lambda do |_name|
             Rigor::Plugin.register(plugin_class)
             true
           end
-        ).run
+        )
+        guarded_run(runner)
       end
     end
     captured_store&.read(plugin_id: "dry-validation", name: :dry_validation_contracts)

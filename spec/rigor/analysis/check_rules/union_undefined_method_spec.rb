@@ -9,11 +9,9 @@ require "spec_helper"
 # the diagnostic. Surfaced by the tool/mutation teeth sweep.
 RSpec.describe "union-receiver undefined-method" do
   def undefined_method_messages(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
-                           .select { |d| d.rule == "call.undefined-method" }
-                           .map(&:message)
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    diagnostics = guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
+    diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
   end
 
   it "fires when the method is absent on every arm of a non-nil union" do

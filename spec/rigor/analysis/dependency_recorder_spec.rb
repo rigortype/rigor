@@ -12,7 +12,7 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
     runner = Rigor::Analysis::Runner.new(
       configuration: configuration, cache_store: nil, record_dependencies: true
     )
-    runner.run
+    guarded_run(runner)
     runner
   end
 
@@ -272,7 +272,7 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
 
       configuration = Rigor::Configuration.new("paths" => [dir])
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-      runner.run
+      guarded_run(runner)
 
       expect(runner.file_dependencies).to be_empty
     end

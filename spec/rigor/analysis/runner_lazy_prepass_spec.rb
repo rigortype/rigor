@@ -50,7 +50,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
       allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
 
-      cold = Dir.chdir(dir) { build_runner(dir, cache_root).run }
+      cold = Dir.chdir(dir) { guarded_run(build_runner(dir, cache_root)) }
       expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
 
       # A fresh Store at the same root forces a real disk hit (not the in-memory memo).
@@ -70,7 +70,7 @@ RSpec.describe Rigor::Analysis::Runner do
       write_project(dir)
       allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
 
-      Dir.chdir(dir) { build_runner(dir, nil).run }
+      Dir.chdir(dir) { guarded_run(build_runner(dir, nil)) }
 
       expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
     end
@@ -82,7 +82,7 @@ RSpec.describe Rigor::Analysis::Runner do
       cache_root = File.join(dir, ".rigor", "cache")
 
       # Prime a plain run so the run-diagnostics entry exists on disk.
-      Dir.chdir(dir) { build_runner(dir, cache_root).run }
+      Dir.chdir(dir) { guarded_run(build_runner(dir, cache_root)) }
 
       allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
       recording = build_runner(dir, cache_root, record_dependencies: true)
@@ -114,7 +114,7 @@ RSpec.describe Rigor::Analysis::Runner do
       runner = described_class.new(
         configuration: config, cache_store: nil, collect_stats: false, prebuilt: scan
       )
-      Dir.chdir(dir) { runner.run }
+      Dir.chdir(dir) { guarded_run(runner) }
 
       # The prebuilt path deliberately seeds an empty project scope, so the deferred discovery is a no-op.
       expect(Rigor::Inference::ScopeIndexer).not_to have_received(:discovered_project_index_for_paths)
@@ -137,7 +137,7 @@ RSpec.describe Rigor::Analysis::Runner do
       Dir.mktmpdir("rigor-discovery-seed-off-") do |dir|
         write_project(dir)
         runner = prebuilt_runner(dir)
-        Dir.chdir(dir) { runner.run }
+        Dir.chdir(dir) { guarded_run(runner) }
 
         tables = runner.send(:project_scope_seed_tables)
         expect(tables.keys.grep(/\Adiscovered_/)).to be_empty
@@ -151,7 +151,7 @@ RSpec.describe Rigor::Analysis::Runner do
         seed = { discovered_classes: { "Widget" => Rigor::Type::Combinator.singleton_of("Widget") }.freeze }.freeze
         runner = prebuilt_runner(dir, discovery_seed: seed)
         allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
-        Dir.chdir(dir) { runner.run }
+        Dir.chdir(dir) { guarded_run(runner) }
 
         expect(runner.send(:project_scope_seed_tables)).to include(discovered_classes: seed[:discovered_classes])
         # The seam SUPPLIES knowledge; it never makes the prebuilt path go find its own.

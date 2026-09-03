@@ -18,7 +18,7 @@ RSpec.describe Rigor::Analysis::SelfCallResolutionRecorder do
       runner = Rigor::Analysis::Runner.new(
         configuration: configuration, cache_store: nil, record_self_calls: true
       )
-      runner.run
+      guarded_run(runner)
       runner.unresolved_self_calls.values
             .flat_map { |record| record.calls.map { |c| [c.class_name, c.method_name] } }
             .to_set
@@ -180,7 +180,7 @@ RSpec.describe Rigor::Analysis::SelfCallResolutionRecorder do
       RUBY
       configuration = Rigor::Configuration.new("paths" => [dir])
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-      runner.run
+      guarded_run(runner)
 
       expect(runner.unresolved_self_calls).to be_empty
       expect(described_class.active?).to be(false)

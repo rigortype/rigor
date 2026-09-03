@@ -15,7 +15,7 @@ RSpec.describe "ADR-84 return memo event-taint store gate" do
   def run_check(dir)
     configuration = Rigor::Configuration.new("paths" => [dir])
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-    runner.run
+    guarded_run(runner)
     runner
   end
 

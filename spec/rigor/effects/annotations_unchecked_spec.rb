@@ -29,7 +29,8 @@ RSpec.describe "effect.annotations-unchecked" do
 
   def diagnostics_in(root, configuration, paths: ["lib"])
     Dir.chdir(root) do
-      Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil).run(paths).diagnostics
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      guarded_run(runner, paths).diagnostics
     end
   end
 

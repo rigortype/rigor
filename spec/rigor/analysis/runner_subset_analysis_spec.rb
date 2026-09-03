@@ -35,9 +35,10 @@ RSpec.describe "Rigor::Analysis::Runner analyze_only" do
 
   def run(dir, analyze_only: nil)
     config = Rigor::Configuration.new("paths" => [dir])
-    Rigor::Analysis::Runner.new(
+    runner = Rigor::Analysis::Runner.new(
       configuration: config, cache_store: nil, analyze_only: analyze_only
-    ).run.diagnostics
+    )
+    guarded_run(runner).diagnostics
   end
 
   it "analyzes only the requested subset, keeping the cross-file pre-pass complete" do

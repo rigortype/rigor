@@ -72,10 +72,11 @@ RSpec.describe "cross-file nested Data constant resolution" do
       File.write(File.join(lib, "a.rb"), defining_file)
       File.write(File.join(lib, "b.rb"), consumer)
       File.write(File.join(sig, "m.rbs"), sibling_rbs)
-      result = Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new("paths" => [lib], "signature_paths" => [sig]),
         cache_store: nil
-      ).run
+      )
+      result = guarded_run(runner)
       result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
     end
   end

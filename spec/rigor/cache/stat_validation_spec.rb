@@ -207,7 +207,7 @@ RSpec.describe "ADR-87 stat-then-digest validation (WD5)" do
         cache_root = File.join(dir, ".rigor", "cache")
 
         allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
-        cold = Dir.chdir(dir) { build_runner(dir, cache_root).run }
+        cold = Dir.chdir(dir) { guarded_run(build_runner(dir, cache_root)) }
         expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
 
         # Touch every project file — move mtime, content identical.
@@ -215,7 +215,7 @@ RSpec.describe "ADR-87 stat-then-digest validation (WD5)" do
         Dir.glob(File.join(lib, "*.rb")).each { |f| File.utime(later, later, f) }
 
         warm_runner = build_runner(dir, cache_root)
-        warm = Dir.chdir(dir) { warm_runner.run }
+        warm = Dir.chdir(dir) { guarded_run(warm_runner) }
 
         # No further discovery parse ⇒ the touched run was served from the ADR-45 cache (stat-then-digest
         # validated the moved-but-identical files as fresh).

@@ -34,7 +34,7 @@ RSpec.describe "environment build failed reporting" do
   end
 
   def run(configuration)
-    Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil).run(%w[app.rb])
+    guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[app.rb])
   end
 
   def env_failed_diagnostics(result)

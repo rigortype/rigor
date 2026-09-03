@@ -48,10 +48,11 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
       Dir.mktmpdir do |dir|
         configuration = Rigor::Configuration.new("paths" => [dir])
         result = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
                                                                                                ".rigor")), workers: 2
-          ).run
+          )
+          guarded_run(runner)
         end
 
         expect(result.diagnostics).to be_empty
@@ -65,15 +66,17 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         configuration = Rigor::Configuration.new("paths" => [path])
 
         sequential = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
         pool = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
                                                                                                ".rigor")), workers: 1
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
 
         expect(diag_keys(pool)).to eq(diag_keys(sequential))
@@ -90,15 +93,17 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         configuration = Rigor::Configuration.new("paths" => paths)
 
         sequential = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
         pool = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
                                                                                                ".rigor")), workers: 4
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
 
         expect(diag_keys(pool)).to eq(diag_keys(sequential))
@@ -119,16 +124,18 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         configuration = Rigor::Configuration.new("paths" => [path])
 
         sequential = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration,
             cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor-seq"))
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
         pool = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration,
             cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor-pool")), workers: 2
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
 
         # Both runs MUST flag the same `call.undefined-method` / `call.wrong-arity` diagnostics — proves the worker
@@ -153,9 +160,10 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         File.write(path, "x = 1\n")
         configuration = Rigor::Configuration.new("paths" => [path])
         result = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil, workers: 2
-          ).run
+          )
+          guarded_run(runner)
         end
 
         degraded = result.diagnostics.find { |d| d.rule == "pool-degraded" }
@@ -179,10 +187,11 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         configuration = Rigor::Configuration.new("paths" => paths)
 
         pool = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
                                                                                                ".rigor")), workers: 3
-          ).run.diagnostics
+          )
+          guarded_run(runner).diagnostics
         end
 
         observed_path_order = pool.map(&:path).uniq
@@ -232,11 +241,12 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         end
 
         result = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration,
             cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")),
             plugin_requirer: requirer, workers: 2
-          ).run
+          )
+          guarded_run(runner)
         end
 
         plugin_diags = result.diagnostics.select { |d| d.rule == "pool-rule" }
@@ -269,11 +279,12 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         end
 
         result = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration,
             cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")),
             plugin_requirer: requirer, workers: 3
-          ).run
+          )
+          guarded_run(runner, allow_plugin_crash: true)
         end
 
         prepare_errors = result.diagnostics.select do |d|

@@ -18,9 +18,8 @@ require "spec_helper"
 # true positive — untouched by this fix (see the "still fires" example below).
 RSpec.describe "defined? operand is not evaluated" do
   def diagnostics_for(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
   end
 
   def undefined_method_messages(source)

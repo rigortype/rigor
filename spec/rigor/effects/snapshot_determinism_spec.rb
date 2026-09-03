@@ -23,7 +23,7 @@ RSpec.describe "effect snapshot determinism" do
   def snapshot_text(workers: 0)
     config = configuration(workers: workers)
     runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-    runner.run([fixture])
+    guarded_run(runner, [fixture])
     Rigor::Effects::Snapshot.build(
       table: runner.effect_table, configuration: config, sources: runner.effect_sources,
       project_root: fixture

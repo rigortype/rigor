@@ -54,14 +54,15 @@ RSpec.describe "plugin dynamic_return captures binary-operator sugar (ADR-42)" d
         )
       )
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration,
           cache_store: nil,
           plugin_requirer: lambda do |_name|
             Rigor::Plugin.register(operator_plugin)
             true
           end
-        ).run
+        )
+        guarded_run(runner)
       end
     end
   end

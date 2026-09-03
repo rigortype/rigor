@@ -10,9 +10,8 @@ require "spec_helper"
 # degrades are resolved.
 RSpec.describe "non-nil argument-type-mismatch (ADR-64)" do
   def diagnostics_for(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
   end
 
   def arg_mismatches(source)

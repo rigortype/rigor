@@ -9,11 +9,9 @@ require "spec_helper"
 # method on the same constant, and any method on a sibling constant with no singleton body, still fire.
 RSpec.describe "singleton-object constant dispatch" do
   def undefined_method_messages(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
-                           .select { |d| d.rule == "call.undefined-method" }
-                           .map(&:message)
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    diagnostics = guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
+    diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
   end
 
   # The type of the program's last top-level statement (the call under test in every example below).

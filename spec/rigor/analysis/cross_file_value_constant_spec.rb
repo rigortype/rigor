@@ -21,9 +21,10 @@ RSpec.describe "cross-file value constants" do
       lib = File.join(dir, "lib")
       FileUtils.mkdir_p(lib)
       files.each { |name, source| File.write(File.join(lib, name), source) }
-      result = Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new("paths" => [lib]), cache_store: nil
-      ).run
+      )
+      result = guarded_run(runner)
       result.diagnostics
             .select { |d| d.qualified_rule == "dump.type" }
             .sort_by { |d| [d.path, d.line] }
@@ -38,9 +39,10 @@ RSpec.describe "cross-file value constants" do
       lib = File.join(dir, "lib")
       FileUtils.mkdir_p(lib)
       files.each { |name, source| File.write(File.join(lib, name), source) }
-      result = Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new("paths" => [lib]), cache_store: nil
-      ).run
+      )
+      result = guarded_run(runner)
       result.diagnostics
             .select { |d| d.qualified_rule == "flow.always-truthy-condition" }
             .map { |d| "#{File.basename(d.path)}:#{d.line}" }

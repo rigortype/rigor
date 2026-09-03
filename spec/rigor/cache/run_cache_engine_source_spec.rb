@@ -57,10 +57,11 @@ RSpec.describe "run-result cache invalidation on an engine-source edit" do
   def analyse(dir, lib, cache_root)
     Rigor::Cache::EngineSource.reset_process_identity!
     Dir.chdir(dir) do
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new("paths" => [lib]),
         cache_store: Rigor::Cache::Store.new(root: cache_root), collect_stats: false
-      ).run
+      )
+      guarded_run(runner)
     end
   end
 

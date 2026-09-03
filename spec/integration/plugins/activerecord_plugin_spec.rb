@@ -92,7 +92,7 @@ RSpec.describe "plugins/rigor-activerecord" do
           collect_stats: false,
           plugin_requirer: build_plugin_requirer
         )
-        result = runner.run
+        result = guarded_run(runner)
         plugin = runner.plugin_registry.find("activerecord")
         [result, plugin&.send(:model_index)]
       end
@@ -156,7 +156,7 @@ RSpec.describe "plugins/rigor-activerecord" do
               true
             }
           )
-          result = runner.run
+          result = guarded_run(runner)
           ar_diags = result.diagnostics.select { |d| d.source_family == "plugin.activerecord" }
           # Only the schema-loading info / load-error diagnostics may pass through; no per-file column errors.
           expect(ar_diags.select { |d| d.rule == "unknown-column" }).to be_empty
@@ -183,7 +183,7 @@ RSpec.describe "plugins/rigor-activerecord" do
               true
             }
           )
-          ar_diags = runner.run.diagnostics.select { |d| d.source_family == "plugin.activerecord" }
+          ar_diags = guarded_run(runner).diagnostics.select { |d| d.source_family == "plugin.activerecord" }
           expect(ar_diags.select { |d| d.rule == "unknown-column" }).to be_empty
         end
       end
@@ -399,10 +399,11 @@ RSpec.describe "plugins/rigor-activerecord" do
           configuration = Rigor::Configuration.new(
             "paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]
           )
-          result = Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil, collect_stats: false,
             plugin_requirer: build_plugin_requirer
-          ).run
+          )
+          result = guarded_run(runner)
           notice = result.diagnostics.find { |d| d.rule == "load-error" }
           expect(notice).not_to be_nil
           expect(notice.severity).to eq(:warning)
@@ -437,7 +438,7 @@ RSpec.describe "plugins/rigor-activerecord" do
             configuration: configuration, cache_store: nil, collect_stats: false,
             plugin_requirer: build_plugin_requirer
           )
-          runner.run
+          guarded_run(runner)
           plugin = runner.plugin_registry.find("activerecord")
           expect(plugin.instance_variable_get(:@load_errors).size).to eq(1)
         end
@@ -619,7 +620,7 @@ RSpec.describe "plugins/rigor-activerecord" do
                 "plugins" => %w[rigor-activerecord rigor-reduced-consumer]
               )
             )
-            Rigor::Analysis::Runner.new(
+            runner = Rigor::Analysis::Runner.new(
               configuration: configuration, cache_store: nil, collect_stats: false,
               plugin_requirer: lambda { |name|
                 case File.basename(name, ".rb")
@@ -628,7 +629,8 @@ RSpec.describe "plugins/rigor-activerecord" do
                 end
                 true
               }
-            ).run
+            )
+            guarded_run(runner)
           end
         end
       end
@@ -1041,7 +1043,7 @@ RSpec.describe "plugins/rigor-activerecord" do
             collect_stats: false,
             plugin_requirer: build_plugin_requirer
           )
-          runner.run
+          guarded_run(runner)
           runner.plugin_registry.find("activerecord").send(:model_index)
         end
       end
@@ -1478,7 +1480,7 @@ RSpec.describe "plugins/rigor-activerecord" do
               true
             }
           )
-          yield runner.run
+          yield guarded_run(runner)
         end
       end
     end
@@ -2211,10 +2213,11 @@ RSpec.describe "plugins/rigor-activerecord" do
       Rigor::Plugin.unregister!
       store = Rigor::Cache::Store.new(root: cache_root)
       result = Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]),
           cache_store: store, collect_stats: false, plugin_requirer: build_plugin_requirer
-        ).run
+        )
+        guarded_run(runner)
       end
       counters = store.stats.fetch(:by_producer)
                       .fetch(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID) { { hits: 0, misses: 0 } }
@@ -2388,7 +2391,7 @@ RSpec.describe "plugins/rigor-activerecord" do
           )
         )
         Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
               case File.basename(name, ".rb")
@@ -2397,7 +2400,8 @@ RSpec.describe "plugins/rigor-activerecord" do
               end
               true
             }
-          ).run
+          )
+          guarded_run(runner)
         end
       end
     end

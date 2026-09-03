@@ -242,14 +242,15 @@ RSpec.describe "plugins/rigor-pundit" do
         )
       )
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration,
           cache_store: Rigor::Cache::Store.new(root: cache_root),
           plugin_requirer: lambda { |_name|
             Rigor::Plugin.register(Rigor::Plugin::Pundit)
             true
           }
-        ).run
+        )
+        guarded_run(runner)
       end
     end
 

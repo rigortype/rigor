@@ -70,7 +70,8 @@ RSpec.describe "the Rails effect layer" do
           ),
           cache_store: nil, plugin_requirer: RAILS_PLUGIN_REQUIRER
         )
-        runner.run(["app"])
+        # Class-level memo, so it runs outside example scope where the `GuardedAnalysis` mixin lives.
+        InternalAnalyzerErrorGuard.check!(runner.run(["app"]), context: "rails_layer_spec .table")
       end
       [runner.effect_table, runner.effect_plugin_facts]
     end
@@ -318,7 +319,7 @@ RSpec.describe "the Rails effect layer" do
           configuration: configuration, cache_store: nil, workers: 0,
           plugin_requirer: RAILS_PLUGIN_REQUIRER
         )
-        runner.run(["app"])
+        guarded_run(runner, ["app"])
         table = runner.effect_table
       end
 

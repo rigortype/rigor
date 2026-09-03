@@ -76,11 +76,9 @@ RSpec.describe "a singleton method sharing a name with an instance method" do
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[app.rb], "signature_paths" => %w[sig])
     )
-    Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-                           .run(%w[app.rb])
-                           .diagnostics
-                           .select { |d| d.rule == "call.undefined-method" }
-                           .map(&:message)
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    diagnostics = guarded_run(runner, %w[app.rb]).diagnostics
+    diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
   end
 
   around do |example|

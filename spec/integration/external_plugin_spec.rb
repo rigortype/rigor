@@ -45,7 +45,7 @@ RSpec.describe "external (out-of-tree) plugin contract" do
       result = Dir.chdir(dir) do
         # No `plugin_requirer:` — the loader falls back to the real `require`, so this loads the fixture gem
         # from $LOAD_PATH for real rather than via a test stub.
-        Rigor::Analysis::Runner.new(configuration: configuration).run
+        guarded_run(Rigor::Analysis::Runner.new(configuration: configuration))
       end
 
       # The plugin registered and produced its diagnostic: proof the out-of-tree gem loaded and ran.

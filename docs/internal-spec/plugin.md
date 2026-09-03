@@ -405,8 +405,13 @@ the block carries logic and runs through `instance_exec`:
       never reaches the diagnostic.
     - The two rules that read a RESOLVED SIGNATURE (`call.wrong-arity`,
       `call.argument-type-mismatch`) are **not** covered by this record
-      today; they still validate against the RBS signature at a
-      plugin-answered site. See issue #653's follow-up note.
+      today: at a plugin-answered site they still validate the call
+      against whatever signature the RBS declares for that name. No
+      bundled plugin reaches that shape — every one of them answers a
+      method its coexisting RBS declares with a compatible arity — so
+      the gap is currently unreachable in the shipped set, and closing
+      it would suppress two checks that do catch real errors. Decide it
+      on evidence from a plugin that actually hits it.
 - `narrowing_facts(methods:) { |call_node, scope| facts | nil }` —
   **post-return narrowing facts**, gated on `call_node.name` being in
   the declared `methods:`. The engine invokes it through

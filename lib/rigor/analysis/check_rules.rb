@@ -666,14 +666,10 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
-          # ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound; firing
-          # undefined-method against it is an FP by construction. Decline.
-          return nil if inferred_param_receiver?(call_node, scope)
-
-          # Issue #653 — a plugin's `dynamic_return` answered THIS call site, so the site's type is the
-          # plugin's and the receiver's RBS never dispatched it. Ahead of the receiver-shape branch below so
-          # the scalar and the union path are covered by the one gate. See {#plugin_typed_call?}.
-          return nil if plugin_typed_call?(call_node, scope)
+          # The two exemptions that hold whatever shape the receiver has. Both sit ahead of the
+          # receiver-shape branch below, so the scalar and the union path are covered by the one gate.
+          # See {#call_site_exempt?}.
+          return nil if call_site_exempt?(call_node, scope)
 
           # N3 — a safe-navigation call (`recv&.m`) never dispatches on the
           # nil edge of its receiver: at runtime it short-circuits to nil.
@@ -990,6 +986,16 @@ module Rigor
           return false if loader.nil? || !loader.respond_to?(:signature_paths)
 
           loader.signature_paths.any? { |path| Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) }
+        end
+
+        # The `call.undefined-method` exemptions that depend only on the CALL SITE, never on the receiver's
+        # type or class — so they are decided before the rule looks at the receiver at all:
+        #
+        # - ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound, so firing
+        #   undefined-method against it is a false positive by construction.
+        # - Issue #653 — a plugin answered this call site ({#plugin_typed_call?}).
+        def call_site_exempt?(call_node, scope)
+          inferred_param_receiver?(call_node, scope) || plugin_typed_call?(call_node, scope)
         end
 
         # Issue #653 — true when a plugin's `dynamic_return` supplied the return type for THIS call node

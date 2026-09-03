@@ -149,14 +149,15 @@ RSpec.describe "rigor-devise integration" do
       )
 
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration,
           cache_store: nil,
           plugin_requirer: lambda do |_name|
             Rigor::Plugin.register(plugin_class)
             true
           end
-        ).run
+        )
+        guarded_run(runner)
       end
     end
   end

@@ -78,7 +78,7 @@ RSpec.describe "plugins/rigor-actionpack" do
             true
           end
         )
-        yield runner.run
+        yield guarded_run(runner)
       end
     end
   end
@@ -830,7 +830,7 @@ RSpec.describe "plugins/rigor-actionpack" do
               true
             end
           )
-          result = runner.run
+          result = guarded_run(runner)
           # The rails-routes plugin still validates the `usres_path` call (its own walker doesn't filter by
           # path), but actionpack's path filter must skip the lib/ file.
           ap_diags = result.diagnostics.select { |d| d.source_family == "plugin.actionpack" }
@@ -868,7 +868,7 @@ RSpec.describe "plugins/rigor-actionpack" do
               true
             }
           )
-          yield runner.run
+          yield guarded_run(runner)
         end
       end
     end
@@ -1266,7 +1266,7 @@ RSpec.describe "plugins/rigor-actionpack" do
               true
             }
           )
-          yield runner.run
+          yield guarded_run(runner)
         end
       end
     end
@@ -1375,7 +1375,7 @@ RSpec.describe "plugins/rigor-actionpack" do
               true
             }
           )
-          yield runner.run
+          yield guarded_run(runner)
         end
       end
     end
@@ -1468,7 +1468,7 @@ RSpec.describe "plugins/rigor-actionpack" do
       Dir.mktmpdir do |dir|
         materialise_nested_module_fixture(dir, path, contents, views)
         Dir.chdir(dir) do
-          yield nested_module_runner(dir).run
+          yield guarded_run(nested_module_runner(dir))
         end
       end
     end
@@ -1572,7 +1572,7 @@ RSpec.describe "plugins/rigor-actionpack" do
               true
             end
           )
-          result = runner.run
+          result = guarded_run(runner)
           ap_diags = result.diagnostics.select { |d| d.source_family == "plugin.actionpack" }
           # Without the helper table, Phase 4 silently no-ops.
           expect(ap_diags).to be_empty

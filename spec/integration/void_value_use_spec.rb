@@ -65,7 +65,7 @@ RSpec.describe "static.value-use.void reporting" do
   end
 
   def run(configuration)
-    Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil).run(%w[app.rb])
+    guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[app.rb])
   end
 
   def void_diagnostics(result)
@@ -366,9 +366,10 @@ RSpec.describe "static.value-use.void reporting" do
           Rigor::Plugin.register(Rigor::Plugin::RbsInline)
           true
         end
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration, cache_store: nil, plugin_requirer: requirer
-        ).run(%w[app.rb])
+        )
+        guarded_run(runner, %w[app.rb])
       end
 
       it "fires on the one-hop value use with the inline-annotated leaf as origin" do

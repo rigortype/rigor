@@ -57,7 +57,7 @@ RSpec.describe "plugins/rigor-activestorage" do
           collect_stats: false,
           plugin_requirer: build_plugin_requirer
         )
-        result = runner.run
+        result = guarded_run(runner)
         plugin = runner.plugin_registry.find("activestorage")
         [result, plugin&.send(:attachment_index)]
       end
@@ -305,10 +305,11 @@ RSpec.describe "plugins/rigor-activestorage" do
       Rigor::Plugin.unregister!
       store = Rigor::Cache::Store.new(root: cache_root)
       result = Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activestorage"]),
           cache_store: store, collect_stats: false, plugin_requirer: build_plugin_requirer
-        ).run
+        )
+        guarded_run(runner)
       end
       counters = store.stats.fetch(:by_producer)
                       .fetch(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID) { { hits: 0, misses: 0 } }

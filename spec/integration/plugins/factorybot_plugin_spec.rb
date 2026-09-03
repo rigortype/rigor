@@ -215,7 +215,7 @@ RSpec.describe "plugins/rigor-factorybot" do
               true
             }
           )
-          yield runner.run
+          yield guarded_run(runner)
         end
       end
     end

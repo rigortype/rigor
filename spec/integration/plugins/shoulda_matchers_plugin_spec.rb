@@ -368,7 +368,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
               true
             end
           )
-          yield runner.run
+          yield guarded_run(runner)
         end
       end
     end

@@ -56,9 +56,10 @@ RSpec.describe "ADR-88 incremental plugin-fact soundness" do
     end
 
     def full_diagnostics
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: config, cache_store: nil, plugin_requirer: sorbet_requirer
-      ).run(%w[models.rb app.rb]).diagnostics
+      )
+      guarded_run(runner, %w[models.rb app.rb]).diagnostics
     end
 
     def undefined_on_app?(diagnostics)

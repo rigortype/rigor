@@ -1561,11 +1561,12 @@ module Rigor
             return
           end
         when Prism::ConstantWriteNode
-          record_constant_write(node, qualified_prefix, default_scope, accumulator, node.name.to_s)
+          record_constant_write(node, qualified_prefix, default_scope, accumulator,
+                                qualified_write_name(qualified_prefix, node.name.to_s))
           return
         when Prism::ConstantPathWriteNode
-          full = Source::ConstantPath.qualified_name(node.target)
-          record_constant_write(node, [], default_scope, accumulator, full) if full
+          full = constant_path_write_key(node.target, qualified_prefix, default_scope)
+          record_constant_write(node, qualified_prefix, default_scope, accumulator, full) if full
           return
         end
 
@@ -1574,16 +1575,67 @@ module Rigor
         end
       end
 
-      def record_constant_write(node, qualified_prefix, default_scope, accumulator, base_name)
-        full = qualified_prefix.empty? ? base_name : "#{qualified_prefix.join('::')}::#{base_name}"
+      # Issue #690 — `enclosing_prefix` is the lexical declaration prefix the write SITS UNDER, `full` the
+      # qualified name it WRITES. The two coincide for a bare `BAR = …` and diverge for a `Foo::BAR = …`,
+      # which is why they are separate parameters. One parameter served both roles, so the path form had to
+      # pass it EMPTY to keep the caller-supplied name intact — and that lost the key's qualification and the
+      # rvalue's lexical context together, in the same argument.
+      def record_constant_write(node, enclosing_prefix, default_scope, accumulator, full)
         body_scope = default_scope
-        unless qualified_prefix.empty?
-          body_scope = census_body_scope(default_scope, qualified_prefix,
-                                         Type::Combinator.singleton_of(qualified_prefix.join("::")))
+        unless enclosing_prefix.empty?
+          body_scope = census_body_scope(default_scope, enclosing_prefix,
+                                         Type::Combinator.singleton_of(enclosing_prefix.join("::")))
         end
         rvalue_type = meta_new_constant_type(node, full) || body_scope.type_of(node.value)
         existing = accumulator[full]
         accumulator[full] = existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      end
+
+      # The accumulator key for a `Foo::BAR = …`. Ruby resolves the path's NAMESPACE through the nesting at
+      # the write site, so `Holder::DEFAULT = …` inside `module Admin` names `Admin::Holder::DEFAULT`
+      # whenever `Admin::Holder` is a class or module some source declares. Filing the entry under the
+      # as-written spelling put it where no read of the resolved name reaches it: a read spelled
+      # `Admin::Holder::DEFAULT` answered `Dynamic[top]`, and the in-namespace spelling fell past the
+      # qualified rung of the lexical ladder to the bare one, hit the mis-keyed entry, and got a top-level
+      # constant of the same name — `call.undefined-method` on correct code ([#690](https://github.com/rigortype/rigor/issues/690)).
+      #
+      # Three forms keep the as-written key because their namespace is not the enclosing one: a write at the
+      # top level, a rooted `::Foo::BAR` (which names the top level by definition), and a dynamic base
+      # (`klass::BAR`, which {Source::ConstantPath.qualified_name} renders leniently as its trailing constant
+      # segments alone). Re-qualifying a namespace the code does not name would file the entry under a guess.
+      def constant_path_write_key(target, qualified_prefix, default_scope)
+        written = Source::ConstantPath.qualified_name(target)
+        return written if written.nil? || qualified_prefix.empty? ||
+                          Source::ConstantPath.rooted?(target) ||
+                          Source::ConstantPath.qualified_name_or_nil(target).nil?
+
+        namespace, _, base = written.rpartition("::")
+        return written if namespace.empty?
+
+        "#{resolved_write_namespace(namespace, qualified_prefix, default_scope)}::#{base}"
+      end
+
+      # The namespace of a `Foo::BAR = …`, resolved the way a READ of the same spelling resolves it: the
+      # first `<nesting entry>::Foo` that names a known class or module, innermost first, and the as-written
+      # name when none does. Only class/module knowledge participates — a value constant owns no constants —
+      # and the ancestor rung {Reflection.resolve_constant_type} walks is deliberately skipped, so a
+      # namespace no source declares keeps the key it has today rather than moving to a guess.
+      def resolved_write_namespace(namespace, qualified_prefix, scope)
+        lexical_nesting_for_prefix(qualified_prefix).each do |entry|
+          candidate = "#{entry}::#{namespace}"
+          return candidate if known_namespace?(candidate, scope)
+        end
+        namespace
+      end
+
+      # True when `name` is a class or module some source declares: a project declaration the indexer
+      # discovered (including the [#528](https://github.com/rigortype/rigor/issues/528) synthesized namespace
+      # prefixes) or an RBS-known class object.
+      def known_namespace?(name, scope)
+        return true if scope.discovered_classes.key?(name)
+
+        environment = scope.environment
+        !environment.nil? && !environment.singleton_for_name(name).nil?
       end
 
       # Survey item (e): when the rvalue is a recognised `Module.new do ... end` / `Class.new do ... end` /

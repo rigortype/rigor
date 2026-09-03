@@ -1052,6 +1052,17 @@ module Rigor
         # silently the way the v0.0.9 cache `Cache::Descriptor` regression did.
       end
 
+      # Yields every type-alias declaration loaded into the environment (`type foo = ...`).
+      # Yields `(RBS::TypeName, RBS::Environment::TypeAliasEntry)` pairs.
+      def each_type_alias_decl
+        return enum_for(:each_type_alias_decl) unless block_given?
+        return unless env
+
+        env.type_alias_decls.each do |type_name, decl_entry|
+          yield [type_name, decl_entry]
+        end
+      end
+
       # ADR-20 slice 2e — iterates over every `%a{...}` annotation attached to a class- or module-level
       # declaration in the loaded RBS environment, yielding `(annotation_string, source_location)` pairs.
       #

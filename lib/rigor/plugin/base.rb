@@ -840,6 +840,8 @@ module Rigor
       def dynamic_return_receiver_class_name(receiver_type)
         case receiver_type
         when Rigor::Type::Nominal, Rigor::Type::Singleton then receiver_type.class_name
+        when Rigor::Type::Result then "Dry::Monads::Result"
+        when Rigor::Type::Maybe then "Dry::Monads::Maybe"
         end
       end
 

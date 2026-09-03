@@ -85,7 +85,7 @@ module Rigor
           Type::Combinator.union(*reduced)
         when HktBody::NominalApp
           reduced_args = node.args.map { |arg| walk(arg, bindings: bindings, state: state) }
-          Type::Combinator.nominal_of(node.class_name, type_args: reduced_args)
+          reduce_nominal_app(node, reduced_args)
         when HktBody::AppRef
           reduced_args = node.args.map { |arg| walk(arg, bindings: bindings, state: state) }
           reduce_app_ref(node.uri, reduced_args, state: state)
@@ -93,6 +93,17 @@ module Rigor
           walk_conditional(node, bindings: bindings, state: state)
         else
           raise ArgumentError, "unknown body node: #{node.class}"
+        end
+      end
+
+      def reduce_nominal_app(node, reduced_args)
+        normalized_name = node.class_name.sub(/\A::/, "")
+        if %w[Result Dry::Monads::Result].include?(normalized_name) && reduced_args.size == 2
+          Type::Combinator.result_of(reduced_args[0], reduced_args[1])
+        elsif %w[Maybe Dry::Monads::Maybe].include?(normalized_name) && reduced_args.size == 1
+          Type::Combinator.maybe_of(reduced_args[0])
+        else
+          Type::Combinator.nominal_of(node.class_name, type_args: reduced_args)
         end
       end
 

@@ -1,6 +1,6 @@
 module Rigor
   module Type
-    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Refined | Intersection | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance | BoundMethod
+    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Refined | Intersection | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance | BoundMethod | Result | Maybe
 
     type accepts_mode = :strict | :gradual | :loose
 
@@ -310,6 +310,37 @@ module Rigor
       def inspect: () -> String
     end
 
+    class Result
+      attr_reader ok_type: Type::t
+      attr_reader err_type: Type::t
+      alias success_type ok_type
+      alias failure_type err_type
+      def initialize: (Type::t ok_type, Type::t err_type) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Maybe
+      attr_reader value_type: Type::t
+      def initialize: (Type::t value_type) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
     class AcceptsResult
       attr_reader trinary: Trinary
       attr_reader mode: accepts_mode
@@ -374,6 +405,8 @@ module Rigor
       def self?.data_instance_of: (members: Hash[Symbol, Type::t], ?class_name: String?) -> DataInstance
       def self?.struct_class_of: (members: Array[Symbol], ?class_name: String?, ?keyword_init: bool) -> StructClass
       def self?.struct_instance_of: (members: Hash[Symbol, Type::t], ?class_name: String?) -> StructInstance
+      def self?.result_of: (Type::t ok_type, Type::t err_type) -> Result
+      def self?.maybe_of: (Type::t value_type) -> Maybe
       def self?.union: (*Type::t types) -> Type::t
       def self?.key_of: (Type::t type) -> Type::t
       def self?.value_of: (Type::t type) -> Type::t

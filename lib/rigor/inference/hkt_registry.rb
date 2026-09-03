@@ -160,6 +160,8 @@ module Rigor
       #   typically `untyped` or stdlib classes.
       # @param reporter [#record, nil] same fail-soft reporter contract the other RBS-extended
       #   parsers use.
+
+      # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockLength
       def self.scan_rbs_loader(rbs_loader, base: EMPTY, name_scope: nil, reporter: nil)
         return base if rbs_loader.nil?
 
@@ -180,6 +182,50 @@ module Rigor
             annotation_string, reporter: reporter, source_location: source_location
           )
           definitions << defn if defn
+        end
+
+        require_relative "hkt_sugar_translator"
+        if rbs_loader.respond_to?(:each_type_alias_decl)
+          rbs_loader.each_type_alias_decl do |type_name, decl_entry|
+            decl = decl_entry.decl
+            next if decl.type_params.empty?
+
+            uri_str = type_name.to_s.sub(/\A::/, "")
+            next unless uri_str.include?("::")
+
+            uri = uri_str.to_sym
+
+            params = decl.type_params.map(&:name)
+            params_set = params.to_set
+
+            translator = HktSugarTranslator.new(uri: uri, params_set: params_set, name_scope: name_scope)
+            body_tree = translator.translate(decl.type)
+
+            next unless translator.recursive
+
+            variance = decl.type_params.map do |p|
+              case p.variance
+              when :covariant then :out
+              when :contravariant then :in
+              else :inv
+              end
+            end
+
+            registrations << Registration.new(
+              uri: uri,
+              arity: params.size,
+              variance: variance,
+              bound: Type::Combinator.untyped
+            )
+            definitions << Definition.new(
+              uri: uri,
+              params: params,
+              body: "",
+              body_tree: body_tree,
+              source_path: decl.location&.buffer&.name,
+              source_line: decl.location&.start_line
+            )
+          end
         end
 
         return base if registrations.empty? && definitions.empty?

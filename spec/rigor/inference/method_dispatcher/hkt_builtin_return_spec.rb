@@ -277,6 +277,37 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
         expect(type).to be_a(Rigor::Type::Nominal)
         expect(type.class_name).to eq("Array")
       end
+
+      it "CSV.readlines(path) returns the same shape as CSV.read" do
+        type = described_class.dispatch(
+          receiver_type: csv_singleton,
+          method_name: :readlines,
+          arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+          environment: environment
+        )
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        inner = type.type_args.first
+        expect(inner).to be_a(Rigor::Type::Nominal)
+        expect(inner.class_name).to eq("Array")
+        cell = inner.type_args.first
+        expect(cell).to be_a(Rigor::Type::Union)
+        expect(cell.members.map(&:describe)).to contain_exactly("String", "nil")
+      end
+
+      it "CSV.parse_line(str) returns Array[String | nil] for a single row" do
+        type = described_class.dispatch(
+          receiver_type: csv_singleton,
+          method_name: :parse_line,
+          arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+          environment: environment
+        )
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        cell = type.type_args.first
+        expect(cell).to be_a(Rigor::Type::Union)
+        expect(cell.members.map(&:describe)).to contain_exactly("String", "nil")
+      end
     end
 
     it "does not fire for YAML.load (deliberately uncovered — can return any Ruby object)" do

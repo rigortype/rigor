@@ -25,8 +25,8 @@ module Rigor
 
       # Dynamic return rule for attached FFI functions
       # Gated on known FFI library receivers and attached function names
-      dynamic_return receivers: -> { producer_value(:ffi_catalog)&.libraries&.to_a || [] },
-                     methods: -> { producer_value(:ffi_catalog)&.function_method_names&.to_a || [] } do |call_node, scope|
+      dynamic_return receivers: -> { producer_value(:ffi_catalog)&.libraries || [] },
+                     methods: -> { producer_value(:ffi_catalog)&.function_method_names || [] } do |call_node, scope|
         catalog = producer_value(:ffi_catalog)
         next nil if catalog.nil?
 
@@ -52,7 +52,7 @@ module Rigor
       # Dynamic return rule for FFI struct field accessors
       # Gated on known FFI struct class names and field names
       dynamic_return receivers: -> { producer_value(:ffi_catalog)&.struct_names || [] },
-                     methods: -> { producer_value(:ffi_catalog)&.struct_field_names&.to_a || [] } do |call_node, scope|
+                     methods: -> { producer_value(:ffi_catalog)&.struct_field_names || [] } do |call_node, scope|
         catalog = producer_value(:ffi_catalog)
         next nil if catalog.nil?
 
@@ -80,7 +80,7 @@ module Rigor
             callbacks: catalog.callbacks
           )
         elsif call_node.name.to_s.end_with?("=")
-          # Issue 3 fix: for both .id = val and [:id] = val, the assigned value is the LAST argument
+          # For both .id = val and [:id] = val, the assigned value is the LAST argument
           val_node = call_node.arguments&.arguments&.last
           val_node ? scope&.type_of(val_node) : Rigor::Type::Combinator.top
         elsif (field_type = fields[call_node.name])
@@ -103,18 +103,16 @@ module Rigor
         Analyzer.ffx_diagnostics_for_class(node, path: path, target: @target || :ffi)
       end
 
-      def init(services)
-        @target = TargetDetector.detect(root: services.project_root, config: config)
+      def init(_services)
+        root = config["root"] || Dir.pwd
+        @target = TargetDetector.detect(root: root, config: config)
         @exceptions = config["exceptions"] || []
       end
 
-      def prepare(services)
-        @target = TargetDetector.detect(root: services.project_root, config: config)
+      def prepare(_services)
+        root = config["root"] || Dir.pwd
+        @target = TargetDetector.detect(root: root, config: config)
         @exceptions = config["exceptions"] || []
-      end
-
-      def diagnostics_for_file(path:, scope:, root:)
-        []
       end
     end
   end

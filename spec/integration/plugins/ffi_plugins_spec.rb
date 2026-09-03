@@ -89,7 +89,18 @@ RSpec.describe "FFI plugin family" do
 
     it "does not match dynamic_return for non-FFI receivers" do
       catalog = Rigor::Plugin::FFI::FFICatalog.new(
-        functions: { size: [Rigor::Plugin::FFI::AttachFunctionFact.new(ruby_name: :size, c_name: :size, arg_types: [], return_type: :int, node: nil, receiver_name: "MyLib")] },
+        functions: {
+          size: [
+            Rigor::Plugin::FFI::AttachFunctionFact.new(
+              ruby_name: :size,
+              c_name: :size,
+              arg_types: [],
+              return_type: :int,
+              node: nil,
+              receiver_name: "MyLib"
+            )
+          ]
+        },
         functions_by_receiver: {},
         libraries: Set.new(["MyLib"]),
         structs: { "MyStruct" => { size: :int } }

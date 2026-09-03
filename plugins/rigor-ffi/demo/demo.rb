@@ -4,6 +4,7 @@ require "ffi"
 
 module CMath
   extend FFI::Library
+
   ffi_lib "m"
 
   attach_function :cos, [:double], :double

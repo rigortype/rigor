@@ -12,16 +12,6 @@ module Rigor
         description: "Models ffi-rzmq / LibZMQ wrappers, socket operations, and cross-gem bindings.",
         signature_paths: ["sig"]
       )
-
-      def init(services)
-      end
-
-      def prepare(services)
-      end
-
-      def diagnostics_for_file(path:, scope:, root:)
-        []
-      end
     end
   end
 end

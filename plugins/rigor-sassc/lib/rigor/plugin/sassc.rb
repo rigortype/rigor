@@ -32,7 +32,9 @@ module Rigor
         fact = FFI::Analyzer.extract_attach_function(node, module_name: mod)
         next [] if fact.nil?
 
-        if stripped_name != ruby_name
+        if stripped_name == ruby_name
+          [fact]
+        else
           [
             fact,
             FFI::AttachFunctionFact.new(
@@ -44,19 +46,7 @@ module Rigor
               receiver_name: mod
             )
           ]
-        else
-          [fact]
         end
-      end
-
-      def init(services)
-      end
-
-      def prepare(services)
-      end
-
-      def diagnostics_for_file(path:, scope:, root:)
-        []
       end
     end
   end

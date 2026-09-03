@@ -55,8 +55,8 @@ module Rigor
           @binding_recognizers ||= []
         end
 
-        def register_binding_recognizer(name, &block)
-          binding_recognizers << BindingRecognizer.new(name, &block)
+        def register_binding_recognizer(name, &)
+          binding_recognizers << BindingRecognizer.new(name, &)
         end
       end
     end
@@ -66,9 +66,9 @@ module Rigor
         @ffi_binding_recognizers ||= []
       end
 
-      def self.ffi_binding_recognizer(name, &block)
-        ffi_binding_recognizers << Rigor::Plugin::FFI::BindingRecognizer.new(name, &block)
-        Rigor::Plugin::FFI.register_binding_recognizer(name, &block)
+      def self.ffi_binding_recognizer(name, &)
+        ffi_binding_recognizers << Rigor::Plugin::FFI::BindingRecognizer.new(name, &)
+        Rigor::Plugin::FFI.register_binding_recognizer(name, &)
       end
     end
   end

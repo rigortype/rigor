@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 module Rigor
   module Plugin
     class FFI < Base
@@ -23,6 +21,13 @@ module Rigor
 
         # Regex anchor must match end of string \z
         NOMINAL_OPAQUE_REGEX = Regexp.new("(_ptr|_handle|Ptr|Handle)\\z")
+
+        BOOL_TYPE = Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.constant_of(true),
+          Rigor::Type::Combinator.constant_of(false)
+        ).freeze
+
+        NIL_TYPE = Rigor::Type::Combinator.constant_of(nil)
 
         module_function
 
@@ -57,7 +62,7 @@ module Rigor
 
           case sym
           when :void
-            Rigor::Type::Combinator.void
+            NIL_TYPE
           when :int, :uint, :short, :ushort, :long, :ulong,
                :int8, :int16, :int32, :int64,
                :uint8, :uint16, :uint32, :uint64,
@@ -66,7 +71,7 @@ module Rigor
           when :float, :double
             Rigor::Type::Combinator.nominal_of("Float")
           when :bool
-            Rigor::Type::Combinator.bool
+            BOOL_TYPE
           when :string
             Rigor::Type::Combinator.nominal_of("String")
           when :pointer
@@ -91,12 +96,12 @@ module Rigor
           sym = type_sym.is_a?(Symbol) ? type_sym : type_sym.to_s.to_sym
 
           if callbacks.key?(sym)
-            return Rigor::Type::Combinator.union_of(
+            return Rigor::Type::Combinator.union(
               Rigor::Type::Combinator.nominal_of("Proc"),
               Rigor::Type::Combinator.nominal_of("Method"),
               Rigor::Type::Combinator.nominal_of("FFI::Pointer"),
               Rigor::Type::Combinator.nominal_of("FFI::Function"),
-              Rigor::Type::Combinator.nil_type
+              NIL_TYPE
             )
           end
 
@@ -105,10 +110,10 @@ module Rigor
             if underlying == :pointer && nominal_opaque_pointer?(sym, exceptions: exceptions)
               nominal = camelize(sym)
               nominal = "#{module_name}::#{nominal}" if module_name && !module_name.empty?
-              return Rigor::Type::Combinator.union_of(
+              return Rigor::Type::Combinator.union(
                 Rigor::Type::Combinator.nominal_of(nominal),
                 Rigor::Type::Combinator.nominal_of("FFI::Pointer"),
-                Rigor::Type::Combinator.nil_type
+                NIL_TYPE
               )
             end
             sym = underlying
@@ -117,19 +122,19 @@ module Rigor
           case sym
           when :pointer
             if target == :ffx
-              Rigor::Type::Combinator.union_of(
+              Rigor::Type::Combinator.union(
                 Rigor::Type::Combinator.nominal_of("Integer"),
-                Rigor::Type::Combinator.nil_type
+                NIL_TYPE
               )
             else
-              Rigor::Type::Combinator.union_of(
+              Rigor::Type::Combinator.union(
                 Rigor::Type::Combinator.nominal_of("FFI::Pointer"),
                 Rigor::Type::Combinator.nominal_of("FFI::MemoryPointer"),
                 Rigor::Type::Combinator.nominal_of("FFI::AutoPointer"),
                 Rigor::Type::Combinator.nominal_of("FFI::Buffer"),
                 Rigor::Type::Combinator.nominal_of("Integer"),
                 Rigor::Type::Combinator.nominal_of("String"),
-                Rigor::Type::Combinator.nil_type
+                NIL_TYPE
               )
             end
           when :int, :uint, :short, :ushort, :long, :ulong,
@@ -138,12 +143,12 @@ module Rigor
                :long_long, :ulong_long, :size_t, :char, :uchar
             Rigor::Type::Combinator.nominal_of("Integer")
           when :float, :double
-            Rigor::Type::Combinator.union_of(
+            Rigor::Type::Combinator.union(
               Rigor::Type::Combinator.nominal_of("Float"),
               Rigor::Type::Combinator.nominal_of("Integer")
             )
           when :bool
-            Rigor::Type::Combinator.bool
+            BOOL_TYPE
           when :string
             Rigor::Type::Combinator.nominal_of("String")
           else

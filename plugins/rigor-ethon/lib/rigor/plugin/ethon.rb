@@ -27,16 +27,6 @@ module Rigor
         builder = EASY_RETURN_TYPES[call_node.name]
         builder&.call
       end
-
-      def init(services)
-      end
-
-      def prepare(services)
-      end
-
-      def diagnostics_for_file(path:, scope:, root:)
-        []
-      end
     end
   end
 end

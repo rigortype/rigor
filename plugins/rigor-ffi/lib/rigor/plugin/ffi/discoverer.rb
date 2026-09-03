@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "prism"
-require "set"
 
 module Rigor
   module Plugin
@@ -67,7 +66,7 @@ module Rigor
           Dir.glob(File.join(@root, "**", "*.rb")).reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
         end
 
-        def walk_tree(node, current_module, &block)
+        def walk_tree(node, current_module, &)
           return unless node
 
           case node
@@ -75,10 +74,10 @@ module Rigor
             name = node.constant_path.slice
             full_name = current_module ? "#{current_module}::#{name}" : name
             yield node, full_name
-            node.body&.child_nodes&.each { |child| walk_tree(child, full_name, &block) }
+            node.body&.child_nodes&.each { |child| walk_tree(child, full_name, &) }
           else
             yield node, current_module
-            node.child_nodes.each { |child| walk_tree(child, current_module, &block) }
+            node.child_nodes.each { |child| walk_tree(child, current_module, &) }
           end
         end
 
@@ -86,8 +85,8 @@ module Rigor
           case node.name
           when :extend
             arg = node.arguments&.arguments&.first
-            if arg && ["FFI::Library", "::FFI::Library", "FFX::Library", "::FFX::Library"].include?(arg.slice)
-              libraries << mod_name if mod_name
+            if arg && ["FFI::Library", "::FFI::Library", "FFX::Library", "::FFX::Library"].include?(arg.slice) && mod_name
+              libraries << mod_name
             end
           when :attach_function
             fact = Analyzer.extract_attach_function(node, module_name: mod_name)
@@ -164,9 +163,9 @@ module Rigor
           superclass_name = node.superclass&.slice
           return unless superclass_name
 
-          if ["FFI::Struct", "::FFI::Struct", "FFI::Union", "::FFI::Union"].include?(superclass_name)
-            structs[mod_name] ||= {} if mod_name
-          end
+          return unless ["FFI::Struct", "::FFI::Struct", "FFI::Union", "::FFI::Union"].include?(superclass_name)
+
+          structs[mod_name] ||= {} if mod_name
         end
       end
     end

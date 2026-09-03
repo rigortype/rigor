@@ -15,9 +15,7 @@ module Rigor
           when Prism::StringNode
             node.unescaped.to_sym
           when Prism::CallNode
-            if node.name == :to_sym && node.receiver
-              extract_symbol(node.receiver)
-            end
+            extract_symbol(node.receiver) if node.name == :to_sym && node.receiver
           end
         end
 
@@ -43,7 +41,7 @@ module Rigor
           return nil if all_args.empty?
 
           # Strip trailing keyword options hash if present
-          pos_args = all_args.reject { |a| a.is_a?(Prism::KeywordHashNode) }
+          pos_args = all_args.grep_v(Prism::KeywordHashNode)
           return nil if pos_args.empty?
 
           ruby_name = extract_symbol(pos_args[0])
@@ -98,31 +96,34 @@ module Rigor
           case call_node.name
           when :callback
             diagnostics << Rigor::Analysis::Diagnostic.new(
+              path: path,
+              line: call_node.location.start_line,
+              column: call_node.location.start_column + 1,
               rule: "ffx.unsupported-callback",
               message: "callback declarations are not supported by ffx (C extensions use native function pointers)",
-              severity: :error,
-              location: call_node.location,
-              source_path: path
+              severity: :error
             )
           when :typedef
             diagnostics << Rigor::Analysis::Diagnostic.new(
+              path: path,
+              line: call_node.location.start_line,
+              column: call_node.location.start_column + 1,
               rule: "ffx.unsupported-typedef",
               message: "typedef declarations are not supported by ffx",
-              severity: :error,
-              location: call_node.location,
-              source_path: path
+              severity: :error
             )
           when :enum, :bitmask
             diagnostics << Rigor::Analysis::Diagnostic.new(
+              path: path,
+              line: call_node.location.start_line,
+              column: call_node.location.start_column + 1,
               rule: "ffx.unsupported-enum",
               message: "#{call_node.name} declarations are not supported by ffx",
-              severity: :error,
-              location: call_node.location,
-              source_path: path
+              severity: :error
             )
           when :attach_function
             args = call_node.arguments&.arguments || []
-            pos_args = args.reject { |a| a.is_a?(Prism::KeywordHashNode) }
+            pos_args = args.grep_v(Prism::KeywordHashNode)
 
             args_node = pos_args.size >= 4 ? pos_args[2] : pos_args[1]
             ret_node = pos_args.size >= 4 ? pos_args[3] : pos_args[2]
@@ -132,19 +133,21 @@ module Rigor
                 type_sym = extract_type_symbol(elem)
                 if type_sym == :varargs
                   diagnostics << Rigor::Analysis::Diagnostic.new(
+                    path: path,
+                    line: elem.location.start_line,
+                    column: elem.location.start_column + 1,
                     rule: "ffx.unsupported-varargs",
                     message: "varargs are not supported by ffx",
-                    severity: :error,
-                    location: elem.location,
-                    source_path: path
+                    severity: :error
                   )
                 elsif type_sym && !Types::FFX_PRIMITIVE_TYPES.include?(type_sym)
                   diagnostics << Rigor::Analysis::Diagnostic.new(
+                    path: path,
+                    line: elem.location.start_line,
+                    column: elem.location.start_column + 1,
                     rule: "ffx.unsupported-type",
                     message: "type :#{type_sym} is not supported by ffx (expected one of 25 primitive types)",
-                    severity: :error,
-                    location: elem.location,
-                    source_path: path
+                    severity: :error
                   )
                 end
               end
@@ -154,11 +157,12 @@ module Rigor
               ret_sym = extract_type_symbol(ret_node)
               if ret_sym && !Types::FFX_PRIMITIVE_TYPES.include?(ret_sym)
                 diagnostics << Rigor::Analysis::Diagnostic.new(
+                  path: path,
+                  line: ret_node.location.start_line,
+                  column: ret_node.location.start_column + 1,
                   rule: "ffx.unsupported-type",
                   message: "return type :#{ret_sym} is not supported by ffx (expected one of 25 primitive types)",
-                  severity: :error,
-                  location: ret_node.location,
-                  source_path: path
+                  severity: :error
                 )
               end
             end
@@ -176,11 +180,12 @@ module Rigor
           if ["FFI::Struct", "::FFI::Struct", "FFI::Union", "::FFI::Union", "FFI::ManagedStruct", "::FFI::ManagedStruct"].include?(superclass_name)
             [
               Rigor::Analysis::Diagnostic.new(
+                path: path,
+                line: class_node.location.start_line,
+                column: class_node.location.start_column + 1,
                 rule: "ffx.unsupported-struct",
                 message: "FFI::Struct and FFI::Union are not supported by ffx",
-                severity: :error,
-                location: class_node.location,
-                source_path: path
+                severity: :error
               )
             ]
           else

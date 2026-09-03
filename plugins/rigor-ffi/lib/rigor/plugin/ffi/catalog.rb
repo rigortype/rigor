@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 module Rigor
   module Plugin
     class FFI < Base
@@ -52,9 +50,9 @@ module Rigor
           end
 
           # Fallback if receiver matches any registered library
-          if receiver_name.nil? || @libraries.include?(receiver_name.to_s)
-            @functions[method_name.to_sym]&.first
-          end
+          return unless receiver_name.nil? || @libraries.include?(receiver_name.to_s)
+
+          @functions[method_name.to_sym]&.first
         end
 
         def struct_fields(struct_name)

@@ -428,7 +428,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # and one that kept peeling satisfies the reverse. Both halves have to be
     # counted for either to mean anything.
     it "still asserts one resolved constant per shape, on both spellings" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(12)
+      expect(marked_lines(harness, "assert_type(").size).to eq(13)
     end
 
     # The false-positive arm. Each compact-body assertion is followed by a call

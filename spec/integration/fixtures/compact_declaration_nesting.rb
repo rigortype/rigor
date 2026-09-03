@@ -168,3 +168,23 @@ class Admin::FallThrough
     end
   end
 end
+
+# A compact declaration written at the TOP level names its own single entry
+# and nothing above it, so a constant owned only by an intermediate segment is
+# genuinely out of reach: Ruby raises `NameError: uninitialized constant
+# Reach::Mid::Tip::SETTING` for exactly this program. Peeling the qualified
+# name found `Reach::Mid::SETTING` and answered a value the code cannot read,
+# so the resolution is deliberately RETRACTED here and the gradual answer
+# stands in its place. This is the one place the change loses precision, and
+# it loses it on a program that does not run.
+module Reach
+  module Mid
+    SETTING = :mid
+  end
+end
+
+class Reach::Mid::Tip
+  def call
+    assert_type('Dynamic[top]', SETTING)
+  end
+end

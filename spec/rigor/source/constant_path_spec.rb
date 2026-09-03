@@ -91,4 +91,64 @@ RSpec.describe Rigor::Source::ConstantPath do
       expect(described_class.rooted?(nil)).to be(false)
     end
   end
+
+  # #708 — the two header readings, which differ in exactly one place: the class's own NAME resets on a
+  # rooted header while its `Module.nesting` keeps the enclosing entries beneath the reset one. Both are
+  # given the header node so they can consult `.rooted?`, which the rendered name has already dropped.
+  describe ".declaration_prefix" do
+    def header(source)
+      node(source).constant_path
+    end
+
+    it "appends a relative header to the prefix it is written under" do
+      expect(described_class.declaration_prefix(%w[Outer], header("class Bar; end"))).to eq(%w[Outer Bar])
+    end
+
+    it "keeps a compact relative header as ONE entry" do
+      expect(described_class.declaration_prefix([], header("class Admin::Widget; end"))).to eq(["Admin::Widget"])
+    end
+
+    it "drops the enclosing prefix for a rooted header" do
+      expect(described_class.declaration_prefix(%w[Outer], header("class ::Rooted::Bar; end")))
+        .to eq(["Rooted::Bar"])
+    end
+
+    it "drops it for the single-segment rooted header too (#638)" do
+      expect(described_class.declaration_prefix(%w[MyApp], header("class ::Foo; end"))).to eq(%w[Foo])
+    end
+
+    it "leaves the caller's prefix alone when the header names no constant" do
+      expect(described_class.declaration_prefix(%w[Outer], node("foo"))).to be_nil
+    end
+  end
+
+  describe ".pushed_nesting" do
+    def header(source)
+      node(source).constant_path
+    end
+
+    it "qualifies a relative header against the entry already on top" do
+      expect(described_class.pushed_nesting(["Outer"], header("class Bar; end"))).to eq(["Outer::Bar", "Outer"])
+    end
+
+    it "pushes ONE entry for a compact header" do
+      expect(described_class.pushed_nesting([], header("class Admin::Widget; end"))).to eq(["Admin::Widget"])
+    end
+
+    # The half that is NOT a reset: Ruby's nesting inside `class ::Rooted::Bar` written in `module Outer`
+    # is `[Rooted::Bar, Outer]`, so the enclosing rung stays live even though the name reset.
+    it "pushes a rooted header un-prefixed and keeps the enclosing entries beneath it" do
+      expect(described_class.pushed_nesting(["Outer"], header("class ::Rooted::Bar; end")))
+        .to eq(["Rooted::Bar", "Outer"])
+    end
+
+    it "renders `class self::Thing` as Ruby's own answer rather than refusing it" do
+      expect(described_class.pushed_nesting(["Outer"], header("class self::Thing; end")))
+        .to eq(["Outer::Thing", "Outer"])
+    end
+
+    it "propagates a nil chain" do
+      expect(described_class.pushed_nesting(nil, header("class Bar; end"))).to be_nil
+    end
+  end
 end

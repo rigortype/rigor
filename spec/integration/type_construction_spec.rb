@@ -541,6 +541,72 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #708 — a ROOTED declaration header. `::` re-anchors a `class` / `module`
+  # header exactly as it re-anchors a reference, and every walk that built a
+  # qualified name from a header read only the rendered name, which drops the
+  # marker by contract. `class ::Rooted::Bar` inside `module Outer` was filed as
+  # `Outer::Rooted::Bar`; the single-segment `class ::Foo` inside `module MyApp`
+  # became `MyApp::Foo` and so was undiscoverable under the name every caller
+  # writes.
+  describe "fixtures/rooted_declaration_header.rb — a rooted header resets to the top level" do
+    let(:harness) { harness_for("rooted_declaration_header") }
+
+    it "names and nests a rooted declaration the way Ruby does" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity, and the reason the rooted and non-rooted spellings are
+    # written as twins: the class's own NAME resets while the enclosing
+    # `Module.nesting` entries stay beneath it, so an implementation that reset
+    # both satisfies every `by_own_*` arm and fails `by_enclosing_constant`, and
+    # one that reset neither is master.
+    it "still asserts every rooted and non-rooted spelling" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(6)
+    end
+
+    # The must-FIRE half, and the symptom the issue actually reports: an
+    # undiscoverable class produces NO diagnostic at all, so an "is empty"
+    # assertion here would have passed on master. Both receivers are reachable
+    # under the name written, so the Symbol each returns answers `nope` with
+    # `call.undefined-method`; master reported only the second.
+    it "reports the undefined call on both the rooted and the non-rooted receiver" do
+      expect(harness.errors.map { |d| [d.line, d.rule] })
+        .to eq([[100, "call.undefined-method"], [101, "call.undefined-method"]])
+    end
+  end
+
+  # #682 — the cref an ANCESTOR NAME is resolved in. Ruby evaluates a superclass
+  # expression before entering the body, so the chain that governs it is the one
+  # the declaration's HEADER sits in. Peeling the subclass's qualified name gave
+  # the nested spelling's chain to both spellings, so a compact
+  # `class Admin::Widget < Base` searched an `Admin::Base` Ruby never looks at.
+  describe "fixtures/header_ancestor_nesting.rb — an ancestor name resolved at its header" do
+    let(:harness) { harness_for("header_ancestor_nesting") }
+
+    it "resolves a compact declaration's superclass and include at the top level" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity. Each arm is a compact / nested pair — an implementation that
+    # stopped peeling entirely satisfies every compact assertion and no nested
+    # twin, and the peel satisfies the reverse — plus `by_two_hop*`, which no
+    # first-hop-only repair reaches, and the include arms, which share the
+    # candidate order the superclass arms exercise.
+    it "still asserts both spellings of every ancestor shape" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(12)
+    end
+
+    # The must-FIRE half. The compact receiver resolved to nothing on master and
+    # its line reported nothing at all; the nested twin fired there and must
+    # keep firing, so neither half of the pair can go quiet unnoticed.
+    it "reports the undefined call on both the compact and the nested receiver" do
+      expect(harness.errors.map { |d| [d.line, d.rule] })
+        .to eq([[137, "call.undefined-method"], [138, "call.undefined-method"]])
+    end
+  end
+
   describe "fixtures/tuple_access.rb — Tuple element typing" do
     let(:harness) { harness_for("tuple_access") }
 

@@ -2131,4 +2131,51 @@ Unrelated
       expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")
     end
   end
+
+  # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the
+  # HEADER is written in, so the two spellings of one qualified name are distinguishable afterwards, which
+  # is exactly what the peel it replaces could not do.
+  describe ".build_superclass_tables" do
+    def header_nestings(source)
+      described_class.build_superclass_tables(parse(source)).last
+    end
+
+    it "records an empty header nesting for a compact declaration written at the top level" do
+      expect(header_nestings("class Admin::Widget < Base; end")).to eq({ "Admin::Widget" => [] })
+    end
+
+    it "records the enclosing namespace for the nested spelling of the same class" do
+      table = header_nestings("module Admin
+  class Widget < Base; end
+end
+")
+      expect(table).to eq({ "Admin" => [], "Admin::Widget" => ["Admin"] })
+    end
+
+    it "records one entry per declaration keyword for a doubly nested declaration" do
+      table = header_nestings("module A
+  module B
+    class C; end
+  end
+end
+")
+      expect(table["A::B::C"]).to eq(["A::B", "A"])
+    end
+
+    # #708 — a rooted header resets the class's NAME but not the cref its superclass name resolves in:
+    # Ruby evaluates `Base` there at `Module.nesting == [Outer]`.
+    it "keys a rooted declaration by its reset name and keeps the enclosing cref for its ancestors" do
+      table = header_nestings("module Outer
+  class ::Rooted::Bar < Base; end
+end
+")
+      expect(table["Rooted::Bar"]).to eq(["Outer"])
+      expect(table).not_to have_key("Outer::Rooted::Bar")
+    end
+
+    it "still records the as-written superclass beside it" do
+      supers = described_class.build_superclass_tables(parse("class Admin::Widget < Base; end")).first
+      expect(supers).to eq({ "Admin::Widget" => "Base" })
+    end
+  end
 end

@@ -122,6 +122,11 @@ module Rigor
         # skip this tier.
         plugin_result = try_plugin_contribution(call_node, scope, receiver_type)
         if plugin_result
+          # Issue #653 — this tier answering is what makes the site's type the plugin's rather than the
+          # RBS's, and `call.undefined-method` reads that record instead of re-deciding from the receiver's
+          # (possibly partial) signature. Recorded for EVERY plugin answer, dynamic or precise: the
+          # incoherence the record closes is about which subsystem typed the call, not about the type.
+          scope&.record_plugin_typed_call(call_node)
           if plugin_result.is_a?(Type::Dynamic)
             scope&.record_dynamic_origin(call_node, DynamicOrigin::FRAMEWORK_DSL_BOUNDARY)
           end

@@ -25,7 +25,7 @@ module Rigor
                 :source_path, :discovery, :struct_fold_safe_locals,
                 :opaque_block_self, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
-                :void_origins,
+                :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
@@ -179,6 +179,23 @@ module Rigor
       self
     end
 
+    # Issue #653 — records that a plugin's `dynamic_return` answered the return type for `node`, i.e. that
+    # `MethodDispatcher`'s plugin tier (which sits ABOVE `RbsDispatch`) is where the site's type came from.
+    # `Analysis::CheckRules` consults it so `call.undefined-method` does not then read the receiver's RBS to
+    # prove the same call undefined: the engine already decided the plugin outranks the signature here, and a
+    # partially-declared receiver is not a closed world (ADR-5). Mirrors {#record_void_origin} exactly —
+    # identity-keyed advisory metadata on a table threaded by reference through `#join` / `#rebuild`,
+    # excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
+    def record_plugin_typed_call(node)
+      @plugin_typed_calls[node] = true
+      self
+    end
+
+    # Issue #653 — whether a plugin answered the return type for `node` on this run.
+    def plugin_typed_call?(node)
+      @plugin_typed_calls.key?(node)
+    end
+
     def initialize(
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
@@ -198,6 +215,7 @@ module Rigor
       local_origins: EMPTY_ORIGINS,
       ivar_origins: EMPTY_ORIGINS,
       void_origins: {}.compare_by_identity,
+      plugin_typed_calls: {}.compare_by_identity,
       optimistic_origins: {}.compare_by_identity,
       optimistic_locals: EMPTY_ORIGINS,
       optimistic_ivars: EMPTY_ORIGINS
@@ -221,6 +239,7 @@ module Rigor
       @local_origins = local_origins
       @ivar_origins = ivar_origins
       @void_origins = void_origins
+      @plugin_typed_calls = plugin_typed_calls
       @optimistic_origins = optimistic_origins
       @optimistic_locals = optimistic_locals
       @optimistic_ivars = optimistic_ivars
@@ -978,6 +997,7 @@ module Rigor
       local_origins: @local_origins,
       ivar_origins: @ivar_origins,
       void_origins: @void_origins,
+      plugin_typed_calls: @plugin_typed_calls,
       optimistic_origins: @optimistic_origins,
       optimistic_locals: @optimistic_locals,
       optimistic_ivars: @optimistic_ivars
@@ -998,6 +1018,7 @@ module Rigor
         local_origins: local_origins,
         ivar_origins: ivar_origins,
         void_origins: void_origins,
+        plugin_typed_calls: plugin_typed_calls,
         optimistic_origins: optimistic_origins,
         optimistic_locals: optimistic_locals,
         optimistic_ivars: optimistic_ivars
@@ -1069,6 +1090,7 @@ module Rigor
         local_origins: join_origins(@local_origins, other.local_origins),
         ivar_origins: join_origins(@ivar_origins, other.ivar_origins),
         void_origins: @void_origins,
+        plugin_typed_calls: @plugin_typed_calls,
         optimistic_origins: @optimistic_origins,
         optimistic_locals: join_origins(@optimistic_locals, other.optimistic_locals),
         optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars)

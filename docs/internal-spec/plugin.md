@@ -379,6 +379,72 @@ the block carries logic and runs through `instance_exec`:
     (coerce direction):** the gate is on the *receiver* class, and Ruby
     dispatches `1 + money` on `Integer`, so a `["Money"]` rule does not
     fire there; that result types left-biased as `Integer` (see ADR-42).
+  - **A `dynamic_return` answer suppresses `call.undefined-method` at
+    that call site** (issue #653). The tier sits above `RbsDispatch` in
+    `MethodDispatcher#resolve`, so when a plugin answers, the receiver's
+    RBS never dispatched the call and the type at the site is the
+    plugin's; the existence check MUST NOT then read that same RBS to
+    prove the call undefined. The dispatcher records each answered call
+    node on `Scope#plugin_typed_calls` during the typing pass and
+    `Analysis::CheckRules` consults the record — it never re-runs a
+    plugin block to decide a diagnostic. The suppression is **per call
+    site, not per receiver class**: it is narrower than the
+    `open_receivers:` exemption below, and a name neither the RBS nor
+    any plugin answers still reports on the same receiver.
+    - **This rule does not rest on which subsystem outranks the other.**
+      A method the receiver's RBS declares resolves through the rule's
+      own `lookup_method` and never reaches the diagnostic, so
+      `call.undefined-method` fires identically whether the record is
+      read as "a plugin answer wins outright" or as "a plugin answer
+      wins where the RBS is silent". The record is consulted for every
+      plugin answer only because that is the cheaper and more honest
+      shape, not because this section is settling the precedence.
+    - **Open divergence — the engine and
+      [ADR-2](../adr/2-extension-api.md) § "Plugin Contribution
+      Merging" disagree, and this section does not resolve it.** The
+      ADR puts plugins in a lower authority tier than accepted RBS:
+      "Lower tiers must not weaken or contradict higher tiers.
+      Lower-tier contributions that contradict a higher tier are
+      diagnostics, not silent overrides", and specifically "Return
+      types from dynamic return extensions are checked against the
+      selected signature. A plugin may narrow within the contract; an
+      incompatible return is a conflict diagnostic, not a contract
+      override." The shipped engine does not implement that check. The
+      `dynamic_return` tier has sat ABOVE `RbsDispatch` in
+      `MethodDispatcher#resolve` since v0.1.1, and an incompatible
+      plugin return therefore overrides the declared one **silently**,
+      with no conflict diagnostic: an RBS `def self.logger: () ->
+      Integer` alongside a plugin answering `Frameworkish::Logger`
+      types the site `Frameworkish::Logger` and reports nothing.
+      Bundled plugins depend on the shipped behaviour —
+      `rigor-activesupport-core-ext`'s `%i[+ - *]` rule deliberately
+      answers over the *fully declared* core `Time#-` / `Integer#*`
+      because the RBS-projected return is wrong once a `Duration` is
+      the operand (`Time.now - 30.minutes` projects `Float`), while
+      `rigor-dry-validation` refines a `to_h` its own bundled `sig/`
+      declares, which is the narrowing ADR-2 permits. Which document
+      gives is a decision, filed for adjudication; nothing here
+      supersedes ADR-2. It is recorded so the two documents stop
+      contradicting each other in silence.
+    - **The suppression is only as sound as the plugin's own receiver
+      gate.** `receivers:` matches a class NAME and does not
+      discriminate `Singleton[C]` from `Nominal[C]`, so an ordinary
+      instance-method rule (`receivers: ["Widget"], methods: [:price]`)
+      also answers `Widget.price`, and this record then silences a
+      genuine `undefined method 'price' for singleton(Widget)` on the
+      plugin's say-so. The receiver-kind gap is pre-existing and
+      tracked separately; no bundled plugin is exposed today (the three
+      `receivers:` rules without a `Nominal` guard are actionpack's,
+      whose classes ship no RBS).
+    - The two rules that read a RESOLVED SIGNATURE (`call.wrong-arity`,
+      `call.argument-type-mismatch`) are **not** covered by this record
+      today: at a plugin-answered site they still validate the call
+      against whatever signature the RBS declares for that name. No
+      bundled plugin reaches that shape — every one of them answers a
+      method its coexisting RBS declares with a compatible arity — so
+      the gap is currently unreachable in the shipped set, and closing
+      it would suppress two checks that do catch real errors. Decide it
+      on evidence from a plugin that actually hits it.
 - `narrowing_facts(methods:) { |call_node, scope| facts | nil }` —
   **post-return narrowing facts**, gated on `call_node.name` being in
   the declared `methods:`. The engine invokes it through

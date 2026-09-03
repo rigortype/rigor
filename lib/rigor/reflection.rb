@@ -321,14 +321,8 @@ module Rigor
       base = enclosing_class_path(scope)
       return [] if base.nil? || base.empty?
 
-      chain = []
-      walker = base
-      while walker && !walker.empty?
-        chain << walker
-        idx = walker.rindex("::")
-        walker = idx ? walker[0, idx] : nil
-      end
-      chain
+      parts = base.split("::")
+      parts.each_index.map { |i| parts[0..-(i + 1)].join("::") }
     end
 
     # Returns the RBS `RBS::Definition::Method` for the instance method, or nil when the

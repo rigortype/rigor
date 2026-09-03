@@ -55,7 +55,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
       # A fresh Store at the same root forces a real disk hit (not the in-memory memo).
       warm_runner = build_runner(dir, cache_root)
-      warm = Dir.chdir(dir) { warm_runner.run }
+      warm = Dir.chdir(dir) { guarded_run(warm_runner) }
 
       # The warm run served from cache added NO further discovery parse.
       expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
@@ -86,7 +86,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
       allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
       recording = build_runner(dir, cache_root, record_dependencies: true)
-      Dir.chdir(dir) { recording.run }
+      Dir.chdir(dir) { guarded_run(recording) }
 
       # ADR-85 WD1 — a `record_dependencies` run is deliberately NOT run-result-cacheable: a cache-served
       # run performs no per-file analysis and so would capture an empty dependency graph, leaving the next

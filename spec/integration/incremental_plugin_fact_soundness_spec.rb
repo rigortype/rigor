@@ -80,7 +80,7 @@ RSpec.describe "ADR-88 incremental plugin-fact soundness" do
           # Process 1 — sig returns Integer, so `Foo.new.bar.upcase` is undefined-method on the consumer.
           write_project(sig_return: "Integer")
           store1 = Rigor::Cache::Store.new(root: cache_root)
-          diags1, warm1 = session(store1).run_incremental(snapshot: snapshot, fingerprint: fp)
+          diags1, warm1 = guarded_run_incremental(session(store1), snapshot: snapshot, fingerprint: fp)
           expect(warm1).to be(false)
           expect(undefined_on_app?(diags1)).to be(true)
 
@@ -91,7 +91,7 @@ RSpec.describe "ADR-88 incremental plugin-fact soundness" do
           # re-analysis (NOT warm) clears the consumer's diagnostic, matching a full run byte-for-byte.
           store2 = Rigor::Cache::Store.new(root: cache_root)
           sess2 = session(store2)
-          diags2, warm2 = sess2.run_incremental(snapshot: snapshot, fingerprint: fp)
+          diags2, warm2 = guarded_run_incremental(sess2, snapshot: snapshot, fingerprint: fp)
 
           expect(warm2).to be(false)
           expect(sess2.fact_surface_invalidated?).to be(true)

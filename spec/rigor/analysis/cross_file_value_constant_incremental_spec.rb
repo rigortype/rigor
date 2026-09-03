@@ -70,12 +70,12 @@ RSpec.describe "cross-file value constants — incremental" do
       File.write(reader, reader_source)
 
       session = session_for(dir)
-      expect(rules(session.baseline)).to eq([])
+      expect(rules(guarded_baseline(session))).to eq([])
       expect(full_run(dir)).to eq([])
 
       # ADD — the `constant:FOO` negative edge the baseline recorded now resolves.
       File.write(declaring, "FOO = 42\n")
-      recheck = session.recheck
+      recheck = guarded_recheck(session)
       expect(recheck.affected).to include(reader)
       expect(rules(recheck.diagnostics)).to eq(["a.rb:call.undefined-method"])
       expect(full_run(dir)).to eq(["a.rb:call.undefined-method"])
@@ -83,19 +83,19 @@ RSpec.describe "cross-file value constants — incremental" do
       # EDIT — the literal moves to a Symbol; the reader's diagnostic must disappear. The file's declaration
       # signature carries its published constants, so the reader is not dropped as declaration-stable.
       File.write(declaring, "FOO = :sym\n")
-      recheck = session.recheck
+      recheck = guarded_recheck(session)
       expect(recheck.affected).to include(reader)
       expect(rules(recheck.diagnostics)).to eq([])
       expect(full_run(dir)).to eq([])
 
       # EDIT BACK — and it must come back.
       File.write(declaring, "FOO = 42\n")
-      expect(rules(session.recheck.diagnostics)).to eq(["a.rb:call.undefined-method"])
+      expect(rules(guarded_recheck(session).diagnostics)).to eq(["a.rb:call.undefined-method"])
 
       # DELETE — the constant is gone, the reader is `Dynamic[top]` again, and the positive edge is what puts
       # it back in the closure (a removed file re-checks its positive dependents).
       FileUtils.rm(declaring)
-      recheck = session.recheck
+      recheck = guarded_recheck(session)
       expect(recheck.affected).to include(reader)
       expect(rules(recheck.diagnostics)).to eq([])
       expect(full_run(dir)).to eq([])
@@ -112,16 +112,20 @@ RSpec.describe "cross-file value constants — incremental" do
       File.write(unrelated, "class Unrelated\n  def z\n    1\n  end\nend\n")
 
       session = session_for(dir)
-      session.baseline
+      guarded_baseline(session)
 
       # Editing the UNRELATED file must not pull the reader in — the paired must-not-fire that proves the
       # edge above is attributed and not a blanket "re-check everything".
       File.write(unrelated, "class Unrelated\n  def z\n    2\n  end\nend\n")
-      expect(session.recheck.affected).not_to include(reader)
+      expect(guarded_recheck(session).affected).not_to include(reader)
 
-      # ...while editing the declaring file's literal does.
+      # ...while editing the declaring file's literal does, and the reader's diagnostic — silent throughout
+      # this example until now, since a Symbol answers `#upcase` — actually fires: the must-fire half of
+      # the pair, so the comparison above cannot pass on two coincidentally-equal empty sets.
       File.write(declaring, "FOO = 42\n")
-      expect(session.recheck.affected).to include(reader)
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(reader)
+      expect(rules(recheck.diagnostics)).to eq(["a.rb:call.undefined-method"])
     end
   end
 
@@ -135,11 +139,11 @@ RSpec.describe "cross-file value constants — incremental" do
         File.write(a, reader_source)
         File.write(File.join(dir, "b.rb"), "FOO = 42\n")
         session = session_for(dir)
-        expect(rules(session.baseline)).to eq(["a.rb:call.undefined-method"])
+        expect(rules(guarded_baseline(session))).to eq(["a.rb:call.undefined-method"])
 
         # The reader RESOLVED at baseline, so it recorded no miss; only the hit-side name edge reaches it.
         File.write(File.join(dir, "c.rb"), "FOO = \"forty-two\"\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
         expect(recheck.affected).to include(a)
         expect(rules(recheck.diagnostics)).to eq([])
         expect(full_run(dir)).to eq([])
@@ -154,11 +158,11 @@ RSpec.describe "cross-file value constants — incremental" do
         File.write(File.join(dir, "b.rb"), "FOO = 42\n")
         File.write(c, "FOO = \"forty-two\"\n")
         session = session_for(dir)
-        expect(rules(session.baseline)).to eq([])
+        expect(rules(guarded_baseline(session))).to eq([])
 
         # A removed file appears in no scan summary, so its whole before-census is what carries the change.
         FileUtils.rm(c)
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
         expect(recheck.affected).to include(a)
         expect(rules(recheck.diagnostics)).to eq(["a.rb:call.undefined-method"])
         expect(full_run(dir)).to eq(["a.rb:call.undefined-method"])
@@ -172,15 +176,15 @@ RSpec.describe "cross-file value constants — incremental" do
         File.write(a, reader_source)
         File.write(b, "FOO = 42\n")
         session = session_for(dir)
-        expect(rules(session.baseline)).to eq(["a.rb:call.undefined-method"])
+        expect(rules(guarded_baseline(session))).to eq(["a.rb:call.undefined-method"])
 
         # Step 1 leaves the reader recording only a MISS; the name never appears or vanishes across step 2,
         # so only a descriptor diff can see it come back.
         File.write(b, "FOO = \"str\"\n")
-        expect(rules(session.recheck.diagnostics)).to eq([])
+        expect(rules(guarded_recheck(session).diagnostics)).to eq([])
 
         File.write(b, "FOO = 42\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
         expect(recheck.affected).to include(a)
         expect(rules(recheck.diagnostics)).to eq(["a.rb:call.undefined-method"])
         expect(full_run(dir)).to eq(["a.rb:call.undefined-method"])
@@ -197,10 +201,10 @@ RSpec.describe "cross-file value constants — incremental" do
       a = File.join(dir, "a.rb")
       File.write(a, "def probe\n  Math::PI.upcase\nend\n")
       session = session_for(dir)
-      expect(messages(session.baseline)).to eq(["undefined method `upcase' for 3.141592653589793"])
+      expect(messages(guarded_baseline(session))).to eq(["undefined method `upcase' for 3.141592653589793"])
 
       File.write(File.join(dir, "b.rb"), "module Math\n  PI = 3\nend\n")
-      recheck = session.recheck
+      recheck = guarded_recheck(session)
       expect(recheck.affected).to include(a)
       expect(messages(recheck.diagnostics)).to eq(["undefined method `upcase' for 3"])
       expect(messages_of(full_diagnostics(dir))).to eq(["undefined method `upcase' for 3"])

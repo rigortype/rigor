@@ -33,12 +33,16 @@ RSpec.describe "incremental snapshot invalidation on an engine-source edit" do
     root
   end
 
-  # Two files, so the recheck has unchanged work it could wrongly serve.
+  # Two files, so the recheck has unchanged work it could wrongly serve. `Shop#total` carries a stable
+  # `Rigor.dump_type` so the diagnostics compared below are never JUST the run-level gem-RBS-coverage
+  # row — an oracle equality on that alone would hold on two crash-coincidental "internal analyzer
+  # error" lists exactly as readily as on a real result (issue #683 review).
   def write_project(dir)
     lib = File.join(dir, "project", "lib")
     FileUtils.mkdir_p(lib)
     File.write(File.join(lib, "a.rb"), "class Widget\n  def price\n    10\n  end\nend\n")
-    File.write(File.join(lib, "b.rb"), "class Shop\n  def total\n    Widget.new.price\n  end\nend\n")
+    File.write(File.join(lib, "b.rb"),
+               "class Shop\n  def total\n    Rigor.dump_type(1)\n    Widget.new.price\n  end\nend\n")
     lib
   end
 
@@ -53,9 +57,11 @@ RSpec.describe "incremental snapshot invalidation on an engine-source edit" do
     Rigor::Cache::EngineSource.reset_process_identity!
     Dir.chdir(dir) do
       configuration = Rigor::Configuration.new("paths" => [lib])
-      Rigor::Analysis::IncrementalSession.new(
+      session = Rigor::Analysis::IncrementalSession.new(
         configuration: configuration, paths: [lib], environment: shared_environment
-      ).run_incremental(
+      )
+      guarded_run_incremental(
+        session,
         snapshot: Rigor::Cache::IncrementalSnapshot.new(root: cache_root),
         fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: [lib])
       )

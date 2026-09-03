@@ -147,12 +147,12 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       write_unit(b, prefix: "B")
 
       session = session_for(configuration(dir))
-      session.baseline
+      guarded_baseline(session)
 
       # Body edit to a.rb only — erase its diagnostic. b.rb is untouched.
       write_unit(a, prefix: "A", reduced: false)
 
-      recheck = session.recheck
+      recheck = guarded_recheck(session)
 
       # Only a.rb was re-analyzed; b.rb was served from cache.
       expect(recheck.changed).to eq(Set[a])
@@ -170,8 +170,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       write_unit(a, prefix: "A")
 
       session = session_for(configuration(dir))
-      session.baseline
-      recheck = session.recheck
+      guarded_baseline(session)
+      recheck = guarded_recheck(session)
 
       expect(recheck.changed).to be_empty
       expect(recheck.affected).to be_empty
@@ -187,17 +187,17 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       write_unit(b, prefix: "B")
 
       session = session_for(configuration(dir))
-      session.baseline
+      guarded_baseline(session)
 
       # Round 1: erase a.rb's diagnostic.
       write_unit(a, prefix: "A", reduced: false)
-      r1 = session.recheck
+      r1 = guarded_recheck(session)
       expect(sorted(r1.diagnostics)).to eq(sorted(full_run(dir)))
 
       # Round 2: erase b.rb's diagnostic too. The session's cache for a.rb must already reflect round 1, so the merge
       # stays correct.
       write_unit(b, prefix: "B", reduced: false)
-      r2 = session.recheck
+      r2 = guarded_recheck(session)
       expect(r2.changed).to eq(Set[b])
       expect(sorted(r2.diagnostics)).to eq(sorted(full_run(dir)))
     end
@@ -215,13 +215,13 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(b, "class Placeholder\nend\n")
 
         session = session_for(configuration(dir))
-        baseline = session.baseline
+        baseline = guarded_baseline(session)
         # Baseline: a.rb fires call.unresolved-toplevel for the undefined helper.
         expect(baseline.map(&:rule)).to include("call.unresolved-toplevel")
 
         # Define the top-level helper in b.rb — a.rb's diagnostic must clear.
         File.write(b, "def helper\n  1\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         # a.rb is pulled into the affected closure by the appeared `helper`, so the merged result matches a full
         # re-analysis (no stale FP).
@@ -241,13 +241,13 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(b, "class Placeholder\nend\n")
 
         session = session_for(configuration(dir))
-        baseline = session.baseline
+        baseline = guarded_baseline(session)
         expect(baseline.map(&:rule)).not_to include("def.override-visibility-reduced")
 
         # Define NewBase (with a public tag) in b.rb — ASub now reduces its visibility, so the override diagnostic must
         # appear.
         File.write(b, "class NewBase\n  def tag\n    \"x\"\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -263,11 +263,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(b, "class Thing\n  def existing\n    1\n  end\nend\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
         # Add an unrelated top-level method — a.rb missed `missing_helper`, not `other`, so it must stay served from
         # cache.
         File.write(b, "class Thing\n  def existing\n    1\n  end\nend\n\ndef other\n  2\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).not_to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -321,12 +321,12 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         config = gate_config(dir)
         session = gate_session(config, dir)
         # Baseline: the project defines no `Widget.build`, so the plugin's contribution stands.
-        expect(session.baseline.map(&:message)).to include("dump_type: PluginGadget")
+        expect(guarded_baseline(session).map(&:message)).to include("dump_type: PluginGadget")
 
         # The project now answers `Widget.build` itself — the gate declines, so the consumer's cached
         # answer is stale and only the negative edge can pull it back into the closure.
         File.write(definer, "module Widget\n  def self.build\n    1\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(consumer)
         expect(recheck.diagnostics.map(&:message)).not_to include("dump_type: PluginGadget")
@@ -343,12 +343,12 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
 
         config = gate_config(dir)
         session = gate_session(config, dir)
-        session.baseline
+        guarded_baseline(session)
 
         # `Widget.other` is not the symbol the gate missed, so the consumer must stay served from cache —
         # the negative edge is per-symbol, not "any edit to a file the gate looked at".
         File.write(definer, "module Widget\n  def self.other\n    1\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).not_to include(consumer)
         expect(recheck.diagnostics.map(&:message)).to include("dump_type: PluginGadget")
@@ -371,13 +371,13 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(b, "class Placeholder\nend\n")
 
         session = session_for(configuration(dir))
-        baseline = session.baseline
+        baseline = guarded_baseline(session)
         # Baseline: nothing declares `Rails`, so the receiver is Dynamic[top] and nothing fires.
         expect(baseline.map(&:rule)).not_to include("call.undefined-method")
 
         # Declare `Rails` in b.rb — `Rails.logger` now answers `:sym`, which has no `info`.
         File.write(b, "module Rails\n  def self.logger\n    :sym\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -391,14 +391,14 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "Rails::Config.logger.info(\"x\")\n")
 
         session = session_for(configuration(dir))
-        baseline = session.baseline
+        baseline = guarded_baseline(session)
         expect(baseline.map(&:rule)).not_to include("call.undefined-method")
 
         # The added file declares the path's LAST segment as a nested class — `appeared_classes` reports it
         # qualified (`Rails::Config`) and `negative_affected` matches it by simple name.
         File.write(File.join(dir, "b.rb"),
                    "module Rails\n  class Config\n    def self.logger\n      :sym\n    end\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -415,11 +415,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "Rigor.dump_type(Point.new(1, 2))\n")
 
         session = session_for(configuration(dir))
-        baseline = session.baseline
+        baseline = guarded_baseline(session)
         expect(baseline.map(&:message)).to include(a_string_including("Dynamic[top]"))
 
         File.write(File.join(dir, "b.rb"), "Point = Data.define(:x, :y)\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -431,14 +431,17 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")
         b = File.join(dir, "b.rb")
-        File.write(a, "Rails.logger.info(\"x\")\n")
+        # `Rails` is never declared anywhere in this example, so a.rb's own diagnostics would otherwise be
+        # empty throughout — the trailing `Rigor.dump_type` gives the oracle comparison below a real
+        # diagnostic to match, per the `write_pair` comment above.
+        File.write(a, "Rails.logger.info(\"x\")\nRigor.dump_type(1)\n")
         File.write(b, "class Placeholder\nend\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
         # a.rb missed `Rails`, not `Unrelated` — the appeared class must not widen the closure to it.
         File.write(b, "class Placeholder\nend\n\nmodule Unrelated\n  def self.thing\n    1\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).not_to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -449,18 +452,20 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")
         b = File.join(dir, "b.rb")
-        File.write(a, "Rails.logger.info(\"x\")\n")
+        # See the sibling example above — `Rails` stays unresolved throughout, so `Rigor.dump_type` is what
+        # keeps the oracle comparison below off two coincidentally-equal empty sides.
+        File.write(a, "Rails.logger.info(\"x\")\nRigor.dump_type(1)\n")
         File.write(b, "class Placeholder\nend\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # `MyApp::Rails` cannot satisfy a.rb's top-level `Rails` read (a.rb is outside `MyApp`), but the class
         # negatives are matched by SIMPLE name — the grammar `CheckRules`'s override-ancestor negatives already
         # use — so this re-checks a.rb needlessly. Pinned deliberately: over-invalidation is the sound
         # direction, and the merged diagnostics still equal a full run (the read stays unresolved).
         File.write(b, "module MyApp\n  module Rails\n    def self.logger\n      :sym\n    end\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -485,7 +490,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(caller, "x = \"hi\"\nputs x.shout\n")
 
         session = session_for(configuration(dir))
-        baseline = session.baseline
+        baseline = guarded_baseline(session)
         caller_diag = baseline.find { |d| d.path == caller && d.rule == "call.undefined-method" }
         expect(caller_diag).not_to be_nil
         expect(caller_diag.project_definition_site).to eq("#{patch}:2")
@@ -493,7 +498,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         # Move the def down one line by inserting a blank line above `class String` — the def BODY (its symbol
         # fingerprint) is unchanged, only its `path:line` moves to line 3.
         File.write(patch, "\nclass String\n  def shout\n    upcase\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         # The caller must be re-analysed (via the WD3 edge) so its cached site line is refreshed; the merged
         # result is byte-identical to a full re-analysis, which now names `patch.rb:3`.
@@ -515,10 +520,12 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "helper()\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        baseline = guarded_baseline(session)
+        # Baseline: `helper` is undefined, so the diagnostic this test then watches disappear is real.
+        expect(baseline.map(&:rule)).to include("call.unresolved-toplevel")
 
         File.write(File.join(dir, "b.rb"), "def helper\n  1\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -532,10 +539,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "class ASub < NewBase\n  private\n\n  def tag\n    \"y\"\n  end\nend\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         File.write(File.join(dir, "b.rb"), "class NewBase\n  def tag\n    \"x\"\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -550,10 +557,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(b, "def helper\n  1\nend\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         File.delete(b)
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         # a.rb re-checked (now fires unresolved-toplevel); b.rb gone from the analyzed set and the merged diagnostics.
         expect(recheck.affected).to include(a)
@@ -566,14 +573,16 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     it "does not re-check unrelated files when a new file is added" do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")
-        File.write(a, "x = 1\nputs x\n")
+        # `Rigor.dump_type` — see the `write_pair` comment above; a.rb is never re-analyzed here, so its
+        # baseline diagnostic is what the oracle comparison below matches.
+        File.write(a, "x = 1\nputs x\nRigor.dump_type(x)\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         added = File.join(dir, "b.rb")
         File.write(added, "class Wholly\n  def z\n    1\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).not_to include(a)
         expect(recheck.affected).to include(added)
@@ -589,15 +598,16 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
         fp = fingerprint(config, dir)
 
-        # Process 1 — cold baseline.
-        _d1, warm1 = session_for(config, paths: [dir])
-                     .run_incremental(snapshot: snapshot, fingerprint: fp)
+        # Process 1 — cold baseline. `helper` is undefined yet, so the diagnostic this test then watches
+        # disappear is real, not two coincidentally-equal empty sides.
+        d1, warm1 = guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot, fingerprint: fp)
         expect(warm1).to be(false)
+        expect(d1.map(&:rule)).to include("call.unresolved-toplevel")
 
         # A new file appears between processes; the roots-keyed fingerprint is unchanged, so the snapshot still loads.
         File.write(File.join(dir, "b.rb"), "def helper\n  1\nend\n")
-        diags2, warm2 = session_for(config, paths: [dir])
-                        .run_incremental(snapshot: snapshot, fingerprint: fp)
+        diags2, warm2 = guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot,
+                                                                                   fingerprint: fp)
         expect(warm2).to be(true)
         expect(sorted(diags2)).to eq(sorted(full_run(dir)))
       end
@@ -617,8 +627,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         fp = fingerprint(config, dir)
 
         # Process 1 — cold: no snapshot yet, full analysis, persists.
-        _diags, warm1 = session_for(config, paths: [dir])
-                        .run_incremental(snapshot: snapshot, fingerprint: fp)
+        _diags, warm1 = guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot,
+                                                                                   fingerprint: fp)
         expect(warm1).to be(false)
 
         # An edit between "processes" — erase a.rb's diagnostic. Content is not part of the fingerprint, so the snapshot
@@ -626,8 +636,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         write_unit(a, prefix: "A", reduced: false)
 
         # Process 2 — warm: a fresh session restores the snapshot and re-analyzes only the changed closure.
-        diags2, warm2 = session_for(config, paths: [dir])
-                        .run_incremental(snapshot: snapshot, fingerprint: fp)
+        diags2, warm2 = guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot,
+                                                                                   fingerprint: fp)
         expect(warm2).to be(true)
         expect(sorted(diags2)).to eq(sorted(full_run(dir)))
       end
@@ -639,11 +649,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         config = configuration(dir)
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
 
-        session_for(config, paths: [dir])
-          .run_incremental(snapshot: snapshot, fingerprint: "fp-original")
+        guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot, fingerprint: "fp-original")
         # A different fingerprint (config / gem / version drift) → cold.
-        _diags, warm = session_for(config, paths: [dir])
-                       .run_incremental(snapshot: snapshot, fingerprint: "fp-changed")
+        _diags, warm = guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot,
+                                                                                  fingerprint: "fp-changed")
         expect(warm).to be(false)
       end
     end
@@ -662,17 +671,17 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         allow(snapshot).to receive(:save).and_call_original
 
         # Cold baseline: no prior snapshot → MUST save.
-        session_for(config, paths: [dir]).run_incremental(snapshot: snapshot, fingerprint: fp)
+        guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot, fingerprint: fp)
         expect(snapshot).to have_received(:save).once
 
         # Warm, zero changes → MUST NOT save (byte-equivalent snapshot already on disk); the call count stays 1.
-        _diags, warm = session_for(config, paths: [dir]).run_incremental(snapshot: snapshot, fingerprint: fp)
+        _diags, warm = guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot, fingerprint: fp)
         expect(warm).to be(true)
         expect(snapshot).to have_received(:save).once
 
         # A real edit → MUST save again so the new state persists (count advances to 2).
         write_unit(a, prefix: "A", reduced: false)
-        session_for(config, paths: [dir]).run_incremental(snapshot: snapshot, fingerprint: fp)
+        guarded_run_incremental(session_for(config, paths: [dir]), snapshot: snapshot, fingerprint: fp)
         expect(snapshot).to have_received(:save).twice
       end
     end
@@ -723,7 +732,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
 
     def warm_snapshot(config, dir, snapshot, fingerprint)
-      session_for(config, paths: [analysis_root(dir)]).run_incremental(snapshot: snapshot, fingerprint: fingerprint)
+      guarded_run_incremental(session_for(config, paths: [analysis_root(dir)]), snapshot: snapshot,
+                                                                                fingerprint: fingerprint)
     end
 
     it "reports a dependent's diagnostic caused by the unsaved buffer, and serves the rest from the snapshot" do
@@ -737,7 +747,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         warm_snapshot(config, dir, snapshot, fp)
         expect(project_diagnostics(full_run(analysis_root(dir)))).to be_empty
 
-        result = buffer_session(config, dir, buffer).run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+        result = guarded_run_buffer_recheck(buffer_session(config, dir, buffer), snapshot: snapshot, fingerprint: fp)
 
         expect(result.diagnostics.map(&:message)).to include(a_string_matching(/undefined method `upcase' for 1/))
         # The diagnostic is attributed to the DEPENDENT, not the buffer, and the buffer reports under its
@@ -756,7 +766,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         warm_snapshot(config, dir, snapshot, fp)
         before = File.binread(snapshot.path)
 
-        buffer_session(config, dir, buffer).run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+        guarded_run_buffer_recheck(buffer_session(config, dir, buffer), snapshot: snapshot, fingerprint: fp)
 
         expect(File.binread(snapshot.path)).to eq(before)
         # And the on-disk truth is still what a full run says.
@@ -778,7 +788,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         fp = fingerprint(config, analysis_root(dir))
         warm_snapshot(config, dir, snapshot, fp)
 
-        result = buffer_session(config, dir, buffer).run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+        result = guarded_run_buffer_recheck(buffer_session(config, dir, buffer), snapshot: snapshot, fingerprint: fp)
 
         expect(result.affected).to include(File.join(dir, "lib", "other.rb"))
         expect(result.reused).not_to include(File.join(dir, "lib", "other.rb"))
@@ -792,9 +802,9 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
 
         # Nothing written yet: a baseline here would repeat on every keystroke, since this session cannot save.
-        expect(buffer_session(config, dir, buffer)
-                 .run_buffer_recheck(snapshot: snapshot, fingerprint: fingerprint(config,
-                                                                                  analysis_root(dir)))).to be_nil
+        session = buffer_session(config, dir, buffer)
+        fp = fingerprint(config, analysis_root(dir))
+        expect(guarded_run_buffer_recheck(session, snapshot: snapshot, fingerprint: fp)).to be_nil
       end
     end
 
@@ -811,8 +821,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         binding_to_identical = Rigor::Analysis::BufferBinding.new(
           logical_path: File.join(dir, "lib", "widget.rb"), physical_path: identical
         )
-        result = buffer_session(config, dir, binding_to_identical)
-                 .run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+        result = guarded_run_buffer_recheck(buffer_session(config, dir, binding_to_identical), snapshot: snapshot,
+                                                                                               fingerprint: fp)
 
         # The stat tuple of the temp file says nothing about the logical path, so the buffer is always re-read.
         expect(result.affected).to include(File.join(dir, "lib", "widget.rb"))
@@ -840,9 +850,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     def run_probe_incremental(config, dir, snapshot, fingerprint_hex, cache_store)
       # Each "process" unregisters first so the loader's newly-registered diff sees a fresh registration.
       Rigor::Plugin.unregister!
-      described_class.new(
+      session = described_class.new(
         configuration: config, paths: [dir], cache_store: cache_store, plugin_requirer: probe_requirer
-      ).run_incremental(snapshot: snapshot, fingerprint: fingerprint_hex)
+      )
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint_hex)
     end
 
     before { Rigor::Plugin.unregister! }
@@ -923,9 +934,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
 
     def run_surface(config, dir, snapshot, fingerprint_hex, requirer)
       Rigor::Plugin.unregister!
-      described_class.new(
+      session = described_class.new(
         configuration: config, paths: [dir], cache_store: nil, plugin_requirer: requirer
-      ).run_incremental(snapshot: snapshot, fingerprint: fingerprint_hex)
+      )
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint_hex)
     end
 
     before { Rigor::Plugin.unregister! }
@@ -966,7 +978,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
           configuration: config, paths: [dir], cache_store: nil, plugin_requirer: surface_requirer
         )
         Rigor::Plugin.unregister!
-        _diags, warm = session.run_incremental(snapshot: snapshot, fingerprint: fp)
+        _diags, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fp)
 
         expect(warm).to be(false) # snapshot invalidated → full analysis
         expect(session.fact_surface_invalidated?).to be(true)
@@ -991,7 +1003,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
           configuration: config, paths: [dir], cache_store: nil, plugin_requirer: opaque_requirer
         )
         Rigor::Plugin.unregister!
-        _diags, warm = session.run_incremental(snapshot: snapshot, fingerprint: fp)
+        _diags, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fp)
 
         expect(warm).to be(false) # opaque → never warm, even with unchanged files
         expect(session.opaque_plugin_ids).to eq(["wd1-opaque"])
@@ -1013,7 +1025,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
           configuration: config, paths: [dir], cache_store: nil, plugin_requirer: surface_requirer, workers: 0
         )
         Rigor::Plugin.unregister!
-        sequential.baseline # seeds @last_runner so `compute_plugin_fact_fingerprint` takes the post-hoc path
+        guarded_baseline(sequential) # seeds @last_runner so `compute_plugin_fact_fingerprint` takes the post-hoc path
         d_seq = sequential.send(:compute_plugin_fact_fingerprint)
 
         pooled = described_class.new(
@@ -1039,7 +1051,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         write_unit(a, prefix: "A")
         write_unit(b, prefix: "B")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # `Digest::SHA256.file` is the sole content-hashing call; the stat tier must not reach it for an
         # unchanged file (the recon anomaly: the old path SHA-256'd every file every recheck).
@@ -1056,7 +1068,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         a = File.join(dir, "a.rb")
         write_unit(a, prefix: "A")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # Move mtime/ctime without changing content (a `git checkout` / `touch`); the digest is the authority.
         future = Time.now + 5
@@ -1071,7 +1083,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         a = File.join(dir, "a.rb")
         write_unit(a, prefix: "A")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         write_unit(a, prefix: "A", reduced: false)
 
@@ -1104,15 +1116,15 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         3.times { |i| write_unit(File.join(dir, "u#{i}.rb"), prefix: "U#{i}") }
 
         session = described_class.new(configuration: configuration(dir), environment: shared_environment, workers: 3)
-        session.baseline
+        guarded_baseline(session)
 
         write_greeter(dir, body: '"edited"')
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
 
         # A second edit exercises the graph the FIRST pooled recheck rebuilt from the marshalled records.
         write_greeter(dir, body: '"again"')
-        recheck2 = session.recheck
+        recheck2 = guarded_recheck(session)
         expect(sorted(recheck2.diagnostics)).to eq(sorted(full_run(dir)))
       end
     end
@@ -1142,15 +1154,18 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         util = write_util(dir, unused_body: '"n"')
         ca = File.join(dir, "caller_a.rb")
         cb = File.join(dir, "caller_b.rb")
-        File.write(ca, "class CallerA\n  def go\n    Util.used\n  end\nend\n")
+        # `ca` is served from cache below (`reused`), so its `Rigor.dump_type` is what keeps the oracle
+        # comparison off two coincidentally-equal empty sides for the MERGE half specifically — util.rb
+        # itself carries no diagnostic either. See the `write_pair` comment further down for the pattern.
+        File.write(ca, "class CallerA\n  def go\n    Rigor.dump_type(1)\n    Util.used\n  end\nend\n")
         File.write(cb, "class CallerB\n  def go\n    Util.used\n  end\nend\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # Edit the UNUSED class method's body — nobody calls it, so no caller is affected.
         write_util(dir, unused_body: '"CHANGED"')
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.changed).to eq(Set[util])
         expect(recheck.affected).to eq(Set[util])
@@ -1167,11 +1182,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(ca, "class CallerA\n  def go\n    Util.used\n  end\nend\n")
 
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # Edit the CALLED class method's body — its caller must be re-analysed.
         File.write(util, "class Util\n  def self.used\n    \"CHANGED\"\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(util, ca)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1196,7 +1211,14 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         end
       RUBY
       sub = File.join(dir, "sub.rb")
-      File.write(sub, "class Sub < Base\n  def announce\n    greet\n  end\nend\n") unless File.exist?(sub)
+      # `Rigor.dump_type` gives every case below a REAL diagnostic to compare against `full_run` — none of
+      # this section's edits (a comment, a CONST/ivar/cvar/global value) otherwise produces one, so without
+      # it the oracle-equality assertions below would hold on two coincidentally-equal EMPTY lists under a
+      # crashed check rule just as readily as on a correct recheck (issue #683 review).
+      unless File.exist?(sub)
+        File.write(sub,
+                   "class Sub < Base\n  def announce\n    Rigor.dump_type(greet)\n  end\nend\n")
+      end
       [base, sub]
     end
 
@@ -1204,11 +1226,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       Dir.mktmpdir do |dir|
         base, sub = write_pair(dir, base_comment: "the original comment")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # Reword the comment — same line count, so the code (and every def's start line) is byte-identical.
         write_pair(dir, base_comment: "a completely different but single-line comment")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.changed).to eq(Set[base])
         expect(recheck.affected).to eq(Set[base]) # sub is skipped despite its ancestry edge to base.rb
@@ -1221,11 +1243,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       Dir.mktmpdir do |dir|
         base, sub = write_pair(dir, base_comment: "c")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # A body edit changes the code fingerprint — the gate must NOT skip the dependent.
         File.write(base, "# c\nclass Base\n  def greet\n    \"HELLO\"\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(base, sub)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1238,12 +1260,12 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         base, sub = write_pair(dir, base_comment: "the original comment")
         session = described_class.new(configuration: configuration(dir), environment: shared_environment,
                                       workers: 2)
-        session.baseline
+        guarded_baseline(session)
 
         # The gate decision (`affected_closure` → `analyze_set`) happens session-side BEFORE worker
         # dispatch, so a pooled recheck must skip exactly the same dependents a sequential one does.
         write_pair(dir, base_comment: "a different comment, same line count")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to eq(Set[base])
         expect(recheck.reused).to include(sub)
@@ -1266,8 +1288,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
           end
         end
       RUBY
+      # See the matching comment in `write_pair` above — `Rigor.dump_type` keeps the oracle comparisons
+      # below off two coincidentally-equal empty lists.
       unless File.exist?(File.join(dir, "consumer.rb"))
-        File.write(File.join(dir, "consumer.rb"), "class Consumer < Base\n  def use\n    read\n  end\nend\n")
+        File.write(File.join(dir, "consumer.rb"),
+                   "class Consumer < Base\n  def use\n    Rigor.dump_type(read)\n  end\nend\n")
       end
       base
     end
@@ -1282,10 +1307,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         Dir.mktmpdir do |dir|
           write_state_holder(dir, before)
           session = session_for(configuration(dir))
-          session.baseline
+          guarded_baseline(session)
 
           write_state_holder(dir, after)
-          recheck = session.recheck
+          recheck = guarded_recheck(session)
 
           # A code edit → the gate declines → the merged result still equals a full re-analysis.
           expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1343,7 +1368,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       RUBY
       # Ancestry dependent: reads App's ancestry to resolve the inherited `common`; never touches `build`.
       write_once(File.join(dir, "model.rb"), "class Model < App\n  def name\n    common\n  end\nend\n")
-      write_once(File.join(dir, "caller.rb"), "class Caller\n  def go\n    App.build(1)\n  end\nend\n")
+      # `Rigor.dump_type(1)` is deliberately UNRELATED to `App.build` (whose arity/return the tests below
+      # edit) — see the `write_pair` comment above for why the oracle comparisons need a real diagnostic
+      # somewhere in the merged result at all.
+      write_once(File.join(dir, "caller.rb"),
+                 "class Caller\n  def go\n    Rigor.dump_type(1)\n    App.build(1)\n  end\nend\n")
     end
 
     it "collapses a same-line body edit to the edited file + its symbol callers, skipping ancestry dependents" do
@@ -1352,7 +1381,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         model = File.join(dir, "model.rb")
         write_wd1_tree(dir, body: 'prefix = "p"; prefix + value.to_s')
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # model.rb IS a recorded ancestry dependent of app.rb (it reads App's ancestry to resolve `common`) —
         # under B1 (code fingerprint) a body edit would re-check it. WD1 must skip it.
@@ -1361,7 +1390,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         # Same-line body edit: rename the local. No signature, line, or ancestry change → App is
         # declaration-stable → the ancestry dependent (model.rb) is skipped.
         write_wd1_tree(dir, body: 'pre = "p"; pre + value.to_s')
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.changed).to eq(Set[app])
         expect(recheck.affected).not_to include(model) # ancestry dependent skipped — the WD1 collapse
@@ -1376,7 +1405,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         model = File.join(dir, "model.rb")
         write_wd1_tree(dir, body: "value", arity: "(value)")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # An arity change moves App.build's declaration signature (its parameter shape), so app is NOT
         # declaration-stable — its ancestry dependents re-check (WD1 must not swallow a signature change),
@@ -1386,7 +1415,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         sigs = Rigor::Inference::ScopeIndexer.scan_summary_for_paths([app])[:declaration_signatures]
         expect(session.send(:declaration_unstable, [app], sigs)).to eq([app])
 
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
         expect(recheck.affected).to include(model) # ancestry dependent re-checks on a declaration change
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
       end
@@ -1397,14 +1426,15 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         base = File.join(dir, "base.rb")
         File.write(base, "class Base\n  def tag\n    \"x\"\n  end\nend\n")
         sub = File.join(dir, "sub.rb")
-        File.write(sub, "class Sub < Base\n  def relay\n    tag\n  end\nend\n")
+        # `Rigor.dump_type(1)` — see the `write_pair` comment above.
+        File.write(sub, "class Sub < Base\n  def relay\n    Rigor.dump_type(1)\n    tag\n  end\nend\n")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # Add `private` — Base#tag's body is byte-identical, only its visibility (a declaration surface the
         # ADR-35 override rule and private-call diagnostics consume) changes.
         File.write(base, "class Base\n  private\n  def tag\n    \"x\"\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(sub)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1418,11 +1448,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         consumer = File.join(dir, "consumer.rb")
         File.write(consumer, "class Consumer\n  def use\n    App.added\n  end\nend\n")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # Define `added` — it APPEARS, so the negative-dependent consumer must re-check.
         write_wd1_tree(dir, body: "value", extra_method: true)
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(consumer)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1434,13 +1464,13 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         caller = File.join(dir, "caller.rb")
         write_wd1_tree(dir, body: '"a"')
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # A same-line literal change moves App.build's return (Constant["a"] → Constant["b"]) — its symbol
         # fingerprint changes, so the symbol dependent (caller.rb) re-checks even though the declaration is
         # stable (ancestry deps still collapse).
         write_wd1_tree(dir, body: '"b"')
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(caller)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1464,7 +1494,9 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
           end
         end
       RUBY
-      write_once(File.join(dir, "user.rb"), "class User\n  def show\n    Fmt.label(\"x\")\n  end\nend\n")
+      # See the `write_pair` comment above — `Rigor.dump_type(1)` is stable across every body variant.
+      write_once(File.join(dir, "user.rb"),
+                 "class User\n  def show\n    Rigor.dump_type(1)\n    Fmt.label(\"x\")\n  end\nend\n")
     end
 
     it "skips symbol dependents on a return-preserving refactor (returns unchanged at observed keys)" do
@@ -1473,7 +1505,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         user = File.join(dir, "user.rb")
         write_wd2_tree(dir, body: 'prefix = "tag-"; prefix + value')
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # user.rb IS a symbol dependent of Fmt.label (it calls it) — a naive body-fingerprint gate re-checks it.
         expect(session.instance_variable_get(:@symbol_dependents).keys).to include([fmt, "Fmt.label"])
@@ -1483,7 +1515,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         # A same-line, return-preserving refactor: rename the local. The return at every observed key is
         # unchanged, so WD2 skips the symbol dependent user.rb.
         write_wd2_tree(dir, body: 'pre = "tag-"; pre + value')
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.changed).to eq(Set[fmt])
         expect(recheck.affected).not_to include(user) # symbol dependent skipped — the WD2 collapse
@@ -1497,12 +1529,12 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         user = File.join(dir, "user.rb")
         write_wd2_tree(dir, body: '"a-" + value')
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # The return literal moves ("a-…" → "b-…"), so the re-evaluation at the observed key mismatches and
         # WD2 keeps the symbol dependent.
         write_wd2_tree(dir, body: '"b-" + value')
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(user)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1516,14 +1548,24 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         acc = File.join(dir, "acc.rb")
         File.write(acc, "class Acc\n  def self.fill(items)\n    items\n  end\nend\n")
         caller = File.join(dir, "caller.rb")
-        File.write(caller, "class Reader\n  def run\n    a = [1]\n    Acc.fill(a)\n    a.first\n  end\nend\n")
+        # `Rigor.dump_type(1)` — see the `write_pair` comment above.
+        File.write(caller, <<~RUBY)
+          class Reader
+            def run
+              Rigor.dump_type(1)
+              a = [1]
+              Acc.fill(a)
+              a.first
+            end
+          end
+        RUBY
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
 
         # The callee STARTS mutating its argument's content — a caller-visible arg-flooring effect change,
         # even though the return (`items`) is nominally unchanged. WD2's effect channel keeps the dependent.
         File.write(acc, "class Acc\n  def self.fill(items)\n    items << 2\n    items\n  end\nend\n")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(caller)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1537,9 +1579,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         # a surface WD2 does not compare — so its dependents always re-check (the conservative direction).
         File.write(st, "class St\n  def self.tag(value)\n    @seen = value\n    \"t-\" + value\n  end\nend\n")
         user = File.join(dir, "user.rb")
-        File.write(user, "class User\n  def show\n    St.tag(\"x\")\n  end\nend\n")
+        # `Rigor.dump_type(1)` — see the `write_pair` comment above.
+        File.write(user, "class User\n  def show\n    Rigor.dump_type(1)\n    St.tag(\"x\")\n  end\nend\n")
         session = session_for(configuration(dir))
-        session.baseline
+        guarded_baseline(session)
         # The summary IS harvested (harvest is unconditional); the GATE rejects it because the def is
         # ineligible (an ivar write), so the dependent is never dropped.
         expect(session.instance_variable_get(:@return_summaries)).to have_key([st, "St.tag"])
@@ -1553,7 +1596,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
             end
           end
         RUBY
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(recheck.affected).to include(user)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -1617,11 +1660,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         callee = write_callee(dir)
         caller_path = write_caller(dir, arg: "1")
         session = pi_session(dir)
-        baseline = session.baseline
+        baseline = guarded_baseline(session)
         expect(dump_messages(baseline)).to eq(["dump_type: Integer"])
 
         write_caller(dir, arg: '"s"')
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         # The file-digest tier sees only the caller; the param-table diff is what pulls the callee in.
         expect(recheck.changed).to eq(Set[caller_path])
@@ -1636,10 +1679,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         callee = write_callee(dir)
         caller_path = write_caller(dir, arg: "1")
         session = pi_session(dir)
-        session.baseline
+        guarded_baseline(session)
 
         write_caller(dir, arg: "1", extra: "@noise = :extra")
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         # Same seed table on both sides of the diff → no param invalidation; the callee is served from
         # cache. This is the precision half — the diff must not degrade every caller edit into a
@@ -1658,13 +1701,13 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         fp = fingerprint(config, dir)
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
 
-        _cold, warm_first = described_class.new(configuration: config, environment: shared_environment)
-                                           .run_incremental(snapshot: snapshot, fingerprint: fp)
+        cold_session = described_class.new(configuration: config, environment: shared_environment)
+        _cold, warm_first = guarded_run_incremental(cold_session, snapshot: snapshot, fingerprint: fp)
         expect(warm_first).to be(false)
 
         write_caller(dir, arg: '"s"')
         session = described_class.new(configuration: config, environment: shared_environment)
-        diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fp)
+        diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fp)
 
         expect(warm).to be(true)
         expect(dump_messages(diagnostics)).to eq(["dump_type: String"])
@@ -1678,13 +1721,13 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         write_callee(dir)
         write_caller(dir, arg: "1")
         session = pi_session(dir)
-        session.baseline
+        guarded_baseline(session)
         oracle = sorted(pi_full_run(dir)) # computed BEFORE the mock — the oracle's own collect is legitimate
 
         # No file moved → the collector's inputs are unchanged, so the recheck must skip the whole-project
         # re-collect (the ADR-87 null-recheck fast path) and still serve the exact baseline result.
         allow(Rigor::Inference::ParameterInferenceCollector).to receive(:collect)
-        recheck = session.recheck
+        recheck = guarded_recheck(session)
 
         expect(Rigor::Inference::ParameterInferenceCollector).not_to have_received(:collect)
         expect(recheck.affected).to be_empty

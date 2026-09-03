@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../protection/measurement_integrity"
+
 module Rigor
   class CLI
     # ADR-70 — aggregates per-file {Protection::MutationScanner::FusedFileResult} into a project-level **fused**
@@ -14,6 +16,13 @@ module Rigor
       def initialize(path:, type_killed:, test_killed:, unprotected:, ratio:, harness_errors: 0)
         super
       end
+
+      # Issue #686 — see {Rigor::CLI::FileEffectiveness#unmeasured?}.
+      def unmeasured?
+        !Protection::MeasurementIntegrity.measured?(
+          total: type_killed + test_killed + unprotected, harness_errors: harness_errors
+        )
+      end
     end
     UnprotectedBreakage = Data.define(:method_name, :count, :examples)
 
@@ -23,10 +32,21 @@ module Rigor
       def total_unprotected = files.sum(&:unprotected)
       def grand_total = total_type_killed + total_test_killed + total_unprotected
       def protected_total = total_type_killed + total_test_killed
-      def ratio = grand_total.zero? ? 1.0 : protected_total.to_f / grand_total
+
+      # Issue #686 review (second pass) — see {MutationProtectionReport#ratio}.
+      def ratio
+        return nil if Protection::MeasurementIntegrity.ratio_unmeasurable?(
+          grand_total: grand_total, unmeasured_files: unmeasured_files
+        )
+
+        grand_total.zero? ? 1.0 : protected_total.to_f / grand_total
+      end
 
       # #264 — stays OUT of `grand_total`/`ratio`, exactly like the plain mutation report.
       def total_harness_errors = files.sum(&:harness_errors)
+
+      # Issue #686 — see {Rigor::CLI::MutationProtectionReport#unmeasured_files}.
+      def unmeasured_files = files.count(&:unmeasured?)
 
       def to_h
         {
@@ -34,8 +54,9 @@ module Rigor
           "type_killed" => total_type_killed,
           "test_killed" => total_test_killed,
           "unprotected" => total_unprotected,
-          "protected_ratio" => ratio.round(4),
+          "protected_ratio" => ratio&.round(4),
           "harness_errors" => total_harness_errors,
+          "unmeasured_files" => unmeasured_files,
           "files" => files.map do |f|
             { "path" => f.path, "type_killed" => f.type_killed, "test_killed" => f.test_killed,
               "unprotected" => f.unprotected, "ratio" => f.ratio.round(4), "harness_errors" => f.harness_errors }

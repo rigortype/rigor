@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../analysis/runner"
+require_relative "analysis_guard"
 require_relative "kill_signature"
 
 module Rigor
@@ -42,11 +43,18 @@ module Rigor
 
       private
 
+      # Issue #686 — the diagnostics of a CRASHED run are not an answer, and this oracle's whole job is to
+      # compare two runs' diagnostics. Both sides of that comparison come through here, so refusing once
+      # here covers `#baseline` and `#killed?` alike; {MutationScanner} turns the raise into a
+      # `harness_errors` count rather than a kill or a survivor.
       def analyse(source, path)
-        Rigor::Analysis::Runner.new(
-          configuration: @configuration, environment: @environment, prebuilt: @project_scan,
-          cache_store: nil, collect_stats: false, discovery_seed: @discovery_seed
-        ).run_source(source: source, path: path).diagnostics
+        AnalysisGuard.checked(
+          Rigor::Analysis::Runner.new(
+            configuration: @configuration, environment: @environment, prebuilt: @project_scan,
+            cache_store: nil, collect_stats: false, discovery_seed: @discovery_seed
+          ).run_source(source: source, path: path),
+          context: "DiagnosticOracle re-analysis of #{path}"
+        )
       end
     end
   end

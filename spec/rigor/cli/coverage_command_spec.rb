@@ -228,11 +228,11 @@ RSpec.describe Rigor::CLI::CoverageCommand do
         status, off, = run(["--protection", "--mutation", "--format", "json", "lib"])
 
         expect(status).to eq(0)
-        # #264 adds the always-present "harness_errors" field (0 on a clean run); everything else here is the
-        # literal pre-#264 payload.
+        # #264 adds the always-present "harness_errors" field and #686 the always-present
+        # "unmeasured_files" (both 0 on a clean run); everything else here is the literal pre-#264 payload.
         expect(JSON.parse(off)).to eq(
           "mode" => "mutation", "killed" => 0, "survived" => 0, "effectiveness_ratio" => 1.0,
-          "harness_errors" => 0,
+          "harness_errors" => 0, "unmeasured_files" => 0,
           "files" => [
             { "path" => "lib/account.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0, "harness_errors" => 0 },
             { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0, "harness_errors" => 0 }
@@ -297,11 +297,11 @@ RSpec.describe Rigor::CLI::CoverageCommand do
 
       expect(status).to eq(0)
       expect(declined).to eq(unconfigured)
-      # #264 adds the always-present "harness_errors" field (0 on a clean run); everything else here is the
-      # literal pre-#264 payload.
+      # #264 adds the always-present "harness_errors" field and #686 the always-present "unmeasured_files"
+      # (both 0 on a clean run); everything else here is the literal pre-#264 payload.
       expect(JSON.parse(unconfigured)).to eq(
         "mode" => "mutation", "killed" => 0, "survived" => 3, "effectiveness_ratio" => 0.0,
-        "harness_errors" => 0,
+        "harness_errors" => 0, "unmeasured_files" => 0,
         "files" => [
           { "path" => "lib/account.rb", "killed" => 0, "survived" => 3, "ratio" => 0.0, "harness_errors" => 0 },
           { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0, "harness_errors" => 0 }
@@ -685,6 +685,84 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       report.define_singleton_method(:parse_errors) { [] }
       report.define_singleton_method(:ratio) { 1.0 }
       report
+    end
+  end
+
+  # Issue #686 review, F3 — a file the harness could not measure AT ALL is a different animal from #264's
+  # occasional rescued mutant, and the difference is exactly the exit code. `killed + survived == 0` is the
+  # "vacuously fully effective" convention for a file with no type-relevant mutation; a crashed file borrowed
+  # it, so a run that measured nothing reported 100% and PASSED `--threshold`. That recreates the defect
+  # #686 exists to close: "the harness has no way to notice" became "CI has no way to notice".
+  describe "an unmeasured file (#686)" do
+    def unmeasured_exit_report(unmeasured:)
+      report = Object.new
+      report.define_singleton_method(:parse_errors) { [] }
+      report.define_singleton_method(:unmeasured_files) { unmeasured }
+      report.define_singleton_method(:ratio) { 1.0 }
+      report
+    end
+
+    it "fails the run even with no --threshold, the way a parse error already does" do
+      command = described_class.new(argv: [])
+
+      exit_code = command.send(:determine_protection_exit, unmeasured_exit_report(unmeasured: 1), { threshold: nil })
+
+      expect(exit_code).to eq(1)
+    end
+
+    # The must-still-succeed twin: the same 1.0 ratio with nothing unmeasured is a genuine pass, so the gate
+    # cannot redden a healthy project.
+    it "still passes a threshold when every file was measured" do
+      command = described_class.new(argv: [])
+      report = unmeasured_exit_report(unmeasured: 0)
+
+      expect(command.send(:determine_protection_exit, report, { threshold: nil })).to eq(0)
+      expect(command.send(:determine_protection_exit, report, { threshold: 1.0 })).to eq(0)
+    end
+
+    # The #264 neighbour at the gate: rescued MUTANTS alone must still not fail the run, whatever their
+    # count. #686 keys the new exit rule on unmeasured FILES precisely so that stays true.
+    it "leaves the exit code alone when mutants were rescued but the file was still measured" do
+      command = described_class.new(argv: [])
+      report = Object.new
+      report.define_singleton_method(:parse_errors) { [] }
+      report.define_singleton_method(:unmeasured_files) { 0 }
+      report.define_singleton_method(:total_harness_errors) { described_class::HARNESS_ERROR_WARN_FLOOR + 5 }
+      report.define_singleton_method(:ratio) { 1.0 }
+
+      expect(command.send(:determine_protection_exit, report, { threshold: nil })).to eq(0)
+    end
+
+    it "says on stderr why the build is red" do
+      err = StringIO.new
+      command = described_class.new(argv: [], err: err)
+      report = Object.new
+      report.define_singleton_method(:total_harness_errors) { 0 }
+      report.define_singleton_method(:unmeasured_files) { 2 }
+
+      command.send(:warn_harness_errors, report)
+
+      expect(err.string).to include("2 file(s) could not be measured at all")
+      expect(err.string).to include("Exiting non-zero")
+    end
+
+    # End to end, with the #665/#674 rescue driven for real: every mutant of the file lands in
+    # `harness_errors`, the ratio is withheld rather than printed as 100%, and `--threshold` fails.
+    it "withholds the percentage and exits non-zero under an injected check-rule crash" do
+      File.write("joins.rb", %(def j\n  File.join("a", "b", "c")\nend\n))
+      healthy, = run(["--protection", "--mutation", "--threshold", "0.5", "joins.rb"])
+      allow(Rigor::Analysis::CheckRules).to receive(:diagnose)
+        .and_raise(RuntimeError, "injected check-rule crash (issue #686 gate)")
+
+      status, out, err = run(["--protection", "--mutation", "--threshold", "0.5", "joins.rb"])
+
+      # Non-vacuity: the same fixture under a healthy analyzer already failed this threshold on its ratio, so
+      # the assertions below are about HOW the crashed run fails, not about it failing at all.
+      expect(healthy).to eq(1)
+      expect(status).to eq(1)
+      expect(out).to include("(not measured)")
+      expect(out).not_to include("(100.0%)")
+      expect(err).to include("could not be measured at all")
     end
   end
 

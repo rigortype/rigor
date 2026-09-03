@@ -36,13 +36,16 @@ module Rigor
         #   because they do not parse (`[path, first_error_line]` pairs).
         # @param env_build_failure_snapshot [#call] reader returning the total RBS env-build failure tuple
         #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
+        # @param definition_build_failures_snapshot [#call] issue #696 — reader returning the per-class
+        #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
+        #   conflicting_buffer_names]` tuples. Empty for a healthy sig set.
         # @param conformance_results_snapshot [#call] reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
                        pool_mode:, cached_plugin_prepare_diagnostics:,
                        pre_eval_diagnostics_from_scanner:, synthesized_namespaces_snapshot:,
                        quarantined_signatures_snapshot:, env_build_failure_snapshot:,
-                       conformance_results_snapshot:)
+                       definition_build_failures_snapshot:, conformance_results_snapshot:)
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -55,6 +58,7 @@ module Rigor
           @synthesized_namespaces_snapshot_reader = synthesized_namespaces_snapshot
           @quarantined_signatures_snapshot_reader = quarantined_signatures_snapshot
           @env_build_failure_snapshot_reader = env_build_failure_snapshot
+          @definition_build_failures_snapshot_reader = definition_build_failures_snapshot
           @conformance_results_snapshot_reader = conformance_results_snapshot
         end
 
@@ -351,6 +355,32 @@ module Rigor
           [build_rbs_environment_build_failed_diagnostic(failure)]
         end
 
+        # Issue #696 — the third rung of the same ladder, between its two neighbours by consequence: a
+        # QUARANTINED file removes what one FILE declared, this removes what one CLASS declared, an
+        # ENV-BUILD failure removes everything. `RBS::DefinitionBuilder` raising for a class (typically
+        # `DuplicatedMethodDefinitionError`: two signature sources declaring the same method, e.g. a project
+        # `sig/` carrying a vendored COPY of a bundled plugin's `.rbs`) leaves the class KNOWN but with no
+        # method surface, so every call on it — real methods and typos alike — reads `Dynamic[top]`. When
+        # the collision is on a class others inherit, the whole bundled type universe goes with it: the
+        # observed shape is thousands of stderr warnings, ZERO diagnostics, and exit 0.
+        #
+        # Not "drop the class to genuinely-unknown" instead. That also removes diagnostics, so it is not
+        # louder; it changes `Dynamic[top]` semantics for every rule that consults `class_known?`; and
+        # `class_known?` reads {Environment::RbsLoader#known_class_names_set}, a different table from the
+        # definition builder, so it would need a new "known but unbuildable" state regardless. The failure
+        # is made REPORTABLE; the class is not made invisible.
+        #
+        # Authored `:warning`, not `:error`, for the same reason as both neighbours: the collision is
+        # typically between the user's `sig/` and Rigor's OWN bundled RBS, so an `:error` default would let
+        # a Rigor release turn a green build red with no user change (ADR-5 / AGENTS.md § FP discipline).
+        # The `reject-unparseable-signatures` bleeding-edge feature promotes it to `:error`.
+        def rbs_definition_build_failed_diagnostics
+          failures = definition_build_failures_snapshot
+          return [] if failures.nil? || failures.empty?
+
+          [build_rbs_definition_build_failed_diagnostic(failures)]
+        end
+
         def rbs_synthesized_namespace_diagnostics
           synthesized = synthesized_namespaces_snapshot
           return [] if synthesized.nil? || synthesized.empty?
@@ -460,6 +490,64 @@ module Rigor
             rule: "rbs.coverage.environment-build-failed",
             source_family: :builtin
           )
+        end
+
+        # Issue #696. One diagnostic per RUN, not per class: a collision on a widely-inherited class fails
+        # every descendant, and 2,709 rows saying the same thing about one `.rbs` line is noise, not
+        # visibility.
+        #
+        # The failed-class list alone is not actionable, and that is what the "First failure" clause is for.
+        # A duplicate on `::Object#blank?` fails `String`, `Integer`, `Array` and 1,333 more — every name in
+        # that list is a DESCENDANT, and none of them is where the fix goes. The member comes off the error
+        # object rather than out of its message ({RbsLoader#definition_build_member}), so it names the
+        # culprit and reads the same on a cache hit, where every `RBS::Location` has been dumped to a
+        # sentinel. The error class is attributed to that first failure explicitly rather than to all of
+        # them: the per-class memo keeps only the first reason, and one run can mix error classes.
+        def build_rbs_definition_build_failed_diagnostic(failures)
+          sample_size = 5
+          files = failures.flat_map { |failure| Array(failure[3]) }.uniq.map { |name| relative_signature_path(name) }
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "#{failures.size} RBS class definition(s) failed to build: " \
+                     "#{sampled(failures.map(&:first), sample_size)}." \
+                     "#{first_failure_clause(failures.first)}#{conflicting_files_clause(files, sample_size)} " \
+                     "Rigor still treats each class as KNOWN, so calls into it — real methods and typos " \
+                     "alike — silently read `Dynamic[top]` instead of resolving, and this run is quieter " \
+                     "than it should be rather than cleaner. Two signature sources declare the same " \
+                     "member; remove the duplicate declaration (`rbs validate`) to restore type coverage.",
+            severity: :warning,
+            rule: "rbs.coverage.definition-build-failed",
+            source_family: :builtin
+          )
+        end
+
+        # `[class_name, error_class, member, buffers]`. The member is nil for the error classes that carry no
+        # name at all (`RecursiveAncestorError`), and the clause then names the error class alone rather than
+        # inventing a member.
+        def first_failure_clause(failure)
+          _, error_class, member, = failure
+          return " First failure: #{error_class}." if member.nil? || member.empty?
+
+          " First failure: #{error_class} on `#{member}`."
+        end
+
+        # Identical on a cache HIT: the ADR-54 env cache drops location POSITIONS but keeps each buffer's
+        # NAME, so a warm run names the same files a cold one does. Where a name is absent anyway, the
+        # reconstructed {RbsLoader::CACHED_LOCATION_BUFFER_NAME} sentinel is filtered out and the clause is
+        # omitted, rather than naming `<cached>` as if it were a path.
+        def conflicting_files_clause(files, sample_size)
+          return "" if files.empty?
+
+          " Conflicting signature file(s): #{sampled(files, sample_size)}."
+        end
+
+        # "a, b, c, and N more" — the sampling shape every `rbs.coverage.*` message above uses.
+        def sampled(names, sample_size)
+          sample = names.first(sample_size)
+          suffix = names.size > sample_size ? ", and #{names.size - sample_size} more" : ""
+          "#{sample.join(', ')}#{suffix}"
         end
 
         # The absolute path is what the loader records; the user thinks in project-relative terms.
@@ -682,6 +770,10 @@ module Rigor
 
         def env_build_failure_snapshot
           @env_build_failure_snapshot_reader.call
+        end
+
+        def definition_build_failures_snapshot
+          @definition_build_failures_snapshot_reader.call
         end
 
         def conformance_results_snapshot

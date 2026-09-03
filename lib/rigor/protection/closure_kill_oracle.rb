@@ -5,6 +5,7 @@ require "tempfile"
 require_relative "../analysis/buffer_binding"
 require_relative "../analysis/runner"
 require_relative "../inference/fork_map"
+require_relative "analysis_guard"
 require_relative "diagnostic_oracle"
 require_relative "discovery_seed"
 require_relative "kill_signature"
@@ -174,11 +175,20 @@ module Rigor
       # and emits nothing. A closure oracle built that way would report zero cross-file kills and look
       # entirely plausible doing it. Passing both selects option B (#146), where the closure wins and the
       # buffer is one member of it.
+      #
+      # Issue #686 — the guard is on this line for the reason the whole class exists. `killed?` decides by
+      # SET DIFFERENCE between the baseline's signatures and the mutant's, and a crashed check rule makes
+      # both sides the same deterministic `internal analyzer error` row on the same file: the difference is
+      # empty and the mutant is scored a survivor, not "indeterminate". Every mutant in the file scores the
+      # same way, which inflates the survivor count the harness reports as its headline signal.
       def analyse(paths, buffer, seed)
-        Analysis::Runner.new(
-          configuration: @configuration, environment: @environment, prebuilt: @project_scan,
-          cache_store: nil, collect_stats: false, buffer: buffer, discovery_seed: seed, analyze_only: paths
-        ).run(paths).diagnostics
+        AnalysisGuard.checked(
+          Analysis::Runner.new(
+            configuration: @configuration, environment: @environment, prebuilt: @project_scan,
+            cache_store: nil, collect_stats: false, buffer: buffer, discovery_seed: seed, analyze_only: paths
+          ).run(paths),
+          context: "ClosureKillOracle closure analysis of #{paths.join(', ')}"
+        )
       end
     end
   end

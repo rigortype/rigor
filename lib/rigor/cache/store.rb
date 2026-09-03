@@ -29,7 +29,16 @@ module Rigor
       # fail the header check and read as silent misses; the `schema_version.txt` marker additionally carries
       # this version, so the first writable run after a bump clears the root and reclaims the unreadable
       # bytes.
-      FORMAT_VERSION = 2
+      #
+      # v3 (issue #696 review, second pass): `RBS::Location#_dump` now carries the buffer NAME rather than an
+      # empty string, so an env blob written before this change reconstructs every location behind the
+      # `<cached>` sentinel. That degrades gracefully — the sentinel is filtered, never printed as a path —
+      # but `rbs.coverage.definition-build-failed` then omits its conflicting-files clause, so a warm run off
+      # a pre-change blob says less than a cold run does, indefinitely: ADR-6's store never evicts.
+      # `PAYLOAD_ABI_VERSION` already rebuilds across a RELEASE, so the exposure is a same-version tree; this
+      # closes that window too, because "the same project reports differently depending on how you ran it" is
+      # the defect the diagnostic exists to end and a stale blob reintroduces it.
+      FORMAT_VERSION = 3
 
       # Payload ABI version. Store values are mostly Marshal blobs of Rigor/RBS objects, so a Rigor release
       # upgrade is an ABI boundary even when the byte layout and descriptor schema are unchanged. Folding the

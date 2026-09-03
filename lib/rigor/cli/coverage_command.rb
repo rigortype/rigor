@@ -223,13 +223,28 @@ module Rigor
         )
       end
 
+      # Issue #686 — an unmeasured file fails the build the way a parse error already does, and for the same
+      # reason: the command could not measure part of what it was asked about, so its ratio is an answer to
+      # a smaller question than the user asked. Deliberately NOT routed through `--threshold`, which the
+      # line below applies to a ratio: a crashed file's mutants leave `killed + survived` at zero, the
+      # project ratio is then computed over the files that DID work, and a run that measured nothing at all
+      # came out at 1.0 and passed every threshold. It is also deliberately not the `harness_errors` count,
+      # which #264 keeps out of the exit code on purpose — a few rescued mutants are the transient that
+      # bucket exists to make visible, while a wholly unmeasured FILE is not a transient.
       def determine_protection_exit(report, options)
         return 1 unless report.parse_errors.empty?
+        return 1 if unmeasured_files_in(report).positive?
 
         threshold = options[:threshold]
         return 0 if threshold.nil?
 
         report.ratio < threshold ? 1 : 0
+      end
+
+      # Issue #686 — the one reader of the count, shared with the stderr warning. The Tier-1 protection
+      # report has no such notion, so a report without the field reads as zero rather than erroring.
+      def unmeasured_files_in(report)
+        report.respond_to?(:unmeasured_files) ? report.unmeasured_files : 0
       end
 
       def usage_error

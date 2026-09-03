@@ -26,13 +26,33 @@ module Rigor
       end
 
       def render_text(report)
-        pct = (report.ratio * 100).round(1)
+        pct = report.ratio ? (report.ratio * 100).round(1) : nil
         @out.puts "Type-protection effectiveness (Tier 2 — mutation kill rate)"
-        @out.puts "  caught breakages: #{report.total_killed} / #{report.grand_total}  (#{pct}%)"
+        @out.puts "  caught breakages: #{report.total_killed} / #{report.grand_total}#{ratio_suffix(pct)}"
         @out.puts "  (effectiveness = when a type-visible bug was introduced, Rigor caught it)"
+        render_unmeasured_files(report)
         render_harness_errors(report)
         render_missed(report)
         render_files(report)
+      end
+
+      # Issue #686 — `0 / 0` is `ratio` 1.0 by the vacuous-file convention, and printing "100.0%" over a run
+      # that measured nothing is the exact shape this issue exists to end. When nothing was measured AND a
+      # file went unmeasured, the percentage is withheld rather than invented.
+      def ratio_suffix(pct)
+        return "  (not measured)" if pct.nil?
+
+        "  (#{pct}%)"
+      end
+
+      # Issue #686 — the count that makes the command exit non-zero, on stdout beside the ratio it qualifies
+      # (the stderr twin in `CoverageMutation#warn_unmeasured_files` carries the explanation).
+      def render_unmeasured_files(report)
+        count = report.unmeasured_files
+        return if count.zero?
+
+        @out.puts "  unmeasured files: #{count} — every mutation of them failed inside the measurement " \
+                  "harness, so they are not in the ratio above"
       end
 
       # #264 — surfaced only when non-zero: a harness-level failure is a defect in the measurement itself, not

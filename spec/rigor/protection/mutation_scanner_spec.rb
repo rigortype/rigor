@@ -198,6 +198,67 @@ RSpec.describe Rigor::Protection::MutationScanner do
     expect(result.harness_errors).to eq(0)
   end
 
+  # Issue #686 — the sweep-level gate. `File.join` is the fixture the "records a surviving site" example above
+  # uses precisely because its mutants genuinely survive, so it is the file a crashed rule would inflate: with
+  # every check rule raising, the baseline and each mutant come back carrying the same `internal analyzer
+  # error` row, the kill comparison finds no difference, and every one of those mutants is reported as a
+  # survivor Rigor "failed to catch". The oracle now refuses the crashed run, and the scanner routes the
+  # refusal into the `harness_errors` bucket the CLI already warns about (#264).
+  #
+  # The healthy scan is asserted first and is the non-vacuity half: the same file really does yield survivors,
+  # so `survived == 0` below is the crash being contained rather than the fixture having nothing to measure.
+  it "reports a crashed run as harness_errors instead of inflating the survivor count (#686)" do
+    File.write("joins.rb", %(def j\n  File.join("a", "b", "c")\nend\n))
+    healthy = scanner.scan_file("joins.rb")
+    expect(healthy.survived).to be >= 1
+
+    allow(Rigor::Analysis::CheckRules).to receive(:diagnose)
+      .and_raise(RuntimeError, "injected check-rule crash (issue #686 gate)")
+    crashed = scanner.scan_file("joins.rb")
+
+    expect(crashed.survived).to eq(0)
+    expect(crashed.killed).to eq(0)
+    expect(crashed.harness_errors).to eq(healthy.total)
+    expect(crashed.total).to eq(0)
+    # Issue #686 review, F3 — `total.zero?` alone means "vacuously fully effective", the convention for a
+    # file with no type-relevant mutation. Borrowing it here made a wholly crashed file report 100% and PASS
+    # `--threshold`, which is the defect this issue exists to close, recreated. `measured?` is what tells the
+    # two apart, and the ratio must not read as a pass.
+    expect(crashed).not_to be_measured
+    expect(crashed.ratio).to eq(0.0)
+  end
+
+  # The #264 NEIGHBOUR, which #686 sits directly on top of and must not move: a file where SOME mutants
+  # failed in the harness but others were measured is the transient #264's bucket exists to make visible. It
+  # still computes a ratio over the measured subset, and it is still `measured?` — so the exit gate, which
+  # keys on unmeasured FILES rather than on the mutant count, still leaves it alone. Only a file where
+  # nothing at all could be measured is new behaviour.
+  it "keeps a partially-measured file measured, with a ratio over the measured subset (#264 neighbour)" do
+    File.write("joins.rb", %(def j\n  File.join("a", "b", "c")\nend\n))
+    kept_count = scanner.scan_file("joins.rb").total
+
+    result = scanner_with_oracle(raising_once_oracle(then_verdict: false)).scan_file("joins.rb")
+
+    expect(result.harness_errors).to eq(1)
+    expect(result.total).to eq(kept_count - 1)
+    expect(result.total).to be > 0
+    expect(result).to be_measured
+    expect(result.ratio).to eq(result.killed.to_f / result.total)
+  end
+
+  # The must-still-succeed twin: a file with genuinely nothing to measure is still vacuously effective, so
+  # the change above cannot redden a project that simply has no type-relevant mutation.
+  it "keeps a file with no type-relevant mutation vacuously effective (#686 F3 control)" do
+    File.write("untyped.rb", %(def f(x)\n  x.save\nend\n))
+
+    result = scanner.scan_file("untyped.rb")
+
+    expect(result.total).to eq(0)
+    expect(result.harness_errors).to eq(0)
+    expect(result).to be_measured
+    expect(result.ratio).to eq(1.0)
+  end
+
   it "never reaches the suite when the type checker already kills the mutant (gradual short-circuit)" do
     # `"hello".upcase` mutants are all type-killed → the test oracle is never consulted; an oracle that would raise if
     # called proves the short-circuit.

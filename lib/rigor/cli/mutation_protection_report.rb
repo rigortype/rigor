@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../protection/measurement_integrity"
+
 module Rigor
   class CLI
     # ADR-63 Tier 2 — aggregates per-file {Protection::MutationScanner} results into a project-level *effectiveness*
@@ -16,6 +18,13 @@ module Rigor
       def initialize(path:, killed:, survived:, ratio:, harness_errors: 0)
         super
       end
+
+      # Issue #686 — the file measured the HARNESS, not the code: every mutant it had landed in
+      # `harness_errors`, so `killed + survived` is zero for a reason that is not "there was nothing to
+      # measure". `ratio` is 0.0 here rather than the vacuous 1.0, and this is what the exit gate reads.
+      def unmeasured?
+        !Protection::MeasurementIntegrity.measured?(total: killed + survived, harness_errors: harness_errors)
+      end
     end
     MissedBreakage = Data.define(:method_name, :count, :examples)
 
@@ -23,21 +32,41 @@ module Rigor
       def total_killed = files.sum(&:killed)
       def total_survived = files.sum(&:survived)
       def grand_total = total_killed + total_survived
-      def ratio = grand_total.zero? ? 1.0 : total_killed.to_f / grand_total
+
+      # Issue #686 review (second pass) — `nil`, not 1.0, when nothing was measured and something failed
+      # trying. The text renderer already withheld the percentage; JSON did not, so a CI gate reading
+      # `effectiveness_ratio` still saw 100% on a run that measured nothing — the same defect one channel
+      # over. An empty project (nothing to measure, nothing failed) stays vacuously 1.0.
+      def ratio
+        return nil if Protection::MeasurementIntegrity.ratio_unmeasurable?(
+          grand_total: grand_total, unmeasured_files: unmeasured_files
+        )
+
+        grand_total.zero? ? 1.0 : total_killed.to_f / grand_total
+      end
 
       # #264 — a harness-level failure count, summed across files. Stays OUT of `grand_total`/`ratio` exactly
       # like a parse error: it is not a measurement of the code.
       def total_harness_errors = files.sum(&:harness_errors)
+
+      # Issue #686 — files where NOTHING could be measured. Distinct from `total_harness_errors`, which
+      # counts mutants and rightly tolerates a few (#264's floor): one wholly unmeasured file already means
+      # the ratio is computed over a smaller project than the user asked about, so this gates the exit and
+      # the mutant count does not.
+      def unmeasured_files = files.count(&:unmeasured?)
 
       def to_h
         {
           "mode" => "mutation",
           "killed" => total_killed,
           "survived" => total_survived,
-          "effectiveness_ratio" => ratio.round(4),
+          "effectiveness_ratio" => ratio&.round(4),
           # #264 — unconditional: a JSON consumer (e.g. a CI gate) must be able to check this every run, not
           # only when a text renderer decided it was worth a line.
           "harness_errors" => total_harness_errors,
+          # Issue #686 — unconditional for the same reason `harness_errors` is: a CI gate reading JSON must
+          # be able to see that part of the project was never measured, on every run.
+          "unmeasured_files" => unmeasured_files,
           "files" => files.map do |f|
             { "path" => f.path, "killed" => f.killed, "survived" => f.survived,
               "ratio" => f.ratio.round(4), "harness_errors" => f.harness_errors }

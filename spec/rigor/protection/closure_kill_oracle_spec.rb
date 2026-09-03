@@ -190,6 +190,55 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     expect(oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(false)
   end
 
+  # Issue #686 — the survivor verdict directly above is the one a crashed analyzer manufactures for free, and
+  # that is the whole defect: `killed?` decides by SET DIFFERENCE, a raising check rule makes
+  # `Runner#analyze_file_body` rescue into one deterministic `internal analyzer error` row per file, so the
+  # baseline and the mutant carry the IDENTICAL row, the difference is empty, and the oracle reports
+  # "survived" — not "indeterminate". Every mutant of the file scores the same way, inflating the survivor
+  # count (the harness's headline signal) in the direction that manufactures work.
+  #
+  # Both halves are in this one example on purpose. The `be(false)` is the must-still-succeed control: a
+  # genuine survivor is still a survivor, so the raise afterwards is the crash being refused rather than the
+  # verdict having changed. An assertion that only checked for the raise would pass on an oracle that refused
+  # everything.
+  it "refuses a crashed run instead of scoring the same mutant a survivor" do
+    paths = write_fixture
+    oracle = oracle_for(paths, dependents: { "lib/account.rb" => [], "lib/service.rb" => [] })
+    baseline = oracle.baseline(source: account_source, path: "lib/account.rb")
+    expect(oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(false)
+
+    crash_every_check_rule!
+
+    expect { oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline) }
+      .to raise_error(Rigor::Protection::AnalyzerCrashed, /internal analyzer error/)
+    expect { oracle.baseline(source: account_source, path: "lib/account.rb") }
+      .to raise_error(Rigor::Protection::AnalyzerCrashed, /internal analyzer error/)
+  end
+
+  # The closure half of the same refusal. The example above narrows the closure to nothing, so the verdict is
+  # settled by the delegated single-file {Rigor::Protection::DiagnosticOracle} and the closure analysis never
+  # runs; here the dependent IS in the closure, so `dependents_signatures` — the cross-file comparison this
+  # class adds — is what has to refuse. Two seams, two guards.
+  it "refuses a crashed run in the dependent closure too" do
+    paths = write_fixture
+    oracle = oracle_for(paths, dependents: recorded_dependents(paths))
+    baseline = oracle.baseline(source: account_source, path: "lib/account.rb")
+    expect(oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(true)
+
+    crash_every_check_rule!
+
+    expect { oracle.baseline(source: account_source, path: "lib/account.rb") }
+      .to raise_error(Rigor::Protection::AnalyzerCrashed, /ClosureKillOracle|DiagnosticOracle/)
+  end
+
+  # The #665 / #674 rescue, driven from the outside: an unconditional raise out of `CheckRules.diagnose` is
+  # exactly what those issues measured the suite with, and it is the only injection that reaches BOTH the
+  # single-file oracle's `run_source` and the closure oracle's `run`.
+  def crash_every_check_rule!
+    allow(Rigor::Analysis::CheckRules).to receive(:diagnose)
+      .and_raise(RuntimeError, "injected check-rule crash (issue #686 gate)")
+  end
+
   # The acceptance criterion the issue calls the trap: the mutated file is treated as changed everywhere the run
   # reads it, even though its bytes on disk never move. If the substitution reached only the analysis, the
   # dependent would resolve the `def` still on disk, no diagnostic could ever appear outside the mutated file,

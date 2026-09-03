@@ -444,6 +444,36 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #681 — the same defect on the path the declaration walk never reaches.
+  # `ScopeIndexer`'s census pre-passes type an rvalue where it is WRITTEN, under a
+  # scope built from a self type alone, so the constant / ivar / cvar tables were
+  # populated by peeling the qualified name and every later read served the wrong
+  # class. `@post = Post.new` in an `initialize` and a `DEFAULT = Post` constant are
+  # ordinary Ruby, which makes this the more reachable half of the family.
+  describe "fixtures/census_declaration_nesting/ — the census pre-passes get Ruby's nesting" do
+    let(:harness) { harness_for("census_declaration_nesting") }
+
+    it "records constant, ivar and cvar rvalues under the writing body's real nesting" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity, and the reason each census is written as a compact / nested pair:
+    # an implementation that stopped walking satisfies every compact assertion and no
+    # nested one, and the peel satisfies the reverse.
+    it "still asserts one recorded rvalue per census, on both spellings" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(11)
+    end
+
+    # The false-positive arm. Every assertion is followed by a call only the
+    # correctly-resolved class owns (`Post#top_post`, `Admin::Post#admin_post`,
+    # `Own#own_marker`, `Loner#loner`), declared in the fixture's `sig/` so
+    # `call.undefined-method` can fire at all. Master fires six of them here.
+    it "leaves no other diagnostic on the recorded receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   describe "fixtures/tuple_access.rb — Tuple element typing" do
     let(:harness) { harness_for("tuple_access") }
 

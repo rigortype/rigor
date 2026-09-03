@@ -464,6 +464,29 @@ module Rigor
         end
       end
 
+      # Issue #681 — the scope a census pre-pass types an rvalue under. The census walks never enter a body
+      # through `StatementEvaluator`, so nothing stamped the declaration's `Module.nesting` on the scope they
+      # build and `Reflection.lexical_nesting_chain` fell back to peeling `self_type`'s qualified name. That
+      # peel cannot tell a compact `class Admin::Census` (nesting `[Admin::Census]`, so a bare `Post` names
+      # `::Post`) from the nested spelling (nesting `[Admin::Census, Admin]`, where it names `Admin::Post`),
+      # so `@post = Post.new` and `DEFAULT = Post` were recorded under the wrong class and every later read
+      # answered it. The prefix these walks already thread IS the chain — `["Admin::Census"]` for the compact
+      # form, `["Admin", "Census"]` for the nested one — so the fact was in hand and only the stamp was
+      # missing.
+      def census_body_scope(default_scope, qualified_prefix, self_type)
+        default_scope.with_self_type(self_type)
+                     .with_lexical_nesting(lexical_nesting_for_prefix(qualified_prefix))
+      end
+
+      # Ruby's `Module.nesting` for a body enclosed by `qualified_prefix`, innermost first: each entry is the
+      # prefix truncated at one declaration, joined, so the compact spelling contributes exactly one entry and
+      # the nested spelling one per `class` / `module` keyword. Same shape as the chain
+      # `Inference::StatementEvaluator` records on the declaration walk, which is what makes the census agree
+      # with the body walk by construction rather than by coincidence.
+      def lexical_nesting_for_prefix(qualified_prefix)
+        (1..qualified_prefix.size).map { |n| qualified_prefix.first(n).join("::") }.reverse.freeze
+      end
+
       def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars, # rubocop:disable Metrics/ParameterLists
                            read_before_write = nil, init_writes = nil, method_assign_effects = nil)
         return unless node.is_a?(Prism::Node)
@@ -519,7 +542,7 @@ module Rigor
           else
             Type::Combinator.nominal_of(class_name)
           end
-        body_scope = default_scope.with_self_type(self_type)
+        body_scope = census_body_scope(default_scope, qualified_prefix, self_type)
 
         # C2 — transient `@x = nil` dead-write elimination. When a method body opens with an unconditional `@x = nil`
         # (defensive init) and then *definitely* reassigns `@x` to a non-nil value on every completing path (a later
@@ -551,7 +574,7 @@ module Rigor
 
         class_name = qualified_prefix.join("::")
         self_type = Type::Combinator.nominal_of(class_name)
-        body_scope = default_scope.with_self_type(self_type)
+        body_scope = census_body_scope(default_scope, qualified_prefix, self_type)
 
         gather_ivar_writes(block_node.body, body_scope, class_name, accumulator,
                            EMPTY_GUARDED_IVARS, mutated_ivars)
@@ -1329,7 +1352,8 @@ module Rigor
         return if def_node.body.nil? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
-        body_scope = default_scope.with_self_type(Type::Combinator.nominal_of(class_name))
+        body_scope = census_body_scope(default_scope, qualified_prefix,
+                                       Type::Combinator.nominal_of(class_name))
         gather_cvar_writes(def_node.body, body_scope, class_name, accumulator)
       end
 
@@ -1554,7 +1578,8 @@ module Rigor
         full = qualified_prefix.empty? ? base_name : "#{qualified_prefix.join('::')}::#{base_name}"
         body_scope = default_scope
         unless qualified_prefix.empty?
-          body_scope = body_scope.with_self_type(Type::Combinator.singleton_of(qualified_prefix.join("::")))
+          body_scope = census_body_scope(default_scope, qualified_prefix,
+                                         Type::Combinator.singleton_of(qualified_prefix.join("::")))
         end
         rvalue_type = meta_new_constant_type(node, full) || body_scope.type_of(node.value)
         existing = accumulator[full]

@@ -14,7 +14,8 @@
 # fixtures a recent engine change had just added — the code paths this gate exists to watch
 # (https://github.com/rigortype/rigor/issues/698). There is deliberately no opt-out list: regenerating one
 # fixture is a single command now, so a missing golden records a step not taken rather than a decision made,
-# and a list would be one more place for that step to hide.
+# and a list would be one more place for that step to hide. That failure has its own self-test — see
+# "the missing-golden failure itself" below — because with every golden present it is otherwise unobservable.
 #
 # Regenerating golden files:
 #
@@ -36,10 +37,13 @@
 require "spec_helper"
 require "yaml"
 require "fileutils"
+require "tmpdir"
 require_relative "support/fixture_harness"
 
-SNAPSHOTS_DIR = File.expand_path("snapshots", __dir__)
-FIXTURE_DIR   = File.expand_path("fixtures",  __dir__)
+# The missing-golden self-test re-runs this file in a subprocess against a scratch directory, so the
+# snapshot location is overridable. Nothing else sets it: an ordinary run reads the committed goldens.
+SNAPSHOTS_DIR = File.expand_path(ENV.fetch("PRECISION_SNAPSHOTS_DIR", "snapshots"), __dir__)
+FIXTURE_DIR   = File.expand_path("fixtures", __dir__)
 
 UPDATE_SNAPSHOTS_ENV = ENV.fetch("UPDATE_SNAPSHOTS", "").strip.freeze
 
@@ -80,8 +84,22 @@ def snapshot_update_targets(value, all_names)
   return names if unknown.empty?
 
   raise ArgumentError,
-        "UPDATE_SNAPSHOTS names #{unknown.size} fixture(s) that do not exist under spec/integration/fixtures/: " \
-        "#{unknown.sort.join(', ')}. Use UPDATE_SNAPSHOTS=1 to regenerate every fixture."
+        "UPDATE_SNAPSHOTS names #{unknown.size} value(s) that are not snapshot fixtures:\n" \
+        "#{unknown.sort.map { |name| "  #{unknown_fixture_reason(name)}" }.join("\n")}\n" \
+        "Use UPDATE_SNAPSHOTS=1 to regenerate every fixture."
+end
+
+# Says what is actually TRUE of a name that is not a snapshot fixture, because "does not exist" is wrong
+# for the one shape a person is most likely to type. `fixtures/effects/` does exist — it is a container of
+# per-spec project trees, carries no entry file, and is therefore not a fixture here — and telling its
+# author it does not exist sends them looking in the wrong place.
+def unknown_fixture_reason(name)
+  entry = Rigor::IntegrationSupport::FixtureHarness::DEFAULT_ENTRY
+  if File.directory?(File.join(FIXTURE_DIR, name))
+    "#{name}: spec/integration/fixtures/#{name}/ exists but carries no #{entry}, so it is not a snapshot fixture"
+  else
+    "#{name}: no spec/integration/fixtures/#{name}.rb, and no spec/integration/fixtures/#{name}/ directory"
+  end
 end
 
 UPDATE_TARGETS, UPDATE_TARGET_ERROR = begin
@@ -114,6 +132,32 @@ def vacuous_snapshot_warning(names)
   "\n#{names.size} snapshot(s) pinned no type at all: #{names.sort.join(', ')}.\n" \
     "This gate captures top-level locals only, and those fixtures declare none, so their goldens are empty. " \
     "Assert the types they are about through `assert_type` in spec/integration/type_construction_spec.rb.\n"
+end
+
+# Re-runs THIS file in a subprocess, narrowed to one fixture's example, against a scratch snapshots
+# directory that either holds that fixture's golden or is empty. Returns `[exit status, combined output]`.
+#
+# `PRECISION_SNAPSHOT_SELF_TEST` keeps the child from defining the self-test group at all, so the
+# recursion is closed structurally rather than by relying on the `-e` filter to exclude it.
+def run_against_scratch_snapshots(fixture, golden:)
+  Dir.mktmpdir("precision-snapshot-selftest") do |dir|
+    FileUtils.cp(snapshot_path(fixture), dir) if golden
+
+    env = {
+      "PRECISION_SNAPSHOTS_DIR" => dir,
+      "PRECISION_SNAPSHOT_SELF_TEST" => "1",
+      "UPDATE_SNAPSHOTS" => "0"
+    }
+    command = ["bundle", "exec", "rspec", __FILE__, "-e", "fixtures/#{fixture} matches the golden snapshot"]
+
+    output = nil
+    status = nil
+    Bundler.with_unbundled_env do
+      output = IO.popen(env, command, err: %i[child out], &:read)
+      status = Process.last_status.exitstatus
+    end
+    [status, output]
+  end
 end
 
 # Human-readable per-local diff, built before failing so the engineer immediately sees which locals moved.
@@ -195,14 +239,52 @@ RSpec.describe "Precision snapshots (inference regression gate)" do
 
       it "rejects a name matching no fixture rather than quietly writing nothing" do
         expect { snapshot_update_targets("bta", names) }
-          .to raise_error(ArgumentError, /do not exist.*bta/m)
+          .to raise_error(ArgumentError, /are not snapshot fixtures.*bta/m)
         # Must still succeed: one bad name in a list does not condemn the list's spelling itself.
         expect { snapshot_update_targets("beta", names) }.not_to raise_error
+      end
+
+      # `effects` is the one directory under `fixtures/` that is deliberately not a fixture — it holds
+      # per-spec project trees and carries no entry file. Telling someone who typed it that it "does not
+      # exist" sends them to the wrong place, so the two shapes have to read differently.
+      it "distinguishes a directory that is not a fixture from a name with nothing behind it" do
+        expect(unknown_fixture_reason("effects"))
+          .to match(%r{fixtures/effects/ exists but carries no #{Regexp.escape(
+            Rigor::IntegrationSupport::FixtureHarness::DEFAULT_ENTRY
+          )}})
+        expect(unknown_fixture_reason("no_such_thing_at_all")).to match(/no spec.+\.rb, and no .+directory/)
       end
 
       it "resolves a real fixture name against the real corpus" do
         expect(snapshot_update_targets(SNAPSHOT_FIXTURE_NAMES.first, SNAPSHOT_FIXTURE_NAMES))
           .to eq([SNAPSHOT_FIXTURE_NAMES.first])
+      end
+    end
+
+    # The hard failure has to be checked by RUNNING it. Every golden exists now, so reverting the
+    # `expect(File.exist?(snap_path))` below to a `skip` leaves this whole file green — the gate that stops
+    # the gate being switched off, itself switched off, which is #698 one level down. So: re-run this file
+    # in a subprocess against a scratch snapshots directory, once with the golden absent and once with it
+    # present. A source grep for the word `skip` would pass the moment someone wrote `pending` instead, and
+    # would keep passing if the expectation were deleted outright; this cannot.
+    unless ENV["PRECISION_SNAPSHOT_SELF_TEST"]
+      describe "the missing-golden failure itself" do
+        let(:fixture) { SNAPSHOT_FIXTURE_NAMES.first }
+
+        it "goes red, names the single-fixture command, and does not pend" do
+          status, output = run_against_scratch_snapshots(fixture, golden: false)
+          expect(status).not_to eq(0), "expected a RED run with no golden:\n#{output}"
+          expect(output).to include("UPDATE_SNAPSHOTS=#{fixture}")
+          expect(output).not_to match(/\bpending\b/)
+        end
+
+        # Must-still-succeed: the same subprocess with the golden in place is green, so the arm above is
+        # failing on the absent golden rather than on the scratch directory or the subprocess itself.
+        it "goes green when the golden is there" do
+          status, output = run_against_scratch_snapshots(fixture, golden: true)
+          expect(status).to eq(0), "expected a GREEN run with the golden present:\n#{output}"
+          expect(output).to include("1 example, 0 failures")
+        end
       end
     end
 

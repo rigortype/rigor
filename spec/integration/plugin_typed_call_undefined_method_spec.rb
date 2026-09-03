@@ -117,6 +117,30 @@ RSpec.describe "a plugin-typed call and call.undefined-method (#653)" do
     expect(rules(result)).to include("call.wrong-arity")
   end
 
+  it "holds inside a module body, a singleton def and a nested instance def" do
+    # A class / method body starts from a FRESH scope (`StatementEvaluator#build_fresh_body_scope`), which
+    # copies only some of the per-node advisory tables across. The record has to reach the check rule at
+    # every nesting depth, so a body-scope construction that stopped threading it would break the
+    # suppression silently — the reported repro is nested, and a top-level-only fixture would miss it.
+    result = run_analysis(<<~RUBY, plugins: ["rigor-readertest"])
+      module MyApp
+        Rigor.dump_type(Frameworkish.logger)
+
+        def self.probe
+          Frameworkish.logger.info("x")
+        end
+
+        class Inner
+          def run
+            Frameworkish.logger.info("y")
+          end
+        end
+      end
+    RUBY
+    expect(rules(result)).not_to include("call.undefined-method")
+    expect(dumps(result)).to eq(["dump_type: Frameworkish::Logger"])
+  end
+
   it "still fires undefined-method for a call neither the RBS nor the plugin answers" do
     # The mandatory must-still-fire half: the suppression is per CALL SITE, not per receiver class. The
     # plugin answers `logger` on this very receiver, and `nope` on the same receiver still reports.

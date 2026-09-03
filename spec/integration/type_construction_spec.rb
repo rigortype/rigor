@@ -414,7 +414,7 @@ RSpec.describe "Rigor type construction (integration)" do
   # bare `Post` there names `::Post`; the nested spelling of the same class
   # reaches `Admin::Post`. The engine peeled the qualified name, which is
   # identical for the two, and answered `Admin::Post` for both.
-  describe "fixtures/compact_declaration_nesting.rb — compact declarations get Ruby's nesting" do
+  describe "fixtures/compact_declaration_nesting/ — compact declarations get Ruby's nesting" do
     let(:harness) { harness_for("compact_declaration_nesting") }
 
     it "resolves a bare name to the top level in a compact body and to the shadow in a nested one" do
@@ -431,10 +431,14 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(marked_lines(harness, "assert_type(").size).to eq(13)
     end
 
-    # The false-positive arm. Each compact-body assertion is followed by a call
-    # that only the correctly-resolved class owns (`Post#top_post`,
-    # `Wrap::Marker#wrap_marker`, `Loner#loner`), so a wrong resolution fires
-    # `call.undefined-method` here rather than only widening a type.
+    # The false-positive arm, and the reason this is a PROJECT fixture. Each
+    # assertion is followed by a call only the correctly-resolved class owns
+    # (`Post#top_post`, `Admin::Post#admin_post`, `Wrap::Marker#wrap_marker`,
+    # `Loner#loner`), and those methods are declared in the fixture's `sig/`
+    # rather than in its body — `call.undefined-method` declines on a receiver
+    # whose class RBS does not know, so a flat fixture could not fire the
+    # diagnostic the issue reports no matter how wrong the resolution got.
+    # With the sig, master fires it four times here and the branch none.
     it "leaves no other diagnostic on the resolved receivers" do
       expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
     end

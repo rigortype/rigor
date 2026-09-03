@@ -24,11 +24,12 @@ RSpec.describe Rigor::Inference::DefNodeResolver do
     Rigor::Inference::DefHandle.new(**)
   end
 
-  def write_and_handle(dir, name: :bar, fingerprint: "fp")
+  def write_and_handle(dir, name: :bar, fingerprint: "fp", nesting: ["Foo"])
     path = File.join(dir, "a.rb")
     File.write(path, "class Foo\n  def bar = 1\n  def baz = 2\nend\n")
     node = find_def(Prism.parse(File.read(path)).value, name)
-    [path, def_handle(path: path, node_id: node.node_id, name: name.to_s, fingerprint: fingerprint)]
+    [path, def_handle(path: path, node_id: node.node_id, name: name.to_s, fingerprint: fingerprint,
+                      nesting: nesting)]
   end
 
   it "resolves a handle to one stable node object for the run (identity)" do
@@ -39,7 +40,7 @@ RSpec.describe Rigor::Inference::DefNodeResolver do
         second = described_class.resolve(handle)
         # A second handle carrying the same (path, node_id) — a different consumer's table entry.
         twin_handle = def_handle(
-          path: path, node_id: handle.node_id, name: "bar", fingerprint: "z"
+          path: path, node_id: handle.node_id, name: "bar", fingerprint: "z", nesting: ["Foo"]
         )
         twin = described_class.resolve(twin_handle)
 
@@ -73,7 +74,8 @@ RSpec.describe Rigor::Inference::DefNodeResolver do
     Dir.mktmpdir do |dir|
       path, handle = write_and_handle(dir, name: :baz)
       # A stale node_id that does not exist in the file → cross-check miss → by-name fallback.
-      stale = def_handle(path: path, node_id: 999_999, name: "baz", fingerprint: handle.fingerprint)
+      stale = def_handle(path: path, node_id: 999_999, name: "baz", fingerprint: handle.fingerprint,
+                         nesting: ["Foo"])
       described_class.with_run do
         node = described_class.resolve(stale)
         expect(node).to be_a(Prism::DefNode)
@@ -88,6 +90,52 @@ RSpec.describe Rigor::Inference::DefNodeResolver do
       node = described_class.resolve(handle)
       expect(node).to be_a(Prism::DefNode)
       expect(node.name).to eq(:bar)
+    end
+  end
+
+  # Issue #707 — the chain #681 records against the DECLARATION cannot ride the discovery table across a
+  # bundle: that table is keyed by node identity and the node here is minted by this module's own parse. So
+  # the handle carries it and the resolver re-attaches it to the node it hands back.
+  describe ".rehydrated_nesting" do
+    it "answers the handle's chain for the node the resolution minted" do
+      Dir.mktmpdir do |dir|
+        _path, handle = write_and_handle(dir, nesting: ["Admin::CompactMaker"])
+        described_class.with_run do
+          node = described_class.resolve(handle)
+          expect(described_class.rehydrated_nesting(node)).to eq(["Admin::CompactMaker"])
+        end
+      end
+    end
+
+    it "answers nil for a node it never minted, so a live node keeps reading the discovery table" do
+      node = find_def(Prism.parse("class Foo\n  def bar = 1\nend\n").value, :bar)
+      described_class.with_run do
+        expect(described_class.resolve(node)).to equal(node)
+        expect(described_class.rehydrated_nesting(node)).to be_nil
+      end
+    end
+
+    it "records nothing for a top-level def's absent chain, keeping the peel fallback" do
+      Dir.mktmpdir do |dir|
+        _path, handle = write_and_handle(dir, nesting: nil)
+        described_class.with_run do
+          node = described_class.resolve(handle)
+          expect(node).to be_a(Prism::DefNode)
+          expect(described_class.rehydrated_nesting(node)).to be_nil
+        end
+      end
+    end
+
+    it "does not leak across the run boundary the node identity itself respects" do
+      Dir.mktmpdir do |dir|
+        _path, handle = write_and_handle(dir, nesting: ["Foo"])
+        first = described_class.with_run do
+          node = described_class.resolve(handle)
+          expect(described_class.rehydrated_nesting(node)).to eq(["Foo"])
+          node
+        end
+        described_class.with_run { expect(described_class.rehydrated_nesting(first)).to be_nil }
+      end
     end
   end
 end

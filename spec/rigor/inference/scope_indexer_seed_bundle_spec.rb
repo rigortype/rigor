@@ -12,17 +12,11 @@ require "rigor/inference/scope_indexer"
 # isolation.
 RSpec.describe Rigor::Inference::ScopeIndexer do
   # A three-file project exercising cross-file reopening, inheritance, includes, singleton defs, a Data.define,
-  # and a `Class.new` constant — the shapes the fold's merge semantics must preserve.
+  # a `Class.new` constant, and — issue #707 — a COMPACT declaration, whose `Module.nesting` is the one entry
+  # `["Shop::Compact"]` where the nested spelling of the same class would record two. Without it the chain
+  # comparison could not tell a carried chain from a re-derived one: both spellings render the same class name.
   def write_project(dir)
-    File.write(File.join(dir, "a.rb"), <<~RUBY)
-      module Shop
-        class Base
-          def tag = "base"
-          def self.make = new
-        end
-        include Comparable
-      end
-    RUBY
+    write_project_a(dir)
     File.write(File.join(dir, "b.rb"), <<~RUBY)
       module Shop
         class Widget < Base
@@ -43,14 +37,35 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     %w[a.rb b.rb c.rb].map { |f| File.join(dir, f) }
   end
 
-  # Resolve a def-node table (live nodes OR DefHandles) to comparable (node_id, name, fingerprint) triples.
-  def normalize_defs(table)
+  def write_project_a(dir)
+    File.write(File.join(dir, "a.rb"), <<~RUBY)
+      module Shop
+        class Base
+          def tag = "base"
+          def self.make = new
+        end
+        include Comparable
+      end
+
+      class Shop::Compact
+        def build = 1
+        def self.build_all = new
+      end
+    RUBY
+  end
+
+  # Resolve a def-node table (live nodes OR DefHandles) to comparable (node_id, name, fingerprint, nesting)
+  # rows. Issue #707 — the chain is part of the equivalence, not an extra: `def_nestings` is keyed by node
+  # IDENTITY, so a bundle can only carry it ON the row, and a fold that dropped it would still compare equal
+  # on every other table while a warm run resolved a different constant than a cold one. For a live node the
+  # chain comes from the index's own `def_nestings` table; for a handle, off the handle.
+  def normalize_defs(table, nestings)
     table.transform_values do |methods|
       methods.transform_values do |value|
         if value.is_a?(Rigor::Inference::DefHandle)
-          [value.node_id, value.name, value.fingerprint]
+          [value.node_id, value.name, value.fingerprint, value.nesting]
         else
-          [value.node_id, value.name.to_s, Digest::SHA256.hexdigest(value.location.slice)]
+          [value.node_id, value.name.to_s, Digest::SHA256.hexdigest(value.location.slice), nestings[value]]
         end
       end
     end
@@ -66,8 +81,13 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     a = actual[:def_index]
     r = reference[:def_index]
     plain_tables.each { |key| expect(a[key]).to eq(r[key]), "#{key} diverged" }
-    expect(normalize_defs(a[:def_nodes])).to eq(normalize_defs(r[:def_nodes]))
-    expect(normalize_defs(a[:singleton_def_nodes])).to eq(normalize_defs(r[:singleton_def_nodes]))
+    expect_def_tables_equivalent(a, r, :def_nodes)
+    expect_def_tables_equivalent(a, r, :singleton_def_nodes)
+  end
+
+  def expect_def_tables_equivalent(actual, reference, key)
+    expect(normalize_defs(actual[key], actual[:def_nestings]))
+      .to eq(normalize_defs(reference[key], reference[:def_nestings])), "#{key} diverged"
   end
 
   it "cold fold (empty bundles) is byte-identical to a fresh walk and keeps live nodes" do
@@ -144,6 +164,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
       expect_index_equivalent(warm, reference)
       expect(warm[:bundles].keys).to match_array(new_paths) # c.rb's bundle dropped, d.rb's added
+    end
+  end
+
+  # Issue #707 — the chain the bundle carries must be the chain the DECLARATION records, and for a compact
+  # declaration that is the single qualified entry. Pinned as a value rather than only through the
+  # equivalence, so a fold that carried the same WRONG chain on both sides would still be caught.
+  it "carries a compact declaration's one-entry Module.nesting onto the handle" do
+    Dir.mktmpdir do |dir|
+      paths = write_project(dir)
+      cold = described_class.discovered_project_index_incremental(paths, seed_bundles: {})
+      warm = described_class.discovered_project_index_incremental(paths, seed_bundles: cold[:bundles])
+
+      compact = warm[:def_index][:def_nodes]["Shop::Compact"][:build]
+      nested = warm[:def_index][:def_nodes]["Shop::Base"][:tag]
+      singleton = warm[:def_index][:singleton_def_nodes]["Shop::Compact"][:build_all]
+
+      expect(compact.nesting).to eq(["Shop::Compact"])
+      expect(nested.nesting).to eq(["Shop::Base", "Shop"])
+      expect(singleton.nesting).to eq(["Shop::Compact"])
     end
   end
 

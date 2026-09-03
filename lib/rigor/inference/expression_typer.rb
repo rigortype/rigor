@@ -14,6 +14,7 @@ require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "captured_locals"
+require_relative "def_node_resolver"
 require_relative "dynamic_origin"
 require_relative "origin_lookup"
 require_relative "../effects/collector"
@@ -2791,13 +2792,24 @@ module Rigor
           # `receiver`'s qualified name — which cannot tell a compact `class Admin::Maker` from the nested
           # spelling, and for an INHERITED body peels the subclass rather than the declaration that owns it.
           # The same `Post.new` then typed one way on the line that writes it and another through this
-          # re-walk. `nil` for a top-level def and for a body restored from an ADR-85 seed bundle, both of
-          # which keep the peel.
-          lexical_nesting: scope.discovery.discovered_def_nestings[def_node],
+          # re-walk. `nil` for a top-level def, which records no chain and keeps the peel.
+          lexical_nesting: recorded_def_nesting(def_node),
           discovery: scope.discovery,
           struct_fold_safe_locals: body_fold_safe_locals(def_node, receiver, self_fold_safe),
           dynamic_origins: scope.dynamic_origins
         )
+      end
+
+      # Issue #681 / #707 — the ONE place in `lib/` that answers "what `Module.nesting` was recorded for this
+      # def node". `Scope::DiscoveryIndex#discovered_def_nestings` is the owner; the resolver memo is that
+      # table's REHYDRATION for the one population it cannot hold — a def served from an ADR-85 seed bundle,
+      # whose node {Inference::DefNodeResolver} mints from its own parse, so no table keyed by the discovery
+      # walk's node identities can contain it. The two key sets are disjoint by construction (see
+      # {Inference::DefNodeResolver.rehydrated_nesting}), so the order here cannot shadow a live answer, and
+      # routing both through one reader is what keeps a cold run and an `--incremental` recheck answering the
+      # same constant for the same body.
+      def recorded_def_nesting(def_node)
+        scope.discovery.discovered_def_nestings[def_node] || DefNodeResolver.rehydrated_nesting(def_node)
       end
 
       # The body scope's fold-safe set: the body's own struct locals, plus issue #525's `:self` sentinel

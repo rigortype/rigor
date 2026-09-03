@@ -28,10 +28,12 @@ module Rigor
       private_constant :MEMO_KEY
 
       # Installs a fresh per-run resolution memo, restoring the previous one on exit (always, even on a raise).
-      # `nodes` caches the resolved node per `(path, node_id)`; `indexes` caches each file's parse index.
+      # `nodes` caches the resolved node per `(path, node_id)`; `indexes` caches each file's parse index;
+      # `nestings` re-attaches each handle's recorded `Module.nesting` to the node this module minted for it
+      # ({.rehydrated_nesting}).
       def self.with_run
         previous = Thread.current[MEMO_KEY]
-        Thread.current[MEMO_KEY] = { nodes: {}, indexes: {} }
+        Thread.current[MEMO_KEY] = { nodes: {}, indexes: {}, nestings: {}.compare_by_identity }
         yield
       ensure
         Thread.current[MEMO_KEY] = previous
@@ -50,8 +52,40 @@ module Rigor
         nodes = memo[:nodes]
         return nodes[key] if nodes.key?(key)
 
-        nodes[key] = locate(handle, memo[:indexes])
+        node = nodes[key] = locate(handle, memo[:indexes])
+        record_nesting(memo, node, handle.nesting)
+        node
       end
+
+      # Issue #707 — the recorded `Module.nesting` for a node this module minted from a {DefHandle}, or nil.
+      #
+      # This is a REHYDRATION of `Scope::DiscoveryIndex#discovered_def_nestings`, not a rival source for the
+      # same question. The two are keyed by node identity and their key sets are DISJOINT BY CONSTRUCTION: the
+      # discovery table holds nodes from the pre-pass's `Prism.parse` of a re-walked file, this memo holds
+      # nodes from {.build_file_index}'s own parse of a bundle-served one, and a file takes exactly one of
+      # those branches per run. So the single reader
+      # ({Inference::ExpressionTyper#recorded_def_nesting}) can consult the table first and fall through here
+      # without any risk of shadowing a live answer with a stale one. `--verify-incremental` is the standing
+      # detector: it compares the warm and cold diagnostics for the whole project, so were the two ever to
+      # disagree the divergence surfaces as a reported incremental-only / full-only diagnostic rather than as
+      # a silently preferred answer.
+      #
+      # Outside a run scope (a runner-less probe: {.with_run} never entered) nothing is recorded and the
+      # reader keeps `Reflection.lexical_nesting_chain`'s peel fallback — the same gradual answer that path
+      # already gives.
+      def self.rehydrated_nesting(node)
+        memo = Thread.current[MEMO_KEY]
+        memo && memo[:nestings][node]
+      end
+
+      # Files the chain the bundle recorded against the node just minted for it. A top-level def carries no
+      # chain (`nil`), and recording an empty one would RETRACT the peel fallback rather than improve on it.
+      def self.record_nesting(memo, node, nesting)
+        return if node.nil? || nesting.nil? || nesting.empty?
+
+        memo[:nestings][node] = nesting
+      end
+      private_class_method :record_nesting
 
       # Finds the node for `handle` using a per-file `{node_id => DefNode}` + `{name => DefNode}` index cache.
       def self.locate(handle, index_cache)

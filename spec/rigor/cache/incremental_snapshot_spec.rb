@@ -164,6 +164,49 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
     end
   end
 
+  # Issue #707 — a schema-13 bundle's def rows are `[node_id, name, fingerprint]`. Read as schema-14 they
+  # destructure with `nesting` nil, which is exactly how a TOP-LEVEL def records its (legitimate) absence of a
+  # chain — so every unchanged file would silently keep the pre-fix peel and a warm run would resolve a
+  # different constant than a cold one, with nothing to notice it. The gate must REJECT the blob, and the
+  # rejection must be the schema's doing: the paired example below writes the same bundle under schema 14 and
+  # requires it to load, so this cannot pass because the blob is unreadable for some other reason.
+  def legacy_bundle_payload(schema, def_row)
+    Marshal.dump(
+      schema: schema, fingerprint: "fp1", cache: {}, sources: {}, digests: {}, analyzed: [],
+      symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {}, missing: {}, class_decls: {},
+      constant_decls: {},
+      seed_bundles: { "a.rb" => { digest: "sha-a", code_fingerprint: "cf",
+                                  def_nodes: { "Foo" => { bar: def_row } } } },
+      plugin_fact_digest: "d", return_summaries: {}, param_table: {}, effect_collections: {},
+      effects_identity: nil
+    )
+  end
+
+  def write_blob(snapshot, raw)
+    FileUtils.mkdir_p(File.dirname(snapshot.path))
+    File.binwrite(snapshot.path, Zlib::Deflate.deflate(raw))
+  end
+
+  it "ignores a schema-13 snapshot (pre-#707: def rows carry no nesting), loading nil for a cold rebuild" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      write_blob(snapshot, legacy_bundle_payload(13, [1, "bar", "fp-bar"]))
+
+      expect(snapshot.load(fingerprint: "fp1")).to be_nil
+    end
+  end
+
+  it "loads the same bundle written under the CURRENT schema, with the nesting the row now carries" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      write_blob(snapshot, legacy_bundle_payload(described_class::SCHEMA, [1, "bar", "fp-bar", ["Foo"]]))
+
+      loaded = snapshot.load(fingerprint: "fp1")
+      expect(loaded).not_to be_nil
+      expect(loaded.seed_bundles.dig("a.rb", :def_nodes, "Foo", :bar)).to eq([1, "bar", "fp-bar", ["Foo"]])
+    end
+  end
+
   it "returns nil when the fingerprint does not match (config / gem / version drift)" do
     Dir.mktmpdir do |dir|
       snapshot = described_class.new(root: dir)

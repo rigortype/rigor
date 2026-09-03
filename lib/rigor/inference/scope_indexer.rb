@@ -1480,34 +1480,38 @@ module Rigor
       #   reads resolve); `:cvars` — `{class_name => Set[Symbol]}`.
       def collect_literal_receiver_mutations(root)
         census = { constants: Set.new, cvars: Hash.new { |h, k| h[k] = Set.new } }
-        walk_literal_receiver_mutations(root, [], census)
+        walk_literal_receiver_mutations(root, [], census, EMPTY_NESTING)
         census
       end
 
-      def walk_literal_receiver_mutations(node, qualified_prefix, census)
+      def walk_literal_receiver_mutations(node, qualified_prefix, census, nesting = EMPTY_NESTING)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
-            walk_literal_receiver_mutations(node.body, child_prefix, census) if node.body
+            if node.body
+              walk_literal_receiver_mutations(node.body, child_prefix, census,
+                                              Source::ConstantPath.pushed_nesting(nesting,
+                                                                                  node.constant_path) || nesting)
+            end
             return
           end
         else
-          record_literal_receiver_mutation(node, qualified_prefix, census)
+          record_literal_receiver_mutation(node, nesting, census)
         end
 
-        node.rigor_each_child { |child| walk_literal_receiver_mutations(child, qualified_prefix, census) }
+        node.rigor_each_child { |child| walk_literal_receiver_mutations(child, qualified_prefix, census, nesting) }
       end
 
-      def record_literal_receiver_mutation(node, qualified_prefix, census)
+      def record_literal_receiver_mutation(node, nesting, census)
         receiver = mutating_receiver_of(node)
         return if receiver.nil?
 
         case receiver
         when Prism::ConstantReadNode
-          constant_mutation_candidates(receiver.name.to_s, qualified_prefix, census[:constants])
+          constant_mutation_candidates(receiver.name.to_s, nesting, census[:constants])
         when Prism::ConstantPathNode
           # The lexical candidates a PATH spelling reaches, for the same reason the bare arm above takes
           # them: `Holder::TABLE[:k] = 1` inside `module Admin` mutates whatever `Holder::TABLE` resolves
@@ -1516,7 +1520,7 @@ module Rigor
           # constant matched by nothing and its closed empty shape intact — the very fold #540 exists to
           # retract. Over-recording only widens, which is the direction this census is allowed to err in.
           full = Source::ConstantPath.qualified_name_or_nil(receiver)
-          constant_mutation_candidates(full, qualified_prefix, census[:constants]) if full
+          constant_mutation_candidates(full, nesting, census[:constants]) if full
         when Prism::ClassVariableReadNode
           census[:cvars][qualified_prefix.join("::")] << receiver.name unless qualified_prefix.empty?
         end
@@ -1537,14 +1541,18 @@ module Rigor
         end
       end
 
-      # Every lexical-resolution candidate for a bare constant name under `qualified_prefix`, outermost
-      # last — `[A, B]` + `C` yields `A::B::C`, `A::C`, `C` — so the widener matches whichever form the
+      # Every lexical-resolution candidate for a bare constant name written at `nesting`, innermost first
+      # — `["A::B", "A"]` + `C` yields `A::B::C`, `A::C`, `C` — so the widener matches whichever form the
       # write accumulator recorded.
-      def constant_mutation_candidates(base_name, qualified_prefix, into)
-        (0..qualified_prefix.size).each do |keep|
-          prefix = qualified_prefix.first(qualified_prefix.size - keep)
-          into << (prefix.empty? ? base_name : "#{prefix.join('::')}::#{base_name}")
-        end
+      #
+      # Issue #708 — this reads Ruby's `Module.nesting`, which the enclosing qualified prefix used to be a
+      # faithful stand-in for. It stopped being one when a rooted header gained the power to RESET that
+      # prefix: a bare `TABLE[:k] = 1` inside `class ::Rooted` in `module Outer` mutates `Outer::TABLE`, and
+      # candidates built from the reset prefix never name it, so the closed shape was never widened and
+      # `Outer::TABLE.empty?` folded to `true` on a table the program fills.
+      def constant_mutation_candidates(base_name, nesting, into)
+        nesting.each { |entry| into << "#{entry}::#{base_name}" }
+        into << base_name
       end
 
       def widen_mutated_constants(accumulator, mutated_names)
@@ -2483,10 +2491,16 @@ module Rigor
       # Two sites that BOTH write ancestor names still union, which is the conservative reading of an
       # ambiguity one table cannot represent.
       #
-      # The mixin scan stops at a nested declaration (that body's calls belong to the nested class) and is
-      # deliberately structural rather than exhaustive: a site whose only `include` hides inside a
-      # conditional records nothing and falls back to the peel, which is this walk's pre-#682 answer and
-      # never a new firing.
+      # The mixin scan counts only a call whose `self` is the declaration itself, so it stops at every
+      # construct that rebinds `self`: a nested `class` / `module` (that body's calls belong to the nested
+      # class), a `class << self` body, and a block `#rebound_block_self` classifies as rebinding — the
+      # `Class.new` / `Module.new` / `Struct.new` / `Data.define` and `class_eval` family. An `include`
+      # written in any of those attaches to something other than this class, so treating it as this site's
+      # ancestor name reinstates exactly the defect above with a different spelling.
+      #
+      # It stays structural rather than exhaustive: `self.include M` and `send(:include, M)` record nothing
+      # and fall back to the peel, which is this walk's pre-#682 answer and never a new firing. (The includes
+      # walk misses those two as well, so the fallback is consistent with what the class's ancestry says.)
       def declares_ancestor_name?(node)
         return true if node.is_a?(Prism::ClassNode) && node.superclass
 
@@ -2496,10 +2510,16 @@ module Rigor
 
       def mixin_call_in_body?(node)
         return false unless node.is_a?(Prism::Node)
-        return false if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+        return false if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) ||
+                        node.is_a?(Prism::SingletonClassNode)
         return true if node.is_a?(Prism::CallNode) && node.receiver.nil? && MIXIN_CALL_NAMES.include?(node.name)
 
-        node.rigor_each_child { |child| return true if mixin_call_in_body?(child) }
+        rebinds = rebound_block_self(node, EMPTY_NESTING)
+        node.rigor_each_child do |child|
+          next if rebinds && child.is_a?(Prism::BlockNode)
+
+          return true if mixin_call_in_body?(child)
+        end
         false
       end
 

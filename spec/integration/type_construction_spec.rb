@@ -562,7 +562,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # both satisfies every `by_own_*` arm and fails `by_enclosing_constant`, and
     # one that reset neither is master.
     it "still asserts every rooted and non-rooted spelling" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(6)
+      expect(marked_lines(harness, "assert_type(").size).to eq(17)
     end
 
     # The must-FIRE half, and the symptom the issue actually reports: an
@@ -572,7 +572,8 @@ RSpec.describe "Rigor type construction (integration)" do
     # `call.undefined-method`; master reported only the second.
     it "reports the undefined call on both the rooted and the non-rooted receiver" do
       expect(harness.errors.map { |d| [d.line, d.rule] })
-        .to eq([[100, "call.undefined-method"], [101, "call.undefined-method"]])
+        .to eq([[100, "call.undefined-method"], [101, "call.undefined-method"],
+                [181, "call.undefined-method"], [182, "call.undefined-method"]])
     end
   end
 
@@ -596,7 +597,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # order the superclass arms exercise, and `ReopenReader`, whose class is
     # declared under BOTH spellings and so must keep the union of their chains.
     it "still asserts both spellings of every ancestor shape" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(13)
+      expect(marked_lines(harness, "assert_type(").size).to eq(16)
     end
 
     # The must-FIRE half. The compact receiver resolved to nothing on master and
@@ -604,7 +605,8 @@ RSpec.describe "Rigor type construction (integration)" do
     # keep firing, so neither half of the pair can go quiet unnoticed.
     it "reports the undefined call on both the compact and the nested receiver" do
       expect(harness.errors.map { |d| [d.line, d.rule] })
-        .to eq([[164, "call.undefined-method"], [165, "call.undefined-method"]])
+        .to eq([[164, "call.undefined-method"], [165, "call.undefined-method"],
+                [213, "call.undefined-method"]])
     end
   end
 

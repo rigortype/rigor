@@ -132,13 +132,13 @@ class Reader
 end
 
 # A class REOPENED under both spellings has two header nestings while the
-# ancestor names its sites write collapse into one per-class table, so taking
-# either site's chain alone drops a candidate the other one had. Rails is the
+# ancestor names its sites write collapse into one per-class table. Rails is the
 # corpus case — `activerecord` declares `ActiveRecord::Relation` inside
 # `module ActiveRecord` and one test file reopens it compactly — and taking the
-# compact site's empty chain cost that class nine included modules. The two are
-# unioned instead, which degrades such a class to the pre-fix candidate list
-# rather than to a shorter one.
+# compact site's empty chain cost that class nine included modules. Only a site
+# that NAMES an ancestor records a chain, so a bare reopen contributes nothing
+# and cannot displace the declaration; two sites that both name ancestors are
+# unioned.
 module Reopened
   module FinderMethods
     def find_one = :found
@@ -163,3 +163,51 @@ end
 # nested half fired there and must keep firing.
 Admin::Widget.new.top_val.nope
 Admin::Nested.new.admin_val.nope
+
+# #708 review — a reopening site that names NO ancestor must contribute no
+# header nesting. `class ::Shadowed` written in `Wrapper` named no ancestor of
+# `Shadowed` at all, yet its `["Wrapper"]` chain unioned in and resolved
+# `Shadowed`'s superclass `Peer` as `Wrapper::Peer` — a class Ruby never looks
+# at, ahead of the right one.
+class Peer
+  def peer_val = :top_peer
+end
+
+class Shadowed < Peer
+end
+
+module Wrapper
+  class Peer
+    def peer_val = :wrapper_peer
+  end
+
+  class ::Shadowed
+    def extra = 1
+  end
+
+  # `self` is rebound inside each of these, so an `include` written in them
+  # attaches to something other than `Shadowed` and must not count as this
+  # site's ancestor name either.
+  class ::AlsoShadowed
+    class << self
+      include Comparable
+    end
+  end
+
+  class ::ThirdShadowed
+    Anon = Class.new do
+      include Comparable
+    end
+  end
+end
+
+class AlsoShadowed < Peer
+end
+
+class ThirdShadowed < Peer
+end
+
+assert_type(':top_peer', Shadowed.new.peer_val)
+assert_type(':top_peer', AlsoShadowed.new.peer_val)
+assert_type(':top_peer', ThirdShadowed.new.peer_val)
+Shadowed.new.peer_val.nope

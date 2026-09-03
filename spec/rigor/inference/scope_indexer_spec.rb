@@ -2193,7 +2193,8 @@ end
     # Rails' own `ActiveRecord::Relation` is the corpus case: the library declares it inside
     # `module ActiveRecord` and a test file reopens it as the compact `class ActiveRecord::Relation`.
     # Last-writer-wins hands the library site the test file's EMPTY chain and its nine `include`s stop
-    # resolving — the false-positive direction — so the two sites' chains are unioned instead.
+    # resolving — the false-positive direction. The reopen names no ancestor, so it now records no chain
+    # at all and the declaring site's survives by construction rather than by a merge rule.
     it "keeps the declaring site's chain when a later site reopens the class and names no ancestor" do
       table = header_nestings(
         "module Admin\n  class Widget\n    include Trackable\n  end\nend\nclass Admin::Widget; end\n"

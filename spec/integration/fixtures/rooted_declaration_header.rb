@@ -99,3 +99,84 @@ assert_type(':plain_ok', MyApp::Plain.new.plain_mark)
 # this line reported nothing at all.
 Foo.new.foo_mark.nope
 MyApp::Plain.new.plain_mark.nope
+
+# #708 review — the CENSUS walks under a rooted header. Everything above reaches
+# the declaration walk only; these shapes reach the walks that used to derive
+# `Module.nesting` by truncating the qualified prefix, which a rooted header
+# resets. `Outer2` is absent from that prefix entirely, so each of these reached
+# the TOP-LEVEL `Sentinel2` and drew a false `undefined-method` on correct Ruby,
+# where master reports none.
+#
+# The discriminating value is a CLASS rather than a namespace-level value
+# constant: this harness runs the fixture under `Scope.empty`, which seeds no
+# cross-file constant publication, so a value constant reads `Dynamic[top]` here
+# for the rooted and non-rooted spellings alike and could not tell them apart.
+class Sentinel2
+  def tag = :top_sentinel
+end
+
+class Base2
+  def who = :top_base2
+end
+
+module Outer2
+  TABLE = {}
+  TWIN = {}
+
+  class Sentinel2
+    def tag = :outer_sentinel
+  end
+
+  class Base2
+    def who = :outer2_base
+  end
+
+  class ::Rooted2
+    DEFAULT = Sentinel2 # constant-write census
+
+    class Inner < Base2
+      def by_inherited = assert_type(':outer2_base', who)
+    end
+
+    def initialize
+      @v = Sentinel2.new # instance-variable census
+    end
+
+    def by_default = assert_type(':outer_sentinel', DEFAULT.new.tag)
+    def by_ivar = assert_type(':outer_sentinel', @v.tag)
+    def by_def_body = assert_type(':outer_sentinel', Sentinel2.new.tag)
+
+    # Mutation census: the bare mutated constant names `Outer2::TABLE`, so the
+    # closed empty shape must widen and `.empty?` must not fold to `true`.
+    def self.fill = TABLE[:k] = 1
+  end
+
+  # The must-still-succeed twin: the same shapes under a NON-rooted header.
+  class Plain2
+    DEFAULT = Sentinel2
+
+    class Inner < Base2
+      def by_inherited = assert_type(':outer2_base', who)
+    end
+
+    def initialize
+      @v = Sentinel2.new
+    end
+
+    def by_default = assert_type(':outer_sentinel', DEFAULT.new.tag)
+    def by_ivar = assert_type(':outer_sentinel', @v.tag)
+    def self.fill = TWIN[:k] = 1
+  end
+end
+
+Rooted2.fill
+Outer2::Plain2.fill
+assert_type('bool', Outer2::TABLE.empty?)
+assert_type('bool', Outer2::TWIN.empty?)
+assert_type(':outer2_base', Rooted2::Inner.new.who)
+assert_type(':outer2_base', Outer2::Plain2::Inner.new.who)
+
+# The must-fire pair for the rooted body: master reported nothing on the first,
+# because the receiver never resolved under the name written here.
+Rooted2::Inner.new.who.nope
+Outer2::Plain2::Inner.new.who.nope

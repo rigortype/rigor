@@ -562,7 +562,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # both satisfies every `by_own_*` arm and fails `by_enclosing_constant`, and
     # one that reset neither is master.
     it "still asserts every rooted and non-rooted spelling" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(17)
+      expect(marked_lines(harness, "assert_type(").size).to eq(19)
     end
 
     # The must-FIRE half, and the symptom the issue actually reports: an
@@ -573,7 +573,7 @@ RSpec.describe "Rigor type construction (integration)" do
     it "reports the undefined call on both the rooted and the non-rooted receiver" do
       expect(harness.errors.map { |d| [d.line, d.rule] })
         .to eq([[100, "call.undefined-method"], [101, "call.undefined-method"],
-                [181, "call.undefined-method"], [182, "call.undefined-method"]])
+                [192, "call.undefined-method"], [193, "call.undefined-method"]])
     end
   end
 

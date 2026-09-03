@@ -1499,13 +1499,17 @@ module Rigor
             return
           end
         else
-          record_literal_receiver_mutation(node, nesting, census)
+          record_literal_receiver_mutation(node, qualified_prefix, nesting, census)
         end
 
         node.rigor_each_child { |child| walk_literal_receiver_mutations(child, qualified_prefix, census, nesting) }
       end
 
-      def record_literal_receiver_mutation(node, nesting, census)
+      # `qualified_prefix` keys a class variable — a `@@x` belongs to the class whose body writes it, which
+      # a rooted header RESETS along with the class's name — while `nesting` resolves a constant name, which
+      # the same header does NOT reset. The two diverge exactly at a rooted header, which is why they are
+      # separate parameters rather than one ([#708](https://github.com/rigortype/rigor/issues/708)).
+      def record_literal_receiver_mutation(node, qualified_prefix, nesting, census)
         receiver = mutating_receiver_of(node)
         return if receiver.nil?
 
@@ -2499,8 +2503,11 @@ module Rigor
       # ancestor name reinstates exactly the defect above with a different spelling.
       #
       # It stays structural rather than exhaustive: `self.include M` and `send(:include, M)` record nothing
-      # and fall back to the peel, which is this walk's pre-#682 answer and never a new firing. (The includes
-      # walk misses those two as well, so the fallback is consistent with what the class's ancestry says.)
+      # and fall back to the peel, which is this walk's pre-#682 answer and never a new firing — and the
+      # includes walk misses those two as well, so the class's ancestry agrees. For the REBINDING shapes it
+      # does not: `walk_class_includes` still charges an `include` written in a `class << self` body or a
+      # `Class.new` block to the enclosing class, where Ruby attaches it elsewhere. This scan is right and
+      # that one is wrong; the divergence is [#728](https://github.com/rigortype/rigor/issues/728).
       def declares_ancestor_name?(node)
         return true if node.is_a?(Prism::ClassNode) && node.superclass
 

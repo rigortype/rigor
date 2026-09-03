@@ -15,16 +15,22 @@ require "rbs"
 #   names the conflicting signature files, and dropping the name made a warm run omit that clause while a
 #   cold run printed it, so the same project said different things by cache state (issue #696 review,
 #   second pass). It costs cache SIZE: a `_dump` payload is raw bytes, not a linkable object graph, so the
-#   path is written once per Location rather than once per buffer — measured at +12% on the env blob of a
-#   one-file project (1,672K to 1,876K, stable across reps). Memoising the coerced name per buffer was tried and changes
-#   nothing for exactly that reason. The size is the price of a diagnostic that reads the same warm and
-#   cold; positions, which are far more numerous and which nothing reads, stay dropped.
+#   path is written once per Location rather than once per buffer. Memoising the coerced name per buffer was
+#   tried and changes nothing for exactly that reason. Measured +6.6% on a realistic project (Rigor's own
+#   349-file `lib`: 4,332K to 4,616K) and +12.3% on a one-file project (1,672K to 1,876K), both stable
+#   across reps — the env blob is fixed overhead, so the ratio falls as a project's own cached data grows
+#   and the realistic figure is the lower one. That is the price of a diagnostic that reads the same warm
+#   and cold; positions, which are far more numerous and which nothing reads, stay dropped.
 # - `_load` reconstructs a zero-range Location over that name, falling back to a `<cached>` sentinel when
 #   the dump carried none. Code paths that DID consult Location after a cache hit see a benign value rather
 #   than crashing, and one that reads `buffer.name` now sees the real path.
-# - The format change needs no cache-schema bump and is compatible both ways: an OLD blob (empty string)
-#   read by this `_load` falls through to the sentinel, and a NEW blob read by an older `_load` — which
-#   ignored its argument — is unchanged.
+# - Both directions were exercised rather than assumed. A NEW blob read by an OLDER `_load` — which ignored
+#   its argument — loads and behaves exactly as before; that direction is clean. An OLD blob read by THIS
+#   `_load` also loads without raising, and the sentinel fallback keeps it from ever naming `<cached>` as a
+#   path — but the conflicting-files clause then goes missing, so a warm run off a pre-change blob says less
+#   than a cold run does. ADR-6's store never evicts, so that would persist. `Cache::Store::FORMAT_VERSION`
+#   is therefore bumped to 3: `PAYLOAD_ABI_VERSION` already rebuilds across a release, and the bump closes
+#   the same-version window too.
 #
 # Idempotent: the guard checks `method_defined?(:_dump)` so requiring this file twice (or against an upstream
 # rbs that adds Marshal hooks itself) is a no-op.

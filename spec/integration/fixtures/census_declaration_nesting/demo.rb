@@ -44,33 +44,36 @@ class Admin::CompactCensus
   def initialize
     @post = Post.new
     @own = Own.new
-    # Must-still-succeed: nothing named `Loner` sits under `Admin::CompactCensus`,
-    # so the single entry must miss and the top level must answer.
+    # Must-still-succeed, and only that: nothing named `Loner` sits under
+    # `Admin::CompactCensus`, so the ladder falls through to the top level. It
+    # does that under the peel and under an empty chain too, so this arm
+    # discriminates neither — it pins the fall-through against a future change,
+    # and the two arms above are what separate the three answers.
     @lone = Loner.new
   end
 
   def read_ivar
-    assert_type('Post', @post)
+    assert_type("Post", @post)
     @post.top_post
   end
 
   def read_owned_ivar
-    assert_type('Admin::CompactCensus::Own', @own)
+    assert_type("Admin::CompactCensus::Own", @own)
     @own.own_marker
   end
 
   def read_fallthrough_ivar
-    assert_type('Loner', @lone)
+    assert_type("Loner", @lone)
     @lone.loner
   end
 
   def read_constant
-    assert_type('singleton(Post)', DEFAULT)
+    assert_type("singleton(Post)", DEFAULT)
     DEFAULT.new.top_post
   end
 
   def read_owned_constant
-    assert_type('singleton(Admin::CompactCensus::Own)', OWNED)
+    assert_type("singleton(Admin::CompactCensus::Own)", OWNED)
     OWNED.new.own_marker
   end
 
@@ -79,7 +82,7 @@ class Admin::CompactCensus
   end
 
   def read_cvar
-    assert_type('singleton(Post)', @@klass)
+    assert_type("singleton(Post)", @@klass)
     @@klass.new.top_post
   end
 end
@@ -101,22 +104,22 @@ module Admin
     end
 
     def read_ivar
-      assert_type('Admin::Post', @post)
+      assert_type("Admin::Post", @post)
       @post.admin_post
     end
 
     def read_owned_ivar
-      assert_type('Admin::NestedCensus::Own', @own)
+      assert_type("Admin::NestedCensus::Own", @own)
       @own.own_marker
     end
 
     def read_constant
-      assert_type('singleton(Admin::Post)', DEFAULT)
+      assert_type("singleton(Admin::Post)", DEFAULT)
       DEFAULT.new.admin_post
     end
 
     def read_owned_constant
-      assert_type('singleton(Admin::NestedCensus::Own)', OWNED)
+      assert_type("singleton(Admin::NestedCensus::Own)", OWNED)
       OWNED.new.own_marker
     end
 
@@ -125,7 +128,7 @@ module Admin
     end
 
     def read_cvar
-      assert_type('singleton(Admin::Post)', @@klass)
+      assert_type("singleton(Admin::Post)", @@klass)
       @@klass.new.admin_post
     end
   end

@@ -109,6 +109,29 @@ module Admin
   end
 end
 
+# The mutation census (#540) rides on the same key. `Table::ROWS[key] = 1` mutates
+# whatever `Table::ROWS` names HERE, so the census has to reach the entry the write
+# accumulator is now keyed under; left unmatched, the closed empty shape survives and
+# `empty?` folds to `true` on a table the module fills, licensing the negative rules.
+module Admin
+  class Table
+  end
+
+  Table::ROWS = {}
+  Table::FROZEN = {}
+
+  def self.fill(key)
+    Table::ROWS[key] = 1
+  end
+
+  def self.shapes
+    assert_type("bool", Table::ROWS.empty?)
+    # Must-still-succeed: an unmutated sibling keeps its empty-shape fold, so the arm
+    # above cannot pass by the widener having gone blanket.
+    assert_type("true", Table::FROZEN.empty?)
+  end
+end
+
 class TopReader
   def read_plain
     assert_type("singleton(Post)", Registry::PLAIN)

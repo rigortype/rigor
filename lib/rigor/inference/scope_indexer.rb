@@ -1447,8 +1447,14 @@ module Rigor
         when Prism::ConstantReadNode
           constant_mutation_candidates(receiver.name.to_s, qualified_prefix, census[:constants])
         when Prism::ConstantPathNode
+          # The lexical candidates a PATH spelling reaches, for the same reason the bare arm above takes
+          # them: `Holder::TABLE[:k] = 1` inside `module Admin` mutates whatever `Holder::TABLE` resolves
+          # to there, and since [#690](https://github.com/rigortype/rigor/issues/690) the write accumulator
+          # keys that entry `Admin::Holder::TABLE`. Recording only the as-written name left the mutated
+          # constant matched by nothing and its closed empty shape intact — the very fold #540 exists to
+          # retract. Over-recording only widens, which is the direction this census is allowed to err in.
           full = Source::ConstantPath.qualified_name_or_nil(receiver)
-          census[:constants] << full if full
+          constant_mutation_candidates(full, qualified_prefix, census[:constants]) if full
         when Prism::ClassVariableReadNode
           census[:cvars][qualified_prefix.join("::")] << receiver.name unless qualified_prefix.empty?
         end

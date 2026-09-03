@@ -334,6 +334,7 @@ module RigorMutation
   # ADR-45/54). A clean run finds nothing; a finding is a bug.
   class Fuzz
     CRASH_PREFIX = "internal analyzer error:"
+    DEFAULT_PATHS = %w[lib/rigor plugins/*/lib examples/*/lib].freeze
 
     def initialize(paths:, config_path:, per_file:, seed:, timeout:, repeat:)
       @paths = paths
@@ -458,9 +459,10 @@ module RigorMutation
       OptionParser.new do |o|
         o.banner = case mode
                    when "sweep" then "usage: bundle exec ruby tool/mutation/mutate.rb sweep <paths...> [options]"
-                   when "fuzz" then "usage: bundle exec ruby tool/mutation/mutate.rb fuzz <paths...> [options]"
+                   when "fuzz" then "usage: bundle exec ruby tool/mutation/mutate.rb fuzz [<paths...>] [options]"
                    else "usage: bundle exec ruby tool/mutation/mutate.rb <target.rb> [options]"
                    end
+        o.on("--all", "fuzz/sweep mode: target default broad scope (#{Fuzz::DEFAULT_PATHS.join(" ")})") { options[:all] = true }
         o.on("--config PATH", "Rigor config file (default: auto-discover)") { |v| options[:config] = v }
         o.on("--limit N", Integer, "single mode: sample at most N mutants") { |v| options[:limit] = v }
         o.on("--per-file N", Integer, "sweep mode: sample at most N mutants/file (default 40)") do |v|
@@ -474,7 +476,7 @@ module RigorMutation
           options[:repeat] = true
         end
         o.on("--seed N", Integer, "RNG seed for sampling (default 1)") { |v| options[:seed] = v }
-        o.on("--operators LIST", "comma list (default #{Mutator::OPERATORS.join(',')}; +arity_extra available)") do |v|
+        o.on("--operators LIST", "comma list (default #{Mutator::OPERATORS.join(',')})") do |v|
           options[:operators] = v.split(",").map(&:strip).map(&:to_sym)
         end
         o.on("--no-type-filter", "keep every mutation, even on Dynamic sites") { options[:type_filter] = false }
@@ -503,20 +505,21 @@ module RigorMutation
     end
 
     def self.run_sweep(argv, options)
-      abort("sweep needs at least one path/dir/glob") if argv.empty?
+      paths = options[:all] ? Fuzz::DEFAULT_PATHS : argv
+      abort("sweep needs at least one path/dir/glob (or --all)") if paths.empty?
 
       Sweep.new(
-        paths: argv, config_path: options[:config], per_file: options[:per_file],
+        paths: paths, config_path: options[:config], per_file: options[:per_file],
         seed: options[:seed], operators: options[:operators], type_filter: options[:type_filter],
         json: options[:json], top: options[:top]
       ).run
     end
 
     def self.run_fuzz(argv, options)
-      abort("fuzz needs at least one path/dir/glob") if argv.empty?
+      paths = options[:all] || argv.empty? ? Fuzz::DEFAULT_PATHS : argv
 
       Fuzz.new(
-        paths: argv, config_path: options[:config], per_file: options[:per_file],
+        paths: paths, config_path: options[:config], per_file: options[:per_file],
         seed: options[:seed], timeout: options[:timeout], repeat: options[:repeat]
       ).run
     end

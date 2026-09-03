@@ -18,7 +18,7 @@ module Rigor
     # rendered receiver type) and `method_name` are filled in for reporting a surviving site; both may stay nil.
     Mutation = Struct.new(
       :operator, :expected_rule, :start, :stop, :replacement, :line, :label, :anchor,
-      :anchor_type, :method_name,
+      :anchor_type, :method_name, :call_node,
       keyword_init: true
     ) do
       def apply(source)
@@ -35,6 +35,100 @@ module Rigor
     # call-argument literal dropped to `nil` or type-swapped (→ `call.argument-type-mismatch`), or a call site
     # renamed to a missing method (→ `call.undefined-method`). Only call sites and bodies are mutated, never
     # `def` signatures, so a reused project scan stays valid.
+
+    # Signature-arity guard for `arity_extra` (ADR-62): verifies through `ScopeIndexer` and
+    # `Reflection` that a call site targets a known, fixed/bounded positional signature and that
+    # adding 1 argument exceeds `max_arity`. Drops variadic or untyped calls to eliminate noise.
+    module ArityGuard
+      CONSTANT_CLASSES = {
+        Integer => "Integer", Float => "Float", String => "String",
+        Symbol => "Symbol", Range => "Range",
+        TrueClass => "TrueClass", FalseClass => "FalseClass",
+        NilClass => "NilClass"
+      }.freeze
+
+      module_function
+
+      def fixed_arity_call?(mut, index)
+        scope = call_scope(mut, index)
+        return false if scope.nil? || !plain_positional_call?(mut.call_node)
+
+        receiver_type = scope.type_of(mut.call_node.receiver)
+        class_name = concrete_class_name(receiver_type)
+        return false if class_name.nil? || !Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+
+        max_arity = method_max_arity(receiver_type, class_name, mut.call_node.name, scope)
+        return false if max_arity.nil? || max_arity == Float::INFINITY
+
+        actual_args_count(mut.call_node) + 1 > max_arity
+      rescue StandardError
+        false
+      end
+
+      def call_scope(mut, index)
+        call_node = mut.call_node
+        return nil if call_node.nil? || call_node.receiver.nil?
+
+        index[call_node] || index[mut.anchor]
+      end
+
+      def actual_args_count(call_node)
+        (call_node.arguments&.arguments || []).size
+      end
+
+      def method_max_arity(receiver_type, class_name, method_name, scope)
+        method_def =
+          if receiver_type.is_a?(Type::Singleton)
+            Rigor::Reflection.singleton_method_definition(class_name, method_name, scope: scope)
+          else
+            Rigor::Reflection.instance_method_definition(class_name, method_name, scope: scope)
+          end
+        return nil if method_def.nil? || method_def == true
+
+        max_positional_arity(method_def)
+      end
+
+      def plain_positional_call?(call_node)
+        arguments = call_node.arguments
+        return true if arguments.nil?
+
+        arguments.arguments.none? do |arg|
+          arg.is_a?(Prism::SplatNode) ||
+            arg.is_a?(Prism::KeywordHashNode) ||
+            arg.is_a?(Prism::BlockArgumentNode) ||
+            arg.is_a?(Prism::ForwardingArgumentsNode)
+        end
+      end
+
+      def max_positional_arity(method_def)
+        maxes = []
+        method_def.method_types.each do |mt|
+          function = mt.type
+          return nil unless function.respond_to?(:required_keywords)
+          return nil unless function.required_keywords.empty? && function.trailing_positionals.empty?
+
+          return Float::INFINITY if function.rest_positionals
+
+          min_arity = function.required_positionals.size
+          maxes << (min_arity + function.optional_positionals.size)
+        end
+        return nil if maxes.empty?
+
+        maxes.max
+      end
+
+      def concrete_class_name(type)
+        case type
+        when Type::Nominal, Type::Singleton then type.class_name
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
+        when Type::Constant then CONSTANT_CLASSES[type.value.class] || type.value.class.name
+        when Type::Refined, Type::Difference then concrete_class_name(type.base)
+        when Type::IntegerRange then "Integer"
+        end
+      end
+    end
+
     class Mutator
       IDENT = /\A[a-z_][A-Za-z0-9_]*\z/
       QUOTES = ['"', "'"].freeze
@@ -47,11 +141,9 @@ module Rigor
       # the mutated value/call sits in a context where Rigor has type knowledge.
       ALL_OPERATORS = %i[nil_inject type_swap undefined_method arity_extra].freeze
 
-      # The default set. `arity_extra` is excluded: most Ruby methods accept an extra argument (splat / optional),
-      # so appending one is usually an equivalent mutant — it contributes almost only noise. Re-enable it
-      # explicitly via `operators:` to measure arity teeth. (A signature-arity guard would make it
-      # default-worthy — a follow-up.)
-      OPERATORS = %i[nil_inject type_swap undefined_method].freeze
+      # The default set. With the signature-arity guard in place (`filter_by_type`), `arity_extra` is
+      # default-worthy: it only mutates call sites whose callee has a known, fixed/bounded positional arity.
+      OPERATORS = ALL_OPERATORS
 
       def initialize(source, operators: OPERATORS)
         @source = source
@@ -85,7 +177,9 @@ module Rigor
         kept = mutations.select do |mut|
           keep, type = anchor_decision(mut.anchor, index, cache)
           mut.anchor_type = type if keep
-          keep
+          next false unless keep
+
+          mut.operator == :arity_extra ? ArityGuard.fixed_arity_call?(mut, index) : true
         end
         [kept, mutations.size - kept.size]
       end
@@ -105,7 +199,7 @@ module Rigor
 
           _keep, type = anchor_decision(mut.anchor, index, cache)
           mut.anchor_type = type
-          true
+          mut.operator == :arity_extra ? ArityGuard.fixed_arity_call?(mut, index) : true
         end
       end
 
@@ -250,15 +344,16 @@ module Rigor
         args = node.arguments&.arguments
         insertion = args && !args.empty? ? ", nil" : "nil"
         add(out, :arity_extra, "call.wrong-arity", close.start_offset, close.start_offset,
-            insertion, node.location.start_line, "call ##{node.name} +1 arg", node.receiver, node.name.to_s)
+            insertion, node.location.start_line, "call ##{node.name} +1 arg", node.receiver,
+            node.name.to_s, call_node: node)
       end
 
-      def add(out, operator, rule, start, stop, replacement, line, label, anchor, method_name) # rubocop:disable Metrics/ParameterLists
+      def add(out, operator, rule, start, stop, replacement, line, label, anchor, method_name, call_node: nil) # rubocop:disable Metrics/ParameterLists
         return unless @operators.include?(operator)
 
         out << Mutation.new(operator: operator, expected_rule: rule, start: start, stop: stop,
                             replacement: replacement, line: line, label: label, anchor: anchor,
-                            method_name: method_name)
+                            method_name: method_name, call_node: call_node)
       end
 
       def snippet(loc)

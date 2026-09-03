@@ -1,6 +1,6 @@
 module Rigor
   module Type
-    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Refined | Intersection | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance | BoundMethod | Result | Maybe
+    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Refined | Intersection | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance | BoundMethod | Result | Maybe | App
 
     type accepts_mode = :strict | :gradual | :loose
 
@@ -36,6 +36,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> "#<Rigor::Type::Top>"
     end
@@ -49,6 +50,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> "#<Rigor::Type::Bot>"
     end
@@ -63,12 +65,16 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
 
     class Constant
+      SCALAR_CLASSES: Array[Class]
+      RBS_LITERAL_CLASSES: Hash[Class, String]
       attr_reader value: untyped
+      def freezable_carrier?: (untyped value) -> bool
       def initialize: (untyped value) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
@@ -77,6 +83,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -84,6 +91,8 @@ module Rigor
     class IntegerRange
       NEG_INFINITY: Symbol
       POS_INFINITY: Symbol
+      INFINITIES: Array[Symbol]
+      ALIAS_NAMES: Hash[[Integer | Symbol, Integer | Symbol], String]
       attr_reader min: (Integer | Symbol)
       attr_reader max: (Integer | Symbol)
       def initialize: ((Integer | Symbol) min, (Integer | Symbol) max) -> void
@@ -101,6 +110,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -116,6 +126,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -130,6 +141,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -144,6 +156,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -159,6 +172,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -175,6 +189,7 @@ module Rigor
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def matches?: (untyped value) -> bool?
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -190,6 +205,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -204,6 +220,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -218,6 +235,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -241,6 +259,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -256,6 +275,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -273,6 +293,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -289,6 +310,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -306,6 +328,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -323,6 +346,7 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
     end
@@ -337,8 +361,45 @@ module Rigor
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
+    end
+
+    class App
+      URI_SEPARATOR: String
+      attr_reader uri: Symbol
+      attr_reader args: Array[Type::t]
+      attr_reader bound: Type::t
+      def initialize: (Symbol uri, Array[Type::t] args, bound: Type::t) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+      def reduce: (untyped registry, ?fuel: Integer?) -> Type::t
+    end
+
+    module PlainLattice
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+    end
+
+    module AcceptanceRouter
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+    end
+
+    module AnonymousClassName
+      PREFIX: String
+      def self?.build: (String | Symbol label, String key) -> String
+      def self?.match?: (untyped class_name) -> bool
+      def self?.display: (String class_name) -> String
     end
 
     class AcceptsResult

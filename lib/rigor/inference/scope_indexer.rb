@@ -1505,10 +1505,14 @@ module Rigor
         node.rigor_each_child { |child| walk_literal_receiver_mutations(child, qualified_prefix, census, nesting) }
       end
 
-      # `qualified_prefix` keys a class variable — a `@@x` belongs to the class whose body writes it, which
-      # a rooted header RESETS along with the class's name — while `nesting` resolves a constant name, which
-      # the same header does NOT reset. The two diverge exactly at a rooted header, which is why they are
-      # separate parameters rather than one ([#708](https://github.com/rigortype/rigor/issues/708)).
+      # Two parameters because the two arms key on two DIFFERENT TABLES, not because the values differ:
+      # `nesting.first` and `qualified_prefix.join("::")` are in fact always equal, since
+      # `.declaration_prefix` and `.pushed_nesting` branch on the same `rooted?` and qualify against the same
+      # parent. `qualified_prefix` is what a class variable must key on because it is the join key with
+      # `build_class_cvar_index`, which derives its own key from the same `declaration_prefix` — so the two
+      # tables agree by construction. `nesting` is what a constant name must resolve through because the
+      # ladder walks every rung, not just the innermost, and a rooted header drops the outer rungs from the
+      # prefix while Ruby keeps them ([#708](https://github.com/rigortype/rigor/issues/708)).
       def record_literal_receiver_mutation(node, qualified_prefix, nesting, census)
         receiver = mutating_receiver_of(node)
         return if receiver.nil?
@@ -2294,6 +2298,10 @@ module Rigor
       end
 
       EMPTY_NESTING = [].freeze
+
+      # The empty qualified prefix. Distinct from {EMPTY_NESTING} only in what it MEANS: the two are handed
+      # to different parameters, and this cycle spent a blocker on a prefix and a nesting sharing a name.
+      EMPTY_PREFIX = [].freeze
       private_constant :EMPTY_NESTING
 
       # Issue #681 — `{Prism::DefNode => Module.nesting}` for every `def` the file declares inside a class or
@@ -2521,7 +2529,7 @@ module Rigor
                         node.is_a?(Prism::SingletonClassNode)
         return true if node.is_a?(Prism::CallNode) && node.receiver.nil? && MIXIN_CALL_NAMES.include?(node.name)
 
-        rebinds = rebound_block_self(node, EMPTY_NESTING)
+        rebinds = rebound_block_self(node, EMPTY_PREFIX)
         node.rigor_each_child do |child|
           next if rebinds && child.is_a?(Prism::BlockNode)
 

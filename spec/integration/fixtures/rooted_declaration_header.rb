@@ -133,7 +133,6 @@ module Outer2
 
   class ::Rooted2
     DEFAULT = Sentinel2 # constant-write census
-    @@seen = {}
 
     class Inner < Base2
       def by_inherited = assert_type(':outer2_base', who)
@@ -150,18 +149,20 @@ module Outer2
     def by_cvar = assert_type(':outer_sentinel', @@kind.new.tag)
     def by_def_body = assert_type(':outer_sentinel', Sentinel2.new.tag)
 
-    # Mutation census, both arms: the bare mutated CONSTANT names `Outer2::TABLE`
-    # through the nesting the rooted header does not reset, while the mutated
-    # class VARIABLE keys by `Rooted2`, the name it does. The two facts diverge
-    # exactly here, which is why the census threads them separately.
+    # Mutation census, both arms, each with a read that can SEE its key. The bare
+    # mutated CONSTANT names `Outer2::TABLE` through the nesting a rooted header
+    # does not reset; the mutated class VARIABLE keys by `Rooted2`, the prefix it
+    # does. Both `.empty?` reads must stay `bool` — a wrong key on either arm
+    # leaves the closed empty shape unwidened and folds its read to `true`.
+    def reset = @@seen = {}
     def self.fill = TABLE[:k] = 1
     def self.note(k) = @@seen[k] = 1
+    def by_seen = assert_type('bool', @@seen.empty?)
   end
 
   # The must-still-succeed twin: the same shapes under a NON-rooted header.
   class Plain2
     DEFAULT = Sentinel2
-    @@twin_seen = {}
 
     class Inner < Base2
       def by_inherited = assert_type(':outer2_base', who)
@@ -172,9 +173,11 @@ module Outer2
     end
 
     def remember = @@kind = Sentinel2
+    def reset = @@twin_seen = {}
     def by_default = assert_type(':outer_sentinel', DEFAULT.new.tag)
     def by_ivar = assert_type(':outer_sentinel', @v.tag)
     def by_cvar = assert_type(':outer_sentinel', @@kind.new.tag)
+    def by_seen = assert_type('bool', @@twin_seen.empty?)
     def self.fill = TWIN[:k] = 1
     def self.note(k) = @@twin_seen[k] = 1
   end

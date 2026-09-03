@@ -2169,40 +2169,6 @@ end
       expect(header_nestings("module Admin\n  class Widget; end\nend\n")).to eq({})
     end
 
-    # #708 review — the mutation census's two arms key on DIFFERENT facts, and a rooted header is where
-    # they diverge: a `@@x` belongs to the class whose body writes it, whose name the header resets, while
-    # a constant name resolves through `Module.nesting`, which the header does not reset. Threading one
-    # value for both is how the cvar arm came to reference a parameter that no longer existed — a NameError
-    # inside the discovery pre-pass, which the runner converts into a single `internal analyzer error` and
-    # DISCARDS every real diagnostic in the file. Nothing in this repository mutates a `@@` receiver, so the
-    # whole suite, the self-check and the corpus were all green over it.
-    describe ".collect_literal_receiver_mutations" do
-      define_method(:census) { |source| described_class.send(:collect_literal_receiver_mutations, parse(source)) }
-
-      it "records a class-variable index write under the class that owns it" do
-        result = census("class A\n  @@t = {}\n  def self.put(k) = @@t[k] = 1\nend\n")
-        expect(result[:cvars]).to eq({ "A" => Set[:@@t] })
-      end
-
-      it "records a class-variable shovel under a nested class" do
-        result = census("module M\n  class A\n    @@l = []\n    def self.add(v) = @@l << v\n  end\nend\n")
-        expect(result[:cvars]).to eq({ "M::A" => Set[:@@l] })
-      end
-
-      # The rooted arm, and the reason the two facts cannot share a parameter: the cvar keys by the RESET
-      # class name while the constant below keys through the UNRESET nesting, from the same body.
-      it "keys a rooted class's cvar by its reset name while its constant reaches the enclosing nesting" do
-        result = census("module Outer\n  TABLE = {}\n  class ::Rooted\n    @@seen = {}\n    " \
-                        "def self.fill(k) = @@seen[k] = 1\n    def self.mark(k) = TABLE[k] = 1\n  end\nend\n")
-        expect(result[:cvars]).to eq({ "Rooted" => Set[:@@seen] })
-        expect(result[:constants]).to include("Outer::TABLE")
-      end
-
-      it "records nothing for a class variable mutated at the top level" do
-        expect(census("@@t = {}\n@@t[:k] = 1\n")[:cvars]).to be_empty
-      end
-    end
-
     it "records a site whose only ancestor name is a mixin call" do
       table = header_nestings("module Admin\n  class Widget\n    include Trackable\n  end\nend\n")
       expect(table["Admin::Widget"]).to eq(["Admin"])
@@ -2242,6 +2208,42 @@ end
         "module A\n  class B::C\n    include M\n  end\nend\n"
       )
       expect(table["A::B::C"]).to eq(["A::B", "A"])
+    end
+  end
+
+  # #708 review — the mutation census's two arms key on DIFFERENT TABLES. A `@@x` keys on the declaration
+  # prefix because that is the join key with `build_class_cvar_index`, which derives its own from the same
+  # `declaration_prefix`; a constant name resolves through the whole `Module.nesting` ladder, whose outer
+  # rungs a rooted header drops from the prefix while Ruby keeps them. (The innermost entry is the same
+  # value either way — the tables are what differ.) Threading one value for both is how the cvar arm came
+  # to reference a parameter that no longer existed — a NameError
+  # inside the discovery pre-pass, which the runner converts into a single `internal analyzer error` and
+  # DISCARDS every real diagnostic in the file. Nothing in this repository mutates a `@@` receiver, so the
+  # whole suite, the self-check and the corpus were all green over it.
+  describe ".collect_literal_receiver_mutations" do
+    define_method(:census) { |source| described_class.send(:collect_literal_receiver_mutations, parse(source)) }
+
+    it "records a class-variable index write under the class that owns it" do
+      result = census("class A\n  @@t = {}\n  def self.put(k) = @@t[k] = 1\nend\n")
+      expect(result[:cvars]).to eq({ "A" => Set[:@@t] })
+    end
+
+    it "records a class-variable shovel under a nested class" do
+      result = census("module M\n  class A\n    @@l = []\n    def self.add(v) = @@l << v\n  end\nend\n")
+      expect(result[:cvars]).to eq({ "M::A" => Set[:@@l] })
+    end
+
+    # The rooted arm, and the reason the two facts cannot share a parameter: the cvar keys by the RESET
+    # class name while the constant below keys through the UNRESET nesting, from the same body.
+    it "keys a rooted class's cvar by its reset name while its constant reaches the enclosing nesting" do
+      result = census("module Outer\n  TABLE = {}\n  class ::Rooted\n    @@seen = {}\n    " \
+                      "def self.fill(k) = @@seen[k] = 1\n    def self.mark(k) = TABLE[k] = 1\n  end\nend\n")
+      expect(result[:cvars]).to eq({ "Rooted" => Set[:@@seen] })
+      expect(result[:constants]).to include("Outer::TABLE")
+    end
+
+    it "records nothing for a class variable mutated at the top level" do
+      expect(census("@@t = {}\n@@t[:k] = 1\n")[:cvars]).to be_empty
     end
   end
 end

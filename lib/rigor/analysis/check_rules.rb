@@ -998,14 +998,17 @@ module Rigor
         # `open_receiver?`'s manifest-driven check short-circuits above it. The two answers agree, which is
         # the point; this predicate asks only whether a Rigor-authored partial declaration is in the
         # environment, never how the project asked for it.
+        #
+        # The two arms are asked in that order, over the WHOLE list each time, rather than interleaved per
+        # path: the overlay arm is a string prefix and the twin arm canonicalises paths on the filesystem,
+        # so the overwhelmingly common overlay-only run never reaches a syscall here.
         def gem_overlay_loaded?(scope)
           loader = scope.environment&.rbs_loader
           return false if loader.nil? || !loader.respond_to?(:signature_paths)
 
-          loader.signature_paths.any? do |path|
-            Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) ||
-              Rigor::Environment.bundled_overlay_twin_signatures?(path)
-          end
+          paths = loader.signature_paths
+          paths.any? { |path| Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) } ||
+            Rigor::Environment.bundled_overlay_twin_signatures?(paths)
         end
 
         # The `call.undefined-method` exemptions that depend only on the CALL SITE, never on the receiver's

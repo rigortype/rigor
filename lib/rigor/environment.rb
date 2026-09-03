@@ -300,7 +300,7 @@ module Rigor
         )
       end
 
-      # Whether a loaded signature directory is the engine's own bundled copy of a gem-overlay plugin twin's
+      # Whether any of `signature_paths` loads the engine's own bundled copy of a gem-overlay plugin twin's
       # `sig/` — the third way one of Rigor's OWN partial declarations of a gem class can reach a run, after
       # the plugin (manifest `open_receivers:`) and the auto-applied overlay
       # (`RbsLoader.under_gem_overlay_root?`).
@@ -313,10 +313,14 @@ module Rigor
       # class names should be listed (issue #660); it only answers the gate #632 already requires — that the
       # bundled declaration actually loaded this run — for one more way of loading it.
       #
-      # @param path [String, Pathname] typically an entry from an {RbsLoader} instance's {#signature_paths}.
-      def bundled_overlay_twin_signatures?(path)
+      # Takes the whole list rather than one entry so the twin's file set is resolved once per question
+      # instead of once per path: the caller asks it per `ActiveSupport::Duration` receiver.
+      #
+      # @param signature_paths [Array<String, Pathname>] typically an {RbsLoader} instance's
+      #   {#signature_paths}.
+      def bundled_overlay_twin_signatures?(signature_paths)
         GEM_OVERLAY_PLUGIN_IDS.each_value.any? do |plugin_id|
-          bundled_twin_signatures_wired?(plugin_id, [path])
+          bundled_twin_signatures_wired?(plugin_id, signature_paths)
         end
       end
 
@@ -388,25 +392,34 @@ module Rigor
         RbsLoader.gem_overlay_sig_paths(eligible)
       end
 
-      # Whether the user's own `signature_paths:` already reach the engine's bundled copy of the overlay's
+      # Whether the user's own `signature_paths:` already LOAD the engine's bundled copy of the overlay's
       # plugin twin (`<ENGINE_ROOT>/plugins/rigor-<id>/sig`).
       #
-      # **A PATH test, deliberately, and not a content test.** The two candidates trade differently:
+      # **The question is which declarations an entry actually loads, not which string it looks like.** The
+      # first cut of this compared path strings, and that is wrong in the direction that costs false
+      # positives: `signature_paths:` naming the twin's `.rbs` FILE, or a subdirectory of the twin that does
+      # not exist, both MATCH the twin as strings while the loader reads nothing from them
+      # ({RbsLoader.project_sig_files} takes directories only, which is exactly what
+      # {Rigor::SignaturePathAudit} reports as `:not_directory` / `:missing`). Standing the overlay down for
+      # those left the project with NEITHER copy, so ordinary `3.minutes` and `"x".camelize` drew
+      # `call.undefined-method` — a check firing on correct code, which ADR-5 ranks below any worst-case
+      # static reading. It is wrong in the quieter direction too: a symlink to the twin, or a case-variant
+      # spelling of it on a case-insensitive filesystem, loads the twin's declarations while matching no
+      # prefix, so the overlay stayed and the class collapsed.
       #
-      # - A path test is exact for the case that actually bites — the trap is pointing `signature_paths:` at
-      #   Rigor's own bundled directory, and nothing but that directory lives under it — costs a handful of
-      #   string comparisons, and CANNOT stand an overlay down for a project that never named it.
-      # - A content test would additionally catch a VENDORED COPY of those signatures. It cannot be bought
-      #   without risk: standing the overlay down on an overlap makes every selector the copy does NOT carry
-      #   a fresh `call.undefined-method` on correct code, and false positives outrank worst-case static
-      #   reading here. A vendored copy also diverges the moment it is edited, so the check would be exact
-      #   only for a byte-identical one.
+      # Asking {RbsLoader.project_sig_files} — the loader's OWN acceptance test — for the twin's files and
+      # then requiring an entry to be a canonicalised directory those files sit under answers both. It also
+      # keeps the ordering right in both directions: RBS walks a signature directory recursively, so naming
+      # the twin's parent reaches its `.rbs` just as naming the subdirectory holding it does.
       #
-      # The vendored-copy residue is therefore left to the collision report rather than guessed at: the
-      # duplicate still raises, and `RbsLoader#warn_about_definition_build_failure` names both files and the
-      # class that collapsed. That report is a stderr warning on a run that still exits 0, which is not loud
-      # enough for a failure that REMOVES diagnostics — issue #672 asks separately whether it should be a
-      # diagnostic, and this comment is the pointer to it, not an answer.
+      # **Still not a CONTENT test, deliberately.** A vendored COPY of these signatures collides identically
+      # and is not caught, because catching it means standing the overlay down on a declaration overlap —
+      # and then every selector the copy omits becomes a fresh `call.undefined-method` on correct code
+      # (ADR-72 WD2 forbids exactly that direction), while an edited copy defeats the test anyway. The
+      # vendored copy keeps the collision report instead: the duplicate still raises and
+      # `RbsLoader#warn_about_definition_build_failure` names both files and the class that collapsed. That
+      # report is a stderr warning on a run that still exits 0, which is not loud enough for a failure that
+      # REMOVES diagnostics — [#696](https://github.com/rigortype/rigor/issues/696) is where that is decided.
       #
       # Both `require_relative`s are in-method for the reason `Plugin::FirstParty` documents at its own: the
       # plugin subsystem's load graph reaches back here, and the overlay path is the only caller — a run with
@@ -419,18 +432,32 @@ module Rigor
         twin = Plugin::Loader.bundled_plugin_sig_path("#{Plugin::FirstParty::GEM_PREFIX}#{plugin_id}")
         return false unless twin
 
-        signature_paths.any? { |entry| signature_path_reaches?(entry, twin) }
+        twin_files = RbsLoader.project_sig_files([twin]).filter_map { |file| canonical_path(file) }
+        return false if twin_files.empty?
+
+        signature_paths.any? { |entry| signature_entry_loads?(entry, twin_files) }
       end
 
-      # Whether an `.rbs` under `twin` would be loaded by a `signature_paths:` entry of `path`. RBS
-      # directories are walked recursively (`RbsLoader.project_sig_files` globs `**/*.rbs`), so containment
-      # counts in BOTH directions: naming the twin's parent reaches it just as naming a subdirectory of it
-      # reaches part of it. Relative entries are expanded against the cwd, which is the same base
-      # `project_sig_files` resolves them against.
-      def signature_path_reaches?(path, twin)
-        entry = File.expand_path(path.to_s)
-        entry == twin || entry.start_with?("#{twin}#{File::SEPARATOR}") ||
-          twin.start_with?("#{entry}#{File::SEPARATOR}")
+      # Whether one `signature_paths:` entry is a directory the RBS loader would read one of `twin_files`
+      # from. Both sides are canonicalised first ({canonical_path}), which is what makes a symlinked or
+      # case-variant spelling of the twin answer the same as the twin itself.
+      def signature_entry_loads?(entry, twin_files)
+        dir = canonical_path(entry)
+        return false unless dir && File.directory?(dir)
+
+        prefix = "#{dir}#{File::SEPARATOR}"
+        twin_files.any? { |file| file.start_with?(prefix) }
+      end
+
+      # `File.realpath` rather than `File.expand_path`: it resolves symlinks and, on a case-insensitive
+      # filesystem, the on-disk spelling — the two ways a path can reach the twin's files without looking
+      # like it. It raises for a path that does not exist, which is the answer we want (an entry that
+      # resolves to nothing loads nothing), so the rescue returns nil rather than falling back to a
+      # lexical expansion that would resurrect the string match.
+      def canonical_path(path)
+        File.realpath(path.to_s)
+      rescue SystemCallError
+        nil
       end
 
       # ADR-32 WD4 + WD5 — for each project source file, invoke every plugin-registered synthesizer once and

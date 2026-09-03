@@ -139,7 +139,41 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
       FileUtils.mkdir_p(File.join(project, "other_sig"))
       result = run_project(project, signature_paths: [File.join(project, "sig"), File.join(project, "other_sig")])
 
-      expect(dumps(result).first).to eq("String")
+      expect(dumps(result)).to eq(["String", "Dynamic[top]", "Integer"])
+      expect(undefined_methods(result)).to eq(["no_such_method_at_all"])
+    end
+
+    # The regression the adversarial review of the first cut caught, and the reason the stand-down asks
+    # what an entry LOADS rather than what it looks like. Both of these MATCH the twin as strings while
+    # the loader reads nothing from them (`SignaturePathAudit` calls them `:not_directory` / `:missing`),
+    # so standing the overlay down for either left the project with NEITHER copy of the RBS: ordinary
+    # `"user_account".camelize` and `3.minutes` fired `call.undefined-method` on correct Rails code.
+    #
+    # The positive half is what makes these non-vacuous: the overlay has to be seen still WORKING, not
+    # merely seen not-crashing, which is why the dump triple is pinned rather than the error list alone.
+    it "keeps the overlay for an entry naming the twin's .rbs file, which loads nothing" do
+      entry = File.join(twin_sig, "active_support", "core_ext.rbs")
+      result = run_project(project, signature_paths: [File.join(project, "sig"), entry])
+
+      expect(dumps(result)).to eq(["String", "Dynamic[top]", "Integer"])
+      expect(undefined_methods(result)).to eq(["no_such_method_at_all"])
+    end
+
+    it "keeps the overlay for an entry naming a subdirectory of the twin that does not exist" do
+      result = run_project(project, signature_paths: [File.join(project, "sig"), File.join(twin_sig, "nope")])
+
+      expect(dumps(result)).to eq(["String", "Dynamic[top]", "Integer"])
+      expect(undefined_methods(result)).to eq(["no_such_method_at_all"])
+    end
+
+    # The other direction: a symlink reaches the twin's declarations while matching no prefix, so the
+    # string test left BOTH copies loaded and the class collapsed. `dumps` proves it did not.
+    it "stands the overlay down for a symlink to the twin" do
+      link = File.join(project, "twinlink")
+      File.symlink(twin_sig, link)
+      result = run_project(project, signature_paths: [File.join(project, "sig"), link])
+
+      expect(dumps(result)).to eq(["String", "Dynamic[top]", "Integer"])
       expect(undefined_methods(result)).to eq(["no_such_method_at_all"])
     end
 
@@ -168,20 +202,45 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
     end
   end
 
+  # The predicate both the stand-down and `CheckRules#gem_overlay_loaded?` ask. Its contract is "would the
+  # RBS loader read one of the twin's `.rbs` files from these entries", NOT "does one of these strings look
+  # like the twin" — the four cases below are exactly where those two answers differ.
   describe "Rigor::Environment.bundled_overlay_twin_signatures?" do
+    def wired?(*paths)
+      Rigor::Environment.bundled_overlay_twin_signatures?(paths)
+    end
+
     it "recognises the twin directory itself" do
-      expect(Rigor::Environment.bundled_overlay_twin_signatures?(twin_sig)).to be(true)
+      expect(wired?(twin_sig)).to be(true)
     end
 
     # RBS walks a signature directory recursively, so an entry either side of the twin reaches its `.rbs`.
     it "recognises an entry that contains the twin, and one that sits inside it" do
-      expect(Rigor::Environment.bundled_overlay_twin_signatures?(File.dirname(twin_sig))).to be(true)
-      expect(Rigor::Environment.bundled_overlay_twin_signatures?("#{twin_sig}/active_support")).to be(true)
+      expect(wired?(File.dirname(twin_sig))).to be(true)
+      expect(wired?(File.join(twin_sig, "active_support"))).to be(true)
     end
 
     it "is false for an unrelated signature directory, and for a sibling sharing the twin's prefix" do
-      expect(Rigor::Environment.bundled_overlay_twin_signatures?("/some/project/sig")).to be(false)
-      expect(Rigor::Environment.bundled_overlay_twin_signatures?("#{twin_sig}_vendored")).to be(false)
+      expect(wired?("/some/project/sig")).to be(false)
+      expect(wired?("#{twin_sig}_vendored")).to be(false)
+    end
+
+    # Matches the twin as a string, loads nothing: the loader `add`s directories only, which is what
+    # `SignaturePathAudit` reports as `:not_directory` and `:missing`. Standing the overlay down for
+    # either is the false-positive regression the review caught.
+    it "is false for the twin's .rbs file itself, and for a nonexistent subdirectory of it" do
+      expect(wired?(File.join(twin_sig, "active_support", "core_ext.rbs"))).to be(false)
+      expect(wired?(File.join(twin_sig, "nope"))).to be(false)
+    end
+
+    # Loads the twin without matching it as a string — the residue the ADR would otherwise be wrong about.
+    it "is true for a symlink to the twin, and for a case-variant spelling where the filesystem folds case" do
+      link = File.join(project, "twinlink")
+      File.symlink(twin_sig, link)
+      expect(wired?(link)).to be(true)
+
+      shouted = File.join(File.dirname(twin_sig), File.basename(twin_sig).upcase)
+      expect(wired?(shouted)).to be(true) if File.directory?(shouted)
     end
   end
 end

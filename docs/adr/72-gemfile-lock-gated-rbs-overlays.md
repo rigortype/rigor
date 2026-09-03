@@ -84,20 +84,35 @@ rather than `plugins:` reaches the same `.rbs` with no registry entry to
 key on, so both halves loaded and every class they share collapsed —
 `RBS::DefinitionBuilder` raised `DuplicatedMethodDefinitionError` while
 `class_known?` kept saying yes, and the run reported *less* while still
-exiting 0. The stand-down therefore also asks whether an entry in the
-user's own `signature_paths:` resolves onto the engine's bundled twin
-`sig/` (`Plugin::Loader.bundled_plugin_sig_path`, containment in either
-direction because RBS walks a signature directory recursively).
+exiting 0. The stand-down therefore also asks whether the user's own
+`signature_paths:` already **load** the engine's bundled twin `sig/`
+(`Plugin::Loader.bundled_plugin_sig_path`).
 
-**A path test, deliberately, and not a content test.** The path test is
-exact for the case that bites — nothing but the twin lives under that
-directory — and cannot stand an overlay down for a project that never
-named it. A content test would additionally catch a *vendored copy* of
-those signatures, but not for free: standing the overlay down on an
-overlap makes every selector the copy omits a fresh
-`call.undefined-method` on correct code, which WD2's direction forbids,
-and an edited copy defeats it anyway. The vendored copy keeps the
-collision report instead of a guess.
+**Load, not look like.** The test is whether an entry is a directory
+that `RbsLoader.project_sig_files` — the loader's own acceptance test —
+would read one of the twin's `.rbs` files from, with both sides
+canonicalised through `File.realpath`. Comparing path strings is wrong
+in both directions, and the false-positive direction is the expensive
+one: `signature_paths:` naming the twin's `.rbs` *file*, or a
+subdirectory of the twin that does not exist, match the twin as strings
+while the loader reads nothing from them (`SignaturePathAudit` reports
+them `:not_directory` / `:missing`). Standing the overlay down for those
+leaves the project with *neither* copy, so ordinary `3.minutes` and
+`"x".camelize` draw `call.undefined-method` — a check firing on correct
+code, which WD2 and [ADR-5](5-robustness-principle.md) both forbid.
+The quiet direction is the mirror image: a symlink to the twin, or a
+case-variant spelling of it where the filesystem folds case, loads the
+twin's declarations while matching no prefix, so the overlay would stay
+and the class would collapse. Canonicalising resolves both.
+
+**Still not a content test.** A *vendored copy* of these signatures
+collides identically and is deliberately not caught: catching it means
+standing the overlay down on a declaration overlap, and then every
+selector the copy omits becomes a fresh `call.undefined-method` on
+correct code — WD2's forbidden direction again — while an edited copy
+defeats the test anyway. The vendored copy keeps the collision report
+instead of a guess, and how loud that report should be is
+[#696](https://github.com/rigortype/rigor/issues/696).
 
 Lockfile resolution piggybacks on `bundler.auto_detect` (default
 **true**), so the fix is on by default for any project with a

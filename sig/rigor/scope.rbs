@@ -20,6 +20,7 @@ module Rigor
     attr_reader source_path: String?
     attr_reader struct_fold_safe_locals: Set[Symbol]
     attr_reader opaque_block_self: bool
+    attr_reader lexical_nesting: Array[String]?
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -98,6 +99,7 @@ module Rigor
     def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?dynamic_origins: Hash[untyped, Symbol]) -> void
     def with_source_path: (String? path) -> Scope
     def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
+    def with_lexical_nesting: (Array[String]? chain) -> Scope
     def struct_fold_safe?: (String | Symbol name) -> bool
     def entering_opaque_block: () -> Scope
     def opaque_block_self?: () -> bool

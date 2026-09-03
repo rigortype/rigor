@@ -1898,16 +1898,15 @@ module Rigor
         # candidate only when the scope actually knows it, so a genuinely absolute spelling still
         # falls through to `bare_name` unchanged.
         #
-        # NOT `Module.nesting`, though — an APPROXIMATION of it, and the gap is #652's. The chain
-        # comes from `lexical_nesting_for`, which peels `scope.self_type.class_name`; that string
-        # is identical for `class Admin::UsersController` and for `module Admin; class
-        # UsersController`, so the derivation cannot tell a COMPACT definition from a nested one
-        # and hands back `["Admin::UsersController", "Admin"]` for both. Ruby's nesting in the
-        # compact form is `[Admin::UsersController]` alone, so a bare `User` there means `::User`
-        # while this walk answers `Admin::User`. The defect is in the derivation, not in any one
-        # guard shape: fixing `lexical_nesting_for` (and `Reflection.enclosing_class_path`, which
-        # peels the same way) closes it for `is_a?`, `case`/`when` and `===` at once. Until then
-        # `case`/`when` and `===` share the divergence that `is_a?` already had.
+        # The chain IS `Module.nesting` wherever a declaration walk recorded one (#652): a COMPACT
+        # `class Admin::UsersController` contributes the single entry `["Admin::UsersController"]`, so a
+        # bare `User` guard there narrows to the top-level `::User` exactly as Ruby resolves it, while
+        # the nested `module Admin; class UsersController` spelling still reaches `Admin::User`. Peeling
+        # `scope.self_type.class_name` could not tell the two apart — the string is identical — and
+        # answered `Admin::User` for both, reporting `undefined method` on correct code across all four
+        # shapes at once. Because the repair lives in the shared derivation, `is_a?`, `case`/`when`, `===`
+        # and the constant typer were fixed together rather than one guard shape at a time. A scope no
+        # declaration walk built still falls back to the peel; see {Reflection.lexical_nesting_chain}.
         def resolve_class_name_lexically(bare_name, scope)
           chain = lexical_nesting_for(scope)
           chain.each do |prefix|
@@ -1926,20 +1925,12 @@ module Rigor
           scope.discovered_classes.key?(candidate)
         end
 
-        # Approximates `Module.nesting` from the inferable `self_type`. Today's implementation
-        # handles the common case: when the surrounding method is a regular instance method
-        # (`self_type = Nominal[T]`) or a class-body / singleton (`self_type = Singleton[T]`),
-        # the chain is `T`'s namespace path — `Foo::Bar::Baz` → `["Foo::Bar::Baz", "Foo::Bar",
-        # "Foo"]`. Returns an empty array when `self_type` is unknown.
+        # `Module.nesting` for the guard's body, innermost first. Delegates to
+        # {Reflection.lexical_nesting_chain} — the SINGLE owner of the question, shared with the constant
+        # typer's step-1 ladder, so `User` read as a value and `x.is_a?(User)` written beside it cannot
+        # resolve to two different classes ([#652](https://github.com/rigortype/rigor/issues/652)).
         def lexical_nesting_for(scope)
-          self_type = scope.self_type
-          base = case self_type
-                 when Type::Nominal, Type::Singleton then self_type.class_name
-                 end
-          return [] if base.nil? || base.empty?
-
-          parts = base.split("::")
-          parts.each_index.map { |i| parts[0..-(i + 1)].join("::") }
+          Reflection.lexical_nesting_chain(scope)
         end
 
         def class_predicate_scopes(scope, name, current, class_name, exact:)

@@ -23,7 +23,7 @@ module Rigor
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
-                :opaque_block_self,
+                :opaque_block_self, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars
@@ -193,6 +193,7 @@ module Rigor
       source_path: nil,
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
       opaque_block_self: false,
+      lexical_nesting: nil,
       dynamic_origins: {}.compare_by_identity,
       local_origins: EMPTY_ORIGINS,
       ivar_origins: EMPTY_ORIGINS,
@@ -215,6 +216,7 @@ module Rigor
       @source_path = source_path
       @struct_fold_safe_locals = struct_fold_safe_locals
       @opaque_block_self = opaque_block_self
+      @lexical_nesting = lexical_nesting
       @dynamic_origins = dynamic_origins
       @local_origins = local_origins
       @ivar_origins = ivar_origins
@@ -306,6 +308,17 @@ module Rigor
     # when typing `Prism::SelfNode` and implicit-self `Prism::CallNode` receivers.
     def with_self_type(type)
       rebuild(self_type: type)
+    end
+
+    # Issue #652 — installs the body's REAL `Module.nesting`, innermost first, as recorded at declaration
+    # time by `Inference::StatementEvaluator` (`["Admin::UsersController"]` for a compact
+    # `class Admin::UsersController`, `["Admin::UsersController", "Admin"]` for the nested spelling). A
+    # qualified name cannot be un-flattened back into the chain that produced it, so the chain has to travel
+    # with the scope; `Reflection.lexical_nesting_chain` is the single reader. `nil` means "not recorded"
+    # (a scope built outside a declaration walk), and the reader then falls back to peeling `self_type`'s
+    # class name — a gradual answer, never a new firing.
+    def with_lexical_nesting(chain)
+      rebuild(lexical_nesting: chain)
     end
 
     # ADR-28 / ADR-52 slice 5a — per-file source path carried on the scope. The analyzer stamps the current file's
@@ -960,6 +973,7 @@ module Rigor
       source_path: @source_path,
       struct_fold_safe_locals: @struct_fold_safe_locals,
       opaque_block_self: @opaque_block_self,
+      lexical_nesting: @lexical_nesting,
       dynamic_origins: @dynamic_origins,
       local_origins: @local_origins,
       ivar_origins: @ivar_origins,
@@ -979,6 +993,7 @@ module Rigor
         source_path: source_path,
         struct_fold_safe_locals: struct_fold_safe_locals,
         opaque_block_self: opaque_block_self,
+        lexical_nesting: lexical_nesting,
         dynamic_origins: dynamic_origins,
         local_origins: local_origins,
         ivar_origins: ivar_origins,
@@ -1045,6 +1060,11 @@ module Rigor
         # block entry by `entering_opaque_block` and inherited through `rebuild`), so both arms usually carry
         # the same value and the `||` is that value.
         opaque_block_self: @opaque_block_self || other.opaque_block_self,
+        # Issue #652 — the recorded `Module.nesting`, stamped once at body entry and threaded by `rebuild`
+        # exactly as the fold-safe set is. A join is a control-flow merge INSIDE one body, so both arms
+        # always carry the identical chain; taking this scope's is that chain. Dropping it would silently
+        # re-enable the name-peel for everything after the first `if` in a body.
+        lexical_nesting: @lexical_nesting,
         dynamic_origins: @dynamic_origins,
         local_origins: join_origins(@local_origins, other.local_origins),
         ivar_origins: join_origins(@ivar_origins, other.ivar_origins),

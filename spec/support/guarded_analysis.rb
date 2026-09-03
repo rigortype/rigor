@@ -29,11 +29,15 @@ module GuardedAnalysis
   # @param runner [Rigor::Analysis::Runner]
   # @param paths [Array<String>, nil] forwarded to `Runner#run` when given; omitted (so the
   #   configuration's own `paths` apply) when nil, which is the dominant call shape.
+  # @param allow_plugin_crash [Boolean] see {InternalAnalyzerErrorGuard.check!} — only for the examples
+  #   that deliberately crash a plugin to assert the runner's isolation envelope.
   # @return [Rigor::Analysis::Result]
   # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
-  def guarded_run(runner, paths = nil)
+  def guarded_run(runner, paths = nil, allow_plugin_crash: false)
     result = paths.nil? ? runner.run : runner.run(paths)
-    InternalAnalyzerErrorGuard.check!(result, context: guarded_analysis_context("guarded_run"))
+    InternalAnalyzerErrorGuard.check!(
+      result, context: guarded_analysis_context("guarded_run"), allow_plugin_crash: allow_plugin_crash
+    )
   end
 
   # @return [Rigor::Analysis::Result]

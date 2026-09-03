@@ -30,7 +30,7 @@ RSpec.describe Rigor::Analysis::Runner do
       RUBY
       configuration = Rigor::Configuration.new("paths" => [dir])
       Dir.chdir(dir) do
-        result = described_class.new(configuration: configuration, cache_store: nil).run
+        result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
         offenders = result.diagnostics.select { |d| d.message.include?("line_number=") }
         expect(offenders).to be_empty
       end
@@ -44,7 +44,7 @@ RSpec.describe Rigor::Analysis::Runner do
       # chdir into a clean tmpdir so the runner does not pick up rigor's own `Gemfile.lock` (which would fire the
       # O4-slice-3 missing-RBS diagnostic ahead of the file-not-found one).
       Dir.chdir(dir) do
-        result = described_class.new(configuration: configuration).run
+        result = guarded_run(described_class.new(configuration: configuration))
 
         expect(result).not_to be_success
         diag = result.diagnostics.first
@@ -60,7 +60,7 @@ RSpec.describe Rigor::Analysis::Runner do
       missing = File.join(dir, "ghost.rb")
       configuration = Rigor::Configuration.new("paths" => [File.join(dir, "real.rb"), missing])
       Dir.chdir(dir) do
-        result = described_class.new(configuration: configuration).run
+        result = guarded_run(described_class.new(configuration: configuration))
         skipped = result.diagnostics.find { |d| d.path == missing }
         expect(skipped).not_to be_nil
         # Warn-and-skip, not an error that aborts the whole run.
@@ -78,7 +78,7 @@ RSpec.describe Rigor::Analysis::Runner do
       # See above: chdir away from rigor's repo root so the missing-RBS diagnostic doesn't surface ahead of the
       # path-error diagnostic.
       Dir.chdir(dir) do
-        result = described_class.new(configuration: configuration).run
+        result = guarded_run(described_class.new(configuration: configuration))
 
         expect(result).not_to be_success
         expect(result.diagnostics.first.message).to include("not a Ruby file")
@@ -133,7 +133,7 @@ RSpec.describe Rigor::Analysis::Runner do
         File.write(File.join(vendored, "lib.rb"), bad_source)
 
         configuration = Rigor::Configuration.new("paths" => [src])
-        result = described_class.new(configuration: configuration, cache_store: nil).run
+        result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
 
         analysed = result.diagnostics.map(&:path)
         expect(analysed).to include(File.join(src, "real.rb"))
@@ -151,7 +151,7 @@ RSpec.describe Rigor::Analysis::Runner do
         configuration = Rigor::Configuration.new(
           "paths" => [src], "exclude" => ["**/fixtures/**"]
         )
-        result = described_class.new(configuration: configuration, cache_store: nil).run
+        result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
 
         analysed = result.diagnostics.map(&:path)
         expect(analysed).to include(File.join(src, "real.rb"))
@@ -166,7 +166,7 @@ RSpec.describe Rigor::Analysis::Runner do
         File.write(explicit, bad_source)
 
         configuration = Rigor::Configuration.new("paths" => [explicit])
-        result = described_class.new(configuration: configuration, cache_store: nil).run
+        result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
 
         expect(result.diagnostics.map(&:path)).to include(explicit)
       end
@@ -266,7 +266,7 @@ RSpec.describe Rigor::Analysis::Runner do
         }
       )
       runner = described_class.new(configuration: configuration, cache_store: nil)
-      runner.run
+      guarded_run(runner)
 
       expect(runner.dependency_source_index).to be_a(Rigor::Analysis::DependencySourceInference::Index)
       expect(runner.dependency_source_index.resolved_gems.map(&:gem_name)).to include("prism")
@@ -279,7 +279,7 @@ RSpec.describe Rigor::Analysis::Runner do
           "source_inference" => [{ "gem" => "definitely-no-such-gem-rigor-12345" }]
         }
       )
-      result = described_class.new(configuration: configuration, cache_store: nil).run
+      result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
       diag = result.diagnostics.find { |d| d.rule == "dynamic.dependency-source.gem-not-found" }
 
       expect(diag).not_to be_nil
@@ -308,7 +308,7 @@ RSpec.describe Rigor::Analysis::Runner do
       runner = described_class.new(
         configuration: configuration, cache_store: nil, plugin_requirer: requirer
       )
-      runner.run
+      guarded_run(runner)
 
       env = Rigor::Environment.for_project(
         plugin_registry: runner.plugin_registry,
@@ -331,7 +331,7 @@ RSpec.describe Rigor::Analysis::Runner do
           ]
         }
       )
-      result = described_class.new(configuration: configuration, cache_store: nil).run
+      result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
       diag = result.diagnostics.find { |d| d.rule == "dynamic.dependency-source.config-conflict" }
 
       expect(diag).not_to be_nil
@@ -356,7 +356,7 @@ RSpec.describe Rigor::Analysis::Runner do
         )
       )
 
-      result = runner.run
+      result = guarded_run(runner)
       budget_diags = result.diagnostics.select { |d| d.rule == "dynamic.dependency-source.budget-exceeded" }
 
       expect(budget_diags.length).to eq(1)
@@ -398,9 +398,10 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [],
             "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
           )
-          result = described_class.new(
+          runner = described_class.new(
             configuration: configuration, cache_store: RunnerHelpers.shared_cache_store
-          ).run
+          )
+          result = guarded_run(runner)
           coverage_diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.missing-gem" }
 
           expect(coverage_diags.length).to eq(1)
@@ -436,9 +437,10 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [],
             "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
           )
-          result = described_class.new(
+          runner = described_class.new(
             configuration: configuration, cache_store: RunnerHelpers.shared_cache_store
-          ).run
+          )
+          result = guarded_run(runner)
           coverage_diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.missing-gem" }
 
           expect(coverage_diags).to be_empty
@@ -461,7 +463,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => ["lib"])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           hints = result.diagnostics.select { |d| d.rule == "rbs.coverage.inline-annotations-unsynthesized" }
 
           expect(hints.length).to eq(1)
@@ -485,7 +487,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => ["lib"])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           hints = result.diagnostics.select { |d| d.rule == "rbs.coverage.inline-annotations-unsynthesized" }
 
           expect(hints).to be_empty
@@ -501,7 +503,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => ["lib"])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           hints = result.diagnostics.select { |d| d.rule == "rbs.coverage.inline-annotations-unsynthesized" }
 
           expect(hints).to be_empty
@@ -540,7 +542,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => ["lib"])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           falsey = result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
 
           expect(falsey).to be_empty
@@ -582,7 +584,7 @@ RSpec.describe Rigor::Analysis::Runner do
           "paths" => [File.join(tmpdir, "code.rb")],
           "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
         )
-        result = described_class.new(configuration: configuration, cache_store: nil).run
+        result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
         result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:method_name)
       end
     end
@@ -637,7 +639,7 @@ RSpec.describe Rigor::Analysis::Runner do
           "signature_paths" => [File.join(tmpdir, "sig")],
           "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
         )
-        described_class.new(configuration: configuration, cache_store: nil).run.diagnostics
+        guarded_run(described_class.new(configuration: configuration, cache_store: nil)).diagnostics
       end
     end
 
@@ -681,7 +683,7 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [File.join(tmpdir, "code.rb")],
             "signature_paths" => [File.join(tmpdir, "sig")]
           )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
 
           expect(undefined.map(&:method_name)).to eq(["bar"])
@@ -701,7 +703,7 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [File.join(tmpdir, "code.rb")],
             "signature_paths" => [File.join(tmpdir, "sig")]
           )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.synthesized-namespace" }
 
           expect(diags.length).to eq(1)
@@ -726,7 +728,7 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [File.join(tmpdir, "code.rb")],
             "signature_paths" => [File.join(tmpdir, "sig")]
           )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.synthesized-namespace" }
 
           expect(diags).to be_empty
@@ -757,7 +759,7 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [File.join(tmpdir, "code.rb")],
             "signature_paths" => [File.join(tmpdir, "sig")]
           )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
 
           expect(undefined).to be_empty
@@ -789,7 +791,7 @@ RSpec.describe Rigor::Analysis::Runner do
             configuration = Rigor::Configuration.new(
               "paths" => [tmpdir], "signature_paths" => [File.join(tmpdir, "sig")]
             )
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             size_diags = result.diagnostics.select do |d|
               d.rule == "call.undefined-method" && d.message.include?("size")
             end
@@ -807,7 +809,7 @@ RSpec.describe Rigor::Analysis::Runner do
             configuration = Rigor::Configuration.new(
               "paths" => [], "pre_eval" => [missing]
             )
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             diags = result.diagnostics.select { |d| d.rule == "pre-eval.file-not-found" }
 
             expect(diags.size).to eq(1)
@@ -825,7 +827,7 @@ RSpec.describe Rigor::Analysis::Runner do
             configuration = Rigor::Configuration.new(
               "paths" => [], "pre_eval" => [present]
             )
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             diags = result.diagnostics.select { |d| d.rule == "pre-eval.file-not-found" }
 
             expect(diags).to be_empty
@@ -841,7 +843,7 @@ RSpec.describe Rigor::Analysis::Runner do
             configuration = Rigor::Configuration.new(
               "paths" => [], "pre_eval" => [missing_a, missing_b]
             )
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             diags = result.diagnostics.select { |d| d.rule == "pre-eval.file-not-found" }
 
             expect(diags.size).to eq(2)
@@ -875,7 +877,7 @@ RSpec.describe Rigor::Analysis::Runner do
               "paths" => [consumer_path],
               "pre_eval" => [ext_path]
             )
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             undefined = result.diagnostics.select do |d|
               d.rule.to_s.include?("undefined-method") && d.message.include?("to_url")
             end
@@ -914,7 +916,7 @@ RSpec.describe Rigor::Analysis::Runner do
               "paths" => [consumer_path],
               "pre_eval" => [ext_path]
             )
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             messages = result.diagnostics
                              .select { |d| d.rule.to_s.include?("undefined-method") }
                              .map(&:message)
@@ -933,7 +935,7 @@ RSpec.describe Rigor::Analysis::Runner do
             configuration = Rigor::Configuration.new(
               "paths" => [], "pre_eval" => [broken_path]
             )
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             warns = result.diagnostics.select { |d| d.rule == "pre-eval.parse-error" }
 
             expect(warns.size).to eq(1)
@@ -962,7 +964,7 @@ RSpec.describe Rigor::Analysis::Runner do
           RUBY
           Dir.chdir(tmpdir) do
             configuration = Rigor::Configuration.new("paths" => [tmpdir])
-            result = described_class.new(configuration: configuration, cache_store: nil).run
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
             diag = result.diagnostics.find do |d|
               d.rule.to_s.include?("undefined-method") && d.message.include?("shout")
             end
@@ -1000,7 +1002,7 @@ RSpec.describe Rigor::Analysis::Runner do
         RUBY
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [tmpdir])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }
 
           expect(mismatches).to(
@@ -1036,7 +1038,7 @@ RSpec.describe Rigor::Analysis::Runner do
         RUBY
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [tmpdir])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }
 
           expect(mismatches).to(
@@ -1070,7 +1072,7 @@ RSpec.describe Rigor::Analysis::Runner do
         RUBY
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [tmpdir])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }
 
           expect(mismatches).to(
@@ -1110,7 +1112,7 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [File.join(tmpdir, "main.rb")],
             "signature_paths" => [File.join(tmpdir, "sig")]
           )
-          yield described_class.new(configuration: configuration, cache_store: nil).run
+          yield guarded_run(described_class.new(configuration: configuration, cache_store: nil))
         end
       end
     end
@@ -1228,7 +1230,7 @@ RSpec.describe Rigor::Analysis::Runner do
         main = write_main(tmpdir, "foo 1\n")
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [main])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           diags = result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }
           expect(diags.size).to eq(1)
           expect(diags.first.severity).to eq(:warning)
@@ -1243,7 +1245,7 @@ RSpec.describe Rigor::Analysis::Runner do
         main = write_main(tmpdir, %(puts "hi"\n))
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [main])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
         end
       end
@@ -1257,7 +1259,7 @@ RSpec.describe Rigor::Analysis::Runner do
         RUBY
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [main])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
         end
       end
@@ -1278,7 +1280,7 @@ RSpec.describe Rigor::Analysis::Runner do
             "paths" => [main],
             "pre_eval" => [patch_path]
           )
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
         end
       end
@@ -1295,7 +1297,7 @@ RSpec.describe Rigor::Analysis::Runner do
         RUBY
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [main])
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
         end
       end
@@ -1306,7 +1308,7 @@ RSpec.describe Rigor::Analysis::Runner do
         main = write_main(tmpdir, "foo 1\n")
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [main], "severity_profile" => "strict")
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           diags = result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }
           expect(diags.size).to eq(1)
           expect(diags.first.severity).to eq(:error)
@@ -1319,7 +1321,7 @@ RSpec.describe Rigor::Analysis::Runner do
         main = write_main(tmpdir, "foo 1\n")
         Dir.chdir(tmpdir) do
           configuration = Rigor::Configuration.new("paths" => [main], "severity_profile" => "lenient")
-          result = described_class.new(configuration: configuration, cache_store: nil).run
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
           expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
         end
       end
@@ -1915,7 +1917,7 @@ RSpec.describe Rigor::Analysis::Runner do
                   "paths" => ["use.rb"], "severity_profile" => "lenient"
                 )
               )
-              result = described_class.new(configuration: configuration, cache_store: nil).run
+              result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
               mismatch = result.diagnostics.find { |d| d.rule == "call.argument-type-mismatch" }
               expect(mismatch).not_to be_nil
               expect(mismatch.severity).to eq(:warning)
@@ -1933,7 +1935,7 @@ RSpec.describe Rigor::Analysis::Runner do
                   "severity_overrides" => { "call.undefined-method" => "off" }
                 )
               )
-              result = described_class.new(configuration: configuration, cache_store: nil).run
+              result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
               expect(result.diagnostics.find { |d| d.rule == "call.undefined-method" }).to be_nil
             end
           end
@@ -4951,7 +4953,9 @@ RSpec.describe Rigor::Analysis::Runner do
     before { Rigor::Plugin.unregister! }
     after { Rigor::Plugin.unregister! }
 
-    def run_with_plugin(plugin_class:, source: "x = 1\n")
+    # `expect_plugin_crash:` is set by the ONE example below whose subject is the runner's
+    # plugin-isolation envelope; every other caller keeps the full guard (issue #674).
+    def run_with_plugin(plugin_class:, source: "x = 1\n", expect_plugin_crash: false)
       Dir.mktmpdir do |dir|
         File.write(File.join(dir, "demo.rb"), source)
         configuration = Rigor::Configuration.new(
@@ -4964,11 +4968,12 @@ RSpec.describe Rigor::Analysis::Runner do
           Rigor::Plugin.register(plugin_class)
           true
         }
-        described_class.new(
+        runner = described_class.new(
           configuration: configuration,
           cache_store: nil,
           plugin_requirer: requirer
-        ).run
+        )
+        guarded_run(runner, allow_plugin_crash: expect_plugin_crash)
       end
     end
 
@@ -5007,7 +5012,7 @@ RSpec.describe Rigor::Analysis::Runner do
       bomb_class.define_method(:diagnostics_for_file) { |**| raise "kaboom" }
       stub_const("FakeBombEmitterPlugin", bomb_class)
 
-      result = run_with_plugin(plugin_class: bomb_class)
+      result = run_with_plugin(plugin_class: bomb_class, expect_plugin_crash: true)
       diag = result.diagnostics.find { |d| d.source_family == :plugin_loader && d.rule == "runtime-error" }
       expect(diag).not_to be_nil
       expect(diag.message).to include("kaboom")
@@ -5019,7 +5024,7 @@ RSpec.describe Rigor::Analysis::Runner do
         configuration = Rigor::Configuration.new(
           Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(dir, "demo.rb")])
         )
-        result = described_class.new(configuration: configuration, cache_store: nil).run
+        result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
         expect(result.diagnostics.select { |d| d.source_family.to_s.start_with?("plugin.") }).to be_empty
       end
     end
@@ -5045,7 +5050,7 @@ RSpec.describe Rigor::Analysis::Runner do
         runner = described_class.new(
           configuration: configuration, cache_store: nil, plugin_requirer: requirer
         )
-        [runner, runner.run]
+        [runner, guarded_run(runner)]
       end
     end
 
@@ -5118,9 +5123,10 @@ RSpec.describe Rigor::Analysis::Runner do
           Rigor::Plugin.register(plugin_class)
           true
         end
-        described_class.new(
+        runner = described_class.new(
           configuration: configuration, cache_store: nil, plugin_requirer: requirer
-        ).run
+        )
+        guarded_run(runner)
       end
     end
 
@@ -5153,9 +5159,10 @@ RSpec.describe Rigor::Analysis::Runner do
           Rigor::Plugin.register(noop)
           true
         end
-        result = described_class.new(
+        runner = described_class.new(
           configuration: configuration, cache_store: nil, plugin_requirer: requirer
-        ).run
+        )
+        result = guarded_run(runner)
         expect(result.diagnostics.select { |d| d.source_family == "plugin.noop-narrower" }).to be_empty
       end
     end
@@ -5165,7 +5172,8 @@ RSpec.describe Rigor::Analysis::Runner do
     before { Rigor::Plugin.unregister! }
     after { Rigor::Plugin.unregister! }
 
-    def run_with_plugin(plugin_class)
+    # `expect_plugin_crash:` — see the twin helper in the plugin-diagnostic-emission group above.
+    def run_with_plugin(plugin_class, expect_plugin_crash: false)
       Dir.mktmpdir do |dir|
         File.write(File.join(dir, "demo.rb"), "x = 1\n")
         configuration = Rigor::Configuration.new(
@@ -5178,9 +5186,10 @@ RSpec.describe Rigor::Analysis::Runner do
           Rigor::Plugin.register(plugin_class)
           true
         end
-        described_class.new(
+        runner = described_class.new(
           configuration: configuration, cache_store: nil, plugin_requirer: requirer
-        ).run
+        )
+        guarded_run(runner, allow_plugin_crash: expect_plugin_crash)
       end
     end
 
@@ -5221,7 +5230,7 @@ RSpec.describe Rigor::Analysis::Runner do
       end
       stub_const("FakePrepareBombPlugin", klass)
 
-      result = run_with_plugin(klass)
+      result = run_with_plugin(klass, expect_plugin_crash: true)
       diag = result.diagnostics.find do |d|
         d.source_family == :plugin_loader && d.rule == "runtime-error" && d.message.include?("prepare")
       end
@@ -5607,9 +5616,10 @@ RSpec.describe Rigor::Analysis::Runner do
           binding = Rigor::Analysis::BufferBinding.new(
             logical_path: logical, physical_path: physical
           )
-          result = described_class.new(
+          runner = described_class.new(
             configuration: configuration, cache_store: nil, buffer: binding
-          ).run
+          )
+          result = guarded_run(runner)
 
           # The parse error from the buffer surfaces under the LOGICAL path — that's what the editor highlights.
           paths = result.diagnostics.map(&:path)
@@ -5635,9 +5645,10 @@ RSpec.describe Rigor::Analysis::Runner do
           binding = Rigor::Analysis::BufferBinding.new(
             logical_path: logical, physical_path: physical
           )
-          result = described_class.new(
+          runner = described_class.new(
             configuration: configuration, cache_store: nil, buffer: binding
-          ).run
+          )
+          result = guarded_run(runner)
 
           paths = result.diagnostics.map(&:path).uniq
           # `other` is NOT analyzed — its parse error stays silent.
@@ -5660,9 +5671,10 @@ RSpec.describe Rigor::Analysis::Runner do
           binding = Rigor::Analysis::BufferBinding.new(
             logical_path: logical, physical_path: physical
           )
-          result = described_class.new(
+          runner = described_class.new(
             configuration: configuration, cache_store: nil, buffer: binding
-          ).run([logical])
+          )
+          result = guarded_run(runner, [logical])
 
           paths = result.diagnostics.map(&:path).uniq
           # The buffer's parse error surfaces under the logical path — NOT as a "no such file" diagnostic.
@@ -5688,9 +5700,10 @@ RSpec.describe Rigor::Analysis::Runner do
           binding = Rigor::Analysis::BufferBinding.new(
             logical_path: logical, physical_path: physical
           )
-          result = described_class.new(
+          runner = described_class.new(
             configuration: configuration, cache_store: nil, buffer: binding
-          ).run
+          )
+          result = guarded_run(runner)
 
           paths = result.diagnostics.map(&:path).uniq
           expect(paths).to include(logical)
@@ -5737,7 +5750,7 @@ RSpec.describe Rigor::Analysis::Runner do
           collect_stats: false,
           prebuilt: scan
         )
-        Dir.chdir(tmpdir) { runner.run }
+        Dir.chdir(tmpdir) { guarded_run(runner) }
 
         expect(runner.plugin_registry).to equal(scan.plugin_registry)
         expect(runner.dependency_source_index).to equal(scan.dependency_source_index)
@@ -5763,7 +5776,7 @@ RSpec.describe Rigor::Analysis::Runner do
           collect_stats: false,
           prebuilt: scan
         )
-        expect { Dir.chdir(tmpdir) { runner.run } }.not_to raise_error
+        expect { Dir.chdir(tmpdir) { guarded_run(runner) } }.not_to raise_error
       end
     end
 
@@ -5773,7 +5786,7 @@ RSpec.describe Rigor::Analysis::Runner do
         configuration = Rigor::Configuration.new("paths" => [tmpdir])
 
         runner = described_class.new(configuration: configuration, cache_store: nil, collect_stats: false)
-        Dir.chdir(tmpdir) { runner.run }
+        Dir.chdir(tmpdir) { guarded_run(runner) }
 
         # Pre-passes ran inline — registry / dep_index built fresh this call, not adopted from a prior snapshot.
         expect(runner.plugin_registry).not_to be_nil
@@ -5801,7 +5814,7 @@ RSpec.describe Rigor::Analysis::Runner do
         # scanner uses `environment: nil`, but the `prewarm_rbs_cache_for_pool` would on pool mode — sequential path
         # here doesn't). Allow it, but assert it isn't called by the override path itself.
         expect do
-          Dir.chdir(tmpdir) { runner.run }
+          Dir.chdir(tmpdir) { guarded_run(runner) }
         end.not_to raise_error
       end
     end
@@ -5822,7 +5835,7 @@ RSpec.describe Rigor::Analysis::Runner do
         runner = described_class.new(
           configuration: configuration, cache_store: nil, collect_stats: false, environment: env
         )
-        Dir.chdir(tmpdir) { runner.run }
+        Dir.chdir(tmpdir) { guarded_run(runner) }
 
         # After the run, the env's reporter slot should reference the runner's per-run reporter, not the pre-attached
         # one.
@@ -5843,13 +5856,13 @@ RSpec.describe Rigor::Analysis::Runner do
         runner_a = described_class.new(
           configuration: configuration, cache_store: nil, collect_stats: false, environment: env
         )
-        Dir.chdir(tmpdir) { runner_a.run }
+        Dir.chdir(tmpdir) { guarded_run(runner_a) }
         reporter_a = env.rbs_extended_reporter
 
         runner_b = described_class.new(
           configuration: configuration, cache_store: nil, collect_stats: false, environment: env
         )
-        Dir.chdir(tmpdir) { runner_b.run }
+        Dir.chdir(tmpdir) { guarded_run(runner_b) }
         reporter_b = env.rbs_extended_reporter
 
         # Each run swaps in its own per-run reporter pair.

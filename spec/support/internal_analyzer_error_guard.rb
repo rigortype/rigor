@@ -45,10 +45,15 @@ module InternalAnalyzerErrorGuard
   # @param result [Rigor::Analysis::Result]
   # @param context [String] the calling helper's name, prefixed onto the raised message so a failure points
   #   straight at which harness entry point saw the crash.
+  # @param allow_plugin_crash [Boolean] for the handful of examples whose SUBJECT is the runner's own
+  #   plugin-isolation envelope (`runner_spec.rb`'s "isolates plugin exceptions …" / "isolates a #prepare
+  #   raise …"): there the `:plugin_loader` / `"runtime-error"` diagnostic is what the example asserts on, so
+  #   raising on it would make the behaviour untestable. The CHECK-RULE half stays armed regardless — a rule
+  #   crashing in one of those runs would still hide the answer, and no spec has a reason to want that.
   # @return [Rigor::Analysis::Result] `result`, unchanged, when no diagnostic matches {.crash?}.
   # @raise [AnalyzerCrashed]
-  def self.check!(result, context:)
-    culprit = result.diagnostics.find { |d| crash?(d) }
+  def self.check!(result, context:, allow_plugin_crash: false)
+    culprit = result.diagnostics.find { |d| crash?(d, allow_plugin_crash: allow_plugin_crash) }
     return result if culprit.nil?
 
     raise AnalyzerCrashed,
@@ -62,8 +67,9 @@ module InternalAnalyzerErrorGuard
   # rule name `"runtime-error"` or `"load-error"` alone — a plugin is free to define its own rule under its
   # OWN `source_family: "plugin.<id>"` (several guarded specs assert a plugin-authored `"load-error"`
   # legitimately), and only the `:plugin_loader` family paired with `"runtime-error"` is this rescue's own.
-  def self.crash?(diagnostic)
+  def self.crash?(diagnostic, allow_plugin_crash: false)
     return true if diagnostic.message.start_with?(CHECK_RULE_CRASH_MESSAGE_PREFIX)
+    return false if allow_plugin_crash
 
     diagnostic.severity == :error &&
       diagnostic.source_family == PLUGIN_CRASH_SOURCE_FAMILY &&

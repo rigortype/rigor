@@ -12,9 +12,10 @@ RSpec.describe "call.self-undefined-method rule" do
       File.write(File.join(dir, "code.rb"), source)
       config = { "paths" => [dir] }
       config["severity_overrides"] = { "call.self-undefined-method" => "warning" } if enable
-      result = Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new(config), cache_store: nil
-      ).run
+      )
+      result = guarded_run(runner)
       result.diagnostics.select { |d| d.rule == "call.self-undefined-method" }.map(&:method_name)
     end
   end

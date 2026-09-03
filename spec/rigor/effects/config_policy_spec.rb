@@ -57,7 +57,7 @@ RSpec.describe "the effects policy configuration" do
       runner = Rigor::Analysis::Runner.new(
         configuration: configuration(effects), cache_store: nil, no_tolerated_effects: no_tolerated
       )
-      diagnostics = runner.run(["app"]).diagnostics
+      diagnostics = guarded_run(runner, ["app"]).diagnostics
       yield(diagnostics, runner)
     end
   end
@@ -131,7 +131,7 @@ RSpec.describe "the effects policy configuration" do
           "effects" => policy
         )
         runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new(data), cache_store: nil)
-        runner.run(["app"]).diagnostics
+        guarded_run(runner, ["app"]).diagnostics
               .select { |d| d.rule == "effect.envelope-exceeded" }
               .map { |d| d.message[/Method (\S+) performs/, 1] }
       end
@@ -192,7 +192,7 @@ RSpec.describe "the effects policy configuration" do
       merged = effects.merge("snapshot" => { "reach" => reach })
       Dir.chdir(fixture) do
         runner = Rigor::Analysis::Runner.new(configuration: configuration(merged), cache_store: nil)
-        runner.run(["app"])
+        guarded_run(runner, ["app"])
         Rigor::Effects::Snapshot.build(table: runner.effect_table, configuration: configuration(merged),
                                        sources: runner.effect_sources)
       end

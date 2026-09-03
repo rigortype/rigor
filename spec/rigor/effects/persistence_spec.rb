@@ -34,7 +34,7 @@ RSpec.describe "effect-summary persistence" do
       configuration: configuration(effects: effects, root: root),
       cache_store: store, collect_stats: false, workers: 0
     )
-    diagnostics = runner.run([root]).diagnostics
+    diagnostics = guarded_run(runner, [root]).diagnostics
     [runner, store, diagnostics]
   end
 
@@ -141,7 +141,7 @@ RSpec.describe "effect-summary persistence" do
     runner = Rigor::Analysis::Runner.new(
       configuration: edited, cache_store: store, collect_stats: false, workers: 0
     )
-    runner.run([fixture])
+    guarded_run(runner, [fixture])
 
     expect(runner.effects_served_from_cache?).to be(false)
     expect(diagnostics_counts(store)[:hits]).to eq(1)

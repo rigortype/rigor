@@ -42,7 +42,7 @@ RSpec.describe "ADR-57 return memo recording behaviour" do
     runner = Rigor::Analysis::Runner.new(
       configuration: configuration, cache_store: nil, record_dependencies: record
     )
-    runner.run
+    guarded_run(runner)
     runner
   end
 

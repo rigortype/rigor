@@ -30,12 +30,13 @@ RSpec.describe "run-result cache invalidation on a lockfile edit" do
   # which is what the next `rigor check` process would face.
   def analyse(dir, cache_root, paths:)
     Dir.chdir(dir) do
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new(
           "paths" => paths, "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
         ),
         cache_store: Rigor::Cache::Store.new(root: cache_root), collect_stats: false
-      ).run.diagnostics
+      )
+      guarded_run(runner).diagnostics
     end
   end
 

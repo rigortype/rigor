@@ -169,13 +169,14 @@ RSpec.describe Rigor::Analysis::Incremental do
       runner = Rigor::Analysis::Runner.new(
         configuration: config, cache_store: nil, record_dependencies: true
       )
-      result = runner.run
+      result = guarded_run(runner)
       [result.diagnostics.group_by(&:path), runner.file_dependents]
     end
 
     def per_file(dir)
       config = Rigor::Configuration.new("paths" => [dir])
-      Rigor::Analysis::Runner.new(configuration: config, cache_store: nil).run.diagnostics.group_by(&:path)
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+      guarded_run(runner).diagnostics.group_by(&:path)
     end
 
     # A self-contained `def.override-visibility-reduced` (balanced profile → :warning). `reduced:` toggles the `private`

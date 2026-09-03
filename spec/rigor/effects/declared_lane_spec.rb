@@ -35,7 +35,7 @@ RSpec.describe "the declared lane at call sites and the inherited bound" do
   def analyze(config = configuration)
     Dir.chdir(fixture) do
       runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-      [runner.run(["lib"]).diagnostics, runner]
+      [guarded_run(runner, ["lib"]).diagnostics, runner]
     end
   end
 
@@ -311,8 +311,8 @@ RSpec.describe "the declared lane at call sites and the inherited bound" do
             "effects" => { "envelopes" => envelopes } }.merge(extra)
         )
       )
-      Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-                             .run(["lib"]).diagnostics.select { |d| d.rule == "effect.liskov-widened" }
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+      guarded_run(runner, ["lib"]).diagnostics.select { |d| d.rule == "effect.liskov-widened" }
     end
 
     it "honours a `# rigor:disable` comment on the override's `def` line" do
@@ -349,10 +349,11 @@ RSpec.describe "the declared lane at call sites and the inherited bound" do
       run = lambda do |effects|
         data = { "paths" => [tracer] }
         data["effects"] = {} if effects
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(data)),
           cache_store: nil
-        ).run([tracer]).diagnostics
+        )
+        guarded_run(runner, [tracer]).diagnostics
       end
       on = run.call(true)
 

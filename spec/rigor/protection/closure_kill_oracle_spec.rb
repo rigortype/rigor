@@ -46,9 +46,11 @@ class BruteForceMutationOracle
 
   def signatures
     diagnostics = Dir.chdir(@root) do
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: @configuration, environment: @environment, cache_store: nil, collect_stats: false
-      ).run(@paths).diagnostics
+      )
+      # A plain class, not an example group, so the `GuardedAnalysis` mixin is out of reach here.
+      InternalAnalyzerErrorGuard.check!(runner.run(@paths), context: "BruteForceMutationOracle").diagnostics
     end
     Rigor::Protection::KillSignature.signatures_of(diagnostics)
   end

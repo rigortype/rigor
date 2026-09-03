@@ -31,10 +31,11 @@ RSpec.describe "effect envelopes written as rbs-inline comments" do
         File.write(File.join(dir, "sig", "demo.rbs"), signature)
       end
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration, cache_store: nil,
           plugin_requirer: ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) }
-        ).run(["demo.rb"]).diagnostics.select { |d| d.rule == "effect.envelope-exceeded" }
+        )
+        guarded_run(runner, ["demo.rb"]).diagnostics.select { |d| d.rule == "effect.envelope-exceeded" }
       end
     end
   end

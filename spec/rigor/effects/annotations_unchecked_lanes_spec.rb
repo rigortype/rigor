@@ -91,11 +91,12 @@ RSpec.describe "effect.annotations-unchecked across the two annotation lanes" do
       configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(data))
       store = cached ? Rigor::Cache::Store.new(root: File.join(dir, ".rigor", "cache")) : nil
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration, cache_store: store,
           plugin_requirer: ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) },
           **runner_kwargs
-        ).run(["lib"]).diagnostics.select { |d| d.rule == rule }
+        )
+        guarded_run(runner, ["lib"]).diagnostics.select { |d| d.rule == rule }
       end
     end
   end

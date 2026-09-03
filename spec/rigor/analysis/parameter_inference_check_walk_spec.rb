@@ -15,7 +15,8 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
     Tempfile.create(["probe", ".rb"]) do |file|
       file.write(source)
       file.flush
-      return Rigor::Analysis::Runner.new(configuration: config, cache_store: nil).run([file.path]).diagnostics
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+      return guarded_run(runner, [file.path]).diagnostics
     end
   end
 

@@ -32,10 +32,11 @@ RSpec.describe "RBS::Extended directives written as rbs-inline comments" do
     Dir.mktmpdir("rigor-inline-directive-") do |dir|
       File.write(File.join(dir, "demo.rb"), source)
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: configuration, cache_store: nil,
           plugin_requirer: ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) }
-        ).run(["demo.rb"]).diagnostics
+        )
+        guarded_run(runner, ["demo.rb"]).diagnostics
       end
     end
   end

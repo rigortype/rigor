@@ -24,7 +24,7 @@ RSpec.describe "a catalogue posture on a syntactically named constant" do
   let(:table) do
     Dir.chdir(fixture) do
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-      runner.run(["lib"])
+      guarded_run(runner, ["lib"])
       runner.effect_table
     end
   end

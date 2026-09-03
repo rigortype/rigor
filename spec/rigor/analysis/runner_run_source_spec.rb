@@ -11,17 +11,16 @@ RSpec.describe "Rigor::Analysis::Runner#run_source" do
   end
 
   def in_memory(source)
-    Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
   end
 
   def from_disk(source)
     Tempfile.create(["probe", ".rb"]) do |file|
       file.write(source)
       file.flush
-      return Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-                                    .run([file.path]).diagnostics
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      return guarded_run(runner, [file.path]).diagnostics
     end
   end
 
@@ -44,9 +43,8 @@ RSpec.describe "Rigor::Analysis::Runner#run_source" do
   end
 
   it "carries the supplied logical path into diagnostic locations" do
-    diagnostics = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-                                         .run_source(source: "x = 1\nx.nope\n", path: "buffer.rb")
-                                         .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    diagnostics = guarded_run_source(runner, source: "x = 1\nx.nope\n", path: "buffer.rb").diagnostics
     expect(diagnostics).not_to be_empty
     # Per-file diagnostics carry the logical path; the only other path is the run-level config-info stream
     # (`.rigor.yml`). No tmp/disk path.
@@ -55,9 +53,8 @@ RSpec.describe "Rigor::Analysis::Runner#run_source" do
   end
 
   it "reports parse errors without touching disk" do
-    diagnostics = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-                                         .run_source(source: "def broken(\n", path: "bad.rb")
-                                         .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    diagnostics = guarded_run_source(runner, source: "def broken(\n", path: "bad.rb").diagnostics
     expect(diagnostics).not_to be_empty
   end
 end

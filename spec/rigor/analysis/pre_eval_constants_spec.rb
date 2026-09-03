@@ -27,9 +27,10 @@ RSpec.describe "pre_eval: constant publication" do
       Dir.chdir(tmpdir) do
         config = { "paths" => [lib] }
         config["pre_eval"] = [File.join(lib, "decls.rb")] if publish
-        result = Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: Rigor::Configuration.new(config), cache_store: nil
-        ).run
+        )
+        result = guarded_run(runner)
         result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
       end
     end
@@ -171,13 +172,14 @@ RSpec.describe "pre_eval: constant publication" do
         File.write(File.join(lib, "b.rb"), "SHARED = #{second_value}\n")
         File.write(File.join(lib, "uses.rb"), "SHARED.probe_conflict\n")
         Dir.chdir(tmpdir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: Rigor::Configuration.new(
               "paths" => [lib],
               "pre_eval" => [File.join(lib, "a.rb"), File.join(lib, "b.rb")]
             ),
             cache_store: nil
-          ).run.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
+          )
+          guarded_run(runner).diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
         end
       end
       receiver_for(messages, "probe_conflict")
@@ -200,12 +202,13 @@ RSpec.describe "pre_eval: constant publication" do
         File.write(File.join(lib, "decls.rb"), "TIMEOUT = 30\n")
         File.write(File.join(lib, "uses.rb"), "TIMEOUT.probe_pool\n")
         Dir.chdir(tmpdir) do
-          result = Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: Rigor::Configuration.new(
               "paths" => [lib], "pre_eval" => [File.join(lib, "decls.rb")]
             ),
             cache_store: nil, workers: workers
-          ).run
+          )
+          result = guarded_run(runner)
           messages = result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
           receiver_for(messages, "probe_pool")
         end

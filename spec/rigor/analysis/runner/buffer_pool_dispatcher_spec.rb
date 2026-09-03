@@ -90,10 +90,11 @@ RSpec.describe Rigor::Analysis::Runner::BufferPoolDispatcher do
   def sequential_diagnostics(dir, context, bindings)
     bindings.map do |binding|
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
+        runner = Rigor::Analysis::Runner.new(
           configuration: context.configuration, cache_store: context.cache_store, collect_stats: false,
           buffer: binding, prebuilt: context.project_scan, environment: context.environment
-        ).run([binding.logical_path]).diagnostics
+        )
+        guarded_run(runner, [binding.logical_path]).diagnostics
       end
     end
   end

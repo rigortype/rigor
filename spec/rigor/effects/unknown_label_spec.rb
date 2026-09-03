@@ -33,8 +33,8 @@ RSpec.describe "effect.unknown-label" do
 
   def diagnostics_for(configuration, root: fixture, rules: [rule])
     Dir.chdir(root) do
-      Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-                             .run(["lib"]).diagnostics.select { |d| rules.include?(d.rule) }
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      guarded_run(runner, ["lib"]).diagnostics.select { |d| rules.include?(d.rule) }
     end
   end
 
@@ -123,10 +123,11 @@ RSpec.describe "effect.unknown-label" do
       Dir.mktmpdir("rigor-inline-unknown-label-") do |dir|
         File.write(File.join(dir, "demo.rb"), source)
         Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
+          runner = Rigor::Analysis::Runner.new(
             configuration: config, cache_store: nil,
             plugin_requirer: ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) }
-          ).run(["demo.rb"]).diagnostics.select { |d| d.rule == rule }
+          )
+          guarded_run(runner, ["demo.rb"]).diagnostics.select { |d| d.rule == rule }
         end
       end
     end

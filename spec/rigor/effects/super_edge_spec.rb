@@ -21,7 +21,7 @@ RSpec.describe "a super call in an effect summary" do
   def analyze(configuration)
     Dir.chdir(fixture) do
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-      diagnostics = runner.run(["lib"]).diagnostics
+      diagnostics = guarded_run(runner, ["lib"]).diagnostics
       [runner.effect_table, diagnostics]
     end
   end

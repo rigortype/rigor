@@ -27,7 +27,7 @@ RSpec.describe "effect.envelope-exceeded over the envelopes fixture" do
   def findings(configuration, cache_store: nil)
     Dir.chdir(fixture) do
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: cache_store)
-      runner.run(["lib"]).diagnostics.select { |d| d.rule == rule }
+      guarded_run(runner, ["lib"]).diagnostics.select { |d| d.rule == rule }
     end
   end
 
@@ -130,7 +130,7 @@ RSpec.describe "effect.envelope-exceeded over the envelopes fixture" do
 
       Dir.chdir(fixture) do
         runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-        diagnostics = runner.run(["lib"]).diagnostics
+        diagnostics = guarded_run(runner, ["lib"]).diagnostics
 
         expect(diagnostics.select { |d| d.rule == rule }).to be_empty
         expect(runner.effect_table["Envelopes::Memo#value"].proven.to_a).to eq(["mutate.self"])
@@ -157,8 +157,8 @@ RSpec.describe "effect.envelope-exceeded over the envelopes fixture" do
           { "paths" => ["lib"], "signature_paths" => ["sig"], "effects" => {} }.merge(extra)
         )
       )
-      Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-                             .run(["lib"]).diagnostics.select { |d| d.rule == rule }
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+      guarded_run(runner, ["lib"]).diagnostics.select { |d| d.rule == rule }
     end
 
     it "honours a `# rigor:disable` comment on the `def` line" do
@@ -195,7 +195,7 @@ RSpec.describe "effect.envelope-exceeded over the envelopes fixture" do
         warm_runner = nil
         warm = Dir.chdir(fixture) do
           warm_runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: store.call)
-          warm_runner.run(["lib"]).diagnostics.select { |d| d.rule == rule }
+          guarded_run(warm_runner, ["lib"]).diagnostics.select { |d| d.rule == rule }
         end
 
         expect(warm_runner.effects_served_from_cache?).to be(true)
@@ -212,8 +212,8 @@ RSpec.describe "effect.envelope-exceeded over the envelopes fixture" do
       config = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge("paths" => [tracer], "effects" => {})
       )
-      diagnostics = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-                                           .run([tracer]).diagnostics
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+      diagnostics = guarded_run(runner, [tracer]).diagnostics
 
       expect(diagnostics.select { |d| d.rule.to_s.start_with?("effect.") }).to be_empty
     end

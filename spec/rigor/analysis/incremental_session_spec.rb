@@ -98,9 +98,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
 
   def full_run(dir)
     config = configuration(dir)
-    Rigor::Analysis::Runner.new(
+    runner = Rigor::Analysis::Runner.new(
       configuration: config, cache_store: nil, environment: shared_environment
-    ).run.diagnostics
+    )
+    guarded_run(runner).diagnostics
   end
 
   def session_for(config, paths: nil)
@@ -301,9 +302,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     # The oracle: a full re-analysis of the edited tree under the same plugin.
     def gate_full_run(config)
       Rigor::Plugin.unregister!
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: config, cache_store: nil, plugin_requirer: gate_requirer
-      ).run.diagnostics
+      )
+      guarded_run(runner).diagnostics
     end
 
     before { Rigor::Plugin.unregister! }
@@ -1571,9 +1573,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
 
     def pi_full_run(dir)
-      Rigor::Analysis::Runner.new(
+      runner = Rigor::Analysis::Runner.new(
         configuration: pi_configuration(dir), cache_store: nil, environment: shared_environment
-      ).run.diagnostics
+      )
+      guarded_run(runner).diagnostics
     end
 
     def pi_session(dir)

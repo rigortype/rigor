@@ -32,15 +32,21 @@
 # into a loud failure at the exact spec that hid it. `spec/integration/internal_analyzer_error_guard_spec.rb`
 # pins that the guard actually fires through these two real rescue sites (not just against a hand-built
 # diagnostic), so a future rewording of either message can't silently disarm it.
+#
+# Issue #696 — what a crash diagnostic LOOKS like is no longer this file's own knowledge. Both shapes are
+# defined once in {Rigor::Analysis::CrashSignature} and reached here through it, because two consumers inside
+# `lib/` need the same answer ({Rigor::Analysis::Result#crashed?} and the ADR-69 kill oracles, issue #686) and
+# a third independent string match on a diagnostic message is a disarming waiting to happen — a reworded
+# message would silently un-arm whichever copies were not updated, and nothing would go red. What stays local
+# to this file is the spec-harness POLICY: the `allow_plugin_crash:` escape hatch, and a message that names
+# the example which hid the crash.
+require "rigor/analysis/crash_signature"
+
 module InternalAnalyzerErrorGuard
   # A named class rather than a bare RuntimeError so a caller-side `rescue StandardError` — or a future
   # `expect { ... }.to raise_error(RuntimeError)` written for an unrelated reason — cannot accidentally
   # swallow, or count as a pass, a fire this guard did not intend it to catch.
   class AnalyzerCrashed < StandardError; end
-
-  CHECK_RULE_CRASH_MESSAGE_PREFIX = "internal analyzer error"
-  PLUGIN_CRASH_RULE = "runtime-error"
-  PLUGIN_CRASH_SOURCE_FAMILY = :plugin_loader
 
   # @param result [Rigor::Analysis::Result]
   # @param context [String] the calling helper's name, prefixed onto the raised message so a failure points
@@ -76,17 +82,21 @@ module InternalAnalyzerErrorGuard
           "this is a real bug, not a spec-harness issue. See issue #665."
   end
 
-  # True for either of the two rescue-produced diagnostics documented above. Deliberately keyed on the
-  # structured `(severity, source_family, rule)` triple for the plugin-crash case rather than on the bare
-  # rule name `"runtime-error"` or `"load-error"` alone — a plugin is free to define its own rule under its
-  # OWN `source_family: "plugin.<id>"` (several guarded specs assert a plugin-authored `"load-error"`
-  # legitimately), and only the `:plugin_loader` family paired with `"runtime-error"` is this rescue's own.
+  # True for either of the two rescue-produced diagnostics documented above. The SHAPES live in
+  # {Rigor::Analysis::CrashSignature} (issue #696) — including why the plugin case is keyed on the
+  # structured `(severity, source_family, rule)` triple rather than on the bare rule name. What this method
+  # adds is the harness policy: `allow_plugin_crash:` drops the plugin half for the handful of examples
+  # whose subject IS the isolation envelope, and the check-rule half stays armed regardless.
+  #
+  # `CrashSignature` also classifies a third shape, `:rbs_build` (`rbs.coverage.definition-build-failed` /
+  # `rbs.coverage.environment-build-failed`, issue #696). It is deliberately NOT armed here: the analysis
+  # ran to completion in that case, `spec/integration/environment_build_failed_spec.rb` produces one on
+  # purpose, and how many other fixtures collide with Rigor's bundled RBS has not been measured. Arming it
+  # is its own change, with that measurement in front of it.
   def self.crash?(diagnostic, allow_plugin_crash: false)
-    return true if diagnostic.message.start_with?(CHECK_RULE_CRASH_MESSAGE_PREFIX)
-    return false if allow_plugin_crash
+    reason = Rigor::Analysis::CrashSignature.reason(diagnostic)
+    return false if reason == :plugin && allow_plugin_crash
 
-    diagnostic.severity == :error &&
-      diagnostic.source_family == PLUGIN_CRASH_SOURCE_FAMILY &&
-      diagnostic.rule == PLUGIN_CRASH_RULE
+    Rigor::Analysis::CrashSignature::ANALYZER_FAILED_REASONS.include?(reason)
   end
 end

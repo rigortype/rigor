@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "analysis_guard"
 require_relative "mutator"
 require_relative "diagnostic_oracle"
 
@@ -114,7 +115,9 @@ module Rigor
         kept = kept_mutations(source, path)
         return FileResult.new(path: path, killed: 0, survived: 0, sites: []) if kept.empty?
 
-        baseline = @oracle.baseline(source: source, path: path)
+        baseline = clean_baseline(source, path)
+        return crashed_baseline_result(path, kept.size) if baseline.nil?
+
         killed = 0
         harness_errors = 0
         sites = []
@@ -140,7 +143,12 @@ module Rigor
         kept = kept_mutations(source, path)
         return FusedFileResult.new(path: path, type_killed: 0, test_killed: 0, sites: []) if kept.empty?
 
-        baseline = @oracle.baseline(source: source, path: path)
+        baseline = clean_baseline(source, path)
+        if baseline.nil?
+          return FusedFileResult.new(path: path, type_killed: 0, test_killed: 0, sites: [],
+                                     harness_errors: kept.size)
+        end
+
         type_killed = 0
         test_killed = 0
         harness_errors = 0
@@ -185,6 +193,12 @@ module Rigor
       # only the latter is a harness defect worth counting and surfacing. Both stay OUT of `killed + survived`
       # exactly as before (containment is unchanged) — #264 is about visibility, not about admitting either
       # bucket into the denominator.
+      #
+      # #686 — a {AnalysisGuard::AnalyzerCrashed} from the oracle's re-analysis arrives here as a
+      # `StandardError` and lands in the same bucket, which is exactly right: an indeterminate mutant must
+      # be scored neither killed nor survived. Before the oracle refused, a crashed re-analysis produced the
+      # same synthetic diagnostic on both sides of the kill comparison, so the mutant was scored a SURVIVOR
+      # and the harness reported a hole it had never measured.
       def classify(source, path, mut, baseline)
         mutant_source = mut.apply(source)
         return :invalid unless Prism.parse(mutant_source).success?
@@ -194,6 +208,27 @@ module Rigor
         # A harness-level failure on one mutant must not abort the file — but it must not vanish either
         # (#264): the caller counts this bucket separately and the CLI surfaces it.
         :harness_error
+      end
+
+      # The clean per-file baseline, or nil when the analyzer crashed while computing it (#686).
+      #
+      # The baseline is computed ONCE per file, outside {#classify}'s per-mutant rescue, so a crash here is
+      # not one mutant's problem: every mutant of this file would be judged against a baseline that knows
+      # nothing, and each would come back a survivor. Reported as `harness_errors` — one per mutant that
+      # would have been measured — rather than raised, so one bad file does not abort a whole sweep, and
+      # rather than silently skipped, so the count the CLI already warns about accounts for it.
+      #
+      # Deliberately narrow: only {AnalyzerCrashed}. Any other exception out of an oracle's baseline
+      # propagates exactly as it did before, because widening that rescue would hide unrelated harness bugs
+      # behind the very bucket this issue exists to make honest.
+      def clean_baseline(source, path)
+        @oracle.baseline(source: source, path: path)
+      rescue AnalyzerCrashed
+        nil
+      end
+
+      def crashed_baseline_result(path, mutant_count)
+        FileResult.new(path: path, killed: 0, survived: 0, sites: [], harness_errors: mutant_count)
       end
 
       def sample(mutations)

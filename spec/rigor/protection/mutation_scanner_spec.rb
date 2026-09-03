@@ -198,6 +198,45 @@ RSpec.describe Rigor::Protection::MutationScanner do
     expect(result.harness_errors).to eq(0)
   end
 
+  # Issue #686 — the sweep-level gate. `File.join` is the fixture the "records a surviving site" example above
+  # uses precisely because its mutants genuinely survive, so it is the file a crashed rule would inflate: with
+  # every check rule raising, the baseline and each mutant come back carrying the same `internal analyzer
+  # error` row, the kill comparison finds no difference, and every one of those mutants is reported as a
+  # survivor Rigor "failed to catch". The oracle now refuses the crashed run, and the scanner routes the
+  # refusal into the `harness_errors` bucket the CLI already warns about (#264).
+  #
+  # The healthy scan is asserted first and is the non-vacuity half: the same file really does yield survivors,
+  # so `survived == 0` below is the crash being contained rather than the fixture having nothing to measure.
+  it "reports a crashed run as harness_errors instead of inflating the survivor count (#686)" do
+    File.write("joins.rb", %(def j\n  File.join("a", "b", "c")\nend\n))
+    healthy = scanner.scan_file("joins.rb")
+    expect(healthy.survived).to be >= 1
+
+    allow(Rigor::Analysis::CheckRules).to receive(:diagnose)
+      .and_raise(RuntimeError, "injected check-rule crash (issue #686 gate)")
+    crashed = scanner.scan_file("joins.rb")
+
+    expect(crashed.survived).to eq(0)
+    expect(crashed.killed).to eq(0)
+    expect(crashed.harness_errors).to eq(healthy.total)
+    expect(crashed.total).to eq(0)
+  end
+
+  # The same containment on the fused path, whose baseline is computed at its own call site.
+  it "reports a crashed run as harness_errors in the fused scan too (#686)" do
+    File.write("joins.rb", %(def j\n  File.join("a", "b", "c")\nend\n))
+    healthy = scanner.scan_file("joins.rb")
+    expect(healthy.total).to be >= 1
+
+    allow(Rigor::Analysis::CheckRules).to receive(:diagnose)
+      .and_raise(RuntimeError, "injected check-rule crash (issue #686 gate)")
+    crashed = scanner.scan_file_fused("joins.rb", test_oracle: fake_test_oracle(false))
+
+    expect(crashed.unprotected).to eq(0)
+    expect(crashed.harness_errors).to eq(healthy.total)
+    expect(crashed.total).to eq(0)
+  end
+
   it "never reaches the suite when the type checker already kills the mutant (gradual short-circuit)" do
     # `"hello".upcase` mutants are all type-killed → the test oracle is never consulted; an oracle that would raise if
     # called proves the short-circuit.

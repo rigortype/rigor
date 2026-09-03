@@ -1,6 +1,6 @@
 # Rigor production plugins
 
-Thirty entries targeting real Ruby gems, frameworks, and DSLs.
+Thirty-five entries targeting real Ruby gems, frameworks, and DSLs.
 Each keeps a self-contained layout (`lib/` + README + demo +
 integration spec), and the set **ships bundled inside the single
 `rigortype` gem** (v0.1.11) — you do not add them to your
@@ -108,6 +108,16 @@ subset; they cross-reference through ADR-9 facts.
 | [`rigor-dry-struct`](rigor-dry-struct/) | **ADR-16 macro expansion substrate Tier C consumer** — declarative `Plugin::Macro::HeredocTemplate` manifest synthesises an instance reader on every `Dry::Struct` subclass for each `attribute :name, T` / `attribute? :name, T`. v0.2.0 reads `:dry_type_aliases` via ADR-18's `returns_from_arg:` for per-call-site precision uplift (`attribute :city, Types::String` returns `Nominal[String]` instead of `Dynamic[Top]`). |
 | [`rigor-dry-validation`](rigor-dry-validation/) | Recognises `class T < Dry::Validation::Contract` subclasses; publishes `:dry_validation_contracts`. Ships an RBS overlay typing `Contract#call → Result` + `Result#{success?, failure?, to_h, errors, []}` so `contract.call(input).to_h` chains resolve cleanly. |
 | [`rigor-dry-monads`](rigor-dry-monads/) | **Lightweight HKT carrier adapter** per ADR-20 Slice 4 — registers `dry_monads::result` and `dry_monads::maybe` HKT tags and contributes return types for constructors (`Success`, `Failure`, `Some`, `None`) and unwrapping (`value!`, `failure`, `value_or`). |
+
+### Foreign Function Interface (FFI) family ([ADR-30](../docs/adr/30-rigor-ffi-plugin-shape.md))
+
+| Plugin | What it does |
+| --- | --- |
+| [`rigor-ffi`](rigor-ffi/) | **Core FFI plugin** — `extend FFI::Library` recognition, literal `attach_function` walking, 25-primitive type set, carrier types (`FFI::Pointer`, `FFI::MemoryPointer`, `FFI::AutoPointer`, `FFI::Buffer`, `FFI::Function`, `FFI::Struct`), nominal pointer typedefs, `:pointer` parameter widening, DSL recognizer extension point (`BindingRecognizer`), and `ffx.unsupported-*` diagnostics for ffx builds. |
+| [`rigor-sassc`](rigor-sassc/) | SassC / LibSass bindings — prefix-stripping DSL recognizer, nominal pointer typedefs (`SassDataContextPtr`, `SassOptionsPtr`, `SassContextPtr`), and high-level RBS definitions. |
+| [`rigor-ethon`](rigor-ethon/) | Ethon / Libcurl bindings — option catalog type inference, dynamic return types for `Ethon::Easy#perform`, `#response_code`, `#total_time`, and high-level RBS definitions. |
+| [`rigor-rbnacl`](rigor-rbnacl/) | RbNaCl / Libsodium bindings — `sodium_function` DSL recognizer and high-level RBS definitions for secret box and signature keys. |
+| [`rigor-ffi-rzmq`](rigor-ffi-rzmq/) | FFI-RZMQ / ZeroMQ bindings — curated RBS definitions for `LibZMQ` and higher-level `ZMQ::Context` / `ZMQ::Socket` wrappers. |
 
 ### Other ecosystem plugins
 

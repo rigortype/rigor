@@ -43,7 +43,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-27 | [Tool Distribution and Installation Model](27-tool-distribution-model.md) | Accepted (partially implemented; Nix flake, container image, and CI templates shipped; single binary deferred) |
 | ADR-28 | [Path-scoped Method-Protocol Contracts](28-path-scoped-protocol-contracts.md) | Accepted |
 | ADR-29 | [Browser Playground](29-browser-playground.md) | Accepted (server-side playground v0.1.10–0.1.11; in-browser ruby.wasm build shipped 2026-06-14/15) |
-| ADR-30 | [`rigor-ffi` Plugin Shape](30-rigor-ffi-plugin-shape.md) | Proposed (not implemented) |
+| ADR-30 | [`rigor-ffi` Plugin Shape](30-rigor-ffi-plugin-shape.md) | Accepted |
 | ADR-31 | [Contribution and Supply-chain Policy](31-contribution-and-supply-chain-policy.md) | Accepted (in force) |
 | ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (WD11/WD12 keep the rbs-inline gem as the reader, 2026-07-30) |
 | ADR-33 | [MCP Server Packaging](33-mcp-server.md) | Accepted (implemented in v0.1.10) |

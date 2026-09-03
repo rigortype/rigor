@@ -1,0 +1,3 @@
+plugins:
+  - gem: rigor-ffi
+  - gem: rigor-sassc

@@ -1,0 +1,67 @@
+module FFI
+  class Pointer
+    NULL: Pointer
+    def self.new: (Integer address) -> instance
+    def null?: () -> bool
+    def address: () -> Integer
+    def +: (Integer offset) -> Pointer
+    def read_string: (?Integer? length) -> String
+    def read_bytes: (Integer length) -> String
+    def write_string: (String str, ?Integer? length) -> Pointer
+    def write_bytes: (String str, ?Integer offset, ?Integer? length) -> Pointer
+  end
+
+  class MemoryPointer < Pointer
+    def self.new: (Symbol | Integer type, ?Integer count, ?bool clear) -> instance
+    def self.from_string: (String s) -> instance
+  end
+
+  class AutoPointer < Pointer
+    def self.new: (Pointer ptr, ?(Method | Proc | Symbol)? releaser) -> instance
+    def free: () -> void
+    def autorelease=: (bool val) -> bool
+  end
+
+  class Buffer < Pointer
+    def self.new: (Symbol | Integer type, ?Integer size, ?Integer count) -> instance
+  end
+
+  class Function < Pointer
+    def self.new: (Symbol return_type, Array[Symbol] param_types, ?Hash[Symbol, untyped] options) ?{ (*untyped) -> untyped } -> instance
+    def call: (*untyped) -> untyped
+  end
+
+  class Struct
+    def self.layout: (*untyped) -> void
+    def self.by_ref: () -> untyped
+    def self.ptr: () -> untyped
+    def self.size: () -> Integer
+    def pointer: () -> Pointer
+    def to_ptr: () -> Pointer
+    def null?: () -> bool
+    def []: (Symbol | String name) -> untyped
+    def []=: (Symbol | String name, untyped value) -> untyped
+  end
+
+  class Union < Struct
+  end
+
+  class ManagedStruct < Struct
+  end
+
+  module Library
+    def ffi_lib: (*(String | Array[String]) libs) -> untyped
+    def attach_function: (*untyped) -> untyped
+    def callback: (Symbol name, Array[Symbol] param_types, Symbol return_type) -> untyped
+    def typedef: (Symbol | String old_type, Symbol | String new_type) -> untyped
+    def enum: (*untyped) -> untyped
+    def bitmask: (*untyped) -> untyped
+  end
+end
+
+module FFX
+  module Library
+    def ffi_lib: (*(String | Array[String]) libs) -> untyped
+    def attach_function: (*untyped) -> untyped
+  end
+end

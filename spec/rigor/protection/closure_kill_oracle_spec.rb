@@ -24,7 +24,14 @@ class BruteForceMutationOracle
       FileUtils.mkdir_p(File.join(@root, File.dirname(path)))
       FileUtils.cp(path, File.join(@root, path))
     end
-    @baseline = signatures
+    # The guard in `signatures` can raise before the example has an oracle to call `discard!` on, which
+    # would abandon the copied tree and trip the suite's leak check with a second, unrelated failure.
+    begin
+      @baseline = signatures
+    rescue StandardError
+      discard!
+      raise
+    end
   end
 
   # The throwaway tree is a whole copy of the fixture project and lives as long as the example that built the

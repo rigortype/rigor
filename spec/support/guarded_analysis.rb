@@ -47,6 +47,19 @@ module GuardedAnalysis
     InternalAnalyzerErrorGuard.check!(result, context: guarded_analysis_context("guarded_run_source"))
   end
 
+  # `WorkerSession#analyze(path)` — the per-file entry the pool workers drive, which returns
+  # `Array<Diagnostic>` rather than a `Result`, so it needs the Array-shaped guard.
+  #
+  # @param session [Rigor::Analysis::WorkerSession]
+  # @return [Array<Rigor::Analysis::Diagnostic>]
+  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  def guarded_session_analyze(session, path, allow_plugin_crash: false)
+    InternalAnalyzerErrorGuard.check_diagnostics!(
+      session.analyze(path),
+      context: guarded_analysis_context("guarded_session_analyze"), allow_plugin_crash: allow_plugin_crash
+    )
+  end
+
   private
 
   # Names the example that hid the crash, not just the helper: the whole point of the guard is to

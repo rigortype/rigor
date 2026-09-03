@@ -53,8 +53,22 @@ module InternalAnalyzerErrorGuard
   # @return [Rigor::Analysis::Result] `result`, unchanged, when no diagnostic matches {.crash?}.
   # @raise [AnalyzerCrashed]
   def self.check!(result, context:, allow_plugin_crash: false)
-    culprit = result.diagnostics.find { |d| crash?(d, allow_plugin_crash: allow_plugin_crash) }
-    return result if culprit.nil?
+    check_diagnostics!(result.diagnostics, context: context, allow_plugin_crash: allow_plugin_crash)
+    result
+  end
+
+  # The bare-Array twin of {.check!}, for the per-file surface that returns diagnostics rather than a
+  # `Result`: `WorkerSession#analyze(path)` is the public entry the fork/Ractor workers call, and it hands
+  # back `Array<Diagnostic>`. Without this there is no seam for it at all, which is how
+  # `worker_session_spec`'s Runner-vs-session equivalence examples stayed vacuous under #674 — a crashed
+  # rule makes BOTH sides one identical diagnostic, so `eq` holds (issue #674 review).
+  #
+  # @param diagnostics [Array<Rigor::Analysis::Diagnostic>]
+  # @return [Array<Rigor::Analysis::Diagnostic>] `diagnostics`, unchanged, when none matches {.crash?}.
+  # @raise [AnalyzerCrashed]
+  def self.check_diagnostics!(diagnostics, context:, allow_plugin_crash: false)
+    culprit = diagnostics.find { |d| crash?(d, allow_plugin_crash: allow_plugin_crash) }
+    return diagnostics if culprit.nil?
 
     raise AnalyzerCrashed,
           "#{context}: the analyzer crashed instead of producing real diagnostics " \

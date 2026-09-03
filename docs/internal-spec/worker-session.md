@@ -79,7 +79,11 @@ deduped by class name: each worker holds its own loader and its own
 per-class memo, so a class two workers touched arrives twice and a class
 one worker touched arrives once, and neither worker alone is the set the
 run hit. This is the drain rule; the diagnostic it carries is normative
-in [diagnostic-policy.md](../type-specification/diagnostic-policy.md).
+in [diagnostic-policy.md](../type-specification/diagnostic-policy.md),
+including its companion rule on the other axis — a pool pre-warm resolves
+every known class, so what it discovers must not reach the diagnostic
+either, or the same project reports differently on a cold cache than on a
+warm one.
 
 Plugin `#prepare` runs **once at construction** so each worker is warm
 before its first `#analyze` call; any raise from `prepare` is captured into

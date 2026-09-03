@@ -39,9 +39,21 @@ module Rigor
         # harness-level failure measures the harness, not the code, exactly like a parse-invalid mutant).
         def total = killed + survived
 
-        # Effectiveness ratio; a file with no type-relevant mutation is vacuously fully effective (no breakage
-        # was available to miss).
-        def ratio = total.zero? ? 1.0 : killed.to_f / total
+        # Issue #686 — "nothing was measured here" is NOT the same as "there was nothing to measure", and
+        # `total.zero?` cannot tell them apart on its own. A file with no type-relevant mutation is
+        # vacuously fully effective; a file whose every mutant landed in `harness_errors` measured the
+        # harness and says nothing about the code. Before this, the second borrowed the first's 1.0 and a
+        # wholly crashed file reported 100% effective.
+        def measured? = !(total.zero? && harness_errors.positive?)
+
+        # Effectiveness ratio. 0.0 rather than 1.0 for an unmeasured file — both are wrong as a measurement,
+        # and only one of them turns a red `--threshold` gate green. Read it next to {#measured?}, which is
+        # what the renderer and the exit gate consult.
+        def ratio
+          return 0.0 unless measured?
+
+          total.zero? ? 1.0 : killed.to_f / total
+        end
       end
 
       # ADR-70 — one type-survivor classified by the dynamic (test) axis. `protection` is `:test` (a test caught
@@ -63,8 +75,15 @@ module Rigor
         def unprotected = sites.size
         def total = type_killed + test_killed + unprotected
 
+        # Issue #686 — see {FileResult#measured?}.
+        def measured? = !(total.zero? && harness_errors.positive?)
+
         # Fused protected ratio — caught by *either* axis.
-        def ratio = total.zero? ? 1.0 : (type_killed + test_killed).to_f / total
+        def ratio
+          return 0.0 unless measured?
+
+          total.zero? ? 1.0 : (type_killed + test_killed).to_f / total
+        end
       end
 
       # @param configuration [Rigor::Configuration]

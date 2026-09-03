@@ -27,11 +27,15 @@ module Rigor
     # let {MutationScanner} put the mutant in the `harness_errors` bucket (#264), which is already excluded
     # from `killed + survived` and already surfaced by the CLI. A crash then READS as a crash.
     #
-    # Only {Analysis::CrashSignature.analyzer_failed?} is armed — an escaped exception, where nothing ran. A
-    # `:rbs_build` degradation is not refused: the analysis ran, and the site filter that admits mutations
-    # already keeps only receivers Rigor holds a concrete type for, so a class whose RBS definition failed
-    # to build contributes no measured sites in the first place. Refusing on it would turn a partially
-    # useful measurement into no measurement, which is the wrong trade under ADR-5.
+    # Only {Analysis::Result#crashed?} is armed — the check-rule rescue, the one shape that REPLACES a
+    # file's whole diagnostic list. Refusing more than that is the same error pointed the other way, and it
+    # was measured: on a project whose plugin `prepare` raises, refusing the `:plugin` row took a file from
+    # `killed=1 survived=6` to `killed=0 survived=0 harness_errors=7` — the builtin rules had run, their
+    # diagnostics were all present, and a real measurement was thrown away. `invoke_plugin_prepare` appends
+    # its row to every sequential run, so arming it would have refused every run for the life of the
+    # process. `:rbs_build` is excluded for the same reason plus one more: the site filter that admits
+    # mutations already drops receivers whose type did not resolve, so a class whose definition failed to
+    # build contributes no measured sites to begin with.
     module AnalysisGuard
       module_function
 

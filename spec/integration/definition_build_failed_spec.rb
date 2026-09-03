@@ -48,10 +48,18 @@ RSpec.describe "definition build failed reporting" do
     Rigor::Configuration.new(settings)
   end
 
-  def run(configuration, **runner_kwargs)
+  def run(configuration, cache_store: nil, **runner_kwargs)
     guarded_run(
-      Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil, **runner_kwargs), %w[app.rb]
+      Rigor::Analysis::Runner.new(configuration: configuration, cache_store: cache_store, **runner_kwargs),
+      %w[app.rb]
     )
+  end
+
+  # A real on-disk store, so `workers:` actually reaches the pre-warm path. `cache_store: nil` disables the
+  # pool's own precondition AND makes `RbsLoader#prewarm` a no-op, which is exactly why the first version of
+  # the equivalence example below could not have caught the pre-warm bug (issue #696 review, F1).
+  def cold_store
+    Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache"))
   end
 
   def build_failed_diagnostics(result)
@@ -82,6 +90,11 @@ RSpec.describe "definition build failed reporting" do
     expect(diagnostics.first.path).to eq(".rigor.yml")
     expect(diagnostics.first.message).to include("Acme")
     expect(diagnostics.first.message).to include("sig/acme.rbs")
+    # The MEMBER, not just the class list. A collision on a widely-inherited class fails every descendant,
+    # and none of the failed classes is where the fix goes — only the member names that (issue #696 review,
+    # F4). Taken off the error object, so it reads the same on a cache hit.
+    expect(diagnostics.first.message).to include("First failure: RBS::DuplicatedMethodDefinitionError")
+    expect(diagnostics.first.message).to include("`::Acme#label`")
     # A warning does not fail the build: the collision is typically between the user's `sig/` and Rigor's OWN
     # bundled RBS, so an `:error` default would let a Rigor release turn a green build red with no user change.
     expect(result.success?).to be(true)
@@ -138,6 +151,40 @@ RSpec.describe "definition build failed reporting" do
     pooled = build_failed_diagnostics(run(config, workers: 2)).map(&:message)
 
     expect(sequential.size).to eq(1)
+    expect(pooled).to eq(sequential)
+  end
+
+  # Issue #696 review, F1 — the arm that catches the pre-warm. The example above runs with `cache_store:
+  # nil`, under which `RbsLoader#prewarm` returns immediately, so it never executes the path where a pooled
+  # run differs at all. With a COLD store the parent pre-warms every cached producer before forking, and two
+  # of them walk every known class through the public `#instance_definition`: the pooled run reported 1,336
+  # classes to the sequential run's 3 — on a fresh checkout with default workers, i.e. CI.
+  it "says the same thing under the fork pool with a COLD cache, where the parent pre-warms" do
+    # A collision on `Object`, not on `Acme`, and that is the whole point of this example. The pre-warm
+    # difference is invisible on a class nothing inherits — parent and worker both name the one class, and
+    # the dedup hides the rest. Reopening `Object` fails every descendant, so an implementation that lets
+    # the whole-universe walk contribute names the entire bundled universe here (1,336 classes measured on
+    # the real CLI) while the sequential run names the handful the analysis touched.
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "acme.rbs"),
+               "class Object\n  def blank?: () -> bool\nend\n\nclass Object\n  def blank?: () -> bool\nend\n")
+    # THREE receivers, so the example pins the COUNT and not merely that the two arms agree. Equality alone
+    # would also hold if both arms under-reported — "equivalence at the wrong value" is the failure mode a
+    # one-receiver fixture cannot see, and reporting fewer classes than actually failed would be the same
+    # defect family in a third costume (a run that says less than happened, on a green exit).
+    File.write("app.rb", "\"a\".upcase\n1.abs\n[].size\n")
+
+    sequential = build_failed_diagnostics(run(config, workers: 0)).map(&:message)
+    FileUtils.rm_rf(File.join(Dir.pwd, ".rigor"))
+    pooled = build_failed_diagnostics(run(config, workers: 2, cache_store: cold_store)).map(&:message)
+
+    # Non-vacuity, and the value. `String`, `Integer` and `Array` each inherit the broken `Object`, so each
+    # demanded definition is a failed build: exactly three, named. A collapsed universe produces zero
+    # diagnostics, which is what an absence-only comparison would pass on; a pre-warm that contributed would
+    # name the whole bundled universe (1,336 measured on the real CLI).
+    expect(sequential.size).to eq(1)
+    expect(sequential.first).to start_with("3 RBS class definition(s) failed to build: String, Integer, Array.")
+    expect(sequential.first).to include("::Object#blank?")
     expect(pooled).to eq(sequential)
   end
 

@@ -88,15 +88,21 @@ module InternalAnalyzerErrorGuard
   # adds is the harness policy: `allow_plugin_crash:` drops the plugin half for the handful of examples
   # whose subject IS the isolation envelope, and the check-rule half stays armed regardless.
   #
+  # Arming `:plugin` here is SUITE POLICY, not a claim that the plugin rescue discarded the analysis — it
+  # does not ({Rigor::Analysis::CrashSignature}), which is why the ADR-69 kill oracles arm only the
+  # check-rule half. No spec has a reason to want a plugin crashing under it, so the harness treats one as a
+  # failure and `allow_plugin_crash:` is the opt-out.
+  #
   # `CrashSignature` also classifies a third shape, `:rbs_build` (`rbs.coverage.definition-build-failed` /
-  # `rbs.coverage.environment-build-failed`, issue #696). It is deliberately NOT armed here: the analysis
-  # ran to completion in that case, `spec/integration/environment_build_failed_spec.rb` produces one on
-  # purpose, and how many other fixtures collide with Rigor's bundled RBS has not been measured. Arming it
-  # is its own change, with that measurement in front of it.
+  # `rbs.coverage.environment-build-failed`, issue #696). It is deliberately NOT armed here either: the
+  # analysis ran to completion, `spec/integration/environment_build_failed_spec.rb` produces one on purpose,
+  # and how many other fixtures collide with Rigor's bundled RBS has not been measured. Arming it is its own
+  # change, with that measurement in front of it.
   def self.crash?(diagnostic, allow_plugin_crash: false)
-    reason = Rigor::Analysis::CrashSignature.reason(diagnostic)
-    return false if reason == :plugin && allow_plugin_crash
-
-    Rigor::Analysis::CrashSignature::ANALYZER_FAILED_REASONS.include?(reason)
+    case Rigor::Analysis::CrashSignature.reason(diagnostic)
+    when :check_rule then true
+    when :plugin then !allow_plugin_crash
+    else false
+    end
   end
 end

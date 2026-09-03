@@ -38,6 +38,10 @@ module Rigor
       # into the set {MethodDispatcher} resolves to `Dynamic[Top]` (no false `call.undefined-method`).
       SYNTHETIC_STUB_BUFFER = "(rigor: synthesized stub types)"
 
+      # The buffer name `Cache::RbsEnvironmentMarshalPatch` reconstructs every `RBS::Location` behind on a
+      # cache HIT. Never a real path, so it must never be reported as one (issue #696).
+      CACHED_LOCATION_BUFFER_NAME = "<cached>"
+
       # Cap on how many quarantined `signature_paths:` files {#warn_about_quarantined_signatures} lists by name
       # before collapsing the tail to "… and N more" — a broken generator can emit many, and a wall of parse
       # errors buries the signal.
@@ -906,8 +910,9 @@ module Rigor
         # Per-loader memoization bucket. Held as a single mutable Hash so the loader instance itself can be
         # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slot
         # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
-        # `:definition_build_recorded`, `:definition_build_failures`, `:builder`, `:reflection`,
-        # `:instance_definitions_table`, `:singleton_definitions_table`.
+        # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
+        # `:universe_walk`, `:builder`, `:reflection`, `:instance_definitions_table`,
+        # `:singleton_definitions_table`.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
         # `@state[:env_loaded]`) to a constant `nil`.
@@ -1172,11 +1177,22 @@ module Rigor
       # keeps the per-process short-circuit. ADR-54 WD1 retired the definitions disk blob: given a cached
       # env, `Marshal.load`-ing every definition was measurably slower (and allocation-heavier) than
       # rebuilding the ones a run actually touches.
+      #
+      # Issue #696 — the report fires HERE, on the result, rather than in `build_*`'s rescue, and it fires on
+      # a memo hit too. `#prewarm`'s cached producers walk every known class through this method, so by the
+      # time a run demands `String` the nil is already memoised and the rescue will never run again; a report
+      # wired to the rescue would say nothing. The guard keeps the cost on the hot path at one `@state` read,
+      # and only on the nil branch — `nil` here is overwhelmingly an unknown class, not a failed build.
       def instance_definition(class_name)
         key = class_name.to_s
-        return @instance_definition_cache[key] if @instance_definition_cache.key?(key)
-
-        @instance_definition_cache[key] = build_instance_definition(class_name)
+        definition =
+          if @instance_definition_cache.key?(key)
+            @instance_definition_cache[key]
+          else
+            @instance_definition_cache[key] = build_instance_definition(class_name)
+          end
+        report_definition_build_failure(class_name) if definition.nil? && @state[:definition_build_details]
+        definition
       end
 
       # @return [RBS::Definition::Method, nil]
@@ -1253,11 +1269,18 @@ module Rigor
       #
       # Built on demand from the env with a per-process memo; the same on-demand discipline as
       # {#instance_definition} (ADR-54 WD1).
+      #
+      # The singleton twin of {#instance_definition}, reporting on the same terms (issue #696).
       def singleton_definition(class_name)
         key = class_name.to_s
-        return @singleton_definition_cache[key] if @singleton_definition_cache.key?(key)
-
-        @singleton_definition_cache[key] = build_singleton_definition(class_name)
+        definition =
+          if @singleton_definition_cache.key?(key)
+            @singleton_definition_cache[key]
+          else
+            @singleton_definition_cache[key] = build_singleton_definition(class_name)
+          end
+        report_definition_build_failure(class_name) if definition.nil? && @state[:definition_build_details]
+        definition
       end
 
       # @return [RBS::Definition::Method, nil] the class method on `class_name`. For example,
@@ -1360,16 +1383,23 @@ module Rigor
       # No-op when `cache_store` is nil — without a Store the worker has no choice but to build env via the
       # loader, so the caller MUST ensure pool mode runs with caching enabled. Returns `self` so the call
       # chains cleanly from the `Runner` pre-spawn hook.
+      #
+      # Issue #696 — the whole body is a {#during_universe_walk}, not only the producers that happen to walk
+      # definitions today. On a COLD store `RbsClassTypeParamNames.compute` and `RbsClassAncestorTable.compute`
+      # ask {#instance_definition} for every known class; marking each producer covers that, and marking
+      # `#prewarm` itself covers whichever producer grows the same appetite next.
       def prewarm
         return self if cache_store.nil?
 
-        env
-        known_class_names_set
-        constant_type_table
-        type_param_names_table
-        ancestor_names_table
-        instance_definitions_table
-        singleton_definitions_table
+        during_universe_walk do
+          env
+          known_class_names_set
+          constant_type_table
+          type_param_names_table
+          ancestor_names_table
+          instance_definitions_table
+          singleton_definitions_table
+        end
         self
       end
 
@@ -1468,21 +1498,21 @@ module Rigor
       end
 
       def constant_type_table
-        @constant_type_table ||= begin
+        @constant_type_table ||= during_universe_walk do
           require_relative "../cache/rbs_constant_table"
           fetch_or_compute_producer(Cache::RbsConstantTable)
         end
       end
 
       def known_class_names_set
-        @known_class_names_set ||= begin
+        @known_class_names_set ||= during_universe_walk do
           require_relative "../cache/rbs_known_class_names"
           fetch_or_compute_producer(Cache::RbsKnownClassNames)
         end
       end
 
       def type_param_names_table
-        @type_param_names_table ||= begin
+        @type_param_names_table ||= during_universe_walk do
           require_relative "../cache/rbs_class_type_param_names"
           fetch_or_compute_producer(Cache::RbsClassTypeParamNames)
         end
@@ -1502,7 +1532,7 @@ module Rigor
       # the existing `RbsClassAncestorTable` producer when `cache_store` is set; falls back to the
       # producer's `compute` otherwise. Used by {#reflection}.
       def ancestor_names_table
-        @ancestor_names_table ||= begin
+        @ancestor_names_table ||= during_universe_walk do
           require_relative "../cache/rbs_class_ancestor_table"
           fetch_or_compute_producer(Cache::RbsClassAncestorTable)
         end
@@ -1660,22 +1690,19 @@ module Rigor
       # Keys stay in `RBS::TypeName#to_s` form (top-level prefixed `"::Hash"`) — the shape
       # {Environment::Reflection} documents.
       #
-      # `record_failure: false` (issue #696) — these two walk EVERY known class, so a failure they hit is a
-      # failure of the sig set, not of anything the run asked about. Letting them feed
-      # {#definition_build_failures} would make the reported class list depend on whether the pool warmed a
-      # cache: a `--workers=N` run prewarms and a `--workers=0` run does not, and the diagnostic would name
-      # more classes under one flag than the other — "reports differently depending on how you ran it",
-      # which is the defect the diagnostic exists to end. The stderr banner is deliberately left armed here,
-      # byte-for-byte as before.
+      # {#during_universe_walk} (issue #696) — these two walk EVERY known class, so a failure they hit is a
+      # failure of the sig set, not of anything the run asked about, and it must not reach
+      # {#definition_build_failures}. The stderr banner is deliberately left armed here, byte-for-byte as
+      # before.
       def instance_definitions_table
-        @state[:instance_definitions_table] ||= build_definitions_table do |name|
-          build_instance_definition(name, record_failure: false)
+        @state[:instance_definitions_table] ||= during_universe_walk do
+          build_definitions_table { |name| build_instance_definition(name) }
         end
       end
 
       def singleton_definitions_table
-        @state[:singleton_definitions_table] ||= build_definitions_table do |name|
-          build_singleton_definition(name, record_failure: false)
+        @state[:singleton_definitions_table] ||= during_universe_walk do
+          build_definitions_table { |name| build_singleton_definition(name) }
         end
       end
 
@@ -1700,7 +1727,7 @@ module Rigor
         )
       end
 
-      def build_instance_definition(class_name, record_failure: true)
+      def build_instance_definition(class_name)
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
         return nil if env.nil?
@@ -1710,12 +1737,12 @@ module Rigor
 
         builder.build_instance(rbs_name)
       rescue ::RBS::BaseError => e
-        record_definition_build_failure(class_name, e) if record_failure
+        store_definition_build_detail(class_name, e)
         warn_about_definition_build_failure(class_name, e)
         nil
       end
 
-      def build_singleton_definition(class_name, record_failure: true)
+      def build_singleton_definition(class_name)
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
         return nil if env.nil?
@@ -1725,35 +1752,73 @@ module Rigor
 
         builder.build_singleton(rbs_name)
       rescue ::RBS::BaseError => e
-        record_definition_build_failure(class_name, e) if record_failure
+        store_definition_build_detail(class_name, e)
         warn_about_definition_build_failure(class_name, e)
         nil
       end
 
-      # Issue #696 — the RECORD half of the same rescue, feeding the `rbs.coverage.definition-build-failed`
-      # diagnostic ({#definition_build_failures}). The banner below reaches only stderr: it is not a
-      # diagnostic, so it is absent from `--format json`, SARIF, CI annotations and the LSP, and it cannot
-      # move the exit code. A run whose whole bundled type universe collapsed therefore printed a wall of
-      # warnings and exited 0 with ZERO diagnostics, which every downstream consumer reads as a clean build.
+      # Issue #696 — the DETAIL half of the same rescue: what went wrong for this class, remembered so
+      # {#definition_build_failures} can report it. Split from the REPORTING decision on purpose, and the
+      # split is the whole fix.
       #
-      # Its own memo, NOT the banner's. The two answer different questions: the banner asks "have I already
-      # told the user about this class", which the eager {#instance_definitions_table} walk legitimately
-      # participates in, while this asks "did the ANALYSIS demand a definition that could not be built",
-      # which that walk must stay out of (see the `record_failure:` note there). Sharing one memo would let
-      # a prewarm silence the record for a class the analysis later really did ask for.
+      # Recording in the rescue is wrong in both directions at once. Too loud: `#prewarm` and the cached
+      # table producers walk EVERY known class, so on a cold store they enter this rescue for every class a
+      # collision took down — 1,336 of them for one `class Object` duplicate — and the diagnostic named all
+      # of them under `--workers=N` with a cold cache while naming 3 under every other configuration. Too
+      # quiet: {#instance_definition} memoises the nil, so once that walk has run, the FIRST real demand
+      # never re-enters the rescue and would record nothing at all.
       #
-      # Keyed on the `::`-stripped name so the two spellings that reach here — the eager walk's
-      # `RBS::TypeName#to_s` (`"::Acme"`) and a dispatch site's bare `"Acme"` — are one entry, the
-      # {#synthesized_namespaces} convention.
-      def record_definition_build_failure(class_name, error)
+      # So the rescue only remembers, keyed by the `::`-stripped name (the eager walk spells it `::Acme`,
+      # a dispatch site spells it `Acme`, and they are one class — the {#synthesized_namespaces}
+      # convention), and {#report_definition_build_failure} decides. First writer wins: the instance and
+      # singleton sides fail for the same underlying collision, and the first is the one a caller hit.
+      def store_definition_build_detail(class_name, error)
         key = class_name.to_s.delete_prefix("::")
-        recorded = (@state[:definition_build_recorded] ||= {})
-        return if recorded[key]
+        details = (@state[:definition_build_details] ||= {})
+        return if details.key?(key)
 
-        recorded[key] = true
-        (@state[:definition_build_failures] ||= []) <<
-          [key, error.class.name.to_s, error.message.to_s.lines.first.to_s.strip,
-           definition_build_conflict_buffers(error)].freeze
+        details[key] = [key, error.class.name.to_s, definition_build_member(error),
+                        definition_build_conflict_buffers(error)].freeze
+      end
+
+      # Issue #696 — the REPORTING half: promote a remembered detail into {#definition_build_failures}
+      # because something the run was actually doing asked for this class's definition and got nothing.
+      #
+      # Called from {#instance_definition} / {#singleton_definition} — the demand entries — rather than from
+      # the rescue, so it fires on a MEMO HIT too. That is what survives a pre-warm: the walk builds the
+      # definition, fails, memoises nil, and never enters the rescue again, but the next real demand still
+      # reads nil here and still reports. Reporting from the rescue could only ever see the first build.
+      #
+      # Silent inside a whole-universe walk ({#during_universe_walk}): a producer that touches every known
+      # class is asking a question the RUN did not ask, and letting it contribute makes the reported class
+      # list depend on whether a cache was cold — the same project saying different things under
+      # `--workers=N` than under `--workers=0`, which is the defect this diagnostic exists to end.
+      def report_definition_build_failure(class_name)
+        return if @state[:universe_walk]
+
+        details = @state[:definition_build_details]
+        return if details.nil?
+
+        key = class_name.to_s.delete_prefix("::")
+        detail = details[key]
+        return if detail.nil?
+
+        reported = (@state[:definition_build_reported] ||= {})
+        return if reported[key]
+
+        reported[key] = true
+        (@state[:definition_build_failures] ||= []) << detail
+      end
+
+      # Marks a producer that walks EVERY known class, so {#report_definition_build_failure} stays silent
+      # for the duration. Save-and-restore rather than a bare flag: `#prewarm` wraps a body whose members
+      # wrap themselves, and a nested walk must not un-mark its caller on the way out.
+      def during_universe_walk
+        previous = @state[:universe_walk]
+        @state[:universe_walk] = true
+        yield
+      ensure
+        @state[:universe_walk] = previous
       end
 
       # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
@@ -1810,20 +1875,51 @@ module Rigor
       # `#location`. Falls back to an empty list — the warning still names the class and the exception's own
       # message — for the remainder (e.g. `SuperclassMismatchError`, which carries neither).
       def definition_build_conflict_buffers(error)
-        locations =
-          if error.respond_to?(:members) && error.members
-            Array(error.members).map(&:location)
-          elsif error.respond_to?(:member) && error.member
-            [error.member.location]
-          elsif error.respond_to?(:location)
-            [error.location]
-          else
-            []
-          end
-
-        locations.compact.filter_map { |loc| loc.buffer&.name }.map(&:to_s).uniq.freeze
+        definition_build_error_locations(error)
+          .compact.filter_map { |loc| loc.buffer&.name }.map(&:to_s)
+          .reject { |name| name == CACHED_LOCATION_BUFFER_NAME }.uniq.freeze
       rescue ::RBS::BaseError, StandardError
         [].freeze
+      end
+
+      # The `RBS::Location`s an error carries, by whichever accessor its class happens to expose (see the
+      # shape survey above). Split out so the buffer-name extraction reads as one pipeline.
+      def definition_build_error_locations(error)
+        return Array(error.members).map(&:location) if error.respond_to?(:members) && error.members
+        return [error.member.location] if error.respond_to?(:member) && error.member
+        return [error.location] if error.respond_to?(:location)
+
+        []
+      end
+
+      # The member the failure is ABOUT, taken off the error object rather than parsed out of its message.
+      #
+      # Issue #696 — the message cannot serve here. It is built from `RBS::Location`s, and the ADR-54 env
+      # cache dumps every location to a {CACHED_LOCATION_BUFFER_NAME} sentinel, so a warm run's message
+      # names neither the file nor the line and the same project reports different text cold and warm. These
+      # accessors are `RBS::TypeName`s and Symbols, so they survive the marshal round trip unchanged — and
+      # they name the class that actually CARRIES the duplicate, which the failed-class list does not: a
+      # collision on `::Object#blank?` fails `String`, `Integer` and `Array`, none of which is where the fix
+      # goes.
+      #
+      # Shapes vary by error class (`references/rbs`'s `lib/rbs/errors.rb`): the two duplicated-definition
+      # errors expose `#qualified_method_name` directly; `InvalidOverloadMethodError` has `#type_name` +
+      # `#method_name`; `UnknownMethodAliasError` and `NoSuperclassFoundError` have `#type_name`;
+      # `SuperclassMismatchError` has `#name`. `RecursiveAncestorError` has none of them and yields nil, and
+      # the diagnostic then omits the clause rather than inventing one.
+      #
+      # @return [String, nil]
+      def definition_build_member(error)
+        return error.qualified_method_name.to_s if error.respond_to?(:qualified_method_name)
+
+        type_name = error.respond_to?(:type_name) ? error.type_name : nil
+        type_name ||= error.respond_to?(:name) ? error.name : nil
+        return nil if type_name.nil?
+
+        method_name = error.respond_to?(:method_name) ? error.method_name : nil
+        method_name.nil? ? type_name.to_s : "#{type_name}##{method_name}"
+      rescue ::RBS::BaseError, StandardError
+        nil
       end
 
       # Resolve an RBS class/module ALIAS to its canonical declared name. `class Mutex = Thread::Mutex`

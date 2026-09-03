@@ -571,6 +571,11 @@ module Rigor
           snapshot_effect_annotation_carrier(environment.rbs_loader)
           diagnostics = files.flat_map { |path| @analyze_file.call(path, environment) }
           loader = environment.rbs_loader
+          # Issue #696 — this path analyses on the coordinator, so its loader IS the one that reached the
+          # failing build, and it must snapshot the same slot the two real paths do. Reached whenever
+          # `fork` is unavailable (Windows) and on `--incremental` / effects runs without it: a run that
+          # degraded to sequential must not also report less than a sequential run would.
+          record_definition_build_failures(loader&.definition_build_failures)
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
           @snapshots.quarantined_signatures =

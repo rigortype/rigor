@@ -9,6 +9,8 @@ require_relative "../protection/dependency_closure"
 require_relative "../protection/discovery_seed"
 require_relative "../protection/mutation_cache"
 
+require_relative "measurement_integrity_warning"
+
 module Rigor
   class CLI
     # ADR-63 Tier 2 + ADR-70 — the mutation-effectiveness and fused static∪dynamic protection paths, factored out of
@@ -43,17 +45,13 @@ module Rigor
 
       private
 
-      # @param report [MutationProtectionReport, FusedProtectionReport] — both expose `total_harness_errors`.
+      # Both measurement-integrity warnings, and the escalation rule between them, live in
+      # {MeasurementIntegrityWarning}. Only the floor stays here: it is this command's policy, and
+      # `coverage_command_spec` reads it off this module.
+      #
+      # @param report [MutationProtectionReport, FusedProtectionReport]
       def warn_harness_errors(report)
-        count = report.total_harness_errors
-        return if count < HARNESS_ERROR_WARN_FLOOR
-
-        @err.puts(
-          "coverage: #{count} mutants failed inside the measurement harness (\"harness_errors\", " \
-          "at/above the #{HARNESS_ERROR_WARN_FLOOR}-mutant floor) — excluded from the ratio like a " \
-          "parse-invalid mutant, but this many suggests a harness defect rather than one-off noise. " \
-          "Investigate before trusting --threshold on this run."
-        )
+        MeasurementIntegrityWarning.emit(report, err: @err, floor: HARNESS_ERROR_WARN_FLOOR)
       end
 
       # The cross-file knowledge Tier 2 measures with — the #253 gate, and the ONLY place in this feature that

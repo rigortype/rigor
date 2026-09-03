@@ -106,6 +106,7 @@ RSpec.describe Rigor::CLI::MutationProtectionReport do
         "survived" => 1,
         "effectiveness_ratio" => 0.5,
         "harness_errors" => 0,
+        "unmeasured_files" => 0,
         "files" => [{ "path" => "a.rb", "killed" => 1, "survived" => 1, "ratio" => 0.5, "harness_errors" => 0 }],
         "add_a_type_here" => [{ "method" => "join", "count" => 1, "examples" => ["a.rb:2"] }],
         "parse_errors" => []

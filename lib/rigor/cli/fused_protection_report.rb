@@ -14,6 +14,9 @@ module Rigor
       def initialize(path:, type_killed:, test_killed:, unprotected:, ratio:, harness_errors: 0)
         super
       end
+
+      # Issue #686 — see {Rigor::CLI::FileEffectiveness#unmeasured?}.
+      def unmeasured? = harness_errors.positive? && (type_killed + test_killed + unprotected).zero?
     end
     UnprotectedBreakage = Data.define(:method_name, :count, :examples)
 
@@ -28,6 +31,9 @@ module Rigor
       # #264 — stays OUT of `grand_total`/`ratio`, exactly like the plain mutation report.
       def total_harness_errors = files.sum(&:harness_errors)
 
+      # Issue #686 — see {Rigor::CLI::MutationProtectionReport#unmeasured_files}.
+      def unmeasured_files = files.count(&:unmeasured?)
+
       def to_h
         {
           "mode" => "protection-fused",
@@ -36,6 +42,7 @@ module Rigor
           "unprotected" => total_unprotected,
           "protected_ratio" => ratio.round(4),
           "harness_errors" => total_harness_errors,
+          "unmeasured_files" => unmeasured_files,
           "files" => files.map do |f|
             { "path" => f.path, "type_killed" => f.type_killed, "test_killed" => f.test_killed,
               "unprotected" => f.unprotected, "ratio" => f.ratio.round(4), "harness_errors" => f.harness_errors }

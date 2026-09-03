@@ -27,18 +27,31 @@ module Rigor
     # own `source_family: "plugin.<id>"`, and several specs legitimately assert on one. Only the
     # `:plugin_loader` family paired with `"runtime-error"` is the isolation envelope's own row.
     #
-    # ## Why `:rbs_build` is classified but NOT a crash
+    # ## Only ONE shape discards a file's analysis
     #
-    # {.analyzer_failed?} — the predicate every consumer arms today — answers true for `:check_rule` and
-    # `:plugin` only. Those two mean *the analysis did not run*: the rescue discards every other diagnostic
-    # the file would have produced, so what comes back is not a weaker answer, it is no answer. `:rbs_build`
-    # is a different condition: the analysis ran to completion and every rule fired, over a type universe
-    # missing one class (`rbs.coverage.definition-build-failed`) or all of them
-    # (`rbs.coverage.environment-build-failed`). That is a degradation the user causes, that the diagnostic
-    # itself reports, and that a project can sit on for a release while it fixes its `sig/` — treating it as
-    # a crash would make a legitimate, self-reported state fail every consumer that guards against a bug.
-    # It is classified here anyway, and deliberately: the next consumer that needs to tell a degraded run
-    # from a healthy one extends this table instead of adding the fourth string match.
+    # {.discards_file_analysis?} answers true for `:check_rule` alone, and the distinction is not pedantry —
+    # it decides whether a consumer may still read the run's diagnostics.
+    #
+    # - `:check_rule` — `Runner#analyze_file_body` rescues around the WHOLE per-file body, so what comes
+    #   back is `[crash_row]` and every diagnostic that file would have produced is gone. Nothing is left to
+    #   read.
+    # - `:plugin` — `collect_plugin_diagnostics` replaces only the raising PLUGIN's contribution;
+    #   `CheckRules.diagnose` has already returned, and `invoke_plugin_prepare` adds one row at `.rigor.yml`
+    #   and lets the run proceed. The builtin rules ran, and their diagnostics are all still there. A
+    #   consumer that refuses the whole run over this throws away a real measurement — and because the
+    #   prepare row is appended to every sequential run, it would refuse every run for the life of the
+    #   process.
+    # - `:rbs_build` — the analysis ran to completion and every rule fired, over a type universe missing one
+    #   class (`rbs.coverage.definition-build-failed`) or all of them
+    #   (`rbs.coverage.environment-build-failed`). A degradation the user causes and the diagnostic itself
+    #   reports; a project can sit on it for a release while it fixes its `sig/`.
+    #
+    # The two consumer tiers therefore differ on purpose. The ADR-69 kill oracles arm `:check_rule` only:
+    # refusing a run they could still have measured is the same "manufactures work" error as scoring an
+    # unmeasured mutant a survivor, pointed the other way (issue #686 review). The spec harness additionally
+    # arms `:plugin`, which is suite POLICY rather than a claim about the diagnostics — no spec has a reason
+    # to want a plugin crashing under it, and `allow_plugin_crash:` is the opt-out for the handful whose
+    # subject IS the isolation envelope.
     module CrashSignature
       # The `rescue StandardError` in `Runner#analyze_file_body` / `WorkerSession#analyze_body` folds a
       # raising check rule (or a plugin's node-rule contribution) into ONE diagnostic per file with this
@@ -58,9 +71,9 @@ module Rigor
         rbs.coverage.environment-build-failed
       ].freeze
 
-      # The reasons that mean NO real diagnostics were produced. See the class doc for why `:rbs_build` is
-      # not one of them.
-      ANALYZER_FAILED_REASONS = %i[check_rule plugin].freeze
+      # The one reason that means a file's whole diagnostic list was replaced by a crash row. `:plugin` and
+      # `:rbs_build` both leave a readable run behind — see the class doc.
+      DISCARDS_FILE_ANALYSIS_REASON = :check_rule
 
       module_function
 
@@ -74,11 +87,13 @@ module Rigor
         nil
       end
 
-      # True when `diagnostic` is one of the two rescue-produced rows that mean the analysis never ran.
+      # True when `diagnostic` is the rescue row that REPLACED a file's analysis — the only shape after which
+      # the run's diagnostics say nothing about the code. NOT a general "something went wrong" predicate; see
+      # the class doc for why `:plugin` and `:rbs_build` are excluded.
       #
       # @param diagnostic [Rigor::Analysis::Diagnostic]
-      def analyzer_failed?(diagnostic)
-        ANALYZER_FAILED_REASONS.include?(reason(diagnostic))
+      def discards_file_analysis?(diagnostic)
+        reason(diagnostic) == DISCARDS_FILE_ANALYSIS_REASON
       end
 
       # A one-line "<reason> at <path>:<line>: <message>" for a failure message, so whoever reads the raise

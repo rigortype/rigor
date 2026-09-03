@@ -37,8 +37,8 @@ module Rigor
         # @param env_build_failure_snapshot [#call] reader returning the total RBS env-build failure tuple
         #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
         # @param definition_build_failures_snapshot [#call] issue #696 — reader returning the per-class
-        #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class,
-        #   first_error_line, conflicting_buffer_names]` tuples. Empty for a healthy sig set.
+        #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
+        #   conflicting_buffer_names]` tuples. Empty for a healthy sig set.
         # @param conformance_results_snapshot [#call] reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
@@ -494,19 +494,25 @@ module Rigor
 
         # Issue #696. One diagnostic per RUN, not per class: a collision on a widely-inherited class fails
         # every descendant, and 2,709 rows saying the same thing about one `.rbs` line is noise, not
-        # visibility. The message leads with the count, names a sample of the classes and the conflicting
-        # signature files, and states the consequence in the vocabulary its two neighbours already use.
+        # visibility.
+        #
+        # The failed-class list alone is not actionable, and that is what the "First failure" clause is for.
+        # A duplicate on `::Object#blank?` fails `String`, `Integer`, `Array` and 1,333 more — every name in
+        # that list is a DESCENDANT, and none of them is where the fix goes. The member comes off the error
+        # object rather than out of its message ({RbsLoader#definition_build_member}), so it names the
+        # culprit and reads the same on a cache hit, where every `RBS::Location` has been dumped to a
+        # sentinel. The error class is attributed to that first failure explicitly rather than to all of
+        # them: the per-class memo keeps only the first reason, and one run can mix error classes.
         def build_rbs_definition_build_failed_diagnostic(failures)
           sample_size = 5
-          classes = failures.map(&:first)
-          error_class = failures.first[1]
           files = failures.flat_map { |failure| Array(failure[3]) }.uniq.map { |name| relative_signature_path(name) }
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,
             column: 1,
-            message: "#{failures.size} RBS class definition(s) failed to build (#{error_class}): " \
-                     "#{sampled(classes, sample_size)}.#{conflicting_files_clause(files, sample_size)} " \
+            message: "#{failures.size} RBS class definition(s) failed to build: " \
+                     "#{sampled(failures.map(&:first), sample_size)}." \
+                     "#{first_failure_clause(failures.first)}#{conflicting_files_clause(files, sample_size)} " \
                      "Rigor still treats each class as KNOWN, so calls into it — real methods and typos " \
                      "alike — silently read `Dynamic[top]` instead of resolving, and this run is quieter " \
                      "than it should be rather than cleaner. Two signature sources declare the same " \
@@ -517,6 +523,19 @@ module Rigor
           )
         end
 
+        # `[class_name, error_class, member, buffers]`. The member is nil for the error classes that carry no
+        # name at all (`RecursiveAncestorError`), and the clause then names the error class alone rather than
+        # inventing a member.
+        def first_failure_clause(failure)
+          _, error_class, member, = failure
+          return " First failure: #{error_class}." if member.nil? || member.empty?
+
+          " First failure: #{error_class} on `#{member}`."
+        end
+
+        # Empty on a cross-process cache HIT: the ADR-54 env cache dumps every `RBS::Location` to a sentinel
+        # buffer, which {RbsLoader::CACHED_LOCATION_BUFFER_NAME} filters out, so a warm run says nothing
+        # about files rather than naming `<cached>` as if it were one.
         def conflicting_files_clause(files, sample_size)
           return "" if files.empty?
 

@@ -367,9 +367,10 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
 
   # Issue #696 — the per-class rung between the two above.
   describe "rbs_definition_build_failed_diagnostics" do
-    def definition_failure(class_name, buffers: ["sig/acme.rbs"])
-      [class_name, "RBS::DuplicatedMethodDefinitionError", "::#{class_name}#label has duplicated definitions",
-       buffers]
+    # `[class_name, error_class, member, buffers]` — the third slot is the MEMBER, taken off the error
+    # object, not a line of its message (issue #696 review, F4).
+    def definition_failure(class_name, member: "::Object#blank?", buffers: ["sig/acme.rbs"])
+      [class_name, "RBS::DuplicatedMethodDefinitionError", member, buffers]
     end
 
     it "names the count, the failed classes, and the conflicting signature files, comma-joined" do
@@ -382,10 +383,33 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(diagnostic.severity).to eq(:warning)
       expect(diagnostic.path).to eq(".rigor.yml")
       expect(diagnostic.message).to start_with("2 RBS class definition(s) failed to build")
-      expect(diagnostic.message).to include("RBS::DuplicatedMethodDefinitionError")
       expect(diagnostic.message).to include("Acme, Widget")
       # Deduped across classes: one collision names one file pair, however many classes it took down.
       expect(diagnostic.message).to include("Conflicting signature file(s): sig/a.rbs, sig/b.rbs")
+    end
+
+    # F4 — the failed-class list is DESCENDANTS. `Acme` and `Widget` above are not where the fix goes; the
+    # member is, and it is the only part of the message that survives a cache hit intact. The error class is
+    # attributed to the first failure explicitly rather than to all of them, because the per-class memo keeps
+    # only the first reason and one run can mix error classes.
+    it "names the first failure's member and error class, scoped to that first failure" do
+      diagnostic = build_aggregator(
+        definition_build_failures_snapshot: [definition_failure("String"), definition_failure("Integer")]
+      ).rbs_definition_build_failed_diagnostics.first
+
+      expect(diagnostic.message)
+        .to include("First failure: RBS::DuplicatedMethodDefinitionError on `::Object#blank?`.")
+    end
+
+    # `RecursiveAncestorError` and friends carry no member at all, so the clause names the error class alone
+    # rather than inventing one.
+    it "omits the member when the error carried none" do
+      diagnostic = build_aggregator(
+        definition_build_failures_snapshot: [definition_failure("Acme", member: nil)]
+      ).rbs_definition_build_failed_diagnostics.first
+
+      expect(diagnostic.message).to include("First failure: RBS::DuplicatedMethodDefinitionError.")
+      expect(diagnostic.message).not_to include("on ``")
     end
 
     it "samples the first five class names, comma-joined, and counts the rest into a `, and N more` suffix" do

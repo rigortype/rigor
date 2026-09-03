@@ -16,6 +16,11 @@ module Rigor
       def initialize(path:, killed:, survived:, ratio:, harness_errors: 0)
         super
       end
+
+      # Issue #686 — the file measured the HARNESS, not the code: every mutant it had landed in
+      # `harness_errors`, so `killed + survived` is zero for a reason that is not "there was nothing to
+      # measure". `ratio` is 0.0 here rather than the vacuous 1.0, and this is what the exit gate reads.
+      def unmeasured? = harness_errors.positive? && (killed + survived).zero?
     end
     MissedBreakage = Data.define(:method_name, :count, :examples)
 
@@ -29,6 +34,12 @@ module Rigor
       # like a parse error: it is not a measurement of the code.
       def total_harness_errors = files.sum(&:harness_errors)
 
+      # Issue #686 — files where NOTHING could be measured. Distinct from `total_harness_errors`, which
+      # counts mutants and rightly tolerates a few (#264's floor): one wholly unmeasured file already means
+      # the ratio is computed over a smaller project than the user asked about, so this gates the exit and
+      # the mutant count does not.
+      def unmeasured_files = files.count(&:unmeasured?)
+
       def to_h
         {
           "mode" => "mutation",
@@ -38,6 +49,9 @@ module Rigor
           # #264 — unconditional: a JSON consumer (e.g. a CI gate) must be able to check this every run, not
           # only when a text renderer decided it was worth a line.
           "harness_errors" => total_harness_errors,
+          # Issue #686 — unconditional for the same reason `harness_errors` is: a CI gate reading JSON must
+          # be able to see that part of the project was never measured, on every run.
+          "unmeasured_files" => unmeasured_files,
           "files" => files.map do |f|
             { "path" => f.path, "killed" => f.killed, "survived" => f.survived,
               "ratio" => f.ratio.round(4), "harness_errors" => f.harness_errors }

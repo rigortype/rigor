@@ -446,12 +446,50 @@ RSpec.describe Rigor::Environment::RbsLoader do
 
       expect(loader.instance_definition("Widget")).to be_nil
 
-      class_name, error_class, first_line, buffers = loader.definition_build_failures.first
+      class_name, error_class, member, buffers = loader.definition_build_failures.first
       expect(loader.definition_build_failures.size).to eq(1)
       expect(class_name).to eq("Widget")
       expect(error_class).to eq("RBS::DuplicatedMethodDefinitionError")
-      expect(first_line).to include("Widget#bar")
+      # The MEMBER, off the error object rather than parsed out of its message: the message is built from
+      # `RBS::Location`s, which the ADR-54 env cache dumps to a `<cached>` sentinel, so a warm run would
+      # otherwise report different text than a cold one (issue #696 review, F4).
+      expect(member).to eq("::Widget#bar")
       expect(buffers).to eq([File.join(tmpdir, "widget.rbs")])
+    end
+
+    # F4 — the member is what has to survive a cache tier, because the file name does not always. A
+    # cross-process cache hit Marshal-loads the env, and the ADR-54 patch reconstructs every `RBS::Location`
+    # behind a `<cached>` sentinel buffer; the run then knew neither the file, the line, nor the class
+    # carrying the duplicate. `#qualified_method_name` is a `TypeName` + Symbol, so it round-trips.
+    it "keeps the member on a cache-hit run" do
+      write_duplicate_method_rbs(tmpdir)
+      cache_store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+      warm = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
+      allow(warm).to receive(:warn)
+      warm.send(:env)
+
+      loader = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
+      allow(loader).to receive(:warn)
+      loader.instance_definition("Widget")
+
+      _, _, member, buffers = loader.definition_build_failures.first
+      expect(member).to eq("::Widget#bar")
+      expect(buffers).not_to include(described_class::CACHED_LOCATION_BUFFER_NAME)
+    end
+
+    # F4, the other half — the sentinel itself, driven straight through the buffer extractor. A warm
+    # cross-process run reported `Conflicting signature file(s): <cached>`, naming a sentinel as if it were
+    # a path the user could open. It is dropped, so the clause is simply absent rather than wrong.
+    it "never reports the marshal sentinel as a conflicting signature file" do
+      loader = described_class.new
+      buffer = Struct.new(:name).new(described_class::CACHED_LOCATION_BUFFER_NAME)
+      member = Struct.new(:location).new(Struct.new(:buffer).new(buffer))
+      # `Struct.new(:members)` would override `Struct#members`; a bare object carrying the accessor is what
+      # the real `RBS::DuplicatedMethodDefinitionError` looks like to this method anyway.
+      error = Object.new
+      error.define_singleton_method(:members) { [member] }
+
+      expect(loader.send(:definition_build_conflict_buffers, error)).to eq([])
     end
 
     # `::Widget` (the eager table walk's `RBS::TypeName#to_s` spelling) and `Widget` (a dispatch site's) are
@@ -477,12 +515,41 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.definition_build_failures).to be_empty
     end
 
-    # The eager whole-universe walk behind `#prewarm` / `#reflection` is a cache-warming implementation
-    # detail. Letting it feed the record would make the reported class list depend on whether a pool warmed
-    # a cache — the same project reporting differently under `--workers=N` than under `--workers=0`, which
-    # is the "reports less depending on how you ran it" defect the diagnostic exists to end. The banner
-    # stays armed there, unchanged.
-    it "does not record from the eager definitions table, only from what the analysis demanded" do
+    # Issue #696 review, F1 — the regression gate for the BLOCKER. The whole-universe walk behind
+    # `#prewarm` / `#reflection` is a cache-warming implementation detail, so what it discovers must not
+    # reach the diagnostic: otherwise the reported class list depends on whether a pool warmed a cache, and
+    # the same project reports differently under `--workers=N` than under `--workers=0` — the "reports less
+    # depending on how you ran it" defect the diagnostic exists to end. The stderr banner stays armed there,
+    # unchanged.
+    #
+    # The first cut of this fix suppressed recording in `instance_definitions_table` /
+    # `singleton_definitions_table`, which record nothing either way. The producers that were actually
+    # recording are `RbsClassTypeParamNames` and `RbsClassAncestorTable`, which walk `each_known_class_name`
+    # through the PUBLIC `#instance_definition` — and only on a COLD store, since a warm one serves the
+    # table from disk and never walks. That is why this example needs a real store and a cold one: with a
+    # nil store `#prewarm` returns immediately and executes none of this.
+    #
+    # On a fresh checkout with default workers (i.e. CI) the un-suppressed walk made one `class Object`
+    # duplicate report 1,336 classes where every other configuration reported 3.
+    it "does not record from a cold-store pre-warm, only from what the analysis demanded" do
+      write_duplicate_method_rbs(tmpdir)
+      cache_store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+      loader = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+
+      loader.prewarm
+
+      expect(loader.definition_build_failures).to be_empty
+      # Non-vacuity: the walk really did reach the failing build — it just must not feed the diagnostic.
+      expect(messages.grep(/RBS definition build failed/)).not_to be_empty
+      # And the memoised nil must not swallow the real demand that follows. Recording from the rescue
+      # cannot satisfy this: after the walk, the rescue never runs again for this class.
+      expect(loader.instance_definition("Widget")).to be_nil
+      expect(loader.definition_build_failures.map(&:first)).to eq(["Widget"])
+    end
+
+    it "does not record from the eager definitions table either" do
       write_duplicate_method_rbs(tmpdir)
       loader = described_class.new(signature_paths: [tmpdir])
       messages = []
@@ -491,9 +558,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader.send(:instance_definitions_table)
 
       expect(loader.definition_build_failures).to be_empty
-      # Non-vacuity: the walk really did hit the failing build — it just must not feed the diagnostic.
       expect(messages.grep(/RBS definition build failed/)).not_to be_empty
-      # And a later real demand still records, so the eager walk cannot silence it either.
       loader.instance_definition("Widget")
       expect(loader.definition_build_failures.map(&:first)).to eq(["Widget"])
     end

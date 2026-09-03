@@ -66,18 +66,29 @@ RSpec.describe Rigor::Analysis::CrashSignature do
     end
   end
 
-  describe ".analyzer_failed?" do
-    it "is true for the two rescue-produced shapes, where nothing ran" do
-      expect([check_rule_crash, plugin_crash].map { |d| described_class.analyzer_failed?(d) }).to eq([true, true])
+  describe ".discards_file_analysis?" do
+    # The check-rule rescue wraps the WHOLE per-file body, so the returned Array is `[crash_row]` and every
+    # diagnostic that file would have produced is gone. This is the only shape after which the run's
+    # diagnostics say nothing about the code.
+    it "is true for the check-rule rescue, which replaced the file's whole diagnostic list" do
+      expect(described_class.discards_file_analysis?(check_rule_crash)).to be(true)
     end
 
-    # The adjudication the module records: an RBS build failure is a DEGRADATION the analysis reports about
-    # itself, not an escaped exception. Every rule still fired; the type universe was smaller. Treating it as
-    # a crash would fail every consumer that guards against a bug, on a state a project legitimately sits on
-    # while it fixes its `sig/`.
+    # Issue #686 review — the plugin rescue replaces only the raising PLUGIN's contribution;
+    # `CheckRules.diagnose` has already returned and its diagnostics are all still present. Arming this at
+    # the oracle tier took a real measurement (`killed=1 survived=6`) to `killed=0 survived=0`, and because
+    # a raising `#prepare` appends its row to every sequential run it would have refused every run for the
+    # life of the process. The spec harness arms it separately as suite policy; that is not this predicate.
+    it "is false for the plugin-isolation row, which leaves the builtin rules' diagnostics in place" do
+      expect(described_class.discards_file_analysis?(plugin_crash)).to be(false)
+      expect(described_class.reason(plugin_crash)).to eq(:plugin)
+    end
+
+    # An RBS build failure is a DEGRADATION the analysis reports about itself, not an escaped exception.
+    # Every rule still fired; the type universe was smaller.
     it "is false for an RBS build failure, which the run completed and reported" do
       failures = described_class::RBS_BUILD_FAILURE_RULES.map do |rule|
-        described_class.analyzer_failed?(diagnostic(message: "…", severity: :warning, rule: rule))
+        described_class.discards_file_analysis?(diagnostic(message: "…", severity: :warning, rule: rule))
       end
 
       expect(failures).to eq([false, false])
@@ -98,6 +109,16 @@ RSpec.describe Rigor::Analysis::CrashSignature do
 
       expect(result.crashed?).to be(true)
       expect(result.crash_diagnostics.map(&:message)).to eq(["internal analyzer error: RuntimeError: boom"])
+    end
+
+    # Issue #686 review — the measurement-preserving half. A run carrying a plugin-isolation row still has
+    # every builtin rule's diagnostics in it, so a consumer that refuses it discards a real measurement.
+    it "is not crashed when a plugin raised but the builtin rules still ran" do
+      result = described_class.new(diagnostics: [diagnostic(message: "undefined", rule: "call.undefined-method"),
+                                                 plugin_crash])
+
+      expect(result.crashed?).to be(false)
+      expect(result.crash_diagnostics).to be_empty
     end
 
     # The must-still-succeed half: a result carrying real findings is not a crash, so a consumer that refuses

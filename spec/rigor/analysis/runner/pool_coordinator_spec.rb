@@ -253,6 +253,49 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     end
   end
 
+  # Issue #696 review, F5 — the no-fork fallback is a THIRD analysis path, alongside sequential and the
+  # pool, and it analyses on the coordinator's own loader. It already snapshots the two sibling signature
+  # conditions; missing this one made a run that degraded to sequential (no `fork` — Windows; and
+  # `--incremental` / effects runs without it) report `pool-degraded` and nothing else, where a plain
+  # sequential run reported the failure. "Reports less depending on how you ran it", one costume further on.
+  describe "#analyze_files_sequentially_fallback" do
+    it "snapshots definition-build failures off the coordinator's own loader" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      failure = ["Acme", "RBS::DuplicatedMethodDefinitionError", "::Acme#label", ["sig/acme.rbs"]]
+      loader = instance_double(
+        Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [], virtual_rbs: [],
+                                       quarantined_signatures: [], env_build_failure: nil,
+                                       definition_build_failures: [failure]
+      )
+      coordinator = build_coordinator(snapshots: snapshots, analyze_file: ->(_path, _env) { [] })
+      allow(coordinator).to receive(:build_runner_environment)
+        .and_return(instance_double(Rigor::Environment, rbs_loader: loader))
+
+      coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "no fork")
+
+      expect(snapshots.definition_build_failures).to eq([failure])
+    end
+
+    # The must-still-succeed twin, and the non-vacuity check for the example above: the same path on a
+    # healthy loader leaves the slot inert and still degrades loudly.
+    it "leaves the slot empty on a healthy loader, and still reports the degrade" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      loader = instance_double(
+        Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [], virtual_rbs: [],
+                                       quarantined_signatures: [], env_build_failure: nil,
+                                       definition_build_failures: []
+      )
+      coordinator = build_coordinator(snapshots: snapshots, analyze_file: ->(_path, _env) { [] })
+      allow(coordinator).to receive(:build_runner_environment)
+        .and_return(instance_double(Rigor::Environment, rbs_loader: loader))
+
+      diagnostics = coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "no fork")
+
+      expect(snapshots.definition_build_failures).to eq([])
+      expect(diagnostics.map(&:rule)).to eq(["pool-degraded"])
+    end
+  end
+
   describe "#snapshot_project_signature_state" do
     it "resets every signature-state snapshot to its inert default when the project declares no signature_paths" do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
@@ -661,7 +704,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       coordinator = build_coordinator(configuration: configuration, snapshots: snapshots)
       loader = instance_double(
         Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [], virtual_rbs: [],
-                                       quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 2, []]
+                                       quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 2, []],
+                                       definition_build_failures: []
       )
       session = instance_double(
         Rigor::Analysis::WorkerSession, environment: instance_double(Rigor::Environment, rbs_loader: loader)
@@ -880,7 +924,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       )
       loader = instance_double(
         Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [], virtual_rbs: [],
-                                       quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 1, []]
+                                       quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 1, []],
+                                       definition_build_failures: []
       )
       built = instance_double(Rigor::Environment, rbs_loader: loader)
       allow(coordinator).to receive(:build_runner_environment).and_return(built)
@@ -896,7 +941,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       coordinator = build_coordinator(snapshots: snapshots, analyze_file: ->(_p, _e) { [] })
       loader = instance_double(Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [],
-                                                              virtual_rbs: [])
+                                                              virtual_rbs: [], definition_build_failures: [])
       built = instance_double(Rigor::Environment, rbs_loader: loader)
       allow(coordinator).to receive(:build_runner_environment).and_return(built)
 

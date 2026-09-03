@@ -64,19 +64,19 @@ RSpec.describe Rigor::Protection::Mutator do
     # Issue #253 — the plain-parameter seam. The class knows nothing about Configuration or feature ids; a
     # caller that has already resolved cross-file discovery hands the scope down, and a receiver whose class
     # is declared in a *sibling* file stops reading Dynamic. `base_scope: nil` is the shipped behaviour.
-it "keeps an arity_extra mutation on a known fixed-arity method call" do
-  kept, = filter(%("hello".sub("h", "j")\n))
-  arity = kept.find { |m| m.operator == :arity_extra }
-  expect(arity).not_to be_nil
-  expect(arity.apply(%("hello".sub("h", "j")\n))).to eq(%("hello".sub("h", "j", nil)\n))
-end
+    it "keeps an arity_extra mutation on a known fixed-arity method call" do
+      kept, = filter(%("hello".sub("h", "j")\n))
+      arity = kept.find { |m| m.operator == :arity_extra }
+      expect(arity).not_to be_nil
+      expect(arity.apply(%("hello".sub("h", "j")\n))).to eq(%("hello".sub("h", "j", nil)\n))
+    end
 
-it "inserts arity_extra correctly for parenthesis-less calls" do
-  kept, = filter(%("hello".sub "h", "j"\n))
-  arity = kept.find { |m| m.operator == :arity_extra }
-  expect(arity).not_to be_nil
-  expect(arity.apply(%("hello".sub "h", "j"\n))).to eq(%("hello".sub "h", "j", nil\n))
-end
+    it "inserts arity_extra correctly for parenthesis-less calls" do
+      kept, = filter(%("hello".sub "h", "j"\n))
+      arity = kept.find { |m| m.operator == :arity_extra }
+      expect(arity).not_to be_nil
+      expect(arity.apply(%("hello".sub "h", "j"\n))).to eq(%("hello".sub "h", "j", nil\n))
+    end
 
     it "drops an arity_extra mutation on a variadic method call" do
       kept, = filter(%(File.join("a", "b")\n))

@@ -28,6 +28,19 @@ require "prism"
 
 SPEC_ANALYZER_GUARD_ROOT = File.expand_path("../..", __dir__)
 
+# Files whose SUBJECT is the crash envelope itself. Guarding them would make the behaviour untestable,
+# which is a different thing from having been missed — each one asserts on the very diagnostic
+# {InternalAnalyzerErrorGuard} raises for. Anything else belongs in `guarded_run`, not here.
+SPEC_ANALYZER_GUARD_ALLOWLIST = {
+  "spec/rigor/analysis/worker_session_spec.rb" =>
+    "asserts the rescue envelope directly: `internal analyzer error` for a raising check rule, and " \
+    "`rule: \"runtime-error\" / source_family: :plugin_loader` for a raising plugin #prepare, " \
+    "#diagnostics_for_file, node_rule and manifest.",
+  "spec/rigor/analysis/runner_pool_spec.rb" =>
+    "excluded from the default suite (`make test-ractor-pool`); drives the Ractor/fork pool backends " \
+    "directly and asserts the `:plugin_loader` runtime-error a worker-side plugin raise folds into."
+}.freeze
+
 # Scans one spec file for analyzer runs whose `Result` never reaches {InternalAnalyzerErrorGuard}.
 #
 # A "run site" is a call to `run` / `run_source` / `analyze_body` whose receiver is an analyzer the same
@@ -40,7 +53,8 @@ module SpecAnalyzerGuardScan
   RUN_METHODS = %i[run run_source analyze_body].freeze
   GUARD_CONSTANT = "InternalAnalyzerErrorGuard"
   # Where an example's own scope begins. A run site inside one of these must carry its own guard.
-  EXAMPLE_SCOPES = %i[it specify example fit ftt xit let let! subject subject! before after around].freeze
+  EXAMPLE_SCOPES = %i[it specify example fit fspecify xit xspecify let let! subject subject!
+                      before after around].freeze
 
   Offense = Struct.new(:line, :source)
 
@@ -86,11 +100,9 @@ module SpecAnalyzerGuardScan
     end
 
     def analyzer_constant?(node)
-      case node
-      when Prism::ConstantReadNode then ANALYZER_CLASSES.include?(node.name.to_s)
-      when Prism::ConstantPathNode then ANALYZER_CLASSES.include?(node.name.to_s)
-      else false
-      end
+      return false unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+
+      ANALYZER_CLASSES.include?(node.name.to_s)
     end
 
     # `Rigor::Analysis::Runner.new(...)`, `Runner.new(...)`, or `described_class.new(...)` in a file that
@@ -170,19 +182,6 @@ module SpecAnalyzerGuardScan
 end
 
 RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
-  # Files whose SUBJECT is the crash envelope itself. Guarding them would make the behaviour untestable,
-  # which is a different thing from having been missed — each one asserts on the very diagnostic
-  # {InternalAnalyzerErrorGuard} raises for. Anything else belongs in `guarded_run`, not here.
-  allowlist = {
-    "spec/rigor/analysis/worker_session_spec.rb" =>
-      "asserts the rescue envelope directly: `internal analyzer error` for a raising check rule, and " \
-      "`rule: \"runtime-error\" / source_family: :plugin_loader` for a raising plugin #prepare, " \
-      "#diagnostics_for_file, node_rule and manifest.",
-    "spec/rigor/analysis/runner_pool_spec.rb" =>
-      "excluded from the default suite (`make test-ractor-pool`); drives the Ractor/fork pool backends " \
-      "directly and asserts the `:plugin_loader` runtime-error a worker-side plugin raise folds into."
-  }.freeze
-
   describe "the scanner (pinned inline, so the rule holds independently of today's tree)" do
     def offense_lines(source)
       SpecAnalyzerGuardScan.offenses(source).map(&:line)
@@ -290,7 +289,7 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
 
   describe "the live tree" do
     it "keeps every allowlisted file present and still offending" do
-      stale = allowlist.keys.reject do |relative|
+      stale = SPEC_ANALYZER_GUARD_ALLOWLIST.keys.reject do |relative|
         path = File.join(SPEC_ANALYZER_GUARD_ROOT, relative)
         File.exist?(path) && !SpecAnalyzerGuardScan.offenses(File.read(path)).empty?
       end
@@ -302,9 +301,9 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
     end
 
     it "routes every other analyzer run through the guard" do
-      offenders = Dir.glob(File.join(SPEC_ANALYZER_GUARD_ROOT, "spec/**/*.rb")).sort.filter_map do |path|
+      offenders = Dir.glob(File.join(SPEC_ANALYZER_GUARD_ROOT, "spec/**/*.rb")).filter_map do |path|
         relative = path.delete_prefix("#{SPEC_ANALYZER_GUARD_ROOT}/")
-        next if allowlist.key?(relative)
+        next if SPEC_ANALYZER_GUARD_ALLOWLIST.key?(relative)
 
         found = SpecAnalyzerGuardScan.offenses(File.read(path))
         next if found.empty?
@@ -327,7 +326,7 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
 
             InternalAnalyzerErrorGuard.check!(runner.run, context: "<what ran it>")
 
-        If the example's SUBJECT is the crash envelope, add it to this spec's `allowlist` with the
+        If the example's SUBJECT is the crash envelope, add it to SPEC_ANALYZER_GUARD_ALLOWLIST with the
         reason. If it deliberately crashes a PLUGIN, keep the guard and pass
         `allow_plugin_crash: true` — the check-rule half stays armed.
 

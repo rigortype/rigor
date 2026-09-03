@@ -132,8 +132,8 @@ RSpec.describe "the effects policy configuration" do
         )
         runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new(data), cache_store: nil)
         guarded_run(runner, ["app"]).diagnostics
-              .select { |d| d.rule == "effect.envelope-exceeded" }
-              .map { |d| d.message[/Method (\S+) performs/, 1] }
+                                    .select { |d| d.rule == "effect.envelope-exceeded" }
+                                    .map { |d| d.message[/Method (\S+) performs/, 1] }
       end
 
       # `annotated` joins the list precisely because the annotation that outranked the stanza is gone.

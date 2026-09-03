@@ -124,4 +124,41 @@ RSpec.describe "examples/rigor-lisp-eval" do
       expect(method_undefined).to be_empty
     end
   end
+
+  describe "pattern-binding extraction and let forms" do
+    it "infers return type for single-binding let forms" do
+      result = run_plugin(source: "Lisp.eval([:let, [:x, 10], [:+, :x, 5]])\n")
+      diags = plugin_diagnostics(result)
+      expect(diags.size).to eq(1)
+      expect(diags.first.message).to eq("Lisp.eval return type inferred as Constant<15>")
+    end
+
+    it "infers return type for multi-binding let forms" do
+      result = run_plugin(source: "Lisp.eval([:let, [[:x, 10], [:y, 20]], [:*, :x, :y]])\n")
+      diags = plugin_diagnostics(result)
+      expect(diags.size).to eq(1)
+      expect(diags.first.message).to eq("Lisp.eval return type inferred as Constant<200>")
+    end
+
+    it "infers return type for destructuring pattern bindings" do
+      result = run_plugin(source: "Lisp.eval([:let, [[:x, :y], [10, 20]], [:+, :x, :y]])\n")
+      diags = plugin_diagnostics(result)
+      expect(diags.size).to eq(1)
+      expect(diags.first.message).to eq("Lisp.eval return type inferred as Constant<30>")
+    end
+
+    it "emits a type error for unbound variables" do
+      result = run_plugin(source: "Lisp.eval([:let, [:x, 10], [:+, :x, :y]])\n")
+      error_diag = plugin_diagnostics(result).find { |d| d.rule == "type-error" }
+      expect(error_diag).not_to be_nil
+      expect(error_diag.message).to include("unbound variable `y`")
+    end
+
+    it "emits a type error for destructuring arity mismatches" do
+      result = run_plugin(source: "Lisp.eval([:let, [[:x, :y], [10]], [:+, :x, :y]])\n")
+      error_diag = plugin_diagnostics(result).find { |d| d.rule == "type-error" }
+      expect(error_diag).not_to be_nil
+      expect(error_diag.message).to include("destructuring arity mismatch")
+    end
+  end
 end

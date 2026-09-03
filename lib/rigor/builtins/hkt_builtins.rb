@@ -52,6 +52,15 @@ module Rigor
         Rigor::Inference::HktBodyParser.parse(CSV_PARSED_BODY, params: [:K])
       end
 
+      # `csv::row[K]` — `Array[K | nil]` (CSV.parse_line's shape:
+      # an Array of optionally-nil cell values for a single row).
+      CSV_ROW_BODY = "Array[K | nil]"
+      private_constant :CSV_ROW_BODY
+
+      def csv_row_body_tree
+        Rigor::Inference::HktBodyParser.parse(CSV_ROW_BODY, params: [:K])
+      end
+
       def json_value_registration
         Rigor::Inference::HktRegistry::Registration.new(
           uri: :"json::value",
@@ -90,6 +99,25 @@ module Rigor
         )
       end
 
+      def csv_row_registration
+        Rigor::Inference::HktRegistry::Registration.new(
+          uri: :"csv::row",
+          arity: 1,
+          variance: [:out],
+          bound: Rigor::Type::Combinator.untyped
+        )
+      end
+
+      def csv_row_definition
+        Rigor::Inference::HktRegistry.definition_with_body_tree(
+          uri: :"csv::row",
+          params: [:K],
+          body_tree: csv_row_body_tree,
+          source_path: __FILE__,
+          source_line: __LINE__ - 5
+        )
+      end
+
       # @return [Rigor::Inference::HktRegistry] frozen registry
       #   pre-seeded with all bundled HKT registrations +
       #   bodies. Allocated fresh each call rather than
@@ -104,8 +132,8 @@ module Rigor
       #   once ADR-15 phase 4b.x covers the dependency graph.
       def registry
         Rigor::Inference::HktRegistry.new(
-          registrations: [json_value_registration, csv_parsed_registration],
-          definitions: [json_value_definition, csv_parsed_definition]
+          registrations: [json_value_registration, csv_parsed_registration, csv_row_registration],
+          definitions: [json_value_definition, csv_parsed_definition, csv_row_definition]
         )
       end
 
@@ -160,6 +188,14 @@ module Rigor
       }.freeze
       private_constant :CSV_PARSED_SPEC
 
+      CSV_ROW_SPEC = {
+        uri: :"csv::row",
+        args: ["String"],
+        discriminator: nil,
+        post_reduce: nil
+      }.freeze
+      private_constant :CSV_ROW_SPEC
+
       METHOD_RETURN_OVERRIDES = {
         # JSON — stdlib's `json` library. Upstream rbs declares
         # `(string, ?options) -> untyped`; the HKT-builtin tier
@@ -190,17 +226,20 @@ module Rigor
         ["YAML",  :safe_load_file, :singleton] => YAML_SAFE_VALUE_SPEC,
         ["Psych", :safe_load,      :singleton] => YAML_SAFE_VALUE_SPEC,
         ["Psych", :safe_load_file, :singleton] => YAML_SAFE_VALUE_SPEC,
-        # CSV.parse / CSV.read — no-headers shape only.
+        # CSV.parse / CSV.read / CSV.readlines / CSV.parse_line — no-headers shape only.
         # Upstream rbs declares broader return shapes but
         # the common case is `Array[Array[String?]]` which
-        # the `csv::parsed[String]` URI matches. The
+        # the `csv::parsed[String]` URI matches, or
+        # `Array[String?]` which `csv::row[String]` matches. The
         # `headers: true` shape (`CSV::Table` of `CSV::Row`)
         # is NOT covered — calls passing the option fall
         # through to the upstream RBS type. CSV.foreach also
         # falls through (it yields rows rather than
         # returning a typed structure).
-        ["CSV", :parse, :singleton] => CSV_PARSED_SPEC,
-        ["CSV", :read,  :singleton] => CSV_PARSED_SPEC
+        ["CSV", :parse,      :singleton] => CSV_PARSED_SPEC,
+        ["CSV", :read,       :singleton] => CSV_PARSED_SPEC,
+        ["CSV", :readlines,  :singleton] => CSV_PARSED_SPEC,
+        ["CSV", :parse_line, :singleton] => CSV_ROW_SPEC
       }.freeze
 
       # @return [Rigor::Type, nil] the reduced HKT type for

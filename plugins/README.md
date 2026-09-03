@@ -97,7 +97,7 @@ your test framework; they compose freely.
 
 ### dry-rb foundation
 
-Four plugins forming the dry-rb adapter family per
+Five plugins forming the dry-rb adapter family per
 [ADR-12](../docs/adr/12-dry-rb-packaging.md). Activate any
 subset; they cross-reference through ADR-9 facts.
 
@@ -107,6 +107,7 @@ subset; they cross-reference through ADR-9 facts.
 | [`rigor-dry-schema`](rigor-dry-schema/) | Recognises `Foo = Dry::Schema.{Params,JSON,define} { ... }` and publishes `:dry_schema_table`. Maps `required(:k).filled(:string)` / `value(Types::Email)` rows to underlying classes; resolves user-authored type references through `:dry_type_aliases`. |
 | [`rigor-dry-struct`](rigor-dry-struct/) | **ADR-16 macro expansion substrate Tier C consumer** — declarative `Plugin::Macro::HeredocTemplate` manifest synthesises an instance reader on every `Dry::Struct` subclass for each `attribute :name, T` / `attribute? :name, T`. v0.2.0 reads `:dry_type_aliases` via ADR-18's `returns_from_arg:` for per-call-site precision uplift (`attribute :city, Types::String` returns `Nominal[String]` instead of `Dynamic[Top]`). |
 | [`rigor-dry-validation`](rigor-dry-validation/) | Recognises `class T < Dry::Validation::Contract` subclasses; publishes `:dry_validation_contracts`. Ships an RBS overlay typing `Contract#call → Result` + `Result#{success?, failure?, to_h, errors, []}` so `contract.call(input).to_h` chains resolve cleanly. |
+| [`rigor-dry-monads`](rigor-dry-monads/) | **Lightweight HKT carrier adapter** per ADR-20 Slice 4 — registers `dry_monads::result` and `dry_monads::maybe` HKT tags and contributes return types for constructors (`Success`, `Failure`, `Some`, `None`) and unwrapping (`value!`, `failure`, `value_or`). |
 
 ### Other ecosystem plugins
 

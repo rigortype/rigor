@@ -68,6 +68,8 @@ module Rigor
         Type::Intersection => :accepts_intersection,
         Type::Tuple => :accepts_tuple,
         Type::HashShape => :accepts_hash_shape,
+        Type::Result => :accepts_result,
+        Type::Maybe => :accepts_maybe,
         Type::StructClass => :accepts_class_factory,
         Type::DataClass => :accepts_class_factory
       }.freeze
@@ -246,11 +248,39 @@ module Rigor
             # is bounded because every refinement carrier's `base` is closer to the nominal layer.
             accepts(self_type, other_type.base, mode: mode)
               .with_reason("projected #{other_type.class.name.split('::').last} to its base")
+          when Type::Result, Type::Maybe
+            accepts_nominal_from_monad(self_type, other_type, mode)
           else
             Type::AcceptsResult.no(
               mode: mode,
               reasons: "Nominal[#{self_type.class_name}] rejects #{other_type.class}"
             )
+          end
+        end
+
+        def accepts_nominal_from_monad(self_type, other_type, mode)
+          cls = self_type.class_name.sub(/\A::/, "")
+          case other_type
+          when Type::Result
+            unless %w[Dry::Monads::Result Result].include?(cls)
+              return Type::AcceptsResult.no(mode: mode, reasons: "Nominal[#{self_type.class_name}] rejects Result")
+            end
+
+            target = Type::Combinator.nominal_of(
+              self_type.class_name,
+              type_args: [other_type.ok_type, other_type.err_type]
+            )
+            accepts(self_type, target, mode: mode).with_reason("projected Result to Nominal")
+          when Type::Maybe
+            unless %w[Dry::Monads::Maybe Maybe].include?(cls)
+              return Type::AcceptsResult.no(mode: mode, reasons: "Nominal[#{self_type.class_name}] rejects Maybe")
+            end
+
+            target = Type::Combinator.nominal_of(
+              self_type.class_name,
+              type_args: [other_type.value_type]
+            )
+            accepts(self_type, target, mode: mode).with_reason("projected Maybe to Nominal")
           end
         end
 
@@ -795,6 +825,56 @@ module Rigor
 
         def hash_shape_no(mode, reason)
           Type::AcceptsResult.no(mode: mode, reasons: reason)
+        end
+
+        def accepts_result(self_type, other_type, mode)
+          case other_type
+          when Type::Result
+            combine_arg_results(
+              [
+                accepts(self_type.ok_type, other_type.ok_type, mode: mode),
+                accepts(self_type.err_type, other_type.err_type, mode: mode)
+              ],
+              mode
+            )
+          when Type::Nominal
+            cls = other_type.class_name.sub(/\A::/, "")
+            if %w[Dry::Monads::Result Result].include?(cls) && other_type.type_args.size == 2
+              combine_arg_results(
+                [
+                  accepts(self_type.ok_type, other_type.type_args[0], mode: mode),
+                  accepts(self_type.err_type, other_type.type_args[1], mode: mode)
+                ],
+                mode
+              )
+            else
+              Type::AcceptsResult.no(mode: mode, reasons: "Result does not accept Nominal[#{other_type.class_name}]")
+            end
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Result does not accept #{other_type.class}"
+            )
+          end
+        end
+
+        def accepts_maybe(self_type, other_type, mode)
+          case other_type
+          when Type::Maybe
+            accepts(self_type.value_type, other_type.value_type, mode: mode)
+          when Type::Nominal
+            cls = other_type.class_name.sub(/\A::/, "")
+            if %w[Dry::Monads::Maybe Maybe].include?(cls) && other_type.type_args.size == 1
+              accepts(self_type.value_type, other_type.type_args[0], mode: mode)
+            else
+              Type::AcceptsResult.no(mode: mode, reasons: "Maybe does not accept Nominal[#{other_type.class_name}]")
+            end
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Maybe does not accept #{other_type.class}"
+            )
+          end
         end
 
         def accepts_class_factory(self_type, other_type, mode)

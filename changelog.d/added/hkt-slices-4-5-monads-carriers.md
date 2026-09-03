@@ -1,0 +1,1 @@
+- **[types]** Introduce first-class `Result` and `Maybe` generic type carriers, the `rigor-dry-monads` plugin with HKT registration, and let-pattern binding in `rigor-lisp-eval`. ([#128](https://github.com/rigortype/rigor/issues/128))

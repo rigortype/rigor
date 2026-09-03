@@ -369,6 +369,16 @@ module Rigor
         StructInstance.new(members, class_name)
       end
 
+      # ADR-3 amendment (ADR-20 slice 4) — generic Result[T, E] carrier constructor.
+      def result_of(ok_type, err_type)
+        Result.new(ok_type, err_type)
+      end
+
+      # ADR-3 amendment (ADR-20 slice 4) — generic Maybe[T] carrier constructor.
+      def maybe_of(value_type)
+        Maybe.new(value_type)
+      end
+
       # Normalized union. Flattens nested Unions, deduplicates structurally equal members, drops Bot, and
       # collapses 0/1-member results.
       def union(*types)

@@ -1,0 +1,9 @@
+module Dry
+  module Monads
+    class Result[out T, out E]
+    end
+
+    class Maybe[out T]
+    end
+  end
+end

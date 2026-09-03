@@ -20,6 +20,7 @@ module Rigor
       #              | :< | :> | :<= | :>= | :==  (comparison)
       #              | :and | :or | :not  (boolean)
       #              | :if   (conditional)
+      #              | :let  (binding & destructuring)
       #
       # Every expression that does not fit the grammar — a non-literal element, an unknown operator, a wrong arity —
       # yields {UnknownExpression} so the caller can decide whether to stay silent or to publish a diagnostic.
@@ -53,16 +54,23 @@ module Rigor
         #   - an Array of {Result}s — successful union (`:if` branches)
         #   - {TypeError} — well-formed but ill-typed
         #   - {UnknownExpression} — outside the supported grammar
-        def evaluate(node)
+        def evaluate(node, env = {})
           case node
           when Prism::IntegerNode then Result.new(tag: INTEGER, value: node.value)
           when Prism::FloatNode then Result.new(tag: FLOAT, value: node.value)
           when Prism::TrueNode then Result.new(tag: BOOL, value: true)
           when Prism::FalseNode then Result.new(tag: BOOL, value: false)
-          when Prism::ArrayNode then evaluate_form(node)
+          when Prism::SymbolNode
+            sym = node.unescaped.to_sym
+            if env.key?(sym)
+              env[sym]
+            else
+              TypeError.new(message: "unbound variable `#{sym}`", node: node)
+            end
+          when Prism::ArrayNode then evaluate_form(node, env)
           else
             UnknownExpression.new(
-              reason: "expected an integer, float, boolean, or [:op, ...] form, got #{describe_node(node)}",
+              reason: "expected an integer, float, boolean, symbol, or [:op, ...] form, got #{describe_node(node)}",
               node: node
             )
           end
@@ -70,7 +78,7 @@ module Rigor
 
         private
 
-        def evaluate_form(node)
+        def evaluate_form(node, env = {})
           elements = node.elements
           return UnknownExpression.new(reason: "empty literal `[]` is not a Lisp form", node: node) if elements.empty?
 
@@ -83,21 +91,22 @@ module Rigor
           args = elements[1..]
 
           case operator
-          when :+, :-, :*, :/ then evaluate_arith(operator, args, node)
-          when :<, :>, :<=, :>=, :== then evaluate_compare(operator, args, node)
-          when :and, :or then evaluate_boolean_binop(operator, args, node)
-          when :not then evaluate_not(args, node)
-          when :if then evaluate_if(args, node)
+          when :+, :-, :*, :/ then evaluate_arith(operator, args, node, env)
+          when :<, :>, :<=, :>=, :== then evaluate_compare(operator, args, node, env)
+          when :and, :or then evaluate_boolean_binop(operator, args, node, env)
+          when :not then evaluate_not(args, node, env)
+          when :if then evaluate_if(args, node, env)
+          when :let then evaluate_let(args, node, env)
           else
             UnknownExpression.new(reason: "unknown operator #{operator.inspect}", node: op_node)
           end
         end
 
-        def evaluate_arith(operator, args, node)
+        def evaluate_arith(operator, args, node, env)
           return arity_error(operator, 2, args.size, node) if args.size != 2
 
-          left = evaluate(args[0])
-          right = evaluate(args[1])
+          left = evaluate(args[0], env)
+          right = evaluate(args[1], env)
           return left if propagate?(left)
           return right if propagate?(right)
 
@@ -112,11 +121,11 @@ module Rigor
           Result.new(tag: numeric_join(left.tag, right.tag), value: value)
         end
 
-        def evaluate_compare(operator, args, node)
+        def evaluate_compare(operator, args, node, env)
           return arity_error(operator, 2, args.size, node) if args.size != 2
 
-          left = evaluate(args[0])
-          right = evaluate(args[1])
+          left = evaluate(args[0], env)
+          right = evaluate(args[1], env)
           return left if propagate?(left)
           return right if propagate?(right)
 
@@ -131,11 +140,11 @@ module Rigor
           Result.new(tag: BOOL, value: value)
         end
 
-        def evaluate_boolean_binop(operator, args, node)
+        def evaluate_boolean_binop(operator, args, node, env)
           return arity_error(operator, 2, args.size, node) if args.size != 2
 
-          left = evaluate(args[0])
-          right = evaluate(args[1])
+          left = evaluate(args[0], env)
+          right = evaluate(args[1], env)
           return left if propagate?(left)
           return right if propagate?(right)
 
@@ -150,10 +159,10 @@ module Rigor
           Result.new(tag: BOOL, value: value)
         end
 
-        def evaluate_not(args, node)
+        def evaluate_not(args, node, env)
           return arity_error(:not, 1, args.size, node) if args.size != 1
 
-          inner = evaluate(args[0])
+          inner = evaluate(args[0], env)
           return inner if propagate?(inner)
           unless boolean?(inner)
             return TypeError.new(
@@ -166,10 +175,10 @@ module Rigor
           Result.new(tag: BOOL, value: value)
         end
 
-        def evaluate_if(args, node)
+        def evaluate_if(args, node, env)
           return arity_error(:if, 3, args.size, node) if args.size != 3
 
-          cond = evaluate(args[0])
+          cond = evaluate(args[0], env)
           return cond if propagate?(cond)
           unless boolean?(cond)
             return TypeError.new(
@@ -178,13 +187,117 @@ module Rigor
             )
           end
 
-          then_branch = evaluate(args[1])
+          then_branch = evaluate(args[1], env)
           return then_branch if propagate?(then_branch)
 
-          else_branch = evaluate(args[2])
+          else_branch = evaluate(args[2], env)
           return else_branch if propagate?(else_branch)
 
           tag_union(then_branch, else_branch)
+        end
+
+        def evaluate_let(args, node, env)
+          return arity_error(:let, 2, args.size, node) if args.size != 2
+
+          bindings_node = args[0]
+          body_node = args[1]
+
+          child_env = env.dup
+          err = extract_all_bindings(bindings_node, child_env, env)
+          return err if err
+
+          evaluate(body_node, child_env)
+        end
+
+        def extract_all_bindings(bindings_node, child_env, eval_env)
+          unless bindings_node.is_a?(Prism::ArrayNode)
+            return TypeError.new(message: "`let` bindings must be an array literal", node: bindings_node)
+          end
+
+          elements = bindings_node.elements
+          return nil if elements.empty?
+
+          if elements.first.is_a?(Prism::SymbolNode)
+            extract_single_binding(elements, child_env, eval_env, bindings_node)
+          elsif elements.size == 2 && pattern_node?(elements[0]) && !binding_pair?(elements[1])
+            extract_pattern_binding(elements[0], elements[1], child_env, eval_env, bindings_node)
+          else
+            elements.each do |elem|
+              unless elem.is_a?(Prism::ArrayNode)
+                return TypeError.new(message: "binding entry must be an array", node: elem)
+              end
+
+              elem_parts = elem.elements
+              if elem_parts.first.is_a?(Prism::SymbolNode)
+                err = extract_single_binding(elem_parts, child_env, eval_env, elem)
+                return err if err
+              elsif elem_parts.size == 2 && pattern_node?(elem_parts[0])
+                err = extract_pattern_binding(elem_parts[0], elem_parts[1], child_env, eval_env, elem)
+                return err if err
+              else
+                return TypeError.new(message: "malformed binding entry", node: elem)
+              end
+            end
+            nil
+          end
+        end
+
+        def extract_single_binding(parts, child_env, eval_env, node)
+          return arity_error(:let_binding, 2, parts.size, node) if parts.size != 2
+
+          sym = parts[0].unescaped.to_sym
+          val = evaluate(parts[1], eval_env)
+          return val if propagate?(val)
+
+          child_env[sym] = val
+          nil
+        end
+
+        def extract_pattern_binding(pattern_node, val_node, child_env, eval_env, node)
+          if pattern_node.is_a?(Prism::SymbolNode)
+            val = evaluate(val_node, eval_env)
+            return val if propagate?(val)
+
+            child_env[pattern_node.unescaped.to_sym] = val
+            return nil
+          end
+
+          unless pattern_node.is_a?(Prism::ArrayNode)
+            return TypeError.new(message: "pattern must be a symbol or array of symbols", node: pattern_node)
+          end
+
+          unless val_node.is_a?(Prism::ArrayNode)
+            return TypeError.new(message: "destructuring expects an array value", node: val_node)
+          end
+
+          p_elems = pattern_node.elements
+          v_elems = val_node.elements
+
+          if p_elems.size != v_elems.size
+            return TypeError.new(
+              message: "destructuring arity mismatch: pattern expects #{p_elems.size} elements, got #{v_elems.size}",
+              node: pattern_node
+            )
+          end
+
+          p_elems.each_with_index do |p_elem, idx|
+            err = extract_pattern_binding(p_elem, v_elems[idx], child_env, eval_env, node)
+            return err if err
+          end
+
+          nil
+        end
+
+        def pattern_node?(node)
+          case node
+          when Prism::SymbolNode then true
+          when Prism::ArrayNode then node.elements.all? { |e| pattern_node?(e) }
+          else false
+          end
+        end
+
+        def binding_pair?(node)
+          node.is_a?(Prism::ArrayNode) && node.elements.size == 2 && pattern_node?(node.elements[0])
         end
 
         def arity_error(operator, expected, actual, node)

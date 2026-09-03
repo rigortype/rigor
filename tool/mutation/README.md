@@ -92,7 +92,7 @@ actually see**, not Dynamic-receiver noise.
 
 ## Fuzz mode — robustness, not teeth
 
-`fuzz <paths…>` is the soundness/robustness sibling: not "does Rigor bite" but
+`fuzz [<paths…>]` (or `--all`) is the soundness/robustness sibling; when no paths are given it defaults to repo-wide scope (`lib/rigor plugins/*/lib examples/*/lib`): not "does Rigor bite" but
 "can Rigor be broken". It runs the warm loop with **aggressive, un-filtered**
 mutation (every operator including `arity_extra`, every site) and reports a
 mutant that makes the analyzer **crash** (a rescued `internal analyzer error:`
@@ -112,7 +112,7 @@ nix … develop -c bundle exec ruby tool/mutation/mutate.rb fuzz lib/rigor --per
 2. ~~**Broad fuzz mode**~~ — **done.** See above.
 3. **Closure-aware kills** — a return-type mutation surfaces at a *caller*; use
    the ADR-46 dependents index to define where a legitimate kill may appear.
-4. **`arity_extra` fixed-arity guard** — resolve the callee signature so the
-   operator only fires on fixed-arity methods, making it default-worthy again.
+4. ~~**`arity_extra` fixed-arity guard**~~ — **done.** Callee signatures are inspected via
+   `Reflection`, keeping the operator default-on while dropping variadic/untyped sites.
 5. Optionally a `make mutate` target and a per-rule fixture corpus where kill is
    *expected*, tracked as a teeth-regression gate.

@@ -25,10 +25,8 @@ RSpec.describe Rigor::Protection::Mutator do
     expect(nil_mut.apply(%(foo.bar(1)\n))).to eq(%(foo.bar(nil)\n))
   end
 
-  it "excludes arity_extra from the default operator set (noise on variadic methods)" do
-    expect(mutations(%(foo.bar(1)\n)).map(&:operator)).not_to include(:arity_extra)
-    with_arity = mutations(%(foo.bar(1)\n), operators: described_class::ALL_OPERATORS)
-    expect(with_arity.map(&:operator)).to include(:arity_extra)
+  it "includes arity_extra in the default operator set (guarded by signature arity in filter_by_type)" do
+    expect(mutations(%(foo.bar(1)\n)).map(&:operator)).to include(:arity_extra)
   end
 
   it "does not mutate an argument to a universal-equality method (always an equivalent mutant)" do
@@ -66,6 +64,32 @@ RSpec.describe Rigor::Protection::Mutator do
     # Issue #253 — the plain-parameter seam. The class knows nothing about Configuration or feature ids; a
     # caller that has already resolved cross-file discovery hands the scope down, and a receiver whose class
     # is declared in a *sibling* file stops reading Dynamic. `base_scope: nil` is the shipped behaviour.
+    it "keeps an arity_extra mutation on a known fixed-arity method call" do
+      kept, = filter(%("hello".sub("h", "j")\n))
+      arity = kept.find { |m| m.operator == :arity_extra }
+      expect(arity).not_to be_nil
+      expect(arity.apply(%("hello".sub("h", "j")\n))).to eq(%("hello".sub("h", "j", nil)\n))
+    end
+
+    it "inserts arity_extra correctly for parenthesis-less calls" do
+      kept, = filter(%("hello".sub "h", "j"\n))
+      arity = kept.find { |m| m.operator == :arity_extra }
+      expect(arity).not_to be_nil
+      expect(arity.apply(%("hello".sub "h", "j"\n))).to eq(%("hello".sub "h", "j", nil\n))
+    end
+
+    it "drops an arity_extra mutation on a variadic method call" do
+      kept, = filter(%(File.join("a", "b")\n))
+      arity = kept.find { |m| m.operator == :arity_extra }
+      expect(arity).to be_nil
+    end
+
+    it "drops an arity_extra mutation on an untyped receiver" do
+      kept, = filter(%(unknown_obj.foo(1)\n))
+      arity = kept.find { |m| m.operator == :arity_extra }
+      expect(arity).to be_nil
+    end
+
     describe "base_scope:" do
       let(:source) { %(Account.find(1)\n) }
 

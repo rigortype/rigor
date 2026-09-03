@@ -151,4 +151,12 @@ module Rigor
       def evaluate_return_types: (untyped paths, untyped specs) -> untyped
     end
   end
+
+  module ValueSemantics
+    def self.included: (Module base) -> void
+
+    module ClassMethods
+      def value_fields: (*Symbol fields) -> void
+    end
+  end
 end

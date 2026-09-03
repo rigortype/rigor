@@ -111,8 +111,8 @@ Gem::Specification.new do |spec|
   # thing under test. `RD_PROF` answers it per file, and `EVENT_PROF` attributes
   # suite time to instrumented engine entry points. Profilers stay inert unless
   # their env var is set, so this costs the default run only its require.
-  spec.add_development_dependency "test-prof", ">= 1.6", "< 2.0"
   spec.add_development_dependency "rubocop", ">= 1.70", "< 2.0"
   spec.add_development_dependency "rubocop-rake", ">= 0.6", "< 1.0"
   spec.add_development_dependency "rubocop-rspec", ">= 3.0", "< 4.0"
+  spec.add_development_dependency "test-prof", ">= 1.6", "< 2.0"
 end

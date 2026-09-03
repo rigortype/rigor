@@ -72,11 +72,32 @@ iff:
   classifies it `:missing` (not a default library, vendored stub,
   bundle-`sig/`, or `rbs collection` entry), AND
 - Rigor bundles an overlay for it (`data/gem_overlay/<gem>/`), AND
-- the opt-in plugin that ships the same signatures is not loaded
+- the opt-in plugin that ships the same signatures is not **reachable**
   (`GEM_OVERLAY_PLUGIN_IDS` maps `activesupport` →
-  `activesupport-core-ext`; when that plugin id is in the registry the
-  overlay stands down, so the two never both declare the methods and
-  raise `RBS::DuplicatedDeclarationError`).
+  `activesupport-core-ext`; the overlay stands down so the two never both
+  declare the methods and raise `RBS::DuplicatedDeclarationError`).
+
+Reachable is two questions, not one. The plugin id being in the registry
+is the route this ADR first anticipated. Issue #672 found the second: a
+project that wires the plugin's signatures through `signature_paths:`
+rather than `plugins:` reaches the same `.rbs` with no registry entry to
+key on, so both halves loaded and every class they share collapsed —
+`RBS::DefinitionBuilder` raised `DuplicatedMethodDefinitionError` while
+`class_known?` kept saying yes, and the run reported *less* while still
+exiting 0. The stand-down therefore also asks whether an entry in the
+user's own `signature_paths:` resolves onto the engine's bundled twin
+`sig/` (`Plugin::Loader.bundled_plugin_sig_path`, containment in either
+direction because RBS walks a signature directory recursively).
+
+**A path test, deliberately, and not a content test.** The path test is
+exact for the case that bites — nothing but the twin lives under that
+directory — and cannot stand an overlay down for a project that never
+named it. A content test would additionally catch a *vendored copy* of
+those signatures, but not for free: standing the overlay down on an
+overlap makes every selector the copy omits a fresh
+`call.undefined-method` on correct code, which WD2's direction forbids,
+and an edited copy defeats it anyway. The vendored copy keeps the
+collision report instead of a guess.
 
 Lockfile resolution piggybacks on `bundler.auto_detect` (default
 **true**), so the fix is on by default for any project with a

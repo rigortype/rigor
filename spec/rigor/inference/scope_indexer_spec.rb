@@ -2177,5 +2177,21 @@ end
       supers = described_class.build_superclass_tables(parse("class Admin::Widget < Base; end")).first
       expect(supers).to eq({ "Admin::Widget" => "Base" })
     end
+
+    # Rails' own `ActiveRecord::Relation` is the corpus case: the library declares it inside
+    # `module ActiveRecord` and a test file reopens it as the compact `class ActiveRecord::Relation`.
+    # Last-writer-wins hands the library site the test file's EMPTY chain and its nine `include`s stop
+    # resolving — the false-positive direction — so the two sites' chains are unioned instead.
+    it "unions the header nestings of a class reopened under two spellings" do
+      table = header_nestings("module Admin\n  class Widget; end\nend\nclass Admin::Widget; end\n")
+      expect(table["Admin::Widget"]).to eq(["Admin"])
+    end
+
+    it "orders a unioned chain most-qualified first" do
+      table = header_nestings(
+        "module A\n  module B\n    class C; end\n  end\nend\nmodule A\n  class B::C; end\nend\n"
+      )
+      expect(table["A::B::C"]).to eq(["A::B", "A"])
+    end
   end
 end

@@ -131,6 +131,33 @@ class Reader
   end
 end
 
+# A class REOPENED under both spellings has two header nestings while the
+# ancestor names its sites write collapse into one per-class table, so taking
+# either site's chain alone drops a candidate the other one had. Rails is the
+# corpus case — `activerecord` declares `ActiveRecord::Relation` inside
+# `module ActiveRecord` and one test file reopens it compactly — and taking the
+# compact site's empty chain cost that class nine included modules. The two are
+# unioned instead, which degrades such a class to the pre-fix candidate list
+# rather than to a shorter one.
+module Reopened
+  module FinderMethods
+    def find_one = :found
+  end
+
+  class Relation
+    include FinderMethods
+  end
+end
+
+class Reopened::Relation
+end
+
+class ReopenReader
+  def read
+    assert_type(':found', Reopened::Relation.new.find_one)
+  end
+end
+
 # The must-fire pair. The compact half reported NOTHING on master, because the
 # receiver reached `Admin::Base`, resolved no `top_val`, and typed opaque; the
 # nested half fired there and must keep firing.

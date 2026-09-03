@@ -179,7 +179,8 @@ module Rigor
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
         file_superclasses, file_header_nestings = build_superclass_tables(root, default_scope.source_path)
         superclasses = default_scope.discovered_superclasses.merge(file_superclasses)
-        header_nestings = default_scope.discovery.discovered_header_nestings.merge(file_header_nestings)
+        header_nestings =
+          merge_header_nestings(default_scope.discovery.discovered_header_nestings.dup, file_header_nestings).freeze
         includes = default_scope.discovered_includes.merge(
           build_discovered_includes(root)
         ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
@@ -2411,11 +2412,34 @@ module Rigor
       # is not on the ladder its superclass name walks.
       def record_declaration_ancestry(node, qualified_prefix, child_prefix, accumulator)
         full = child_prefix.join("::")
-        accumulator[:header_nestings][full] = lexical_nesting_for_prefix(qualified_prefix)
+        add_header_nesting(accumulator[:header_nestings], full, lexical_nesting_for_prefix(qualified_prefix))
         return unless node.is_a?(Prism::ClassNode)
 
         superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
         accumulator[:superclasses][full] = superclass if superclass
+      end
+
+      # Adds one declaration site's header nesting to the per-class table, UNIONING it with what a
+      # previous site recorded, most-qualified first. A class reopened under two spellings has two header
+      # nestings while the ancestor names its sites write collapse into ONE table, so taking either site's
+      # chain alone drops a candidate the other one had — and dropping a candidate drops an ancestor edge,
+      # the false-positive direction. Rails is the corpus case: `activerecord` declares
+      # `ActiveRecord::Relation` inside `module ActiveRecord` and one test file reopens it as the compact
+      # `class ActiveRecord::Relation`, so last-writer-wins cost the library class nine included modules.
+      # The union is the conservative reading of an ambiguity the per-class table cannot represent: it
+      # degrades such a class to the pre-fix candidate list rather than to a shorter one.
+      def add_header_nesting(table, name, entries)
+        existing = table[name]
+        return table[name] = entries.freeze if existing.nil?
+        return if entries.all? { |entry| existing.include?(entry) }
+
+        table[name] = (existing | entries).sort_by { |entry| [-entry.split("::").size, entry] }.freeze
+      end
+
+      # {#add_header_nesting} over a whole table, for the per-file and cross-file merges.
+      def merge_header_nestings(target, incoming)
+        incoming.each { |name, entries| add_header_nesting(target, name, entries) }
+        target
       end
 
       # #319 — `Class.new(Parent) do ... end` names its superclass in the first positional. Recording it under the
@@ -3311,7 +3335,7 @@ module Rigor
         acc[:superclasses].merge!(file_index[:superclasses])
         # Issue #682 — a pre-#682 seed bundle carries no header nestings; the SCHEMA bump makes such a blob a
         # cold rebuild, but default so any in-flight fold stays total and simply peels for those classes.
-        acc[:header_nestings].merge!(file_index[:header_nestings] || {})
+        merge_header_nestings(acc[:header_nestings], file_index[:header_nestings] || {})
         accumulate_module_lists(acc[:includes], file_index[:includes])
         accumulate_module_lists(acc[:extends], file_index[:extends] || {})
         file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
@@ -3477,7 +3501,7 @@ module Rigor
         superclasses, header_nestings = build_superclass_tables(root, path)
         includes = build_discovered_includes(root)
         acc[:superclasses].merge!(superclasses)
-        acc[:header_nestings].merge!(header_nestings)
+        merge_header_nestings(acc[:header_nestings], header_nestings)
         accumulate_module_lists(acc[:includes], includes)
         accumulate_module_lists(acc[:extends], build_discovered_extends(root))
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes)

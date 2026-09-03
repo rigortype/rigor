@@ -592,10 +592,11 @@ RSpec.describe "Rigor type construction (integration)" do
     # Non-vacuity. Each arm is a compact / nested pair — an implementation that
     # stopped peeling entirely satisfies every compact assertion and no nested
     # twin, and the peel satisfies the reverse — plus `by_two_hop*`, which no
-    # first-hop-only repair reaches, and the include arms, which share the
-    # candidate order the superclass arms exercise.
+    # first-hop-only repair reaches, the include arms, which share the candidate
+    # order the superclass arms exercise, and `ReopenReader`, whose class is
+    # declared under BOTH spellings and so must keep the union of their chains.
     it "still asserts both spellings of every ancestor shape" do
-      expect(marked_lines(harness, "assert_type(").size).to eq(12)
+      expect(marked_lines(harness, "assert_type(").size).to eq(13)
     end
 
     # The must-FIRE half. The compact receiver resolved to nothing on master and
@@ -603,7 +604,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # keep firing, so neither half of the pair can go quiet unnoticed.
     it "reports the undefined call on both the compact and the nested receiver" do
       expect(harness.errors.map { |d| [d.line, d.rule] })
-        .to eq([[137, "call.undefined-method"], [138, "call.undefined-method"]])
+        .to eq([[164, "call.undefined-method"], [165, "call.undefined-method"]])
     end
   end
 

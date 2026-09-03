@@ -771,6 +771,66 @@ module Rigor
           path.to_s.start_with?("#{GEM_OVERLAY_SIGS_ROOT}/")
         end
 
+        # The twin of {.under_gem_overlay_root?}, for the OTHER copy of the same declarations. ADR-72 ships
+        # each overlay's surface twice — as `data/gem_overlay/<gem>/` and as the opt-in plugin's own `sig/` —
+        # and a project can reach the second WITHOUT the plugin registry, by naming it in `signature_paths:`
+        # (issue #672). Two callers ask, for different reasons:
+        #
+        # - `Environment.gem_overlay_paths` asks per gem, so the overlay stands down instead of loading
+        #   alongside the twin and collapsing every class they share;
+        # - `CheckRules#gem_overlay_loaded?` asks across all of them, because the twin's `sig/` carries no
+        #   plugin manifest, so `open_receivers:` cannot protect the partial `ActiveSupport::Duration`
+        #   declaration it nonetheless loads.
+        #
+        # **Both ask what an entry LOADS, not what it looks like.** Comparing path strings is wrong in both
+        # directions, and the false-positive direction is the expensive one: an entry naming the twin's
+        # `.rbs` FILE, or a subdirectory of the twin that does not exist, matches as a string while the
+        # loader reads nothing from it ({.project_sig_files} takes directories only — the same fact
+        # {Rigor::SignaturePathAudit} reports as `:not_directory` / `:missing`). Standing an overlay down for
+        # those leaves the project with NEITHER copy, so ordinary `3.minutes` draws `call.undefined-method`
+        # on correct code. The quiet direction is the mirror: a symlink to the twin, or a case-variant
+        # spelling of it where the filesystem folds case, loads the twin while matching no prefix. Asking
+        # {.project_sig_files} for the twin's files and canonicalising both sides answers both.
+        #
+        # Lives here rather than on {Rigor::Environment} because it is an internal seam, not ADR-2 public
+        # API: `spec/rigor/public_api_drift_spec.rb` pins `Environment`'s singleton surface, and a predicate
+        # two call sites share is not a promise to plugin authors. Here it sits beside the overlay-side
+        # answer to the very same question, on the class that already owns the overlay's layout
+        # ({GEM_OVERLAY_SIGS_ROOT}, {.gem_overlay_sig_paths}).
+        #
+        # @param signature_paths [Array<String, Pathname>] typically an {RbsLoader} instance's
+        #   {#signature_paths}. Takes the whole list rather than one entry so the twin's file set resolves
+        #   once per question — `CheckRules` asks it per `ActiveSupport::Duration` receiver.
+        def gem_overlay_twin_signatures_loaded?(signature_paths)
+          # `GEM_OVERLAY_PLUGIN_IDS` is ADR-72 eligibility policy and stays owned by `Environment`; it is
+          # read here only to enumerate which bundled plugins HAVE an overlay twin.
+          GEM_OVERLAY_PLUGIN_IDS.each_value.any? do |plugin_id|
+            bundled_overlay_twin_signatures_loaded?(plugin_id, signature_paths)
+          end
+        end
+
+        # The per-plugin half of {.gem_overlay_twin_signatures_loaded?}. `Environment` owns the gem → plugin
+        # id mapping and passes the id; this resolves the id to the engine's own bundled `sig/` and answers
+        # the filesystem question.
+        #
+        # @param plugin_id [String] a manifest id, e.g. `"activesupport-core-ext"`.
+        def bundled_overlay_twin_signatures_loaded?(plugin_id, signature_paths)
+          return false if signature_paths.nil? || signature_paths.empty?
+
+          # In-method for the reason `Plugin::FirstParty` documents at its own `require`: the plugin
+          # subsystem's load graph reaches back into the environment, and only the overlay path calls this —
+          # a run with no eligible overlay gem never pays them.
+          require_relative "../plugin/first_party"
+          require_relative "../plugin/loader"
+          twin = Plugin::Loader.bundled_plugin_sig_path("#{Plugin::FirstParty::GEM_PREFIX}#{plugin_id}")
+          return false unless twin
+
+          twin_files = project_sig_files([twin]).filter_map { |file| canonical_real_path(file) }
+          return false if twin_files.empty?
+
+          signature_paths.any? { |entry| signature_entry_loads?(entry, twin_files) }
+        end
+
         def vendored_gem_sig_paths
           return [] unless File.directory?(VENDORED_GEM_SIGS_ROOT)
 
@@ -790,6 +850,34 @@ module Rigor
           Dir.children(VENDORED_GEM_SIGS_ROOT).reject do |child|
             File.file?(File.join(VENDORED_GEM_SIGS_ROOT, child))
           end
+        end
+
+        # Everything below is internal to {.bundled_overlay_twin_signatures_loaded?}. `private` (not
+        # `private_class_method`) because inside `class << self` these are instance methods of the
+        # singleton class; `private_class_method` looks for them one level further out and raises NameError
+        # at load. Placed last so the modifier cannot capture a method that is meant to be reachable.
+        private
+
+        # Whether one `signature_paths:` entry is a directory the loader would read one of `twin_files`
+        # from. Both sides are canonicalised first, which is what makes a symlinked or case-variant
+        # spelling of the twin answer the same as the twin itself.
+        def signature_entry_loads?(entry, twin_files)
+          dir = canonical_real_path(entry)
+          return false unless dir && File.directory?(dir)
+
+          prefix = "#{dir}#{File::SEPARATOR}"
+          twin_files.any? { |file| file.start_with?(prefix) }
+        end
+
+        # `File.realpath` rather than `File.expand_path`: it resolves symlinks and, on a case-insensitive
+        # filesystem, the on-disk spelling — the two ways a path can reach the twin's files without looking
+        # like it. It raises for a path that does not exist, which is the answer we want (an entry that
+        # resolves to nothing loads nothing), so the rescue returns nil rather than falling back to a
+        # lexical expansion that would resurrect the string match.
+        def canonical_real_path(path)
+          File.realpath(path.to_s)
+        rescue SystemCallError
+          nil
         end
       end
 

@@ -1008,7 +1008,7 @@ module Rigor
 
           paths = loader.signature_paths
           paths.any? { |path| Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) } ||
-            Rigor::Environment.bundled_overlay_twin_signatures?(paths)
+            Rigor::Environment::RbsLoader.gem_overlay_twin_signatures_loaded?(paths)
         end
 
         # The `call.undefined-method` exemptions that depend only on the CALL SITE, never on the receiver's

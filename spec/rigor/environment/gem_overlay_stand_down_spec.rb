@@ -228,9 +228,13 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
   # The predicate both the stand-down and `CheckRules#gem_overlay_loaded?` ask. Its contract is "would the
   # RBS loader read one of the twin's `.rbs` files from these entries", NOT "does one of these strings look
   # like the twin" — the four cases below are exactly where those two answers differ.
-  describe "Rigor::Environment.bundled_overlay_twin_signatures?" do
+  #
+  # It lives on `RbsLoader`, beside the overlay-side `under_gem_overlay_root?` answer to the same question,
+  # rather than on `Rigor::Environment`, whose singleton surface `spec/rigor/public_api_drift_spec.rb` pins
+  # as ADR-2 public API — a seam two call sites share is not a promise to plugin authors.
+  describe "Rigor::Environment::RbsLoader.gem_overlay_twin_signatures_loaded?" do
     def wired?(*paths)
-      Rigor::Environment.bundled_overlay_twin_signatures?(paths)
+      Rigor::Environment::RbsLoader.gem_overlay_twin_signatures_loaded?(paths)
     end
 
     it "recognises the twin directory itself" do

@@ -1,0 +1,15 @@
+# The marker methods live here rather than in `demo.rb` so a wrong constant
+# resolution surfaces as `call.undefined-method` — the diagnostic
+# https://github.com/rigortype/rigor/issues/681 actually reports. The rule
+# declines on a receiver whose class RBS does not know, so every class that
+# appears as a resolved receiver has to be declared.
+
+class Post
+  def top_post: () -> String
+end
+
+module Admin
+  class Post
+    def admin_post: () -> String
+  end
+end

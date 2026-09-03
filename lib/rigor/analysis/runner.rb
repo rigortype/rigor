@@ -344,6 +344,8 @@ module Rigor
         @cached_plugin_prepare_diagnostics = [].freeze
         @project_discovered_classes = {}.freeze
         @project_discovered_def_nodes = {}.freeze
+        # Issue #681 — the `Module.nesting` recorded per declared `def`, keyed by node identity.
+        @project_discovered_def_nestings = {}.compare_by_identity.freeze
         @project_discovered_singleton_def_nodes = {}.freeze
         @project_discovered_def_sources = {}.freeze
         @project_discovered_singleton_def_sources = {}.freeze
@@ -1210,6 +1212,7 @@ module Rigor
       def apply_discovery_result(discovery)
         @project_discovered_classes = discovery.discovered_classes
         @project_discovered_def_nodes = discovery.discovered_def_nodes
+        @project_discovered_def_nestings = discovery.discovered_def_nestings
         @project_discovered_singleton_def_nodes = discovery.discovered_singleton_def_nodes
         @project_discovered_def_sources = discovery.discovered_def_sources
         @project_discovered_singleton_def_sources = discovery.discovered_singleton_def_sources
@@ -1610,6 +1613,9 @@ module Rigor
         tables[:run_generation] = @run_generation if @run_generation
         tables[:discovered_classes] = @project_discovered_classes unless @project_discovered_classes.empty?
         tables[:discovered_def_nodes] = @project_discovered_def_nodes unless @project_discovered_def_nodes.empty?
+        unless @project_discovered_def_nestings.empty?
+          tables[:discovered_def_nestings] = @project_discovered_def_nestings
+        end
         unless @project_discovered_singleton_def_nodes.empty?
           tables[:discovered_singleton_def_nodes] = @project_discovered_singleton_def_nodes
         end

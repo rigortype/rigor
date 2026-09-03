@@ -2786,6 +2786,14 @@ module Rigor
           environment: scope.environment,
           locals: locals.freeze,
           self_type: receiver,
+          # Issue #681 — the chain the walk recorded as it entered `def_node`'s own declaration. Without it
+          # this scope carried a self type alone, and `Reflection.lexical_nesting_chain` fell back to peeling
+          # `receiver`'s qualified name — which cannot tell a compact `class Admin::Maker` from the nested
+          # spelling, and for an INHERITED body peels the subclass rather than the declaration that owns it.
+          # The same `Post.new` then typed one way on the line that writes it and another through this
+          # re-walk. `nil` for a top-level def and for a body restored from an ADR-85 seed bundle, both of
+          # which keep the peel.
+          lexical_nesting: scope.discovery.discovered_def_nestings[def_node],
           discovery: scope.discovery,
           struct_fold_safe_locals: body_fold_safe_locals(def_node, receiver, self_fold_safe),
           dynamic_origins: scope.dynamic_origins

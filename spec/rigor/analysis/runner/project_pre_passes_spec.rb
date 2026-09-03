@@ -134,11 +134,12 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
 
   describe "#discover / #discover_from_bundles / #build_discovery" do
     # rubocop:disable-next RSpec/ExampleLength
-    it "builds every Discovery slot from the matching def_index key, without transposing any of the 15 slots" do
+    it "builds every Discovery slot from the matching def_index key, without transposing any of the 16 slots" do
       index = {
         classes: :classes_marker,
         def_index: {
           def_nodes: :def_nodes_marker,
+          def_nestings: :def_nestings_marker,
           singleton_def_nodes: :singleton_def_nodes_marker,
           def_sources: :def_sources_marker,
           singleton_def_sources: :singleton_def_sources_marker,
@@ -162,6 +163,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
 
       expect(discovery.discovered_classes).to eq(:classes_marker)
       expect(discovery.discovered_def_nodes).to eq(:def_nodes_marker)
+      expect(discovery.discovered_def_nestings).to eq(:def_nestings_marker)
       expect(discovery.discovered_singleton_def_nodes).to eq(:singleton_def_nodes_marker)
       expect(discovery.discovered_def_sources).to eq(:def_sources_marker)
       expect(discovery.discovered_singleton_def_sources).to eq(:singleton_def_sources_marker)

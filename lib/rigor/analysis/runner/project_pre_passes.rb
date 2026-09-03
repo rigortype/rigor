@@ -55,6 +55,7 @@ module Rigor
         Discovery = Data.define(
           :discovered_classes,
           :discovered_def_nodes,
+          :discovered_def_nestings,
           :discovered_singleton_def_nodes,
           :discovered_def_sources,
           :discovered_singleton_def_sources,
@@ -159,6 +160,9 @@ module Rigor
           Discovery.new(
             discovered_classes: index.fetch(:classes),
             discovered_def_nodes: def_index.fetch(:def_nodes),
+            # Issue #681 — the recorded `Module.nesting` per declared `def`, so a callee's body re-walk
+            # resolves its constants the way the declaration that owns it does.
+            discovered_def_nestings: def_index.fetch(:def_nestings),
             discovered_singleton_def_nodes: def_index.fetch(:singleton_def_nodes),
             discovered_def_sources: def_index.fetch(:def_sources),
             discovered_singleton_def_sources: def_index.fetch(:singleton_def_sources),

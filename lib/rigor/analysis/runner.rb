@@ -350,6 +350,8 @@ module Rigor
         @project_discovered_def_sources = {}.freeze
         @project_discovered_singleton_def_sources = {}.freeze
         @project_discovered_superclasses = {}.freeze
+        # Issue #682 — the `Module.nesting` each class / module declaration HEADER is written in.
+        @project_discovered_header_nestings = {}.freeze
         @project_discovered_includes = {}.freeze
         @project_discovered_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
@@ -1221,6 +1223,7 @@ module Rigor
         @project_discovered_def_sources = discovery.discovered_def_sources
         @project_discovered_singleton_def_sources = discovery.discovered_singleton_def_sources
         @project_discovered_superclasses = discovery.discovered_superclasses
+        @project_discovered_header_nestings = discovery.discovered_header_nestings
         @project_discovered_includes = discovery.discovered_includes
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
@@ -1627,6 +1630,9 @@ module Rigor
         seed_def_source_tables(tables)
         unless @project_discovered_superclasses.empty?
           tables[:discovered_superclasses] = @project_discovered_superclasses
+        end
+        unless @project_discovered_header_nestings.empty?
+          tables[:discovered_header_nestings] = @project_discovered_header_nestings
         end
         tables[:discovered_includes] = @project_discovered_includes unless @project_discovered_includes.empty?
         unless @project_discovered_method_visibilities.empty?

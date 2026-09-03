@@ -768,8 +768,9 @@ module Rigor
     end
 
     # Pushes `current`'s direct ancestors onto the BFS queue: included / prepended modules first (Ruby places
-    # mixins nearer than the superclass), then the superclass. Each as-written name is resolved against
-    # `current`'s lexical nesting; names that resolve to no project class/module are dropped.
+    # mixins nearer than the superclass), then the superclass. Each as-written name is resolved against the
+    # nesting `current`'s declaration header is written in ({#ancestor_name_candidates}); names that resolve
+    # to no project class/module are dropped.
     def enqueue_ancestors(current, queue, name_memo)
       includes_of(current).each do |raw|
         resolved = resolve_ancestor_class_name(current, raw, name_memo)
@@ -783,8 +784,8 @@ module Rigor
     end
 
     # Resolves an ancestor name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) to a project-discovered class,
-    # following Ruby's `Module.nesting` constant lookup: try it under each enclosing namespace of the subclass,
-    # innermost first, then bare. nil when no candidate names a discovered user class.
+    # following Ruby's `Module.nesting` constant lookup from the subclass's declaration HEADER, innermost
+    # first, then bare. nil when no candidate names a discovered user class.
     def resolve_ancestor_class_name(subclass_qualified, raw_ancestor, name_memo)
       by_subclass = (name_memo[subclass_qualified] ||= {})
       return by_subclass[raw_ancestor] if by_subclass.key?(raw_ancestor)
@@ -793,13 +794,51 @@ module Rigor
     end
     private :ancestor_walk_gave_up, :resolve_ancestor_class_name
 
+    # Issue #682 — the candidate names an ancestor spelled `raw_ancestor` can denote in `subclass_qualified`,
+    # in Ruby's lookup order, most-qualified first and the bare name last. The single owner of the question:
+    # three walks resolved a superclass / include name apiece ({#enqueue_ancestors} for method lookup,
+    # `Reflection.resolve_ancestor_name` for the constant ladder's ancestor rung, and
+    # `Analysis::CheckRules`' override-visibility rule), and each derived the order by PEELING the
+    # subclass's qualified name one `::` segment at a time.
+    #
+    # That peel is the NESTED spelling's answer, given to both spellings. Ruby evaluates a superclass
+    # expression before entering the body, so the cref that governs it is the one the declaration's HEADER
+    # is written in — `Module.nesting` minus the declaration's own entry. For `module Admin; class Widget <
+    # Base` that is `["Admin"]` and the peel agrees; for the compact `class Admin::Widget < Base` written at
+    # the top level it is EMPTY, and the peel searched an `Admin::Base` Ruby never looks at — a wrong class
+    # for the ancestor rung of constant lookup and for method dispatch alike.
+    #
+    # The header nesting is a property of the DECLARATION, not of the reader, so it is read from the
+    # discovery table `Inference::ScopeIndexer` records it in rather than from this scope's own
+    # `#lexical_nesting`. Answering off the reader's chain would be wrong past the first hop of the ancestor
+    # BFS (the chain describes the reader's class, not the ancestor being resolved) and would silently
+    # corrupt the run-scoped ancestor memos in `Inference::ExpressionTyper#class_graph_buckets` and
+    # `Reflection.ancestor_constant_scopes`, both of which key on the class name alone because this walk is
+    # a pure function of the frozen discovery tables.
+    #
+    # The peel survives as the FALLBACK, for a class no declaration walk recorded — a scope seeded without
+    # the table, an anonymous `Class.new` name, a class reached only through RBS. It is the same answer this
+    # walk gave before, so an unrecorded class is unchanged rather than degraded.
+    #
+    # An include / prepend name is written INSIDE the body, so Ruby also tries `<subclass>::<raw>` ahead of
+    # everything here. That rung is deliberately still missing — it was missing from the peel too, and
+    # adding it is a widening this change does not need.
+    def ancestor_name_candidates(subclass_qualified, raw_ancestor)
+      recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
+      entries = recorded || peeled_header_nesting(subclass_qualified)
+      entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s
+    end
+
+    # The pre-#682 reading of a qualified class name: every proper prefix of it, innermost first, as if the
+    # class had been declared one `module` keyword per segment.
+    def peeled_header_nesting(subclass_qualified)
+      segments = subclass_qualified.to_s.split("::")
+      (segments.length - 1).downto(1).map { |i| segments[0, i].join("::") }
+    end
+    private :peeled_header_nesting
+
     def compute_ancestor_class_name(subclass_qualified, raw_ancestor)
-      segments = subclass_qualified.split("::")
-      (segments.length - 1).downto(0) do |i|
-        candidate = (segments[0, i] + [raw_ancestor]).join("::")
-        return candidate if known_user_class?(candidate)
-      end
-      nil
+      ancestor_name_candidates(subclass_qualified, raw_ancestor).find { |c| known_user_class?(c) }
     end
 
     def known_user_class?(name)

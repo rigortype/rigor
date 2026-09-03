@@ -260,6 +260,7 @@ module Rigor
         singleton_def_nodes: :discovered_singleton_def_nodes,
         def_sources: :discovered_def_sources,
         superclasses: :discovered_superclasses,
+        header_nestings: :discovered_header_nestings,
         includes: :discovered_includes,
         class_sources: :discovered_class_sources,
         method_visibilities: :discovered_method_visibilities,

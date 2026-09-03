@@ -25,6 +25,7 @@ module Rigor
       :discovered_singleton_def_sources,
       :discovered_method_visibilities,
       :discovered_superclasses,
+      :discovered_header_nestings,
       :discovered_includes,
       :discovered_class_sources,
       :constant_sources,
@@ -75,6 +76,13 @@ module Rigor
         discovered_singleton_def_sources: EMPTY_TABLE,
         discovered_method_visibilities: EMPTY_TABLE,
         discovered_superclasses: EMPTY_TABLE,
+        # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
+        # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
+        # which resolves a superclass / include name in that cref instead of peeling the subclass's qualified
+        # name — the peel is the nested spelling's answer, and it searched an `Admin::Base` that a compact
+        # `class Admin::Widget < Base` written at the top level never reaches. An absent entry means "not
+        # recorded" and keeps the peel, so a scope that never saw a declaration walk is unchanged.
+        discovered_header_nestings: EMPTY_TABLE,
         discovered_includes: EMPTY_TABLE,
         discovered_class_sources: EMPTY_TABLE,
         # Issue #644 — `{qualified constant name => Set[declaring file]}`, the write attribution behind the

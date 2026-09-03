@@ -64,8 +64,14 @@ module Rigor
       # instead of a peel of the receiver's name; a pre-14 blob mismatches the SCHEMA gate and loads as nil (a
       # clean cold rebuild — no migration). The bump is what keeps a pre-14 blob REJECTED rather than MISREAD:
       # a three-element row destructures with `nesting` nil, which is indistinguishable from a top-level def,
-      # so every unchanged file would silently keep the pre-fix peel.
-      SCHEMA = 14
+      # so every unchanged file would silently keep the pre-fix peel. 15: issue #682 gives each seed bundle a
+      # `header_nestings` table — the `Module.nesting` each class / module DECLARATION HEADER is written in —
+      # so a bundle-served class resolves its superclass and include names in the cref Ruby resolves them in
+      # rather than by peeling its own qualified name; a pre-15 blob mismatches the SCHEMA gate and loads as
+      # nil (a clean cold rebuild — no migration). Absence here is gradual rather than misread (the resolver
+      # falls back to the peel), but a warm run that peels where a cold run does not is exactly the
+      # `--verify-incremental` divergence 14 was bumped for.
+      SCHEMA = 15
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

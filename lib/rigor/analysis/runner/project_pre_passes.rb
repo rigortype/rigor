@@ -60,6 +60,7 @@ module Rigor
           :discovered_def_sources,
           :discovered_singleton_def_sources,
           :discovered_superclasses,
+          :discovered_header_nestings,
           :discovered_includes,
           :discovered_class_sources,
           :constant_values,
@@ -167,6 +168,9 @@ module Rigor
             discovered_def_sources: def_index.fetch(:def_sources),
             discovered_singleton_def_sources: def_index.fetch(:singleton_def_sources),
             discovered_superclasses: def_index.fetch(:superclasses),
+            # Issue #682 — the nesting each declaration header is written in, so an ancestor name resolves in
+            # the cref Ruby resolves it in rather than by peeling the subclass's own qualified name.
+            discovered_header_nestings: def_index.fetch(:header_nestings),
             discovered_includes: def_index.fetch(:includes),
             discovered_class_sources: def_index.fetch(:class_sources),
             # Issue #644 — the cross-file value-constant publication table and its write attribution.

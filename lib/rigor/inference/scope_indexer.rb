@@ -177,9 +177,9 @@ module Rigor
         singleton_def_nodes = default_scope.discovered_singleton_def_nodes.merge(
           build_discovered_singleton_def_nodes(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
-        superclasses = default_scope.discovered_superclasses.merge(
-          build_discovered_superclasses(root, default_scope.source_path)
-        )
+        file_superclasses, file_header_nestings = build_superclass_tables(root, default_scope.source_path)
+        superclasses = default_scope.discovered_superclasses.merge(file_superclasses)
+        header_nestings = default_scope.discovery.discovered_header_nestings.merge(file_header_nestings)
         includes = default_scope.discovered_includes.merge(
           build_discovered_includes(root)
         ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
@@ -204,6 +204,7 @@ module Rigor
             discovered_def_nestings: def_nestings,
             discovered_singleton_def_nodes: singleton_def_nodes,
             discovered_superclasses: superclasses,
+            discovered_header_nestings: header_nestings,
             discovered_includes: includes,
             discovered_method_visibilities: method_visibilities,
             data_member_layouts: data_member_layouts,
@@ -992,9 +993,7 @@ module Rigor
         case root
         when Prism::ClassNode, Prism::ModuleNode
           child = Source::ConstantPath.declaration_prefix(prefix, root.constant_path)
-          if child && root.body
-            collect_class_method_defs(root.body, child, acc)
-          end
+          collect_class_method_defs(root.body, child, acc) if child && root.body
           return acc
         when Prism::DefNode
           (acc[prefix.join("::")] ||= {})[root.name] = root unless prefix.empty? || root.receiver
@@ -2369,11 +2368,21 @@ module Rigor
       # ADR-24 slice 2 — per-class table mapping a fully qualified user class to its superclass name AS WRITTEN at the
       # `class Foo < Bar` declaration. Only constant superclasses are recorded (`class Foo < Struct.new(...)` and other
       # non-constant superclasses produce no entry). The as-written name is resolved to a qualified class at the call
-      # site against the subclass's lexical nesting — see `ExpressionTyper#resolve_ancestor_class_name`.
-      def build_discovered_superclasses(root, source_path = nil)
-        accumulator = {}
+      # site against the nesting the declaration's HEADER sits in — see {Scope#ancestor_name_candidates}, which reads
+      # the second table this walk builds.
+      #
+      # Issue #682 — `header_nestings` maps the same qualified class name to that nesting: `Module.nesting` where the
+      # `class` / `module` KEYWORD is written, which is the body's chain minus the declaration's own entry. It is
+      # recorded here, with the walk's prefix in hand, because it is unrecoverable afterwards: `class Admin::Widget`
+      # and `module Admin; class Widget` render the identical `"Admin::Widget"`, and an ancestor name is resolved in
+      # the enclosing cref — `[]` for the first spelling, `["Admin"]` for the second. A class reopened under two
+      # spellings keeps the LAST one walked, matching how `superclasses` itself merges.
+      #
+      # @return [Array(Hash{String=>String}, Hash{String=>Array[String]})] `[superclasses, header_nestings]`
+      def build_superclass_tables(root, source_path = nil)
+        accumulator = { superclasses: {}, header_nestings: {} }
         walk_class_superclasses(root, [], accumulator, source_path)
-        accumulator.freeze
+        [accumulator[:superclasses].freeze, accumulator[:header_nestings].freeze]
       end
 
       def walk_class_superclasses(node, qualified_prefix, accumulator, source_path = nil)
@@ -2381,19 +2390,11 @@ module Rigor
 
         case node
         when Prism::CallNode
-          record_anonymous_meta_superclass(node, accumulator, source_path)
-        when Prism::ClassNode
+          record_anonymous_meta_superclass(node, accumulator[:superclasses], source_path)
+        when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
-            full = child_prefix.join("::")
-            superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
-            accumulator[full] = superclass if superclass
-            walk_class_superclasses(node.body, child_prefix, accumulator) if node.body
-            return
-          end
-        when Prism::ModuleNode
-          child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
-          if child_prefix
+            record_declaration_ancestry(node, qualified_prefix, child_prefix, accumulator)
             walk_class_superclasses(node.body, child_prefix, accumulator) if node.body
             return
           end
@@ -2402,6 +2403,19 @@ module Rigor
         node.rigor_each_child do |child|
           walk_class_superclasses(child, qualified_prefix, accumulator, source_path)
         end
+      end
+
+      # One declaration's two ancestry facts: the as-written superclass name (classes only), and the
+      # `Module.nesting` its header is written in, which {#lexical_nesting_for_prefix} derives from the
+      # ENCLOSING prefix — the header is evaluated before the body is entered, so the declaration's own entry
+      # is not on the ladder its superclass name walks.
+      def record_declaration_ancestry(node, qualified_prefix, child_prefix, accumulator)
+        full = child_prefix.join("::")
+        accumulator[:header_nestings][full] = lexical_nesting_for_prefix(qualified_prefix)
+        return unless node.is_a?(Prism::ClassNode)
+
+        superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
+        accumulator[:superclasses][full] = superclass if superclass
       end
 
       # #319 — `Class.new(Parent) do ... end` names its superclass in the first positional. Recording it under the
@@ -2680,7 +2694,7 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength
       def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
         return current_visibility unless node.is_a?(Prism::Node)
 
@@ -3295,6 +3309,9 @@ module Rigor
       # superclasses later-wins; includes / class_sources accumulate; member layouts later-wins.
       def fold_ancestry_tables(acc, file_index)
         acc[:superclasses].merge!(file_index[:superclasses])
+        # Issue #682 — a pre-#682 seed bundle carries no header nestings; the SCHEMA bump makes such a blob a
+        # cold rebuild, but default so any in-flight fold stays total and simply peels for those classes.
+        acc[:header_nestings].merge!(file_index[:header_nestings] || {})
         accumulate_module_lists(acc[:includes], file_index[:includes])
         accumulate_module_lists(acc[:extends], file_index[:extends] || {})
         file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
@@ -3329,6 +3346,9 @@ module Rigor
           def_sources: file_index[:def_sources],
           singleton_def_sources: file_index[:singleton_def_sources],
           superclasses: file_index[:superclasses],
+          # Issue #682 — plain `{class name => Array[String]}` data, so the bundle stays Marshal-clean and a
+          # warm incremental file resolves its ancestor names the way a cold walk of it does.
+          header_nestings: file_index[:header_nestings],
           includes: file_index[:includes],
           method_visibilities: file_index[:method_visibilities],
           methods: file_index[:methods],
@@ -3353,6 +3373,7 @@ module Rigor
           # but default to `{}` so any in-flight fold stays total.
           singleton_def_sources: bundle[:singleton_def_sources] || {},
           superclasses: bundle[:superclasses],
+          header_nestings: bundle[:header_nestings] || {},
           includes: bundle[:includes],
           # #526 — pre-extends bundles lack the key; default `{}` keeps the fold total.
           extends: bundle[:extends] || {},
@@ -3393,7 +3414,8 @@ module Rigor
       def new_def_index_accumulator
         { def_nodes: {}, def_nestings: {}.compare_by_identity,
           singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
-          superclasses: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {}, class_sources: {},
+          superclasses: {}, header_nestings: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {},
+          class_sources: {},
           constant_writes: {},
           data_member_layouts: {}, struct_member_layouts: {} }
       end
@@ -3452,9 +3474,10 @@ module Rigor
         # silently degrading to the file's full ancestry closure.
         merge_discovered_defs(acc[:singleton_def_nodes], acc[:singleton_def_sources], path,
                               build_discovered_singleton_def_nodes(root))
-        superclasses = build_discovered_superclasses(root, path)
+        superclasses, header_nestings = build_superclass_tables(root, path)
         includes = build_discovered_includes(root)
         acc[:superclasses].merge!(superclasses)
+        acc[:header_nestings].merge!(header_nestings)
         accumulate_module_lists(acc[:includes], includes)
         accumulate_module_lists(acc[:extends], build_discovered_extends(root))
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes)

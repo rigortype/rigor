@@ -31,7 +31,7 @@ module Rigor
       # @return [Array<String>] the warnings this report earns, widest consequence first.
       def lines_for(report, floor:)
         lines = []
-        unmeasured = report.respond_to?(:unmeasured_files) ? report.unmeasured_files : 0
+        unmeasured = report.respond_to?(:unmeasured_files) ? report.unmeasured_files : 0 # see CoverageCommand
         lines << unmeasured_line(unmeasured) if unmeasured.positive?
         harness_errors = report.total_harness_errors
         lines << harness_error_line(harness_errors, floor) if harness_errors >= floor

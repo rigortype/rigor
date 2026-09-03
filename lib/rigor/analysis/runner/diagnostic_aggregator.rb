@@ -533,9 +533,10 @@ module Rigor
           " First failure: #{error_class} on `#{member}`."
         end
 
-        # Empty on a cross-process cache HIT: the ADR-54 env cache dumps every `RBS::Location` to a sentinel
-        # buffer, which {RbsLoader::CACHED_LOCATION_BUFFER_NAME} filters out, so a warm run says nothing
-        # about files rather than naming `<cached>` as if it were one.
+        # Identical on a cache HIT: the ADR-54 env cache drops location POSITIONS but keeps each buffer's
+        # NAME, so a warm run names the same files a cold one does. Where a name is absent anyway, the
+        # reconstructed {RbsLoader::CACHED_LOCATION_BUFFER_NAME} sentinel is filtered out and the clause is
+        # omitted, rather than naming `<cached>` as if it were a path.
         def conflicting_files_clause(files, sample_size)
           return "" if files.empty?
 

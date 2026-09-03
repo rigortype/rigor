@@ -9,11 +9,22 @@ require "rbs"
 #
 # Patch policy (purely additive):
 #
-# - `_dump` returns an empty string. The cached env loses per-node source-position info, but Rigor does not
-#   consult `RBS::Location` from any analysis code path (every diagnostic uses Prism's own location), so the
-#   loss is inert in practice.
-# - `_load` reconstructs a sentinel Location backed by an empty `<cached>` Buffer. Code paths that DID consult
-#   Location after a cache hit see a benign zero-range value rather than crashing.
+# - `_dump` returns the buffer's NAME and nothing else. Per-node source POSITIONS are still dropped (Rigor
+#   does not consult them from any analysis path — every diagnostic uses Prism's own location), but the
+#   file a declaration came from is cheap to keep and is not inert: `rbs.coverage.definition-build-failed`
+#   names the conflicting signature files, and dropping the name made a warm run omit that clause while a
+#   cold run printed it, so the same project said different things by cache state (issue #696 review,
+#   second pass). It costs cache SIZE: a `_dump` payload is raw bytes, not a linkable object graph, so the
+#   path is written once per Location rather than once per buffer — measured at +12% on the env blob of a
+#   one-file project (1,672K to 1,876K, stable across reps). Memoising the coerced name per buffer was tried and changes
+#   nothing for exactly that reason. The size is the price of a diagnostic that reads the same warm and
+#   cold; positions, which are far more numerous and which nothing reads, stay dropped.
+# - `_load` reconstructs a zero-range Location over that name, falling back to a `<cached>` sentinel when
+#   the dump carried none. Code paths that DID consult Location after a cache hit see a benign value rather
+#   than crashing, and one that reads `buffer.name` now sees the real path.
+# - The format change needs no cache-schema bump and is compatible both ways: an OLD blob (empty string)
+#   read by this `_load` falls through to the sentinel, and a NEW blob read by an older `_load` — which
+#   ignored its argument — is unchanged.
 #
 # Idempotent: the guard checks `method_defined?(:_dump)` so requiring this file twice (or against an upstream
 # rbs that adds Marshal hooks itself) is a no-op.
@@ -33,13 +44,19 @@ require "rbs"
 # reference. Both classes are value objects fully described by `to_s`, so the round-trip is lossless.
 module RBS
   class Location
+    # The name a Location gets back when the dump carried none — an old blob, or a buffer that never had
+    # one. Never a real path, so a consumer that reports file names must filter it
+    # ({Rigor::Environment::RbsLoader::CACHED_LOCATION_BUFFER_NAME}).
+    CACHED_BUFFER_NAME = "<cached>"
+
     unless method_defined?(:_dump)
       def _dump(_)
-        ""
+        buffer&.name.to_s
       end
 
-      def self._load(_)
-        new(buffer: ::RBS::Buffer.new(name: "<cached>", content: ""), start_pos: 0, end_pos: 0)
+      def self._load(name)
+        name = CACHED_BUFFER_NAME if name.nil? || name.empty?
+        new(buffer: ::RBS::Buffer.new(name: name, content: ""), start_pos: 0, end_pos: 0)
       end
     end
   end

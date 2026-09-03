@@ -233,12 +233,18 @@ module Rigor
       # bucket exists to make visible, while a wholly unmeasured FILE is not a transient.
       def determine_protection_exit(report, options)
         return 1 unless report.parse_errors.empty?
-        return 1 if report.respond_to?(:unmeasured_files) && report.unmeasured_files.positive?
+        return 1 if unmeasured_files_in(report).positive?
 
         threshold = options[:threshold]
         return 0 if threshold.nil?
 
         report.ratio < threshold ? 1 : 0
+      end
+
+      # Issue #686 — the one reader of the count, shared with the stderr warning. The Tier-1 protection
+      # report has no such notion, so a report without the field reads as zero rather than erroring.
+      def unmeasured_files_in(report)
+        report.respond_to?(:unmeasured_files) ? report.unmeasured_files : 0
       end
 
       def usage_error

@@ -63,6 +63,7 @@ module Rigor
       def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
       def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+      def ancestor_names_for: (String | Symbol class_name) -> Array[String]
       def constant_type: (String name) -> Type::t?
       def constant_names: () -> Array[String]
       def each_known_class_name: () { (String name) -> void } -> untyped

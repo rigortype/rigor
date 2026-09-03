@@ -154,6 +154,37 @@ RSpec.describe "definition build failed reporting" do
     expect(pooled).to eq(sequential)
   end
 
+  # Issue #696 review, SECOND PASS — the arm that catches the hierarchy, and the one the first round of
+  # specs could not execute at all.
+  #
+  # `workers: 0` WITH a real store is the CLI default on a fresh checkout, and it is the only configuration
+  # where `RbsHierarchy`'s cold-store table build fired: nothing pre-warms the store there, so the first
+  # `class_ordering` walked every known class through the public `#instance_definition` and the diagnostic
+  # named 1,337 classes — the original F1 number, on the default configuration. Every earlier example
+  # passed `cache_store: nil` (the `run` helper's default), under which that path does not exist.
+  #
+  # `raise AcmeError` is what reaches it: ordering two RBS-declared classes is a comparison the
+  # `ClassRegistry` cannot answer, so it falls through to the hierarchy.
+  it "says the same thing at the default workers=0 WITH a store, where the hierarchy is consulted" do
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "acme.rbs"),
+               "class Object\n  def blank?: () -> bool\nend\n\nclass Object\n  def blank?: () -> bool\nend\n" \
+               "\nclass AcmeError < StandardError\nend\n")
+    File.write("app.rb", "def f\n  raise AcmeError, \"boom\"\nend\n")
+
+    nocache = build_failed_diagnostics(run(config, workers: 0)).map(&:message)
+    FileUtils.rm_rf(File.join(Dir.pwd, ".rigor"))
+    cold_store_sequential = build_failed_diagnostics(run(config, workers: 0, cache_store: cold_store)).map(&:message)
+    warm_store_sequential = build_failed_diagnostics(run(config, workers: 0, cache_store: cold_store)).map(&:message)
+
+    # The value, not just the agreement: only `Object` is demanded for its method surface here. A hierarchy
+    # that fed the diagnostic named the whole bundled universe on the cold-store arm alone.
+    expect(nocache.size).to eq(1)
+    expect(nocache.first).to start_with("1 RBS class definition(s) failed to build: Object.")
+    expect(cold_store_sequential).to eq(nocache)
+    expect(warm_store_sequential).to eq(nocache)
+  end
+
   # Issue #696 review, F1 — the arm that catches the pre-warm. The example above runs with `cache_store:
   # nil`, under which `RbsLoader#prewarm` returns immediately, so it never executes the path where a pooled
   # run differs at all. With a COLD store the parent pre-warms every cached producer before forking, and two

@@ -27,9 +27,9 @@ module Rigor
       end
 
       def render_text(report)
-        pct = (report.ratio * 100).round(1)
+        pct = report.ratio ? (report.ratio * 100).round(1) : nil
         @out.puts "Fused protection (static type ∪ dynamic test)"
-        @out.puts "  protected: #{report.protected_total} / #{report.grand_total}#{ratio_suffix(report, pct)}"
+        @out.puts "  protected: #{report.protected_total} / #{report.grand_total}#{ratio_suffix(pct)}"
         @out.puts "    by type:  #{report.total_type_killed}"
         @out.puts "    by test:  #{report.total_test_killed}  (type-survivors a test caught)"
         @out.puts "  unprotected: #{report.total_unprotected}  (neither — add a type or a test)"
@@ -40,8 +40,8 @@ module Rigor
       end
 
       # Issue #686 — see {MutationProtectionRenderer#ratio_suffix}.
-      def ratio_suffix(report, pct)
-        return "  (not measured)" if report.grand_total.zero? && report.unmeasured_files.positive?
+      def ratio_suffix(pct)
+        return "  (not measured)" if pct.nil?
 
         "  (#{pct}%)"
       end

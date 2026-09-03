@@ -41,32 +41,26 @@ module Rigor
         end
       end
 
+      # Issue #696 review, second pass — the ancestry lookup moved to {RbsLoader#ancestor_names_for}, and
+      # what moved with it is the reason.
+      #
+      # This method used to fetch `Cache::RbsClassAncestorTable` DIRECTLY, bypassing the loader's own
+      # accessor, and branch on `loader.cache_store`: a whole-universe table build with a store, a
+      # single-class demand without one. Same project, same question, three different answers to "which
+      # classes failed to build" — 504 on a cold store, 0 on a warm one, 2 with no store. On the DEFAULT
+      # `--workers=0` path nothing pre-warms the store, so the cold answer was the one written into the
+      # run-result cache and replayed until a file changed.
+      #
+      # The cache-state branch still exists — it is worth 50x on the warm path — but it lives behind the
+      # loader now, where both of its sides are marked as RIGOR'S OWN demand. Ordering two classes is not
+      # the analysis asking whether either one's methods resolve, so neither side reaches the diagnostic,
+      # and the answer is identical on both (the table's producer computes exactly this, keyed the same
+      # way). What this method keeps is its own per-name memo, which is about repeated comparisons.
       def ancestor_names(class_name)
         key = normalize_name(class_name)
         return @ancestor_names_cache[key] if @ancestor_names_cache.key?(key)
 
-        @ancestor_names_cache[key] =
-          if loader.cache_store
-            ancestor_table.fetch(key, [].freeze)
-          else
-            compute_ancestor_names(key)
-          end
-      end
-
-      def compute_ancestor_names(key)
-        definition = loader.instance_definition(key)
-        return [].freeze if definition.nil?
-
-        definition.ancestors.ancestors.map { |ancestor| normalize_name(ancestor.name.to_s) }.uniq.freeze
-      rescue StandardError
-        [].freeze
-      end
-
-      def ancestor_table
-        @ancestor_table ||= begin
-          require_relative "../cache/rbs_class_ancestor_table"
-          Cache::RbsClassAncestorTable.fetch(loader: loader, store: loader.cache_store)
-        end
+        @ancestor_names_cache[key] = loader.ancestor_names_for(key)
       end
 
       def normalize_name(name)

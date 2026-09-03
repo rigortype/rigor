@@ -26,9 +26,9 @@ module Rigor
       end
 
       def render_text(report)
-        pct = (report.ratio * 100).round(1)
+        pct = report.ratio ? (report.ratio * 100).round(1) : nil
         @out.puts "Type-protection effectiveness (Tier 2 — mutation kill rate)"
-        @out.puts "  caught breakages: #{report.total_killed} / #{report.grand_total}#{ratio_suffix(report, pct)}"
+        @out.puts "  caught breakages: #{report.total_killed} / #{report.grand_total}#{ratio_suffix(pct)}"
         @out.puts "  (effectiveness = when a type-visible bug was introduced, Rigor caught it)"
         render_unmeasured_files(report)
         render_harness_errors(report)
@@ -39,8 +39,8 @@ module Rigor
       # Issue #686 — `0 / 0` is `ratio` 1.0 by the vacuous-file convention, and printing "100.0%" over a run
       # that measured nothing is the exact shape this issue exists to end. When nothing was measured AND a
       # file went unmeasured, the percentage is withheld rather than invented.
-      def ratio_suffix(report, pct)
-        return "  (not measured)" if report.grand_total.zero? && report.unmeasured_files.positive?
+      def ratio_suffix(pct)
+        return "  (not measured)" if pct.nil?
 
         "  (#{pct}%)"
       end

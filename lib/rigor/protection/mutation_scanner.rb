@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "analysis_guard"
+require_relative "measurement_integrity"
 require_relative "mutator"
 require_relative "diagnostic_oracle"
 
@@ -44,7 +45,7 @@ module Rigor
         # vacuously fully effective; a file whose every mutant landed in `harness_errors` measured the
         # harness and says nothing about the code. Before this, the second borrowed the first's 1.0 and a
         # wholly crashed file reported 100% effective.
-        def measured? = !(total.zero? && harness_errors.positive?)
+        def measured? = MeasurementIntegrity.measured?(total: total, harness_errors: harness_errors)
 
         # Effectiveness ratio. 0.0 rather than 1.0 for an unmeasured file — both are wrong as a measurement,
         # and only one of them turns a red `--threshold` gate green. Read it next to {#measured?}, which is
@@ -76,7 +77,7 @@ module Rigor
         def total = type_killed + test_killed + unprotected
 
         # Issue #686 — see {FileResult#measured?}.
-        def measured? = !(total.zero? && harness_errors.positive?)
+        def measured? = MeasurementIntegrity.measured?(total: total, harness_errors: harness_errors)
 
         # Fused protected ratio — caught by *either* axis.
         def ratio

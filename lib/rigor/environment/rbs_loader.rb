@@ -911,7 +911,7 @@ module Rigor
         # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slot
         # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
         # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
-        # `:universe_walk`, `:builder`, `:reflection`, `:instance_definitions_table`,
+        # `:internal_demand`, `:builder`, `:reflection`, `:instance_definitions_table`,
         # `:singleton_definitions_table`.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
@@ -1323,6 +1323,47 @@ module Rigor
         @hierarchy.class_ordering(lhs, rhs)
       end
 
+      # The ancestor chain of ONE class, as {RbsHierarchy} asks it to order two classes.
+      #
+      # Issue #696 review (second pass) — this used to live in the hierarchy, which branched on
+      # `cache_store`: with a store it built the whole `RbsClassAncestorTable` and read one key, without a
+      # store it demanded that one class. Three configurations, three different answers to "which classes
+      # failed to build" for one project — 504 classes on a cold store, 0 on a warm one, 2 with no store —
+      # and on the DEFAULT `--workers=0` path, where nothing pre-warms the store first, the cold answer was
+      # the one written into the run-result cache and replayed on every warm run after it.
+      #
+      # The fix is {#during_internal_demand} on BOTH sides, not the removal of the branch. Collapsing to a
+      # per-class demand everywhere was tried first and measured 50x slower on the warm path a cached run
+      # actually takes (200 orderings: 0.0035s reading the table, 0.18s building 400 definitions), which is
+      # the wrong trade for a determinism the marking already buys. What has to be identical across cache
+      # states is the diagnostic, and with both sides marked neither contributes to it: the reported set is
+      # the classes whose METHOD SURFACE the analysis demanded, in every configuration. The memo-hit report
+      # in {#instance_definition} is what makes that hold — a class this path built and memoised as nil is
+      # still reported when a real demand for it arrives later.
+      #
+      # The table side goes through {#ancestor_names_table}, the loader's own marked accessor, rather than
+      # `Cache::RbsClassAncestorTable.fetch` directly. That direct fetch was the bypass: it walked every
+      # known class through the public {#instance_definition} with nothing marking it.
+      #
+      # Answers are identical on both sides — the table's producer computes exactly this, keyed the same
+      # way, and both yield `[]` for an unknown or unbuildable class. Pinned by spec across all three cache
+      # states.
+      #
+      # @return [Array<String>] `::`-stripped ancestor names, or `[]` for an unknown or unbuildable class.
+      def ancestor_names_for(class_name)
+        key = class_name.to_s.delete_prefix("::")
+        during_internal_demand do
+          next ancestor_names_table.fetch(key, [].freeze) if cache_store
+
+          definition = instance_definition(key)
+          next [].freeze if definition.nil?
+
+          definition.ancestors.ancestors.map { |ancestor| ancestor.name.to_s.delete_prefix("::") }.uniq.freeze
+        end
+      rescue ::RBS::BaseError, StandardError
+        [].freeze
+      end
+
       # @return [Array<String>] every RBS-declared constant name (top-level prefixed, e.g., `"::Math::PI"`)
       #   currently loaded into the environment. Used by the cache producer that materialises the
       #   constant-type table; ordinary callers should keep using {#constant_type} for point lookups.
@@ -1384,14 +1425,14 @@ module Rigor
       # loader, so the caller MUST ensure pool mode runs with caching enabled. Returns `self` so the call
       # chains cleanly from the `Runner` pre-spawn hook.
       #
-      # Issue #696 — the whole body is a {#during_universe_walk}, not only the producers that happen to walk
+      # Issue #696 — the whole body is a {#during_internal_demand}, not only the producers that happen to walk
       # definitions today. On a COLD store `RbsClassTypeParamNames.compute` and `RbsClassAncestorTable.compute`
       # ask {#instance_definition} for every known class; marking each producer covers that, and marking
       # `#prewarm` itself covers whichever producer grows the same appetite next.
       def prewarm
         return self if cache_store.nil?
 
-        during_universe_walk do
+        during_internal_demand do
           env
           known_class_names_set
           constant_type_table
@@ -1498,21 +1539,21 @@ module Rigor
       end
 
       def constant_type_table
-        @constant_type_table ||= during_universe_walk do
+        @constant_type_table ||= during_internal_demand do
           require_relative "../cache/rbs_constant_table"
           fetch_or_compute_producer(Cache::RbsConstantTable)
         end
       end
 
       def known_class_names_set
-        @known_class_names_set ||= during_universe_walk do
+        @known_class_names_set ||= during_internal_demand do
           require_relative "../cache/rbs_known_class_names"
           fetch_or_compute_producer(Cache::RbsKnownClassNames)
         end
       end
 
       def type_param_names_table
-        @type_param_names_table ||= during_universe_walk do
+        @type_param_names_table ||= during_internal_demand do
           require_relative "../cache/rbs_class_type_param_names"
           fetch_or_compute_producer(Cache::RbsClassTypeParamNames)
         end
@@ -1532,7 +1573,7 @@ module Rigor
       # the existing `RbsClassAncestorTable` producer when `cache_store` is set; falls back to the
       # producer's `compute` otherwise. Used by {#reflection}.
       def ancestor_names_table
-        @ancestor_names_table ||= during_universe_walk do
+        @ancestor_names_table ||= during_internal_demand do
           require_relative "../cache/rbs_class_ancestor_table"
           fetch_or_compute_producer(Cache::RbsClassAncestorTable)
         end
@@ -1690,18 +1731,18 @@ module Rigor
       # Keys stay in `RBS::TypeName#to_s` form (top-level prefixed `"::Hash"`) — the shape
       # {Environment::Reflection} documents.
       #
-      # {#during_universe_walk} (issue #696) — these two walk EVERY known class, so a failure they hit is a
+      # {#during_internal_demand} (issue #696) — these two walk EVERY known class, so a failure they hit is a
       # failure of the sig set, not of anything the run asked about, and it must not reach
       # {#definition_build_failures}. The stderr banner is deliberately left armed here, byte-for-byte as
       # before.
       def instance_definitions_table
-        @state[:instance_definitions_table] ||= during_universe_walk do
+        @state[:instance_definitions_table] ||= during_internal_demand do
           build_definitions_table { |name| build_instance_definition(name) }
         end
       end
 
       def singleton_definitions_table
-        @state[:singleton_definitions_table] ||= during_universe_walk do
+        @state[:singleton_definitions_table] ||= during_internal_demand do
           build_definitions_table { |name| build_singleton_definition(name) }
         end
       end
@@ -1789,12 +1830,12 @@ module Rigor
       # definition, fails, memoises nil, and never enters the rescue again, but the next real demand still
       # reads nil here and still reports. Reporting from the rescue could only ever see the first build.
       #
-      # Silent inside a whole-universe walk ({#during_universe_walk}): a producer that touches every known
+      # Silent inside a whole-universe walk ({#during_internal_demand}): a producer that touches every known
       # class is asking a question the RUN did not ask, and letting it contribute makes the reported class
       # list depend on whether a cache was cold — the same project saying different things under
       # `--workers=N` than under `--workers=0`, which is the defect this diagnostic exists to end.
       def report_definition_build_failure(class_name)
-        return if @state[:universe_walk]
+        return if @state[:internal_demand]
 
         details = @state[:definition_build_details]
         return if details.nil?
@@ -1810,15 +1851,34 @@ module Rigor
         (@state[:definition_build_failures] ||= []) << detail
       end
 
-      # Marks a producer that walks EVERY known class, so {#report_definition_build_failure} stays silent
-      # for the duration. Save-and-restore rather than a bare flag: `#prewarm` wraps a body whose members
-      # wrap themselves, and a nested walk must not un-mark its caller on the way out.
-      def during_universe_walk
-        previous = @state[:universe_walk]
-        @state[:universe_walk] = true
+      # Marks a definition demand that is RIGOR'S OWN, not the analysed program's, so
+      # {#report_definition_build_failure} stays silent for the duration.
+      #
+      # The diagnostic reports classes whose METHOD SURFACE the analysis asked to resolve — that is what its
+      # message promises, and it is the only demand set that does not vary with how the run was invoked. Two
+      # kinds of demand are Rigor's own and must be excluded:
+      #
+      # - a whole-universe cache producer ({#prewarm}'s tables), which asks about every known class;
+      # - the hierarchy oracle's ancestry lookup ({#ancestor_names_for}), which asks whether two classes are
+      #   ordered, not whether either one's methods resolve.
+      #
+      # Both were cache-state-dependent before this, and each produced a DIFFERENT class list per
+      # configuration for the same project — the second one on the DEFAULT `--workers=0` path (issue #696
+      # review, second pass).
+      #
+      # Save-and-restore rather than a bare flag: `#prewarm` wraps a body whose members wrap themselves, and
+      # a nested demand must not un-mark its caller on the way out.
+      #
+      # Per LOADER, not per thread. Nesting and a raise mid-demand are both handled, and the fork pool forks
+      # after `#prewarm` returns, so no CLI path shares a loader across concurrent analyses. An in-process
+      # host that did (`language_server/debouncer.rb` runs analysis on a `Thread`) could have one analysis
+      # silence another's reporting; not reachable today, and not worth a thread-local until it is.
+      def during_internal_demand
+        previous = @state[:internal_demand]
+        @state[:internal_demand] = true
         yield
       ensure
-        @state[:universe_walk] = previous
+        @state[:internal_demand] = previous
       end
 
       # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
@@ -1895,12 +1955,12 @@ module Rigor
       # The member the failure is ABOUT, taken off the error object rather than parsed out of its message.
       #
       # Issue #696 — the message cannot serve here. It is built from `RBS::Location`s, and the ADR-54 env
-      # cache dumps every location to a {CACHED_LOCATION_BUFFER_NAME} sentinel, so a warm run's message
-      # names neither the file nor the line and the same project reports different text cold and warm. These
-      # accessors are `RBS::TypeName`s and Symbols, so they survive the marshal round trip unchanged — and
-      # they name the class that actually CARRIES the duplicate, which the failed-class list does not: a
-      # collision on `::Object#blank?` fails `String`, `Integer` and `Array`, none of which is where the fix
-      # goes.
+      # cache drops their POSITIONS, so a warm run's message would name no line and the same project would
+      # report different text cold and warm. These accessors are `RBS::TypeName`s and Symbols, so they
+      # survive the marshal round trip unchanged — and they name the class that actually CARRIES the
+      # duplicate, which the failed-class list does not: a collision on `::Object#blank?` fails `String`,
+      # `Integer` and `Array`, none of which is where the fix goes. (The buffer NAME does survive, since the
+      # second review pass; it is the file list that uses it, not this.)
       #
       # Shapes vary by error class (`references/rbs`'s `lib/rbs/errors.rb`): the two duplicated-definition
       # errors expose `#qualified_method_name` directly; `InvalidOverloadMethodError` has `#type_name` +

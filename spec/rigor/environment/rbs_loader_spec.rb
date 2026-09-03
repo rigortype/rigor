@@ -457,11 +457,16 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(buffers).to eq([File.join(tmpdir, "widget.rbs")])
     end
 
-    # F4 — the member is what has to survive a cache tier, because the file name does not always. A
-    # cross-process cache hit Marshal-loads the env, and the ADR-54 patch reconstructs every `RBS::Location`
-    # behind a `<cached>` sentinel buffer; the run then knew neither the file, the line, nor the class
-    # carrying the duplicate. `#qualified_method_name` is a `TypeName` + Symbol, so it round-trips.
-    it "keeps the member on a cache-hit run" do
+    # F4 — a cache hit must report the SAME thing a cold run does, member and file alike.
+    #
+    # `#qualified_method_name` is a `TypeName` + Symbol, so the member always round-tripped. The FILE did
+    # not: the ADR-54 marshal patch reconstructed every `RBS::Location` behind a `<cached>` sentinel, so a
+    # warm run named no file and a cold run named one — the same project saying different things by cache
+    # state. The patch now keeps `buffer.name`, so both name the file.
+    #
+    # `eq`, not `not_to include`: the weaker form passes on `[]`, which is exactly the residual it was
+    # supposed to document (issue #696 review, second pass, nit 2).
+    it "reports the same member AND the same file on a cache-hit run as on a cold one" do
       write_duplicate_method_rbs(tmpdir)
       cache_store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
       warm = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
@@ -474,7 +479,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
 
       _, _, member, buffers = loader.definition_build_failures.first
       expect(member).to eq("::Widget#bar")
-      expect(buffers).not_to include(described_class::CACHED_LOCATION_BUFFER_NAME)
+      expect(buffers).to eq([File.join(tmpdir, "widget.rbs")])
     end
 
     # F4, the other half — the sentinel itself, driven straight through the buffer extractor. A warm
@@ -547,6 +552,50 @@ RSpec.describe Rigor::Environment::RbsLoader do
       # cannot satisfy this: after the walk, the rescue never runs again for this class.
       expect(loader.instance_definition("Widget")).to be_nil
       expect(loader.definition_build_failures.map(&:first)).to eq(["Widget"])
+    end
+
+    # Issue #696 review, second pass — the BLOCKER. `RbsHierarchy` used to fetch `RbsClassAncestorTable`
+    # directly, bypassing the loader's marked accessor, and branched on `cache_store`: a whole-universe
+    # table build with a store, a single-class demand without one. Same project, same question, three
+    # answers — 504 classes on a cold store, 0 on a warm one, 2 with no store. Reached from
+    # `Environment#class_ordering` whenever two RBS-declared classes are compared (`raise SomeGemError`,
+    # `rescue`, `is_a?`), and on the DEFAULT `--workers=0` path nothing pre-warms the store first, so the
+    # cold answer was the one written into the run-result cache and replayed.
+    #
+    # Ordering two classes is not the analysis asking whether either one's methods resolve, so neither side
+    # feeds the diagnostic now.
+    it "reports nothing from a class-ordering query, in any cache state" do
+      write_duplicate_method_rbs(tmpdir)
+      root = File.join(tmpdir, ".rigor", "cache")
+      cold = described_class.new(signature_paths: [tmpdir], cache_store: Rigor::Cache::Store.new(root: root))
+      warm = described_class.new(signature_paths: [tmpdir], cache_store: Rigor::Cache::Store.new(root: root))
+      none = described_class.new(signature_paths: [tmpdir], cache_store: nil)
+      [cold, warm, none].each { |loader| allow(loader).to receive(:warn) }
+
+      orderings = [cold, warm, none].map { |loader| loader.class_ordering("Widget", "Object") }
+      failures = [cold, warm, none].map(&:definition_build_failures)
+
+      expect(failures).to eq([[], [], []])
+      # Non-vacuity and the must-still-succeed half: the query really was answered, identically in all
+      # three states. A hierarchy that silently returned `:unknown` everywhere would satisfy the line above.
+      expect(orderings.uniq.size).to eq(1)
+      expect(orderings.first).to eq(:unknown) # `Widget` is the class whose build fails here
+    end
+
+    # The ordering ANSWERS are what the branch removal must not move, so they are pinned on a healthy sig
+    # set where the relationships are real.
+    it "answers class_ordering identically in every cache state on a healthy sig set" do
+      File.write(File.join(tmpdir, "widget.rbs"), "class Widget\n  def bar: () -> void\nend\n")
+      root = File.join(tmpdir, ".rigor", "cache")
+      loaders = [described_class.new(signature_paths: [tmpdir], cache_store: Rigor::Cache::Store.new(root: root)),
+                 described_class.new(signature_paths: [tmpdir], cache_store: Rigor::Cache::Store.new(root: root)),
+                 described_class.new(signature_paths: [tmpdir], cache_store: nil)]
+      pairs = [%w[String Object], %w[Object String], %w[String Integer], %w[StandardError Exception]]
+
+      answers = loaders.map { |loader| pairs.map { |l, r| loader.class_ordering(l, r) } }
+
+      expect(answers.uniq.size).to eq(1)
+      expect(answers.first).to eq(%i[subclass superclass disjoint subclass])
     end
 
     it "does not record from the eager definitions table either" do

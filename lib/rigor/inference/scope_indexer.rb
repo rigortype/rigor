@@ -1824,7 +1824,7 @@ module Rigor
       # suppression and for the ADR-24 slice-4 self-call recorder, which must treat a synthesized member as an existing
       # method, not an unresolved call.
       def record_meta_superclass_members(class_node, qualified_prefix, accumulator)
-        record_meta_members(class_node.superclass, qualified_prefix, accumulator)
+        record_meta_members(class_node.superclass, qualified_prefix, accumulator, allow_outer_block: false)
       end
 
       # The registration itself, shared with the two BLOCK forms — `Const = Struct.new(:a) do … end` from the
@@ -1834,8 +1834,8 @@ module Rigor
       # falls through to `Kernel#lambda`, and `lambda.upcase` reports an undefined method on `Proc` — a wrong-type
       # diagnostic on correct code. No-op for `Class.new` / `Module.new` and for a factory whose members are not
       # literal Symbols (nothing to register).
-      def record_meta_members(factory_call, qualified_prefix, accumulator)
-        factory_call = resolve_meta_factory_call(factory_call)
+      def record_meta_members(factory_call, qualified_prefix, accumulator, allow_outer_block: true)
+        factory_call = resolve_meta_factory_call(factory_call, allow_outer_block: allow_outer_block)
         return unless factory_call
 
         members = meta_member_names(factory_call)
@@ -1848,10 +1848,10 @@ module Rigor
       # Unwinds nested single-parent `Class.new(...)` calls to a root `Struct.new(...)` / `Data.define(...)`.
       # A nested wrapper or factory block is declined because its method overrides belong to the intermediate
       # superclass and cannot be attributed to the outer class's reader-override guard.
-      def resolve_meta_factory_call(call_node)
+      def resolve_meta_factory_call(call_node, allow_outer_block: true)
         wrapped = false
         while class_new_call?(call_node)
-          return nil if wrapped && call_node.block
+          return nil if intermediate_factory_block?(call_node, wrapped, allow_outer_block)
 
           arguments = call_node.arguments&.arguments
           return nil unless arguments&.one?
@@ -1859,10 +1859,18 @@ module Rigor
           call_node = arguments.first
           wrapped = true
         end
-        return nil unless data_define_call?(call_node) || struct_new_call?(call_node)
-        return nil if wrapped && call_node.block
+        return nil unless meta_factory_call?(call_node)
+        return nil if intermediate_factory_block?(call_node, wrapped, allow_outer_block)
 
         call_node
+      end
+
+      def intermediate_factory_block?(call_node, wrapped, allow_outer_block)
+        (wrapped || !allow_outer_block) && !call_node.block.nil?
+      end
+
+      def meta_factory_call?(call_node)
+        data_define_call?(call_node) || struct_new_call?(call_node)
       end
 
       # The Symbol member names of a `Data.define(*Symbol)` / `Struct.new(*Symbol [, keyword_init:])` call. For
@@ -2150,7 +2158,9 @@ module Rigor
         when Prism::ClassNode
           name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
-            record_data_member_layout(accumulator, qualified_prefix + [name], node.superclass)
+            record_data_member_layout(
+              accumulator, qualified_prefix + [name], node.superclass, allow_outer_block: false
+            )
             walk_data_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
             return
           end
@@ -2171,8 +2181,8 @@ module Rigor
 
       # Records `qualified -> [members]` when `expr` is a `Data.define(*Symbol)` call with at least one literal-Symbol
       # member.
-      def record_data_member_layout(accumulator, qualified_parts, expr)
-        expr = resolve_meta_factory_call(expr)
+      def record_data_member_layout(accumulator, qualified_parts, expr, allow_outer_block: true)
+        expr = resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
         return unless expr && data_define_call?(expr)
 
         members = meta_member_names(expr)
@@ -2198,7 +2208,9 @@ module Rigor
         when Prism::ClassNode
           name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
-            record_struct_member_layout(accumulator, qualified_prefix + [name], node.superclass)
+            record_struct_member_layout(
+              accumulator, qualified_prefix + [name], node.superclass, allow_outer_block: false
+            )
             walk_struct_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
             return
           end
@@ -2219,8 +2231,8 @@ module Rigor
 
       # Records `qualified -> { members:, keyword_init: }` when `expr` is a `Struct.new(*Symbol [, keyword_init:
       # <bool>])` call with at least one literal-Symbol member.
-      def record_struct_member_layout(accumulator, qualified_parts, expr)
-        expr = resolve_meta_factory_call(expr)
+      def record_struct_member_layout(accumulator, qualified_parts, expr, allow_outer_block: true)
+        expr = resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
         return unless expr && struct_new_call?(expr)
 
         members = meta_member_names(expr)

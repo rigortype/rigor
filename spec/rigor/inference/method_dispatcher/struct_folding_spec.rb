@@ -128,6 +128,17 @@ RSpec.describe "Struct.new value folding", type: :runner do
       expect(types.first).not_to eq("1")
     end
 
+    it "does not propagate a layout when a ClassNode superclass has a block (#634)" do
+      types = dumped_types(<<~RUBY)
+        class Sub < (Struct.new(:x) do
+          def x = "overridden"
+        end)
+        end
+        dump_type(Sub.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
     it "folds a never-mutated bound local materialised inline" do
       expect(dumped_types(<<~RUBY)).to eq(["1"])
         p = Struct.new(:x).new(1)

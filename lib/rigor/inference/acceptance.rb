@@ -287,7 +287,7 @@ module Rigor
         # introspection patterns. The rule conservatively answers `:yes` for `Module` (every singleton is at
         # least a Module) and for `Class` / `Object` / `BasicObject` (the class object inherits from those).
         # Other Nominals fall through to the default `:no`.
-        CLASS_OBJECT_NOMINALS = %w[Module Class Object BasicObject].freeze
+        CLASS_OBJECT_NOMINALS = %w[Module Class Object Kernel BasicObject].freeze
         private_constant :CLASS_OBJECT_NOMINALS
 
         def accepts_nominal_from_singleton(self_type, other_type, mode)

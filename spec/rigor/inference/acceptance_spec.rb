@@ -486,8 +486,8 @@ RSpec.describe Rigor::Inference::Acceptance do
     let(:struct_class) { Rigor::Type::Combinator.struct_class_of(members: %i[text]) }
     let(:data_class) { Rigor::Type::Combinator.data_class_of(members: %i[text]) }
 
-    it "accepts StructClass and DataClass under meta nominals (Class, Module, Object, BasicObject)" do
-      %w[Class Module Object BasicObject].each do |name|
+    it "accepts StructClass and DataClass under meta nominals (Class, Module, Object, Kernel, BasicObject)" do
+      %w[Class Module Object Kernel BasicObject].each do |name|
         target = Rigor::Type::Combinator.nominal_of(name)
         expect(accepts(target, struct_class)).to be_yes
         expect(accepts(target, data_class)).to be_yes
@@ -543,6 +543,7 @@ RSpec.describe Rigor::Inference::Acceptance do
       expect(accepts(Rigor::Type::Combinator.singleton_of("String"), named_data)).to be_no
     end
   end
+
   describe "Type#accepts public surface" do
     it "every type form exposes accepts as a public method" do
       [top, bot, dyn_top, int_nominal, int_singleton, int_constant, int_or_str].each do |t|

@@ -53,22 +53,11 @@ module Rigor
         # consumes them and so never pays the double parse (see {#discover} + `Runner#ensure_project_discovery`).
         # The slot names mirror the discovery half of {Result} exactly.
         Discovery = Data.define(
-          :discovered_classes,
-          :discovered_def_nodes,
-          :discovered_def_nestings,
-          :discovered_singleton_def_nodes,
-          :discovered_def_sources,
-          :discovered_singleton_def_sources,
-          :discovered_superclasses,
-          :discovered_header_nestings,
-          :discovered_includes,
-          :discovered_class_sources,
-          :constant_values,
-          :constant_sources,
-          :constant_writes,
-          :discovered_method_visibilities,
-          :discovered_methods,
-          :data_member_layouts,
+          :discovered_classes, :discovered_def_nodes, :discovered_def_nestings,
+          :discovered_singleton_def_nodes, :discovered_def_sources, :discovered_singleton_def_sources,
+          :discovered_superclasses, :discovered_header_nestings, :discovered_includes,
+          :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
+          :discovered_method_visibilities, :discovered_methods, :data_member_layouts,
           :struct_member_layouts
         )
 

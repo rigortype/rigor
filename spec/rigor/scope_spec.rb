@@ -553,7 +553,7 @@ RSpec.describe Rigor::Scope do
   describe "#ancestor_name_candidates" do
     def scope_with(header_nestings)
       Rigor::Scope.empty.with_discovery(
-        Rigor::Scope.empty.discovery.with(discovered_header_nestings: header_nestings)
+        Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_header_nestings: header_nestings)
       )
     end
 
@@ -575,13 +575,13 @@ RSpec.describe Rigor::Scope do
     # The fallback, and the reason an unrecorded class is unchanged rather than degraded: peeling the
     # qualified name IS the nested spelling's chain, so it reproduces the pre-#682 candidate list exactly.
     it "peels the qualified name when no header nesting was recorded, answering the nested spelling" do
-      unrecorded = Rigor::Scope.empty.ancestor_name_candidates("A::B::C", "R")
+      unrecorded = described_class.empty.ancestor_name_candidates("A::B::C", "R")
       expect(unrecorded).to eq(["A::B::R", "A::R", "R"])
       expect(unrecorded).to eq(scope_with({ "A::B::C" => ["A::B", "A"] }).ancestor_name_candidates("A::B::C", "R"))
     end
 
     it "peels to the bare name alone for a single-segment class" do
-      expect(Rigor::Scope.empty.ancestor_name_candidates("Widget", "Base")).to eq(%w[Base])
+      expect(described_class.empty.ancestor_name_candidates("Widget", "Base")).to eq(%w[Base])
     end
   end
 end

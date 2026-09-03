@@ -177,10 +177,7 @@ module Rigor
         singleton_def_nodes = default_scope.discovered_singleton_def_nodes.merge(
           build_discovered_singleton_def_nodes(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
-        file_superclasses, file_header_nestings = build_superclass_tables(root, default_scope.source_path)
-        superclasses = default_scope.discovered_superclasses.merge(file_superclasses)
-        header_nestings =
-          merge_header_nestings(default_scope.discovery.discovered_header_nestings.dup, file_header_nestings).freeze
+        superclasses, header_nestings = merge_ancestry_tables(default_scope, root)
         includes = default_scope.discovered_includes.merge(
           build_discovered_includes(root)
         ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
@@ -212,6 +209,16 @@ module Rigor
             struct_member_layouts: struct_member_layouts
           )
         )
+      end
+
+      # The as-written superclass table and its issue #682 header-nesting twin, each merged over the cross-file
+      # seed. Returned as a pair for the same reason {#merge_def_node_tables} is: both come from ONE walk of the
+      # file, so a caller cannot pair a superclass name with a nesting recorded by a different parse.
+      def merge_ancestry_tables(default_scope, root)
+        file_superclasses, file_header_nestings = build_superclass_tables(root, default_scope.source_path)
+        [default_scope.discovered_superclasses.merge(file_superclasses),
+         merge_header_nestings(default_scope.discovery.discovered_header_nestings.dup,
+                               file_header_nestings).freeze]
       end
 
       # The instance-side def-node table and its issue #681 nesting twin, each merged over the cross-file seed.

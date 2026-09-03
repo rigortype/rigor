@@ -18,20 +18,20 @@ include Rigor::Testing
 # compact spelling and once in the nested one — because an implementation
 # that simply stopped walking would pass every compact example and none of
 # the nested twins.
+#
+# This is a PROJECT fixture so that the marker methods come from `sig/`
+# rather than from the bodies below. `call.undefined-method` declines on a
+# receiver whose class RBS does not know (`CheckRules`' `rbs_class_known?`
+# gate), so as a flat fixture the diagnostic the issue actually reports could
+# not fire at all and only the `assert_type` half discriminated.
 
 class Post
-  def top_post
-    "top"
-  end
 end
 
 LABEL = :top
 
 module Admin
   class Post
-    def admin_post
-      "admin"
-    end
   end
 
   LABEL = :admin
@@ -65,9 +65,9 @@ class Admin::CompactController
     end
   end
 
-  # A `class << self` body rewrites the innermost frame in place rather than
-  # pushing one, so the recorded chain carries through and the singleton side
-  # answers the same constant the instance side does.
+  # A `class << self` body INHERITS the chain: Ruby pushes the singleton class
+  # on top of the enclosing entries rather than replacing them, so the
+  # singleton side answers the same constant the instance side does.
   class << self
     def singleton_constant_read
       assert_type(':top', LABEL)
@@ -76,7 +76,9 @@ class Admin::CompactController
 end
 
 # NESTED, same class name. Nesting is `[Admin::NestedController, Admin]`, so
-# `Post` is `Admin::Post` — the must-still-succeed twin of every example above.
+# `Post` is `Admin::Post` — the must-still-succeed twin of every example above,
+# and its own false-positive arm: an implementation that merely stopped
+# walking fires `undefined method 'admin_post' for Post` on each of these.
 module Admin
   class NestedController
     def by_constant_read
@@ -113,16 +115,10 @@ end
 # the outer rung must still answer while `Wrap::Deep`'s own `Marker` must not.
 module Wrap
   class Marker
-    def wrap_marker
-      "wrap"
-    end
   end
 
   module Deep
     class Marker
-      def deep_marker
-        "deep"
-      end
     end
   end
 
@@ -155,9 +151,6 @@ end
 # nothing, and an implementation that resolved its first candidate
 # unconditionally would still pass everything above.
 class Loner
-  def loner
-    "loner"
-  end
 end
 
 class Admin::FallThrough

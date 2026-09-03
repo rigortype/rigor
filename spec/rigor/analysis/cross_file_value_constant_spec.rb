@@ -15,16 +15,35 @@ require "fileutils"
 # is a set of DECLINE rules — a spec that only checked "this one publishes" would pass with a rule that
 # published everything, which is the false-positive direction this feature spends its budget avoiding.
 RSpec.describe "cross-file value constants" do
-  # Runs a project of `files` (name => source) and returns the `dump.type` messages in source order.
-  def dumps(files)
+  # Runs a project of `files` (name => source), optionally with `sig` written to a project `sig/` directory,
+  # and yields the run result. The signature directory is what makes a "correct code" claim checkable: without
+  # a declaration the constants below are undefined at runtime, so a rule that fires on one is only arguably
+  # wrong.
+  def analysed(files, sig)
     Dir.mktmpdir do |dir|
       lib = File.join(dir, "lib")
       FileUtils.mkdir_p(lib)
       files.each { |name, source| File.write(File.join(lib, name), source) }
-      runner = Rigor::Analysis::Runner.new(
-        configuration: Rigor::Configuration.new("paths" => [lib]), cache_store: nil
-      )
-      result = guarded_run(runner)
+      options = { "paths" => [lib] }
+      options["signature_paths"] = [write_project_sig(dir, sig)] if sig
+      yield guarded_run(Rigor::Analysis::Runner.new(
+                          configuration: Rigor::Configuration.new(options), cache_store: nil
+                        ))
+    end
+  end
+
+  def write_project_sig(dir, sig)
+    signatures = File.join(dir, "sig")
+    FileUtils.mkdir_p(signatures)
+    File.write(File.join(signatures, "decl.rbs"), sig)
+    signatures
+  end
+
+  # The `dump.type` messages in source order. The `_sig` variants take an RBS source; every call passes the
+  # project as a POSITIONAL hash, so the signature stays positional too — a keyword parameter would swallow a
+  # braceless `"b.rb" => …` as keywords.
+  def dumps(files, sig = nil)
+    analysed(files, sig) do |result|
       result.diagnostics
             .select { |d| d.qualified_rule == "dump.type" }
             .sort_by { |d| [d.path, d.line] }
@@ -34,15 +53,8 @@ RSpec.describe "cross-file value constants" do
 
   # The `flow.always-truthy-condition` sites, as `basename:line` — the rule a value-pinned constant can make
   # fire at a reader that was previously silent.
-  def flow_warnings(files)
-    Dir.mktmpdir do |dir|
-      lib = File.join(dir, "lib")
-      FileUtils.mkdir_p(lib)
-      files.each { |name, source| File.write(File.join(lib, name), source) }
-      runner = Rigor::Analysis::Runner.new(
-        configuration: Rigor::Configuration.new("paths" => [lib]), cache_store: nil
-      )
-      result = guarded_run(runner)
+  def flow_warnings(files, sig = nil)
+    analysed(files, sig) do |result|
       result.diagnostics
             .select { |d| d.qualified_rule == "flow.always-truthy-condition" }
             .map { |d| "#{File.basename(d.path)}:#{d.line}" }
@@ -426,6 +438,102 @@ RSpec.describe "cross-file value constants" do
       expect(duel("LIMIT += 1\n")).to eq(["Dynamic[top]", ":kept"])
       expect(duel("LIMIT ||= 7\n")).to eq(["Dynamic[top]", ":kept"])
       expect(duel("LIMIT &&= 7\n")).to eq(["Dynamic[top]", ":kept"])
+    end
+  end
+
+  # Issue #705 — `self::LIMIT = …` names whatever `self` is, and a `class_eval`-family block swaps `self` for
+  # the receiver while leaving `Module.nesting` alone. Charging the lexical enclosure gets BOTH halves wrong at
+  # once: the name the write did touch keeps publishing a value a second writer replaced, and the name it did
+  # not stops publishing one nothing conflicts with. Both halves are asserted, and the two declines are paired
+  # with the ordinary block that must still charge the enclosure.
+  describe "`self::` under a block that rebinds `self`" do
+    # `module N` in the reader's project, plus the `KEPT` control that proves a `Dynamic[top]` is this rule
+    # and not the whole table failing.
+    def eval_duel(second_writer, read)
+      dumps("b.rb" => "class Other\nend\nmodule N\n  LIMIT = 50\nend\nKEPT = :kept\n",
+            "c.rb" => second_writer,
+            "a.rb" => "Rigor.dump_type(#{read})\nRigor.dump_type(KEPT)\n")
+    end
+
+    it "charges the RECEIVER's namespace for a `self::` write inside its `class_eval`" do
+      expect(dumps("b.rb" => "class Other\n  LIMIT = 50\nend\nKEPT = :kept\n",
+                   "c.rb" => "module N\n  Other.class_eval { self::LIMIT = 7 }\nend\n",
+                   "a.rb" => "Rigor.dump_type(Other::LIMIT)\nRigor.dump_type(KEPT)\n"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+
+    it "does NOT charge the lexical enclosure for that write" do
+      expect(eval_duel("module N\n  Other.class_eval { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["50", ":kept"])
+    end
+
+    it "does not charge the enclosure for a `class_eval` whose receiver names no class" do
+      expect(eval_duel("module N\n  target = Other\n  target.class_eval { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["50", ":kept"])
+    end
+
+    it "does not charge the enclosure for a `self::` write inside a `Class.new` block" do
+      expect(eval_duel("module N\n  Made = Class.new { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["50", ":kept"])
+    end
+
+    it "still charges the enclosure for a `self::` write inside an ORDINARY block, which keeps `self`" do
+      expect(eval_duel("module N\n  [1].each { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+
+    # `Object` is the one owner whose constants ARE the top-level ones. Keying `Object::LIMIT` files this
+    # write beside the sibling's plain `LIMIT` instead of on top of it, and the conflict between the two
+    # goes undetected — the direction a value gets published that the program may not have.
+    it "spells an `Object` owner BARE, so a sibling's plain write still conflicts with it" do
+      expect(dumps("b.rb" => "Object.class_eval { self::LIMIT = 7 }\n",
+                   "c.rb" => "LIMIT = 50\nKEPT = :kept\n",
+                   "a.rb" => "Rigor.dump_type(LIMIT)\nRigor.dump_type(KEPT)\n"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+  end
+
+  # Issue #705 — a write whose base is not statically nameable renders in this census as the bare trailing
+  # segment: `[Foo].each { |k| k::X = 1 }` creates `Foo::X` and is filed under `X`. Publishing a VALUE there is
+  # a guess a flow rule then concludes from, and the site's "over-suppressing is the safe direction" reading
+  # does not cover it because it is not suppressing at all. The NAME still enters the census: on THIS side a
+  # decline would leave another file's value for the name trusted, which is the risky direction rather than
+  # the gradual one.
+  describe "a write whose base no name reaches" do
+    # `X` is DECLARED, so every read below is correct code and a diagnostic on one is a false positive.
+    let(:declared_x) { "class Foo\nend\n\nX: Integer\n" }
+    let(:dynamic_write) { "class Foo\nend\n[Foo].each { |k| k::X = 1 }\n" }
+
+    it "publishes no value under the bare name the render falls back to" do
+      expect(dumps({ "b.rb" => dynamic_write, "a.rb" => "Rigor.dump_type(X)\n" }, declared_x))
+        .to eq(["Integer"])
+    end
+
+    it "leaves a comparison against it unfolded in the WRITING file, which the guard does not withhold" do
+      expect(dumps({ "b.rb" => "#{dynamic_write}Rigor.dump_type(X == 2)\n" }, declared_x)).to eq(["bool"])
+    end
+
+    it "does not fire the truthiness rule on correct code in the WRITING file" do
+      source = "#{dynamic_write}def check\n  :two if X == 2\nend\ndef seen\n  :yes if X\nend\n"
+      expect(flow_warnings({ "b.rb" => source }, declared_x)).to be_empty
+    end
+
+    # The arm a full decline would fail. The write may still be the top-level `X` — that is exactly the case
+    # where the bare render is not a guess — so the name stays censused and no value for it is trusted.
+    it "still counts the name as WRITTEN, retracting a value another file publishes for it" do
+      expect(dumps("b.rb" => dynamic_write,
+                   "c.rb" => "X = 5\nKEPT = :kept\n",
+                   "a.rb" => "Rigor.dump_type(X)\nRigor.dump_type(KEPT)\n"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+
+    # Must-still-succeed: the statically-written twin publishes, and its reader is still withheld from the
+    # truthiness rule — so the arms above cannot pass by publication having stopped working.
+    it "still publishes a statically-written scalar and still withholds it from the rule" do
+      files = { "b.rb" => "class Foo\n  X = 1\nend\n",
+                "a.rb" => "Rigor.dump_type(Foo::X)\n:two if Foo::X == 2\n" }
+      expect(dumps(files)).to eq(["1"])
+      expect(flow_warnings(files)).to be_empty
     end
   end
 

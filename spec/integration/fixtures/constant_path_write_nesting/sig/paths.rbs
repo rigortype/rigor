@@ -20,6 +20,9 @@ LATE: singleton(Post)
 module Dyn
   class Post
   end
+
+  class Reader
+  end
 end
 
 module Admin
@@ -59,6 +62,19 @@ module Admin
       def own_marker: () -> String
     end
   end
+
+  class Evalled
+    def self.evalled_only: () -> String
+    def self.build: () -> String
+  end
+
+  def self.build: () -> Integer
+
+  # The lexically-enclosing names a `class_eval` block's `self::` write must NOT be filed under.
+  # Rooted, because an unrooted `Post` inside `module Admin` is `Admin::Post` to RBS — the very
+  # class the mis-keyed write would have supplied.
+  MARK: singleton(::Post)
+  LOOSE: singleton(::Post)
 
   class NestedReader
   end

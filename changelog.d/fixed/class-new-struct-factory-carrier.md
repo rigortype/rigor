@@ -1,0 +1,1 @@
+- **[engine]** `Class.new(Struct.new(...))` and `Class.new(Data.define(...))` no longer report an argument-type mismatch, and the resulting classes retain their declared members for type checking and value folding ([#634](https://github.com/rigortype/rigor/issues/634), [#687](https://github.com/rigortype/rigor/pull/687)).

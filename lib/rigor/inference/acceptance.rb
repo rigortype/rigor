@@ -67,7 +67,9 @@ module Rigor
         Type::Refined => :accepts_refined,
         Type::Intersection => :accepts_intersection,
         Type::Tuple => :accepts_tuple,
-        Type::HashShape => :accepts_hash_shape
+        Type::HashShape => :accepts_hash_shape,
+        Type::StructClass => :accepts_class_factory,
+        Type::DataClass => :accepts_class_factory
       }.freeze
       private_constant :TYPE_HANDLERS
 
@@ -165,20 +167,28 @@ module Rigor
           end
         end
 
-        # Singleton[C] only accepts another Singleton[D] where D is a subclass of (or equal to) C. Any other
-        # carrier (instance, constant, ...) is no, because the singleton type's inhabitants are the class
-        # objects themselves.
+        # Singleton[C] only accepts another Singleton[D] (or StructClass / DataClass) where D is a subclass
+        # of (or equal to) C. Any other carrier (instance, constant, ...) is no, because the singleton type's
+        # inhabitants are the class objects themselves.
         def accepts_singleton(self_type, other_type, mode)
-          unless other_type.is_a?(Type::Singleton)
-            return Type::AcceptsResult.no(
-              mode: mode,
-              reasons: "Singleton[#{self_type.class_name}] does not accept #{other_type.class}"
-            )
-          end
+          actual_name =
+            case other_type
+            when Type::Singleton then other_type.class_name
+            when Type::StructClass, Type::DataClass
+              return Type::AcceptsResult.yes(mode: mode, reasons: "exact name match") if
+                other_type.class_name == self_type.class_name
+
+              class_factory_base_name(other_type)
+            else
+              return Type::AcceptsResult.no(
+                mode: mode,
+                reasons: "Singleton[#{self_type.class_name}] does not accept #{other_type.class}"
+              )
+            end
 
           class_subtype_result(
             target_name: self_type.class_name,
-            actual_name: other_type.class_name,
+            actual_name: actual_name,
             mode: mode,
             kind: :singleton
           )
@@ -195,11 +205,13 @@ module Rigor
         # - HashShape{*} when self is the Hash (or a supertype) family, projected to
         #   `Nominal[Hash, [union(keys), union(values)]]`.
         # - Singleton: never (wrong value kind).
+        # - StructClass / DataClass: class-side carriers, accepted when C is a meta nominal (Class, Module, ...).
         def accepts_nominal(self_type, other_type, mode)
           case other_type
           when Type::Nominal then accepts_nominal_from_nominal(self_type, other_type, mode)
           when Type::Constant then accepts_nominal_from_constant(self_type, other_type, mode)
           when Type::Singleton then accepts_nominal_from_singleton(self_type, other_type, mode)
+          when Type::StructClass, Type::DataClass then accepts_nominal_from_class_factory(self_type, other_type, mode)
           when Type::IntegerRange then accepts_nominal_from_integer_range(self_type, other_type, mode)
           else accepts_nominal_from_shape(self_type, other_type, mode)
           end
@@ -275,11 +287,11 @@ module Rigor
         # introspection patterns. The rule conservatively answers `:yes` for `Module` (every singleton is at
         # least a Module) and for `Class` / `Object` / `BasicObject` (the class object inherits from those).
         # Other Nominals fall through to the default `:no`.
-        META_NOMINALS_FROM_SINGLETON = %w[Module Class Object BasicObject].freeze
-        private_constant :META_NOMINALS_FROM_SINGLETON
+        CLASS_OBJECT_NOMINALS = %w[Module Class Object Kernel BasicObject].freeze
+        private_constant :CLASS_OBJECT_NOMINALS
 
         def accepts_nominal_from_singleton(self_type, other_type, mode)
-          if META_NOMINALS_FROM_SINGLETON.include?(self_type.class_name)
+          if CLASS_OBJECT_NOMINALS.include?(self_type.class_name)
             return Type::AcceptsResult.yes(
               mode: mode,
               reasons: "Singleton[#{other_type.class_name}] is-a #{self_type.class_name}"
@@ -290,6 +302,38 @@ module Rigor
             mode: mode,
             reasons: "Nominal[#{self_type.class_name}] rejects Singleton[#{other_type.class_name}]"
           )
+        end
+
+        def accepts_nominal_from_class_factory(self_type, other_type, mode)
+          if CLASS_OBJECT_NOMINALS.include?(self_type.class_name) && self_type.type_args.empty?
+            return Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "#{other_type.describe} is-a #{self_type.class_name}"
+            )
+          end
+
+          if self_type.class_name == "Class" && self_type.type_args.one?
+            return accepts_class_factory_instance_arg(self_type.type_args.first, other_type, mode)
+          end
+
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "Nominal[#{self_type.class_name}] rejects #{other_type.class}"
+          )
+        end
+
+        def accepts_class_factory_instance_arg(formal, factory, mode)
+          if factory.class_name
+            named = accepts(formal, Type::Combinator.nominal_of(factory.class_name), mode: mode)
+            return named.with_reason("matched the factory class name") if named.yes?
+          end
+
+          accepts(formal, Type::Combinator.nominal_of(class_factory_base_name(factory)), mode: mode)
+            .with_reason("projected the factory instance type")
+        end
+
+        def class_factory_base_name(factory)
+          factory.is_a?(Type::StructClass) ? "Struct" : "Data"
         end
 
         def accepts_nominal_from_nominal(self_type, other_type, mode)
@@ -751,6 +795,13 @@ module Rigor
 
         def hash_shape_no(mode, reason)
           Type::AcceptsResult.no(mode: mode, reasons: reason)
+        end
+
+        def accepts_class_factory(self_type, other_type, mode)
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "#{self_type.describe} rejects #{other_type.class}"
+          )
         end
 
         # Uses Ruby's actual class hierarchy via Object.const_get to answer "is D a subclass of C?" for core,

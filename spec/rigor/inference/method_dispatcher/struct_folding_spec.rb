@@ -89,6 +89,56 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
+    it "folds off a Class.new(Struct.new(...)) subclass (#634)" do
+      expect(dumped_types(<<~RUBY)).to eq(["1", "\"two\""])
+        Point = Class.new(Struct.new(:x, :y))
+        p = Point.new(1, "two")
+        dump_type(p.x)
+        dump_type(p.y)
+      RUBY
+    end
+
+    it "does not fold a reader redefined by an outer anonymous Class.new block (#634)" do
+      types = dumped_types(<<~RUBY)
+        klass = Class.new(Struct.new(:x)) do
+          def x = "overridden"
+        end
+        dump_type(klass.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
+    it "does not propagate a nested factory layout whose own block can redefine a reader (#634)" do
+      types = dumped_types(<<~RUBY)
+        Point = Class.new(Struct.new(:x) do
+          def x = "overridden"
+        end)
+        dump_type(Point.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
+    it "does not propagate a layout through an intermediate Class.new block (#634)" do
+      types = dumped_types(<<~RUBY)
+        Point = Class.new(Class.new(Struct.new(:x)) do
+          def x = "overridden"
+        end)
+        dump_type(Point.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
+    it "does not propagate a layout when a ClassNode superclass has a block (#634)" do
+      types = dumped_types(<<~RUBY)
+        class Sub < (Struct.new(:x) do
+          def x = "overridden"
+        end)
+        end
+        dump_type(Sub.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
     it "folds a never-mutated bound local materialised inline" do
       expect(dumped_types(<<~RUBY)).to eq(["1"])
         p = Struct.new(:x).new(1)

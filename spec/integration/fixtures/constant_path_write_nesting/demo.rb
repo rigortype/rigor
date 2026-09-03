@@ -109,6 +109,25 @@ module Admin
   end
 end
 
+# A target that renders NO static path is not a fourth "keep the as-written key" form, and
+# must not be keyed by the lenient render of its constant segments. `self::SELF_DEFAULT`
+# names `Admin::SELF_DEFAULT` and its rvalue is `Admin::Post`, so the bare key would file an
+# `Admin::Post` under the name of the RBS-declared top-level constant and hand every reader
+# of `::SELF_DEFAULT` a receiver Ruby never names there.
+module Admin
+  self::SELF_DEFAULT = Post
+end
+
+# A genuinely dynamic base names no attributable namespace at all, so the write is DECLINED
+# rather than filed under its trailing segment.
+module Dyn
+  class Post
+  end
+
+  holder = Post
+  holder::LATE = Post
+end
+
 # The mutation census (#540) rides on the same key. `Table::ROWS[key] = 1` mutates
 # whatever `Table::ROWS` names HERE, so the census has to reach the entry the write
 # accumulator is now keyed under; left unmatched, the closed empty shape survives and
@@ -169,6 +188,19 @@ class TopReader
     assert_type("singleton(Admin::OwnNested::Value)", Admin::OwnNested::Own::MARK)
     Admin::OwnNested::Own::MARK.new.own_marker
   end
+
+  # Must-still-succeed: `SELF_DEFAULT` here is the RBS-declared top-level constant, not the
+  # `Admin::Post` the `self::` write put under `Admin::SELF_DEFAULT`.
+  def read_self_write_from_top
+    assert_type("singleton(Post)", SELF_DEFAULT)
+    SELF_DEFAULT.new.top_post
+  end
+
+  # Must-still-succeed: the declined dynamic write leaves the RBS constant answering.
+  def read_dynamic_write_from_top
+    assert_type("singleton(Post)", LATE)
+    LATE.new.top_post
+  end
 end
 
 module Admin
@@ -178,6 +210,13 @@ module Admin
     def read_nested_relative
       assert_type("singleton(Admin::Post)", Registry::NESTED)
       Registry::NESTED.new.admin_post
+    end
+
+    # The `self::` write's own namespace. Master answers the top-level `Post` off the
+    # mis-keyed bare entry, which is the same defect one spelling further out.
+    def read_self_write_in_namespace
+      assert_type("singleton(Admin::Post)", SELF_DEFAULT)
+      SELF_DEFAULT.new.admin_post
     end
   end
 end

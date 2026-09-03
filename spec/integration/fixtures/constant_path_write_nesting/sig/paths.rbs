@@ -13,6 +13,15 @@ end
 class Loner
 end
 
+# The top-level constants a `self::` or dynamic-base write must NOT be filed under.
+SELF_DEFAULT: singleton(Post)
+LATE: singleton(Post)
+
+module Dyn
+  class Post
+  end
+end
+
 module Admin
   class Post
     def admin_post: () -> String

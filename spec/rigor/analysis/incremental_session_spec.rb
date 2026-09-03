@@ -474,6 +474,76 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
   end
 
+  # Issue #690 — the constant-WRITE half of the same tier. `Holder::DEFAULT = …` inside `module Admin` is
+  # keyed under the namespace the spelling resolves to, so the key is a function of ANOTHER file's class
+  # declarations. No edge the reader records covers that: a reference's negative key names the constant that
+  # failed to resolve, whereas this key moves because a MIDDLE segment appeared. `ScopeIndexer`'s namespace
+  # probe records both edges itself.
+  describe "negative (appeared-namespace) dependencies for a path constant write" do
+    let(:writer_source) do
+      "module Admin
+  Holder::DEFAULT = :sym
+end
+
+Rigor.dump_type(Admin::Holder::DEFAULT)
+"
+    end
+
+    it "re-checks a path write's file when an edit declares the namespace it resolves through" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "module Admin
+end
+")
+        File.write(b, writer_source)
+
+        session = session_for(configuration(dir))
+        baseline = guarded_baseline(session)
+        expect(baseline.map(&:message)).to include(a_string_including("Dynamic[top]"))
+
+        File.write(a, "module Admin
+  class Holder
+  end
+end
+")
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to include(b)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(recheck.diagnostics.map(&:message)).to include(a_string_including(":sym"))
+      end
+    end
+
+    # The must-still-succeed twin, and the half a negative edge alone cannot serve: deleting the namespace
+    # moves the key BACK, which only the positive edge on the declaring file re-checks.
+    it "re-checks it again when the namespace it resolved through goes away" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "module Admin
+  class Holder
+  end
+end
+")
+        File.write(b, writer_source)
+
+        session = session_for(configuration(dir))
+        baseline = guarded_baseline(session)
+        expect(baseline.map(&:message)).to include(a_string_including(":sym"))
+
+        File.write(a, "module Admin
+end
+")
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to include(b)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(recheck.diagnostics.map(&:message)).to include(a_string_including("Dynamic[top]"))
+      end
+    end
+  end
+
   # ADR-88 WD3 — `Scope#user_def_site_for` now records the cross-file method edge the sibling `#user_def_for`
   # records, so a caller whose `call.undefined-method` names a project monkey-patch's definition site
   # (`project_definition_site`, a `"path:line"` embedded in the message) re-checks when that site MOVES. A

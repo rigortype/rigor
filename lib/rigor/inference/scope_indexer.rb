@@ -1836,7 +1836,7 @@ module Rigor
       # literal Symbols (nothing to register).
       def record_meta_members(factory_call, qualified_prefix, accumulator)
         factory_call = resolve_meta_factory_call(factory_call)
-        return unless factory_call && (data_define_call?(factory_call) || struct_new_call?(factory_call))
+        return unless factory_call
 
         members = meta_member_names(factory_call)
         return if members.empty?
@@ -1845,12 +1845,23 @@ module Rigor
         members.each { |member| record_method_kind(accumulator, class_name, member, :instance) }
       end
 
-      # Unwinds nested `Class.new(...)` calls to their root factory call (`Struct.new(...)` or `Data.define(...)`).
+      # Unwinds nested single-parent `Class.new(...)` calls to a root `Struct.new(...)` / `Data.define(...)`.
+      # A nested wrapper or factory block is declined because its method overrides belong to the intermediate
+      # superclass and cannot be attributed to the outer class's reader-override guard.
       def resolve_meta_factory_call(call_node)
+        wrapped = false
         while class_new_call?(call_node)
-          call_node = call_node.arguments&.arguments&.first
-          return nil unless call_node
+          return nil if wrapped && call_node.block
+
+          arguments = call_node.arguments&.arguments
+          return nil unless arguments&.one?
+
+          call_node = arguments.first
+          wrapped = true
         end
+        return nil unless data_define_call?(call_node) || struct_new_call?(call_node)
+        return nil if wrapped && call_node.block
+
         call_node
       end
 
@@ -3540,7 +3551,7 @@ module Rigor
       # but legal) still feed the discovered table.
       def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         factory_call = resolve_meta_factory_call(node.value)
-        return false unless factory_call && (data_define_call?(factory_call) || struct_new_call?(factory_call))
+        return false unless factory_call
 
         full = (qualified_prefix + [node.name.to_s]).join("::")
         discovered[full] = Type::Combinator.singleton_of(full)

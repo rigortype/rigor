@@ -1003,9 +1003,9 @@ module Rigor
         return nil unless arg_types.size == 1
 
         parent = arg_types.first
-        return parent if parent.is_a?(Type::Singleton) ||
-                         parent.is_a?(Type::StructClass) ||
-                         parent.is_a?(Type::DataClass)
+        factory_parent = parent.is_a?(Type::StructClass) || parent.is_a?(Type::DataClass)
+        return nil if factory_parent && context&.call_node&.block
+        return parent if parent.is_a?(Type::Singleton) || factory_parent
 
         nil
       end

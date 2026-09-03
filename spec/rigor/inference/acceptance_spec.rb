@@ -502,6 +502,23 @@ RSpec.describe Rigor::Inference::Acceptance do
       end
     end
 
+    it "checks the instance type carried by Class[T]" do
+      string_class = Rigor::Type::Combinator.nominal_of("Class", type_args: [str_nominal])
+      struct_meta = Rigor::Type::Combinator.nominal_of(
+        "Class", type_args: [Rigor::Type::Combinator.nominal_of("Struct")]
+      )
+      data_meta = Rigor::Type::Combinator.nominal_of(
+        "Class", type_args: [Rigor::Type::Combinator.nominal_of("Data")]
+      )
+
+      expect(accepts(string_class, struct_class)).to be_no
+      expect(accepts(string_class, data_class)).to be_no
+      expect(accepts(struct_meta, struct_class)).to be_yes
+      expect(accepts(struct_meta, data_class)).to be_no
+      expect(accepts(data_meta, struct_class)).to be_no
+      expect(accepts(data_meta, data_class)).to be_yes
+    end
+
     it "accepts StructClass under Singleton[Struct] and DataClass under Singleton[Data]" do
       expect(accepts(Rigor::Type::Combinator.singleton_of("Struct"), struct_class)).to be_yes
       expect(accepts(Rigor::Type::Combinator.singleton_of("Data"), data_class)).to be_yes
@@ -514,6 +531,16 @@ RSpec.describe Rigor::Inference::Acceptance do
       expect(accepts(Rigor::Type::Combinator.singleton_of("String"), data_class)).to be_no
       expect(accepts(Rigor::Type::Combinator.singleton_of("Struct"), data_class)).to be_no
       expect(accepts(Rigor::Type::Combinator.singleton_of("Data"), struct_class)).to be_no
+    end
+
+    it "uses the factory ancestry rather than an unresolved assigned name for Singleton acceptance" do
+      named_struct = Rigor::Type::Combinator.struct_class_of(members: %i[text], class_name: "Point")
+      named_data = Rigor::Type::Combinator.data_class_of(members: %i[text], class_name: "Value")
+
+      expect(accepts(Rigor::Type::Combinator.singleton_of("Struct"), named_struct)).to be_yes
+      expect(accepts(Rigor::Type::Combinator.singleton_of("Data"), named_data)).to be_yes
+      expect(accepts(Rigor::Type::Combinator.singleton_of("String"), named_struct)).to be_no
+      expect(accepts(Rigor::Type::Combinator.singleton_of("String"), named_data)).to be_no
     end
   end
   describe "Type#accepts public surface" do

@@ -83,6 +83,36 @@ RSpec.describe "Data.define value folding", type: :runner do
       RUBY
     end
 
+    it "does not fold a reader redefined by an outer anonymous Class.new block (#634)" do
+      types = dumped_types(<<~RUBY)
+        klass = Class.new(Data.define(:x)) do
+          def x = "overridden"
+        end
+        dump_type(klass.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
+    it "does not propagate a nested factory layout whose own block can redefine a reader (#634)" do
+      types = dumped_types(<<~RUBY)
+        Point = Class.new(Data.define(:x) do
+          def x = "overridden"
+        end)
+        dump_type(Point.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
+    it "does not propagate a layout through an intermediate Class.new block (#634)" do
+      types = dumped_types(<<~RUBY)
+        Point = Class.new(Class.new(Data.define(:x)) do
+          def x = "overridden"
+        end)
+        dump_type(Point.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
     it "folds the Point[...] new alias" do
       expect(dumped_types(<<~RUBY)).to eq(["Point(x: 3, y: 4)"])
         Point = Data.define(:x, :y)

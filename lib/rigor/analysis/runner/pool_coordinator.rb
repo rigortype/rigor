@@ -126,6 +126,10 @@ module Rigor
           snapshot_project_signature_state(environment)
           snapshot_effect_annotation_carrier(environment&.rbs_loader)
           result = files.flat_map { |path| @analyze_file.call(path, environment) }
+          # Issue #696 — AFTER the loop, deliberately. Definition builds are lazy (ADR-54 WD1: per class, on
+          # first demand), so a snapshot taken beside the ones above — which run BEFORE `files.flat_map` —
+          # would read an empty list on every run, including the ones this diagnostic exists for.
+          record_definition_build_failures(environment&.rbs_loader&.definition_build_failures)
           if @collect_stats
             loader = environment.rbs_loader
             @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
@@ -608,9 +612,34 @@ module Rigor
               plugin_id: entry.plugin_id, path: entry.path, message: entry.message
             )
           end
+          # Issue #696. Fetched with a default so an older drain stays compatible, exactly as the line above.
+          record_definition_build_failures(drained[:definition_build_failures])
         end
 
         private
+
+        # Issue #696 — accumulate the per-class `RBS::DefinitionBuilder` failures this run observed, deduped
+        # by class name and kept in first-seen order.
+        #
+        # Accumulating rather than assigning is what makes a pooled run say what a sequential one says: each
+        # worker holds its OWN loader and its own memo (the `@state` that also gates the stderr banner, which
+        # is why the banner repeats per worker — #295), so a class that fails in two workers arrives twice
+        # and a class only one worker touched arrives once. The union over the workers is the set the RUN
+        # hit; neither worker alone is.
+        #
+        # NOT gated on `project_signature_paths?`, unlike {#snapshot_project_signature_state}. That gate
+        # exists because each condition there forces the otherwise-lazy env build, which would warm the cache
+        # on a project with no sig set of its own. Nothing is forced here — this reads what the analysis
+        # already demanded — and the failure is not a project-sig-only condition anyway: two BUNDLED sources
+        # declaring the same method collapse a class with no `signature_paths:` in sight (the
+        # `bigdecimal` / `BigMath` shape, #299). Gating it would suppress exactly the variant the user cannot
+        # fix by editing their own `sig/`.
+        def record_definition_build_failures(failures)
+          return if failures.nil? || failures.empty?
+
+          @snapshots.definition_build_failures =
+            (@snapshots.definition_build_failures + failures).uniq(&:first).freeze
+        end
 
         # True when the project declares its own `signature_paths:` (the only place the
         # qualified-name-without-namespace mistake lives).

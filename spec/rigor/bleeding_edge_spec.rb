@@ -14,12 +14,15 @@ RSpec.describe Rigor::BleedingEdge do
       feature = described_class.feature("reject-unparseable-signatures")
       expect(feature.severity_overrides).to eq(
         "rbs.coverage.quarantined-signature" => :error,
-        "rbs.coverage.environment-build-failed" => :error
+        "rbs.coverage.environment-build-failed" => :error,
+        "rbs.coverage.definition-build-failed" => :error
       )
 
       adopted = described_class.severity_overrides_for({ "mode" => "all" })
       expect(adopted["rbs.coverage.quarantined-signature"]).to eq(:error)
       expect(adopted["rbs.coverage.environment-build-failed"]).to eq(:error)
+      # Issue #696 — the per-class rung of the same ladder: one file, one class, the whole env.
+      expect(adopted["rbs.coverage.definition-build-failed"]).to eq(:error)
 
       # Off by default — an existing green build must not turn red on upgrade.
       expect(described_class.severity_overrides_for({ "mode" => "none" })).to eq({})

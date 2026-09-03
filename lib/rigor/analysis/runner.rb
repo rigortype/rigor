@@ -986,6 +986,10 @@ module Rigor
         close_effect_graph
         diagnostics += @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_environment_build_failed_diagnostics
+        # Issue #696 — after its env-wide twin and before the synthesized-namespace notice: the three
+        # `rbs.coverage.*` build conditions surface widest-consequence first, and their relative order is
+        # the diagnostic output contract.
+        diagnostics += @diagnostic_aggregator.rbs_definition_build_failed_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_synthesized_namespace_diagnostics
         diagnostics += @diagnostic_aggregator.conforms_to_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
@@ -1395,6 +1399,7 @@ module Rigor
           synthesized_namespaces_snapshot: -> { @snapshots.synthesized_namespaces },
           quarantined_signatures_snapshot: -> { @snapshots.quarantined_signatures },
           env_build_failure_snapshot: -> { @snapshots.env_build_failure },
+          definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
           conformance_results_snapshot: -> { @snapshots.conformance_results }
         )
       end

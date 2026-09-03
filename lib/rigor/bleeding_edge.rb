@@ -107,14 +107,15 @@ module Rigor
         id: "reject-unparseable-signatures",
         kind: :severity,
         summary: "A broken `signature_paths:` RBS set fails the run instead of degrading it silently. An " \
-                 "unparseable `.rbs` is otherwise skipped with a warning, and a duplicate-declaration " \
-                 "conflict (a file that parses fine but collides on resolve — typically against Rigor's " \
-                 "own bundled RBS) collapses the whole env with a warning; either way the run gets quieter " \
-                 "rather than cleaner. This treats both as a build error, the way a broken source file " \
-                 "already is.",
+                 "unparseable `.rbs` is otherwise skipped with a warning; a duplicate-declaration conflict " \
+                 "(a file that parses fine but collides on resolve — typically against Rigor's own bundled " \
+                 "RBS) collapses the whole env with a warning; and a duplicate METHOD definition collapses " \
+                 "one class's method surface the same way. Each leaves the run quieter rather than " \
+                 "cleaner. This treats all three as a build error, the way a broken source file already is.",
         severity_overrides: {
           "rbs.coverage.quarantined-signature" => :error,
-          "rbs.coverage.environment-build-failed" => :error
+          "rbs.coverage.environment-build-failed" => :error,
+          "rbs.coverage.definition-build-failed" => :error
         }.freeze
       ),
       Feature.new(

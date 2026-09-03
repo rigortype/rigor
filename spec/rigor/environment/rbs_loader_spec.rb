@@ -435,6 +435,68 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(messages.size).to eq(1)
       expect(messages.first).to include("RBS definition build failed")
     end
+
+    # Issue #696 — the stderr banner above is not a diagnostic, so it never reached `--format json`, SARIF,
+    # CI annotations, the LSP, or the exit code. `#definition_build_failures` is the recorded half the
+    # analysis layer turns into `rbs.coverage.definition-build-failed`.
+    it "records the failed class, the error class, the message and the colliding file for the diagnostic" do
+      write_duplicate_method_rbs(tmpdir)
+      loader = described_class.new(signature_paths: [tmpdir])
+      allow(loader).to receive(:warn)
+
+      expect(loader.instance_definition("Widget")).to be_nil
+
+      class_name, error_class, first_line, buffers = loader.definition_build_failures.first
+      expect(loader.definition_build_failures.size).to eq(1)
+      expect(class_name).to eq("Widget")
+      expect(error_class).to eq("RBS::DuplicatedMethodDefinitionError")
+      expect(first_line).to include("Widget#bar")
+      expect(buffers).to eq([File.join(tmpdir, "widget.rbs")])
+    end
+
+    # `::Widget` (the eager table walk's `RBS::TypeName#to_s` spelling) and `Widget` (a dispatch site's) are
+    # the same class, and a diagnostic that named both would be lying about the count.
+    it "records one entry per class however the caller spelled the name" do
+      write_duplicate_method_rbs(tmpdir)
+      loader = described_class.new(signature_paths: [tmpdir])
+      allow(loader).to receive(:warn)
+
+      loader.instance_definition("Widget")
+      loader.singleton_definition("::Widget")
+
+      expect(loader.definition_build_failures.map(&:first)).to eq(["Widget"])
+    end
+
+    # The must-still-succeed twin of the two above: a healthy sig set records nothing, so the diagnostic
+    # cannot fire on a project with nothing wrong.
+    it "records nothing for a class whose definition builds cleanly" do
+      File.write(File.join(tmpdir, "widget.rbs"), "class Widget\n  def bar: () -> void\nend\n")
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.instance_definition("Widget")).not_to be_nil
+      expect(loader.definition_build_failures).to be_empty
+    end
+
+    # The eager whole-universe walk behind `#prewarm` / `#reflection` is a cache-warming implementation
+    # detail. Letting it feed the record would make the reported class list depend on whether a pool warmed
+    # a cache — the same project reporting differently under `--workers=N` than under `--workers=0`, which
+    # is the "reports less depending on how you ran it" defect the diagnostic exists to end. The banner
+    # stays armed there, unchanged.
+    it "does not record from the eager definitions table, only from what the analysis demanded" do
+      write_duplicate_method_rbs(tmpdir)
+      loader = described_class.new(signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+
+      loader.send(:instance_definitions_table)
+
+      expect(loader.definition_build_failures).to be_empty
+      # Non-vacuity: the walk really did hit the failing build — it just must not feed the diagnostic.
+      expect(messages.grep(/RBS definition build failed/)).not_to be_empty
+      # And a later real demand still records, so the eager walk cannot silence it either.
+      loader.instance_definition("Widget")
+      expect(loader.definition_build_failures.map(&:first)).to eq(["Widget"])
+    end
   end
 
   describe "#class_type_param_names (Slice 4 phase 2d)" do

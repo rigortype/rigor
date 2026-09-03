@@ -155,7 +155,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       coordinator = build_coordinator(collect_stats: true, snapshots: snapshots)
       loader = instance_double(
         Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"],
-                                       virtual_rbs: []
+                                       virtual_rbs: [], definition_build_failures: []
       )
       environment = instance_double(Rigor::Environment, rbs_loader: loader)
 
@@ -172,7 +172,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       # gating the read.
       loader = instance_double(
         Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"],
-                                       virtual_rbs: []
+                                       virtual_rbs: [], definition_build_failures: []
       )
       environment = instance_double(Rigor::Environment, rbs_loader: loader)
 
@@ -193,7 +193,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         Rigor::Environment::RbsLoader,
         virtual_rbs: [["virtual:x:plain.rb", "class Plain\nend\n"],
                       ["virtual:x:memo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"],
-                      ["virtual:x:other.rb", "class Other\n  %a{pure}\nend\n"]]
+                      ["virtual:x:other.rb", "class Other\n  %a{pure}\nend\n"]],
+        definition_build_failures: []
       )
 
       coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
@@ -209,11 +210,46 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         configuration: Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("effects" => {})),
         snapshots: snapshots
       )
-      loader = instance_double(Rigor::Environment::RbsLoader)
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [])
 
       coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
 
       expect(snapshots.effect_annotation_carrier).to eq([])
+    end
+
+    # Issue #696 — the timing contract. Definition builds are LAZY (ADR-54 WD1: per class, on first demand),
+    # so the class that fails is not known until the per-file loop has run. A snapshot taken beside the
+    # signature-state ones, which fire BEFORE `files.flat_map`, would read empty on every run — including
+    # every run this diagnostic exists for. The `analyze_file` callable below is what makes the loader answer
+    # at all, so an implementation that read the loader too early gets `[]` and this fails.
+    it "records definition-build failures only after the per-file loop has run (they are lazy)" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      failure = ["Acme", "RBS::DuplicatedMethodDefinitionError", "::Acme#label has duplicated definitions",
+                 ["sig/acme.rbs"]]
+      observed = []
+      loader = instance_double(Rigor::Environment::RbsLoader, virtual_rbs: [])
+      allow(loader).to receive(:definition_build_failures) { observed.dup }
+      analyze_file = lambda do |_path, _environment|
+        observed << failure
+        []
+      end
+      coordinator = build_coordinator(snapshots: snapshots, analyze_file: analyze_file)
+
+      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+
+      expect(snapshots.definition_build_failures).to eq([failure])
+    end
+
+    # The must-still-succeed twin: a healthy loader leaves the slot at its inert default, so the diagnostic
+    # cannot fire on a project with nothing wrong.
+    it "leaves the slot empty when every definition built" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      coordinator = build_coordinator(snapshots: snapshots)
+      loader = instance_double(Rigor::Environment::RbsLoader, virtual_rbs: [], definition_build_failures: [])
+
+      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+
+      expect(snapshots.definition_build_failures).to eq([])
     end
   end
 

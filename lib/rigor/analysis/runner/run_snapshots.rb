@@ -17,12 +17,15 @@ module Rigor
       class RunSnapshots
         attr_accessor :class_decl_paths, :signature_paths,
                       :synthesized_namespaces, :quarantined_signatures, :conformance_results,
-                      :env_build_failure, :effect_annotation_carrier
+                      :env_build_failure, :definition_build_failures, :effect_annotation_carrier
 
         # Constructor defaults match the {Runner} constructor: the pre-seed values `build_run_stats` /
         # `pre_file_diagnostics` read before the first analysis path runs are frozen empties. The
         # `env_build_failure` slot is nil (no failure) rather than an empty collection — it holds a single
-        # `[error_class, first_line, buffer_names]` tuple or nothing.
+        # `[error_class, first_line, buffer_names]` tuple or nothing. Its per-class sibling
+        # `definition_build_failures` (#696) holds a LIST, because a collapsed universe fails many classes,
+        # and is accumulated ACROSS pool workers rather than assigned once — see
+        # {PoolCoordinator#merge_worker_reporters}.
         def initialize
           @class_decl_paths = {}.freeze
           @signature_paths = [].freeze
@@ -30,6 +33,7 @@ module Rigor
           @quarantined_signatures = [].freeze
           @conformance_results = [].freeze
           @env_build_failure = nil
+          @definition_build_failures = [].freeze
           @effect_annotation_carrier = [].freeze
         end
 
@@ -42,6 +46,7 @@ module Rigor
           @quarantined_signatures = []
           @conformance_results = []
           @env_build_failure = nil
+          @definition_build_failures = []
           @effect_annotation_carrier = [].freeze
         end
       end

@@ -906,7 +906,8 @@ module Rigor
         # Per-loader memoization bucket. Held as a single mutable Hash so the loader instance itself can be
         # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slot
         # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
-        # `:builder`, `:reflection`, `:instance_definitions_table`, `:singleton_definitions_table`.
+        # `:definition_build_recorded`, `:definition_build_failures`, `:builder`, `:reflection`,
+        # `:instance_definitions_table`, `:singleton_definitions_table`.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
         # `@state[:env_loaded]`) to a constant `nil`.
@@ -952,6 +953,30 @@ module Rigor
       def env_build_failure
         env unless @state[:env_loaded]
         @state[:env_build_failure]
+      end
+
+      # Issue #696 — the PER-CLASS sibling of {#env_build_failure}, one tier quieter in consequence: an
+      # `RBS::DefinitionBuilder` failure ({#build_instance_definition} / {#build_singleton_definition}'s
+      # rescue) leaves the class KNOWN but with no method surface, so every call on it — real methods and
+      # typos alike — reads `Dynamic[top]` and stops being checkable. `class_known?` consults
+      # {#known_class_names_set}, never a definition build, so nothing downstream can tell the difference.
+      #
+      # NOT forced the way {#env_build_failure} forces `env`, and it MUST NOT be: definition builds are lazy
+      # (ADR-54 WD1 — per class, on first demand), so this answers "which classes has THIS loader failed to
+      # build so far". A reader that forces would have to build every known class, which is a different and
+      # far more expensive question than the run asked. The consequence for callers is a timing contract: a
+      # snapshot taken before the per-file loop reads empty. `Runner::PoolCoordinator` reads it after.
+      #
+      # Recorded, not derived. The two conditions this sits beside are re-derivable from the built env
+      # ({#quarantined_signatures} re-parses; {#virtual_rbs_collision_quarantined} inspects buffers), but a
+      # definition-build failure leaves no trace in the env at all — the env is fine; it is the BUILD over it
+      # that raised — so the rescue is the only place that ever knows.
+      #
+      # @return [Array<Array(String, String, String, Array<String>)>] `[class_name, error_class_name,
+      #   first_error_line, conflicting_buffer_names]`, one per class, in first-failure order. Empty for a
+      #   healthy sig set, which is the common case.
+      def definition_build_failures
+        (@state[:definition_build_failures] || []).dup.freeze
       end
 
       # Virtual (inline-synthesized) contributions dropped by the collision quarantine
@@ -1634,15 +1659,23 @@ module Rigor
       # all definitions from a cached env is faster), so the eager-table cost is now a compute, not a load.
       # Keys stay in `RBS::TypeName#to_s` form (top-level prefixed `"::Hash"`) — the shape
       # {Environment::Reflection} documents.
+      #
+      # `record_failure: false` (issue #696) — these two walk EVERY known class, so a failure they hit is a
+      # failure of the sig set, not of anything the run asked about. Letting them feed
+      # {#definition_build_failures} would make the reported class list depend on whether the pool warmed a
+      # cache: a `--workers=N` run prewarms and a `--workers=0` run does not, and the diagnostic would name
+      # more classes under one flag than the other — "reports differently depending on how you ran it",
+      # which is the defect the diagnostic exists to end. The stderr banner is deliberately left armed here,
+      # byte-for-byte as before.
       def instance_definitions_table
         @state[:instance_definitions_table] ||= build_definitions_table do |name|
-          build_instance_definition(name)
+          build_instance_definition(name, record_failure: false)
         end
       end
 
       def singleton_definitions_table
         @state[:singleton_definitions_table] ||= build_definitions_table do |name|
-          build_singleton_definition(name)
+          build_singleton_definition(name, record_failure: false)
         end
       end
 
@@ -1667,7 +1700,7 @@ module Rigor
         )
       end
 
-      def build_instance_definition(class_name)
+      def build_instance_definition(class_name, record_failure: true)
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
         return nil if env.nil?
@@ -1677,11 +1710,12 @@ module Rigor
 
         builder.build_instance(rbs_name)
       rescue ::RBS::BaseError => e
+        record_definition_build_failure(class_name, e) if record_failure
         warn_about_definition_build_failure(class_name, e)
         nil
       end
 
-      def build_singleton_definition(class_name)
+      def build_singleton_definition(class_name, record_failure: true)
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
         return nil if env.nil?
@@ -1691,6 +1725,7 @@ module Rigor
 
         builder.build_singleton(rbs_name)
       rescue ::RBS::BaseError => e
+        record_definition_build_failure(class_name, e) if record_failure
         warn_about_definition_build_failure(class_name, e)
         nil
       end
@@ -1714,6 +1749,32 @@ module Rigor
       # `@state`: a class whose definition fails can print its warning once per worker that happens to touch
       # it, i.e. more than once in a single `rigor check` run. Deduplicating that across processes is out of
       # scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
+      # Issue #696 — the RECORD half of the same rescue, feeding the `rbs.coverage.definition-build-failed`
+      # diagnostic ({#definition_build_failures}). The banner below reaches only stderr: it is not a
+      # diagnostic, so it is absent from `--format json`, SARIF, CI annotations and the LSP, and it cannot
+      # move the exit code. A run whose whole bundled type universe collapsed therefore printed a wall of
+      # warnings and exited 0 with ZERO diagnostics, which every downstream consumer reads as a clean build.
+      #
+      # Its own memo, NOT the banner's. The two answer different questions: the banner asks "have I already
+      # told the user about this class", which the eager {#instance_definitions_table} walk legitimately
+      # participates in, while this asks "did the ANALYSIS demand a definition that could not be built",
+      # which that walk must stay out of (see the `record_failure:` note there). Sharing one memo would let
+      # a prewarm silence the record for a class the analysis later really did ask for.
+      #
+      # Keyed on the `::`-stripped name so the two spellings that reach here — the eager walk's
+      # `RBS::TypeName#to_s` (`"::Acme"`) and a dispatch site's bare `"Acme"` — are one entry, the
+      # {#synthesized_namespaces} convention.
+      def record_definition_build_failure(class_name, error)
+        key = class_name.to_s.delete_prefix("::")
+        recorded = (@state[:definition_build_recorded] ||= {})
+        return if recorded[key]
+
+        recorded[key] = true
+        (@state[:definition_build_failures] ||= []) <<
+          [key, error.class.name.to_s, error.message.to_s.lines.first.to_s.strip,
+           definition_build_conflict_buffers(error)].freeze
+      end
+
       def warn_about_definition_build_failure(class_name, error)
         warned = (@state[:definition_build_warned] ||= {})
         key = class_name.to_s

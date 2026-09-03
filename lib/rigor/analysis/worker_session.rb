@@ -235,6 +235,14 @@ module Rigor
       # Read-once snapshot of the per-worker reporters so the caller (or the eventual Phase 4b pool
       # aggregator) can merge into a single coordinator-side reporter. Both reporters dedupe at write time,
       # so a post-hoc concat + de-dup at the entry-key level is sound.
+      #
+      # Issue #696 — `definition_build_failures` rides this channel rather than a coordinator-side snapshot,
+      # and it has to. Under the pool the PARENT never analyses a file, so its loader never demands a
+      # definition and never enters the failing build; a diagnostic wired off the parent's loader would
+      # appear at `--workers=0` and vanish at `--workers=N`, which is the same "reports less depending on
+      # how you ran it" defect the diagnostic exists to end. Draining it out of the workers is what makes
+      # the two paths say the same thing. The payload is `[String, String, String, Array<String>]` tuples —
+      # Marshal-clean for the fork backend and shareable for the Ractor one.
       def drain_reporters
         {
           rbs_extended: {
@@ -242,7 +250,8 @@ module Rigor
             lossy_projections: @rbs_extended_reporter.lossy_projections
           },
           boundary_cross: @boundary_cross_reporter.entries,
-          source_rbs_synthesis: @source_rbs_synthesis_reporter.entries
+          source_rbs_synthesis: @source_rbs_synthesis_reporter.entries,
+          definition_build_failures: @environment&.rbs_loader&.definition_build_failures || []
         }
       end
 

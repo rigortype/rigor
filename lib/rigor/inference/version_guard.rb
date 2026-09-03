@@ -157,22 +157,30 @@ module Rigor
       end
       private_class_method :read_gem_version
 
-      # Resolves a constant path in the analyzer's own runtime WITHOUT triggering autoload or
-      # `const_missing` (the {Builtins::PredefinedConstantRefinements} walk, same rationale: a missing
-      # optional library would raise `LoadError`, a `ScriptError` rather than the `NameError` the walk
-      # expects, and abort the whole run).
+      # Resolves a constant path in the analyzer's own runtime without triggering `const_missing` or an
+      # autoload. The path is always one of {PREDEFINED} / {VERSION_CONSTANTS} — Rigor's own source,
+      # never a name read out of the analysed program — but the walk is guarded the same way
+      # {Builtins::PredefinedConstantRefinements} is, for the same reason: `const_defined?` answers true
+      # for a REGISTERED-BUT-NOT-YET-TRIGGERED autoload, so it does not mean "already in memory" and
+      # `const_get` would execute the target file inside the analyzer. `Module#autoload?` is what
+      # separates the two ([#680](https://github.com/rigortype/rigor/issues/680)).
       #
       # @return [String, nil] the constant's value when it is a non-empty String
       def runtime_value(path)
         mod = ::Object
         path.split("::").each do |part|
           return nil unless mod.is_a?(::Module) && mod.const_defined?(part, false)
+          return nil if mod.autoload?(part)
 
           mod = mod.const_get(part, false)
         end
 
         mod.is_a?(::String) && !mod.empty? ? mod : nil
-      rescue ::NameError, ::TypeError, ::LoadError
+      rescue ::StandardError, ::ScriptError, ::SystemExit
+        # Wider than `NameError` / `TypeError` / `LoadError`: folding a version guard is a precision
+        # win, and nothing it can hit justifies stopping the run. `SystemExit` is not a `StandardError`
+        # and escaped every rescue in the analyzer when a resolution executed third-party code (#680).
+        # `Interrupt`, `SignalException` and `NoMemoryError` stay uncaught on purpose.
         nil
       end
       private_class_method :runtime_value

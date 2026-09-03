@@ -447,6 +447,41 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
+  # Issue #680. `resolve_class` resolves a class name taken from the ANALYSED PROGRAM with `Object.const_get`, so it
+  # can execute an autoload target inside the analyzer. Declining a pending autoload there moves a verdict and is
+  # deferred to #689; the rescue widening does not, and is what keeps a throwing resolution from ending the run.
+  describe "resolving a class name whose resolution throws (#680)" do
+    def exploding_nominal(exception)
+      probe = Module.new do
+        define_singleton_method(:const_missing) { |_name| raise exception }
+      end
+      stub_const("RigorSpecThrowingProbe", probe)
+      Rigor::Type::Combinator.nominal_of("RigorSpecThrowingProbe::BOOM")
+    end
+
+    it "answers instead of killing the process when the resolution raises SystemExit" do
+      # `prism/translation/ruby_parser.rb` calls `exit` at the top level when `sexp_processor` is absent, and
+      # `SystemExit` is not a `StandardError` — the old `rescue NameError` let it past every rescue in the analysis
+      # path, so `rigor check` died with no diagnostics and no summary.
+      nominal = exploding_nominal(SystemExit.new(3))
+
+      expect { accepts(nominal, int_constant) }.not_to raise_error
+      expect(accepts(nominal, int_constant)).to be_no
+    end
+
+    it "answers instead of propagating when the resolution raises a ScriptError" do
+      nominal = exploding_nominal(LoadError.new("library not found"))
+
+      expect(accepts(nominal, int_constant)).to be_no
+    end
+
+    it "leaves a class that resolves normally at the verdict it already had (the widening moves nothing)" do
+      expect(accepts(int_nominal, int_constant)).to be_yes
+      expect(accepts(str_nominal, int_constant)).to be_no
+      expect(accepts(numeric_nominal, int_constant)).to be_yes
+    end
+  end
+
   describe "Type#accepts public surface" do
     it "every type form exposes accepts as a public method" do
       [top, bot, dyn_top, int_nominal, int_singleton, int_constant, int_or_str].each do |t|

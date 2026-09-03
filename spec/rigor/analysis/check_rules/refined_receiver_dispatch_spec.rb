@@ -8,9 +8,8 @@ require "spec_helper"
 # the tool/mutation teeth sweep (the `non-negative-int#>=` cluster).
 RSpec.describe "refined-receiver call-rule dispatch" do
   def diagnostics_for(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
   end
 
   def rule_messages(source, rule)

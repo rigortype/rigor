@@ -15,9 +15,8 @@ require "spec_helper"
 # `lib/` (the String / Integer nil_inject clusters).
 RSpec.describe "nil argument-type-mismatch" do
   def diagnostics_for(source)
-    Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-                           .run_source(source: source, path: "mem.rb")
-                           .diagnostics
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+    guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
   end
 
   def arg_mismatches(source)

@@ -59,9 +59,8 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
         FileUtils.mkdir_p("sig")
         File.write(File.join("sig", "sink.rbs"), sink_rbs)
         File.write("app.rb", source)
-        Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-                               .run(%w[app.rb])
-                               .diagnostics
+        runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+        guarded_run(runner, %w[app.rb]).diagnostics
       end
     end
   end

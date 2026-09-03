@@ -35,29 +35,46 @@ module Rigor
           end
         end
 
+        # Issue 3 fix: proper positional argument handling for attach_function
         def extract_attach_function(call_node, module_name: nil)
           return nil unless call_node.is_a?(Prism::CallNode) && call_node.name == :attach_function
 
-          args = call_node.arguments&.arguments || []
-          return nil if args.empty?
+          all_args = call_node.arguments&.arguments || []
+          return nil if all_args.empty?
 
-          ruby_name = extract_symbol(args[0])
+          # Strip trailing keyword options hash if present
+          pos_args = all_args.reject { |a| a.is_a?(Prism::KeywordHashNode) }
+          return nil if pos_args.empty?
+
+          ruby_name = extract_symbol(pos_args[0])
           return nil if ruby_name.nil?
 
-          idx = 1
-          c_name = ruby_name
-          if args[idx] && (args[idx].is_a?(Prism::SymbolNode) || (args[idx].is_a?(Prism::StringNode) && args[idx + 1].is_a?(Prism::ArrayNode)))
-            c_name = extract_symbol(args[idx]) || ruby_name
-            idx += 1
+          if pos_args.size >= 4
+            # Form B: ruby_name, c_name, arg_types, return_type
+            c_name = extract_symbol(pos_args[1]) || ruby_name
+            args_node = pos_args[2]
+            ret_node = pos_args[3]
+          elsif pos_args.size == 3
+            # Form A: ruby_name, arg_types, return_type
+            c_name = ruby_name
+            args_node = pos_args[1]
+            ret_node = pos_args[2]
+          elsif pos_args.size == 2
+            c_name = ruby_name
+            args_node = nil
+            ret_node = pos_args[1]
+          else
+            return nil
           end
 
           arg_types = []
-          if args[idx].is_a?(Prism::ArrayNode)
-            arg_types = (args[idx].elements || []).map { |elem| extract_type_symbol(elem) }.compact
-            idx += 1
+          if args_node.is_a?(Prism::ArrayNode)
+            arg_types = (args_node.elements || []).map { |elem| extract_type_symbol(elem) }.compact
+          elsif args_node.is_a?(Prism::ConstantReadNode) || args_node.is_a?(Prism::ConstantPathNode)
+            arg_types = [args_node.slice.to_sym]
           end
 
-          return_type = args[idx] ? (extract_type_symbol(args[idx]) || :void) : :void
+          return_type = ret_node ? (extract_type_symbol(ret_node) || :void) : :void
 
           AttachFunctionFact.new(
             ruby_name: ruby_name,
@@ -69,85 +86,102 @@ module Rigor
           )
         end
 
-        def ffx_diagnostics_for_call(node, path:, target:)
-          return [] unless target == :ffx && node.is_a?(Prism::CallNode)
+        def ffx_diagnostics_for_call(call_node, path:, target:)
+          return [] unless target == :ffx && call_node.is_a?(Prism::CallNode)
 
-          diags = []
-          case node.name
+          diagnostics = []
+
+          case call_node.name
           when :callback
-            diags << Rigor::Analysis::Diagnostic.new(
-              path: path,
-              line: node.location.start_line,
-              column: node.location.start_column + 1,
-              message: "ffx does not support callback declarations",
+            diagnostics << Rigor::Analysis::Diagnostic.new(
+              rule: "ffx.unsupported-callback",
+              message: "callback declarations are not supported by ffx (C extensions use native function pointers)",
               severity: :error,
-              rule: "ffx.unsupported-callback"
+              location: call_node.location,
+              source_path: path
             )
           when :typedef
-            diags << Rigor::Analysis::Diagnostic.new(
-              path: path,
-              line: node.location.start_line,
-              column: node.location.start_column + 1,
-              message: "ffx does not support typedef declarations",
+            diagnostics << Rigor::Analysis::Diagnostic.new(
+              rule: "ffx.unsupported-typedef",
+              message: "typedef declarations are not supported by ffx",
               severity: :error,
-              rule: "ffx.unsupported-typedef"
+              location: call_node.location,
+              source_path: path
             )
           when :enum, :bitmask
-            diags << Rigor::Analysis::Diagnostic.new(
-              path: path,
-              line: node.location.start_line,
-              column: node.location.start_column + 1,
-              message: "ffx does not support #{node.name} declarations",
+            diagnostics << Rigor::Analysis::Diagnostic.new(
+              rule: "ffx.unsupported-enum",
+              message: "#{call_node.name} declarations are not supported by ffx",
               severity: :error,
-              rule: "ffx.unsupported-enum"
+              location: call_node.location,
+              source_path: path
             )
           when :attach_function
-            fact = extract_attach_function(node)
-            if fact
-              if fact.arg_types.include?(:varargs)
-                diags << Rigor::Analysis::Diagnostic.new(
-                  path: path,
-                  line: node.location.start_line,
-                  column: node.location.start_column + 1,
-                  message: "ffx does not support variadic (:varargs) functions",
-                  severity: :error,
-                  rule: "ffx.unsupported-varargs"
-                )
-              end
+            args = call_node.arguments&.arguments || []
+            pos_args = args.reject { |a| a.is_a?(Prism::KeywordHashNode) }
 
-              all_types = fact.arg_types.reject { |t| t == :varargs } + [fact.return_type]
-              unsupported = all_types.reject { |t| Types::FFX_PRIMITIVE_TYPES.include?(t) }
-              unless unsupported.empty?
-                diags << Rigor::Analysis::Diagnostic.new(
-                  path: path,
-                  line: node.location.start_line,
-                  column: node.location.start_column + 1,
-                  message: "ffx does not support type #{unsupported.first.inspect}; only the 25 primitive types are supported",
+            args_node = pos_args.size >= 4 ? pos_args[2] : pos_args[1]
+            ret_node = pos_args.size >= 4 ? pos_args[3] : pos_args[2]
+
+            if args_node.is_a?(Prism::ArrayNode)
+              args_node.elements.each do |elem|
+                type_sym = extract_type_symbol(elem)
+                if type_sym == :varargs
+                  diagnostics << Rigor::Analysis::Diagnostic.new(
+                    rule: "ffx.unsupported-varargs",
+                    message: "varargs are not supported by ffx",
+                    severity: :error,
+                    location: elem.location,
+                    source_path: path
+                  )
+                elsif type_sym && !Types::FFX_PRIMITIVE_TYPES.include?(type_sym)
+                  diagnostics << Rigor::Analysis::Diagnostic.new(
+                    rule: "ffx.unsupported-type",
+                    message: "type :#{type_sym} is not supported by ffx (expected one of 25 primitive types)",
+                    severity: :error,
+                    location: elem.location,
+                    source_path: path
+                  )
+                end
+              end
+            end
+
+            if ret_node
+              ret_sym = extract_type_symbol(ret_node)
+              if ret_sym && !Types::FFX_PRIMITIVE_TYPES.include?(ret_sym)
+                diagnostics << Rigor::Analysis::Diagnostic.new(
+                  rule: "ffx.unsupported-type",
+                  message: "return type :#{ret_sym} is not supported by ffx (expected one of 25 primitive types)",
                   severity: :error,
-                  rule: "ffx.unsupported-type"
+                  location: ret_node.location,
+                  source_path: path
                 )
               end
             end
           end
-          diags
+
+          diagnostics
         end
 
-        def ffx_diagnostics_for_class(node, path:, target:)
-          return [] unless target == :ffx && node.is_a?(Prism::ClassNode)
+        def ffx_diagnostics_for_class(class_node, path:, target:)
+          return [] unless target == :ffx && class_node.is_a?(Prism::ClassNode)
 
-          superclass_name = node.superclass&.slice
-          return [] unless superclass_name && ["FFI::Struct", "::FFI::Struct", "FFI::Union", "::FFI::Union", "FFI::ManagedStruct", "::FFI::ManagedStruct"].include?(superclass_name)
+          superclass_name = class_node.superclass&.slice
+          return [] unless superclass_name
 
-          [
-            Rigor::Analysis::Diagnostic.new(
-              path: path,
-              line: node.location.start_line,
-              column: node.location.start_column + 1,
-              message: "ffx does not support #{superclass_name} declarations",
-              severity: :error,
-              rule: "ffx.unsupported-struct"
-            )
-          ]
+          if ["FFI::Struct", "::FFI::Struct", "FFI::Union", "::FFI::Union", "FFI::ManagedStruct", "::FFI::ManagedStruct"].include?(superclass_name)
+            [
+              Rigor::Analysis::Diagnostic.new(
+                rule: "ffx.unsupported-struct",
+                message: "FFI::Struct and FFI::Union are not supported by ffx",
+                severity: :error,
+                location: class_node.location,
+                source_path: path
+              )
+            ]
+          else
+            []
+          end
         end
       end
     end

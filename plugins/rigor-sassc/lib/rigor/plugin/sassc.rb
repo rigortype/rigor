@@ -14,7 +14,7 @@ module Rigor
       )
 
       # Recognizer for sass prefix-stripped attach_function calls
-      ffi_binding_recognizer :sassc_function do |node, _scope|
+      ffi_binding_recognizer :sassc_function do |node, module_name|
         next [] unless node.is_a?(Prism::CallNode) && node.name == :attach_function
 
         args = node.arguments&.arguments || []
@@ -23,11 +23,13 @@ module Rigor
         ruby_name = FFI::Analyzer.extract_symbol(args[0])
         next [] if ruby_name.nil?
 
+        mod = module_name && !module_name.empty? ? module_name : "SassC::Native"
+
         # If ruby_name starts with sass_, also register stripped version
         c_name = ruby_name
         stripped_name = ruby_name.to_s.sub(/^sass_/, "").to_sym
 
-        fact = FFI::Analyzer.extract_attach_function(node, module_name: "SassC::Native")
+        fact = FFI::Analyzer.extract_attach_function(node, module_name: mod)
         next [] if fact.nil?
 
         if stripped_name != ruby_name
@@ -39,7 +41,7 @@ module Rigor
               arg_types: fact.arg_types,
               return_type: fact.return_type,
               node: node,
-              receiver_name: "SassC::Native"
+              receiver_name: mod
             )
           ]
         else

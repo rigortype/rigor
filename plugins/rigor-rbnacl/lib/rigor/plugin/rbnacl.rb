@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "rigor/plugin"
+require "rigor"
 require "rigor-ffi"
 
 module Rigor
@@ -9,27 +9,37 @@ module Rigor
       manifest(
         id: "rbnacl",
         version: "0.1.0",
-        description: "Models RbNaCl / libsodium DSL bindings (sodium_function) and cryptographic carrier types.",
-        signature_paths: ["sig"]
+        description: "Rigor type support for RbNaCl libsodium bindings",
+        homepage: "https://github.com/rigortype/rigor",
+        authors: ["Rigor Authors"]
       )
 
-      # Recognizer for sodium_function DSL wrapping attach_function (WD2)
-      ffi_binding_recognizer :sodium_function do |node, _scope|
+      # Issue 5 fix: do not hardcode "RbNaCl" as receiver name; use module_name context
+      ffi_binding_recognizer :sodium_function do |node, module_name|
         next [] unless node.is_a?(Prism::CallNode) && node.name == :sodium_function
 
         args = node.arguments&.arguments || []
-        next [] if args.size < 4
+        next [] if args.empty?
 
         ruby_name = FFI::Analyzer.extract_symbol(args[0])
-        c_name = FFI::Analyzer.extract_symbol(args[1]) || ruby_name
         next [] if ruby_name.nil?
 
-        arg_types = []
-        if args[2].is_a?(Prism::ArrayNode)
-          arg_types = (args[2].elements || []).map { |elem| FFI::Analyzer.extract_type_symbol(elem) }.compact
+        c_name = ruby_name
+        idx = 1
+        if args[idx] && (args[idx].is_a?(Prism::SymbolNode) || args[idx].is_a?(Prism::StringNode)) && args[idx + 1].is_a?(Prism::ArrayNode)
+          c_name = FFI::Analyzer.extract_symbol(args[idx]) || ruby_name
+          idx += 1
         end
 
-        return_type = FFI::Analyzer.extract_type_symbol(args[3]) || :void
+        arg_types = []
+        if args[idx].is_a?(Prism::ArrayNode)
+          arg_types = (args[idx].elements || []).map { |elem| FFI::Analyzer.extract_type_symbol(elem) }.compact
+          idx += 1
+        end
+
+        return_type = args[idx] ? (FFI::Analyzer.extract_type_symbol(args[idx]) || :int) : :int
+
+        receiver = module_name && !module_name.empty? ? module_name : "RbNaCl"
 
         [
           FFI::AttachFunctionFact.new(
@@ -38,22 +48,10 @@ module Rigor
             arg_types: arg_types,
             return_type: return_type,
             node: node,
-            receiver_name: "RbNaCl"
+            receiver_name: receiver
           )
         ]
-      end
-
-      def init(services)
-      end
-
-      def prepare(services)
-      end
-
-      def diagnostics_for_file(path:, scope:, root:)
-        []
       end
     end
   end
 end
-
-Rigor::Plugin.register(Rigor::Plugin::RbNaCl)

@@ -32,11 +32,12 @@ RSpec.describe "FFI plugin family" do
       expect(Rigor::Plugin::FFI::Types::FFX_PRIMITIVE_TYPES.size).to eq(25)
     end
 
-    it "identifies nominal opaque pointer typedefs per WD4" do
+    it "identifies nominal opaque pointer typedefs per WD4 with proper \\z anchor" do
       expect(Rigor::Plugin::FFI::Types.nominal_opaque_pointer?(:sass_context_ptr)).to be true
       expect(Rigor::Plugin::FFI::Types.nominal_opaque_pointer?(:window_handle)).to be true
       expect(Rigor::Plugin::FFI::Types.nominal_opaque_pointer?(:SassContextPtr)).to be true
       expect(Rigor::Plugin::FFI::Types.nominal_opaque_pointer?(:plain_int)).to be false
+      expect(Rigor::Plugin::FFI::Types.nominal_opaque_pointer?(:sass_context_ptrz)).to be false
       expect(Rigor::Plugin::FFI::Types.nominal_opaque_pointer?(:my_ptr, exceptions: ["my_ptr"])).to be false
     end
 
@@ -48,6 +49,25 @@ RSpec.describe "FFI plugin family" do
     it "detects target from extconf and lockfile per WD6" do
       expect(Rigor::Plugin::FFI::TargetDetector.detect(root: nil, config: { "target" => "ffx" })).to eq(:ffx)
       expect(Rigor::Plugin::FFI::TargetDetector.detect(root: nil, config: { "target" => "auto" })).to eq(:ffi)
+    end
+
+    it "correctly parses attach_function with string C name and constant args" do
+      code = "attach_function :foo, \"foo_c\", ARGS, :int"
+      call_node = Prism.parse(code).value.statements.body.first
+      fact = Rigor::Plugin::FFI::Analyzer.extract_attach_function(call_node)
+      expect(fact.ruby_name).to eq(:foo)
+      expect(fact.c_name).to eq(:foo_c)
+      expect(fact.arg_types).to eq([:ARGS])
+      expect(fact.return_type).to eq(:int)
+    end
+
+    it "supports callbacks in discovery and typing" do
+      callbacks = { my_cb: { params: [:int], return_type: :void } }
+      ret_type = Rigor::Plugin::FFI::Types.return_type_for(:my_cb, callbacks: callbacks)
+      expect(ret_type.describe(:short)).to eq("FFI::Function")
+
+      param_type = Rigor::Plugin::FFI::Types.param_type_for(:my_cb, callbacks: callbacks)
+      expect(param_type).to be_a(Rigor::Type::Union)
     end
 
     it "flags ffx unsupported constructs with proper diagnostic rules per WD5" do
@@ -66,6 +86,18 @@ RSpec.describe "FFI plugin family" do
       diags_va = Rigor::Plugin::FFI::Analyzer.ffx_diagnostics_for_call(call_va, path: "test.rb", target: :ffx)
       expect(diags_va.map(&:rule)).to include("ffx.unsupported-varargs")
     end
+
+    it "does not match dynamic_return for non-FFI receivers" do
+      catalog = Rigor::Plugin::FFI::FFICatalog.new(
+        functions: { size: [Rigor::Plugin::FFI::AttachFunctionFact.new(ruby_name: :size, c_name: :size, arg_types: [], return_type: :int, node: nil, receiver_name: "MyLib")] },
+        functions_by_receiver: {},
+        libraries: Set.new(["MyLib"]),
+        structs: { "MyStruct" => { size: :int } }
+      )
+      expect(catalog.libraries).not_to include("Array")
+      expect(catalog.struct_names).not_to include("Array")
+      expect(catalog.function_for("Array", :size)).to be_nil
+    end
   end
 
   describe "sub-plugins" do
@@ -77,8 +109,14 @@ RSpec.describe "FFI plugin family" do
       expect(Rigor::Plugin::Ethon.manifest.id).to eq("ethon")
     end
 
-    it "loads rigor-rbnacl with manifest id rbnacl" do
+    it "loads rigor-rbnacl with manifest id rbnacl and preserves nested submodule receivers" do
       expect(Rigor::Plugin::RbNaCl.manifest.id).to eq("rbnacl")
+
+      code = "sodium_function :crypto_sign_ed25519_seed_keypair, [:pointer], :int"
+      call_node = Prism.parse(code).value.statements.body.first
+      recognizer = Rigor::Plugin::FFI.binding_recognizers.find { |r| r.name == :sodium_function }
+      facts = recognizer.recognize(call_node, "RbNaCl::Signatures::Ed25519")
+      expect(facts.first.receiver_name).to eq("RbNaCl::Signatures::Ed25519")
     end
 
     it "loads rigor-ffi-rzmq with manifest id ffi-rzmq" do

@@ -173,9 +173,7 @@ module Rigor
       # is merged UNDER the cross-file `discovered_def_index_for_paths` seed carried on `default_scope` — same-file
       # declarations win per entry, the cross-file seed supplies sibling-file ancestors.
       def merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes)
-        def_nodes = default_scope.discovered_def_nodes.merge(
-          file_def_nodes
-        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        def_nodes, def_nestings = merge_def_node_tables(default_scope, root, file_def_nodes)
         singleton_def_nodes = default_scope.discovered_singleton_def_nodes.merge(
           build_discovered_singleton_def_nodes(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
@@ -203,8 +201,7 @@ module Rigor
           seeded_scope.discovery.with(
             discovered_methods: methods_table,
             discovered_def_nodes: def_nodes,
-            discovered_def_nestings: merge_def_nestings(default_scope.discovery.discovered_def_nestings,
-                                                        build_def_nestings(root)),
+            discovered_def_nestings: def_nestings,
             discovered_singleton_def_nodes: singleton_def_nodes,
             discovered_superclasses: superclasses,
             discovered_includes: includes,
@@ -213,6 +210,17 @@ module Rigor
             struct_member_layouts: struct_member_layouts
           )
         )
+      end
+
+      # The instance-side def-node table and its issue #681 nesting twin, each merged over the cross-file seed.
+      # Returned as a pair so the two stay written together: a node the merge keeps must be the same object the
+      # nesting table keys, and they are only that if both halves take the same file's walk.
+      def merge_def_node_tables(default_scope, root, file_def_nodes)
+        def_nodes = default_scope.discovered_def_nodes.merge(
+          file_def_nodes
+        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        [def_nodes,
+         merge_def_nestings(default_scope.discovery.discovered_def_nestings, build_def_nestings(root))]
       end
 
       # Issue #681 — the per-file nesting table over the cross-file seed. Both are keyed by node identity, so
@@ -3167,6 +3175,10 @@ module Rigor
       # bundle's carries {DefHandle}s. The merges never deref the value, so both fold identically.
       def fold_file_index(acc, file_index)
         fold_def_tables(acc, file_index)
+        # Issue #681 — a re-walked file contributes live nodes and their chains together; a file restored from
+        # a seed bundle contributes neither (a {DefHandle} is not the node the re-walk is handed), so its defs
+        # keep the peel fallback rather than a chain recorded against the wrong object.
+        acc[:def_nestings].merge!(file_index[:def_nestings] || {})
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
       end
@@ -3184,10 +3196,6 @@ module Rigor
       # def_sources / singleton_def_sources fold first-wins ({#fold_def_sources}).
       def fold_def_tables(acc, file_index)
         file_index[:def_nodes].each { |cn, methods| (acc[:def_nodes][cn] ||= {}).merge!(methods) }
-        # Issue #681 — a re-walked file contributes live nodes and their chains together; a file restored from
-        # a seed bundle contributes neither (a {DefHandle} is not the node the re-walk is handed), so its defs
-        # keep the peel fallback rather than a chain recorded against the wrong object.
-        acc[:def_nestings].merge!(file_index[:def_nestings] || {})
         file_index[:singleton_def_nodes].each { |cn, methods| (acc[:singleton_def_nodes][cn] ||= {}).merge!(methods) }
         file_index[:method_visibilities].each { |cn, table| (acc[:method_visibilities][cn] ||= {}).merge!(table) }
         file_index[:methods].each { |cn, table| acc[:methods][cn] = merge_method_kinds(acc[:methods][cn] || {}, table) }

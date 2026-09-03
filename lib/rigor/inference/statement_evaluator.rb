@@ -139,9 +139,9 @@ module Rigor
       # Issue #652 — Ruby's `Module.nesting` for the body currently being evaluated, innermost first, built as
       # the walk ENTERS each declaration rather than reconstructed from the qualified name afterwards. A
       # compact `module A::B` contributes ONE entry, the nested `module A; module B` two, and both render the
-      # same `class_name`, so the distinction survives only if it is recorded here. `[]` is the file top
-      # level; `nil` means the frame stack was RESET under a body whose enclosing lexical context the walk can
-      # no longer name, and nothing is stamped for it.
+      # same `class_name`, so the distinction survives only if it is recorded here. `[]` is the file top level,
+      # and nothing is stamped for it — a scope with no recorded chain falls back to the name-peel, which
+      # answers the same thing at the top level and answers correctly for a body this walk never entered.
       EMPTY_NESTING = [].freeze
       private_constant :EMPTY_NESTING
 
@@ -340,12 +340,11 @@ module Rigor
       # `self` — a wrong receiver for every implicit-self call in the body.
       def eval_constant_write(node)
         result = [scope.type_of(node, tracer: tracer), scope]
-        context, nesting = meta_new_constant_body_context(node)
+        context = meta_new_constant_body_context(node)
         return result if context.nil?
 
         call_node = node.value
-        enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block),
-                              context, nesting)
+        enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block), context)
         result
       end
 
@@ -363,14 +362,11 @@ module Rigor
         return nil unless call_node.is_a?(Prism::CallNode) && call_node.block.is_a?(Prism::BlockNode)
 
         if node.is_a?(Prism::ConstantWriteNode) && ScopeIndexer.meta_new_block_body(node)
-          name = node.name.to_s
-          return [@class_context + [ClassFrame.new(name: name, singleton: false)], pushed_nesting(name)]
+          return @class_context + [ClassFrame.new(name: node.name.to_s, singleton: false)]
         end
 
         anonymous = AnonymousMetaClass.name_for(call_node, scope.source_path)
-        # The anonymous form is registered under a synthesized name that no `Module.nesting` ever contains,
-        # and it discards the enclosing frames — so the chain is unknown, not empty.
-        anonymous && [[ClassFrame.new(name: anonymous, singleton: false)], nil]
+        anonymous && [ClassFrame.new(name: anonymous, singleton: false)]
       end
 
       # Slice 7 phase 3 — compound writes (||=, &&=, +=/-=/...) for every variable kind. Each handler:
@@ -1477,9 +1473,16 @@ module Rigor
       # class — the innermost frame flips to `singleton: true` so a nested `def foo` resolves through `singleton_method`
       # rather than `instance_method`. For non-`self` expressions we cannot statically resolve the receiver, so we keep
       # the existing context and accept that nested defs degrade to the `Dynamic[Top]` default.
+      # Issue #652 — the body INHERITS this evaluator's chain. Ruby pushes the singleton class onto
+      # `Module.nesting` and leaves the enclosing entries beneath it, so `class << Other` written inside
+      # `module Admin` reads `Admin::Y`: the enclosing rung is live, and only the singleton rung itself
+      # (`#<Class:Other>`) is one Rigor does not model, on either path
+      # ([#662](https://github.com/rigortype/rigor/issues/662)). Discarding the chain here because
+      # {#singleton_context_for} resets the FRAME STACK for the cross-class form would answer `Other::Y`
+      # off the name-peel instead — a rung Ruby's lookup does not have at all.
       def eval_singleton_class(node)
         new_context = singleton_context_for(node)
-        body_type, _body_scope = eval_class_body(node, new_context, singleton_nesting_for(new_context))
+        body_type, _body_scope = eval_class_body(node, new_context)
         [body_type, scope]
       end
 
@@ -2008,7 +2011,7 @@ module Rigor
         anonymous = AnonymousMetaClass.name_for(node, scope.source_path)
         return sub_eval(block, block_entry) if anonymous.nil?
 
-        enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)], nil)
+        enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
       end
 
       # Enters a meta-new `block` as the body of the class `class_context` names: `self_type` is that class's
@@ -2016,9 +2019,16 @@ module Rigor
       # {#self_type_for_method_body} route, while `block_entry` keeps the outer locals visible. Shared by the two
       # positions such a block is reached from — a statement-level call ({#evaluate_block_if_present}) and a
       # constant-write rvalue ({#eval_constant_write}) — so the two cannot drift on what a class body's entry is.
-      def enter_meta_class_body(block, block_entry, class_context, nesting)
+      #
+      # Issue #652 — the body keeps this evaluator's `Module.nesting`. A BLOCK never pushes a cref, however
+      # much `class_eval` semantics make it behave like a class body in every other respect, so
+      # `K = Class.new do … end` written inside `module Outer` reads `Outer::LABEL` at runtime and MUST NOT
+      # record a `Outer::K` entry: that is a rung Ruby's constant lookup does not have. The `class_context`
+      # frame is still pushed — it is what a nested `def` registers its method under — which is exactly the
+      # divergence that makes the chain a separate record rather than a view of the frame stack.
+      def enter_meta_class_body(block, block_entry, class_context)
         entry = block_entry.with_self_type(self_type_for_class_body(class_context))
-        sub_eval(block, stamp_nesting(entry, nesting), class_context: class_context, lexical_nesting: nesting)
+        sub_eval(block, stamp_nesting(entry, @lexical_nesting), class_context: class_context)
       end
 
       # Slice 6 phase C sub-phase 3b/3c. When the call carries a block whose receiving method is NOT proven
@@ -2968,27 +2978,15 @@ module Rigor
       # ONE `Module.nesting` entry per declaration keyword, qualified against the entry already on top, so
       # `module A::B` pushes the single `"A::B"` and `module A; module B` pushes `"A"` and then `"A::B"`. That
       # is the whole difference between the compact and the nested spelling, and it is unrecoverable from the
-      # `"A::B"` the two share afterwards. `nil` propagates: once the walk has lost the enclosing context it
-      # cannot qualify anything pushed under it.
+      # `"A::B"` the two share afterwards. This is the ONLY thing that pushes an entry: a `def`, a block, and a
+      # `class << expr` body each inherit the chain unchanged, because none of them pushes a cref in Ruby. A
+      # header that renders no name yields `nil`, which propagates — the walk cannot qualify anything under an
+      # entry it could not name.
       def pushed_nesting(name)
         return nil if @lexical_nesting.nil? || name.nil?
 
         outer = @lexical_nesting.first
         [outer ? "#{outer}::#{name}" : name, *@lexical_nesting].freeze
-      end
-
-      # The chain for a `class << expr` body. `class << self` — and `class << Foo` written inside `class Foo`,
-      # which {#singleton_context_for} treats as the same thing — rewrites the innermost frame in place without
-      # renaming it, so the recorded chain carries through unchanged. Ruby additionally pushes the singleton
-      # class itself, a rung Rigor models on neither path ([#662](https://github.com/rigortype/rigor/issues/662)).
-      # The cross-class `class << Other` form instead RESETS the frame stack to the target and discards the
-      # enclosing frames, so the chain becomes unknown rather than empty and the name-peel keeps answering for
-      # that body exactly as it does today.
-      def singleton_nesting_for(new_context)
-        return @lexical_nesting if new_context.length == @class_context.length &&
-                                   new_context.each_with_index.all? { |f, i| f.name == @class_context[i].name }
-
-        nil
       end
 
       # Stamps a recorded chain onto a body-entry scope. An empty chain (a top-level body) and an unknown one

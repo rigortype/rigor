@@ -976,20 +976,36 @@ module Rigor
           registry.open_receiver?(class_name)
         end
 
-        # Whether THIS run's RBS environment actually includes a `data/gem_overlay/<gem>/` directory —
-        # {GEM_OVERLAY_OPEN_RECEIVERS} membership alone must not grant the exemption (see that constant's
-        # comment). `RbsLoader#signature_paths` is the same list `Environment.for_project` builds from
-        # `resolved_paths + plugin_sig_paths + gem_sig_paths + collection_paths + overlay_paths` — a gem
-        # overlay directory is a member of it if and only if `gem_overlay_paths` picked it (the gem is
-        # locked, `:missing` coverage, and its opt-in plugin twin is NOT loaded — ADR-72), so a prefix match
-        # against `RbsLoader.under_gem_overlay_root?` is exact: no other signature source lives under that
-        # root. When the PLUGIN is loaded instead, this returns false (the overlay stands down) and
-        # `open_receiver?`'s manifest-driven check above is what protects the same class name.
+        # Whether THIS run's RBS environment actually includes one of Rigor's OWN partial declarations of the
+        # overlaid gem — {GEM_OVERLAY_OPEN_RECEIVERS} membership alone must not grant the exemption (see that
+        # constant's comment). `RbsLoader#signature_paths` is the same list `Environment.for_project` builds
+        # from `resolved_paths + plugin_sig_paths + gem_sig_paths + collection_paths + overlay_paths`, and
+        # two of its members can carry that declaration:
+        #
+        # - a `data/gem_overlay/<gem>/` directory, which is a member if and only if `gem_overlay_paths`
+        #   picked it (the gem is locked, `:missing` coverage, and its plugin twin is NOT reachable —
+        #   ADR-72), so the `RbsLoader.under_gem_overlay_root?` prefix match is exact: no other signature
+        #   source lives under that root;
+        # - the bundled plugin twin's own `sig/`, when a project wires it through `signature_paths:` instead
+        #   of `plugins:`. Before #672 that route loaded BOTH halves and `Duration` collapsed outright, so
+        #   nothing fired and nothing needed protecting; now the overlay stands down and the twin's
+        #   declaration is the one that loads — with no manifest behind it, so `open_receiver?` above stays
+        #   false and this is the only thing standing between a real `Duration` receiver and a false
+        #   `call.undefined-method` on every member the declaration omits.
+        #
+        # When the PLUGIN itself is loaded the first arm goes false (the overlay stands down) and the second
+        # goes true — its `sig/` rides in as a plugin signature path — but nothing here decides that case:
+        # `open_receiver?`'s manifest-driven check short-circuits above it. The two answers agree, which is
+        # the point; this predicate asks only whether a Rigor-authored partial declaration is in the
+        # environment, never how the project asked for it.
         def gem_overlay_loaded?(scope)
           loader = scope.environment&.rbs_loader
           return false if loader.nil? || !loader.respond_to?(:signature_paths)
 
-          loader.signature_paths.any? { |path| Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) }
+          loader.signature_paths.any? do |path|
+            Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) ||
+              Rigor::Environment.bundled_overlay_twin_signatures?(path)
+          end
         end
 
         # The `call.undefined-method` exemptions that depend only on the CALL SITE, never on the receiver's

@@ -76,6 +76,20 @@ module Rigor
         File.file?(path) ? path : nil
       end
 
+      # The signature half of {.bundled_plugin_path}: the absolute `sig/` directory of the engine's OWN
+      # bundled copy of a plugin gem (`<ENGINE_ROOT>/plugins/<gem>/sig`), or nil when the engine does not
+      # bundle it, it ships no signatures, or the packaging carries no `plugins/` tree (ADR-27).
+      #
+      # Unlike its sibling this is NOT a require anchor — nothing loads Ruby from it. It exists so the
+      # engine can recognise its own bundled RBS when a project reaches that directory by a route the
+      # plugin registry never sees: a `signature_paths:` entry pointing straight at it (issue #672). The
+      # anchor is deliberately the same `ENGINE_ROOT`, so a git checkout and an installed `rigortype` gem
+      # answer identically and the two halves of a bundled plugin can never resolve to different copies.
+      def self.bundled_plugin_sig_path(gem_name)
+        path = File.join(ENGINE_ROOT, "plugins", gem_name, "sig")
+        File.directory?(path) ? path : nil
+      end
+
       # @param entries [Array<String, Hash>] the raw `plugins:` list from the configuration.
       # @return [Registry]
       def load(entries)

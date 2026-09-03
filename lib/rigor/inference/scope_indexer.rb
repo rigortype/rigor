@@ -2184,9 +2184,6 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          # A header that renders no name (`class self::Thing`) pushes an entry Ruby has and this walk cannot
-          # spell, so `nil` propagates and nothing inside the body is recorded — the same refusal
-          # `Inference::StatementEvaluator#pushed_nesting` makes on the declaration walk.
           walk_def_nestings(node.body, pushed_nesting(nesting, node.constant_path), accumulator) if node.body
           return
         when Prism::DefNode
@@ -2201,6 +2198,17 @@ module Rigor
       # `Inference::StatementEvaluator#pushed_nesting`, which records the same chain on the declaration walk.
       # Ruby pushes ONE entry per declaration keyword, qualified against the entry already on top, so a
       # compact `class A::B` contributes the single `"A::B"` where `module A; class B` contributes two.
+      #
+      # The header is rendered by the LENIENT {Source::ConstantPath.qualified_name}, which is total over every
+      # header Ruby parses — `class` and `module` require a constant path, so the only dynamic base the grammar
+      # admits is `self`, and `class self::Thing` inside `module Outer` renders `"Thing"` and records
+      # `["Outer::Thing", "Outer"]`, which is what Ruby's nesting is there. So there is no unnameable-header
+      # case to refuse, and the `nil` guards below are reachable only for a non-constant node (which a
+      # `ClassNode` / `ModuleNode` header never is) and for the nil chain a caller may thread in. What makes
+      # the recorded chain trustworthy is not this renderer's fidelity but that the declaration walk reads the
+      # SAME one: wherever it renders a header differently from Ruby — a leading `::` is dropped, so
+      # `class ::Rooted::Bar` inside `module Outer` renders `"Rooted::Bar"` and both walks qualify it under
+      # `Outer` — the two agree, and the callee re-walk still answers what the body's own walk answers.
       def pushed_nesting(nesting, constant_path)
         return nil if nesting.nil?
 

@@ -70,6 +70,13 @@ RSpec.describe Rigor::Builtins::PredefinedConstantRefinements do
       expect(described_class.lookup("File::SEPARATOR")).to eq(non_empty_string)
     end
 
+    it "returns non-empty-string for File::Separator (the capital-S alias core RBS also declares)" do
+      # Both spellings name the same value, so a rule that fires on one MUST fire on the other; listing only the
+      # screaming-case twin made `File::Separator.size == 0` stop reporting as always-false while `File::SEPARATOR`
+      # still did.
+      expect(described_class.lookup("File::Separator")).to eq(non_empty_string)
+    end
+
     it "returns nil for RUBY_PATCHLEVEL (Integer constant — no String refinement)" do
       expect(described_class.lookup("RUBY_PATCHLEVEL")).to be_nil
     end

@@ -93,17 +93,19 @@ module Rigor
       # The closed set of names tier 2 may read, by the admission criterion in the module note.
       #
       # The `RUBY_*` / `Ruby::*` pairs and `Encoding::UNICODE_VERSION` are defined by the interpreter
-      # itself; `File::SEPARATOR` / `PATH_SEPARATOR` / `ALT_SEPARATOR` by its `File` core class
-      # (`ALT_SEPARATOR` is `nil` off Windows, and simply gets no entry there); `Gem::VERSION` by the
-      # rubygems every `rigor` process has already loaded. A name that resolves to something other
-      # than a non-empty String on the running interpreter is skipped, so listing one costs nothing
-      # where it does not exist.
+      # itself; `File::SEPARATOR` / `Separator` / `PATH_SEPARATOR` / `ALT_SEPARATOR` by its `File`
+      # core class (`Separator` is the capital-S alias of `SEPARATOR`, declared in core RBS and just
+      # as spellable in project code; `ALT_SEPARATOR` is `nil` off Windows and simply gets no entry
+      # there); `Gem::VERSION` by rubygems, which is not the interpreter's to version but IS loaded
+      # in every process that can run `rigor` at all. A name that resolves to something other than a
+      # non-empty String on the running interpreter is skipped, so listing one costs nothing where it
+      # does not exist.
       RUNTIME_STRING_CONSTANTS = %w[
         RUBY_VERSION RUBY_RELEASE_DATE RUBY_PLATFORM RUBY_DESCRIPTION RUBY_COPYRIGHT
         RUBY_ENGINE RUBY_ENGINE_VERSION RUBY_REVISION
         Ruby::VERSION Ruby::RELEASE_DATE Ruby::PLATFORM Ruby::DESCRIPTION Ruby::COPYRIGHT
         Ruby::ENGINE Ruby::ENGINE_VERSION Ruby::REVISION
-        File::SEPARATOR File::PATH_SEPARATOR File::ALT_SEPARATOR
+        File::SEPARATOR File::Separator File::PATH_SEPARATOR File::ALT_SEPARATOR
         Encoding::UNICODE_VERSION
         Gem::VERSION
       ].freeze

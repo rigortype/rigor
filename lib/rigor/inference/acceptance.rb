@@ -791,9 +791,25 @@ module Rigor
           end
         end
 
+        # NOTE: this walk still resolves a class name taken from the ANALYSED PROGRAM, and so still
+        # triggers an autoload registered in the analyzer's process — `Object.const_get("IPAddr")`
+        # loads and runs `ipaddr.rb` here. Declining on `Module#autoload?` the way
+        # `Builtins::PredefinedConstantRefinements` does is deferred to
+        # [#689](https://github.com/rigortype/rigor/issues/689) because it MOVES a verdict: an
+        # unresolved target answers `:maybe`, or `:no` through `subtype_result_via_ancestors` when
+        # only the actual side resolves, so it owes its own false-positive measurement.
+        #
+        # Widening the rescue does not move a verdict, and is taken now. A class that resolves
+        # normally is unaffected; the widening only covers the case where the autoload target throws
+        # something the old `rescue NameError` let past — `prism/translation/ruby_parser.rb`'s
+        # top-level `exit` raises `SystemExit`, which is not a `StandardError` and which no rescue in
+        # the analysis path caught, so the process died with no diagnostics and no summary rather
+        # than answering `:maybe` here ([#680](https://github.com/rigortype/rigor/issues/680)).
+        # `Interrupt`, `SignalException` and `NoMemoryError` stay uncaught, as they do in the
+        # refinement tier's own walk.
         def resolve_class(name)
           Object.const_get(name)
-        rescue NameError
+        rescue ::StandardError, ::ScriptError, ::SystemExit
           nil
         end
       end

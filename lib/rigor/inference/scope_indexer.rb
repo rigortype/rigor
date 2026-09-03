@@ -1632,12 +1632,18 @@ module Rigor
       # Recursion into `node`'s children, swapping `self` for the ONE child a self-rebinding call evaluates
       # under a different receiver — its block. Every other child, and every child of a node that rebinds
       # nothing, keeps the `self` it was reached under.
+      #
+      # The block is identified by its CLASS rather than by identity against `CallNode#block`. These walks
+      # recurse over every node kind, so `node` here is the whole `Prism::Node` union and reading a member
+      # only a call carries off it is exactly the shape Rigor's own check rejects. The test is equivalent:
+      # `rebound` is non-nil only where {#rebound_block_self} already saw a `Prism::BlockNode` in the `block`
+      # field, and no other child of a call can be one — a receiver is an expression, arguments sit under
+      # `ArgumentsNode`, and a `&blk` pass-through is a `BlockArgumentNode`.
       def walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner)
         rebound = rebound_block_self(node, qualified_prefix, default_scope)
-        block = rebound.nil? ? nil : node.block
         node.rigor_each_child do |child|
-          walk_constant_writes(child, qualified_prefix, default_scope, accumulator,
-                               block.equal?(child) ? rebound : self_owner)
+          owner = rebound && child.is_a?(Prism::BlockNode) ? rebound : self_owner
+          walk_constant_writes(child, qualified_prefix, default_scope, accumulator, owner)
         end
       end
 
@@ -3590,10 +3596,9 @@ module Rigor
         end
 
         rebound = rebound_block_self(node, qualified_prefix)
-        block = rebound.nil? ? nil : node.block
         node.rigor_each_child do |child|
-          walk_constant_write_census(child, qualified_prefix, writes, seen,
-                                     block.equal?(child) ? rebound : self_owner)
+          owner = rebound && child.is_a?(Prism::BlockNode) ? rebound : self_owner
+          walk_constant_write_census(child, qualified_prefix, writes, seen, owner)
         end
       end
 

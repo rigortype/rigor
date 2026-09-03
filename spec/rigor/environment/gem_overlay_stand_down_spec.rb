@@ -116,6 +116,10 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
     # `open_receivers:` cannot say so here — no plugin is loaded — and with the overlay standing down the
     # #632 overlay gate is false too, so this is the route's own protection under test.
     it "protects Duration's method_missing surface, which no plugin manifest is present to declare open" do
+      # Paired locally, not just with the example above: `round` staying quiet is what a collapsed
+      # `Duration` looks like too, so the declared half of the same receiver has to be seen resolving in
+      # the same run for the absence to mean anything.
+      expect(dumps(result)).to include("Integer")
       expect(undefined_methods(result)).not_to include("round")
     end
   end

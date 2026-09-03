@@ -474,6 +474,38 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #690 — the one census shape #681 carved out. A `Foo::BAR = …` resolves its own
+  # NAMESPACE through the nesting too, so the entry's key and its rvalue both depend on
+  # the enclosing declaration; the census carried one parameter for both roles and had to
+  # pass it empty, losing them together. The two losses compound: the qualified read
+  # reaches no entry, and the in-namespace read falls past the qualified rung to the
+  # mis-keyed one and fires `undefined method` on correct code.
+  describe "fixtures/constant_path_write_nesting/ — a path write keyed and typed by its nesting" do
+    let(:harness) { harness_for("constant_path_write_nesting") }
+
+    it "keys a path write under the namespace Ruby resolves and types its rvalue there" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity. Each write is read back through every spelling that differs — the
+    # fully-qualified one the mis-keying broke and the in-namespace one the rvalue typing
+    # broke — plus the arms that must NOT move (a top-level write, an unattributable
+    # namespace, a rooted `::Registry`, and the two top-level reads a `self::` or
+    # dynamic-base write must not capture), the innermost-owned pair whose two spellings
+    # must answer alike, and the #540 mutation-widening pair that rides on the same key.
+    it "still asserts every read spelling of the recorded writes" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(13)
+    end
+
+    # The false-positive arm: every assertion is followed by a call only the correctly
+    # resolved class owns (`Post#top_post`, `Admin::Post#admin_post`, `Value#own_marker`),
+    # declared in the fixture's `sig/`, so a wrong answer fires rather than widens.
+    it "leaves no other diagnostic on the recorded receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   describe "fixtures/tuple_access.rb — Tuple element typing" do
     let(:harness) { harness_for("tuple_access") }
 

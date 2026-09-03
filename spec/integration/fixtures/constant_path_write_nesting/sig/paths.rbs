@@ -1,0 +1,68 @@
+# The marker methods live here rather than in `demo.rb` so a wrong constant resolution
+# surfaces as `call.undefined-method` — `CheckRules`' `rbs_class_known?` gate declines on
+# a receiver whose class RBS does not know, so a flat fixture could not fire the
+# diagnostic https://github.com/rigortype/rigor/issues/690 actually reports.
+
+class Post
+  def top_post: () -> String
+end
+
+class Registry
+end
+
+class Loner
+end
+
+# The top-level constants a `self::` or dynamic-base write must NOT be filed under.
+SELF_DEFAULT: singleton(Post)
+LATE: singleton(Post)
+
+module Dyn
+  class Post
+  end
+end
+
+module Admin
+  class Post
+    def admin_post: () -> String
+  end
+
+  class Registry
+  end
+
+  class PathNested
+  end
+
+  class PathCompact
+  end
+
+  class PathFallthrough
+  end
+
+  class PathRooted
+  end
+
+  class OwnCompact
+    class Own
+    end
+
+    class Value
+      def own_marker: () -> String
+    end
+  end
+
+  class OwnNested
+    class Own
+    end
+
+    class Value
+      def own_marker: () -> String
+    end
+  end
+
+  class NestedReader
+  end
+end
+
+class TopReader
+end

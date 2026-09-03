@@ -176,6 +176,10 @@ jobs:
         if: matrix.shard == 1
         run: make test-ractor-pool
 
+      - name: Run plugin integration tests
+        if: matrix.shard == 1
+        run: make test-integration-plugins
+
   # ── 1b. Shard coverage ──────────────────────────────────────────
   # Sharding's one silent failure: shards never coordinate, so each trusts
   # the others to have cut the identical partition from the identical

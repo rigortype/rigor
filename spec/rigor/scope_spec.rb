@@ -439,9 +439,10 @@ RSpec.describe Rigor::Scope do
     # - `:merged` — combined from both arms (union, intersection, agreement, or `||`). The exact rule differs
     #   per field and is pinned by the examples above and around; what this roster pins is that the field is
     #   REACHED at all.
-    # - `:receiver` — deliberately taken from the receiver alone. `discovery` and `source_path` describe where
-    #   the code IS, not what a branch did. The three `*_origins` node tables are advisory, compare-by-identity
-    #   and shared by reference: passing only `mine` is the documented contract, not an omission.
+    # - `:receiver` — deliberately taken from the receiver alone. `discovery`, `source_path` and
+    #   `lexical_nesting` describe where the code IS, not what a branch did. The three `*_origins` node tables
+    #   are advisory, compare-by-identity and shared by reference: passing only `mine` is the documented
+    #   contract, not an omission.
     # - `:required` — no default exists for it to silently fall back to.
     def join_field_groups
       { merged: %i[
@@ -450,7 +451,7 @@ RSpec.describe Rigor::Scope do
           struct_fold_safe_locals opaque_block_self
           local_origins ivar_origins optimistic_locals optimistic_ivars
         ],
-        receiver: %i[discovery source_path dynamic_origins void_origins optimistic_origins],
+        receiver: %i[discovery source_path lexical_nesting dynamic_origins void_origins optimistic_origins],
         required: %i[environment] }
     end
 
@@ -482,6 +483,7 @@ RSpec.describe Rigor::Scope do
         source_path: "lib/a.rb",
         struct_fold_safe_locals: Set[:s].freeze,
         opaque_block_self: true,
+        lexical_nesting: ["A::B"].freeze,
         dynamic_origins: { node => :cause }.compare_by_identity,
         local_origins: { x: :cause }.freeze,
         ivar_origins: { :@i => :cause }.freeze,

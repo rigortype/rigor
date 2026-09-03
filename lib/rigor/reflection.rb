@@ -145,13 +145,9 @@ module Rigor
       prefix = enclosing_class_path(scope)
 
       # Step 1 — `Module.nesting`, innermost first. Each entry contributes only its OWN constants.
-      walker = prefix
-      while walker && !walker.empty?
-        hit = constant_type_at("#{walker}::#{name}", scope)
+      lexical_nesting_chain(scope).each do |entry|
+        hit = constant_type_at("#{entry}::#{name}", scope)
         return hit if hit
-
-        idx = walker.rindex("::")
-        walker = idx ? walker[0, idx] : nil
       end
 
       # Step 2 (#354) — the ancestors of the innermost cresting scope, which Ruby consults BEFORE
@@ -300,6 +296,40 @@ module Rigor
       end
     end
     private_class_method :enclosing_class_path
+
+    # Ruby's `Module.nesting` for the body `scope` sits in, innermost first — the chain step 1 of
+    # {.resolve_constant_type} walks, and the chain `Inference::Narrowing` walks to resolve a class-guard
+    # name. The single owner of the question, so a constant read and the `is_a?` / `case`-`when` / `===`
+    # guard over the same spelling cannot disagree about which constant it names.
+    #
+    # The chain the analyzer RECORDED at declaration time wins ({Scope#with_lexical_nesting}). It is not
+    # recoverable from `self_type`: `class Admin::UsersController` and `module Admin; class
+    # UsersController` produce the identical `class_name`, while Ruby's nesting is
+    # `[Admin::UsersController]` for the first and `[Admin::UsersController, Admin]` for the second — so a
+    # bare `User` in the compact form names `::User`, and peeling the name reached `Admin::User` and
+    # reported `undefined method` on correct code ([#652](https://github.com/rigortype/rigor/issues/652)).
+    #
+    # The peel survives only as the FALLBACK, for a scope no declaration walk built (a callee body
+    # re-entered through `Scope#evaluate`, a plugin-constructed scope, a `class << SomeOtherConstant`
+    # body whose frame stack is reset). Answering an empty chain there would retract resolutions the
+    # engine makes today and turn correct code into `Dynamic`; a stale-but-gradual rung costs precision
+    # only, which is the direction AGENTS.md § "Implementation Guidelines" mandates.
+    def lexical_nesting_chain(scope)
+      recorded = scope.lexical_nesting
+      return recorded if recorded
+
+      base = enclosing_class_path(scope)
+      return [] if base.nil? || base.empty?
+
+      chain = []
+      walker = base
+      while walker && !walker.empty?
+        chain << walker
+        idx = walker.rindex("::")
+        walker = idx ? walker[0, idx] : nil
+      end
+      chain
+    end
 
     # Returns the RBS `RBS::Definition::Method` for the instance method, or nil when the
     # class or method is not in RBS. The source-side discovered-method facts are reachable

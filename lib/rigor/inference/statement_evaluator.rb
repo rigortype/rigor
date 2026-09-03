@@ -136,6 +136,15 @@ module Rigor
       # singleton-method RBS lookups.
       ClassFrame = Data.define(:name, :singleton)
 
+      # Issue #652 — Ruby's `Module.nesting` for the body currently being evaluated, innermost first, built as
+      # the walk ENTERS each declaration rather than reconstructed from the qualified name afterwards. A
+      # compact `module A::B` contributes ONE entry, the nested `module A; module B` two, and both render the
+      # same `class_name`, so the distinction survives only if it is recorded here. `[]` is the file top
+      # level; `nil` means the frame stack was RESET under a body whose enclosing lexical context the walk can
+      # no longer name, and nothing is stamped for it.
+      EMPTY_NESTING = [].freeze
+      private_constant :EMPTY_NESTING
+
       # @param scope [Rigor::Scope]
       # @param tracer [Rigor::Inference::FallbackTracer, nil]
       # @param on_enter [#call, nil] optional `(node, scope) ->` callable
@@ -158,11 +167,12 @@ module Rigor
       #   `Integer`). Display-path only — `rigor check` leaves it off,
       #   keeping its diagnostics and wall-clock unchanged.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze,
-                     converged_loop_recording: false)
+                     lexical_nesting: EMPTY_NESTING, converged_loop_recording: false)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
         @class_context = class_context.freeze
+        @lexical_nesting = lexical_nesting.freeze
         @converged_loop_recording = converged_loop_recording
       end
 
@@ -330,11 +340,12 @@ module Rigor
       # `self` — a wrong receiver for every implicit-self call in the body.
       def eval_constant_write(node)
         result = [scope.type_of(node, tracer: tracer), scope]
-        context = meta_new_constant_body_context(node)
+        context, nesting = meta_new_constant_body_context(node)
         return result if context.nil?
 
         call_node = node.value
-        enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block), context)
+        enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block),
+                              context, nesting)
         result
       end
 
@@ -352,11 +363,14 @@ module Rigor
         return nil unless call_node.is_a?(Prism::CallNode) && call_node.block.is_a?(Prism::BlockNode)
 
         if node.is_a?(Prism::ConstantWriteNode) && ScopeIndexer.meta_new_block_body(node)
-          return @class_context + [ClassFrame.new(name: node.name.to_s, singleton: false)]
+          name = node.name.to_s
+          return [@class_context + [ClassFrame.new(name: name, singleton: false)], pushed_nesting(name)]
         end
 
         anonymous = AnonymousMetaClass.name_for(call_node, scope.source_path)
-        anonymous && [ClassFrame.new(name: anonymous, singleton: false)]
+        # The anonymous form is registered under a synthesized name that no `Module.nesting` ever contains,
+        # and it discards the enclosing frames — so the chain is unknown, not empty.
+        anonymous && [[ClassFrame.new(name: anonymous, singleton: false)], nil]
       end
 
       # Slice 7 phase 3 — compound writes (||=, &&=, +=/-=/...) for every variable kind. Each handler:
@@ -1455,7 +1469,7 @@ module Rigor
       def eval_class_or_module(node)
         name = Source::ConstantPath.qualified_name(node.constant_path)
         new_context = @class_context + [ClassFrame.new(name: name, singleton: false)]
-        body_type, _body_scope = eval_class_body(node, new_context)
+        body_type, _body_scope = eval_class_body(node, new_context, pushed_nesting(name))
         [body_type, scope]
       end
 
@@ -1465,7 +1479,7 @@ module Rigor
       # the existing context and accept that nested defs degrade to the `Dynamic[Top]` default.
       def eval_singleton_class(node)
         new_context = singleton_context_for(node)
-        body_type, _body_scope = eval_class_body(node, new_context)
+        body_type, _body_scope = eval_class_body(node, new_context, singleton_nesting_for(new_context))
         [body_type, scope]
       end
 
@@ -1994,7 +2008,7 @@ module Rigor
         anonymous = AnonymousMetaClass.name_for(node, scope.source_path)
         return sub_eval(block, block_entry) if anonymous.nil?
 
-        enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
+        enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)], nil)
       end
 
       # Enters a meta-new `block` as the body of the class `class_context` names: `self_type` is that class's
@@ -2002,9 +2016,9 @@ module Rigor
       # {#self_type_for_method_body} route, while `block_entry` keeps the outer locals visible. Shared by the two
       # positions such a block is reached from — a statement-level call ({#evaluate_block_if_present}) and a
       # constant-write rvalue ({#eval_constant_write}) — so the two cannot drift on what a class body's entry is.
-      def enter_meta_class_body(block, block_entry, class_context)
-        sub_eval(block, block_entry.with_self_type(self_type_for_class_body(class_context)),
-                 class_context: class_context)
+      def enter_meta_class_body(block, block_entry, class_context, nesting)
+        entry = block_entry.with_self_type(self_type_for_class_body(class_context))
+        sub_eval(block, stamp_nesting(entry, nesting), class_context: class_context, lexical_nesting: nesting)
       end
 
       # Slice 6 phase C sub-phase 3b/3c. When the call carries a block whose receiving method is NOT proven
@@ -2694,7 +2708,7 @@ module Rigor
 
       # ----- def/class helpers -----
 
-      def eval_class_body(node, new_context)
+      def eval_class_body(node, new_context, new_nesting = @lexical_nesting)
         return [Type::Combinator.constant_of(nil), scope] if node.body.nil?
 
         # Class/module bodies run in a fresh scope: the outer scope's locals are NOT visible inside `class Foo; ...
@@ -2704,7 +2718,8 @@ module Rigor
         fresh = build_fresh_body_scope
         body_self = self_type_for_class_body(new_context)
         fresh = fresh.with_self_type(body_self) if body_self
-        sub_eval(node.body, fresh, class_context: new_context)
+        fresh = stamp_nesting(fresh, new_nesting)
+        sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting)
       end
 
       def build_method_entry_scope(def_node) # rubocop:disable Metrics/AbcSize
@@ -2731,6 +2746,9 @@ module Rigor
         fresh = build_fresh_body_scope
         body_self = self_type_for_method_body(singleton: singleton)
         fresh = fresh.with_self_type(body_self) if body_self
+        # A `def` opens no new `Module.nesting` entry — the body resolves constants against the chain of the
+        # declaration that encloses it, which is what the evaluator is already carrying (#652).
+        fresh = stamp_nesting(fresh, @lexical_nesting)
         fresh = seed_instance_ivars(fresh, singleton: singleton)
         fresh = seed_class_cvars(fresh)
         fresh = seed_program_globals(fresh)
@@ -2946,6 +2964,41 @@ module Rigor
         end
       end
 
+      # Issue #652 — the chain a body gains by entering a declaration whose header spells `name`. Ruby pushes
+      # ONE `Module.nesting` entry per declaration keyword, qualified against the entry already on top, so
+      # `module A::B` pushes the single `"A::B"` and `module A; module B` pushes `"A"` and then `"A::B"`. That
+      # is the whole difference between the compact and the nested spelling, and it is unrecoverable from the
+      # `"A::B"` the two share afterwards. `nil` propagates: once the walk has lost the enclosing context it
+      # cannot qualify anything pushed under it.
+      def pushed_nesting(name)
+        return nil if @lexical_nesting.nil? || name.nil?
+
+        outer = @lexical_nesting.first
+        [outer ? "#{outer}::#{name}" : name, *@lexical_nesting].freeze
+      end
+
+      # The chain for a `class << expr` body. `class << self` — and `class << Foo` written inside `class Foo`,
+      # which {#singleton_context_for} treats as the same thing — rewrites the innermost frame in place without
+      # renaming it, so the recorded chain carries through unchanged. Ruby additionally pushes the singleton
+      # class itself, a rung Rigor models on neither path ([#662](https://github.com/rigortype/rigor/issues/662)).
+      # The cross-class `class << Other` form instead RESETS the frame stack to the target and discards the
+      # enclosing frames, so the chain becomes unknown rather than empty and the name-peel keeps answering for
+      # that body exactly as it does today.
+      def singleton_nesting_for(new_context)
+        return @lexical_nesting if new_context.length == @class_context.length &&
+                                   new_context.each_with_index.all? { |f, i| f.name == @class_context[i].name }
+
+        nil
+      end
+
+      # Stamps a recorded chain onto a body-entry scope. An empty chain (a top-level body) and an unknown one
+      # are both left unstamped, so `Reflection.lexical_nesting_chain` keeps its peel fallback for them.
+      def stamp_nesting(body_scope, chain)
+        return body_scope if chain.nil? || chain.empty?
+
+        body_scope.with_lexical_nesting(chain)
+      end
+
       # The qualified name of the immediately-enclosing class (joining every nested `ClassFrame` with `::`). Returns
       # `nil` for a top-level def with no enclosing class, which routes the parameter binder past RBS lookup.
       def current_class_path
@@ -2999,12 +3052,13 @@ module Rigor
         end
       end
 
-      def sub_eval(node, with_scope, class_context: @class_context)
+      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
           on_enter: @on_enter,
           class_context: class_context,
+          lexical_nesting: lexical_nesting,
           converged_loop_recording: @converged_loop_recording
         ).evaluate(node)
       end

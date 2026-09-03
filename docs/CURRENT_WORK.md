@@ -17,21 +17,24 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**Thirteen PRs landed 2026-09-03**, the last three being #699 (#672 overlay stand-down), #702 (#653
-plugin-typed calls) and #706 (#690 path constant writes). The review rounds produced **37 new
-issues**, all with reproduced repros.
+**Fifteen PRs landed 2026-09-03**, the last two being #709 (#681 the callee re-walk) and #711 (#705
+dynamic-base name guessing). The review rounds produced **41 new issues**, all with reproduced repros.
 
-Three arcs are now closed or nearly so. Read the arc before picking up its leftovers.
+**The constant-resolution arc is CLOSED.** #685 recorded `Module.nesting` at declaration time
+instead of reconstructing it from a qualified-name string; #692 did the census scopes; #706 added the
+rule that a write whose base is not statically nameable is DECLINED rather than guessed into a bare
+name; #711 followed the `self` a block rebinds; #709 gave the def-node index each def's chain.
+**Nothing in `lib/` now builds a scope from a self type alone.** What is left of the family is
+enumerated in the ranked list below, and none of it is the old peel.
 
-**Constant resolution** — the engine no longer reconstructs lexical nesting from a qualified-name
-string. #685 records `Module.nesting` at declaration time (only a `class`/`module` keyword pushes;
-`def`, blocks and `class << expr` inherit), #692 did the census scopes, #706 did path writes and
-introduced *declining* a write whose base is not statically nameable rather than guessing a name.
-**What remains: [#681](https://github.com/rigortype/rigor/issues/681)** (the callee re-walk — the
-only `Scope.new(… self_type:)` left in `lib/`, and it needs the def-node index to carry the chain,
-not a stamp), plus [#682](https://github.com/rigortype/rigor/issues/682),
-[#705](https://github.com/rigortype/rigor/issues/705) (three more places that still guess a bare
-name), [#655](https://github.com/rigortype/rigor/issues/655),
+**Constant resolution, what is left after the arc.**
+[#682](https://github.com/rigortype/rigor/issues/682) (a superclass name still peels the subclass's
+qualified name), [#708](https://github.com/rigortype/rigor/issues/708) (a rooted declaration header
+keeps the enclosing prefix — both walks agree with each other and disagree with Ruby),
+[#707](https://github.com/rigortype/rigor/issues/707) (the ADR-85 seed bundle re-parses, so
+`--incremental` keeps the old answer and `--verify-incremental` reports a difference),
+[#710](https://github.com/rigortype/rigor/issues/710), plus the older
+[#655](https://github.com/rigortype/rigor/issues/655),
 [#656](https://github.com/rigortype/rigor/issues/656),
 [#662](https://github.com/rigortype/rigor/issues/662).
 
@@ -58,12 +61,14 @@ adjudication (ready-for-human); [#701](https://github.com/rigortype/rigor/issues
 
 ## Backlog, ranked
 
-1. **[#705](https://github.com/rigortype/rigor/issues/705)** — three FP-producing places that still
-   guess a bare name from a non-nameable base. Do A first: it unblocks a regression witness #706
-   could not write.
-2. **[#696](https://github.com/rigortype/rigor/issues/696)** + **[#686](https://github.com/rigortype/rigor/issues/686)**
-   via a shared `Result#crashed?`.
-3. **[#681](https://github.com/rigortype/rigor/issues/681)** — the last constant-resolution member.
+1. **[#696](https://github.com/rigortype/rigor/issues/696)** + **[#686](https://github.com/rigortype/rigor/issues/686)**
+   via a shared `Result#crashed?` — the two remaining "reports less while exiting 0" entry points,
+   both running `Runner#run` inside `lib/` where no spec wrapper reaches.
+2. **[#707](https://github.com/rigortype/rigor/issues/707)** — a warm `--incremental` run keeps a
+   stale resolution and `--verify-incremental` flips to FAILED on a project with compact
+   declarations. Introduced by #709 in the sense that cold got fixed and warm did not.
+3. **[#708](https://github.com/rigortype/rigor/issues/708)** + **[#682](https://github.com/rigortype/rigor/issues/682)**
+   — the two constant-resolution leftovers that are wrong against Ruby rather than merely imprecise.
 4. **[#700](https://github.com/rigortype/rigor/issues/700)** (human) and
    **[#660](https://github.com/rigortype/rigor/issues/660)** (human) — two ADR questions the plugin
    work keeps deferring to. Answering them unblocks #697 and #701 cleanly.

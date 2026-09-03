@@ -364,6 +364,41 @@ RSpec.describe Rigor::Reflection do
     end
   end
 
+  # Issue #652 — the single owner of `Module.nesting` for a body, shared by the constant typer's step-1
+  # ladder and by `Inference::Narrowing`'s class guards. The two questions used to have two peels, and a
+  # peel cannot represent a compact declaration at all.
+  describe ".lexical_nesting_chain" do
+    let(:nominal) { Rigor::Type::Combinator.nominal_of("Admin::UsersController") }
+
+    it "returns the chain the declaration walk recorded, however few entries it has" do
+      scope = Rigor::Scope.empty.with_self_type(nominal).with_lexical_nesting(["Admin::UsersController"])
+
+      expect(described_class.lexical_nesting_chain(scope)).to eq(["Admin::UsersController"])
+    end
+
+    # The must-still-succeed twin: the nested spelling of the SAME class name records two entries, and the
+    # reader must hand back both. Without it the example above passes for an implementation that always
+    # answers a one-element chain.
+    it "returns both entries for the nested spelling of the same class name" do
+      scope = Rigor::Scope.empty.with_self_type(nominal)
+                          .with_lexical_nesting(["Admin::UsersController", "Admin"])
+
+      expect(described_class.lexical_nesting_chain(scope)).to eq(["Admin::UsersController", "Admin"])
+    end
+
+    # The FP-safe fallback: a scope no declaration walk built keeps the name-peel rather than answering an
+    # empty chain, which would retract resolutions the engine makes today.
+    it "peels the self type's class name when no chain was recorded" do
+      scope = Rigor::Scope.empty.with_self_type(nominal)
+
+      expect(described_class.lexical_nesting_chain(scope)).to eq(["Admin::UsersController", "Admin"])
+    end
+
+    it "is empty at the top level, where no self type names a class" do
+      expect(described_class.lexical_nesting_chain(Rigor::Scope.empty)).to eq([])
+    end
+  end
+
   describe ".discovered_class? / .discovered_method?" do
     let(:scope) do
       index = Rigor::Scope::DiscoveryIndex::EMPTY.with(

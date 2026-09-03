@@ -119,12 +119,13 @@ module Rigor
 
       def concrete_class_name(type)
         case type
-        when Type::Nominal, Type::Singleton then type.class_name
+        when Type::Nominal, Type::Singleton, Type::DataClass, Type::DataInstance, Type::StructClass, Type::StructInstance then type.class_name
         when Type::Tuple then "Array"
         when Type::HashShape then "Hash"
         when Type::Constant then CONSTANT_CLASSES[type.value.class] || type.value.class.name
         when Type::Refined, Type::Difference then concrete_class_name(type.base)
         when Type::IntegerRange then "Integer"
+        when Type::App then concrete_class_name(type.bound)
         end
       end
     end
@@ -336,17 +337,22 @@ module Rigor
 
       # Append a trailing argument inside explicit `(...)` parens to trip an arity diagnostic against a known
       # fixed-arity signature.
-      def extend_arity(node, out)
-        open = node.opening_loc
-        close = node.closing_loc
-        return unless close && open&.slice == "("
+def extend_arity(node, out)
+  if node.closing_loc && node.opening_loc&.slice == "("
+    offset = node.closing_loc.start_offset
+    args = node.arguments&.arguments
+    insertion = args && !args.empty? ? ", nil" : "nil"
+  elsif node.arguments && !node.arguments.arguments.empty?
+    offset = node.arguments.location.end_offset
+    insertion = ", nil"
+  else
+    return
+  end
 
-        args = node.arguments&.arguments
-        insertion = args && !args.empty? ? ", nil" : "nil"
-        add(out, :arity_extra, "call.wrong-arity", close.start_offset, close.start_offset,
-            insertion, node.location.start_line, "call ##{node.name} +1 arg", node.receiver,
-            node.name.to_s, call_node: node)
-      end
+  add(out, :arity_extra, "call.wrong-arity", offset, offset,
+      insertion, node.location.start_line, "call #{node.name} +1 arg", node.receiver,
+      node.name.to_s, call_node: node)
+end
 
       def add(out, operator, rule, start, stop, replacement, line, label, anchor, method_name, call_node: nil) # rubocop:disable Metrics/ParameterLists
         return unless @operators.include?(operator)

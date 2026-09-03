@@ -233,7 +233,16 @@ module RigorMutation
       paths.flat_map do |p|
         if File.directory?(p) then Dir.glob(File.join(p, "**", "*.rb"))
         elsif File.file?(p) then [p]
-        else Dir.glob(p).select { |f| f.end_with?(".rb") }
+        else
+          Dir.glob(p).flat_map do |match|
+            if File.directory?(match)
+              Dir.glob(File.join(match, "**", "*.rb"))
+            elsif match.end_with?(".rb")
+              [match]
+            else
+              []
+            end
+          end
         end
       end.uniq.sort
     end
@@ -462,7 +471,7 @@ module RigorMutation
                    when "fuzz" then "usage: bundle exec ruby tool/mutation/mutate.rb fuzz [<paths...>] [options]"
                    else "usage: bundle exec ruby tool/mutation/mutate.rb <target.rb> [options]"
                    end
-        o.on("--all", "fuzz/sweep mode: target default broad scope (#{Fuzz::DEFAULT_PATHS.join(" ")})") { options[:all] = true }
+        o.on("--all", "fuzz/sweep mode: target default broad scope (#{Fuzz::DEFAULT_PATHS.join(' ')})") { options[:all] = true }
         o.on("--config PATH", "Rigor config file (default: auto-discover)") { |v| options[:config] = v }
         o.on("--limit N", Integer, "single mode: sample at most N mutants") { |v| options[:limit] = v }
         o.on("--per-file N", Integer, "sweep mode: sample at most N mutants/file (default 40)") do |v|

@@ -35,9 +35,9 @@ module Rigor
           end
         end
 
-        # Issue 3 fix: proper positional argument handling for attach_function
-        def extract_attach_function(call_node, module_name: nil)
-          return nil unless call_node.is_a?(Prism::CallNode) && call_node.name == :attach_function
+        # Universal binding extractor for attach_function, sodium_function, etc.
+        def extract_function_binding(call_node, method_name:, module_name: nil, default_return: :void)
+          return nil unless call_node.is_a?(Prism::CallNode) && call_node.name == method_name
 
           all_args = call_node.arguments&.arguments || []
           return nil if all_args.empty?
@@ -74,7 +74,7 @@ module Rigor
             arg_types = [args_node.slice.to_sym]
           end
 
-          return_type = ret_node ? (extract_type_symbol(ret_node) || :void) : :void
+          return_type = ret_node ? (extract_type_symbol(ret_node) || default_return) : default_return
 
           AttachFunctionFact.new(
             ruby_name: ruby_name,
@@ -84,6 +84,10 @@ module Rigor
             node: call_node,
             receiver_name: module_name
           )
+        end
+
+        def extract_attach_function(call_node, module_name: nil)
+          extract_function_binding(call_node, method_name: :attach_function, module_name: module_name, default_return: :void)
         end
 
         def ffx_diagnostics_for_call(call_node, path:, target:)

@@ -80,7 +80,9 @@ module Rigor
             callbacks: catalog.callbacks
           )
         elsif call_node.name.to_s.end_with?("=")
-          scope&.type_of(call_node.arguments&.arguments&.first) || Rigor::Type::Combinator.top
+          # Issue 3 fix: for both .id = val and [:id] = val, the assigned value is the LAST argument
+          val_node = call_node.arguments&.arguments&.last
+          val_node ? scope&.type_of(val_node) : Rigor::Type::Combinator.top
         elsif (field_type = fields[call_node.name])
           Types.return_type_for(
             field_type,

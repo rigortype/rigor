@@ -98,6 +98,13 @@ RSpec.describe "FFI plugin family" do
       expect(catalog.struct_names).not_to include("Array")
       expect(catalog.function_for("Array", :size)).to be_nil
     end
+
+    it "identifies assigned value node for struct []= as the last argument" do
+      code = "struct[:id] = 5"
+      call_node = Prism.parse(code).value.statements.body.first
+      expect(call_node.name).to eq(:[]=)
+      expect(call_node.arguments.arguments.last).to be_a(Prism::IntegerNode)
+    end
   end
 
   describe "sub-plugins" do
@@ -109,14 +116,16 @@ RSpec.describe "FFI plugin family" do
       expect(Rigor::Plugin::Ethon.manifest.id).to eq("ethon")
     end
 
-    it "loads rigor-rbnacl with manifest id rbnacl and preserves nested submodule receivers" do
+    it "loads rigor-rbnacl with manifest id rbnacl and preserves nested submodule receivers and parses constant args" do
       expect(Rigor::Plugin::RbNaCl.manifest.id).to eq("rbnacl")
 
-      code = "sodium_function :crypto_sign_ed25519_seed_keypair, [:pointer], :int"
+      code = "sodium_function :crypto_sign_ed25519_seed_keypair, :crypto_sign_ed25519_seed_keypair, ARGS, :int"
       call_node = Prism.parse(code).value.statements.body.first
       recognizer = Rigor::Plugin::FFI.binding_recognizers.find { |r| r.name == :sodium_function }
       facts = recognizer.recognize(call_node, "RbNaCl::Signatures::Ed25519")
       expect(facts.first.receiver_name).to eq("RbNaCl::Signatures::Ed25519")
+      expect(facts.first.arg_types).to eq([:ARGS])
+      expect(facts.first.return_type).to eq(:int)
     end
 
     it "loads rigor-ffi-rzmq with manifest id ffi-rzmq" do

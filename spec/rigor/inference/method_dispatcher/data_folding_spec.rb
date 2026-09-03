@@ -73,6 +73,16 @@ RSpec.describe "Data.define value folding", type: :runner do
       RUBY
     end
 
+    it "folds off a Class.new(Data.define(...)) subclass (#634)" do
+      expect(dumped_types(<<~RUBY)).to eq(["Point(x: 1, y: \"two\")", "1", "\"two\""])
+        Point = Class.new(Data.define(:x, :y))
+        p = Point.new(1, "two")
+        dump_type(p)
+        dump_type(p.x)
+        dump_type(p.y)
+      RUBY
+    end
+
     it "folds the Point[...] new alias" do
       expect(dumped_types(<<~RUBY)).to eq(["Point(x: 3, y: 4)"])
         Point = Data.define(:x, :y)

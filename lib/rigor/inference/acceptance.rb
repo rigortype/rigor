@@ -67,7 +67,9 @@ module Rigor
         Type::Refined => :accepts_refined,
         Type::Intersection => :accepts_intersection,
         Type::Tuple => :accepts_tuple,
-        Type::HashShape => :accepts_hash_shape
+        Type::HashShape => :accepts_hash_shape,
+        Type::StructClass => :accepts_struct_class,
+        Type::DataClass => :accepts_data_class
       }.freeze
       private_constant :TYPE_HANDLERS
 
@@ -165,20 +167,25 @@ module Rigor
           end
         end
 
-        # Singleton[C] only accepts another Singleton[D] where D is a subclass of (or equal to) C. Any other
-        # carrier (instance, constant, ...) is no, because the singleton type's inhabitants are the class
-        # objects themselves.
+        # Singleton[C] only accepts another Singleton[D] (or StructClass / DataClass) where D is a subclass
+        # of (or equal to) C. Any other carrier (instance, constant, ...) is no, because the singleton type's
+        # inhabitants are the class objects themselves.
         def accepts_singleton(self_type, other_type, mode)
-          unless other_type.is_a?(Type::Singleton)
-            return Type::AcceptsResult.no(
-              mode: mode,
-              reasons: "Singleton[#{self_type.class_name}] does not accept #{other_type.class}"
-            )
-          end
+          actual_name =
+            case other_type
+            when Type::Singleton then other_type.class_name
+            when Type::StructClass then other_type.class_name || "Struct"
+            when Type::DataClass then other_type.class_name || "Data"
+            else
+              return Type::AcceptsResult.no(
+                mode: mode,
+                reasons: "Singleton[#{self_type.class_name}] does not accept #{other_type.class}"
+              )
+            end
 
           class_subtype_result(
             target_name: self_type.class_name,
-            actual_name: other_type.class_name,
+            actual_name: actual_name,
             mode: mode,
             kind: :singleton
           )
@@ -195,11 +202,13 @@ module Rigor
         # - HashShape{*} when self is the Hash (or a supertype) family, projected to
         #   `Nominal[Hash, [union(keys), union(values)]]`.
         # - Singleton: never (wrong value kind).
+        # - StructClass / DataClass: class-side carriers, accepted when C is a meta nominal (Class, Module, ...).
         def accepts_nominal(self_type, other_type, mode)
           case other_type
           when Type::Nominal then accepts_nominal_from_nominal(self_type, other_type, mode)
           when Type::Constant then accepts_nominal_from_constant(self_type, other_type, mode)
           when Type::Singleton then accepts_nominal_from_singleton(self_type, other_type, mode)
+          when Type::StructClass, Type::DataClass then accepts_nominal_from_class_factory(self_type, other_type, mode)
           when Type::IntegerRange then accepts_nominal_from_integer_range(self_type, other_type, mode)
           else accepts_nominal_from_shape(self_type, other_type, mode)
           end
@@ -289,6 +298,20 @@ module Rigor
           Type::AcceptsResult.no(
             mode: mode,
             reasons: "Nominal[#{self_type.class_name}] rejects Singleton[#{other_type.class_name}]"
+          )
+        end
+
+        def accepts_nominal_from_class_factory(self_type, other_type, mode)
+          if META_NOMINALS_FROM_SINGLETON.include?(self_type.class_name)
+            return Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "#{other_type.describe} is-a #{self_type.class_name}"
+            )
+          end
+
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "Nominal[#{self_type.class_name}] rejects #{other_type.class}"
           )
         end
 
@@ -751,6 +774,20 @@ module Rigor
 
         def hash_shape_no(mode, reason)
           Type::AcceptsResult.no(mode: mode, reasons: reason)
+        end
+
+        def accepts_struct_class(self_type, other_type, mode)
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "#{self_type.describe} rejects #{other_type.class}"
+          )
+        end
+
+        def accepts_data_class(self_type, other_type, mode)
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "#{self_type.describe} rejects #{other_type.class}"
+          )
         end
 
         # Uses Ruby's actual class hierarchy via Object.const_get to answer "is D a subclass of C?" for core,

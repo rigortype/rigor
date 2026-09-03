@@ -1835,13 +1835,23 @@ module Rigor
       # diagnostic on correct code. No-op for `Class.new` / `Module.new` and for a factory whose members are not
       # literal Symbols (nothing to register).
       def record_meta_members(factory_call, qualified_prefix, accumulator)
-        return unless data_define_call?(factory_call) || struct_new_call?(factory_call)
+        factory_call = resolve_meta_factory_call(factory_call)
+        return unless factory_call && (data_define_call?(factory_call) || struct_new_call?(factory_call))
 
         members = meta_member_names(factory_call)
         return if members.empty?
 
         class_name = qualified_prefix.join("::")
         members.each { |member| record_method_kind(accumulator, class_name, member, :instance) }
+      end
+
+      # Unwinds nested `Class.new(...)` calls to their root factory call (`Struct.new(...)` or `Data.define(...)`).
+      def resolve_meta_factory_call(call_node)
+        while class_new_call?(call_node)
+          call_node = call_node.arguments&.arguments&.first
+          return nil unless call_node
+        end
+        call_node
       end
 
       # The Symbol member names of a `Data.define(*Symbol)` / `Struct.new(*Symbol [, keyword_init:])` call. For
@@ -2151,7 +2161,8 @@ module Rigor
       # Records `qualified -> [members]` when `expr` is a `Data.define(*Symbol)` call with at least one literal-Symbol
       # member.
       def record_data_member_layout(accumulator, qualified_parts, expr)
-        return unless data_define_call?(expr)
+        expr = resolve_meta_factory_call(expr)
+        return unless expr && data_define_call?(expr)
 
         members = meta_member_names(expr)
         return if members.empty?
@@ -2198,7 +2209,8 @@ module Rigor
       # Records `qualified -> { members:, keyword_init: }` when `expr` is a `Struct.new(*Symbol [, keyword_init:
       # <bool>])` call with at least one literal-Symbol member.
       def record_struct_member_layout(accumulator, qualified_parts, expr)
-        return unless struct_new_call?(expr)
+        expr = resolve_meta_factory_call(expr)
+        return unless expr && struct_new_call?(expr)
 
         members = meta_member_names(expr)
         return if members.empty?
@@ -3527,7 +3539,8 @@ module Rigor
       # The block body, if present, is recursed into so any nested class/module declarations in the override block (rare
       # but legal) still feed the discovered table.
       def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
-        return false unless data_define_call?(node.value) || struct_new_call?(node.value)
+        factory_call = resolve_meta_factory_call(node.value)
+        return false unless factory_call && (data_define_call?(factory_call) || struct_new_call?(factory_call))
 
         full = (qualified_prefix + [node.name.to_s]).join("::")
         discovered[full] = Type::Combinator.singleton_of(full)

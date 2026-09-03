@@ -76,4 +76,19 @@ RSpec.describe "non-nil argument-type-mismatch (ADR-64)" do
     RUBY
     expect(diagnostics_for(source).select(&:error?)).to be_empty
   end
+
+  describe "Class.new with struct/data factory superclass (#634)" do
+    it "accepts Struct.new, Data.define, and Class.new as Class superclass arguments" do
+      expect(arg_mismatches("Class.new(Struct.new(:a))\n")).to be_empty
+      expect(arg_mismatches("Class.new(Data.define(:a))\n")).to be_empty
+      expect(arg_mismatches("Class.new(Class.new)\n")).to be_empty
+    end
+
+    it "still fires on invalid superclass arguments" do
+      expect(arg_mismatches("Class.new(\"x\")\n"))
+        .to include(a_string_matching(/expected Class, got "x"/))
+      expect(arg_mismatches("Class.new(Struct.new(:a).new)\n"))
+        .to include(a_string_matching(/expected Class/))
+    end
+  end
 end

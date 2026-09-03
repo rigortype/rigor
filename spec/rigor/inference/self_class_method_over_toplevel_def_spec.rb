@@ -89,6 +89,48 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  it "reads a struct member inside a `Const = Class.new(Struct.new(...)) do ... end` body (#634)" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Line = Class.new(Struct.new(:text)) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a Data member inside a `Const = Class.new(Data.define(...)) do ... end` body (#634)" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Pt = Class.new(Data.define(:text)) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a struct member inside an anonymous `Class.new(Struct.new(...)) do ... end` body (#634)" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Class.new(Struct.new(:text)) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a struct member declared by `Const = Class.new(Struct.new(...))` and reopened (#634)" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Point = Class.new(Struct.new(:text))
+
+      class Point
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
   it "reads a struct member declared by the constant spelling and reopened" do
     expect(upcase_errors(<<~RUBY)).to be_empty
       Point = Struct.new(:text)

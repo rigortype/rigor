@@ -89,6 +89,15 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
+    it "folds off a Class.new(Struct.new(...)) subclass (#634)" do
+      expect(dumped_types(<<~RUBY)).to eq(["1", "\"two\""])
+        Point = Class.new(Struct.new(:x, :y))
+        p = Point.new(1, "two")
+        dump_type(p.x)
+        dump_type(p.y)
+      RUBY
+    end
+
     it "folds a never-mutated bound local materialised inline" do
       expect(dumped_types(<<~RUBY)).to eq(["1"])
         p = Struct.new(:x).new(1)

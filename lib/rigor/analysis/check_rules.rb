@@ -670,6 +670,11 @@ module Rigor
           # undefined-method against it is an FP by construction. Decline.
           return nil if inferred_param_receiver?(call_node, scope)
 
+          # Issue #653 — a plugin's `dynamic_return` answered THIS call site, so the site's type is the
+          # plugin's and the receiver's RBS never dispatched it. Ahead of the receiver-shape branch below so
+          # the scalar and the union path are covered by the one gate. See {#plugin_typed_call?}.
+          return nil if plugin_typed_call?(call_node, scope)
+
           # N3 — a safe-navigation call (`recv&.m`) never dispatches on the
           # nil edge of its receiver: at runtime it short-circuits to nil.
           # A receiver that types as exactly `nil` yields nil with no call at
@@ -985,6 +990,34 @@ module Rigor
           return false if loader.nil? || !loader.respond_to?(:signature_paths)
 
           loader.signature_paths.any? { |path| Rigor::Environment::RbsLoader.under_gem_overlay_root?(path) }
+        end
+
+        # Issue #653 — true when a plugin's `dynamic_return` supplied the return type for THIS call node
+        # (recorded by `MethodDispatcher` on `Scope#plugin_typed_calls` during the typing pass, exactly the
+        # way `Scope#void_origins` is recorded and consumed).
+        #
+        # Why the rule declines. The plugin tier sits ABOVE `RbsDispatch` in `MethodDispatcher#resolve`, so
+        # a plugin answer means the RBS never dispatched the call: the type at the site is the plugin's.
+        # Reading that same receiver's RBS afterwards to prove the call undefined puts the two subsystems in
+        # direct contradiction on one line of one run — the plugin says `Rails.logger` is an
+        # `ActiveSupport::BroadcastLogger`, the rule says `logger` does not exist. Under ADR-5 a
+        # partially-declared receiver is not a closed world, and incompleteness is exactly what a plugin is
+        # loaded to cover, so the plugin's answer is the honest one. Without this, adding a four-line
+        # partial `sig/` for a class a plugin already covered turned every covered call site into an error
+        # — writing more RBS made a project's diagnostics worse.
+        #
+        # Deliberately NOT scoped to "the RBS is silent about this method": the precedence recorded here is
+        # the dispatcher's own, and the dispatcher does not consult the RBS before letting a plugin answer.
+        # For THIS rule the two readings coincide anyway — a method the RBS declares is found by
+        # `lookup_method` below and never reaches the diagnostic — so the broader statement costs no
+        # diagnostic and keeps the contract stated in one direction. `docs/internal-spec/plugin.md` §
+        # "Return-type and narrowing contributions" is where it binds.
+        #
+        # Unlike {#unbounded_receiver_surface?} this is per CALL SITE, not per receiver class: a plugin
+        # answering `Rails.logger` exempts that call and nothing else, so `Rails.no_such_reader` on the same
+        # receiver still fires.
+        def plugin_typed_call?(call_node, scope)
+          scope.plugin_typed_call?(call_node)
         end
 
         def synthesized_stub_receiver?(class_name, scope)

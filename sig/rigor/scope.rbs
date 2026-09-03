@@ -12,6 +12,7 @@ module Rigor
     attr_reader local_origins: Hash[Symbol, Symbol]
     attr_reader ivar_origins: Hash[Symbol, Symbol]
     attr_reader void_origins: Hash[untyped, Inference::VoidOrigin]
+    attr_reader plugin_typed_calls: Hash[untyped, bool]
     attr_reader optimistic_origins: Hash[untyped, Symbol]
     attr_reader optimistic_locals: Hash[Symbol, Symbol]
     attr_reader optimistic_ivars: Hash[Symbol, Symbol]
@@ -52,6 +53,9 @@ module Rigor
     def record_optimistic_origin: (untyped node, Symbol cause) -> Scope
 
     def record_void_origin: (untyped node, Inference::VoidOrigin origin) -> Scope
+
+    def record_plugin_typed_call: (untyped node) -> Scope
+    def plugin_typed_call?: (untyped node) -> bool
 
     class DiscoveryIndex
       attr_reader declared_types: Hash[untyped, Type::t]

@@ -379,6 +379,34 @@ the block carries logic and runs through `instance_exec`:
     (coerce direction):** the gate is on the *receiver* class, and Ruby
     dispatches `1 + money` on `Integer`, so a `["Money"]` rule does not
     fire there; that result types left-biased as `Integer` (see ADR-42).
+  - **A `dynamic_return` answer suppresses `call.undefined-method` at
+    that call site** (issue #653). The tier sits above `RbsDispatch` in
+    `MethodDispatcher#resolve`, so when a plugin answers, the receiver's
+    RBS never dispatched the call and the type at the site is the
+    plugin's; the existence check MUST NOT then read that same RBS to
+    prove the call undefined. The dispatcher records each answered call
+    node on `Scope#plugin_typed_calls` during the typing pass and
+    `Analysis::CheckRules` consults the record — it never re-runs a
+    plugin block to decide a diagnostic. The suppression is **per call
+    site, not per receiver class**: it is narrower than the
+    `open_receivers:` exemption below, and a name neither the RBS nor
+    any plugin answers still reports on the same receiver.
+    - The precedence is **unconditional on what the RBS says**, not
+      "only where the RBS is silent": it restates the dispatcher's own
+      tier order, and the dispatcher does not consult the RBS before
+      letting a plugin answer. Plugins that answer a method their
+      coexisting RBS also declares are ordinary and shipping —
+      `rigor-activesupport-core-ext`'s `%i[+ - *]` rule deliberately
+      overrides the *fully declared* core `Time#-` / `Integer#*`
+      signatures because the RBS-projected return is wrong once a
+      `Duration` is the operand, and `rigor-dry-validation` refines a
+      `to_h` its own bundled `sig/` declares. For this rule the two
+      readings coincide anyway — a method the RBS declares resolves and
+      never reaches the diagnostic.
+    - The two rules that read a RESOLVED SIGNATURE (`call.wrong-arity`,
+      `call.argument-type-mismatch`) are **not** covered by this record
+      today; they still validate against the RBS signature at a
+      plugin-answered site. See issue #653's follow-up note.
 - `narrowing_facts(methods:) { |call_node, scope| facts | nil }` —
   **post-return narrowing facts**, gated on `call_node.name` being in
   the declared `methods:`. The engine invokes it through

@@ -441,8 +441,8 @@ RSpec.describe Rigor::Scope do
     #   REACHED at all.
     # - `:receiver` — deliberately taken from the receiver alone. `discovery`, `source_path` and
     #   `lexical_nesting` describe where the code IS, not what a branch did. The three `*_origins` node tables
-    #   are advisory, compare-by-identity and shared by reference: passing only `mine` is the documented
-    #   contract, not an omission.
+    #   and `plugin_typed_calls` are advisory, compare-by-identity and shared by reference: passing only
+    #   `mine` is the documented contract, not an omission.
     # - `:required` — no default exists for it to silently fall back to.
     def join_field_groups
       { merged: %i[
@@ -451,7 +451,10 @@ RSpec.describe Rigor::Scope do
           struct_fold_safe_locals opaque_block_self
           local_origins ivar_origins optimistic_locals optimistic_ivars
         ],
-        receiver: %i[discovery source_path lexical_nesting dynamic_origins void_origins optimistic_origins],
+        receiver: %i[
+          discovery source_path lexical_nesting
+          dynamic_origins void_origins optimistic_origins plugin_typed_calls
+        ],
         required: %i[environment] }
     end
 
@@ -488,6 +491,7 @@ RSpec.describe Rigor::Scope do
         local_origins: { x: :cause }.freeze,
         ivar_origins: { :@i => :cause }.freeze,
         void_origins: { node => :cause }.compare_by_identity,
+        plugin_typed_calls: { node => true }.compare_by_identity,
         optimistic_origins: { node => :cause }.compare_by_identity,
         optimistic_locals: { x: :cause }.freeze,
         optimistic_ivars: { :@i => :cause }.freeze

@@ -306,6 +306,43 @@ RSpec.describe "plugins/rigor-railties" do
       expect(rules(result)).not_to include("call.undefined-method")
     end
 
+    it "stays silent when the project's own partial `sig/` declares `Rails` (#653)" do
+      # The reported repro: a project `sig/` (or a community RBS) declaring SOME of the `Rails` singleton
+      # surface makes the constant RBS-known, and the existence check then read that partial declaration as
+      # a closed world — three errors on working code, where deleting the four-line signature produced
+      # none. Adding RBS must never make a plugin-covered call site worse.
+      source = <<~RUBY
+        Rigor.dump_type(Rails.logger)
+        Rigor.dump_type(::Rails.logger)
+        ::Rails.logger.info("x")
+      RUBY
+      result = run_plugin(
+        source: source,
+        files: { "sig/rails.rbs" => "module Rails\n  def self.env: () -> String\nend\n" },
+        signature_paths: ["sig"]
+      )
+      expect(rules(result)).not_to include("call.undefined-method")
+      # Must-still-resolve: a `Rails` collapsed to `Dynamic` would be silent too.
+      expect(dumps(result)).to eq(["dump_type: ActiveSupport::BroadcastLogger"] * 2)
+    end
+
+    it "CONTROL: the declared half of that partial `sig/` still binds, and its gaps still fire (#653)" do
+      # The two discriminations for the example above. `Rails.env` IS declared, so it keeps type-checking
+      # against its signature (String, not the plugin's nominal); `Rails.no_such_reader` is answered by
+      # neither the RBS nor the plugin, so the rule still reports it — the suppression is per call site.
+      source = <<~RUBY
+        Rigor.dump_type(Rails.env)
+        Rails.no_such_reader
+      RUBY
+      result = run_plugin(
+        source: source,
+        files: { "sig/rails.rbs" => "module Rails\n  def self.env: () -> String\nend\n" },
+        signature_paths: ["sig"]
+      )
+      expect(dumps(result)).to eq(["dump_type: String"])
+      expect(rules(result)).to include("call.undefined-method")
+    end
+
     it "CONTROL: the harness fires undefined-method in this fixture shape" do
       # The must-fire sibling for the two negatives above — without it, a rule-id rename or an unanalysed
       # fixture would make them pass while reporting nothing.

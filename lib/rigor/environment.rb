@@ -38,9 +38,9 @@ module Rigor
     # ADR-87 WD4 boot-slimming probe can read it without loading the inference engine.
 
     # ADR-72 — a Gemfile.lock gem name mapped to the opt-in plugin id that ships the SAME core-ext RBS. When
-    # that plugin is loaded the auto-overlay for the gem stands down, so the two never both declare the
-    # methods (which would raise a duplicate-declaration error). Keyed on the gem name `RbsCoverageReport`
-    # reports.
+    # that plugin's signatures are reachable the auto-overlay for the gem stands down, so the two never both
+    # declare the methods (which would raise a duplicate-declaration error). Keyed on the gem name
+    # `RbsCoverageReport` reports.
     GEM_OVERLAY_PLUGIN_IDS = { "activesupport" => "activesupport-core-ext" }.freeze
 
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
@@ -253,11 +253,13 @@ module Rigor
         # extensions resolve (e.g. `Integer#minutes` on a Rails project) — turning a systematic false
         # `call.undefined-method` into a no-op while a project WITHOUT the gem still sees the genuine
         # diagnostic. Appended last so any RBS the project already supplies wins, and skipped for a gem whose
-        # opt-in plugin twin is loaded (no duplicate declaration). The paths ride in
-        # `loader_signature_paths`, so the env cache descriptor digests them for free.
+        # opt-in plugin twin is REACHABLE — loaded as a plugin, or wired in by `signature_paths:` (#672) —
+        # so the two never both declare the methods. The paths ride in `loader_signature_paths`, so the env
+        # cache descriptor digests them for free.
         missing_gems, overlay_paths = missing_gems_and_overlay_paths(
           locked: locked, default_libraries: merged_libraries, bundle_sig_paths: gem_sig_paths,
-          rbs_collection_paths: collection_paths, plugin_registry: plugin_registry
+          rbs_collection_paths: collection_paths, plugin_registry: plugin_registry,
+          signature_paths: resolved_paths
         )
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths +
                                  collection_paths + overlay_paths
@@ -329,27 +331,45 @@ module Rigor
       # and consumed twice: as `[gem_name, version]` pairs for the ADR-82 WD9 constant-ownership index, and
       # as the eligible-gem set for the ADR-72 overlay resolution. Returns `[pairs, overlay_paths]`.
       def missing_gems_and_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
-                                         rbs_collection_paths:, plugin_registry:)
+                                         rbs_collection_paths:, plugin_registry:, signature_paths: [])
         return [[], []] if locked.empty?
 
         rows = RbsCoverageReport.classify(
           locked_gems: locked, default_libraries: default_libraries,
           bundle_sig_paths: bundle_sig_paths, rbs_collection_paths: rbs_collection_paths
         ).select { |row| row.source == :missing }
-        overlays = gem_overlay_paths(missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry)
+        overlays = gem_overlay_paths(
+          missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry,
+          signature_paths: signature_paths
+        )
         [rows.map { |row| [row.gem_name, row.version] }, overlays]
       end
 
       # ADR-72 — resolve the bundled RBS overlay directories to load for this project. A gem is eligible when
-      # it is classified `:missing` (see {missing_rbs_gem_rows}) and its conflicting opt-in plugin (if any)
-      # is not loaded. Returns `[Pathname]`, deterministically ordered, or `[]` when no eligible gem.
-      def gem_overlay_paths(missing_gem_names:, plugin_registry:)
+      # it is classified `:missing` (see {missing_rbs_gem_rows}) and its conflicting opt-in plugin twin (if
+      # any) is NOT already reachable. Returns `[Pathname]`, deterministically ordered, or `[]` when no
+      # eligible gem.
+      #
+      # "Reachable" is two questions, not one. The plugin being LOADED is the route ADR-72 anticipated. The
+      # second is the route issue #672 found: a project that wires the plugin's signatures through
+      # `signature_paths:` instead of `plugins:` reaches the same `.rbs` with no registry entry to key on, so
+      # both halves loaded, `RBS::DefinitionBuilder` raised `DuplicatedMethodDefinitionError` for every class
+      # they share, and each one silently degraded to `Dynamic[top]` — the run reported LESS while exiting 0.
+      #
+      # This method keeps the POLICY (which gem maps to which plugin id, and when an overlay is eligible at
+      # all); `RbsLoader.bundled_overlay_twin_signatures_loaded?` answers the filesystem half, beside the
+      # overlay-side answer to the same question, and carries the reasoning for why it asks what an entry
+      # LOADS rather than what it looks like.
+      def gem_overlay_paths(missing_gem_names:, plugin_registry:, signature_paths: [])
         return [] if missing_gem_names.empty?
 
         loaded_ids = plugin_registry ? plugin_registry.ids.to_set : Set.new
         eligible = missing_gem_names.reject do |gem_name|
           plugin_id = GEM_OVERLAY_PLUGIN_IDS[gem_name]
-          plugin_id && loaded_ids.include?(plugin_id)
+          next false unless plugin_id
+
+          loaded_ids.include?(plugin_id) ||
+            RbsLoader.bundled_overlay_twin_signatures_loaded?(plugin_id, signature_paths)
         end.sort
         RbsLoader.gem_overlay_sig_paths(eligible)
       end

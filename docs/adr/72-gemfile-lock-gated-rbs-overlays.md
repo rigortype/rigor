@@ -72,11 +72,47 @@ iff:
   classifies it `:missing` (not a default library, vendored stub,
   bundle-`sig/`, or `rbs collection` entry), AND
 - Rigor bundles an overlay for it (`data/gem_overlay/<gem>/`), AND
-- the opt-in plugin that ships the same signatures is not loaded
+- the opt-in plugin that ships the same signatures is not **reachable**
   (`GEM_OVERLAY_PLUGIN_IDS` maps `activesupport` →
-  `activesupport-core-ext`; when that plugin id is in the registry the
-  overlay stands down, so the two never both declare the methods and
-  raise `RBS::DuplicatedDeclarationError`).
+  `activesupport-core-ext`; the overlay stands down so the two never both
+  declare the methods and raise `RBS::DuplicatedDeclarationError`).
+
+Reachable is two questions, not one. The plugin id being in the registry
+is the route this ADR first anticipated. Issue #672 found the second: a
+project that wires the plugin's signatures through `signature_paths:`
+rather than `plugins:` reaches the same `.rbs` with no registry entry to
+key on, so both halves loaded and every class they share collapsed —
+`RBS::DefinitionBuilder` raised `DuplicatedMethodDefinitionError` while
+`class_known?` kept saying yes, and the run reported *less* while still
+exiting 0. The stand-down therefore also asks whether the user's own
+`signature_paths:` already **load** the engine's bundled twin `sig/`
+(`Plugin::Loader.bundled_plugin_sig_path`).
+
+**Load, not look like.** The test is whether an entry is a directory
+that `RbsLoader.project_sig_files` — the loader's own acceptance test —
+would read one of the twin's `.rbs` files from, with both sides
+canonicalised through `File.realpath`. Comparing path strings is wrong
+in both directions, and the false-positive direction is the expensive
+one: `signature_paths:` naming the twin's `.rbs` *file*, or a
+subdirectory of the twin that does not exist, match the twin as strings
+while the loader reads nothing from them (`SignaturePathAudit` reports
+them `:not_directory` / `:missing`). Standing the overlay down for those
+leaves the project with *neither* copy, so ordinary `3.minutes` and
+`"x".camelize` draw `call.undefined-method` — a check firing on correct
+code, which WD2 and [ADR-5](5-robustness-principle.md) both forbid.
+The quiet direction is the mirror image: a symlink to the twin, or a
+case-variant spelling of it where the filesystem folds case, loads the
+twin's declarations while matching no prefix, so the overlay would stay
+and the class would collapse. Canonicalising resolves both.
+
+**Still not a content test.** A *vendored copy* of these signatures
+collides identically and is deliberately not caught: catching it means
+standing the overlay down on a declaration overlap, and then every
+selector the copy omits becomes a fresh `call.undefined-method` on
+correct code — WD2's forbidden direction again — while an edited copy
+defeats the test anyway. The vendored copy keeps the collision report
+instead of a guess, and how loud that report should be is
+[#696](https://github.com/rigortype/rigor/issues/696).
 
 Lockfile resolution piggybacks on `bundler.auto_detect` (default
 **true**), so the fix is on by default for any project with a

@@ -391,18 +391,51 @@ the block carries logic and runs through `instance_exec`:
     site, not per receiver class**: it is narrower than the
     `open_receivers:` exemption below, and a name neither the RBS nor
     any plugin answers still reports on the same receiver.
-    - The precedence is **unconditional on what the RBS says**, not
-      "only where the RBS is silent": it restates the dispatcher's own
-      tier order, and the dispatcher does not consult the RBS before
-      letting a plugin answer. Plugins that answer a method their
-      coexisting RBS also declares are ordinary and shipping —
+    - **This rule does not rest on which subsystem outranks the other.**
+      A method the receiver's RBS declares resolves through the rule's
+      own `lookup_method` and never reaches the diagnostic, so
+      `call.undefined-method` fires identically whether the record is
+      read as "a plugin answer wins outright" or as "a plugin answer
+      wins where the RBS is silent". The record is consulted for every
+      plugin answer only because that is the cheaper and more honest
+      shape, not because this section is settling the precedence.
+    - **Open divergence — the engine and
+      [ADR-2](../adr/2-extension-api.md) § "Plugin Contribution
+      Merging" disagree, and this section does not resolve it.** The
+      ADR puts plugins in a lower authority tier than accepted RBS:
+      "Lower tiers must not weaken or contradict higher tiers.
+      Lower-tier contributions that contradict a higher tier are
+      diagnostics, not silent overrides", and specifically "Return
+      types from dynamic return extensions are checked against the
+      selected signature. A plugin may narrow within the contract; an
+      incompatible return is a conflict diagnostic, not a contract
+      override." The shipped engine does not implement that check. The
+      `dynamic_return` tier has sat ABOVE `RbsDispatch` in
+      `MethodDispatcher#resolve` since v0.1.1, and an incompatible
+      plugin return therefore overrides the declared one **silently**,
+      with no conflict diagnostic: an RBS `def self.logger: () ->
+      Integer` alongside a plugin answering `Frameworkish::Logger`
+      types the site `Frameworkish::Logger` and reports nothing.
+      Bundled plugins depend on the shipped behaviour —
       `rigor-activesupport-core-ext`'s `%i[+ - *]` rule deliberately
-      overrides the *fully declared* core `Time#-` / `Integer#*`
-      signatures because the RBS-projected return is wrong once a
-      `Duration` is the operand, and `rigor-dry-validation` refines a
-      `to_h` its own bundled `sig/` declares. For this rule the two
-      readings coincide anyway — a method the RBS declares resolves and
-      never reaches the diagnostic.
+      answers over the *fully declared* core `Time#-` / `Integer#*`
+      because the RBS-projected return is wrong once a `Duration` is
+      the operand (`Time.now - 30.minutes` projects `Float`), while
+      `rigor-dry-validation` refines a `to_h` its own bundled `sig/`
+      declares, which is the narrowing ADR-2 permits. Which document
+      gives is a decision, filed for adjudication; nothing here
+      supersedes ADR-2. It is recorded so the two documents stop
+      contradicting each other in silence.
+    - **The suppression is only as sound as the plugin's own receiver
+      gate.** `receivers:` matches a class NAME and does not
+      discriminate `Singleton[C]` from `Nominal[C]`, so an ordinary
+      instance-method rule (`receivers: ["Widget"], methods: [:price]`)
+      also answers `Widget.price`, and this record then silences a
+      genuine `undefined method 'price' for singleton(Widget)` on the
+      plugin's say-so. The receiver-kind gap is pre-existing and
+      tracked separately; no bundled plugin is exposed today (the three
+      `receivers:` rules without a `Nominal` guard are actionpack's,
+      whose classes ship no RBS).
     - The two rules that read a RESOLVED SIGNATURE (`call.wrong-arity`,
       `call.argument-type-mismatch`) are **not** covered by this record
       today: at a plugin-answered site they still validate the call

@@ -666,8 +666,12 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
-          # The two exemptions that hold whatever shape the receiver has. Both sit ahead of the
-          # receiver-shape branch below, so the scalar and the union path are covered by the one gate.
+          # The two exemptions that hold whatever shape the receiver has. Ahead of the receiver-shape
+          # branch below because a plugin is consulted ONCE for the whole receiver, union included, so the
+          # gate belongs where that one consult is rather than duplicated into each shape's path. On the
+          # union side that is placement, not demonstrated coverage: no fixture reaches the gate through
+          # `union_undefined_method_diagnostic` today — every plugin-typed union anyone has built carries a
+          # `Singleton` arm, which `union_arm_blocks_undefined_fire?` declines on outright.
           # See {#call_site_exempt?}.
           return nil if call_site_exempt?(call_node, scope)
 

@@ -17,95 +17,97 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**Ten PRs landed 2026-09-03** through the worktree → adversarial-review → draft-PR pipeline:
-#654 (#626), #664 (#635), #666 (#632), #669 (#644), #675 (#658), #676 (#665), #677 (#623),
-#685 (#652), #688 (#674), #691 (#680), #692 (#681 census half), #694 (#683). The review rounds
-produced **27 new issues**, all with reproduced repros.
+**Thirteen PRs landed 2026-09-03**, the last three being #699 (#672 overlay stand-down), #702 (#653
+plugin-typed calls) and #706 (#690 path constant writes). The review rounds produced **37 new
+issues**, all with reproduced repros.
 
-Two multi-PR arcs closed, and both are worth knowing before picking up their leftovers.
+Three arcs are now closed or nearly so. Read the arc before picking up its leftovers.
 
-**Constant resolution.** #685 stopped the engine reconstructing lexical nesting by string-peeling a
-qualified name (which cannot tell a compact `class A::B` from the nested spelling) and made it
-RECORDED at declaration time, closing constant reads, `is_a?`, `case`/`when` and `===` in one repair.
-#692 did the same for `ScopeIndexer`'s four census scopes. **What remains is
-[#681](https://github.com/rigortype/rigor/issues/681)** — the callee re-walk
-(`ExpressionTyper#build_user_method_body_scope`), now the ONLY `Scope.new(… self_type:)` in `lib/`,
-so it is the last of that family. Unlike the census half it needs the def-node index to carry the
-chain; there is no prefix in hand. Siblings: [#690](https://github.com/rigortype/rigor/issues/690)
-(FP-capable, see below), [#682](https://github.com/rigortype/rigor/issues/682) (superclass names
-still peel), [#655](https://github.com/rigortype/rigor/issues/655),
+**Constant resolution** — the engine no longer reconstructs lexical nesting from a qualified-name
+string. #685 records `Module.nesting` at declaration time (only a `class`/`module` keyword pushes;
+`def`, blocks and `class << expr` inherit), #692 did the census scopes, #706 did path writes and
+introduced *declining* a write whose base is not statically nameable rather than guessing a name.
+**What remains: [#681](https://github.com/rigortype/rigor/issues/681)** (the callee re-walk — the
+only `Scope.new(… self_type:)` left in `lib/`, and it needs the def-node index to carry the chain,
+not a stamp), plus [#682](https://github.com/rigortype/rigor/issues/682),
+[#705](https://github.com/rigortype/rigor/issues/705) (three more places that still guess a bare
+name), [#655](https://github.com/rigortype/rigor/issues/655),
 [#656](https://github.com/rigortype/rigor/issues/656),
 [#662](https://github.com/rigortype/rigor/issues/662).
 
-**Absence assertions passing on crashed analysis.** A raising check rule leaves ONE
-`internal analyzer error` diagnostic and discards the rest, so `not_to include` / `to be_empty` /
-`all(eq(...))` all pass. #676 guarded the shared helpers, #688 the ~200 local wrappers (1,177 of
-1,925 examples had been passing with every rule crashing), #694 `IncrementalSession`. **Two entry
-points remain and neither is reachable from the spec side** — they run `Runner#run` inside `lib/`:
-[#686](https://github.com/rigortype/rigor/issues/686) (`ClosureKillOracle` scores a crashed run as a
-*survivor*, inflating the mutation harness's headline signal in the direction that manufactures work)
-and the `SystemExit`-escapes-the-runner's-`StandardError`-rescue hole named in
-[#680](https://github.com/rigortype/rigor/issues/680)'s PR. A `Result#crashed?` predicate would serve
-both plus the spec guard from one definition instead of three string matches.
+**Analysis that reports LESS while exiting 0.** #676/#688/#694 closed the three spec-side entry
+points (1,177 of 1,925 examples had been passing with every check rule crashing). Two remain, both
+running `Runner#run` inside `lib/` where no spec wrapper reaches:
+[#686](https://github.com/rigortype/rigor/issues/686) (`ClosureKillOracle` scores a crashed run a
+*survivor*, inflating the mutation harness's headline in the direction that manufactures work) and
+[#696](https://github.com/rigortype/rigor/issues/696) (a `DuplicatedMethodDefinitionError` leaves a
+class known-but-empty; a vendored RBS copy collapses the whole type universe on a green run). **A
+`Result#crashed?` predicate would serve both plus the existing guard from one definition** instead of
+three string matches. Same family, different surface:
+[#698](https://github.com/rigortype/rigor/issues/698) (five snapshot fixtures with no golden report
+*pending*, so that gate is off) and [#704](https://github.com/rigortype/rigor/issues/704) (a
+plugins-route spec can pass with an empty registry).
+
+**Plugin/RBS precedence.** #702 stopped a plugin-typed call being re-decided from the RBS — *writing
+more RBS no longer makes diagnostics worse*. It also surfaced that **ADR-2 says the opposite of what
+ships**: an incompatible `dynamic_return` is meant to be a conflict diagnostic, and has silently
+overridden RBS since v0.1.1. [#700](https://github.com/rigortype/rigor/issues/700) is that
+adjudication (ready-for-human); [#701](https://github.com/rigortype/rigor/issues/701) and
+[#697](https://github.com/rigortype/rigor/issues/697) are its neighbours, and
+[#660](https://github.com/rigortype/rigor/issues/660) is the ADR-26 question they keep pointing at.
 
 ## Backlog, ranked
 
-1. **[#690](https://github.com/rigortype/rigor/issues/690)** — `Foo::BAR = Post` inside a `module`
-   fires `undefined-method` on correct code. Two compounding causes (the entry is mis-keyed on the
-   as-written name AND its rvalue is typed at top level); fixing only one leaves the firing.
-2. **[#653](https://github.com/rigortype/rigor/issues/653)** — a plugin-typed call still reports
-   `call.undefined-method` when a partial RBS declares the receiver, so *writing more RBS makes a
-   project's diagnostics worse*. Cheap; removes a perverse incentive.
-3. **[#672](https://github.com/rigortype/rigor/issues/672)** — a gem overlay does not stand down for
-   `signature_paths:`, so both halves load, the class collapses to `Dynamic`, and the run exits 0
-   with **zero** diagnostics. Same "reports less, still green" family as the guard work.
-4. **[#681](https://github.com/rigortype/rigor/issues/681)** (above) and
-   **[#689](https://github.com/rigortype/rigor/issues/689)** — after #691, `Acceptance.resolve_class`
-   no longer kills the run but still EXECUTES an autoload silently. The bug stopped announcing
-   itself; urgency down, care needed up.
-5. **[#574](https://github.com/rigortype/rigor/issues/574)** (ready-for-HUMAN) — still the sole
-   blocker on the corpus's biggest pair (`Parameters#[]`, 581 redmine + 496 mastodon). Measurement
-   DONE on the issue; not agent-adjudicable.
-6. Rails/AR follow-ups with repros: [#658](https://github.com/rigortype/rigor/issues/658)'s
-   descendants [#659](https://github.com/rigortype/rigor/issues/659) (unblocked),
-   [#670](https://github.com/rigortype/rigor/issues/670) (note the `-> self` sizing comment),
-   [#673](https://github.com/rigortype/rigor/issues/673), plus
+1. **[#705](https://github.com/rigortype/rigor/issues/705)** — three FP-producing places that still
+   guess a bare name from a non-nameable base. Do A first: it unblocks a regression witness #706
+   could not write.
+2. **[#696](https://github.com/rigortype/rigor/issues/696)** + **[#686](https://github.com/rigortype/rigor/issues/686)**
+   via a shared `Result#crashed?`.
+3. **[#681](https://github.com/rigortype/rigor/issues/681)** — the last constant-resolution member.
+4. **[#700](https://github.com/rigortype/rigor/issues/700)** (human) and
+   **[#660](https://github.com/rigortype/rigor/issues/660)** (human) — two ADR questions the plugin
+   work keeps deferring to. Answering them unblocks #697 and #701 cleanly.
+5. **[#574](https://github.com/rigortype/rigor/issues/574)** (human) — still the sole blocker on the
+   corpus's biggest pair (`Parameters#[]`, 581 redmine + 496 mastodon).
+6. Rails/AR: [#658](https://github.com/rigortype/rigor/issues/658)'s descendants
+   [#659](https://github.com/rigortype/rigor/issues/659) (unblocked),
+   [#670](https://github.com/rigortype/rigor/issues/670),
+   [#673](https://github.com/rigortype/rigor/issues/673); plus
    [#678](https://github.com/rigortype/rigor/issues/678),
    [#679](https://github.com/rigortype/rigor/issues/679),
    [#671](https://github.com/rigortype/rigor/issues/671).
 
-## Measurement — read this before writing a gate or trusting a number
+## Measurement — read before writing a gate or trusting a number
 
 - **A gate an issue prescribes can be green while the change ships FPs.** #632's was "no new firing
-  on redmine/mastodon"; those configs scope `paths: [app, lib]` while the affected sites were under
-  `spec/` and in ERB fixtures. Only an adversarial fixture found the nine.
-- **A collapsed class, and a crashed run, both produce zero diagnostics** — so "nothing fires"
-  passes on the failure. Gate on a declared return RESOLVING, or on the autoload NOT having fired.
-- **"Byte-identical diagnostics" is often inert, not probative.** `lib/rigor` and `plugins/*` contain
-  ZERO compact declarations; mastodon's stream over the relevant files is almost all plugin rows.
-  #692's answer is the pattern to copy: a Prism probe counting sites that CAN move, then adjudicating
-  each — it found a real mastodon instance that moves no diagnostic at all.
-- `rigor check` on an explicit FILE LIST can fire a false `undefined-method` the same check over the
-  DIRECTORY does not ([#684](https://github.com/rigortype/rigor/issues/684)), so per-directory sums
-  over-report. Pass directories.
-- CRuby's `lib/` was probed for opacity this cycle: stdlib-proper precision **72.7%**, whole tree
-  64.5% (vendored bundler/rubygems is 65% of the named-receiver residue). The top stdlib clusters are
-  all honest `void`/`untyped` — non-levers. Note the lens counts `-> void` as opaque.
+  on redmine/mastodon"; those configs scope `paths: [app, lib]` and the sites were elsewhere.
+- **A collapsed class, a crashed run, and an empty plugin registry all produce zero diagnostics** —
+  "nothing fires" passes on each. Gate on a declared return RESOLVING, or on the autoload not having
+  fired, or on the plugin being registered.
+- **"Byte-identical diagnostics" is usually inert, not probative.** The pattern that works is #692's
+  and #706's: a Prism probe counting the sites that CAN move, then adjudicating each. #706's found a
+  real mastodon instance that moves no diagnostic at all.
+- `rigor check` on a FILE LIST can fire a false `undefined-method` the same check over the DIRECTORY
+  does not ([#684](https://github.com/rigortype/rigor/issues/684)) — pass directories.
+- CRuby's `lib/` opacity, probed this cycle: stdlib-proper precision **72.7%**, whole tree 64.5%
+  (vendored bundler/rubygems is 65% of the named-receiver residue). The top stdlib clusters are all
+  honest `void`/`untyped`. The lens counts `-> void` as opaque.
 
-## Pipeline notes (each earned by an incident this cycle)
+## Pipeline notes (each earned by an incident)
 
-- **A "found it" report is reproducible; its CHARACTERISATION is not.** Three issues were filed with
-  the implementer's framing and had to be corrected after review measured it — #684's mechanism,
-  #689's scope, and #690, filed as "FP-safe" when it fires on correct code. File the repro; verify
-  the framing separately.
-- **Check a normative `MUST` against the code it ships with.** Four branches this cycle wrote spec
-  text broader than their implementation; every one was caught by review, none by a gate.
-- **A gate is not safe because it exists.** #688's satisfaction rule was textual (a comment naming
-  the constant laundered a run); #694's extension then introduced an FP that rejected the exact
-  manual shape the gate's own message recommends.
-- Workers: find affected specs by GREPPING changed identifiers (two files are named
-  `pre_eval_constants_spec.rb`); lint your own diff with
-  `git diff --name-only origin/master...HEAD | grep '\.rb$' | xargs rubocop --force-exclusion`.
-- Landing traps that LOOK like a red gate: `gh pr view --json headRefOid` lags a push; editing a
-  script while a background invocation runs it corrupts that process. File the follow-up issue
-  BEFORE opening the PR that cites it — a PR twice took the number it referenced.
+- **A finding's REPRO is reproducible; its CHARACTERISATION is a separate claim.** Five issues were
+  filed this cycle with an implementer's or reviewer's framing and had to be corrected after someone
+  measured it — including one filed "FP-safe" that fires on correct code. Verify the framing.
+- **Grepping your changed identifiers is necessary but NOT sufficient.** Structural guards ENUMERATE
+  a surface: `public_api_drift_spec` (public method lists), `scope_spec`'s field coverage
+  (constructor keywords), `project_pre_passes_spec` (Discovery slots), `precision_snapshot_spec`
+  (goldens). None names what you added. Check by COMPUTING what they pin. Three workers were caught
+  by these this cycle; when one goes red, moving the method somewhere unpinned usually beats editing
+  the snapshot.
+- **Check a normative `MUST` against the code it ships with.** Five branches this cycle shipped spec
+  text broader than their implementation; all were caught by review, none by a gate.
+- Read gate exit codes UNPIPED; lint your own diff with
+  `git diff --name-only origin/master...HEAD | grep '\.rb$' | xargs rubocop --force-exclusion`;
+  push a rebased branch with `--force-with-lease`; file a follow-up issue BEFORE opening the PR that
+  cites it (a PR twice took the number it referenced).
+- A version-RANGE dependency is only proven by the compat job: reproduce it at BOTH ends locally.

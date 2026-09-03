@@ -966,6 +966,12 @@ module Rigor
 
       # ADR-20 slice 2e — iterates over every `%a{...}` annotation attached to a class- or module-level
       # declaration in the loaded RBS environment, yielding `(annotation_string, source_location)` pairs.
+      #
+      # Declarations come from {.entry_declarations}, NOT from a direct `entry.each_decl`: that accessor is
+      # RBS 4.x-only, so the direct call raised `NoMethodError` on every RBS 3.x host — inside a rescue that
+      # deliberately does not swallow `NoMethodError`. It stayed latent because nothing the `rbs-compat` job
+      # runs reached an annotated declaration until #672 added a spec under `spec/rigor/environment` that
+      # drives a whole `Runner`.
       # Used by {Rigor::Inference::HktRegistry.scan_rbs_loader} to find `rigor:v1:hkt_register` /
       # `rigor:v1:hkt_define` directives in user-authored overlays and merge them into the per-`Environment`
       # HKT registry. Yields nothing when the env failed to build (fail-soft, same shape as
@@ -975,7 +981,7 @@ module Rigor
         return if env.nil?
 
         env.class_decls.each_value do |entry|
-          entry.each_decl do |decl|
+          self.class.entry_declarations(entry).each do |decl|
             next unless decl.respond_to?(:annotations)
 
             decl.annotations.each { |a| yield a.string, a.location }
@@ -996,7 +1002,7 @@ module Rigor
         return if env.nil?
 
         env.class_decls.each do |rbs_name, entry|
-          entry.each_decl do |decl|
+          self.class.entry_declarations(entry).each do |decl|
             next unless decl.respond_to?(:annotations)
 
             decl.annotations.each { |a| yield rbs_name.to_s, a.string, a.location }

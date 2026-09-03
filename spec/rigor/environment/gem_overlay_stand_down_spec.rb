@@ -25,6 +25,18 @@ end
 $LOAD_PATH.unshift(AS_STAND_DOWN_PLUGIN_LIB) unless $LOAD_PATH.include?(AS_STAND_DOWN_PLUGIN_LIB)
 require "rigor-activesupport-core-ext"
 
+# Re-registers whatever an EARLIER spec file's `Rigor::Plugin.unregister!` cleared. The suite calls that
+# pervasively (see `spec_helper.rb`) while the `require` above is a once-per-process no-op, so by the time
+# this file runs the registry may be empty and the loader would resolve nothing — the plugin then silently
+# does not load and the `plugins:` example measures a plugin-less run. That is how the first version of this
+# file passed alone and failed on CI. `Plugin.register` is idempotent for the same class, so calling it
+# unconditionally is safe. Paired with the `{gem:, id:}` entry form below, which resolves by id rather than
+# by the loader's newly-registered delta — the delta is empty here by construction.
+AS_STAND_DOWN_PLUGIN_REQUIRER = lambda do |_name|
+  Rigor::Plugin.register(Rigor::Plugin::ActivesupportCoreExt)
+  true
+end
+
 RSpec.describe "ADR-72 gem-overlay stand-down" do
   # The engine's own bundled copy of the overlay's plugin twin — the directory a project reaches when it
   # points `signature_paths:` at the plugin instead of listing it under `plugins:`.
@@ -75,7 +87,11 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
         "plugins" => plugins,
         "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
       )
-      guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil))
+      guarded_run(
+        Rigor::Analysis::Runner.new(
+          configuration: configuration, cache_store: nil, plugin_requirer: AS_STAND_DOWN_PLUGIN_REQUIRER
+        )
+      )
     end
   end
 
@@ -85,6 +101,10 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
 
   def undefined_methods(result)
     result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:method_name)
+  end
+
+  def plugin_loader_messages(result)
+    result.diagnostics.select { |d| d.source_family == :plugin_loader }.map(&:message)
   end
 
   around do |example|
@@ -177,14 +197,17 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
       expect(undefined_methods(result)).to eq(["no_such_method_at_all"])
     end
 
-    # `3.minutes` reads `ActiveSupport::Duration` here and `Dynamic[top]` everywhere else in this file:
+    # `3.minutes` reads `ActiveSupport::Duration` here and `Dynamic[top]` on every other route in this file:
     # naming the class on a multiplier is the plugin's `dynamic_return` rule (#534), which no RBS route
-    # carries. That difference is the reason the `plugins:` route stays the recommended one, and pinning it
-    # keeps this example from passing on a run that merely resembled the plugin being loaded.
+    # carries. So that middle slot is this example's proof the plugin actually LOADED, and it is the reason
+    # the triple is not copyable between examples — `Dynamic[top]` there is precisely what a plugins-route
+    # run that loaded no plugin looks like, which is what this example did on CI before
+    # `AS_STAND_DOWN_PLUGIN_REQUIRER` existed. The load-error check is the second lock on the same door.
     it "leaves the `plugins:` route alone" do
       entry = { "gem" => "rigor-activesupport-core-ext", "id" => Rigor::Plugin::ActivesupportCoreExt.manifest.id }
       result = run_project(project, signature_paths: [File.join(project, "sig")], plugins: [entry])
 
+      expect(plugin_loader_messages(result)).to be_empty
       expect(dumps(result)).to eq(["String", "ActiveSupport::Duration", "Integer"])
       expect(undefined_methods(result)).to eq(["no_such_method_at_all"])
     end

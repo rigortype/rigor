@@ -1588,9 +1588,11 @@ module Rigor
       SELF_REBINDING_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec].freeze
       private_constant :SELF_REBINDING_EVAL_CALLS
 
-      # …and the ones whose block `self` reaches no class or module NAME: an `instance_eval` / `instance_exec`
-      # body evaluates on an INSTANCE (`self::BAR = …` raises `TypeError` there) and a `define_method` body on
-      # the receiver at call time.
+      # …and the ones whose block `self` this walk cannot name. An `instance_eval` / `instance_exec` body
+      # evaluates on the RECEIVER OBJECT, which is a class or module only when the receiver happens to be one
+      # (`Klass.instance_eval { self::BAR = 1 }` defines `Klass::BAR`; `obj.instance_eval` raises `TypeError`),
+      # and a `define_method` body on the receiver at call time. A syntactic walk cannot tell those apart, so
+      # the write is declined — gradual for the legal case, and no guess for the rest.
       OPAQUE_SELF_BLOCK_CALLS = %i[instance_eval instance_exec define_method].freeze
       private_constant :OPAQUE_SELF_BLOCK_CALLS
 
@@ -1598,6 +1600,10 @@ module Rigor
       # under it is DECLINED — the same answer a dynamic base takes, for the same reason.
       OPAQUE_SELF = :__rigor_opaque_self__
       private_constant :OPAQUE_SELF
+
+      # The owner whose constants the census spells BARE — `Object`'s constants are the top-level ones.
+      OBJECT_OWNER = "Object"
+      private_constant :OBJECT_OWNER
 
       def walk_constant_writes(node, qualified_prefix, default_scope, accumulator, self_owner = nil)
         return unless node.is_a?(Prism::Node)
@@ -1612,11 +1618,11 @@ module Rigor
           end
         when Prism::ConstantWriteNode
           record_constant_write(node, qualified_prefix, default_scope, accumulator,
-                                qualified_write_name(qualified_prefix, node.name.to_s))
+                                qualified_write_name(qualified_prefix, node.name.to_s), self_owner)
           return
         when Prism::ConstantPathWriteNode
           full = constant_path_write_key(node.target, qualified_prefix, default_scope, self_owner)
-          record_constant_write(node, qualified_prefix, default_scope, accumulator, full) if full
+          record_constant_write(node, qualified_prefix, default_scope, accumulator, full, self_owner) if full
           return
         end
 
@@ -1673,11 +1679,19 @@ module Rigor
       # which is why they are separate parameters. One parameter served both roles, so the path form had to
       # pass it EMPTY to keep the caller-supplied name intact — and that lost the key's qualification and the
       # rvalue's lexical context together, in the same argument.
-      def record_constant_write(node, enclosing_prefix, default_scope, accumulator, full)
+      #
+      # Issue #705 — and the rvalue needs BOTH halves of the context separately as well, because a
+      # `class_eval` block moves one and not the other. `Module.nesting` stays lexical, so a bare `Post` in
+      # `Other.class_eval { … }` inside `module Admin` is still `Admin::Post`; `self` becomes the RECEIVER, so
+      # `self` and an implicit-self call in the same block answer on `Other`. Reading the self type off
+      # `enclosing_prefix` typed `self::REF = self` as `singleton(Admin)` and `self::V = build` through
+      # `Admin.build` — wrong on correct code, and reachable at a reader the moment the key stopped being a
+      # guess. `self_owner` is a String exactly when the walk resolved a rebound `self`.
+      def record_constant_write(node, enclosing_prefix, default_scope, accumulator, full, self_owner = nil)
+        owner = self_owner.is_a?(String) ? self_owner : enclosing_prefix.join("::")
         body_scope = default_scope
-        unless enclosing_prefix.empty?
-          body_scope = census_body_scope(default_scope, enclosing_prefix,
-                                         Type::Combinator.singleton_of(enclosing_prefix.join("::")))
+        unless owner.empty?
+          body_scope = census_body_scope(default_scope, enclosing_prefix, Type::Combinator.singleton_of(owner))
         end
         rvalue_type = meta_new_constant_type(node, full) || body_scope.type_of(node.value)
         existing = accumulator[full]
@@ -1732,9 +1746,15 @@ module Rigor
       # module name where a `class_eval`-family block rebound `self` to one, and {OPAQUE_SELF} where it
       # rebound `self` to something unnameable, which declines the write (nil) rather than filing it under a
       # namespace Ruby did not touch ([#705](https://github.com/rigortype/rigor/issues/705)).
+      #
+      # `Object` is the one owner that is not a namespace of its own: its constants ARE the top-level ones, and
+      # every other census key spells those bare. Keying `Object::T` would file the write beside a sibling's
+      # plain `T = 2` instead of on top of it, so the conflict between them goes undetected and one of the two
+      # values publishes — the direction this whole issue is about.
       def self_write_name(qualified_prefix, self_owner, base)
         return qualified_write_name(qualified_prefix, base) if self_owner.nil?
         return nil if self_owner.equal?(OPAQUE_SELF)
+        return base if self_owner == OBJECT_OWNER
 
         "#{self_owner}::#{base}"
       end

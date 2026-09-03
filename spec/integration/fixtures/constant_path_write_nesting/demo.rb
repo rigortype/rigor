@@ -131,6 +131,23 @@ module Admin
   Evalled.class_eval { self::MARK = Post }
 end
 
+# Fixing the KEY is only half of it: the same swap moves the rvalue's `self`, and until it did, a wrong
+# type merely sat under a key no read arrived at. `self` in the block is the receiver, and so is the
+# receiver of an implicit-self call — while `Module.nesting` stays lexical, which is why the two halves
+# come from different places at the same site. The bare twin needs the second half just as much: its key
+# was always the lexical one, so it answered the enclosing module on master too.
+module Admin
+  def self.build = 1
+
+  class Evalled
+    def self.build = "s"
+  end
+
+  Evalled.class_eval { self::SELF_REF = self }
+  Evalled.class_eval { self::VIA_CALL = build }
+  Evalled.class_eval { BARE_SELF = self }
+end
+
 # A `class_eval` receiver that names no class leaves `self` unattributable, so the write is
 # DECLINED — the same answer a dynamic base takes, and for the same reason.
 module Admin
@@ -271,6 +288,25 @@ module Admin
     def read_loose_eval_write
       assert_type("singleton(Post)", LOOSE)
       LOOSE.new.top_post
+    end
+
+    # The rvalue's own `self`, which the key fix made reachable.
+    def read_class_eval_self_rvalue
+      assert_type("singleton(Admin::Evalled)", Evalled::SELF_REF)
+      Evalled::SELF_REF.evalled_only
+    end
+
+    # An implicit-self call in the block dispatches on the receiver, not on the enclosing module — the two
+    # own a `build` with different return types, so the wrong one fires rather than widening.
+    def read_class_eval_implicit_self_call
+      assert_type("String", Evalled::VIA_CALL)
+      Evalled::VIA_CALL.upcase
+    end
+
+    # The BARE twin, whose key was never wrong and whose rvalue always was.
+    def read_class_eval_bare_rvalue
+      assert_type("singleton(Admin::Evalled)", BARE_SELF)
+      BARE_SELF.evalled_only
     end
   end
 end

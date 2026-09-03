@@ -481,6 +481,16 @@ RSpec.describe "cross-file value constants" do
       expect(eval_duel("module N\n  [1].each { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
         .to eq(["Dynamic[top]", ":kept"])
     end
+
+    # `Object` is the one owner whose constants ARE the top-level ones. Keying `Object::LIMIT` files this
+    # write beside the sibling's plain `LIMIT` instead of on top of it, and the conflict between the two
+    # goes undetected — the direction a value gets published that the program may not have.
+    it "spells an `Object` owner BARE, so a sibling's plain write still conflicts with it" do
+      expect(dumps("b.rb" => "Object.class_eval { self::LIMIT = 7 }\n",
+                   "c.rb" => "LIMIT = 50\nKEPT = :kept\n",
+                   "a.rb" => "Rigor.dump_type(LIMIT)\nRigor.dump_type(KEPT)\n"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
   end
 
   # Issue #705 — a write whose base is not statically nameable renders in this census as the bare trailing

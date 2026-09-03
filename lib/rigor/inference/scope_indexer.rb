@@ -508,14 +508,41 @@ module Rigor
       # missing.
       def census_body_scope(default_scope, qualified_prefix, self_type)
         default_scope.with_self_type(self_type)
-                     .with_lexical_nesting(lexical_nesting_for_prefix(qualified_prefix))
+                     .with_lexical_nesting(census_nesting(default_scope, qualified_prefix))
+      end
+
+      # The chain a census walk answers `Module.nesting` with: the one {#scope_entering_declaration} threaded
+      # on the scope when a header was entered, and only failing that the prefix-derived approximation below.
+      def census_nesting(scope, qualified_prefix)
+        scope&.lexical_nesting || lexical_nesting_for_prefix(qualified_prefix)
+      end
+
+      # The scope a census walk threads into the body a `class` / `module` header opens: the scope it already
+      # threads, carrying that body's real `Module.nesting`.
+      #
+      # Issue #708 — the qualified prefix stopped being sufficient to DERIVE that chain. A rooted header
+      # RESETS the prefix (`class ::Rooted` inside `module Outer` prefixes `["Rooted"]`), so `Outer` is absent
+      # from it entirely and no function of the prefix alone recovers it, while Ruby keeps `Outer` on the
+      # ladder as a live rung. `Source::ConstantPath.pushed_nesting` — the one function both declaration walks
+      # already push with — has that case right, so the chain travels on the scope these walks thread anyway
+      # rather than through every walk's parameter list, and stays a single owner ([#652](https://github.com/rigortype/rigor/issues/652)).
+      def scope_entering_declaration(default_scope, constant_path)
+        return default_scope if default_scope.nil?
+
+        chain = Source::ConstantPath.pushed_nesting(default_scope.lexical_nesting || EMPTY_NESTING,
+                                                    constant_path)
+        chain ? default_scope.with_lexical_nesting(chain) : default_scope
       end
 
       # Ruby's `Module.nesting` for a body enclosed by `qualified_prefix`, innermost first: each entry is the
       # prefix truncated at one declaration, joined, so the compact spelling contributes exactly one entry and
-      # the nested spelling one per `class` / `module` keyword. Same shape as the chain
-      # `Inference::StatementEvaluator` records on the declaration walk, which is what makes the census agree
-      # with the body walk by construction rather than by coincidence.
+      # the nested spelling one per `class` / `module` keyword.
+      #
+      # **This is an approximation, and only correct when no ROOTED header encloses the body** — a rooted
+      # header resets the prefix without resetting Ruby's nesting, so the entries beneath the reset are not
+      # in the prefix to be truncated out of it (#708). It remains the answer for a caller that threaded no
+      # chain, where it is what the code did before and never a new firing; the walks that reach a body
+      # thread the real chain via {#scope_entering_declaration}.
       def lexical_nesting_for_prefix(qualified_prefix)
         (1..qualified_prefix.size).map { |n| qualified_prefix.first(n).join("::") }.reverse.freeze
       end
@@ -537,7 +564,8 @@ module Rigor
               # class-body level then writes `@x = SomeClass.new` inside an instance method gains an unjustified nil
               # widening at every read.
               collect_class_body_ivar_writes(node.body, child_prefix.join("::"), init_writes) if init_writes
-              walk_class_ivars(node.body, child_prefix, default_scope, accumulator,
+              walk_class_ivars(node.body, child_prefix,
+                               scope_entering_declaration(default_scope, node.constant_path), accumulator,
                                mutated_ivars, read_before_write, init_writes, method_assign_effects)
             end
             return
@@ -1363,7 +1391,10 @@ module Rigor
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
-            walk_class_cvars(node.body, child_prefix, default_scope, accumulator) if node.body
+            if node.body
+              walk_class_cvars(node.body, child_prefix,
+                               scope_entering_declaration(default_scope, node.constant_path), accumulator)
+            end
             return
           end
         when Prism::DefNode
@@ -1616,7 +1647,11 @@ module Rigor
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
-            walk_constant_writes(node.body, child_prefix, default_scope, accumulator) if node.body
+            if node.body
+              walk_constant_writes(node.body, child_prefix,
+                                   scope_entering_declaration(default_scope, node.constant_path),
+                                   accumulator)
+            end
             return
           end
         when Prism::ConstantWriteNode
@@ -1774,7 +1809,7 @@ module Rigor
       # and the ancestor rung {Reflection.resolve_constant_type} walks is deliberately skipped, so a
       # namespace no source declares keeps the key it has today rather than moving to a guess.
       def resolved_write_namespace(namespace, qualified_prefix, scope)
-        lexical_nesting_for_prefix(qualified_prefix).each do |entry|
+        census_nesting(scope, qualified_prefix).each do |entry|
           candidate = "#{entry}::#{namespace}"
           return candidate if known_namespace?(candidate, scope)
         end
@@ -2393,7 +2428,7 @@ module Rigor
         [accumulator[:superclasses].freeze, accumulator[:header_nestings].freeze]
       end
 
-      def walk_class_superclasses(node, qualified_prefix, accumulator, source_path = nil)
+      def walk_class_superclasses(node, qualified_prefix, accumulator, source_path = nil, nesting = EMPTY_NESTING)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -2402,28 +2437,70 @@ module Rigor
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
-            record_declaration_ancestry(node, qualified_prefix, child_prefix, accumulator)
-            walk_class_superclasses(node.body, child_prefix, accumulator) if node.body
+            record_declaration_ancestry(node, nesting, child_prefix, accumulator)
+            if node.body
+              walk_class_superclasses(node.body, child_prefix, accumulator, nil,
+                                      Source::ConstantPath.pushed_nesting(nesting, node.constant_path) ||
+                                      nesting)
+            end
             return
           end
         end
 
         node.rigor_each_child do |child|
-          walk_class_superclasses(child, qualified_prefix, accumulator, source_path)
+          walk_class_superclasses(child, qualified_prefix, accumulator, source_path, nesting)
         end
       end
 
       # One declaration's two ancestry facts: the as-written superclass name (classes only), and the
-      # `Module.nesting` its header is written in, which {#lexical_nesting_for_prefix} derives from the
-      # ENCLOSING prefix — the header is evaluated before the body is entered, so the declaration's own entry
-      # is not on the ladder its superclass name walks.
-      def record_declaration_ancestry(node, qualified_prefix, child_prefix, accumulator)
+      # `Module.nesting` its header is written in. `nesting` is the chain in force OUTSIDE the header — the
+      # header is evaluated before the body is entered, so the declaration's own entry is not on the ladder
+      # its superclass name walks — which is why the walk pushes only when it recurses into the body. The
+      # chain is threaded rather than derived from the enclosing prefix because a rooted header resets that
+      # prefix without resetting Ruby's nesting ([#708](https://github.com/rigortype/rigor/issues/708)).
+      def record_declaration_ancestry(node, nesting, child_prefix, accumulator)
         full = child_prefix.join("::")
-        add_header_nesting(accumulator[:header_nestings], full, lexical_nesting_for_prefix(qualified_prefix))
+        add_header_nesting(accumulator[:header_nestings], full, nesting) if declares_ancestor_name?(node)
         return unless node.is_a?(Prism::ClassNode)
 
         superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
         accumulator[:superclasses][full] = superclass if superclass
+      end
+
+      # Whether this declaration SITE writes an ancestor name — a superclass in its header, or a mixin call
+      # in its own body. Only such a site contributes a header nesting.
+      #
+      # Issue #708's review: a per-CLASS union of every site's chain is wrong for a rooted reopen inside
+      # another namespace. `class ::Foo; def extra = 1; end` written in `module Outer` contributed `["Outer"]`
+      # to `Foo`, and the ancestor rung then resolved `Foo`'s superclass `Base` as `Outer::Base` — a class
+      # Ruby never looks at, ahead of the right one, on a site that named no ancestor at all. A site that
+      # writes no ancestor name has no ancestor for its cref to govern, so it has nothing to say here.
+      #
+      # This keeps what the union was FOR. It was added because last-writer-wins let one rails TEST file
+      # reopening `ActiveRecord::Relation` compactly beat the library declaration, costing the class all nine
+      # of its `include`d modules; that reopen writes no ancestor name either, so it now contributes nothing
+      # rather than winning — the protection comes from the recording rule instead of from a merge rule.
+      # Two sites that BOTH write ancestor names still union, which is the conservative reading of an
+      # ambiguity one table cannot represent.
+      #
+      # The mixin scan stops at a nested declaration (that body's calls belong to the nested class) and is
+      # deliberately structural rather than exhaustive: a site whose only `include` hides inside a
+      # conditional records nothing and falls back to the peel, which is this walk's pre-#682 answer and
+      # never a new firing.
+      def declares_ancestor_name?(node)
+        return true if node.is_a?(Prism::ClassNode) && node.superclass
+
+        body = node.body
+        body ? mixin_call_in_body?(body) : false
+      end
+
+      def mixin_call_in_body?(node)
+        return false unless node.is_a?(Prism::Node)
+        return false if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+        return true if node.is_a?(Prism::CallNode) && node.receiver.nil? && MIXIN_CALL_NAMES.include?(node.name)
+
+        node.rigor_each_child { |child| return true if mixin_call_in_body?(child) }
+        false
       end
 
       # Adds one declaration site's header nesting to the per-class table, UNIONING it with what a

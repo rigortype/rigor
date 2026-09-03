@@ -49,6 +49,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
 
       class Shop::Compact
+        include Enumerable
         def build = 1
         def self.build_all = new
       end
@@ -95,9 +96,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
   end
 
   # Issue #682 — the value the parity above is carrying, spelled out: the compact `class Shop::Compact` in
-  # a.rb records the EMPTY header nesting (its superclass name would resolve at the top level), while the
-  # nested `module Shop; class Widget` in b.rb records `["Shop"]`. Both spellings render the class name they
-  # share, so nothing else in the index distinguishes them.
+  # a.rb records the EMPTY header nesting (its ancestor names resolve at the top level), while the nested
+  # `module Shop; class Widget` in b.rb records `["Shop"]`. Both spellings render the class name they share,
+  # so nothing else in the index distinguishes them. Each site names an ancestor — `Compact` an `include`,
+  # `Widget` a superclass — because #708's review made that the condition for recording a chain at all: a
+  # site that names no ancestor has none for its cref to govern.
   it "records the header nesting each spelling is written in" do
     Dir.mktmpdir do |dir|
       paths = write_project(dir)

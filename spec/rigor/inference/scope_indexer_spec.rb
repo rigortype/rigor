@@ -2149,17 +2149,29 @@ Unrelated
   class Widget < Base; end
 end
 ")
-      expect(table).to eq({ "Admin" => [], "Admin::Widget" => ["Admin"] })
+      expect(table).to eq({ "Admin::Widget" => ["Admin"] })
     end
 
     it "records one entry per declaration keyword for a doubly nested declaration" do
       table = header_nestings("module A
   module B
-    class C; end
+    class C < Base; end
   end
 end
 ")
       expect(table["A::B::C"]).to eq(["A::B", "A"])
+    end
+
+    # #708 review — a site that writes NO ancestor name has no ancestor for its cref to govern, so it
+    # contributes nothing. Recording it anyway is what let a rooted reopen inside another namespace put a
+    # foreign chain ahead of the right one for a class it named no ancestor of.
+    it "records nothing for a declaration that writes no ancestor name" do
+      expect(header_nestings("module Admin\n  class Widget; end\nend\n")).to eq({})
+    end
+
+    it "records a site whose only ancestor name is a mixin call" do
+      table = header_nestings("module Admin\n  class Widget\n    include Trackable\n  end\nend\n")
+      expect(table["Admin::Widget"]).to eq(["Admin"])
     end
 
     # #708 — a rooted header resets the class's NAME but not the cref its superclass name resolves in:
@@ -2182,14 +2194,17 @@ end
     # `module ActiveRecord` and a test file reopens it as the compact `class ActiveRecord::Relation`.
     # Last-writer-wins hands the library site the test file's EMPTY chain and its nine `include`s stop
     # resolving — the false-positive direction — so the two sites' chains are unioned instead.
-    it "unions the header nestings of a class reopened under two spellings" do
-      table = header_nestings("module Admin\n  class Widget; end\nend\nclass Admin::Widget; end\n")
+    it "keeps the declaring site's chain when a later site reopens the class and names no ancestor" do
+      table = header_nestings(
+        "module Admin\n  class Widget\n    include Trackable\n  end\nend\nclass Admin::Widget; end\n"
+      )
       expect(table["Admin::Widget"]).to eq(["Admin"])
     end
 
-    it "orders a unioned chain most-qualified first" do
+    it "unions two sites that BOTH name an ancestor, most-qualified first" do
       table = header_nestings(
-        "module A\n  module B\n    class C; end\n  end\nend\nmodule A\n  class B::C; end\nend\n"
+        "module A\n  module B\n    class C < Base; end\n  end\nend\n" \
+        "module A\n  class B::C\n    include M\n  end\nend\n"
       )
       expect(table["A::B::C"]).to eq(["A::B", "A"])
     end

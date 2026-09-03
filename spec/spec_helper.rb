@@ -103,7 +103,10 @@ RSpec.configure do |config|
   # spawns no Ractors unless RIGOR_POOL_BACKEND=ractor is exported; the exclusion is kept so an exported backend
   # override can never destabilise the main suite. Set `RIGOR_INCLUDE_RACTOR_POOL=1` to opt the file back in to a
   # same-process run.
-  config.exclude_pattern = "spec/rigor/analysis/runner_pool_spec.rb" unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
+  exclusions = []
+  exclusions << "spec/rigor/analysis/runner_pool_spec.rb" unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
+  exclusions << "spec/integration/plugins/*_spec.rb" unless ENV["RIGOR_INCLUDE_INTEGRATION_PLUGINS"]
+  config.exclude_pattern = exclusions.join(",") unless exclusions.empty?
 
   # ADR-93 WD2 — `Configuration.load` default-wires the bundled `rigor-rbs-inline` plugin whenever the upstream
   # `rbs-inline` library is resolvable, which it is under this repo's bundle. Left live, that would inject the

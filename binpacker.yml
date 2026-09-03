@@ -6,6 +6,7 @@ profiles:
     test_pattern: spec/**/*_spec.rb
     test_exclude:
       - spec/rigor/analysis/runner_pool_spec.rb
+      - spec/integration/plugins/*_spec.rb
     scheduler:
       algorithm: lpt
 

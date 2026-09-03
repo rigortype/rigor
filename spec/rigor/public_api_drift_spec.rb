@@ -631,11 +631,7 @@ RSpec.describe "Public API drift", :public_api_drift do
     collected = []
     cursor = klass
     while cursor
-      methods = cursor.public_instance_methods(false).reject do |name|
-        loc = cursor.instance_method(name).source_location
-        loc && loc[0].include?("/plugins/")
-      end
-      collected.concat(methods)
+      collected.concat(cursor.public_instance_methods(false))
       parent = cursor.superclass
       break unless parent && parent.name.nil? && parent != Object
 
@@ -645,11 +641,7 @@ RSpec.describe "Public API drift", :public_api_drift do
   end
 
   def singleton_signatures(klass)
-    methods = klass.singleton_methods(false).reject do |name|
-      loc = klass.method(name).source_location
-      loc && loc[0].include?("/plugins/")
-    end
-    methods.sort.map { |name| signature(klass.method(name)) }
+    klass.singleton_methods(false).sort.map { |name| signature(klass.method(name)) }
   end
 
   describe "Rigor::Scope" do

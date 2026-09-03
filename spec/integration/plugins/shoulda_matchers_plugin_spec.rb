@@ -22,7 +22,9 @@ require "fileutils"
 require "tmpdir"
 
 SHOULDA_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-shoulda-matchers/lib", __dir__)
-ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-activerecord/lib", __dir__)
+unless defined?(ACTIVERECORD_PLUGIN_LIB)
+  ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-activerecord/lib", __dir__)
+end
 $LOAD_PATH.unshift(SHOULDA_PLUGIN_LIB) unless $LOAD_PATH.include?(SHOULDA_PLUGIN_LIB)
 $LOAD_PATH.unshift(ACTIVERECORD_PLUGIN_LIB) unless $LOAD_PATH.include?(ACTIVERECORD_PLUGIN_LIB)
 require "rigor-shoulda-matchers"

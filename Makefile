@@ -90,6 +90,12 @@ test:
 test-ractor-pool:
 	RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec spec/rigor/analysis/runner_pool_spec.rb
 
+# Plugin integration tests are excluded from the default suite because they modify global state (Test Pollution).
+# Specifically, rigor-ffi re-opens Rigor::Plugin::Base to define DSL macros.
+# Running them in a separate RSpec process avoids flaky failures in public_api_drift_spec.rb.
+test-integration-plugins:
+	RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec spec/integration/plugins/
+
 # Spec suite via `binpacker`, distributing files across worker
 # processes using LPT scheduling driven by measured per-file
 # runtimes (tmp/binpacker.timings). On a cold start (no timings
@@ -234,12 +240,12 @@ effect-budget:
 # sequential variant below). Use `verify-sequential` when chasing
 # parallel-only flakes — the worker isolation hides certain
 # ordering bugs that surface only in a single-process run.
-verify: test-binpacker test-ractor-pool lint check check-plugins
+verify: test-binpacker test-ractor-pool test-integration-plugins lint check check-plugins
 
 # Sequential variant. Identical phases as `verify` but `test`
 # runs single-process. Slower but bit-for-bit reproducible
 # without inter-worker scheduling effects.
-verify-sequential: test test-ractor-pool lint check check-plugins
+verify-sequential: test test-ractor-pool test-integration-plugins lint check check-plugins
 
 # Backward-compatible alias for the previous `verify-parallel`
 # target name. Identical to `verify` now that parallel is the

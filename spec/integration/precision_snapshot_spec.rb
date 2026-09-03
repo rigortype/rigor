@@ -132,7 +132,7 @@ end
 RSpec.describe "Precision snapshots (inference regression gate)" do
   if UPDATE_TARGET_ERROR
     it "resolves the UPDATE_SNAPSHOTS selection to real fixtures" do
-      raise UPDATE_TARGET_ERROR
+      expect(UPDATE_TARGET_ERROR).to be_nil, UPDATE_TARGET_ERROR
     end
   elsif UPDATE_TARGETS.any?
     # One unloadable fixture MUST NOT cost the whole regeneration: every other snapshot is still written, and

@@ -151,7 +151,8 @@ module Rigor
       def descend_class_or_module(node, qualified_prefix, in_singleton_class, source_path, entries)
         name = Source::ConstantPath.qualified_name_or_nil(node.constant_path)
         if name && node.body
-          walk_node(node.body, qualified_prefix + [name], in_singleton_class, source_path, entries)
+          child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
+          walk_node(node.body, child_prefix, in_singleton_class, source_path, entries)
         else
           walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
         end

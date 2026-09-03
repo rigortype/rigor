@@ -23,6 +23,7 @@ require "spec_helper"
 module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   SCOPE_INSTANCE = %w[
     ==(req:other)
+    ancestor_name_candidates(req:subclass_qualified,req:raw_ancestor)
     bindable_top_level_def_for(req:method_name)
     class_cvars()
     class_cvars_for(req:class_name)

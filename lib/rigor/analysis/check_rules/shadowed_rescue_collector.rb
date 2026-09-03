@@ -88,8 +88,7 @@ module Rigor
         def extend_prefix(node, prefix)
           return prefix unless node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
 
-          name = Source::ConstantPath.qualified_name(node.constant_path)
-          name ? prefix + [name] : prefix
+          Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
         end
 
         def collect_begin(node, prefix)

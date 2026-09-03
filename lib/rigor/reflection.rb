@@ -266,17 +266,14 @@ module Rigor
     end
     private_class_method :compute_ancestor_constant_scopes
 
-    # Resolves an ancestor name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) against the
-    # subclass's lexical nesting, innermost first — the same walk
-    # `ExpressionTyper#compute_ancestor_class_name` performs for method lookup. Returns nil when no
-    # candidate names a discovered project class or module.
+    # Resolves an ancestor name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) against the nesting in
+    # force where the subclass's header is written — `Scope#ancestor_name_candidates`, the single
+    # owner of that order, which `Scope#enqueue_ancestors` reads for method lookup and the
+    # override-visibility rule reads for its own walk. Returns nil when no candidate names a
+    # discovered project class or module.
     def resolve_ancestor_name(subclass_qualified, raw, scope)
-      segments = subclass_qualified.split("::")
-      (segments.length - 1).downto(0) do |i|
-        candidate = (segments[0, i] + [raw]).join("::")
-        return candidate if known_project_namespace?(candidate, scope)
-      end
-      nil
+      scope.ancestor_name_candidates(subclass_qualified, raw)
+           .find { |candidate| known_project_namespace?(candidate, scope) }
     end
     private_class_method :resolve_ancestor_name
 

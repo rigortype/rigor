@@ -2131,4 +2131,119 @@ Unrelated
       expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")
     end
   end
+
+  # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the
+  # HEADER is written in, so the two spellings of one qualified name are distinguishable afterwards, which
+  # is exactly what the peel it replaces could not do.
+  describe ".build_superclass_tables" do
+    def header_nestings(source)
+      described_class.build_superclass_tables(parse(source)).last
+    end
+
+    it "records an empty header nesting for a compact declaration written at the top level" do
+      expect(header_nestings("class Admin::Widget < Base; end")).to eq({ "Admin::Widget" => [] })
+    end
+
+    it "records the enclosing namespace for the nested spelling of the same class" do
+      table = header_nestings("module Admin
+  class Widget < Base; end
+end
+")
+      expect(table).to eq({ "Admin::Widget" => ["Admin"] })
+    end
+
+    it "records one entry per declaration keyword for a doubly nested declaration" do
+      table = header_nestings("module A
+  module B
+    class C < Base; end
+  end
+end
+")
+      expect(table["A::B::C"]).to eq(["A::B", "A"])
+    end
+
+    # #708 review — a site that writes NO ancestor name has no ancestor for its cref to govern, so it
+    # contributes nothing. Recording it anyway is what let a rooted reopen inside another namespace put a
+    # foreign chain ahead of the right one for a class it named no ancestor of.
+    it "records nothing for a declaration that writes no ancestor name" do
+      expect(header_nestings("module Admin\n  class Widget; end\nend\n")).to eq({})
+    end
+
+    it "records a site whose only ancestor name is a mixin call" do
+      table = header_nestings("module Admin\n  class Widget\n    include Trackable\n  end\nend\n")
+      expect(table["Admin::Widget"]).to eq(["Admin"])
+    end
+
+    # #708 — a rooted header resets the class's NAME but not the cref its superclass name resolves in:
+    # Ruby evaluates `Base` there at `Module.nesting == [Outer]`.
+    it "keys a rooted declaration by its reset name and keeps the enclosing cref for its ancestors" do
+      table = header_nestings("module Outer
+  class ::Rooted::Bar < Base; end
+end
+")
+      expect(table["Rooted::Bar"]).to eq(["Outer"])
+      expect(table).not_to have_key("Outer::Rooted::Bar")
+    end
+
+    it "still records the as-written superclass beside it" do
+      supers = described_class.build_superclass_tables(parse("class Admin::Widget < Base; end")).first
+      expect(supers).to eq({ "Admin::Widget" => "Base" })
+    end
+
+    # Rails' own `ActiveRecord::Relation` is the corpus case: the library declares it inside
+    # `module ActiveRecord` and a test file reopens it as the compact `class ActiveRecord::Relation`.
+    # Last-writer-wins hands the library site the test file's EMPTY chain and its nine `include`s stop
+    # resolving — the false-positive direction. The reopen names no ancestor, so it now records no chain
+    # at all and the declaring site's survives by construction rather than by a merge rule.
+    it "keeps the declaring site's chain when a later site reopens the class and names no ancestor" do
+      table = header_nestings(
+        "module Admin\n  class Widget\n    include Trackable\n  end\nend\nclass Admin::Widget; end\n"
+      )
+      expect(table["Admin::Widget"]).to eq(["Admin"])
+    end
+
+    it "unions two sites that BOTH name an ancestor, most-qualified first" do
+      table = header_nestings(
+        "module A\n  module B\n    class C < Base; end\n  end\nend\n" \
+        "module A\n  class B::C\n    include M\n  end\nend\n"
+      )
+      expect(table["A::B::C"]).to eq(["A::B", "A"])
+    end
+  end
+
+  # #708 review — the mutation census's two arms key on DIFFERENT TABLES. A `@@x` keys on the declaration
+  # prefix because that is the join key with `build_class_cvar_index`, which derives its own from the same
+  # `declaration_prefix`; a constant name resolves through the whole `Module.nesting` ladder, whose outer
+  # rungs a rooted header drops from the prefix while Ruby keeps them. (The innermost entry is the same
+  # value either way — the tables are what differ.) Threading one value for both is how the cvar arm came
+  # to reference a parameter that no longer existed — a NameError
+  # inside the discovery pre-pass, which the runner converts into a single `internal analyzer error` and
+  # DISCARDS every real diagnostic in the file. Nothing in this repository mutates a `@@` receiver, so the
+  # whole suite, the self-check and the corpus were all green over it.
+  describe ".collect_literal_receiver_mutations" do
+    define_method(:census) { |source| described_class.send(:collect_literal_receiver_mutations, parse(source)) }
+
+    it "records a class-variable index write under the class that owns it" do
+      result = census("class A\n  @@t = {}\n  def self.put(k) = @@t[k] = 1\nend\n")
+      expect(result[:cvars]).to eq({ "A" => Set[:@@t] })
+    end
+
+    it "records a class-variable shovel under a nested class" do
+      result = census("module M\n  class A\n    @@l = []\n    def self.add(v) = @@l << v\n  end\nend\n")
+      expect(result[:cvars]).to eq({ "M::A" => Set[:@@l] })
+    end
+
+    # The rooted arm, and the reason the two facts cannot share a parameter: the cvar keys by the RESET
+    # class name while the constant below keys through the UNRESET nesting, from the same body.
+    it "keys a rooted class's cvar by its reset name while its constant reaches the enclosing nesting" do
+      result = census("module Outer\n  TABLE = {}\n  class ::Rooted\n    @@seen = {}\n    " \
+                      "def self.fill(k) = @@seen[k] = 1\n    def self.mark(k) = TABLE[k] = 1\n  end\nend\n")
+      expect(result[:cvars]).to eq({ "Rooted" => Set[:@@seen] })
+      expect(result[:constants]).to include("Outer::TABLE")
+    end
+
+    it "records nothing for a class variable mutated at the top level" do
+      expect(census("@@t = {}\n@@t[:k] = 1\n")[:cvars]).to be_empty
+    end
+  end
 end

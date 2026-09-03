@@ -546,4 +546,42 @@ RSpec.describe Rigor::Scope do
       expect(left.join(right).self_type).to be_nil
     end
   end
+
+  # #682 — the candidate order an ancestor NAME walks. It is decided by the `Module.nesting` the
+  # SUBCLASS'S declaration header is written in, which the discovery pre-pass records per class, and
+  # never by peeling the subclass's qualified name: the two spellings render the identical name.
+  describe "#ancestor_name_candidates" do
+    def scope_with(header_nestings)
+      Rigor::Scope.empty.with_discovery(
+        Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_header_nestings: header_nestings)
+      )
+    end
+
+    it "offers only the bare name for a compact declaration written at the top level" do
+      scope = scope_with({ "Admin::Widget" => [] })
+      expect(scope.ancestor_name_candidates("Admin::Widget", "Base")).to eq(%w[Base])
+    end
+
+    it "offers the enclosing namespace first for the nested spelling of the same class" do
+      scope = scope_with({ "Admin::Widget" => %w[Admin] })
+      expect(scope.ancestor_name_candidates("Admin::Widget", "Base")).to eq(["Admin::Base", "Base"])
+    end
+
+    it "walks a multi-keyword nesting innermost first" do
+      scope = scope_with({ "A::B::C" => ["A::B", "A"] })
+      expect(scope.ancestor_name_candidates("A::B::C", "R")).to eq(["A::B::R", "A::R", "R"])
+    end
+
+    # The fallback, and the reason an unrecorded class is unchanged rather than degraded: peeling the
+    # qualified name IS the nested spelling's chain, so it reproduces the pre-#682 candidate list exactly.
+    it "peels the qualified name when no header nesting was recorded, answering the nested spelling" do
+      unrecorded = described_class.empty.ancestor_name_candidates("A::B::C", "R")
+      expect(unrecorded).to eq(["A::B::R", "A::R", "R"])
+      expect(unrecorded).to eq(scope_with({ "A::B::C" => ["A::B", "A"] }).ancestor_name_candidates("A::B::C", "R"))
+    end
+
+    it "peels to the bare name alone for a single-segment class" do
+      expect(described_class.empty.ancestor_name_candidates("Widget", "Base")).to eq(%w[Base])
+    end
+  end
 end

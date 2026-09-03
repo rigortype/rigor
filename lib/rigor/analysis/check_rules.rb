@@ -2972,8 +2972,9 @@ module Rigor
         end
 
         # Direct ancestors of `class_name` as project-discovered, qualified names: included / prepended
-        # modules first, then the superclass. As-written names are resolved against the subclass's lexical
-        # nesting; names that resolve to no project class/module (RBS-known / third-party) are dropped.
+        # modules first, then the superclass. As-written names are resolved against the nesting the
+        # subclass's declaration header is written in (`Scope#ancestor_name_candidates`, the single owner of
+        # that order); names that resolve to no project class/module (RBS-known / third-party) are dropped.
         def ancestor_class_names(scope, class_name)
           names = []
           scope.includes_of(class_name).each do |raw|
@@ -2989,11 +2990,10 @@ module Rigor
         end
 
         def resolve_override_ancestor_name(scope, subclass_qualified, raw_ancestor)
-          segments = subclass_qualified.to_s.split("::")
-          (segments.length - 1).downto(0) do |i|
-            candidate = (segments[0, i] + [raw_ancestor]).join("::")
-            return candidate if known_user_class?(scope, candidate)
-          end
+          resolved = scope.ancestor_name_candidates(subclass_qualified, raw_ancestor)
+                          .find { |candidate| known_user_class?(scope, candidate) }
+          return resolved if resolved
+
           # ADR-46 slice 3 — the override checker reads the class graph
           # directly (not through the recorder's `Scope` choke points), and
           # short-circuits when the ancestor resolves to no project class, so

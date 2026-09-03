@@ -20,6 +20,12 @@ module Rigor
     # lookup MUST consult — `::Foo` names the top-level `Foo` and never a lexically nearer shadow
     # ([#614](https://github.com/rigortype/rigor/issues/614)). A node that is neither a `ConstantReadNode`
     # nor a `ConstantPathNode` yields `nil` under both policies.
+    #
+    # A `class` / `module` HEADER is a constant path too, and it has to consult the same marker — which is why
+    # {.declaration_prefix} and {.pushed_nesting} live here rather than in each of the two dozen walks that
+    # used to append the rendered name to their own prefix. `::` re-anchors a header at the top level exactly
+    # as it re-anchors a reference; reading only the rendered name filed `class ::Foo` inside `module MyApp`
+    # under `MyApp::Foo` ([#708](https://github.com/rigortype/rigor/issues/708)).
     module ConstantPath
       module_function
 
@@ -70,6 +76,59 @@ module Rigor
         return true if parent.nil?
 
         rooted?(parent)
+      end
+
+      # The qualified prefix a `class` / `module` header contributes to the body it opens, given the prefix of
+      # the body the header is WRITTEN in. `class Bar` inside `module Outer` is `Outer::Bar`; the compact
+      # `class Outer::Bar` written at the top level is the same name through one keyword instead of two.
+      #
+      # A ROOTED header RESETS the prefix. `class ::Rooted::Bar` names `Rooted::Bar` wherever it is written —
+      # Ruby's `::` re-anchors the header at the top level exactly as it does a reference — so the enclosing
+      # prefix is DROPPED rather than kept. Keeping it filed the class under `Outer::Rooted::Bar`, a name no
+      # caller writes, and the single-segment `class ::Foo` inside `module MyApp` became `MyApp::Foo`: not
+      # merely mis-keyed but undiscoverable, so a call on `Foo` typed opaque and reported nothing at all
+      # ([#708](https://github.com/rigortype/rigor/issues/708), [#638](https://github.com/rigortype/rigor/issues/638)).
+      #
+      # nil when the header names no constant — the same refusal {.qualified_name} makes, propagated so a
+      # caller keeps its own prefix rather than qualifying under a name it could not render.
+      def declaration_prefix(outer_prefix, constant_path)
+        name = qualified_name(constant_path)
+        return nil if name.nil?
+
+        rooted?(constant_path) ? [name] : outer_prefix + [name]
+      end
+
+      # Ruby's `Module.nesting` inside the body a `class` / `module` header opens, given the nesting of the
+      # body the header is written in. ONE entry per declaration keyword, qualified against the entry already
+      # on top, so a compact `class A::B` contributes the single `"A::B"` where `module A; class B` contributes
+      # two — the whole difference between the two spellings, and unrecoverable from the `"A::B"` they share
+      # afterwards ([#652](https://github.com/rigortype/rigor/issues/652)). This is the ONLY thing that pushes
+      # an entry: a `def`, a block, and a `class << expr` body each inherit the chain unchanged, because none
+      # of them pushes a cref in Ruby.
+      #
+      # A ROOTED header pushes its name UNQUALIFIED and leaves the enclosing entries beneath it, which is the
+      # one place this differs from {.declaration_prefix}: Ruby's nesting inside `class ::Rooted::Bar` written
+      # in `module Outer` is `[Rooted::Bar, Outer]`, so the class's own name resets while `Outer` stays on the
+      # ladder as a live rung ([#708](https://github.com/rigortype/rigor/issues/708)).
+      #
+      # The header is rendered by the LENIENT {.qualified_name}, which is total over every header Ruby parses —
+      # `class` and `module` require a constant path, so the only dynamic base the grammar admits is `self`, and
+      # `class self::Thing` inside `module Outer` renders `"Thing"` and records `["Outer::Thing", "Outer"]`,
+      # which is what Ruby's nesting is there. So there is no unnameable-header case to refuse, and the `nil`
+      # guards below are reachable only for a non-constant node (which a `ClassNode` / `ModuleNode` header
+      # never is) and for the nil chain a caller may thread in.
+      #
+      # Both nesting walks call THIS function — `Inference::StatementEvaluator`'s declaration walk and
+      # `Inference::ScopeIndexer`'s def-node walk — so a callee re-walk answers what the body's own walk
+      # answers by construction rather than by two mirrored implementations staying in step.
+      def pushed_nesting(nesting, constant_path)
+        return nil if nesting.nil?
+
+        name = qualified_name(constant_path)
+        return nil if name.nil?
+
+        outer = rooted?(constant_path) ? nil : nesting.first
+        [outer ? "#{outer}::#{name}" : name, *nesting].freeze
       end
     end
   end

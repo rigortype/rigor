@@ -49,6 +49,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
 
       class Shop::Compact
+        include Enumerable
         def build = 1
         def self.build_all = new
       end
@@ -72,8 +73,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
+  # Issue #682 — `header_nestings` belongs in this list, not beside it: a warm fold that dropped it would
+  # compare equal on every other table while resolving a compact declaration's superclass in a namespace a
+  # cold run does not, which is the `--verify-incremental` divergence #707 was bumped for.
   def plain_tables
-    %i[def_sources superclasses includes method_visibilities methods
+    %i[def_sources superclasses header_nestings includes method_visibilities methods
        class_sources data_member_layouts struct_member_layouts]
   end
 
@@ -89,6 +93,22 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
   def expect_def_tables_equivalent(actual, reference, key)
     expect(normalize_defs(actual[key], actual[:def_nestings]))
       .to eq(normalize_defs(reference[key], reference[:def_nestings])), "#{key} diverged"
+  end
+
+  # Issue #682 — the value the parity above is carrying, spelled out: the compact `class Shop::Compact` in
+  # a.rb records the EMPTY header nesting (its ancestor names resolve at the top level), while the nested
+  # `module Shop; class Widget` in b.rb records `["Shop"]`. Both spellings render the class name they share,
+  # so nothing else in the index distinguishes them. Each site names an ancestor — `Compact` an `include`,
+  # `Widget` a superclass — because #708's review made that the condition for recording a chain at all: a
+  # site that names no ancestor has none for its cref to govern.
+  it "records the header nesting each spelling is written in" do
+    Dir.mktmpdir do |dir|
+      paths = write_project(dir)
+      table = described_class.discovered_project_index_for_paths(paths)[:def_index][:header_nestings]
+
+      expect(table["Shop::Compact"]).to eq([])
+      expect(table["Shop::Widget"]).to eq(["Shop"])
+    end
   end
 
   it "cold fold (empty bundles) is byte-identical to a fresh walk and keeps live nodes" do

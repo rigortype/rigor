@@ -1154,7 +1154,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         util = write_util(dir, unused_body: '"n"')
         ca = File.join(dir, "caller_a.rb")
         cb = File.join(dir, "caller_b.rb")
-        File.write(ca, "class CallerA\n  def go\n    Util.used\n  end\nend\n")
+        # `ca` is served from cache below (`reused`), so its `Rigor.dump_type` is what keeps the oracle
+        # comparison off two coincidentally-equal empty sides for the MERGE half specifically — util.rb
+        # itself carries no diagnostic either. See the `write_pair` comment further down for the pattern.
+        File.write(ca, "class CallerA\n  def go\n    Rigor.dump_type(1)\n    Util.used\n  end\nend\n")
         File.write(cb, "class CallerB\n  def go\n    Util.used\n  end\nend\n")
 
         session = session_for(configuration(dir))

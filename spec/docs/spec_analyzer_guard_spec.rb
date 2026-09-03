@@ -217,10 +217,10 @@ module SpecAnalyzerGuardScan
     def guarded?(stack)
       return true if stack.any? { |ancestor| guard_call?(ancestor) }
 
-      name = assigned_local_name(stack)
-      return false if name.nil?
+      names = assigned_local_names(stack)
+      return false if names.empty?
 
-      guard_checks_local?(scope_node(stack), name)
+      guard_checks_local?(scope_node(stack), names)
     end
 
     def guard_call?(node)
@@ -228,15 +228,21 @@ module SpecAnalyzerGuardScan
         node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name.to_s == GUARD_CONSTANT
     end
 
-    # The local the run's value flows into, if any: the innermost enclosing `<local> = …` that is still
-    # inside the site's own scope. Handles the `result = Dir.chdir(dir) { …run }` shape as well as a bare
-    # `result = …run`.
-    def assigned_local_name(stack)
+    # The local(s) the run's value flows into, if any: the innermost enclosing `<local> = …` that is
+    # still inside the site's own scope. Handles the `result = Dir.chdir(dir) { …run }` shape, a bare
+    # `result = …run`, and — issue #683 review — a MultiWriteNode destructure (`diagnostics, warm =
+    # session.run_incremental(…)`), the shape every `run_incremental` / `run_buffer_recheck` caller uses
+    # since both return a `[diagnostics, warm]` / possibly-nil tuple rather than a bare Array. Without this
+    # a manual `check_diagnostics!(diagnostics, context: …)` right below such a line had no accepted shape
+    # at all — the gate's own failure message told the reader to "call the guard yourself" and then
+    # rejected the result.
+    def assigned_local_names(stack)
       stack.reverse_each do |ancestor|
-        return ancestor.name if ancestor.is_a?(Prism::LocalVariableWriteNode)
+        return [ancestor.name] if ancestor.is_a?(Prism::LocalVariableWriteNode)
+        return ancestor.lefts.grep(Prism::LocalVariableTargetNode).map(&:name) if ancestor.is_a?(Prism::MultiWriteNode)
         break if ancestor.is_a?(Prism::DefNode)
       end
-      nil
+      []
     end
 
     # The innermost `def`, else the innermost example block, else the whole file.
@@ -249,7 +255,7 @@ module SpecAnalyzerGuardScan
       stack.first
     end
 
-    def guard_checks_local?(scope, name)
+    def guard_checks_local?(scope, names)
       return false if scope.nil?
 
       found = false
@@ -257,7 +263,7 @@ module SpecAnalyzerGuardScan
         next unless guard_call?(node)
 
         found ||= (node.arguments&.arguments || []).any? do |argument|
-          argument.is_a?(Prism::LocalVariableReadNode) && argument.name == name
+          argument.is_a?(Prism::LocalVariableReadNode) && names.include?(argument.name)
         end
       end
       found
@@ -431,6 +437,42 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
           guarded_recheck(session)
           guarded_run_incremental(session, snapshot: s, fingerprint: fp)
           guarded_run_buffer_recheck(session, snapshot: s, fingerprint: fp)
+        end
+      RUBY
+    end
+
+    # Issue #683 review — `run_incremental` / `run_buffer_recheck` return a tuple / possibly-nil struct, so
+    # a manual (non-helper) guard site destructures the result: `assigned_local_name` recognised only a
+    # bare `LocalVariableWriteNode`, so this shape had NO accepted form at all before the fix below.
+    it "flags a manually-destructured `run_incremental` whose local is never checked" do
+      expect(offense_lines(<<~RUBY)).to eq([3])
+        it "x" do
+          session = Rigor::Analysis::IncrementalSession.new(configuration: config)
+          diagnostics, warm = session.run_incremental(snapshot: s, fingerprint: fp)
+          expect(warm).to be(true)
+        end
+      RUBY
+    end
+
+    it "accepts a manually-destructured `run_incremental` checked via the FIRST target local" do
+      expect(offense_lines(<<~RUBY)).to be_empty
+        it "x" do
+          session = Rigor::Analysis::IncrementalSession.new(configuration: config)
+          diagnostics, warm = session.run_incremental(snapshot: s, fingerprint: fp)
+          InternalAnalyzerErrorGuard.check_diagnostics!(diagnostics, context: "x")
+        end
+      RUBY
+    end
+
+    # The scanner does not know WHICH destructured name a real guard call would sensibly take — it only
+    # has to stop rejecting every one of them, so checking the second target proves it tracks the whole
+    # `lefts` list, not just the first.
+    it "accepts a manually-destructured `run_incremental` checked via the SECOND target local" do
+      expect(offense_lines(<<~RUBY)).to be_empty
+        it "x" do
+          session = Rigor::Analysis::IncrementalSession.new(configuration: config)
+          diagnostics, warm = session.run_incremental(snapshot: s, fingerprint: fp)
+          InternalAnalyzerErrorGuard.check_diagnostics!(warm, context: "x")
         end
       RUBY
     end

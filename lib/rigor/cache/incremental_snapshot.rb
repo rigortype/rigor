@@ -58,8 +58,14 @@ module Rigor
       # (the per-file constant PUBLICATION CENSUS — `{qualified name => [literal] | :unpublishable}` — whose
       # diff drives the new `constant:` edge's producer) and grows each seed bundle's row grammar by its own
       # `constant_writes` census; a pre-13 blob mismatches the SCHEMA gate and loads as nil (a clean cold
-      # rebuild — no migration).
-      SCHEMA = 13
+      # rebuild — no migration). 14: issue #707 widens each seed-bundle def row from `[node_id, name,
+      # fingerprint]` to `[node_id, name, fingerprint, nesting]`, carrying issue #681's recorded
+      # `Module.nesting` so a bundle-served callee resolves its constants under the declaration that owns it
+      # instead of a peel of the receiver's name; a pre-14 blob mismatches the SCHEMA gate and loads as nil (a
+      # clean cold rebuild — no migration). The bump is what keeps a pre-14 blob REJECTED rather than MISREAD:
+      # a three-element row destructures with `nesting` nil, which is indistinguishable from a top-level def,
+      # so every unchanged file would silently keep the pre-fix peel.
+      SCHEMA = 14
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

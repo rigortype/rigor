@@ -98,7 +98,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-82 | [`Dynamic[T]` provenance wiring: breaking the catch-all on real apps](82-dynamic-provenance-wiring.md) | Accepted (WD1-3,6-9 implemented 2026-07-06/07-11; WD4 deferred; causeless 49%→26%) |
 | ADR-83 | [Dynamic-origin algebra: keep union arms over absorbing into `Dynamic`](83-dynamic-origin-algebra.md) | Accepted (supersedes the value-lattice.md join algebra; spec revised to match engine behavior) |
 | ADR-84 | [Cross-file return-memo scoping and the taint-precise store gate](84-cross-file-return-memo-scoping.md) | Accepted (WD1 landed in PR #79; WD2-WD3 implemented; mail body evals 3355→557) |
-| ADR-85 | [Per-file seed bundles and lazy def-node handles (pre-pass incrementalization)](85-seed-bundles-and-lazy-def-node-handles.md) | Accepted (WD1 in PR #81; WD2-WD3 in PR #82; gitlab warm-incremental allocs 16.7M→2.06M) |
+| ADR-85 | [Per-file seed bundles and lazy def-node handles (pre-pass incrementalization)](85-seed-bundles-and-lazy-def-node-handles.md) | Accepted (WD1 in PR #81; WD2-WD3 in PR #82; WD5 in #707; gitlab warm-incremental allocs 16.7M→2.06M) |
 | ADR-86 | [Partial native extensions for residual hot paths (rejected; rigor-rs owns native speed)](86-partial-native-extensions.md) | Accepted (standing rejection of native extensions; rigor-rs owns native speed; WD4 candidate staged) |
 | ADR-87 | [The null-build floor: stat-then-digest validation, zero-change snapshot skip, hit-path boot slimming](87-null-build-floor.md) | Accepted (WD1-WD5 implemented, PR #85; supersedes ADR-54's rejected mtime fast-path) |
 | ADR-88 | [Incremental plugin-fact soundness](88-incremental-plugin-fact-soundness.md) | Accepted (WD1-WD4 implemented, PR #89; WD5 deferred) |

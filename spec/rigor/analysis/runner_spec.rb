@@ -1390,7 +1390,8 @@ RSpec.describe Rigor::Analysis::Runner do
   describe "#collect_symbol_fingerprints (private, ADR-85 WD3 DefHandle path)" do
     it "reads a DefHandle's own precomputed fingerprint rather than re-hashing a (non-existent) live node" do
       runner = described_class.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
-      handle = Rigor::Inference::DefHandle.new(path: "lib/x.rb", node_id: 1, name: "foo", fingerprint: "deadbeef")
+      handle = Rigor::Inference::DefHandle.new(path: "lib/x.rb", node_id: 1, name: "foo",
+                                               fingerprint: "deadbeef", nesting: ["Foo"])
       sources = { "Foo" => { foo: "lib/x.rb:3" } }
       nodes = { "Foo" => { foo: handle } }
       result = Hash.new { |h, k| h[k] = {} }

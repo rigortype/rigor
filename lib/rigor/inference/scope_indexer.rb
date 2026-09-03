@@ -3281,9 +3281,11 @@ module Rigor
       # bundle's carries {DefHandle}s. The merges never deref the value, so both fold identically.
       def fold_file_index(acc, file_index)
         fold_def_tables(acc, file_index)
-        # Issue #681 — a re-walked file contributes live nodes and their chains together; a file restored from
-        # a seed bundle contributes neither (a {DefHandle} is not the node the re-walk is handed), so its defs
-        # keep the peel fallback rather than a chain recorded against the wrong object.
+        # Issue #681 — a re-walked file contributes live nodes and their chains together. A file restored from
+        # a seed bundle contributes NO entry here and cannot: this table is keyed by node identity, and the
+        # only object a bundle has is a {DefHandle}. Issue #707 — the chain travels ON the handle instead, and
+        # {DefNodeResolver} re-attaches it to the node it mints, so both paths answer the same chain for the
+        # same body without either one keying a table by an object the other never sees.
         acc[:def_nestings].merge!(file_index[:def_nestings] || {})
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
@@ -3350,8 +3352,8 @@ module Rigor
           declaration_signature: declaration_signature(file_index),
           classes: file_classes,
           extends: file_index[:extends],
-          def_nodes: live_defs_to_bundle(file_index[:def_nodes]),
-          singleton_def_nodes: live_defs_to_bundle(file_index[:singleton_def_nodes]),
+          def_nodes: live_defs_to_bundle(file_index[:def_nodes], file_index[:def_nestings]),
+          singleton_def_nodes: live_defs_to_bundle(file_index[:singleton_def_nodes], file_index[:def_nestings]),
           def_sources: file_index[:def_sources],
           singleton_def_sources: file_index[:singleton_def_sources],
           superclasses: file_index[:superclasses],
@@ -3393,20 +3395,24 @@ module Rigor
         }
       end
 
-      # `{class => {method => Prism::DefNode}}` → `{class => {method => [node_id, name, fingerprint]}}`.
-      def live_defs_to_bundle(defs)
+      # `{class => {method => Prism::DefNode}}` → `{class => {method => [node_id, name, fingerprint,
+      # nesting]}}`. Issue #707 — `nestings` is this file's identity-keyed `{DefNode => Module.nesting}` table,
+      # read here while the live nodes are still in hand, because it is the LAST moment the two can be paired:
+      # the bundle's reader has only the row. Nil for a top-level def, which records no chain.
+      def live_defs_to_bundle(defs, nestings)
         defs.transform_values do |methods|
           methods.transform_values do |node|
-            [node.node_id, node.name.to_s, Digest::SHA256.hexdigest(node.location.slice)]
+            [node.node_id, node.name.to_s, Digest::SHA256.hexdigest(node.location.slice), nestings[node]]
           end
         end
       end
 
-      # `{class => {method => [node_id, name, fingerprint]}}` → `{class => {method => DefHandle}}` for `path`.
+      # `{class => {method => [node_id, name, fingerprint, nesting]}}` → `{class => {method => DefHandle}}`
+      # for `path`.
       def bundle_defs_to_handles(defs, path)
         defs.transform_values do |methods|
-          methods.transform_values do |(node_id, name, fingerprint)|
-            DefHandle.new(path: path, node_id: node_id, name: name, fingerprint: fingerprint)
+          methods.transform_values do |(node_id, name, fingerprint, nesting)|
+            DefHandle.new(path: path, node_id: node_id, name: name, fingerprint: fingerprint, nesting: nesting)
           end
         end
       end

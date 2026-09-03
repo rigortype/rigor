@@ -118,6 +118,26 @@ module Admin
   self::SELF_DEFAULT = Post
 end
 
+# …and `self` is not always the enclosing declaration. `Evalled.class_eval { … }` swaps `self`
+# for the RECEIVER while leaving `Module.nesting` alone, so `self::MARK` names
+# `Admin::Evalled::MARK` and the rvalue `Post` still resolves through the untouched nesting to
+# `Admin::Post`. Keying it by the lexical enclosure files that `Admin::Post` under `Admin::MARK`,
+# which is where the RBS-declared `Admin::MARK` reader finds it
+# (https://github.com/rigortype/rigor/issues/705).
+module Admin
+  class Evalled
+  end
+
+  Evalled.class_eval { self::MARK = Post }
+end
+
+# A `class_eval` receiver that names no class leaves `self` unattributable, so the write is
+# DECLINED — the same answer a dynamic base takes, and for the same reason.
+module Admin
+  target = Evalled
+  target.class_eval { self::LOOSE = Post }
+end
+
 # A genuinely dynamic base names no attributable namespace at all, so the write is DECLINED
 # rather than filed under its trailing segment.
 module Dyn
@@ -230,6 +250,27 @@ module Admin
     def read_self_write_in_namespace
       assert_type("singleton(Admin::Post)", SELF_DEFAULT)
       SELF_DEFAULT.new.admin_post
+    end
+
+    # The name the `class_eval` block actually writes — a resolution keying by the lexical
+    # enclosure does not have at all.
+    def read_class_eval_write
+      assert_type("singleton(Admin::Post)", Evalled::MARK)
+      Evalled::MARK.new.admin_post
+    end
+
+    # Must-still-succeed: the lexical enclosure is NOT what `self` named there, so `Admin::MARK`
+    # is still the RBS-declared top-level `Post`.
+    def read_class_eval_lexical_miss
+      assert_type("singleton(Post)", MARK)
+      MARK.new.top_post
+    end
+
+    # Must-still-succeed: the declined `class_eval` on an unnameable receiver leaves the RBS
+    # `Admin::LOOSE` answering, exactly as the declined dynamic base leaves the top-level `LATE`.
+    def read_loose_eval_write
+      assert_type("singleton(Post)", LOOSE)
+      LOOSE.new.top_post
     end
   end
 end

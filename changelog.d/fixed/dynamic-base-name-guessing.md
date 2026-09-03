@@ -1,0 +1,1 @@
+- **[inference]** A `self::CONST = …` written inside a `class_eval` block is now attributed to the class the block runs on rather than to the enclosing module, so a constant defined that way types where it is defined and no longer shadows an unrelated constant of the same name in its lexical parent. ([#705](https://github.com/rigortype/rigor/issues/705))

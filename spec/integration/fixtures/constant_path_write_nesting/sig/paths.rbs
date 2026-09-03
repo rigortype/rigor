@@ -63,6 +63,15 @@ module Admin
     end
   end
 
+  class Evalled
+  end
+
+  # The lexically-enclosing names a `class_eval` block's `self::` write must NOT be filed under.
+  # Rooted, because an unrooted `Post` inside `module Admin` is `Admin::Post` to RBS — the very
+  # class the mis-keyed write would have supplied.
+  MARK: singleton(::Post)
+  LOOSE: singleton(::Post)
+
   class NestedReader
   end
 end

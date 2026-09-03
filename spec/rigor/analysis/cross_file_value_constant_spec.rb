@@ -429,6 +429,48 @@ RSpec.describe "cross-file value constants" do
     end
   end
 
+  # Issue #705 — `self::LIMIT = …` names whatever `self` is, and a `class_eval`-family block swaps `self` for
+  # the receiver while leaving `Module.nesting` alone. Charging the lexical enclosure gets BOTH halves wrong at
+  # once: the name the write did touch keeps publishing a value a second writer replaced, and the name it did
+  # not stops publishing one nothing conflicts with. Both halves are asserted, and the two declines are paired
+  # with the ordinary block that must still charge the enclosure.
+  describe "`self::` under a block that rebinds `self`" do
+    # `module N` in the reader's project, plus the `KEPT` control that proves a `Dynamic[top]` is this rule
+    # and not the whole table failing.
+    def eval_duel(second_writer, read)
+      dumps("b.rb" => "class Other\nend\nmodule N\n  LIMIT = 50\nend\nKEPT = :kept\n",
+            "c.rb" => second_writer,
+            "a.rb" => "Rigor.dump_type(#{read})\nRigor.dump_type(KEPT)\n")
+    end
+
+    it "charges the RECEIVER's namespace for a `self::` write inside its `class_eval`" do
+      expect(dumps("b.rb" => "class Other\n  LIMIT = 50\nend\nKEPT = :kept\n",
+                   "c.rb" => "module N\n  Other.class_eval { self::LIMIT = 7 }\nend\n",
+                   "a.rb" => "Rigor.dump_type(Other::LIMIT)\nRigor.dump_type(KEPT)\n"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+
+    it "does NOT charge the lexical enclosure for that write" do
+      expect(eval_duel("module N\n  Other.class_eval { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["50", ":kept"])
+    end
+
+    it "declines a `class_eval` whose receiver names no class" do
+      expect(eval_duel("module N\n  target = Other\n  target.class_eval { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["50", ":kept"])
+    end
+
+    it "declines a `self::` write inside a `Class.new` block, whose class the enclosure does not name" do
+      expect(eval_duel("module N\n  Made = Class.new { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["50", ":kept"])
+    end
+
+    it "still charges the enclosure for a `self::` write inside an ORDINARY block, which keeps `self`" do
+      expect(eval_duel("module N\n  [1].each { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+  end
+
   describe "lexical resolution" do
     it "does not let a top-level constant answer a nested read that has its own" do
       files = {

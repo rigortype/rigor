@@ -1582,7 +1582,24 @@ module Rigor
         seeded.merge(per_file).freeze
       end
 
-      def walk_constant_writes(node, qualified_prefix, default_scope, accumulator)
+      # Issue #705 — the block-taking calls that swap `self` for the RECEIVER: Ruby evaluates the block with
+      # the receiver as `self` and leaves `Module.nesting` untouched, so `self::BAR = …` inside one names the
+      # receiver's `BAR` while a bare `BAR = …` in the same block still names the enclosing namespace's.
+      SELF_REBINDING_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec].freeze
+      private_constant :SELF_REBINDING_EVAL_CALLS
+
+      # …and the ones whose block `self` reaches no class or module NAME: an `instance_eval` / `instance_exec`
+      # body evaluates on an INSTANCE (`self::BAR = …` raises `TypeError` there) and a `define_method` body on
+      # the receiver at call time.
+      OPAQUE_SELF_BLOCK_CALLS = %i[instance_eval instance_exec define_method].freeze
+      private_constant :OPAQUE_SELF_BLOCK_CALLS
+
+      # The sentinel for "`self` was rebound to something no class/module name reaches". A `self::BAR = …`
+      # under it is DECLINED — the same answer a dynamic base takes, for the same reason.
+      OPAQUE_SELF = :__rigor_opaque_self__
+      private_constant :OPAQUE_SELF
+
+      def walk_constant_writes(node, qualified_prefix, default_scope, accumulator, self_owner = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -1598,14 +1615,57 @@ module Rigor
                                 qualified_write_name(qualified_prefix, node.name.to_s))
           return
         when Prism::ConstantPathWriteNode
-          full = constant_path_write_key(node.target, qualified_prefix, default_scope)
+          full = constant_path_write_key(node.target, qualified_prefix, default_scope, self_owner)
           record_constant_write(node, qualified_prefix, default_scope, accumulator, full) if full
           return
         end
 
+        walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner)
+      end
+
+      # Recursion into `node`'s children, swapping `self` for the ONE child a self-rebinding call evaluates
+      # under a different receiver — its block. Every other child, and every child of a node that rebinds
+      # nothing, keeps the `self` it was reached under.
+      def walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner)
+        rebound = rebound_block_self(node, qualified_prefix, default_scope)
+        block = rebound.nil? ? nil : node.block
         node.rigor_each_child do |child|
-          walk_constant_writes(child, qualified_prefix, default_scope, accumulator)
+          walk_constant_writes(child, qualified_prefix, default_scope, accumulator,
+                               block.equal?(child) ? rebound : self_owner)
         end
+      end
+
+      # Issue #705 — the class or module `self` names inside `node`'s BLOCK, or nil when `node` opens no
+      # block that rebinds `self` (an ordinary block keeps the `self` it closed over, so a `self::BAR = …`
+      # there is still the enclosing declaration's and every walk below this stays as it was).
+      #
+      # {OPAQUE_SELF} where the new `self` reaches no class or module name: a `class_eval` receiver that is
+      # not a static constant path, an {OPAQUE_SELF_BLOCK_CALLS} body, and the `Class.new { … }` /
+      # `Module.new` / `Struct.new` / `Data.define` block, whose class is named only by a constant write the
+      # walk would have to thread down to it. Declining there costs a resolution the engine never had; naming
+      # the LEXICAL enclosure instead is the guess that fires, because it is the one name Ruby is guaranteed
+      # NOT to have written.
+      def rebound_block_self(node, qualified_prefix, default_scope = nil)
+        return nil unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+        return OPAQUE_SELF if OPAQUE_SELF_BLOCK_CALLS.include?(node.name) || meta_new_constant_rvalue?(node)
+        return nil unless SELF_REBINDING_EVAL_CALLS.include?(node.name)
+
+        eval_receiver_self(node.receiver, qualified_prefix, default_scope)
+      end
+
+      # The `self` a `Recv.class_eval { … }` block runs under. An implicit or literal `self` receiver leaves
+      # `self` where it was — nil, so nothing about the walk changes. A static constant path resolves the way
+      # a path write's own namespace resolves ({#resolved_write_namespace}); anything else is opaque. A nil
+      # `default_scope` is the publication census, which has no class knowledge to resolve through and keys a
+      # path AS WRITTEN, so the receiver keeps its spelling there too.
+      def eval_receiver_self(receiver, qualified_prefix, default_scope)
+        return nil if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        name = Source::ConstantPath.qualified_name_or_nil(receiver)
+        return OPAQUE_SELF if name.nil?
+        return name if default_scope.nil? || qualified_prefix.empty? || Source::ConstantPath.rooted?(receiver)
+
+        resolved_write_namespace(name, qualified_prefix, default_scope)
       end
 
       # Issue #690 — `enclosing_prefix` is the lexical declaration prefix the write SITS UNDER, `full` the
@@ -1637,19 +1697,19 @@ module Rigor
       # namespace the code does not name would file the entry under a guess.
       #
       # A target that renders no static path is NOT a third such form, and must not be handled by rendering
-      # it leniently. `self::BAR = …` names the enclosing lexical namespace's `BAR`, so it takes the key a
-      # bare `BAR = …` in the same body takes — the answer {#constant_path_write_name} already gives the
-      # [#644](https://github.com/rigortype/rigor/issues/644) census. Any other dynamic base (`klass::BAR`)
-      # is attributable to no namespace at all and is DECLINED: `qualified_name`'s lenient render drops the
-      # dynamic segment and yields the bare trailing name, so recording it filed a value under a name the
-      # write never touched — and once the rvalue is typed under the enclosing nesting, that bare key
-      # outranks an RBS top-level constant declaration and hands every reader of the top-level name a
-      # receiver Ruby never names there.
-      def constant_path_write_key(target, qualified_prefix, default_scope)
+      # it leniently. `self::BAR = …` names whatever `self` is at that point — the enclosing declaration in
+      # an ordinary body, the receiver inside a `class_eval` block ([#705](https://github.com/rigortype/rigor/issues/705)),
+      # which is why `self_owner` travels with the walk rather than being read off `qualified_prefix`. Any
+      # other dynamic base (`klass::BAR`) is attributable to no namespace at all and is DECLINED:
+      # `qualified_name`'s lenient render drops the dynamic segment and yields the bare trailing name, so
+      # recording it filed a value under a name the write never touched — and once the rvalue is typed under
+      # the enclosing nesting, that bare key outranks an RBS top-level constant declaration and hands every
+      # reader of the top-level name a receiver Ruby never names there.
+      def constant_path_write_key(target, qualified_prefix, default_scope, self_owner = nil)
         return Source::ConstantPath.qualified_name(target) if Source::ConstantPath.rooted?(target)
 
         written = Source::ConstantPath.qualified_name_or_nil(target)
-        return dynamic_base_write_key(target, qualified_prefix) if written.nil?
+        return dynamic_base_write_key(target, qualified_prefix, self_owner) if written.nil?
         return written if qualified_prefix.empty?
 
         namespace, _, base = written.rpartition("::")
@@ -1658,13 +1718,25 @@ module Rigor
         "#{resolved_write_namespace(namespace, qualified_prefix, default_scope)}::#{base}"
       end
 
-      # The key for a path write whose base is not a static constant path: the enclosing-qualified name for
+      # The key for a path write whose base is not a static constant path: the name `self` carries for a
       # `self::BAR = …`, and nil — decline to record the write at all — for every other dynamic base.
-      def dynamic_base_write_key(target, qualified_prefix)
+      def dynamic_base_write_key(target, qualified_prefix, self_owner = nil)
         return nil unless target.parent.is_a?(Prism::SelfNode)
 
         base = target.name&.to_s
-        base && qualified_write_name(qualified_prefix, base)
+        base && self_write_name(qualified_prefix, self_owner, base)
+      end
+
+      # The qualified name a `self::BAR = …` writes. `self_owner` is nil in the ordinary case — `self` is the
+      # enclosing declaration, so the write takes the key a bare `BAR = …` in the same body takes — a class or
+      # module name where a `class_eval`-family block rebound `self` to one, and {OPAQUE_SELF} where it
+      # rebound `self` to something unnameable, which declines the write (nil) rather than filing it under a
+      # namespace Ruby did not touch ([#705](https://github.com/rigortype/rigor/issues/705)).
+      def self_write_name(qualified_prefix, self_owner, base)
+        return qualified_write_name(qualified_prefix, base) if self_owner.nil?
+        return nil if self_owner.equal?(OPAQUE_SELF)
+
+        "#{self_owner}::#{base}"
       end
 
       # The namespace of a `Foo::BAR = …`, resolved the way a READ of the same spelling resolves it: the
@@ -3483,7 +3555,7 @@ module Rigor
       # `||=` constant write, a `ConstantTargetNode` under a `MultiWriteNode` (`A, B = :x, :y`), a `self::X =`
       # whose target renders no qualified name, and the inner write of a chain (`C = D = :x`), which is why a
       # `ConstantWriteNode` descends into its own rvalue instead of returning.
-      def walk_constant_write_census(node, qualified_prefix, writes, seen)
+      def walk_constant_write_census(node, qualified_prefix, writes, seen, self_owner = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -3494,35 +3566,41 @@ module Rigor
             return
           end
         else
-          census_constant_write(node, qualified_prefix, writes, seen)
+          census_constant_write(node, qualified_prefix, writes, seen, self_owner)
         end
 
-        node.rigor_each_child { |child| walk_constant_write_census(child, qualified_prefix, writes, seen) }
+        rebound = rebound_block_self(node, qualified_prefix)
+        block = rebound.nil? ? nil : node.block
+        node.rigor_each_child do |child|
+          walk_constant_write_census(child, qualified_prefix, writes, seen,
+                                     block.equal?(child) ? rebound : self_owner)
+        end
       end
 
       # Censuses `node` when it is any constant-assigning form. Only a plain `ConstantWriteNode` /
       # `ConstantPathWriteNode` can contribute a VALUE; every other form is recorded unpublishable, which
       # suppresses publication of the name exactly as a second file's write would.
-      def census_constant_write(node, qualified_prefix, writes, seen)
+      def census_constant_write(node, qualified_prefix, writes, seen, self_owner = nil)
         case node
         when Prism::ConstantWriteNode
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s),
                                        constant_literal_value(node.value), writes, seen)
         when Prism::ConstantPathWriteNode
-          record_constant_write_census(constant_path_write_name(node.target, qualified_prefix),
+          record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
                                        constant_literal_value(node.value), writes, seen)
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, writes, seen)
         when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
-          record_constant_write_census(constant_path_write_name(node.target, qualified_prefix), nil, writes, seen)
+          record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
+                                       nil, writes, seen)
         when Prism::MultiWriteNode
-          census_multi_write_constants(node, qualified_prefix, writes, seen)
+          census_multi_write_constants(node, qualified_prefix, writes, seen, self_owner)
         end
       end
 
       # `A, B = :x, :y` and `A, *rest = …`. A destructured element's value is a projection of the right-hand
       # side, which this syntactic walk does not evaluate, so every constant target is censused unpublishable.
-      def census_multi_write_constants(node, qualified_prefix, writes, seen)
+      def census_multi_write_constants(node, qualified_prefix, writes, seen, self_owner = nil)
         targets = node.lefts + node.rights
         targets << node.rest if node.rest
         targets.each do |target|
@@ -3530,7 +3608,8 @@ module Rigor
           when Prism::ConstantTargetNode
             record_constant_write_census(qualified_write_name(qualified_prefix, target.name.to_s), nil, writes, seen)
           when Prism::ConstantPathTargetNode
-            record_constant_write_census(constant_path_write_name(target, qualified_prefix), nil, writes, seen)
+            record_constant_write_census(constant_path_write_name(target, qualified_prefix, self_owner),
+                                         nil, writes, seen)
           end
         end
       end
@@ -3541,18 +3620,21 @@ module Rigor
       # ([#690](https://github.com/rigortype/rigor/issues/690)). Moving this one changes which name a value
       # publishes to the whole project, an over-suppression question with its own safety story, so the two
       # censuses key a path write differently until that is settled.
-      # `self::BAR = …` names the enclosing lexical namespace's `BAR`. Any other
-      # dynamic receiver (`klass::BAR = …`) cannot be attributed to a namespace at all, so it falls back to
-      # the bare last segment: over-suppressing a top-level name is gradual typing, which is the safe
-      # direction, whereas guessing a namespace would suppress the wrong name.
-      def constant_path_write_name(target, qualified_prefix)
+      # `self::BAR = …` names whatever `self` is at that point, which the walk carries in `self_owner`
+      # ([#705](https://github.com/rigortype/rigor/issues/705)) — the enclosing lexical namespace in an
+      # ordinary body, the receiver inside a `class_eval` block, and nothing nameable where `self` was
+      # rebound to a class no constant names. Any other dynamic receiver (`klass::BAR = …`) cannot be
+      # attributed to a namespace at all, so it falls back to the bare last segment: over-suppressing a
+      # top-level name is gradual typing, which is the safe direction, whereas guessing a namespace would
+      # suppress the wrong name.
+      def constant_path_write_name(target, qualified_prefix, self_owner = nil)
         full = Source::ConstantPath.qualified_name_or_nil(target)
         return full if full
 
         base = target.name&.to_s
         return nil if base.nil?
 
-        target.parent.is_a?(Prism::SelfNode) ? qualified_write_name(qualified_prefix, base) : base
+        target.parent.is_a?(Prism::SelfNode) ? self_write_name(qualified_prefix, self_owner, base) : base
       end
 
       def qualified_write_name(qualified_prefix, base_name)

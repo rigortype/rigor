@@ -2176,23 +2176,29 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = Source::ConstantPath.qualified_name(node.constant_path)
-          if name
-            walk_def_nestings(node.body, pushed_nesting(nesting, name), accumulator) if node.body
-            return
-          end
+          # A header that renders no name (`class self::Thing`) pushes an entry Ruby has and this walk cannot
+          # spell, so `nil` propagates and nothing inside the body is recorded — the same refusal
+          # `Inference::StatementEvaluator#pushed_nesting` makes on the declaration walk.
+          walk_def_nestings(node.body, pushed_nesting(nesting, node.constant_path), accumulator) if node.body
+          return
         when Prism::DefNode
-          accumulator[node] = nesting unless nesting.empty?
+          accumulator[node] = nesting unless nesting.nil? || nesting.empty?
           return
         end
 
         node.rigor_each_child { |child| walk_def_nestings(child, nesting, accumulator) }
       end
 
-      # The chain a body gains by entering a declaration whose header spells `name` — the mirror of
+      # The chain a body gains by entering a declaration whose header is `constant_path` — the mirror of
       # `Inference::StatementEvaluator#pushed_nesting`, which records the same chain on the declaration walk.
-      # Ruby pushes ONE entry per declaration keyword, qualified against the entry already on top.
-      def pushed_nesting(nesting, name)
+      # Ruby pushes ONE entry per declaration keyword, qualified against the entry already on top, so a
+      # compact `class A::B` contributes the single `"A::B"` where `module A; class B` contributes two.
+      def pushed_nesting(nesting, constant_path)
+        return nil if nesting.nil?
+
+        name = Source::ConstantPath.qualified_name(constant_path)
+        return nil if name.nil?
+
         outer = nesting.first
         [outer ? "#{outer}::#{name}" : name, *nesting].freeze
       end

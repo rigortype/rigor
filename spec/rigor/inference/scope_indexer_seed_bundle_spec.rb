@@ -4,6 +4,7 @@ require "spec_helper"
 require "tmpdir"
 require "digest"
 require "rigor/inference/scope_indexer"
+require "rigor/inference/def_node_resolver"
 
 # ADR-85 WD2 — the seed-bundle fold. The core correctness property: rebuilding the cross-file discovery index
 # from cached per-file bundles (re-walking only changed files) is byte-identical to a fresh parse+walk of the
@@ -183,6 +184,40 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(compact.nesting).to eq(["Shop::Compact"])
       expect(nested.nesting).to eq(["Shop::Base", "Shop"])
       expect(singleton.nesting).to eq(["Shop::Compact"])
+    end
+  end
+
+  # Issue #707 — the reason a rehydration memo is NOT a second source for the same fact: the two tables are
+  # keyed by node identity and their key sets are disjoint by construction, because a file is either re-walked
+  # (contributing live nodes to the index) or bundle-served (contributing handles the resolver parses), never
+  # both in one run. That is the load-bearing claim behind the reader's `table || rehydration` order, so it is
+  # COMPUTED here rather than argued: were a resolved node ever also an index key, the fallback could silently
+  # prefer a stale chain over a live one.
+  it "keeps the index table and the resolver rehydration disjoint over the same run" do
+    Dir.mktmpdir do |dir|
+      paths = write_project(dir)
+      cold = described_class.discovered_project_index_incremental(paths, seed_bundles: {})
+      # Edit b.rb so the run is MIXED: b.rb re-walked (live nodes), a.rb / c.rb served from bundles (handles).
+      File.write(paths[1], "module Shop\n  class Widget < Base\n    def price = 42\n  end\nend\n")
+      warm = described_class.discovered_project_index_incremental(paths, seed_bundles: cold[:bundles])
+      nestings = warm[:def_index][:def_nestings]
+
+      Rigor::Inference::DefNodeResolver.with_run do
+        bundled = Rigor::Inference::DefNodeResolver.resolve(
+          warm[:def_index][:def_nodes]["Shop::Compact"][:build]
+        )
+        live = warm[:def_index][:def_nodes]["Shop::Widget"][:price]
+
+        # The bundle-served def: minted by the resolver's own parse, so the index cannot key it — the
+        # rehydration is the ONLY answer, and it is the chain the declaration recorded.
+        expect(nestings).not_to have_key(bundled)
+        expect(Rigor::Inference::DefNodeResolver.rehydrated_nesting(bundled)).to eq(["Shop::Compact"])
+
+        # The re-walked def, in the same run: the index owns it and the rehydration knows nothing about it.
+        expect(live).to be_a(Prism::DefNode)
+        expect(nestings[live]).to eq(["Shop::Widget", "Shop"])
+        expect(Rigor::Inference::DefNodeResolver.rehydrated_nesting(live)).to be_nil
+      end
     end
   end
 

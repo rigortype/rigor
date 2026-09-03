@@ -408,6 +408,38 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #652 — the sibling defect of the fixture above, and the one that made this
+  # family a DERIVATION bug rather than a per-shape one. Ruby's `Module.nesting`
+  # inside a compact `class Admin::CompactController` is that class alone, so a
+  # bare `Post` there names `::Post`; the nested spelling of the same class
+  # reaches `Admin::Post`. The engine peeled the qualified name, which is
+  # identical for the two, and answered `Admin::Post` for both.
+  describe "fixtures/compact_declaration_nesting.rb — compact declarations get Ruby's nesting" do
+    let(:harness) { harness_for("compact_declaration_nesting") }
+
+    it "resolves a bare name to the top level in a compact body and to the shadow in a nested one" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity for the example above, and the reason the compact and nested
+    # halves are written as twins: an implementation that stopped walking
+    # entirely satisfies every compact assertion and none of the nested ones,
+    # and one that kept peeling satisfies the reverse. Both halves have to be
+    # counted for either to mean anything.
+    it "still asserts one resolved constant per shape, on both spellings" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(12)
+    end
+
+    # The false-positive arm. Each compact-body assertion is followed by a call
+    # that only the correctly-resolved class owns (`Post#top_post`,
+    # `Wrap::Marker#wrap_marker`, `Loner#loner`), so a wrong resolution fires
+    # `call.undefined-method` here rather than only widening a type.
+    it "leaves no other diagnostic on the resolved receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   describe "fixtures/tuple_access.rb — Tuple element typing" do
     let(:harness) { harness_for("tuple_access") }
 

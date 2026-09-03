@@ -186,7 +186,7 @@ module Rigor
           Analysis::Runner.new(
             configuration: @configuration, environment: @environment, prebuilt: @project_scan,
             cache_store: nil, collect_stats: false, buffer: buffer, discovery_seed: seed, analyze_only: paths
-          ).run(paths).diagnostics,
+          ).run(paths),
           context: "ClosureKillOracle closure analysis of #{paths.join(', ')}"
         )
       end

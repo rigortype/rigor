@@ -15,11 +15,12 @@ module Rigor
     #
     # ## The three shapes
     #
-    # | reason | shape | produced by |
-    # | --- | --- | --- |
-    # | `:check_rule` | message begins `internal analyzer error`, `rule: nil` | `Runner#analyze_file_body` / `WorkerSession#analyze_body` `rescue StandardError` |
-    # | `:plugin` | `severity: :error`, `source_family: :plugin_loader`, `rule: "runtime-error"` | `Runner#collect_plugin_diagnostics` / `Runner::ProjectPrePasses#invoke_plugin_prepare` |
-    # | `:rbs_build` | `rule` in {RBS_BUILD_FAILURE_RULES} | `Environment::RbsLoader`'s env-build and definition-build rescues, surfaced by {Runner::DiagnosticAggregator} |
+    # - `:check_rule` — message begins `internal analyzer error`, `rule: nil`. Built by
+    #   `Runner#analyze_file_body` / `WorkerSession#analyze_body`'s `rescue StandardError`.
+    # - `:plugin` — `severity: :error`, `source_family: :plugin_loader`, `rule: "runtime-error"`. Built by
+    #   `Runner#collect_plugin_diagnostics` / `Runner::ProjectPrePasses#invoke_plugin_prepare`.
+    # - `:rbs_build` — `rule` in {RBS_BUILD_FAILURE_RULES}. Recorded by `Environment::RbsLoader`'s
+    #   env-build and definition-build rescues, surfaced by {Runner::DiagnosticAggregator}.
     #
     # The `:plugin` shape is keyed on the structured `(severity, source_family, rule)` triple rather than on
     # the bare rule name: a plugin is free to define its OWN `"runtime-error"` (or `"load-error"`) under its

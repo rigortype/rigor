@@ -35,18 +35,21 @@ module Rigor
     module AnalysisGuard
       module_function
 
-      # @param diagnostics [Array<Rigor::Analysis::Diagnostic>] one analysis run's output.
+      # Takes the whole {Analysis::Result} rather than its diagnostics so the question is asked through
+      # {Analysis::Result#crashed?} — the same predicate the spec-side guard reads, off the same
+      # {Analysis::CrashSignature} table. Hands back the diagnostics, which is all a kill comparison wants.
+      #
+      # @param result [Rigor::Analysis::Result] one analysis run.
       # @param context [String] which oracle call produced it, so the raise points at the right seam.
-      # @return [Array<Rigor::Analysis::Diagnostic>] `diagnostics`, unchanged, when the run was healthy.
+      # @return [Array<Rigor::Analysis::Diagnostic>] the run's diagnostics, when the run was healthy.
       # @raise [AnalyzerCrashed]
-      def checked(diagnostics, context:)
-        culprit = diagnostics.find { |diagnostic| Analysis::CrashSignature.analyzer_failed?(diagnostic) }
-        return diagnostics if culprit.nil?
+      def checked(result, context:)
+        return result.diagnostics unless result.crashed?
 
         raise AnalyzerCrashed,
               "#{context}: the analyzer crashed, so this run's diagnostics say nothing about the code " \
-              "(#{Analysis::CrashSignature.describe(culprit)}). A kill comparison against it would score " \
-              "the mutant a survivor it was never measured against. See issue #686."
+              "(#{Analysis::CrashSignature.describe(result.crash_diagnostics.first)}). A kill comparison " \
+              "against it would score the mutant a survivor it was never measured against. See issue #686."
       end
     end
   end

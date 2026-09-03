@@ -65,7 +65,21 @@ accumulates:
   `#drain_dependencies`);
 - the `Rigor::Environment`, threaded with the per-worker reporters so
   reporter writes from inference / dispatch accumulate into the worker's
-  own state.
+  own state — including its `RbsLoader`, whose per-class RBS
+  definition-build failures ride the same drain
+  ([#696](https://github.com/rigortype/rigor/issues/696)).
+
+A whole-run condition that only a definition BUILD can observe MUST be
+drained out of the workers rather than read off the coordinator's own
+loader. Under the pool the coordinator never analyses a file, so its
+loader never demands a definition and never reaches the failing build; a
+diagnostic wired to it would appear at `--workers=0` and vanish at
+`--workers=N`. The coordinator accumulates the union across workers,
+deduped by class name: each worker holds its own loader and its own
+per-class memo, so a class two workers touched arrives twice and a class
+one worker touched arrives once, and neither worker alone is the set the
+run hit. This is the drain rule; the diagnostic it carries is normative
+in [diagnostic-policy.md](../type-specification/diagnostic-policy.md).
 
 Plugin `#prepare` runs **once at construction** so each worker is warm
 before its first `#analyze` call; any raise from `prepare` is captured into

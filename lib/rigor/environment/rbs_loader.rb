@@ -1730,25 +1730,6 @@ module Rigor
         nil
       end
 
-      # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
-      # once per class per PROCESS, a `RBS::DefinitionBuilder` failure caught in
-      # {#build_instance_definition} / {#build_singleton_definition}'s rescue. Without it, `class_known?`
-      # stays true (it only consults {#known_class_names_set}, never a definition build), so every call on
-      # the class — real methods and typos alike — silently degrades to `Dynamic[top]`.
-      #
-      # STRUCTURAL DIVERGENCE from its two siblings: they fire from the single central site at the end of
-      # {#env}, because the whole env is built eagerly and every quarantine/collision is already known by
-      # then. Definition builds are LAZY (ADR-54 WD1 — built on demand per class the FIRST time a caller asks,
-      # long after {#env} has already run), so there is no later central checkpoint to fire from before the
-      # affected classes even exist. This warns inline at the rescue site instead, gated on
-      # `@state[:definition_build_warned]` (keyed by class name) so the instance and singleton sides — and
-      # any re-entry once the per-process `@instance_definition_cache` / `@singleton_definition_cache`
-      # memoize the failure — warn at most once per class name, cache-hit runs included (a definition build
-      # is per-process regardless of the RBS-env cache tier). `@state` is per-LOADER-INSTANCE, not
-      # process-global, so under the fork-based analysis pool each worker holds its own loader and its own
-      # `@state`: a class whose definition fails can print its warning once per worker that happens to touch
-      # it, i.e. more than once in a single `rigor check` run. Deduplicating that across processes is out of
-      # scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
       # Issue #696 — the RECORD half of the same rescue, feeding the `rbs.coverage.definition-build-failed`
       # diagnostic ({#definition_build_failures}). The banner below reaches only stderr: it is not a
       # diagnostic, so it is absent from `--format json`, SARIF, CI annotations and the LSP, and it cannot
@@ -1775,6 +1756,25 @@ module Rigor
            definition_build_conflict_buffers(error)].freeze
       end
 
+      # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
+      # once per class per PROCESS, a `RBS::DefinitionBuilder` failure caught in
+      # {#build_instance_definition} / {#build_singleton_definition}'s rescue. Without it, `class_known?`
+      # stays true (it only consults {#known_class_names_set}, never a definition build), so every call on
+      # the class — real methods and typos alike — silently degrades to `Dynamic[top]`.
+      #
+      # STRUCTURAL DIVERGENCE from its two siblings: they fire from the single central site at the end of
+      # {#env}, because the whole env is built eagerly and every quarantine/collision is already known by
+      # then. Definition builds are LAZY (ADR-54 WD1 — built on demand per class the FIRST time a caller asks,
+      # long after {#env} has already run), so there is no later central checkpoint to fire from before the
+      # affected classes even exist. This warns inline at the rescue site instead, gated on
+      # `@state[:definition_build_warned]` (keyed by class name) so the instance and singleton sides — and
+      # any re-entry once the per-process `@instance_definition_cache` / `@singleton_definition_cache`
+      # memoize the failure — warn at most once per class name, cache-hit runs included (a definition build
+      # is per-process regardless of the RBS-env cache tier). `@state` is per-LOADER-INSTANCE, not
+      # process-global, so under the fork-based analysis pool each worker holds its own loader and its own
+      # `@state`: a class whose definition fails can print its warning once per worker that happens to touch
+      # it, i.e. more than once in a single `rigor check` run. Deduplicating that across processes is out of
+      # scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
       def warn_about_definition_build_failure(class_name, error)
         warned = (@state[:definition_build_warned] ||= {})
         key = class_name.to_s

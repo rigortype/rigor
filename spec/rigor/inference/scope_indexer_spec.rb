@@ -1701,6 +1701,45 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             outer = index_with_registry(before_source, stub_registry([entry]))
             expect(user_type_has_nil?(outer)).to be(true)
           end
+
+          # #681 — the block-form census scope is built from a self type alone like the three others, so
+          # it too has to carry the declaration's `Module.nesting`. This is the only one of the four that
+          # needs a plugin to be reachable at all, hence a unit example rather than a fixture arm.
+          # Written as a compact / nested pair: the compact body's nesting is
+          # `[Admin::CompactSpec]`, so `Post` there names `::Post`, while the nested spelling reaches
+          # `Admin::Post`. Peeling the qualified name answers `Admin::Post` for both.
+          def compact_and_nested_post_types
+            source = <<~RUBY
+              class Post; end
+              module Admin
+                class Post; end
+              end
+
+              class Admin::CompactSpec
+                before { @post = Post }
+              end
+
+              module Admin
+                class NestedSpec
+                  before { @post = Post }
+                end
+              end
+            RUBY
+            names = %w[Admin::CompactSpec Admin::NestedSpec]
+            entries = names.map do |name|
+              Rigor::Plugin::AdditionalInitializer.new(receiver_constraint: name, block_methods: [:before])
+            end
+            outer = index_with_registry(source, stub_registry(entries))
+            names.map { |name| outer.class_ivars_for(name)[:@post] }
+          end
+
+          it "records the block's rvalue under the nesting of the declaration the block sits in" do
+            compact, nested = compact_and_nested_post_types
+            expect(compact).to be_a(Rigor::Type::Singleton)
+            expect(compact.class_name).to eq("Post")
+            expect(nested).to be_a(Rigor::Type::Singleton)
+            expect(nested.class_name).to eq("Admin::Post")
+          end
         end
 
         it "does NOT add nil when `initialize` writes the ivar (soundness gate)" do

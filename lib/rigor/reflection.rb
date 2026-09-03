@@ -310,8 +310,10 @@ module Rigor
     # reported `undefined method` on correct code ([#652](https://github.com/rigortype/rigor/issues/652)).
     #
     # The peel survives only as the FALLBACK, for a scope no declaration walk built (a callee body
-    # re-entered through `Scope#evaluate`, a plugin-constructed scope, a `class << SomeOtherConstant`
-    # body whose frame stack is reset). Answering an empty chain there would retract resolutions the
+    # re-entered through `Scope#evaluate`, a plugin-constructed scope). A `class << expr` body is NOT
+    # one of them — not even `class << SomeOtherConstant`, whose class-frame stack the evaluator
+    # resets: the body inherits the enclosing chain, because Ruby pushes no `Module.nesting` entry
+    # there either. Answering an empty chain there would retract resolutions the
     # engine makes today and turn correct code into `Dynamic`; a stale-but-gradual rung costs precision
     # only, which is the direction AGENTS.md § "Implementation Guidelines" mandates.
     def lexical_nesting_chain(scope)

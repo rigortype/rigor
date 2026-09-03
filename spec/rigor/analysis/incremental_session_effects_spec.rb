@@ -72,7 +72,7 @@ RSpec.describe "incremental effect collection" do
 
   it "re-collects only the changed closure and keeps an untouched file's summaries" do
     session = session_for(dir)
-    session.baseline
+    guarded_baseline(session)
 
     expect(proven(session, "Leaf#emit")).to eq(["io.output.stdout"])
     expect(proven(session, "Other#alone")).to eq(["io.output.stderr"])
@@ -85,7 +85,7 @@ RSpec.describe "incremental effect collection" do
       end
     RUBY
     seen = collected_files
-    session.recheck
+    guarded_recheck(session)
 
     # `other.rb` is in nobody's closure, so it was never re-analyzed — and its unit is still in the table,
     # which is only possible if its collection came back from the session's own store.
@@ -99,9 +99,9 @@ RSpec.describe "incremental effect collection" do
 
   it "drops a removed file's summaries from the merged table" do
     session = session_for(dir)
-    session.baseline
+    guarded_baseline(session)
     FileUtils.rm(File.join(dir, "other.rb"))
-    session.recheck
+    guarded_recheck(session)
 
     expect(proven(session, "Other#alone")).to be_nil
     expect(proven(session, "Leaf#emit")).to eq(["io.output.stdout"])
@@ -116,7 +116,7 @@ RSpec.describe "incremental effect collection" do
       configuration = configuration(dir, effects: effects)
       session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: [dir])
       fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: [dir])
-      _diagnostics, warm = session.run_incremental(snapshot: snapshot_for(cache), fingerprint: fingerprint)
+      _diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot_for(cache), fingerprint: fingerprint)
       [session, warm]
     end
 

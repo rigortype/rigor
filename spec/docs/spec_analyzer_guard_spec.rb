@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# The regrowth gate for issues #665 / #674.
+# The regrowth gate for issues #665 / #674 / #683.
 #
 # When a check rule raises, `Runner#analyze_file_body` (and `WorkerSession#analyze_body`) rescues it into
 # ONE `"internal analyzer error"` diagnostic for the whole file and DISCARDS every other diagnostic that
@@ -11,13 +11,20 @@
 #
 # #665 fixed the two shared harness entry points. #674 measured the rest: with an unconditional raise in
 # `CheckRules.diagnose`, **1,177 of 1,925 examples across 86 files still passed**, because those files
-# build their own Runner and read the raw `Result`. Whole files were green with zero rules running.
+# build their own Runner and read the raw `Result`. Whole files were green with zero rules running. #683
+# found a THIRD entry point the same sweep had deliberately left out of scope: `IncrementalSession`'s
+# `#baseline` / `#recheck` / `#run_incremental` / `#run_buffer_recheck` route diagnostics through their
+# own `run_runner`, invisibly to both #665's fix and #674's gate — 14 of 60
+# `incremental_session_spec.rb` examples still passed under the same injected raise, because the crash
+# diagnostic is deterministic content, so an incremental spec's own `recheck.diagnostics == full_run(dir)`
+# oracle comparison matches the SAME synthetic row on both sides instead of catching the crash.
 #
 # Fixing the population is a one-off; keeping it fixed is not. Every new spec that reaches for
 # `Rigor::Analysis::Runner.new(...).run` re-creates one member of it, and nothing about writing that line
 # feels wrong. So the rule is mechanical: an analyzer run in `spec/` has to end up in front of
 # {InternalAnalyzerErrorGuard}. `GuardedAnalysis#guarded_run` / `#guarded_run_source` /
-# `#guarded_session_analyze` are the one-liners that satisfy it; a wrapper outside example scope calls
+# `#guarded_session_analyze` / `#guarded_baseline` / `#guarded_recheck` / `#guarded_run_incremental` /
+# `#guarded_run_buffer_recheck` are the one-liners that satisfy it; a wrapper outside example scope calls
 # `InternalAnalyzerErrorGuard.check!` (or `.check_diagnostics!`) itself.
 #
 # What is checked is the RUN, never the construction: `WorkerSession.new(...)` on its own is what
@@ -66,12 +73,17 @@ SPEC_ANALYZER_GUARD_ALLOWLIST = {
 # the value costs nothing: on the tree as it stands the structural rule accepts every site the textual one
 # did.
 module SpecAnalyzerGuardScan
-  ANALYZER_CLASSES = %w[Runner WorkerSession].freeze
+  # Issue #683 — `IncrementalSession` is the third analyzer class the gate tracks, alongside `Runner`
+  # and `WorkerSession`.
+  ANALYZER_CLASSES = %w[Runner WorkerSession IncrementalSession].freeze
   # `analyze` is `WorkerSession`'s PUBLIC per-file entry; `analyze_body` is the private half behind it,
   # listed so that making it public later cannot open a hole. A bare `analyze(...)` with no receiver is
   # `RunnerHelpers#analyze`, which is already guarded — a run site needs an analyzer receiver, so it is
-  # never matched here.
-  RUN_METHODS = %i[run run_source analyze analyze_body].freeze
+  # never matched here. `baseline` / `recheck` / `run_incremental` / `run_buffer_recheck` are
+  # `IncrementalSession`'s four run methods (#683) — none of their names collide with `Runner`'s or
+  # `WorkerSession`'s, so listing them here applies only to an `IncrementalSession` receiver in practice.
+  RUN_METHODS = %i[run run_source analyze analyze_body baseline recheck run_incremental
+                   run_buffer_recheck].freeze
   GUARD_CONSTANT = "InternalAnalyzerErrorGuard"
   GUARD_METHODS = %i[check! check_diagnostics!].freeze
   # Where an example's own scope begins. A run site inside one of these must carry its own guard.
@@ -138,17 +150,37 @@ module SpecAnalyzerGuardScan
       described && receiver.is_a?(Prism::CallNode) && receiver.name == :described_class && receiver.receiver.nil?
     end
 
-    # Local variables ever assigned an analyzer construction, file-wide. Deliberately not scope-aware: a
-    # name reused for something else would only cost a spurious hit on `<name>.run`, and no spec has one.
+    # Local variables ever assigned an analyzer construction OR a call to a known factory method,
+    # file-wide. Deliberately not scope-aware: a name reused for something else would only cost a
+    # spurious hit on `<name>.run`, and no spec has one.
+    #
+    # The factory half (issue #683) matters whenever a file's ONLY session-producing shape is
+    # `session = session_for(dir)` with no bare `described_class.new` / `Rigor::Analysis::X.new`
+    # assigned to that same name anywhere else in the file: without it, `session` never enters this
+    # set, so `session.baseline` downstream is invisible to {#run_site?} even though `session_for`
+    # itself IS a recognised factory ({#collect_factory_methods}) — `cross_file_value_constant_incremental_spec.rb`
+    # was exactly this shape, and every one of its `session.baseline` / `session.recheck` calls
+    # scanned clean only because no OTHER file in the corpus happened to reuse the name "session" on
+    # a direct construction (the coincidence #674's own review warned a file-granular gate hides).
     def collect_analyzer_locals(root)
       described = describes_analyzer?(root)
+      factories = collect_factory_methods(root)
       names = []
       walk(root, []) do |node, _|
-        next unless node.is_a?(Prism::LocalVariableWriteNode) && construction?(node.value, described: described)
+        next unless node.is_a?(Prism::LocalVariableWriteNode)
+
+        value = node.value
+        next unless construction?(value, described: described) || factory_call?(value, factories)
 
         names << node.name
       end
       names.uniq
+    end
+
+    # `name = factory_method(...)` — a bare call (no receiver) to a method {#collect_factory_methods}
+    # already proved constructs an analyzer.
+    def factory_call?(node, factories)
+      node.is_a?(Prism::CallNode) && node.receiver.nil? && factories.include?(node.name)
     end
 
     # `def build_runner(...) = <construction>` — a factory, so `build_runner(...).run` is a run site too.
@@ -171,7 +203,7 @@ module SpecAnalyzerGuardScan
       return true if construction?(receiver, described: described)
       return true if receiver.is_a?(Prism::LocalVariableReadNode) && analyzer_locals.include?(receiver.name)
 
-      receiver.is_a?(Prism::CallNode) && receiver.receiver.nil? && factories.include?(receiver.name)
+      factory_call?(receiver, factories)
     end
 
     # Structural, in the two shapes a real wrapper takes:
@@ -284,6 +316,23 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
       RUBY
     end
 
+    # Issue #683 review — a local assigned from a FACTORY call (rather than a bare construction) is
+    # just as much an analyzer local as one built inline, and `cross_file_value_constant_incremental_spec.rb`
+    # was invisible to the gate for exactly this reason: `session = session_for(dir)` never populated
+    # `collect_analyzer_locals` because that scan looked only for a direct `.new` on the RHS.
+    it "flags a run through a local assigned from a factory method (not a bare construction)" do
+      expect(offense_lines(<<~RUBY)).to eq([7])
+        def build_runner(dir)
+          Rigor::Analysis::Runner.new(configuration: config(dir))
+        end
+
+        it "x" do
+          runner = build_runner(dir)
+          runner.run
+        end
+      RUBY
+    end
+
     it "accepts a run wrapped in the guard at the site" do
       expect(offense_lines(<<~RUBY)).to be_empty
         it "x" do
@@ -348,6 +397,40 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
         it "x" do
           session = Rigor::Analysis::WorkerSession.new(configuration: config, environment: env)
           diags = InternalAnalyzerErrorGuard.check_diagnostics!(session.analyze(path), context: "x")
+        end
+      RUBY
+    end
+
+    # Issue #683 — `IncrementalSession` is a third analyzer class, with four run methods of its own.
+    it "flags an `IncrementalSession#baseline` / `#recheck` pair, unguarded" do
+      expect(offense_lines(<<~RUBY)).to eq([3, 5])
+        it "x" do
+          session = Rigor::Analysis::IncrementalSession.new(configuration: config)
+          session.baseline
+          edit_files
+          session.recheck
+        end
+      RUBY
+    end
+
+    it "flags a bare `IncrementalSession#run_incremental` / `#run_buffer_recheck` chain" do
+      expect(offense_lines(<<~RUBY)).to eq([2, 3])
+        it "x" do
+          Rigor::Analysis::IncrementalSession.new(configuration: config).run_incremental(snapshot: s, fingerprint: fp)
+          Rigor::Analysis::IncrementalSession.new(configuration: config).run_buffer_recheck(snapshot: s, fingerprint: fp)
+        end
+      RUBY
+    end
+
+    it "accepts an `IncrementalSession` run through the matching guarded_* helper" do
+      expect(offense_lines(<<~RUBY)).to be_empty
+        it "x" do
+          session = Rigor::Analysis::IncrementalSession.new(configuration: config)
+          guarded_baseline(session)
+          edit_files
+          guarded_recheck(session)
+          guarded_run_incremental(session, snapshot: s, fingerprint: fp)
+          guarded_run_buffer_recheck(session, snapshot: s, fingerprint: fp)
         end
       RUBY
     end
@@ -475,7 +558,7 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
 
     it "routes every other analyzer run through the guard" do
       expect(offenders).to be_empty, <<~MSG
-        An analyzer run in spec/ whose Result never reaches InternalAnalyzerErrorGuard (#674).
+        An analyzer run in spec/ whose Result never reaches InternalAnalyzerErrorGuard (#674 / #683).
 
         A check rule that raises is rescued into ONE "internal analyzer error" diagnostic and every other
         diagnostic for that file is discarded, so an absence assertion on the raw Result passes while
@@ -485,6 +568,10 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
             guarded_run(runner, %w[app.rb])
             guarded_run_source(runner, source: source, path: "mem.rb")
             guarded_session_analyze(session, path)
+            guarded_baseline(session)
+            guarded_recheck(session)
+            guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+            guarded_run_buffer_recheck(session, snapshot: snapshot, fingerprint: fingerprint)
 
         Outside example scope (a `def self.` memo, a plain helper class) call the guard yourself, and note
         that the guard has to name the VALUE — a `check!` on a different result in the same example does

@@ -367,6 +367,8 @@ module Rigor
         @project_discovered_methods = {}.freeze
         @project_data_member_layouts = {}.freeze
         @project_struct_member_layouts = {}.freeze
+        # Issue #684 — set per run by {#project_discovery_expansion}; nil on every path that does not widen.
+        @project_discovery_expansion = nil
         # ADR-67 WD6a — the call-site parameter-inference table, populated by the opt-in pre-pass in
         # `assemble_run_diagnostics` when `parameter_inference:` is enabled, then seeded onto every per-file
         # scope (sequential + fork-worker) through `project_scope_seed_tables`. Empty by default, so the gate-off
@@ -417,6 +419,7 @@ module Rigor
         return Result.new(diagnostics: [target_ruby_error]) if target_ruby_error
 
         expansion = expand_paths(paths)
+        @project_discovery_expansion = project_discovery_expansion(paths, expansion)
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
@@ -666,6 +669,8 @@ module Rigor
       def evaluate_return_types_setup(paths, specs)
         expansion = expand_paths(paths || @configuration.paths)
         @project_discovery_done = false
+        # This entry point supplies its own expansion; it never widens (see {#project_discovery_expansion}).
+        @project_discovery_expansion = nil
         @run_generation = Object.new.freeze
         run_project_pre_passes(expansion: expansion)
         ensure_project_discovery(expansion)
@@ -1114,7 +1119,8 @@ module Rigor
       end
 
       def build_run_dependency_descriptor(expansion, rbs_descriptor)
-        entries = analyzed_file_entries(expansion) + pre_eval_file_entries + rbs_descriptor.files
+        entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) +
+                  pre_eval_file_entries + rbs_descriptor.files
         @plugin_registry.plugins.each do |plugin|
           # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
           # are frozen after the run, and a plugin that never built a boundary read no files through it,
@@ -1123,6 +1129,19 @@ module Rigor
           entries.concat(boundary.cache_descriptor.files) if boundary
         end
         Cache::Descriptor.new(files: entries)
+      end
+
+      # Issue #684 — the project files this run DISCOVERED but did not analyse. A widened run's diagnostics
+      # are a function of them (that is the entire point: the method whose absence would have been reported
+      # is defined in one of them), so the run-result cache must invalidate when one changes. Empty on every
+      # run whose discovery expansion is its analysis expansion, which is every whole-project run.
+      def discovery_file_entries(expansion)
+        return [] if @project_discovery_expansion.nil?
+
+        analyzed = expansion.fetch(:files).to_set
+        analyzed_file_entries(
+          { files: @project_discovery_expansion.fetch(:files).reject { |path| analyzed.include?(path) } }
+        )
       end
 
       def analyzed_file_entries(expansion)
@@ -1249,6 +1268,8 @@ module Rigor
         return if @project_discovery_done
 
         @project_discovery_done = true
+        # Issue #684 — the cross-file index spans the PROJECT even when the analysis targets a file list.
+        expansion = @project_discovery_expansion || expansion
         if @collect_seed_bundles
           # ADR-85 WD2 — rebuild discovery from the prior run's bundles (re-walking only changed files) and
           # capture the refreshed bundle set for the session to persist.
@@ -1261,6 +1282,39 @@ module Rigor
         end
       end
 
+      # Issue #684 — the file set the cross-file DISCOVERY pre-pass walks, when that is wider than the set
+      # being analysed. nil means "the same one", which is every whole-project run.
+      #
+      # `rigor check path/to/one_file.rb` — what an editor integration, a pre-commit hook and
+      # `git diff --name-only | xargs rigor check` all do — discovered only the files it was handed, so a
+      # class the project declares in `sig/` WITHOUT declaring every one of its methods drew a false
+      # `call.undefined-method` for any method whose defining file was outside the invocation. The class was
+      # RBS-known, source discovery could not supply the method, and the rule fired on correct code. The
+      # same check over the containing DIRECTORY reported nothing, which is also why per-directory sums
+      # over a tree over-reported against a whole-tree run (14 diagnostics of this shape against 2 during
+      # the #652 work).
+      #
+      # Discovery is a parse pass, not an analysis: 0.55s over Rigor's own 444-file `lib` cold, and under
+      # ADR-85 seed bundles a warm run re-walks only what changed. The alternative — standing the rule down
+      # whenever evidence might be missing — buys the same FP safety by making `rigor check one_file.rb`
+      # answer a different question than `rigor check .`, and the diagnostics for a file should not depend
+      # on what else was on the command line.
+      #
+      # Excluded, each because its expansion is already the one it means: the LSP `prebuilt:` path (which
+      # seeds discovery from a snapshot), editor `buffer:` mode, `run_source`'s in-memory single file, and
+      # ADR-46's `analyze_only` subset mode (which already passes the full expansion and filters later).
+      def project_discovery_expansion(paths, expansion)
+        return nil unless widen_discovery_to_project?(paths)
+
+        widened = expand_paths(@configuration.paths | paths)
+        widened.fetch(:files).size > expansion.fetch(:files).size ? widened : nil
+      end
+
+      def widen_discovery_to_project?(paths)
+        @prebuilt.nil? && @buffer.nil? && @in_memory_sources.nil? && @analyze_only.nil? &&
+          paths != @configuration.paths
+      end
+
       # ADR-46 — the dependency-recording and subset-analysis modes read the discovery tables OUTSIDE the
       # analysis assembly (`Runner#symbol_fingerprints` / `#class_declarations`, consumed by
       # {IncrementalSession} after the run), so they force the build eagerly — matching the pre-slice-1
@@ -1271,7 +1325,8 @@ module Rigor
       end
 
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result,
-              :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?
+              :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?,
+              :project_discovery_expansion, :widen_discovery_to_project?
 
       # Ruby versions probed (ascending) to discover the lowest one this Prism build accepts for
       # `version:`. Prism exposes no version list, so the floor is found empirically — only when a

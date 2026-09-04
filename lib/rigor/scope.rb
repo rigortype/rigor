@@ -767,14 +767,60 @@ module Rigor
       [nil, nil]
     end
 
+    # Issue #723 — the same ancestor walk as {#user_def_through_ancestors}, asked of the DISCOVERY table
+    # rather than the def-node table: does the project define `method_name` on `class_name` or on any
+    # ancestor the project itself declares? The two tables are not interchangeable —
+    # `discovered_methods` also carries `define_method`, `attr_*` and the whole singleton side, none of
+    # which contributes a `Prism::DefNode` — and the suppression probe shared by the `call.*` check rules
+    # needs the broader one.
+    #
+    # Why it must walk at all: `Analysis::CheckRules#source_declared_method?` asked `discovered_method?`,
+    # which is keyed on the receiver's OWN name, while the typer resolves the same call through this
+    # ancestry. A project class whose `sig/` declares it without its project superclass therefore drew
+    # `call.undefined-method` on a method `dump_type` resolved on the same line of the same run — writing
+    # MORE RBS made the run worse, the incentive #653 removed for plugin-typed calls.
+    #
+    # `kind: :singleton` follows the superclass chain ONLY: a class method is inherited by a subclass, but
+    # an `include`d module contributes instance methods and its own `def self.x` is not callable on the
+    # includer. `extend M` is not lost to that narrowing — `Inference::ScopeIndexer` folds an extend into
+    # the extender's own singleton entries before this table is frozen.
+    def discovered_method_through_ancestors?(class_name, method_name, kind, name_memo: {})
+      return false if class_name.nil?
+
+      queue = [class_name.to_s]
+      seen = {}
+      visited = 0
+      until queue.empty?
+        current = queue.shift
+        next if current.nil? || seen[current]
+
+        seen[current] = true
+        visited += 1
+        # Budget exhaustion is uncertainty, not absence: answering "not declared" here would hand a
+        # `call.undefined-method` a fired verdict it has no evidence for. Suppress and record the hit.
+        if visited > ANCESTOR_WALK_LIMIT
+          Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
+          return true
+        end
+
+        return true if discovered_method?(current, method_name, kind)
+
+        enqueue_ancestors(current, queue, name_memo, mixins: kind != :singleton)
+      end
+      false
+    end
+
     # Pushes `current`'s direct ancestors onto the BFS queue: included / prepended modules first (Ruby places
     # mixins nearer than the superclass), then the superclass. Each as-written name is resolved against the
     # nesting `current`'s declaration header is written in ({#ancestor_name_candidates}); names that resolve
-    # to no project class/module are dropped.
-    def enqueue_ancestors(current, queue, name_memo)
-      includes_of(current).each do |raw|
-        resolved = resolve_ancestor_class_name(current, raw, name_memo)
-        queue.push(resolved) if resolved
+    # to no project class/module are dropped. `mixins: false` walks the superclass chain alone, for the
+    # singleton-side question where an `include` contributes nothing.
+    def enqueue_ancestors(current, queue, name_memo, mixins: true)
+      if mixins
+        includes_of(current).each do |raw|
+          resolved = resolve_ancestor_class_name(current, raw, name_memo)
+          queue.push(resolved) if resolved
+        end
       end
       raw_super = superclass_of(current)
       return if raw_super.nil?
@@ -841,9 +887,14 @@ module Rigor
       ancestor_name_candidates(subclass_qualified, raw_ancestor).find { |c| known_user_class?(c) }
     end
 
+    # Issue #723 — `discovered_methods` is in the list because the other three miss a class whose only
+    # project-side content is CLASS methods: `class Base; def self.build = :built; end` records no instance
+    # def node, no superclass and no include, so the ancestor-name resolver did not recognise `Base` as a
+    # project class at all and every walk through it ended one hop early. The table that answers "the
+    # project defines something here" on both sides is this one.
     def known_user_class?(name)
       discovered_superclasses.key?(name) || discovered_def_nodes.key?(name) ||
-        discovered_includes.key?(name)
+        discovered_includes.key?(name) || discovered_methods.key?(name)
     end
     private :ancestor_walk_gave_up, :compute_ancestor_class_name, :known_user_class?
 

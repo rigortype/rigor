@@ -176,6 +176,12 @@ function, and replaces the hand-rolled Levenshtein copies plugins used to
 carry. It only affects suggestion *text* on an already-emitted
 diagnostic, never whether one fires.
 
+`Rigor::Plugin::Base.ffi_binding_recognizer(name, &block)` / `.ffi_binding_recognizers`
+(ADR-30 / #727) is the class-level DSL contributed by `rigor-ffi`. Plugins authoring
+FFI binding recognizers (such as `rigor-rbnacl`, `rigor-sassc`) register custom
+binding recognizers using this DSL so the FFI catalog can recognize their binding
+declarations.
+
 `#diagnostics_for(violations, path:, node: nil)` (ADR-60 WD4) maps a
 plugin's own violation objects onto `Diagnostic`s through `#diagnostic`,
 absorbing the `violations.map { |v| diagnostic(node, …) }` block the

@@ -73,18 +73,22 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
-  # Issue #682 — `header_nestings` belongs in this list, not beside it: a warm fold that dropped it would
-  # compare equal on every other table while resolving a compact declaration's superclass in a namespace a
-  # cold run does not, which is the `--verify-incremental` divergence #707 was bumped for.
+  # Issue #724 — derive the plain tables from the accumulator rather than restating them by hand,
+  # so a new table is compared by default and only def-node / def-nesting tables need custom normalization.
+  def non_plain_tables
+    %i[def_nodes singleton_def_nodes def_nestings].freeze
+  end
+
   def plain_tables
-    %i[def_sources superclasses header_nestings includes method_visibilities methods
-       class_sources data_member_layouts struct_member_layouts]
+    @plain_tables ||= (described_class.new_def_index_accumulator.keys - non_plain_tables).freeze
   end
 
   def expect_index_equivalent(actual, reference)
     expect(actual[:classes]).to eq(reference[:classes])
     a = actual[:def_index]
     r = reference[:def_index]
+    expect(plain_tables + non_plain_tables)
+      .to match_array(described_class.new_def_index_accumulator.keys)
     plain_tables.each { |key| expect(a[key]).to eq(r[key]), "#{key} diverged" }
     expect_def_tables_equivalent(a, r, :def_nodes)
     expect_def_tables_equivalent(a, r, :singleton_def_nodes)
@@ -255,6 +259,34 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       round_tripped = Marshal.load(Marshal.dump(cold[:bundles]))
       warm = described_class.discovered_project_index_incremental(paths, seed_bundles: round_tripped)
       expect_index_equivalent(warm, described_class.discovered_project_index_for_paths(paths))
+    end
+  end
+
+  # Issue #724 Gate — removing any one table from the fold (specifically the three previously omitted tables:
+  # singleton_def_sources, extends, constant_writes, plus def_sources) must fail equivalence.
+  describe "equivalence gate discrimination (#724)" do
+    it "fails equivalence when any plain table is stripped from the compared index" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "ext.rb"), <<~RUBY)
+          module Mod
+            def bar = 2
+            def self.foo = 1
+            extend Enumerable
+            CONST = 42
+          end
+        RUBY
+        paths = [File.join(dir, "ext.rb")]
+        reference = described_class.discovered_project_index_for_paths(paths)
+
+        %i[singleton_def_sources extends constant_writes def_sources].each do |table_key|
+          tampered = {
+            classes: reference[:classes],
+            def_index: reference[:def_index].merge(table_key => {})
+          }
+          expect { expect_index_equivalent(tampered, reference) }
+            .to raise_error(RSpec::Expectations::ExpectationNotMetError, /#{table_key} diverged/)
+        end
+      end
     end
   end
 end

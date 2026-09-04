@@ -144,10 +144,13 @@ module Rigor
       },
       "bundler" => {
         # Open item O4 — target-project Bundler awareness. When `bundle_path:` is set (or auto-detected),
-        # Rigor walks `<bundle_path>/ruby/*/gems/*/sig/` and adds each gem-shipped sig directory to
-        # `signature_paths:`. With O7's failure-memo in place, conflicts (a vendored sig already declares the
-        # same constant) degrade gracefully to "no RBS env" with a single-line warning naming the offending
-        # file, rather than hanging.
+        # Rigor walks `<bundle_path>/ruby/*/gems/*/sig/` (RubyGems-sourced gems) and
+        # `<bundle_path>/ruby/*/bundler/gems/*/sig/` (`git:`-sourced gems) and adds each gem-shipped sig
+        # directory to `signature_paths:`. A `path:`-sourced gem is not under either — Bundler uses the
+        # `path:` directory in place rather than copying it into the bundle root — so add its `sig/` directly
+        # via `signature_paths:` instead. With O7's failure-memo in place, conflicts (a vendored sig already
+        # declares the same constant) degrade gracefully to "no RBS env" with a single-line warning naming
+        # the offending file, rather than hanging.
         #
         # `bundle_path:` (String, optional): explicit path to the bundler install root (e.g.,
         # "vendor/bundle" or an absolute path). Resolved relative to the project root (`paths:`'s base) when

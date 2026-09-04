@@ -315,6 +315,108 @@ RSpec.describe Rigor::Environment do
     end
   end
 
+  describe "bundler-discovered gem sig (issue #611)" do
+    # Bundler installs a RubyGems-sourced gem under `<bundle>/ruby/X.Y.Z/gems/<name>-<version>/`, and a
+    # `git:`-sourced gem under `<bundle>/ruby/X.Y.Z/bundler/gems/<repo>-<12-hex-revision>/` (see
+    # `Bundler::Source::Git#install_path`). Before this fix only the first layout was walked, so a
+    # git-sourced gem's own `sig/` — the natural place to ship one for a fork the project controls — was
+    # silently ignored: the constant simply typed `untyped`, with no warning naming the skipped directory.
+    def write_sig(dir, constant_name)
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, "#{constant_name.downcase}.rbs"), <<~RBS)
+        class #{constant_name}
+        end
+      RBS
+    end
+
+    it "resolves a constant from a RubyGems-sourced gem's sig/" do
+      Dir.mktmpdir do |tmpdir|
+        bundle = File.join(tmpdir, "bundle")
+        write_sig(
+          File.join(bundle, "ruby", "4.0.0", "gems", "acme_rubygems_fork-1.2.3", "sig"),
+          "AcmeRubygemsFork611"
+        )
+
+        env = described_class.for_project(
+          root: tmpdir, signature_paths: [], bundler_bundle_path: bundle, bundler_auto_detect: false
+        )
+
+        expect(env.nominal_for_name("AcmeRubygemsFork611")&.class_name).to eq("AcmeRubygemsFork611")
+      end
+    end
+
+    it "resolves a constant from a git-sourced gem's sig/ (the bundler/gems/ layout)" do
+      Dir.mktmpdir do |tmpdir|
+        bundle = File.join(tmpdir, "bundle")
+        write_sig(
+          File.join(bundle, "ruby", "4.0.0", "bundler", "gems", "acme_git_fork-3a357404c083", "sig"),
+          "AcmeGitFork611"
+        )
+
+        env = described_class.for_project(
+          root: tmpdir, signature_paths: [], bundler_bundle_path: bundle, bundler_auto_detect: false
+        )
+
+        expect(env.nominal_for_name("AcmeGitFork611")&.class_name).to eq("AcmeGitFork611")
+      end
+    end
+
+    it "still resolves the git-sourced gem's sig/ when a Gemfile.lock filter is active (O4 Layer 3)" do
+      # A git-installed gem's directory carries a revision, not a version, so the Layer-3 lockfile filter
+      # cannot match it on (name, version) the way it does a rubygems-sourced gem — it has to fall back to
+      # matching on gem name alone. Almost every real Bundler project has a Gemfile.lock, so this is the
+      # path that actually matters, not just the no-lockfile case above.
+      Dir.mktmpdir do |tmpdir|
+        bundle = File.join(tmpdir, "bundle")
+        write_sig(
+          File.join(bundle, "ruby", "4.0.0", "bundler", "gems", "acme_git_fork-3a357404c083", "sig"),
+          "AcmeGitForkLocked611"
+        )
+        File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCKFILE)
+          GIT
+            remote: https://example.com/acme_git_fork.git
+            revision: 3a357404c083916d379104428a3d51c8a25f7d0
+            specs:
+              acme_git_fork (3.0.0)
+
+          PLATFORMS
+            ruby
+
+          DEPENDENCIES
+            acme_git_fork!
+
+          BUNDLED WITH
+             2.5.3
+        LOCKFILE
+
+        env = described_class.for_project(
+          root: tmpdir, signature_paths: [], bundler_bundle_path: bundle,
+          bundler_auto_detect: false, bundler_lockfile: File.join(tmpdir, "Gemfile.lock")
+        )
+
+        expect(env.nominal_for_name("AcmeGitForkLocked611")&.class_name).to eq("AcmeGitForkLocked611")
+      end
+    end
+
+    it "ignores a directory that is not a gem sig root (control: the widened glob is not matching everything)" do
+      Dir.mktmpdir do |tmpdir|
+        bundle = File.join(tmpdir, "bundle")
+        # Shaped like the git layout one directory off — `bundler/<repo>-<sha>/sig` with no intervening
+        # `gems/` segment — so neither the rubygems glob root nor the new git glob root should match it.
+        write_sig(
+          File.join(bundle, "ruby", "4.0.0", "bundler", "acme_decoy_611-3a357404c083", "sig"),
+          "AcmeDecoy611"
+        )
+
+        env = described_class.for_project(
+          root: tmpdir, signature_paths: [], bundler_bundle_path: bundle, bundler_auto_detect: false
+        )
+
+        expect(env.nominal_for_name("AcmeDecoy611")).to be_nil
+      end
+    end
+  end
+
   describe "#attach_reporters!" do
     let(:env) do
       described_class.new(

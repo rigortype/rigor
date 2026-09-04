@@ -47,6 +47,7 @@ DEFAULT_CHANNELS = {
 
 DEFAULT_PLUGIN_ENTRY = {
   "gem" => "rigor-actioncable",
+  "id" => "actioncable",
   "config" => { "channel_base_classes" => ["ApplicationCable::Channel"] }
 }.freeze
 
@@ -56,12 +57,9 @@ RSpec.describe "plugins/rigor-actioncable" do
 
   let(:plugin_class) { Rigor::Plugin::Actioncable }
 
-  # Opt into the shared per-process `Cache::Store`. The plugin's `:channel_index` producer now passes an
-  # explicit `glob_descriptor` covering `app/channels/**/*.rb`, so cache entries invalidate correctly when
-  # channel files differ between examples. Without that descriptor fix the shared cache served stale
-  # `ChannelIndex` data across examples (see `docs/CURRENT_WORK.md` § Open Engineering Items for the session
-  # that surfaced the bug).
-  let(:default_run_plugin_cache_store) { :shared }
+  # Do NOT opt into the shared per-process `Cache::Store`: examples in this file test custom roots and empty
+  # channels across distinct temporary directories, which causes empty channel cache entries to bleed across
+  # examples when run under random seeds (issue #704).
 
   describe "broadcast_to recognition" do
     it "emits a `broadcast-target` info diagnostic for `<Channel>.broadcast_to(...)`" do
@@ -330,6 +328,7 @@ RSpec.describe "plugins/rigor-actioncable" do
     let(:custom_plugin_entry) do
       {
         "gem" => "rigor-actioncable",
+        "id" => "actioncable",
         "config" => {
           "channel_search_paths" => ["lib/cable"],
           "channel_base_classes" => ["MyBaseChannel"]
@@ -448,6 +447,7 @@ RSpec.describe "plugins/rigor-actioncable" do
         paths: ["lib/cable/typo_channel.rb"],
         plugin_entry: {
           "gem" => "rigor-actioncable",
+          "id" => "actioncable",
           "config" => { "channel_search_paths" => ["lib/cable"], "channel_base_classes" => ["MyBaseChannel"] }
         }
       )
@@ -473,6 +473,7 @@ RSpec.describe "plugins/rigor-actioncable" do
         paths: multi_root_files.keys,
         plugin_entry: {
           "gem" => "rigor-actioncable",
+          "id" => "actioncable",
           "config" => {
             "channel_search_paths" => ["app/channels", "engines/chat/app/channels"],
             "channel_base_classes" => ["ApplicationCable::Channel"]

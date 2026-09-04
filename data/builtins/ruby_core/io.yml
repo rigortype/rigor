@@ -99,7 +99,8 @@ classes:
         arity: 1
         defined_at: references/ruby/io.c:15743
         c_body_at: references/ruby/io.c:8555
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       reopen:
         source: c
@@ -230,7 +231,8 @@ classes:
         arity: 1
         defined_at: references/ruby/io.c:15757
         c_body_at: references/ruby/io.c:6094
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(_ToS object) -> Integer"
@@ -253,7 +255,8 @@ classes:
         arity: -1
         defined_at: references/ruby/io.c:15760
         c_body_at: references/ruby/io.c:6241
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(int maxlen, int offset, ?string? out_string) -> String"
@@ -264,7 +267,8 @@ classes:
         arity: 2
         defined_at: references/ruby/io.c:15761
         c_body_at: references/ruby/io.c:6329
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(_ToS object, int offset) -> Integer"
@@ -393,7 +397,8 @@ classes:
         arity: -1
         defined_at: references/ruby/io.c:15780
         c_body_at: references/ruby/io.c:3642
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(int maxlen, ?string? outbuf) -> String"
@@ -462,7 +467,8 @@ classes:
         arity: 0
         defined_at: references/ruby/io.c:15786
         c_body_at: references/ruby/io.c:5068
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> String"
@@ -473,7 +479,8 @@ classes:
         arity: 0
         defined_at: references/ruby/io.c:15787
         c_body_at: references/ruby/io.c:5142
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> Integer"
@@ -529,7 +536,8 @@ classes:
         arity: 0
         defined_at: references/ruby/io.c:15792
         c_body_at: references/ruby/io.c:2460
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> Integer"
@@ -551,7 +559,8 @@ classes:
         arity: 0
         defined_at: references/ruby/io.c:15808
         c_body_at: references/ruby/io.c:2624
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> Integer"
@@ -562,7 +571,8 @@ classes:
         arity: 0
         defined_at: references/ruby/io.c:15809
         c_body_at: references/ruby/io.c:2460
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       pos=:
         source: c
@@ -570,7 +580,8 @@ classes:
         arity: 1
         defined_at: references/ruby/io.c:15810
         c_body_at: references/ruby/io.c:2584
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(Integer new_position) -> Integer"
@@ -981,7 +992,8 @@ classes:
         arity: -1
         defined_at: references/ruby/io.c:15712
         c_body_at: references/ruby/io.c:8007
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(string | cmd_array cmd, ?string | int mode, ?path: string?, ?external_encoding:
@@ -1118,6 +1130,7 @@ classes:
         c_body_at: references/ruby/io.c:11912
         c_effects:
         - block
+        - raises
         purity: block_dependent
         rbs:
         - "(?String | Encoding | nil ext_or_ext_int_enc, ?String | Encoding | nil
@@ -1183,7 +1196,8 @@ classes:
         arity: 1
         defined_at: references/ruby/io.c:15891
         c_body_at: references/ruby/io.c:10048
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       to_s:
         source: c
@@ -1330,7 +1344,8 @@ classes:
         arity: -1
         defined_at: references/ruby/io.c:15912
         c_body_at: references/ruby/io.c:10508
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       getc:
         source: c
@@ -1354,7 +1369,8 @@ classes:
         arity: 0
         defined_at: references/ruby/io.c:15915
         c_body_at: references/ruby/io.c:14143
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       readbyte:
         source: c
@@ -1362,7 +1378,8 @@ classes:
         arity: 0
         defined_at: references/ruby/io.c:15916
         c_body_at: references/ruby/io.c:14183
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       tell:
         source: c

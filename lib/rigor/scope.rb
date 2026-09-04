@@ -333,9 +333,21 @@ module Rigor
     # time by `Inference::StatementEvaluator` (`["Admin::UsersController"]` for a compact
     # `class Admin::UsersController`, `["Admin::UsersController", "Admin"]` for the nested spelling). A
     # qualified name cannot be un-flattened back into the chain that produced it, so the chain has to travel
-    # with the scope; `Reflection.lexical_nesting_chain` is the single reader. `nil` means "not recorded"
-    # (a scope built outside a declaration walk), and the reader then falls back to peeling `self_type`'s
-    # class name — a gradual answer, never a new firing.
+    # with the scope; `Reflection.lexical_nesting_chain` is the single reader.
+    #
+    # The value is THREE-valued, and issue #716 is what the third state is for:
+    #
+    # - a non-empty chain — the body's real `Module.nesting`, recorded at declaration time;
+    # - `[]` — recorded, and the body is written at the TOP LEVEL. Ruby's `Module.nesting` there is empty,
+    #   so a top-level `def helper = Post.new` names `::Post` no matter which namespace calls it.
+    #   `Reflection.resolve_constant_type` consults the top level FIRST for such a scope and only then the
+    #   caller-derived rungs, instead of letting the caller's namespace answer;
+    # - `nil` — NOT recorded, for a scope built outside a declaration walk (a callee body re-entered through
+    #   `Scope#evaluate`, a plugin-constructed scope). The reader then peels `self_type`'s class name — a
+    #   gradual answer, never a new firing.
+    #
+    # Collapsing `[]` into `nil` is precisely the bug #716 fixed, so a writer that has an empty chain must
+    # pass it rather than skip the stamp.
     def with_lexical_nesting(chain)
       rebuild(lexical_nesting: chain)
     end
@@ -909,6 +921,13 @@ module Rigor
     # everything here. That rung is deliberately still missing — it was missing from the peel too, and
     # adding it is a widening this change does not need.
     def ancestor_name_candidates(subclass_qualified, raw_ancestor)
+      # Issue #722 residue 1 / #637 — a ROOTED ancestor name is anchored at the top level and has no
+      # candidate list: `class Rooted < ::Base` names `::Base` wherever it is written, exactly as
+      # `Source::ConstantPath.declaration_prefix` already re-anchors a rooted HEADER. The marker is the
+      # leading `::` `Inference::ScopeIndexer.recorded_ancestor_name` preserves.
+      raw = raw_ancestor.to_s
+      return [raw.delete_prefix("::")] if raw.start_with?("::")
+
       recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
       entries = recorded || peeled_header_nesting(subclass_qualified)
       entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s

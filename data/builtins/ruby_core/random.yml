@@ -31,7 +31,8 @@ classes:
         arity: 1
         defined_at: references/ruby/random.c:1870
         c_body_at: references/ruby/random.c:829
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(self object) -> self"

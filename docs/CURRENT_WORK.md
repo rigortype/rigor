@@ -7,7 +7,7 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Hard cap: 120 lines, enforced by spec/docs/agent_index_spec.rb. Compress, do not append.
 - Verify a claim before carrying it forward, by the thing that decides rather than a proxy —
-  including claims in THIS file. Last session's own "next unaudited sections" pointer was wrong.
+  including claims in THIS file. Two sessions running, its own pointers have been wrong.
 -->
 
 # Current Work — Session Handoff
@@ -17,104 +17,94 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**Master is the release candidate and `make verify` is green on it.** 73 changelog fragments and ~550 commits
-since v0.3.6, every fragment carrying its landing PR link. The version bump is NOT autonomous —
-`Rigor::VERSION`, `CHANGELOG.md` and `Gemfile.lock` move only on an explicit request (ADR-50 § WD5, the
-`rigor-release-prep` skill), which consolidates `changelog.d/` at the cut.
+**v0.3.7 is still DEFERRED, deliberately, to raise completeness — there is no cut to prepare.** 84
+`changelog.d/` fragments and 585 commits since v0.3.6 are why the bar moved, not a backlog to flush.
+`Rigor::VERSION`, `CHANGELOG.md` and `Gemfile.lock` move only on an explicit request (ADR-50 § WD5).
+`make verify` and `make docs-check` are green on the integrated master, and every fragment carries its
+landing PR link.
 
-**Eleven fixes landed on 2026-09-04, all found by vetting the backlog against the release
-rather than by a gate.** One theme runs through every one of them: *the analysis had the answer and the
-output said otherwise.*
+## Read this before ranking anything: OPEN does not mean LIVE
 
-- [#733](https://github.com/rigortype/rigor/pull/733) (#723) — the rule asked a name-keyed table while the
-  typer walked the project's ancestry, so a class declared in `sig/` without its superclass drew
-  `undefined method 'x'` on the line `dump_type` printed `x`'s type on.
-- [#734](https://github.com/rigortype/rigor/pull/734) (#684) — discovery ran over the INVOCATION's file
-  set, so `rigor check one_file.rb` reported what `rigor check .` does not. It now spans the configured
-  project while the analysis still targets the given files (0.55s over `lib`'s 444 files; whole-project runs
-  are byte-identical and pay nothing).
-- [#737](https://github.com/rigortype/rigor/pull/737) (#735) — `sig-gen --write` made the next run **5.9×
-  noisier**: unresolvable superclasses collapsed 98 classes, and a partial sidecar turned every cross-file
-  `def` into an ADR-17 monkey-patch report. [#738](https://github.com/rigortype/rigor/pull/738) (#722 r3) —
-  a flattened declaration's superclass token re-pointed at a different class than the checker resolves.
-- The receivers the rule could not enumerate but did: [#741](https://github.com/rigortype/rigor/pull/741)
-  (#739, mixin-module `self` and its `self.class`), [#743](https://github.com/rigortype/rigor/pull/743)
-  (#742, a base class's method under a sidecar `sig/`, plus `Class` / `Module`),
-  [#747](https://github.com/rigortype/rigor/pull/747) (#746, a class including a module no loaded RBS
-  declares). Each closed a fork where the UNION rule already declined what the scalar rule reported.
-- [#740](https://github.com/rigortype/rigor/pull/740) (#736) — `mattr_accessor` / `cattr_accessor` /
-  `class_attribute` introduce methods discovery never recorded.
-- [#745](https://github.com/rigortype/rigor/pull/745) (#744) — sig-gen wrote a base class's precise return
-  for a method an unsigned subclass overrides, and RBS then gave the subclass the base's answer.
-- [#748](https://github.com/rigortype/rigor/pull/748) (#731) — the singleton-side lookup now walks the
-  superclass chain: +62 precise sites on redmine, diagnostics byte-identical.
-- [#749](https://github.com/rigortype/rigor/pull/749) (#728, half) — a mixin call in a self-rebinding block
-  went to the lexically enclosing class, so `Class.new { include M }` put `M` on the class around it.
+Six PRs landed on 2026-09-05, but the session's most useful hour was spent discovering that **seven open
+issues were already fixed**. GitHub closes only the FIRST reference in `Fixes #a, #b, #c` — every issue
+after the first comma stays open forever. #678/#679 (by [#750](https://github.com/rigortype/rigor/pull/750))
+and #727 (by [#752](https://github.com/rigortype/rigor/pull/752)) died that way; #682, #637, #638 and #662
+were fixed by the #652/#709/#721/#754 constant-resolution arc and simply never closed.
 
-**The sig-gen workflow is the measurement that drove seven of the nine.** `sig-gen --write` on redmine then
-`check`, deduplicated by site: the penalty for running the command ADR-14 recommends fell from **82 extra
-diagnostics over the project's own baseline to 5**. The baseline moved only once, by 3, and deliberately
-(#743's `Class` receivers). Of the five left, three are `class_eval`-string metaprogramming
-(`Redmine::Plugin#def_field`), one is `include Singleton`'s class-side `instance`
-([#527](https://github.com/rigortype/rigor/issues/527)), and one is a TRUE POSITIVE:
-`Views::Builders::Structure < BasicObject` calls `self.class.name`, which raises.
+All seven are now closed with the repro re-run and pinned against MRI, not on a PR title. **Run an issue's
+repro before ranking, outsourcing or starting it** — `grep -rn "#<N>" lib/ spec/ changelog.d/` is the cheap
+pre-filter, an implementation comment naming the issue usually means it landed. And put each `Fixes #N` on
+its own line.
 
-**The three external reports (#609/#610/#611) are triaged** — they had sat unlabelled. #609 and #610 carry
-what today's investigation established and, as importantly, what it could NOT reproduce.
+## What landed
+
+- [#758](https://github.com/rigortype/rigor/pull/758) — ten scratch files (`test.rb`…`test10.rb`) that rode
+  #753 onto the repository root. The `git add -A` hazard this file documented, one day later.
+- [#759](https://github.com/rigortype/rigor/pull/759) (#756) — a `spec/docs` gate checking every
+  `raises`-omitting builtin-catalogue row against the C body its own `c_body_at` cites. Found ten more wrong
+  rows beyond #757's 36 and fixed the data rather than loosening the check.
+- [#760](https://github.com/rigortype/rigor/pull/760) (#670) — the ActiveSupport `Date` / `DateTime` surface,
+  with per-class `DateTime` overrides. [#765](https://github.com/rigortype/rigor/pull/765) (#762 + #659) then
+  removed five `Date` singletons ActiveSupport never defines, retyped `Date.beginning_of_week` to `Symbol`,
+  and declared `Duration`'s six-method `ago` family.
+- [#761](https://github.com/rigortype/rigor/pull/761) (#611) — bundle `sig/` discovery now walks the
+  `bundler/gems/` layout, so a git-sourced gem's own signatures are found.
+- [#764](https://github.com/rigortype/rigor/pull/764) (#716) — a top-level `def` resolves its constants at the
+  top level, as Ruby does, instead of under the caller's namespace.
+
+## Two measurements that change what is worth doing
+
+**[#574](https://github.com/rigortype/rigor/issues/574)'s stated blocker does not exist.** The issue said the
+witness-gate tightening needs its own corpus FP/FN diff before landing. That diff has been run and is empty:
+1,529 analysis examples pass unchanged, redmine (1,016 diagnostics) and mastodon (2,356) are byte-identical,
+and the `Dynamic | String | nil` must-fire example it predicted would break keeps firing. The zero is not an
+unexercised path — a second counter shows the vacuity firing 198 times across the two corpora; every one of
+those arms is a project class the discovery table knows, so it stays a legitimate witness under #574's own
+criterion. **It cannot land alone** (`params[:username]` types as non-nilable `Parameters` today, so the new
+branch is unreachable) — land it WITH #534 item 1's `#[] -> Parameters | nil`, which is the pair that gates.
+Harness: branch `measure/574-witness-gate`, do-not-merge, two counters behind `RIGOR_574_PROBE`.
+
+**[#656](https://github.com/rigortype/rigor/issues/656) is real and not release-blocking.** Reproduced (wrong
+class, then a false positive against it). Sized at **6 movable sites in 210,000 constant paths** across eight
+targets — all gitlab, all through an `include` edge (a superclass-only probe finds zero), five of the six in
+`spec/`. The fix is segment-by-segment ancestor resolution in two hot resolvers; six sites does not buy that
+risk now. Note the correction in the issue: the HEAD segment resolves fine, the second one does not.
+
+## Work in flight elsewhere — check before starting
+
+**Worktrees under `~/repo/ruby/rigor-wt/`: #713 (120 dirty files) and #718 (1), both still uncommitted** after
+two sessions; `class-new-struct-factory-carrier` is clean and behind master. Coordinate before touching
+`spec/integration/precision_snapshot_spec.rb`, the `spec/integration/snapshots/` goldens, or
+`lib/rigor/environment/rbs_loader.rb`.
 
 ## Backlog, ranked
 
-1. **[#744](https://github.com/rigortype/rigor/issues/744) half 2** (needs adjudication) — should an
-   INHERITED declaration outrank the receiver class's own source `def`? Under RBS semantics yes, and
-   `def.return-type-mismatch` already reports the inconsistency; under this project's FP-first value the
-   type that flows is the override's. #745 stopped sig-gen manufacturing the conflict; the engine question
-   is untouched and is the kind of call #700 / #660 are on the list for.
-2. **[#610](https://github.com/rigortype/rigor/issues/610)** — every AR relation degrades to `Dynamic[top]`
-   when `rbs collection install` and `rigor-activerecord` are both used, which is the documented Rails setup.
-   Structurally confirmed; **not reproduced end-to-end** — the issue comment records why (a synthetic fixture
-   cannot exercise the plugin's `Relation` typing) and what a real reproduction needs.
-3. **[#728](https://github.com/rigortype/rigor/issues/728)'s titled half** — per-SITE header nesting.
-   Reproduced (rigor `:outer`, MRI `:top`). #749 took its second half; what is left needs a NEW discovery
-   table threaded through the ADR-85 seed bundles, i.e. a persisted-format schema bump with both
-   directions run. A day's work with a migration in it — the issue comment records the cost so the next
-   person sizes it before starting.
-5. **[#722](https://github.com/rigortype/rigor/issues/722)** residues 1, 2 and 4;
-   **[#732](https://github.com/rigortype/rigor/issues/732)** (the forked `known_user_class?`);
-   **[#717](https://github.com/rigortype/rigor/issues/717)** / **[#718](https://github.com/rigortype/rigor/issues/718)**
-   (banner noise — #725 already preserves buffer names, so re-check what `<cached>` still reaches first).
-6. **#700**, **#660**, **#574** — the human ADR adjudications. #574 still gates the corpus's biggest pair
-   (`Parameters#[]`, 581 redmine + 496 mastodon).
+1. **[#610](https://github.com/rigortype/rigor/issues/610)** — every AR relation degrades to `Dynamic[top]`
+   under the documented Rails setup. Still the largest user-facing unknown, still **not reproduced
+   end-to-end**; needs a real Rails app plus an actual `rbs collection install`.
+2. **[#574](https://github.com/rigortype/rigor/issues/574) + [#534](https://github.com/rigortype/rigor/issues/534) item 1 as ONE PR** — now unblocked by measurement, and the corpus's biggest FP pair (`Parameters#[]`, 581 redmine + 496 mastodon).
+3. **[#763](https://github.com/rigortype/rigor/issues/763)** (new) — `MissingGemConstantIndex` still walks only
+   the RubyGems layout, so a git-sourced gem owns none of its constants; feeds #530's mislabelling.
+4. **[#744](https://github.com/rigortype/rigor/issues/744) half 2** and **[#728](https://github.com/rigortype/rigor/issues/728)** — the adjudication and the persisted-schema half, unchanged.
+5. Then **#700**, **#660**, **#605/#601** — the human adjudications.
 
-## Measurement — read before writing a gate or trusting a number
-
-- **Neuter the change and confirm the new example — and ONLY that example — fails.** #734's cache arm was
-  verified that way; #737's and #738's discriminating examples likewise, with their controls stated as
-  controls. "The gate is green" and "the gate can execute that path" remain different claims.
-- **A corpus diff can be inert by construction, and saying so is part of the result.** #733 is byte-identical
-  on redmine and on Rigor's own `lib` — neither contains a movable site. Evidence it silences nothing, not
-  evidence it fixes anything.
-- **Run the user's own workflow end to end before believing the feature works.** `sig-gen --write` on a real
-  Rails app, then `check`, is what found #735 and #736; every gate in the repo was green throughout, because
-  our own `sig/` is thorough enough never to hit the shape.
-- **Ask the expensive probe where the answer is needed.** #733's ancestor walk and #747's include walk both
-  record ADR-46 ancestry edges; on the hot path each coarsened incremental invalidation project-wide, and
-  `dependency_recorder_spec` was the only thing that caught either. Expect a third.
-- **Measure the obvious optimisation before adopting it.** A `sig/`-presence gate on #734's widening looked
-  free and would have missed the whole monkey-patching population.
-- **Measure a suppression's COST, not only its benefit.** #747 was landed on "the no-`sig/` baseline is
-  unchanged at 26" — the number that would have said "too broad" had it moved.
+Good next outsourcing lanes, all independent and repro-complete: **#630** (four plugins bypass the
+`IoBoundary`), **#530**, **#686**, **#695 + #724** items 1-2 (#724 item 3 belongs to #713).
 
 ## Pipeline notes (each earned by an incident)
 
-- **`gh pr checks --watch` exits 0 with "no checks reported" inside the registration window**, and again on a
-  network drop mid-watch. Confirm `statusCheckRollup` is non-empty first, and read the per-check outcomes
-  (`awk -F'\t' '{print $2}' | sort | uniq -c`) rather than the wrapper's exit code.
-- **A finding's REPRO is reproducible; its CHARACTERISATION is a separate claim.** #723 and #684 were filed
-  as one family and have two unrelated roots; reading the code, not the issues, settled it.
-- **A spec can use a diagnostic as its observable and be invalidated by a correct fix.**
-  `runner_fork_pool_spec` asserted the ADR-17 message to prove the pool's discovery seeding; #737 removed
-  that message legitimately, so the fixture moved to a bundled class rather than the contract being weakened.
-- Structural guards ENUMERATE a surface (`public_api_drift_spec` in BOTH halves — the runtime list is
-  order-sensitive and the `sig/` coverage half is separate). Check by COMPUTING what they pin.
-- Read gate exit codes UNPIPED. Lint your own diff with `--force-exclusion`. File a follow-up issue BEFORE
-  opening the PR that cites it. After a parallel batch, verify the INTEGRATED master.
+- **A worktree SHARES `.git`, and submodules are NOT populated in one.** `references/ruby` is empty in a fresh
+  worktree, so a gate reading it silently SKIPS — verify such a gate EXECUTED, not merely that it was green.
+  A worker's `git submodule deinit` there deregistered the submodule for the MAIN CLONE (files survived,
+  `git status` stayed clean, only `git submodule status` showed it). Adding a checkout in a worktree is fine;
+  removing a registration never is.
+- **Serialize the full gate across parallel lanes** with a `mkdir /tmp/rigor-verify.lock` mutex — parallel
+  `make verify` runs have OOM-killed this host. Expect several minutes per gate under contention.
+- **Subagents stall waiting on a backgrounded gate, and `SendMessage` may be disabled** — then the coordinator
+  must finish the lane by hand, and an agent that later resumes will collide with those commits. Brief every
+  worker to run gates in the FOREGROUND with a generous timeout.
+- **Verify the INTEGRATED master after a batch.** Run it; no single PR's CI sees the combination.
+- A finding's REPRO is reproducible; its CHARACTERISATION is a separate claim. `docs/notes/`'s own
+  top-level-def census called 66 name collisions "the canonical shape of the defect" and was wrong — the
+  reading defs were all in `spec/`, where no caller pushes a cref. It is corrected in place; the correction
+  came from the implementer, not the author.

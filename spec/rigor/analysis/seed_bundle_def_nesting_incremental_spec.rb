@@ -68,6 +68,31 @@ RSpec.describe "ADR-85 seed bundles carry the recorded def nesting" do
   # The diagnostic master's warm arm invents. Asserted absent explicitly rather than only implied by the
   # equality, so a future regression names itself.
   let(:peeled_message) { "undefined method `top_post' for Admin::Post" }
+  # Issue #716 — the TOP-LEVEL half, which this file could not pin until the top-level chain became a
+  # recorded answer. A previous comment here explained that it was unpinnable, and it was right for the tree
+  # it described: `def helper = Post.new` at top level recorded NOTHING, both arms peeled the caller's
+  # namespace, and cold agreed with warm on the same wrong constant — so an example asserting equality here
+  # would have pinned `Admin::Post` where Ruby names `::Post`.
+  #
+  # Recording `[]` makes the cold answer right, and that is exactly what puts the warm arm at risk: `[]`
+  # has to survive `live_defs_to_bundle` → Marshal → {Inference::DefHandle} → `DefNodeResolver` as `[]` and
+  # not degrade to nil, which would silently restore the peel on every unchanged file. Mutating
+  # `DefNodeResolver.record_nesting` back to skipping an empty chain fails this example, which is the claim
+  # the older comment could not make.
+  #
+  # Both halves are asserted, so neither a lost diagnostic nor an invented one passes: `helper` returns
+  # `::Post`, so `admin_post` MUST fire and `top_post` MUST NOT.
+  let(:toplevel_maker_source) do
+    <<~RUBY
+      class Post; end
+
+      module Admin
+        class Post; end
+      end
+
+      def helper = Post.new
+    RUBY
+  end
 
   def reader_source(extra: nil)
     <<~RUBY
@@ -158,41 +183,43 @@ RSpec.describe "ADR-85 seed bundles carry the recorded def nesting" do
     end
   end
 
-  # A top-level `def` records NO chain (#681: an empty chain would retract the peel fallback, which is the
-  # answer that path must keep), and the bundle must carry that absence as an absence.
-  #
-  # **This example does not prove that**, and an earlier comment here claimed it did. Mutating
-  # `DefNodeResolver.record_nesting` to store `nesting || []` leaves all three examples in this file green;
-  # only `spec/rigor/inference/def_node_resolver_spec.rb`'s "records nothing for a top-level def's absent
-  # chain" catches it (`expected: nil / got: []`). That unit example is where the guard lives.
-  #
-  # The absence is not pinnable HERE, and the reason is worth recording rather than working around. A fixture
-  # that discriminates needs the top-level def to READ a constant, and for such a body the recorded-empty
-  # answer and the peel answer are both heuristics rather than one being Ruby's: Ruby's `Module.nesting`
-  # inside a top-level `def` IS empty, so the peel — which resolves the constant against the CALLER's
-  # namespace — is the one #681 deliberately kept for precision, and it can be wrong. Measured on
-  # `def helper = Post.new` at top level, called from inside `module Admin`: both arms report
-  # `undefined method 'top_post' for Admin::Post` where Ruby names `::Post`. Cold equals warm, so it is not
-  # this branch's defect, but asserting it here would pin a wrong answer into a regression gate.
-  #
-  # What this example DOES carry is the non-regression half: a bundle-served top-level def keeps answering
-  # exactly what a full run answers, so carrying the chain for nested defs did not disturb the population
-  # that records none.
-  it "keeps a bundle-served top-level def answering exactly what a full run answers" do
-    Dir.mktmpdir do |dir|
-      File.write(File.join(dir, maker), "def helper = 1\n")
-      File.write(File.join(dir, reader), "class Reader\n  def read = helper\nend\n")
-      config = Rigor::Configuration.new("paths" => [dir])
-      environment = Rigor::Environment.for_project
-      session = session_for(config, dir, environment)
-      expect(sites(guarded_baseline(session))).to eq([])
+  def toplevel_reader_source(extra: nil)
+    <<~RUBY
+      module Admin
+        class Reader
+          def resolves = helper.top_post
+          def misses = helper.admin_post
+      #{"    def noise = #{extra}\n" if extra}  end
+      end
+    RUBY
+  end
 
-      File.write(File.join(dir, reader), "class Reader\n  def read = helper\n  def noise = 2\nend\n")
+  def write_toplevel_project(dir, extra: nil)
+    File.write(File.join(dir, maker), toplevel_maker_source)
+    File.write(File.join(dir, reader), toplevel_reader_source(extra: extra))
+    signatures = File.join(dir, "sig")
+    FileUtils.mkdir_p(signatures)
+    File.write(File.join(signatures, "decl.rbs"), sig_source)
+    Rigor::Configuration.new("paths" => [dir], "signature_paths" => [signatures])
+  end
+
+  it "resolves a bundle-served top-level def's constants at the top level, as a full run does" do
+    Dir.mktmpdir do |dir|
+      config = write_toplevel_project(dir)
+      environment = environment_for(config)
+      session = session_for(config, dir, environment)
+      expected = ["#{reader}:4:call.undefined-method"]
+      expect(sites(guarded_baseline(session))).to eq(expected)
+
+      # Edit the CALLER only, so the top-level def is served from the seed bundle built during the baseline.
+      File.write(File.join(dir, reader), toplevel_reader_source(extra: "1"))
       recheck = guarded_recheck(session)
 
       expect(recheck.reused).to include(File.join(dir, maker))
+      expect(sites(recheck.diagnostics)).to eq(expected)
+      expect(messages(recheck.diagnostics)).to eq(["undefined method `admin_post' for Post"])
+      expect(messages(recheck.diagnostics)).not_to include(peeled_message)
       expect(sites(recheck.diagnostics)).to eq(sites(full_diagnostics(config, environment)))
-      expect(sites(recheck.diagnostics)).to eq([])
     end
   end
 end

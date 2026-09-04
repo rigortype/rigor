@@ -264,20 +264,32 @@ end
 # undeclared and silently `Dynamic` rather than guessed.
 module ActiveSupport
   class Duration
-    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
-    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
-    # and typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`,
-    # `past?`, `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, …) to
-    # already be closed and complete — `Time` is CORE, RBS-known from stdlib, and this bundle's `Time`
-    # block below never declared that instance surface (#658 — already a live FP on master:
-    # `Time.current.to_fs(:db)` fires today, independent of Duration). Answering `ago` with `Time` does not
-    # leave the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN
-    # undeclared members — it fires a false `call.undefined-method` on `to_fs` for `1.hour.ago.to_fs(:db)`,
-    # ordinary Rails, and the same for every other Rails `Time` extension nothing here declares: 9 false
-    # positives on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658
-    # lands: plain `Time`, not a `Time | ActiveSupport::TimeWithZone` union (Rails overrides
-    # `TimeWithZone#is_a?` to answer true for `::Time`, and the union measured to `Dynamic[top]`
-    # everywhere downstream). Do not re-add these until #658 lands the `Time` surface first.
+    # The `ago` family (issue #659). `since(time = ::Time.current)` and `ago(time = ::Time.current)` are
+    # the only two real methods; `from_now` / `after` alias the first and `until` / `before` the second,
+    # so all six share one signature. They were declared once before and removed, because typing them
+    # `Time` while the Rails `Time` INSTANCE surface was undeclared made `1.hour.ago.to_fs(:db)` —
+    # ordinary Rails — a false `call.undefined-method` on the returned `Time`, which
+    # `GEM_OVERLAY_OPEN_RECEIVERS` cannot suppress since it protects a Duration receiver, not a `Time`
+    # one. #658 declared that surface and #670 the `Date` / `DateTime` twins, so the chains resolve now.
+    #
+    # `Time` is the right class rather than a compromise: under a zone these answer an
+    # `ActiveSupport::TimeWithZone`, and Rails overrides `TimeWithZone#is_a?` to answer true for
+    # `::Time`. A `Time | ActiveSupport::TimeWithZone` union was measured and rejected — it types every
+    # downstream call `Dynamic[top]`. The with-an-argument form stays `untyped` because the runtime
+    # return depends on the argument's class AND on whether the duration carries a date-scale part
+    # (`(1.month).ago(Date.today)` answers a `Date`; `(30.minutes).ago(Date.today)` a `TimeWithZone`).
+    def ago: () -> Time
+           | (untyped time) -> untyped
+    def until: () -> Time
+             | (untyped time) -> untyped
+    def before: () -> Time
+              | (untyped time) -> untyped
+    def since: () -> Time
+             | (untyped time) -> untyped
+    def from_now: () -> Time
+                | (untyped time) -> untyped
+    def after: () -> Time
+             | (untyped time) -> untyped
 
     # `to_i` / its `in_seconds` alias return `@value.to_i` — always Integer.
     def to_i: () -> Integer
@@ -509,15 +521,16 @@ end
 # ---------------------------------------------------------------
 
 class Date
+  # The whole date-constructing singleton surface `core_ext/date/calculations.rb`'s `class << self`
+  # adds. `self.end_of_week`, `self.beginning_of_month`, `self.end_of_month`,
+  # `self.beginning_of_year` and `self.end_of_year` were declared here until #762 and do not exist —
+  # `Date` only INCLUDES `DateAndTime::Calculations`, so those five are instance methods, below. The
+  # declarations made `Date.end_of_month`, a real `NoMethodError`, type-check as a `Date`, and
+  # `DateTime` inherited all five. `self.beginning_of_week` exists but is the week-start
+  # configuration reader, declared with that group at the bottom of this class.
   def self.current: () -> Date
   def self.yesterday: () -> Date
   def self.tomorrow: () -> Date
-  def self.beginning_of_week: () -> Date
-  def self.end_of_week: () -> Date
-  def self.beginning_of_month: () -> Date
-  def self.end_of_month: () -> Date
-  def self.beginning_of_year: () -> Date
-  def self.end_of_year: () -> Date
 
   def yesterday: () -> Date
   def tomorrow: () -> Date
@@ -553,6 +566,87 @@ class Date
   # without it `date.to_time(:utc)` — correct Rails code — draws an arity diagnostic (#449). `| ...`
   # appends this overload ahead of the stdlib one, so both arities resolve.
   def to_time: (?Symbol form) -> Time | ...
+
+  # Issue #670 — the rest of the Rails `Date` instance surface, plus the week-start configuration
+  # singletons. `Date` is CLOSED (rbs's `stdlib/date` types it fully), so an OMISSION here is a false
+  # positive on correct Rails code exactly as much as a wrong return type is. Audited against the
+  # vendored activesupport-8.1.3.1 sources and every return confirmed by calling it on a real `Date`
+  # receiver; the plugin twin carries the per-method reasoning and the purity verdicts, which the
+  # overlay deliberately does not (see the header). The six `:nodoc:` operator-alias artefacts
+  # (`plus_with{,out}_duration`, `minus_with{,out}_duration`, `compare_with{,out}_coercion`) are left
+  # out on purpose, as are the `Object`- / `Module`-level core_ext methods that reach `Date` because
+  # they reach every class (#673).
+  def today?: () -> bool
+  def tomorrow?: () -> bool
+  def next_day?: () -> bool
+  def yesterday?: () -> bool
+  def prev_day?: () -> bool
+  def past?: () -> bool
+  def future?: () -> bool
+  def on_weekend?: () -> bool
+  def on_weekday?: () -> bool
+  def before?: (untyped date_or_time) -> bool
+  def after?: (untyped date_or_time) -> bool
+  def days_ago: (Numeric days) -> Date
+  def days_since: (Numeric days) -> Date
+  def weeks_ago: (Numeric weeks) -> Date
+  def weeks_since: (Numeric weeks) -> Date
+  def months_ago: (Numeric months) -> Date
+  def months_since: (Numeric months) -> Date
+  def years_ago: (Numeric years) -> Date
+  def years_since: (Numeric years) -> Date
+  def at_beginning_of_month: () -> Date
+  def at_end_of_month: () -> Date
+  def at_beginning_of_year: () -> Date
+  def at_end_of_year: () -> Date
+  def beginning_of_quarter: () -> Date
+  def at_beginning_of_quarter: () -> Date
+  def end_of_quarter: () -> Date
+  def at_end_of_quarter: () -> Date
+  def quarter: () -> Integer
+  def next_week: (?Symbol given_day_in_next_week, ?same_time: bool) -> Date
+  def prev_week: (?Symbol start_day, ?same_time: bool) -> Date
+  def last_week: (?Symbol start_day, ?same_time: bool) -> Date
+  def next_weekday: () -> Date
+  def days_to_week_start: (?Symbol start_day) -> Integer
+  def all_week: (?Symbol start_day) -> Range[Date]
+  def at_beginning_of_week: (?Symbol start_day) -> Date
+  def at_end_of_week: (?Symbol start_day) -> Date
+  def prev_weekday: () -> Date
+  def last_weekday: () -> Date
+  def monday: () -> Date
+  def sunday: () -> Date
+  def next_quarter: () -> Date
+  def prev_quarter: () -> Date
+  def last_quarter: () -> Date
+  def last_month: () -> Date
+  def last_year: () -> Date
+  def all_month: () -> Range[Date]
+  def all_quarter: () -> Range[Date]
+  def all_year: () -> Range[Date]
+  def next_occurring: (Symbol day_of_week) -> Date
+  def prev_occurring: (Symbol day_of_week) -> Date
+  def change: (untyped options) -> Date
+  def in: (Numeric seconds) -> Time
+  def middle_of_day: () -> Time
+  def midday: () -> Time
+  def noon: () -> Time
+  def at_midday: () -> Time
+  def at_noon: () -> Time
+  def at_middle_of_day: () -> Time
+  def to_fs: (?Symbol format) -> String
+  def to_formatted_s: (?Symbol format) -> String
+  def readable_inspect: () -> String
+  def default_inspect: () -> String
+  def in_time_zone: (?untyped zone) -> untyped
+  # The week-start configuration group. `self.beginning_of_week` is its READER and answers the week
+  # start (`:monday` by default), not a date — it was `() -> Date` until #762, which made every
+  # correct Symbol use of the value look wrong and every incorrect `Date` use look right.
+  def self.beginning_of_week: () -> Symbol
+  def self.beginning_of_week=: (Symbol week_start) -> Symbol
+  def self.beginning_of_week_default: () -> Symbol?
+  def self.beginning_of_week_default=: (Symbol? week_start) -> Symbol?
+  def self.find_beginning_of_week!: (Symbol week_start) -> Symbol
 end
 
 # ---------------------------------------------------------------
@@ -689,10 +783,29 @@ end
 # ---------------------------------------------------------------
 
 class DateTime
+  # Issue #670. `DateTime < Date`, so every row the `Date` block above declares is INHERITED here —
+  # and for most of `DateAndTime::Calculations` the inherited return is WRONG, because the shared
+  # module's `first_hour` / `last_hour` helpers branch on `acts_like?(:time)` (false on `Date`, true
+  # on `DateTime`) and compose each class's own `advance` / `change`. `DateTime.now.beginning_of_month`
+  # answered `Date` on master while returning a `DateTime` at runtime. So most of this block is
+  # overrides, and declaring the missing surface on `Date` alone would have converted the
+  # undefined-method false positives into wrong-return ones instead of fixing them.
+  #
+  # Rows already correct through inheritance are deliberately absent: `today?` / `past?` / `before?` /
+  # `on_weekend?` (bool), `quarter` / `days_to_week_start` (Integer), `to_fs` / `to_formatted_s` /
+  # `readable_inspect` / `default_inspect` (String), `acts_like_date?` (true). The sharpest is at the
+  # singleton — `DateTime.yesterday` / `.tomorrow` really do answer a `Date` (their bodies are a
+  # hardcoded `::Date.current.…`), so the inherited rows are right and overriding them would have been
+  # the false positive. `DateTime.current` is the one that is wrong inherited, and it is overridden.
   def utc: () -> Time
-  # NOTE: `DateTime#to_time` is NOT declared here — stdlib `date` already types it, and re-declaring it
-  # collapsed the whole `DateTime` definition (see the `Time#utc?` note above).
-  def in_time_zone: (?String | Symbol zone) -> untyped
+  def getgm: () -> Time
+  def getutc: () -> Time
+  def gmtime: () -> Time
+  # NOTE: `DateTime#to_time` is NOT declared here — stdlib `date` already types it, and re-declaring
+  # it collapsed the whole `DateTime` definition (see the `Time#utc?` note above). The
+  # `in_time_zone` PARAMETER widened from `String | Symbol` to `untyped` in #670: `Time.find_zone!`
+  # also accepts a `TimeZone`, a `TZInfo::Timezone` and an offset `Duration`.
+  def in_time_zone: (?untyped zone) -> untyped
   def yesterday: () -> DateTime
   def tomorrow: () -> DateTime
   def ago: (Numeric seconds) -> DateTime
@@ -704,6 +817,82 @@ class DateTime
   def beginning_of_minute: () -> DateTime
   def end_of_minute: () -> DateTime
   def acts_like_time?: () -> true
+  def advance: (untyped options) -> DateTime
+  def change: (untyped options) -> DateTime
+  def in: (Numeric seconds) -> DateTime
+  def midnight: () -> DateTime
+  def at_midnight: () -> DateTime
+  def at_beginning_of_day: () -> DateTime
+  def at_end_of_day: () -> DateTime
+  def middle_of_day: () -> DateTime
+  def midday: () -> DateTime
+  def noon: () -> DateTime
+  def at_midday: () -> DateTime
+  def at_noon: () -> DateTime
+  def at_middle_of_day: () -> DateTime
+  def at_beginning_of_hour: () -> DateTime
+  def at_end_of_hour: () -> DateTime
+  def at_beginning_of_minute: () -> DateTime
+  def at_end_of_minute: () -> DateTime
+  def seconds_since_midnight: () -> Integer
+  def seconds_until_end_of_day: () -> Integer
+  def subsec: () -> Rational
+  def to_f: () -> Float
+  def to_i: () -> Integer
+  def usec: () -> Integer
+  def nsec: () -> Integer
+  def utc?: () -> bool
+  def utc_offset: () -> Integer
+  def localtime: (?untyped utc_offset) -> Time
+  def getlocal: (?untyped utc_offset) -> Time
+  def days_ago: (Numeric days) -> DateTime
+  def days_since: (Numeric days) -> DateTime
+  def weeks_ago: (Numeric weeks) -> DateTime
+  def weeks_since: (Numeric weeks) -> DateTime
+  def months_ago: (Numeric months) -> DateTime
+  def months_since: (Numeric months) -> DateTime
+  def years_ago: (Numeric years) -> DateTime
+  def years_since: (Numeric years) -> DateTime
+  def beginning_of_month: () -> DateTime
+  def at_beginning_of_month: () -> DateTime
+  def end_of_month: () -> DateTime
+  def at_end_of_month: () -> DateTime
+  def beginning_of_year: () -> DateTime
+  def at_beginning_of_year: () -> DateTime
+  def end_of_year: () -> DateTime
+  def at_end_of_year: () -> DateTime
+  def beginning_of_quarter: () -> DateTime
+  def at_beginning_of_quarter: () -> DateTime
+  def end_of_quarter: () -> DateTime
+  def at_end_of_quarter: () -> DateTime
+  def next_quarter: () -> DateTime
+  def prev_quarter: () -> DateTime
+  def last_quarter: () -> DateTime
+  def last_month: () -> DateTime
+  def last_year: () -> DateTime
+  def prev_weekday: () -> DateTime
+  def last_weekday: () -> DateTime
+  def monday: () -> DateTime
+  def sunday: () -> DateTime
+  def next_occurring: (Symbol day_of_week) -> DateTime
+  def prev_occurring: (Symbol day_of_week) -> DateTime
+  def all_day: () -> Range[DateTime]
+  def all_month: () -> Range[DateTime]
+  def all_quarter: () -> Range[DateTime]
+  def all_year: () -> Range[DateTime]
+  def beginning_of_week: (?Symbol start_day) -> DateTime
+  def end_of_week: (?Symbol start_day) -> DateTime
+  def at_beginning_of_week: (?Symbol start_day) -> DateTime
+  def at_end_of_week: (?Symbol start_day) -> DateTime
+  def next_week: (?Symbol given_day_in_next_week, ?same_time: bool) -> DateTime
+  def prev_week: (?Symbol start_day, ?same_time: bool) -> DateTime
+  def last_week: (?Symbol start_day, ?same_time: bool) -> DateTime
+  def next_weekday: () -> DateTime
+  def all_week: (?Symbol start_day) -> Range[DateTime]
+  def formatted_offset: (?boolish colon, ?untyped alternate_utc_string) -> String
+  def utc_to_local_returns_utc_offset_times: () -> bool
+  def self.current: () -> DateTime
+  def self.civil_from_format: (untyped utc_or_local, Integer year, ?Integer month, ?Integer day, ?Integer hour, ?Integer min, ?Integer sec) -> DateTime
 end
 
 # ---------------------------------------------------------------

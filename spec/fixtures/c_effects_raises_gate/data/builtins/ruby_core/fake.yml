@@ -1,0 +1,34 @@
+# Fixture catalogue for spec/docs/c_effects_raises_gate_spec.rb — NOT generated, hand-authored to shadow
+# the shape of a real data/builtins/ruby_core/*.yml file. `broken` is a deliberately wrong row (its body
+# at references/ruby/fake.c:7, resolved against this fixture directory, calls rb_raise, but c_effects
+# omits `raises`); `fine` is its correct sibling (its body at fake.c:14 never raises, and c_effects
+# correctly omits `raises`) — kept alongside `broken` so the spec proves the scan flags the wrong row
+# WITHOUT also flagging the right one.
+---
+schema_version: 1
+classes:
+  FakeClass:
+    parent: Object
+    defined_at: references/ruby/fake.c:1
+    includes: []
+    constants: {}
+    aliases: {}
+    instance_methods:
+      broken:
+        source: c
+        cfunc: fake_broken
+        arity: 0
+        defined_at: references/ruby/fake.c:7
+        c_body_at: references/ruby/fake.c:7
+        c_effects: []
+        purity: leaf
+      fine:
+        source: c
+        cfunc: fake_fine
+        arity: 0
+        defined_at: references/ruby/fake.c:14
+        c_body_at: references/ruby/fake.c:14
+        c_effects: []
+        purity: leaf
+    singleton_methods: {}
+    undefined: []

@@ -447,38 +447,131 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
-  # Issue #680. `resolve_class` resolves a class name taken from the ANALYSED PROGRAM with `Object.const_get`, so it
-  # can execute an autoload target inside the analyzer. Declining a pending autoload there moves a verdict and is
-  # deferred to #689; the rescue widening does not, and is what keeps a throwing resolution from ending the run.
-  describe "resolving a class name whose resolution throws (#680)" do
-    def exploding_nominal(exception)
-      probe = Module.new do
-        define_singleton_method(:const_missing) { |_name| raise exception }
+  # Issues #680, #689. `resolve_class` resolves a class name taken from the ANALYSED PROGRAM without triggering
+  # `const_missing` or executing pending autoloads inside the analyzer.
+  describe "resolving class names safely (#680, #689)" do
+    describe "guarding against pending autoloads (#689)" do
+      let(:autoload_dir) { Dir.mktmpdir("rigor-spec-autoload-") }
+      let(:marker_path)  { File.join(autoload_dir, "fired.marker") }
+      let(:target_path)  { File.join(autoload_dir, "probe_target.rb") }
+      let(:probe) do
+        File.write(target_path, <<~RUBY)
+          File.write(#{marker_path.dump}, "fired")
+          class RigorSpecAutoloadProbe
+            class Target; end
+          end
+        RUBY
+        Module.new.tap { |mod| mod.autoload(:Target, target_path) }
       end
-      stub_const("RigorSpecThrowingProbe", probe)
-      Rigor::Type::Combinator.nominal_of("RigorSpecThrowingProbe::BOOM")
+
+      after { FileUtils.remove_entry(autoload_dir) if File.directory?(autoload_dir) }
+
+      it "returns nil without firing a pending autoload" do
+        stub_const("RigorSpecAutoloadProbe", probe)
+
+        resolved = described_class.send(:resolve_class, "RigorSpecAutoloadProbe::Target")
+        expect(resolved).to be_nil
+        expect(File.exist?(marker_path)).to be(false)
+        expect(probe.autoload?(:Target)).to eq(target_path)
+      end
+
+      it "declines when accepting a nominal of an autoload-registered class without firing the autoload" do
+        stub_const("RigorSpecAutoloadProbe", probe)
+        nominal = Rigor::Type::Combinator.nominal_of("RigorSpecAutoloadProbe::Target")
+
+        expect(accepts(nominal, int_constant)).to be_no
+        expect(File.exist?(marker_path)).to be(false)
+        expect(probe.autoload?(:Target)).to eq(target_path)
+      end
+
+      it "resolves a class that was already genuinely loaded" do
+        expect(described_class.send(:resolve_class, "String")).to eq(String)
+        expect(described_class.send(:resolve_class, "Process::Status")).to eq(Process::Status)
+      end
+
+      it "returns nil for non-module constants, unknown constants, and malformed names" do
+        expect(described_class.send(:resolve_class, "File::SEPARATOR")).to be_nil
+        expect(described_class.send(:resolve_class, "RigorSpecNonExistentConstant")).to be_nil
+        expect(described_class.send(:resolve_class, "")).to be_nil
+        expect(described_class.send(:resolve_class, "::")).to be_nil
+        expect(described_class.send(:resolve_class, nil)).to be_nil
+      end
     end
 
-    it "answers instead of killing the process when the resolution raises SystemExit" do
-      # `prism/translation/ruby_parser.rb` calls `exit` at the top level when `sexp_processor` is absent, and
-      # `SystemExit` is not a `StandardError` — the old `rescue NameError` let it past every rescue in the analysis
-      # path, so `rigor check` died with no diagnostics and no summary.
-      nominal = exploding_nominal(SystemExit.new(3))
+    describe "widening rescue to catch throwing resolution (#680)" do
+      def exploding_nominal_via_const_defined(exception)
+        probe = Module.new do
+          define_singleton_method(:const_defined?) { |*| raise exception }
+        end
+        stub_const("RigorSpecThrowingProbe", probe)
+        Rigor::Type::Combinator.nominal_of("RigorSpecThrowingProbe::BOOM")
+      end
 
-      expect { accepts(nominal, int_constant) }.not_to raise_error
-      expect(accepts(nominal, int_constant)).to be_no
+      def exploding_nominal_via_const_missing(exception)
+        probe = Module.new do
+          define_singleton_method(:const_missing) { |_name| raise exception }
+        end
+        stub_const("RigorSpecThrowingProbe", probe)
+        Rigor::Type::Combinator.nominal_of("RigorSpecThrowingProbe::BOOM")
+      end
+
+      it "answers instead of killing the process when the resolution raises SystemExit" do
+        # `prism/translation/ruby_parser.rb` calls `exit` at the top level when `sexp_processor` is absent, and
+        # `SystemExit` is not a `StandardError` — the old `rescue NameError` let it past every rescue in the analysis
+        # path, so `rigor check` died with no diagnostics and no summary.
+        nominal = exploding_nominal_via_const_defined(SystemExit.new(3))
+
+        expect { accepts(nominal, int_constant) }.not_to raise_error
+        expect(accepts(nominal, int_constant)).to be_no
+      end
+
+      it "answers instead of propagating when the resolution raises a ScriptError" do
+        nominal = exploding_nominal_via_const_defined(LoadError.new("library not found"))
+
+        expect(accepts(nominal, int_constant)).to be_no
+      end
+
+      it "returns no when constant is undefined on a probe defining const_missing" do
+        nominal = exploding_nominal_via_const_missing(RuntimeError.new("should not be called"))
+
+        expect(accepts(nominal, int_constant)).to be_no
+      end
+
+      it "leaves a class that resolves normally at the verdict it already had (the widening moves nothing)" do
+        expect(accepts(int_nominal, int_constant)).to be_yes
+        expect(accepts(str_nominal, int_constant)).to be_no
+        expect(accepts(numeric_nominal, int_constant)).to be_yes
+      end
     end
 
-    it "answers instead of propagating when the resolution raises a ScriptError" do
-      nominal = exploding_nominal(LoadError.new("library not found"))
+    describe "analysing a reference to an autoload-registered class", type: :runner do
+      let(:autoload_dir) { Dir.mktmpdir("rigor-spec-autoload-run-") }
+      let(:marker_path)  { File.join(autoload_dir, "fired.marker") }
+      let(:target_path)  { File.join(autoload_dir, "probe_target.rb") }
+      let(:probe) do
+        File.write(target_path, <<~RUBY)
+          File.write(#{marker_path.dump}, "fired")
+          class RigorSpecAutoloadRunProbe
+            class Target; end
+          end
+        RUBY
+        Module.new.tap { |mod| mod.autoload(:Target, target_path) }
+      end
 
-      expect(accepts(nominal, int_constant)).to be_no
-    end
+      after { FileUtils.remove_entry(autoload_dir) if File.directory?(autoload_dir) }
 
-    it "leaves a class that resolves normally at the verdict it already had (the widening moves nothing)" do
-      expect(accepts(int_nominal, int_constant)).to be_yes
-      expect(accepts(str_nominal, int_constant)).to be_no
-      expect(accepts(numeric_nominal, int_constant)).to be_yes
+      it "completes analysis and leaves the autoload pending" do
+        stub_const("RigorSpecAutoloadRunProbe", probe)
+        analyze(<<~RUBY)
+          class RigorSpecAutoloadRunProbe
+            class Target; end
+          end
+          1 + RigorSpecAutoloadRunProbe::Target.new
+        RUBY
+
+        expect(File.exist?(marker_path)).to be(false)
+        expect(probe.autoload?(:Target)).to eq(target_path)
+      end
     end
   end
 

@@ -21,6 +21,17 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
     end
   end
 
+  def make_git_bundle_layout(root, *gem_entries)
+    # gem_entries: [repo_name, short_sha, ruby_version] tuples; creates
+    # <root>/ruby/<ruby_version>/bundler/gems/<repo_name>-<short_sha>/sig/ — the `git:`-sourced layout
+    # (`Bundler::Source::Git#install_path`: "#{base_name}-#{revision[0..11]}").
+    gem_entries.each do |repo_name, short_sha, ruby_version|
+      sig_dir = File.join(root, "ruby", ruby_version, "bundler", "gems", "#{repo_name}-#{short_sha}", "sig")
+      FileUtils.mkdir_p(sig_dir)
+      File.write(File.join(sig_dir, "#{repo_name}.rbs"), "module #{repo_name.capitalize}_Stub\nend\n")
+    end
+  end
+
   describe ".discover with explicit bundle_path" do
     it "returns the sig directory for every gem under the bundle root" do
       bundle = File.join(tmpdir, "bundle")
@@ -242,6 +253,103 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
       result = described_class.discover(bundle_path: bundle, project_root: tmpdir, auto_detect: false)
       expect(result.size).to eq(1)
       expect(result.first.parent.basename.to_s).to eq("ffi-1.17.4-aarch64-linux-gnu")
+    end
+  end
+
+  describe "git-sourced gem dirs (bundler/gems/ layout, issue #611)" do
+    it "discovers a sig dir installed under bundler/gems/ alongside the plain gems/ layout" do
+      bundle = File.join(tmpdir, "bundle")
+      make_bundle_layout(bundle, ["acme_sdk", "1.2.3", "4.0.0"])
+      make_git_bundle_layout(bundle, ["tcp_user_timeout", "3a357404c083", "4.0.0"])
+
+      result = described_class.discover(bundle_path: bundle, project_root: tmpdir, auto_detect: false)
+      gem_dirs = result.map { |p| p.parent.basename.to_s }.sort
+      expect(gem_dirs).to eq(["acme_sdk-1.2.3", "tcp_user_timeout-3a357404c083"])
+    end
+
+    it "recovers the gem name from a git-layout dir via gem_name_from_sig_path" do
+      bundle = File.join(tmpdir, "bundle")
+      make_git_bundle_layout(bundle, ["tcp_user_timeout", "3a357404c083", "4.0.0"])
+      sig_dir = described_class.discover(bundle_path: bundle, project_root: tmpdir, auto_detect: false).first
+      expect(described_class.gem_name_from_sig_path(sig_dir)).to eq("tcp_user_timeout")
+    end
+
+    it "recovers the gem name even when the short revision starts with a letter, not a digit" do
+      # The rubygems-layout heuristic strips from the first `-<digit>`; a hex revision that happens to start
+      # with a letter (a-f) must not fall through to that heuristic and swallow part of the repo name.
+      bundle = File.join(tmpdir, "bundle")
+      make_git_bundle_layout(bundle, ["tcp_user_timeout", "affe07404c08", "4.0.0"])
+      sig_dir = described_class.discover(bundle_path: bundle, project_root: tmpdir, auto_detect: false).first
+      expect(described_class.gem_name_from_sig_path(sig_dir)).to eq("tcp_user_timeout")
+    end
+
+    it "applies skip_gems to git-sourced dirs by name, same as the rubygems layout" do
+      bundle = File.join(tmpdir, "bundle")
+      make_git_bundle_layout(bundle, ["prism", "3a357404c083", "4.0.0"])
+      result = described_class.discover(bundle_path: bundle, project_root: tmpdir, auto_detect: false)
+      expect(result).to eq([])
+    end
+
+    it "does NOT match a bundler/ dir missing the intervening gems/ segment (glob precision control)" do
+      bundle = File.join(tmpdir, "bundle")
+      # `bundler/<name>-<sha>/sig`, one level off the real `bundler/gems/<name>-<sha>/sig` layout.
+      sig_dir = File.join(bundle, "ruby", "4.0.0", "bundler", "acme_decoy-3a357404c083", "sig")
+      FileUtils.mkdir_p(sig_dir)
+      File.write(File.join(sig_dir, "acme_decoy.rbs"), "module AcmeDecoy_Stub end\n")
+
+      result = described_class.discover(bundle_path: bundle, project_root: tmpdir, auto_detect: false)
+      expect(result).to eq([])
+    end
+
+    describe "under the O4 Layer 3 lockfile filter" do
+      let(:locked_gem_klass) { Rigor::Environment::LockfileResolver::LockedGem }
+
+      it "keeps a git-sourced sig dir whose gem name matches a git-sourced lockfile entry" do
+        bundle = File.join(tmpdir, "bundle")
+        make_git_bundle_layout(bundle, ["tcp_user_timeout", "3a357404c083", "4.0.0"])
+        # A git gem's lockfile entry still carries name + version (the pinned gemspec version) — just not
+        # the revision, which is what the on-disk directory encodes instead.
+        locked = {
+          "tcp_user_timeout" => locked_gem_klass.new(
+            name: "tcp_user_timeout", version: "3.0.0", platform: "ruby", git_source: true
+          )
+        }
+        result = described_class.discover(
+          bundle_path: bundle, project_root: tmpdir, auto_detect: false, locked_gems: locked
+        )
+        expect(result.size).to eq(1)
+      end
+
+      it "drops a git-sourced sig dir whose lockfile entry is NOT git-sourced (stale bundler/gems/ leftover)" do
+        # Regression coverage: a gem that used to be `git:`-sourced and has since moved to a released
+        # version keeps its old `bundler/gems/<repo>-<sha>/` directory in the bundle tree until a `bundle
+        # clean` runs. Its NAME is still present in the lockfile — now via the rubygems entry — so matching
+        # by name alone would wrongly readmit the stale directory. This repo's own `vendor/bundle` hit
+        # exactly this case after `binpacker` moved from `git:` to a released gem.
+        bundle = File.join(tmpdir, "bundle")
+        make_git_bundle_layout(bundle, ["acme_sdk", "3a357404c083", "4.0.0"])
+        locked = {
+          "acme_sdk" => locked_gem_klass.new(
+            name: "acme_sdk", version: "1.2.3", platform: "ruby", git_source: false
+          )
+        }
+        result = described_class.discover(
+          bundle_path: bundle, project_root: tmpdir, auto_detect: false, locked_gems: locked
+        )
+        expect(result).to eq([])
+      end
+
+      it "drops a git-sourced sig dir whose gem name is absent from the lockfile" do
+        bundle = File.join(tmpdir, "bundle")
+        make_git_bundle_layout(bundle, ["leftover_fork", "3a357404c083", "4.0.0"])
+        locked = {
+          "acme_sdk" => locked_gem_klass.new(name: "acme_sdk", version: "1.2.3", platform: "ruby")
+        }
+        result = described_class.discover(
+          bundle_path: bundle, project_root: tmpdir, auto_detect: false, locked_gems: locked
+        )
+        expect(result).to eq([])
+      end
     end
   end
 end

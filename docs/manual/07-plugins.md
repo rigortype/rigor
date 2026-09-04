@@ -49,6 +49,10 @@ each plugin's options — but the families today are:
   `rigor-factorybot`.
 - **dry-rb** — `rigor-dry-types`, `rigor-dry-schema`,
   `rigor-dry-struct`, `rigor-dry-validation`.
+- **FFI** — `rigor-ffi` and sub-plugins (`rigor-ffi-rzmq`,
+  `rigor-rbnacl`, `rigor-sassc`, `rigor-ethon`). For plugin authors,
+  `rigor-ffi` provides the `ffi_binding_recognizer` class DSL on
+  `Rigor::Plugin::Base` to recognize custom binding definitions.
 - **Other ecosystems** — `rigor-sinatra`, `rigor-hanami`,
   `rigor-devise`, `rigor-pundit`, `rigor-sidekiq`,
   `rigor-graphql`, `rigor-statesman`, `rigor-sorbet`,

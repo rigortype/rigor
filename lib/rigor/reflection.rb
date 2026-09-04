@@ -156,15 +156,13 @@ module Rigor
       # go stale. Over-recording is ADR-46's safe direction.
       record_constant_reference(name) if Analysis::DependencyRecorder.active?
       return constant_type_at(name, scope) if rooted
-
-      prefix = enclosing_class_path(scope)
+      # Issue #716 — a body whose `Module.nesting` was RECORDED EMPTY is definitively top level, and Ruby
+      # resolves its constants there no matter which namespace calls it. Steps 1 and 2 both derive from the
+      # caller and are both wrong for it, so it takes its own ladder.
+      return toplevel_first_constant_type(name, scope) if recorded_toplevel_nesting?(scope)
 
       # Step 1 — `Module.nesting`, innermost first. Each entry contributes only its OWN constants.
-      lexical_nesting_chain(scope).each do |entry|
-        hit = constant_type_at("#{entry}::#{name}", scope)
-        return hit if hit
-      end
-
+      #
       # Step 2 (#354) — the ancestors of the innermost cresting scope, which Ruby consults BEFORE
       # falling back to the top level. Skipping this step did not merely lose a resolution: when the
       # same name also exists at top level, step 3 answered a lookup Ruby gives to the ancestor, so
@@ -172,16 +170,67 @@ module Rigor
       # wrong type on correct code, which outranks any worst-case reading (AGENTS.md
       # § "Implementation Guidelines"). Only project ancestors are walked; an RBS-known superclass
       # contributes no name here (see {.ancestor_constant_scopes}).
-      if prefix
-        ancestor_constant_scopes(prefix, scope).each do |ancestor|
-          hit = constant_type_at("#{ancestor}::#{name}", scope)
-          return hit if hit
-        end
-      end
-
+      #
       # Step 3 — the bare name (top level).
-      constant_type_at(name, scope)
+      first_constant_hit(lexical_nesting_chain(scope), name, scope) ||
+        ancestor_constant_type(name, scope, enclosing_class_path(scope)) ||
+        constant_type_at(name, scope)
     end
+
+    # The first candidate `<entry>::<name>` any source knows, walking `entries` in order, or nil. The one
+    # place a qualifying prefix is joined to a name, so every rung of the ladder consults its candidates
+    # identically.
+    def first_constant_hit(entries, name, scope)
+      entries.each do |entry|
+        hit = constant_type_at("#{entry}::#{name}", scope)
+        return hit if hit
+      end
+      nil
+    end
+    private_class_method :first_constant_hit
+
+    # Step 2's rung on its own: nil when there is no enclosing class path to take ancestors of.
+    def ancestor_constant_type(name, scope, prefix)
+      return nil if prefix.nil? || prefix.empty?
+
+      first_constant_hit(ancestor_constant_scopes(prefix, scope), name, scope)
+    end
+    private_class_method :ancestor_constant_type
+
+    # Issue #716 — whether the scope carries a RECORDED empty `Module.nesting`, which is the declaration
+    # walk's positive statement that the body is written at the top level (`Inference::ScopeIndexer#
+    # walk_def_nestings`). Distinct from `nil`, which still means "no declaration walk built this scope" and
+    # keeps the peel ({.lexical_nesting_chain}); the two are only distinguishable because the table is
+    # populated by that walk alone.
+    def recorded_toplevel_nesting?(scope) = scope.lexical_nesting.is_a?(Array) && scope.lexical_nesting.empty?
+    private_class_method :recorded_toplevel_nesting?
+
+    # Issue #716 — the ladder for a top-level body: the top level FIRST, then the caller-derived rungs
+    # unchanged. The candidate SET is exactly what {.resolve_constant_type}'s three steps consult for the
+    # same scope — only the order moves — so no read that resolves today stops resolving, and any read where
+    # the two disagree is one where the top level is Ruby's answer and the caller's namespace never was.
+    #
+    # Keeping the caller-derived rungs at all is deliberate and unsound against Ruby: they cover reads whose
+    # name exists ONLY under some namespace, where Ruby raises `NameError` (486 such reads on gitlab, 33 on
+    # dependabot-core — `docs/notes/20260905-toplevel-def-cref-movable-sites.md`). Rigor reports nothing
+    # about them either way, so retracting them would trade a silent wrong answer for a silent absent one at
+    # no gain. Making them FIRE is a separate question with its own false-positive budget.
+    def toplevel_first_constant_type(name, scope)
+      constant_type_at(name, scope) || caller_derived_constant_type(name, scope)
+    end
+    private_class_method :toplevel_first_constant_type
+
+    # The peel and its ancestors — {.resolve_constant_type}'s steps 1 and 2 as they answer for a scope with
+    # no recorded chain, factored out so the top-level ladder above can consult them BELOW the top level
+    # instead of above it.
+    def caller_derived_constant_type(name, scope)
+      prefix = enclosing_class_path(scope)
+      return nil if prefix.nil? || prefix.empty?
+
+      first_constant_hit(peeled_nesting(prefix), name, scope) ||
+        ancestor_constant_type(name, scope, prefix)
+    end
+    private_class_method :caller_derived_constant_type
 
     # One candidate name, consulted in source-precedence order: the class registry (yielding a
     # `Singleton[C]`), source-discovered classes, in-source value constants, then RBS-side
@@ -328,6 +377,11 @@ module Rigor
     # there either. Answering an empty chain there would retract resolutions the
     # engine makes today and turn correct code into `Dynamic`; a stale-but-gradual rung costs precision
     # only, which is the direction AGENTS.md § "Implementation Guidelines" mandates.
+    #
+    # Issue #716 — the recorded value is three-valued, and a RECORDED `[]` is not the absence of one: it is
+    # the declaration walk saying "top level", and this returns it verbatim so `Module.nesting` reads what
+    # Ruby reads. {.resolve_constant_type} keeps the peel for that case as a rung BELOW the top level rather
+    # than through this reader, because a chain is not where an out-of-order fallback belongs.
     def lexical_nesting_chain(scope)
       recorded = scope.lexical_nesting
       return recorded if recorded
@@ -335,9 +389,17 @@ module Rigor
       base = enclosing_class_path(scope)
       return [] if base.nil? || base.empty?
 
+      peeled_nesting(base)
+    end
+
+    # The peel itself: a qualified name split into the chain the NESTED spelling would have produced
+    # (`"Admin::Users::Show"` → `["Admin::Users::Show", "Admin::Users", "Admin"]`). Shared by the fallback
+    # above and by issue #716's below-the-top-level rung, so the two cannot drift apart.
+    def peeled_nesting(base)
       parts = base.split("::")
       parts.each_index.map { |i| parts[0..-(i + 1)].join("::") }
     end
+    private_class_method :peeled_nesting
 
     # Returns the RBS `RBS::Definition::Method` for the instance method, or nil when the
     # class or method is not in RBS. The source-side discovered-method facts are reachable

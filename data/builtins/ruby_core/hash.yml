@@ -177,6 +177,7 @@ classes:
         c_effects:
         - block
         - dispatch
+        - raises
         purity: block_dependent
         rbs:
         - "(_Key key) -> V"
@@ -916,7 +917,8 @@ classes:
         arity: 1
         defined_at: references/ruby/hash.c:7443
         c_body_at: references/ruby/hash.c:1895
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       ruby2_keywords_hash:
         source: c
@@ -924,6 +926,7 @@ classes:
         arity: 1
         defined_at: references/ruby/hash.c:7444
         c_body_at: references/ruby/hash.c:1917
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
     undefined: []

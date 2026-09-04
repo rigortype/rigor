@@ -445,7 +445,8 @@ classes:
         arity: 1
         defined_at: references/ruby/ext/date/date_core.c:9775
         c_body_at: references/ruby/ext/date/date_core.c:5952
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(Numeric & _ToR other) -> Date"
@@ -1038,7 +1039,8 @@ classes:
         arity: -1
         defined_at: references/ruby/ext/date/date_core.c:9694
         c_body_at: references/ruby/ext/date/date_core.c:3790
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(?Integer start) -> Date"
@@ -1618,7 +1620,8 @@ classes:
         arity: -1
         defined_at: references/ruby/ext/date/date_core.c:9988
         c_body_at: references/ruby/ext/date/date_core.c:8137
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(?Integer start) -> DateTime"

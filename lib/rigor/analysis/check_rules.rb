@@ -844,9 +844,15 @@ module Rigor
         # the larger half — modules with class-method surfaces are how that codebase is organised.
         def project_defines_method?(scope, class_name, method_name, kind)
           if kind == :singleton
+            # The singleton side has no ancestor walk to ask (#731); it answers for the receiver's own name.
             !scope.user_singleton_def_site_for(class_name, method_name).nil?
           else
-            !scope.user_def_site_for(class_name, method_name).nil?
+            # Through the project's ancestry, not the receiver's name alone: a base class defining a helper
+            # its subclasses call is ordinary Ruby, and a sidecar `sig/` that declares the SUBCLASS without
+            # that helper was reporting it (`AbstractAdapter#url`, called from `FilesystemAdapter#target`).
+            # The def-node walk is what has to answer here — `discovered_methods` deliberately withholds a
+            # plain cross-file `def` (`ScopeIndexer#finalize_def_index`), which is exactly this shape.
+            !scope.user_def_through_ancestors(class_name, method_name).first.nil?
           end
         end
 

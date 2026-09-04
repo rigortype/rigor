@@ -1546,16 +1546,22 @@ module Rigor
           visited += 1
           return false if visited > EXTERNAL_GEM_ANCESTRY_LIMIT
 
-          raw_ancestors = scope.includes_of(current) + [scope.superclass_of(current)].compact
-          raw_ancestors.each do |raw|
-            resolved = scope.ancestor_name_candidates(current, raw).find { |c| scope.known_user_class?(c) }
-            next queue.push(resolved) if resolved
-
-            root = raw.to_s.delete_prefix("::").split("::").first
-            return true if root && environment.missing_rbs_gem_owner(root)
-          end
+          return true if ancestry_step_leaves_project?(current, queue, environment)
         end
         false
+      end
+
+      # One hop of {#external_gem_reached_through_ancestry?}: pushes `current`'s ancestors that stay INSIDE
+      # the project onto `queue`, and answers whether any that leaves lands in a gem the index claims.
+      def ancestry_step_leaves_project?(current, queue, environment)
+        raw_ancestors = scope.includes_of(current) + [scope.superclass_of(current)].compact
+        raw_ancestors.any? do |raw|
+          resolved = scope.ancestor_name_candidates(current, raw).find { |c| scope.known_user_class?(c) }
+          next queue.push(resolved) && false if resolved
+
+          root = raw.to_s.delete_prefix("::").split("::").first
+          !(root.nil? || environment.missing_rbs_gem_owner(root).nil?)
+        end
       end
 
       # Deliberately smaller than the dispatch walk's cap: this answers a REPORTING question, and a hierarchy

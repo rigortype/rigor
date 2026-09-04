@@ -17,12 +17,12 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**Master is the release candidate and `make verify` is green on it.** 71 changelog fragments and ~540 commits
+**Master is the release candidate and `make verify` is green on it.** 73 changelog fragments and ~550 commits
 since v0.3.6, every fragment carrying its landing PR link. The version bump is NOT autonomous —
 `Rigor::VERSION`, `CHANGELOG.md` and `Gemfile.lock` move only on an explicit request (ADR-50 § WD5, the
 `rigor-release-prep` skill), which consolidates `changelog.d/` at the cut.
 
-**Nine false-positive fixes landed on 2026-09-04, all found by vetting the backlog against the release
+**Eleven fixes landed on 2026-09-04, all found by vetting the backlog against the release
 rather than by a gate.** One theme runs through every one of them: *the analysis had the answer and the
 output said otherwise.*
 
@@ -33,22 +33,23 @@ output said otherwise.*
   set, so `rigor check one_file.rb` reported what `rigor check .` does not. It now spans the configured
   project while the analysis still targets the given files (0.55s over `lib`'s 444 files; whole-project runs
   are byte-identical and pay nothing).
-- [#737](https://github.com/rigortype/rigor/pull/737) (#735) — `sig-gen --write` on redmine made the next
-  run **5.9× noisier**: unresolvable superclasses collapsed 98 classes, and a partial project sidecar turned
-  every cross-file `def` into an ADR-17 monkey-patch report. 171 → 121 `call.undefined-method`, 8 → 0 failed
-  builds.
-- [#738](https://github.com/rigortype/rigor/pull/738) (#722 residue 3) — a flattened declaration's
-  superclass token silently re-pointed at a different class than the checker resolves.
+- [#737](https://github.com/rigortype/rigor/pull/737) (#735) — `sig-gen --write` made the next run **5.9×
+  noisier**: unresolvable superclasses collapsed 98 classes, and a partial sidecar turned every cross-file
+  `def` into an ADR-17 monkey-patch report. [#738](https://github.com/rigortype/rigor/pull/738) (#722 r3) —
+  a flattened declaration's superclass token re-pointed at a different class than the checker resolves.
+- The receivers the rule could not enumerate but did: [#741](https://github.com/rigortype/rigor/pull/741)
+  (#739, mixin-module `self` and its `self.class`), [#743](https://github.com/rigortype/rigor/pull/743)
+  (#742, a base class's method under a sidecar `sig/`, plus `Class` / `Module`),
+  [#747](https://github.com/rigortype/rigor/pull/747) (#746, a class including a module no loaded RBS
+  declares). Each closed a fork where the UNION rule already declined what the scalar rule reported.
 - [#740](https://github.com/rigortype/rigor/pull/740) (#736) — `mattr_accessor` / `cattr_accessor` /
   `class_attribute` introduce methods discovery never recorded.
-- [#741](https://github.com/rigortype/rigor/pull/741) (#739) — a mixin module's surface belongs to its
-  includer and cannot be enumerated; the rule enumerated it anyway, and its union twin never had.
-- [#743](https://github.com/rigortype/rigor/pull/743) (#742) — a method inherited from a project base class
-  under a sidecar `sig/`, and `Class` / `Module` receivers (the same union-twin fork as #739).
 - [#745](https://github.com/rigortype/rigor/pull/745) (#744) — sig-gen wrote a base class's precise return
   for a method an unsigned subclass overrides, and RBS then gave the subclass the base's answer.
-- [#747](https://github.com/rigortype/rigor/pull/747) (#746) — a class including a module no loaded RBS
-  declares has ancestors Rigor cannot see, so its surface is not enumerable.
+- [#748](https://github.com/rigortype/rigor/pull/748) (#731) — the singleton-side lookup now walks the
+  superclass chain: +62 precise sites on redmine, diagnostics byte-identical.
+- [#749](https://github.com/rigortype/rigor/pull/749) (#728, half) — a mixin call in a self-rebinding block
+  went to the lexically enclosing class, so `Class.new { include M }` put `M` on the class around it.
 
 **The sig-gen workflow is the measurement that drove seven of the nine.** `sig-gen --write` on redmine then
 `check`, deduplicated by site: the penalty for running the command ADR-14 recommends fell from **82 extra
@@ -72,18 +73,17 @@ what today's investigation established and, as importantly, what it could NOT re
    when `rbs collection install` and `rigor-activerecord` are both used, which is the documented Rails setup.
    Structurally confirmed; **not reproduced end-to-end** — the issue comment records why (a synthetic fixture
    cannot exercise the plugin's `Relation` typing) and what a real reproduction needs.
-3. **[#728](https://github.com/rigortype/rigor/issues/728)** — reproduced: rigor answers `:outer` where MRI
-   answers `:top`. A wrong class, not a wider candidate list.
-4. **[#731](https://github.com/rigortype/rigor/issues/731)** — a class method inherited from a project
-   superclass types `Dynamic[top]`: the singleton-side lookup has no ancestor walk.
-   `sig_declared_ancestor_undefined_method_spec` ASSERTS that `Dynamic[top]`, so closing it fails there.
+3. **[#728](https://github.com/rigortype/rigor/issues/728)'s titled half** — per-SITE header nesting.
+   Reproduced (rigor `:outer`, MRI `:top`). #749 took its second half; what is left needs a NEW discovery
+   table threaded through the ADR-85 seed bundles, i.e. a persisted-format schema bump with both
+   directions run. A day's work with a migration in it — the issue comment records the cost so the next
+   person sizes it before starting.
 5. **[#722](https://github.com/rigortype/rigor/issues/722)** residues 1, 2 and 4;
    **[#732](https://github.com/rigortype/rigor/issues/732)** (the forked `known_user_class?`);
    **[#717](https://github.com/rigortype/rigor/issues/717)** / **[#718](https://github.com/rigortype/rigor/issues/718)**
    (banner noise — #725 already preserves buffer names, so re-check what `<cached>` still reaches first).
-6. **[#700](https://github.com/rigortype/rigor/issues/700)**, **[#660](https://github.com/rigortype/rigor/issues/660)**,
-   **[#574](https://github.com/rigortype/rigor/issues/574)** — the human ADR adjudications. #574 still gates
-   the corpus's biggest pair (`Parameters#[]`, 581 redmine + 496 mastodon).
+6. **#700**, **#660**, **#574** — the human ADR adjudications. #574 still gates the corpus's biggest pair
+   (`Parameters#[]`, 581 redmine + 496 mastodon).
 
 ## Measurement — read before writing a gate or trusting a number
 

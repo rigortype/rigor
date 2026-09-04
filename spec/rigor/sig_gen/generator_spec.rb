@@ -1023,4 +1023,60 @@ end
       expect(candidates.first.skip_reason).to be_nil
     end
   end
+
+  # Issue #722 residue 3 — sig-gen FLATTENS a nested declaration into a compact header, and RBS resolves a
+  # compact header's superclass at the top level. The source token therefore stops meaning what it meant:
+  # `module Admin; class Record2 < Record` written out as `class Admin::Record2 < Record` re-points at
+  # `::Record` where Ruby (and the checker, on the same tree) resolves `Admin::Record`.
+  describe "#run resolving a superclass written under a nesting" do
+    def superclass_of(candidates, class_name)
+      candidates.filter_map { |c| c.class_superclasses[class_name] }.uniq.first
+    end
+
+    it "qualifies a superclass the nesting resolves, across files" do
+      write_fixture("lib/m.rb", <<~RUBY)
+        class Record
+          def rec = 1
+        end
+        class Admin::Record < Record
+          def adm = 2
+        end
+      RUBY
+      write_fixture("lib/m2.rb", <<~RUBY)
+        module Admin
+          class Record2 < Record
+            def two = 3
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [File.join(tmpdir, "lib")]).run
+
+      # MRI: `Admin::Record2.superclass == Admin::Record`, and `Admin::Record2.new.rec` still reaches
+      # `Record#rec` through it.
+      expect(superclass_of(candidates, "Admin::Record2")).to eq("Admin::Record")
+      # The compact header at the top level keeps the bare token: its nesting is empty, so Ruby means
+      # `::Record` there and so does RBS.
+      expect(superclass_of(candidates, "Admin::Record")).to eq("Record")
+    end
+
+    it "leaves a token the nesting does not resolve alone" do
+      # Must-not-rewrite: `Admin::Base` does not exist, so `Base` means the top-level one and the emitted
+      # spelling is already right. A pass that qualified every token by its nesting would break this.
+      write_fixture("lib/m.rb", <<~RUBY)
+        class Base
+          def top = 1
+        end
+        module Admin
+          class Widget < Base
+            def w = 2
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [File.join(tmpdir, "lib")]).run
+
+      expect(superclass_of(candidates, "Admin::Widget")).to eq("Base")
+    end
+  end
 end

@@ -258,6 +258,10 @@ module Rigor
         # `Mail::Error`), longest prefix first; falls back to the as-written name (which RBS may know, e.g.
         # `StandardError`).
         def resolve_parent(child, parent, scope)
+          # Issue #722 residue 1 — a rooted parent is anchored at the top level; the namespace walk below
+          # is Ruby's lexical lookup, which `::` opts out of.
+          return parent.delete_prefix("::") if parent.start_with?("::")
+
           segments = child.to_s.split("::")[0...-1]
           until segments.empty?
             candidate = "#{segments.join('::')}::#{parent}"

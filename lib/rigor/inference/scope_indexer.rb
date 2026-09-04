@@ -2484,8 +2484,25 @@ module Rigor
         add_header_nesting(accumulator[:header_nestings], full, nesting) if declares_ancestor_name?(node)
         return unless node.is_a?(Prism::ClassNode)
 
-        superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
-        accumulator[:superclasses][full] = superclass if superclass
+        accumulator[:superclasses][full] = recorded_ancestor_name(node.superclass) if node.superclass
+      end
+
+      # Issue #722 residue 1 / #637 — the recorded ancestor name, carrying the ROOTED marker when the site
+      # wrote one. `Source::ConstantPath.qualified_name` renders segments only, so `class Rooted < ::Base`
+      # recorded the same `"Base"` a bare `< Base` does, and the resolver then walked the enclosing nesting
+      # and answered `A::Base` — a class Ruby never looks at, on a spelling whose whole point is that it
+      # does not.
+      #
+      # The marker rides the existing table's VALUE rather than a new table. It is still a String, so the
+      # per-file index, the cross-file fold and the ADR-85 seed bundle carry it unchanged; the three
+      # resolvers that read it strip and anchor. `IncrementalSnapshot::SCHEMA` is bumped anyway, because an
+      # older blob's un-rooted value is indistinguishable from "not rooted" and a warm run would keep the
+      # pre-fix answer for every unchanged file.
+      def recorded_ancestor_name(node)
+        name = Source::ConstantPath.qualified_name(node)
+        return name if name.nil? || !Source::ConstantPath.rooted?(node)
+
+        "::#{name}"
       end
 
       # Whether this declaration SITE writes an ancestor name — a superclass in its header, or a mixin call
@@ -2572,6 +2589,11 @@ module Rigor
         arg = call_node.arguments&.arguments&.first
         return if arg.nil?
 
+        # Issue #722 residue 1 — deliberately NOT marked rooted here, unlike the `class X < ::Parent`
+        # header. Marking it changed nothing observable: `Made = Class.new(::Base)` inside a namespace that
+        # shadows `Base` still resolved the shadow, so the anonymous class's ancestry is reached by a path
+        # that does not read this value, and shipping a marker no resolver honours would be a change with
+        # no gate. The residue stays on #722 with that finding attached.
         superclass = Source::ConstantPath.qualified_name(arg)
         return if superclass.nil?
 

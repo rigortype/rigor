@@ -1121,14 +1121,18 @@ module Rigor
       def build_run_dependency_descriptor(expansion, rbs_descriptor)
         entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) +
                   pre_eval_file_entries + rbs_descriptor.files
+        globs = []
         @plugin_registry.plugins.each do |plugin|
           # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
           # are frozen after the run, and a plugin that never built a boundary read no files through it,
           # so it contributes no dependencies.
           boundary = plugin.instance_variable_get(:@io_boundary)
           entries.concat(boundary.cache_descriptor.files) if boundary
+          plugin.class.producers.each_value do |prod|
+            globs.concat(plugin.send(:watch_glob_entries, prod[:watch])) if prod[:watch]
+          end
         end
-        Cache::Descriptor.new(files: entries)
+        Cache::Descriptor.new(files: entries, globs: globs.uniq)
       end
 
       # Issue #684 — the project files this run DISCOVERED but did not analyse. A widened run's diagnostics

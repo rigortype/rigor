@@ -124,32 +124,23 @@ be the real one.
   `User < ApplicationRecord` is not discovered. Either add `User`
   to `model_base_classes`, or list every concrete model
   explicitly.
-- **A model nested inside ANOTHER model class stands down rather
-  than guesses.** `Post::Comment` where `Post < ApplicationRecord`
-  hits a different Rails naming rule entirely — the parent's own
+- **A model nested inside ANOTHER non-abstract model class stands down rather
+  than guesses.** `Post::Comment` where `Post < ApplicationRecord` and `Post`
+  is not abstract hits a different Rails naming rule entirely — the parent's own
   table name is spliced into the middle of the child's, not a
   prefix/suffix — so the plugin recognises the shape and stands
   `Comment`'s column / alias / association checks down instead of
   computing (or guessing at) the real name. (A model nested inside
-  an *abstract* model reads its own plain demodulized name in real
-  Rails — the splice only applies to a non-abstract parent — but the
-  plugin does not distinguish that case yet and stands it down too;
-  a coverage loss, not a wrong answer.)
-- **Any `table_name_prefix` / `table_name_suffix` declared OUTSIDE
-  `model_search_paths` is invisible, not stood down — the guessed
-  bare name is trusted as if nothing were declared.** The plugin
-  only reads files under the configured model roots, so a plain
-  `def self.table_name_prefix` sitting in, say, `lib/blog.rb`
-  reads exactly the same as no declaration at all — as does a
-  `Rails::Engine.isolate_namespace` call, which normally lives in
-  `lib/<engine>/engine.rb`. Two further sources read wrong the same
-  way regardless of `model_search_paths`: a model declaring
-  `table_name_prefix` on ITSELF rather than on an enclosing
-  namespace, and a base class (e.g. `ApplicationRecord`) setting
-  `self.table_name_prefix` for every model under it. None of these
-  four are read today, so a model in one of these shapes can read
-  the wrong table exactly as it did before this section's fix
-  landed.
+  an *abstract* parent class, such as `Base::Comment` where `Base` declares
+  `self.abstract_class = true` or `primary_abstract_class`, correctly resolves
+  its plain demodulized table name with full column checks.)
+- **External `table_name_prefix` / `table_name_suffix` declarations and
+  engines.** Declarations outside `model_search_paths` (e.g. in `lib/` or an
+  engine's `isolate_namespace`) are detected across the project and cause
+  affected models to safely stand down with an empty column set, rather than
+  guessing an incorrect table name. Within `model_search_paths`, model-level
+  and base-class `table_name_prefix` declarations (literal or computed) are
+  resolved directly.
 - **PostgreSQL `db/structure.sql` fallback.** When `db/schema.rb` is
   absent, the plugin parses `db/structure.sql` (the `schema_format =
   :sql` dump) for the same column/type table. It reads PostgreSQL DDL

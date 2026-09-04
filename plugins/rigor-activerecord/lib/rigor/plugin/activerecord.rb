@@ -133,9 +133,13 @@ module Rigor
       end
 
       # Cached: model index. Walks every model file, then composes the rows with the cached schema table.
-      # `watch:` (ADR-60 WD3) covers model-file additions; the discoverer's in-block reads are captured
-      # into the record-and-validate dependency descriptor after the block runs.
-      producer :model_index, watch: -> { [[@model_search_paths, "**/*.rb"]] } do |_params|
+      # `watch:` (ADR-60 WD3) covers model-file additions and outside declarations; the discoverer's in-block
+      # reads are captured into the record-and-validate dependency descriptor after the block runs.
+      producer :model_index,
+               watch: lambda {
+                 outside = ModelDiscoverer::OUTSIDE_SEARCH_DIRECTORIES.map { |dir| [dir, "**/*.rb"] }
+                 [[@model_search_paths, "**/*.rb"], *outside]
+               } do |_params|
         discoverer = ModelDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @model_search_paths,

@@ -83,10 +83,12 @@ module Rigor
         # Declaration macros whose column's runtime value is a rich object, not the SQL scalar. Their column
         # must NOT be narrowed to the schema type (see {ModelIndex.build}'s type-override remap).
         TYPE_OVERRIDE_METHODS = %i[serialize mount_uploader mount_uploaders].freeze
+        OUTSIDE_SEARCH_DIRECTORIES = %w[lib config engines].freeze
 
-        def initialize(io_boundary:, search_paths:, base_classes:)
+        def initialize(io_boundary:, search_paths:, base_classes:, project_root: ".")
           @io_boundary = io_boundary
           @search_paths = search_paths
+          @project_root = project_root
           # De-rooted for the same reason superclass names are ({#visit_class}): the match is by exact
           # spelling, so a configured `model_base_classes: ["::ApplicationRecord"]` would otherwise never
           # match anything a declaration can render.
@@ -121,10 +123,12 @@ module Rigor
             tree = Prism.parse(contents).value
             walk_for_classes(tree, []) { |candidate| candidates << candidate }
           end
+          scan_outside_decorators
+          superclass_map = build_superclass_map(candidates)
           # Every file is walked (and every module's `table_name_prefix` / `table_name_suffix` recorded)
           # before any row is resolved — a model's file may sort, and so be visited, before the file that
           # declares its enclosing module's decorator.
-          attach_table_name_decorators(resolve_models(candidates))
+          attach_table_name_decorators(resolve_models(candidates), superclass_map: superclass_map)
         end
 
         private
@@ -204,6 +208,7 @@ module Rigor
         def merged_row(base, addition)
           base.merge(
             superclass_name: base[:superclass_name] || addition[:superclass_name],
+            abstract_class: base[:abstract_class] || addition[:abstract_class],
             sti_parent: base[:sti_parent] || addition[:sti_parent],
             table_name_override: addition[:table_name_override] || base[:table_name_override],
             table_name_computed: base[:table_name_computed] || addition[:table_name_computed] ||
@@ -230,10 +235,8 @@ module Rigor
         end
 
         # Resolves each model row's `table_name_prefix:` / `table_name_suffix:` / `table_name_nested_in_model:`
-        # (#623) against every module/class walked and the full discovered model set, once ALL files have
-        # been scanned (so a model resolved from a file earlier in glob order than its enclosing namespace's
-        # file still sees that namespace's decorator, and a model declared before its would-be parent model
-        # sorts still sees it in `model_class_names`).
+        # (#623, #671, #678, #679) against enclosing namespaces, model's own decorators, superclasses, and the
+        # full discovered model set.
         #
         # Deliberately does NOT fold any of this into `table_name_computed` — that flag gates
         # `ModelIndex.table_name_exact?`, which only ever matters when a SOURCE-DECLARED literal
@@ -242,31 +245,73 @@ module Rigor
         # bearing on whether that literal is what the app actually uses. What DOES depend on these three
         # fields is whether {ModelIndex.build} trusts the INFLECTED name enough to look up its columns —
         # see {ModelIndex.inflected_table_name_unreliable?}.
-        def attach_table_name_decorators(rows)
-          model_class_names = rows.to_h { |row| [row.fetch(:class_name), true] }
+        def attach_table_name_decorators(rows, superclass_map: {})
+          models_by_name = rows.to_h { |row| [row.fetch(:class_name), row] }
           rows.map do |row|
             class_name = row.fetch(:class_name)
             row.merge(
-              table_name_prefix: resolve_table_name_decorator(class_name, :prefix),
-              table_name_suffix: resolve_table_name_decorator(class_name, :suffix),
-              table_name_nested_in_model: nested_in_model_class?(class_name, model_class_names)
+              table_name_prefix: resolve_table_name_decorator(class_name, :prefix, superclass_map: superclass_map),
+              table_name_suffix: resolve_table_name_decorator(class_name, :suffix, superclass_map: superclass_map),
+              table_name_nested_in_model: nested_in_model_class?(class_name, models_by_name)
             )
           end
         end
 
-        # The decorator (`{ literal: }` / `{ computed: true }`) the NEAREST enclosing namespace (module OR
-        # class — {#visit_class} and {#visit_module} both feed {#record_table_name_decorators}) declares for
-        # `key`, walking outward from the model's immediate namespace — mirroring Rails'
-        # `full_table_name_prefix` / `full_table_name_suffix` ancestor search. Falls back to `{ literal: ""
-        # }` (AR::Base's own default) when no enclosing namespace says anything about `key` at all.
-        def resolve_table_name_decorator(class_name, key)
+        # The decorator (`{ literal: }` / `{ computed: true }`) for `key`:
+        # 1. First checks enclosing namespaces outward (mirroring Rails' `full_table_name_prefix`
+        #    `module_parents` ancestor search).
+        # 2. Checks the model's own class decorator.
+        # 3. Walks the superclass hierarchy via `superclass_map` (e.g. `ApplicationRecord` or base classes).
+        # Falls back to `{ literal: "" }` (AR::Base's own default) when nothing says anything about `key`.
+        def resolve_table_name_decorator(class_name, key, superclass_map: {})
           namespace_ancestors(class_name).each do |namespace_name|
             decorator = @namespace_table_name_decorators[namespace_name]
             next unless decorator&.key?(key)
 
             return decorator[key]
           end
+
+          decorator = @namespace_table_name_decorators[class_name]
+          return decorator[key] if decorator&.key?(key)
+
+          curr = superclass_map[class_name]
+          visited = Set.new([class_name])
+          while curr && !visited.include?(curr)
+            visited << curr
+            decorator = @namespace_table_name_decorators[curr]
+            return decorator[key] if decorator&.key?(key)
+
+            curr = superclass_map[curr]
+          end
+
           { literal: "" }
+        end
+
+        def build_superclass_map(candidates)
+          candidates_by_name = candidates.to_h { |c| [c[:class_name], c] }
+          superclass_map = {}
+          candidates.each do |c|
+            name = c[:class_name]
+            super_name = resolve_superclass_name(c, candidates_by_name)
+            superclass_map[name] ||= super_name if super_name
+          end
+          superclass_map
+        end
+
+        def resolve_superclass_name(candidate, candidates_by_name)
+          super_name = candidate[:superclass_name]
+          return nil if super_name.nil?
+
+          return super_name if candidates_by_name.key?(super_name) || @base_classes.include?(super_name)
+
+          segments = candidate[:class_name].split("::")
+          (segments.length - 1).downto(1).each do |n|
+            prefix = segments.first(n).join("::")
+            candidate_super = "#{prefix}::#{super_name}"
+            return candidate_super if candidates_by_name.key?(candidate_super)
+          end
+
+          super_name
         end
 
         # `"Foo::Bar::Post"` → `["Foo::Bar", "Foo"]`, nearest first; a top-level `"Post"` → `[]`. Derived
@@ -278,20 +323,24 @@ module Rigor
           (segments.length - 1).downto(1).map { |n| segments.first(n).join("::") }
         end
 
-        # Whether `class_name`'s IMMEDIATE lexical parent is itself a discovered model — `Post::Comment`
-        # where `Post < ApplicationRecord`. Rails' `compute_table_name` special-cases exactly this shape: it
-        # splices `"#{parent.table_name.singularize}_"` into the middle of the name, entirely separately
-        # from the `table_name_prefix` / `table_name_suffix` mechanism above (`ActiveRecord::ModelSchema::
-        # ClassMethods#compute_table_name`'s `module_parent < Base && !module_parent.abstract_class?` arm).
-        # This walker does not attempt that computation — it would need the PARENT's own resolved table name
-        # (itself possibly namespaced, prefixed, or STI-derived), compounding uncertainty on uncertainty —
-        # so a model in this shape is reported as unable-to-resolve-reliably instead
-        # ({ModelIndex.inflected_table_name_unreliable?}: an empty column set rather than a wrong guess).
-        def nested_in_model_class?(class_name, model_class_names)
+        # Whether `class_name`'s IMMEDIATE lexical parent is itself a non-abstract discovered model —
+        # `Post::Comment` where `Post < ApplicationRecord` and `Post` is not abstract. Rails'
+        # `compute_table_name` special-cases exactly this shape: it splices
+        # `"#{parent.table_name.singularize}_"` into the middle of the name, entirely separately from the
+        # `table_name_prefix` / `table_name_suffix` mechanism above (`ActiveRecord::ModelSchema::ClassMethods#compute_table_name`'s
+        # `module_parent < Base && !module_parent.abstract_class?` arm).
+        #
+        # Abstract parents (`self.abstract_class = true` or `primary_abstract_class`) do NOT trigger this
+        # containment rule in Rails — e.g. `Base::Comment` inflects to `"comments"` with normal live columns.
+        def nested_in_model_class?(class_name, models_by_name)
           segments = class_name.split("::")
           return false if segments.length < 2
 
-          model_class_names.key?(segments[0..-2].join("::"))
+          parent_name = segments[0..-2].join("::")
+          parent = models_by_name[parent_name]
+          return false if parent.nil?
+
+          parent[:abstract_class] != true
         end
 
         # Resolves a superclass NAME against the set of known model class names. Both sides come out of
@@ -325,9 +374,43 @@ module Rigor
             visit_class(node, lexical_path, &)
           when Prism::ModuleNode
             visit_module(node, lexical_path, &)
+          when Prism::CallNode
+            handle_top_level_call(node, lexical_path)
+          when Prism::DefNode
+            handle_top_level_def(node)
           else
             node.rigor_each_child { |child| walk_for_classes(child, lexical_path, &) }
           end
+        end
+
+        def handle_top_level_call(node, lexical_path)
+          if node.name == :isolate_namespace
+            target = isolate_namespace_target(node, lexical_path.first)
+            if target
+              @namespace_table_name_decorators[target] ||= {}
+              @namespace_table_name_decorators[target][:prefix] = { computed: true }
+            end
+          elsif node.receiver && %i[table_name_prefix= table_name_suffix=].include?(node.name)
+            target = strip_root(constant_path_name(node.receiver))
+            if target
+              key = TABLE_NAME_DECORATOR_METHODS[node.name.to_s.delete_suffix("=").to_sym]
+              @namespace_table_name_decorators[target] ||= {}
+              @namespace_table_name_decorators[target][key] = literal_assignment_value(node)
+            end
+          end
+        end
+
+        def handle_top_level_def(node)
+          return unless node.receiver
+
+          target = strip_root(constant_path_name(node.receiver))
+          return unless target
+
+          key = TABLE_NAME_DECORATOR_METHODS[node.name]
+          return unless key
+
+          @namespace_table_name_decorators[target] ||= {}
+          @namespace_table_name_decorators[target][key] = literal_def_value(node.body)
         end
 
         # Captures EVERY class declaration as a candidate — the `resolve_models` fixpoint decides
@@ -345,11 +428,12 @@ module Rigor
           # — lexical nesting, which does not care whether the namespace container was written `module Blog`
           # or `class Blog`. A `class` used purely as a namespace holder (or a model class that happens to
           # ALSO declare a decorator for its own nested classes) must be scanned the same way a module is.
-          record_table_name_decorators(full_name, node.body)
+          record_table_name_decorators(full_name, node.body, is_class: true)
 
           yield({
             class_name: full_name,
             superclass_name: superclass,
+            abstract_class: abstract_class?(node.body),
             table_name_override: lookup_table_name_override(node.body),
             table_name_computed: table_name_computed?(node.body),
             associations: lookup_associations(node.body),
@@ -373,7 +457,7 @@ module Rigor
           collect_type_overrides(node.body)
 
           full_name = declared_constant_name(module_local_name, lexical_path)
-          record_table_name_decorators(full_name, node.body)
+          record_table_name_decorators(full_name, node.body, is_class: false)
 
           inner_path = [full_name]
           walk_for_classes(node.body, inner_path, &) if node.body
@@ -522,6 +606,37 @@ module Rigor
           !node.arguments&.arguments&.first.is_a?(Prism::StringNode)
         end
 
+        # Whether a class declares itself abstract via `self.abstract_class = true` (or `abstract_class = true`)
+        # or Rails 7+'s `primary_abstract_class` (#679). Abstract model classes are skipped by Rails' nested-model
+        # containment prefixing rule in `compute_table_name`.
+        def abstract_class?(body)
+          return false if body.nil?
+
+          body.rigor_each_child do |node|
+            case node
+            when Prism::CallNode
+              if (node.name == :abstract_class=) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+                arg = node.arguments&.arguments&.first
+                return true if arg.is_a?(Prism::TrueNode)
+              elsif (node.name == :primary_abstract_class) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+                return true
+              end
+            when Prism::SingletonClassNode
+              node.body&.rigor_each_child do |inner|
+                next unless inner.is_a?(Prism::CallNode)
+
+                if (inner.name == :abstract_class=) && (inner.receiver.nil? || inner.receiver.is_a?(Prism::SelfNode))
+                  arg = inner.arguments&.arguments&.first
+                  return true if arg.is_a?(Prism::TrueNode)
+                elsif (inner.name == :primary_abstract_class) && (inner.receiver.nil? || inner.receiver.is_a?(Prism::SelfNode))
+                  return true
+                end
+              end
+            end
+          end
+          false
+        end
+
         # `table_name_prefix` / `table_name_suffix`, keyed by the setter/reader name a namespace (module OR
         # class) body can declare either one under (#623). Rails' own table-name computation
         # (`ActiveRecord::ModelSchema::ClassMethods#full_table_name_prefix` / `#full_table_name_suffix`)
@@ -554,8 +669,8 @@ module Rigor
         # Scans a module OR class BODY for `table_name_prefix` / `table_name_suffix` declarations and
         # records what it finds into `@namespace_table_name_decorators`, merged with any earlier reopening
         # of the same namespace.
-        def record_table_name_decorators(full_name, body)
-          found = table_name_decorators(body)
+        def record_table_name_decorators(full_name, body, is_class: false)
+          found = table_name_decorators(body, is_class: is_class)
           return if found.empty?
 
           existing = @namespace_table_name_decorators[full_name]
@@ -570,70 +685,167 @@ module Rigor
         # assignment order, not a guess: `mattr_accessor :table_name_prefix` (no `default:`, so `computed:
         # true`) followed two lines down by a real `self.table_name_prefix = "blog_"` folds to the literal.
         #
-        # The plain-assignment form (`self.NAME = "…"`) is folded to the literal ONLY when a READER for
-        # that name was ALSO established earlier in this SAME body scan (`readers`, below) — by
-        # `def self.NAME`, `class << self; def NAME`, or one of {ACCESSOR_DECLARATION_METHODS} (never a
-        # `*_writer`, none of which define one). Rails' own ancestor search tests
-        # `respond_to?(:table_name_prefix)`, the READER; a `self.NAME = …` call site only proves a WRITER
-        # exists (it must, or the assignment itself would raise), which is not the same fact —
-        # `mattr_writer :table_name_prefix; self.table_name_prefix = "blog_"` is valid Ruby that sets a
-        # class variable Rails' reader-only probe never reads back.
+        # For a class (`is_class: true`), `ActiveRecord::Base` already defines reader accessors for
+        # `table_name_prefix` and `table_name_suffix` (#671), so a plain assignment `self.NAME = "…"` folds
+        # directly to the literal value without requiring an explicit reader declaration.
         #
-        # An assignment with NO tracked reader is still NOT ignored, though (#623 second review — a
-        # BLOCKER): the assignment itself proves the namespace declares the name — an unrecognised reader
-        # spelling (a hand-rolled `def table_name_prefix` inside `class << self` reading an ivar, a
-        # `define_singleton_method`, `module_function`, `extend self` — this walker does not enumerate every
-        # way Ruby can define a method) is far more likely than a genuinely writer-only module, and treating
-        # an observed declaration as "nothing declared" is exactly the state that licenses the bare guess
-        # this whole mechanism exists to refuse. So a keyless-reader assignment folds to `computed: true` —
-        # standing down costs nothing on correct code.
-        def table_name_decorators(body)
+        # For a module (`is_class: false`), plain assignment folds to the literal ONLY when a reader was
+        # established earlier in the same body. An unrecognized or missing reader folds to `computed: true`.
+        #
+        # Four exotic reader spellings are recognized without assignment (#679):
+        # 1. Singleton `attr_reader` (`class << self; attr_reader :table_name_prefix; end`) coupled with `@table_name_prefix = "…"`.
+        # 2. `define_singleton_method(:table_name_prefix) { "…" }`.
+        # 3. `module_function :table_name_prefix` or `module_function def table_name_prefix = "…"`.
+        # 4. `extend self` with `def table_name_prefix = "…"`.
+        def table_name_decorators(body, is_class: false)
           return {} if body.nil?
 
           decorators = {}
           readers = Set.new
+          singleton_attr_readers = Set.new
+          ivars = {}
+          instance_methods = {}
+          extend_self = false
+          module_function_all = false
+
           body.rigor_each_child do |node|
-            if node.is_a?(Prism::DefNode) && node.receiver.is_a?(Prism::SelfNode)
-              key = TABLE_NAME_DECORATOR_METHODS[node.name]
-              next unless key
-
-              decorators[key] = literal_def_value(node.body)
-              readers << key
-            elsif node.is_a?(Prism::CallNode) && node.receiver.is_a?(Prism::SelfNode) &&
-                  node.name.to_s.end_with?("=")
-              key = TABLE_NAME_DECORATOR_METHODS[node.name.to_s.delete_suffix("=").to_sym]
-              next unless key
-
-              decorators[key] = readers.include?(key) ? literal_assignment_value(node) : { computed: true }
-            elsif node.is_a?(Prism::CallNode) && node.receiver.nil? &&
-                  ACCESSOR_DECLARATION_METHODS.include?(node.name)
-              found = mattr_decorator_values(node)
-              readers.merge(found.keys)
-              decorators.merge!(found)
-            elsif node.is_a?(Prism::SingletonClassNode)
-              found = singleton_class_decorator_values(node)
-              readers.merge(found.keys)
-              decorators.merge!(found)
+            case node
+            when Prism::DefNode
+              if node.receiver.is_a?(Prism::SelfNode)
+                key = TABLE_NAME_DECORATOR_METHODS[node.name]
+                if key
+                  readers << key
+                  decorators[key] = literal_def_value(node.body)
+                end
+              elsif node.receiver.nil?
+                key = TABLE_NAME_DECORATOR_METHODS[node.name]
+                if key
+                  val = literal_def_value(node.body)
+                  instance_methods[key] = val
+                  if extend_self || module_function_all
+                    readers << key
+                    decorators[key] = val
+                  end
+                end
+              end
+            when Prism::InstanceVariableWriteNode
+              ivar_name = node.name.to_s.delete_prefix("@").to_sym
+              key = TABLE_NAME_DECORATOR_METHODS[ivar_name]
+              if key
+                val = node.value.is_a?(Prism::StringNode) ? { literal: node.value.unescaped } : { computed: true }
+                ivars[key] = val
+                decorators[key] = val if singleton_attr_readers.include?(key)
+              end
+            when Prism::CallNode
+              if node.receiver.is_a?(Prism::SelfNode) && node.name.to_s.end_with?("=")
+                key = TABLE_NAME_DECORATOR_METHODS[node.name.to_s.delete_suffix("=").to_sym]
+                if key
+                  decorators[key] = readers.include?(key) || is_class ? literal_assignment_value(node) : { computed: true }
+                end
+              elsif (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&
+                    ACCESSOR_DECLARATION_METHODS.include?(node.name)
+                found = mattr_decorator_values(node)
+                readers.merge(found.keys)
+                decorators.merge!(found)
+              elsif (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&
+                    node.name == :define_singleton_method
+                arg0 = node.arguments&.arguments&.first
+                name = Rigor::Source::Literals.symbol_name(arg0) || (arg0.is_a?(Prism::StringNode) ? arg0.unescaped : nil)
+                key = TABLE_NAME_DECORATOR_METHODS[name.to_sym] if name
+                if key
+                  readers << key
+                  decorators[key] = node.block.is_a?(Prism::BlockNode) ? literal_def_value(node.block.body) : { computed: true }
+                end
+              elsif (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) && node.name == :extend
+                arg = node.arguments&.arguments&.first
+                if arg.is_a?(Prism::SelfNode)
+                  extend_self = true
+                  instance_methods.each do |k, v|
+                    readers << k
+                    decorators[k] = v
+                  end
+                end
+              elsif (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) && node.name == :module_function
+                args = node.arguments&.arguments || []
+                if args.empty?
+                  module_function_all = true
+                  instance_methods.each do |k, v|
+                    readers << k
+                    decorators[k] = v
+                  end
+                else
+                  args.each do |arg|
+                    if arg.is_a?(Prism::DefNode)
+                      k = TABLE_NAME_DECORATOR_METHODS[arg.name]
+                      if k
+                        readers << k
+                        decorators[k] = literal_def_value(arg.body)
+                      end
+                    else
+                      sym = Rigor::Source::Literals.symbol_name(arg) || (arg.is_a?(Prism::StringNode) ? arg.unescaped : nil)
+                      k = TABLE_NAME_DECORATOR_METHODS[sym.to_sym] if sym
+                      if k
+                        readers << k
+                        decorators[k] = instance_methods[k] || { computed: true }
+                      end
+                    end
+                  end
+                end
+              end
+            when Prism::SingletonClassNode
+              found_decorators, found_readers, found_attr_readers = singleton_class_decorator_values(node, ivars)
+              readers.merge(found_readers)
+              singleton_attr_readers.merge(found_attr_readers)
+              decorators.merge!(found_decorators)
             end
           end
           decorators
         end
 
-        # `class << self; def table_name_prefix = "blog_"; end; end` — a common idiom, and structurally the
-        # SAME as `def self.table_name_prefix = "blog_"` (a `DefNode` with an implicit-self body in the
-        # singleton class rather than an explicit `self` receiver), so it folds through the identical
-        # {#literal_def_value} check.
-        def singleton_class_decorator_values(node)
-          return {} unless node.body
+        # `class << self; def table_name_prefix = "blog_"; end; end` or `class << self; attr_reader :table_name_prefix; end`
+        # (#623, #679).
+        def singleton_class_decorator_values(node, ivars = {})
+          return [{}, Set.new, Set.new] unless node.body
 
           decorators = {}
-          node.body.rigor_each_child do |inner|
-            next unless inner.is_a?(Prism::DefNode) && inner.receiver.nil?
+          readers = Set.new
+          attr_readers = Set.new
 
-            key = TABLE_NAME_DECORATOR_METHODS[inner.name]
-            decorators[key] = literal_def_value(inner.body) if key
+          node.body.rigor_each_child do |inner|
+            case inner
+            when Prism::DefNode
+              next unless inner.receiver.nil?
+
+              key = TABLE_NAME_DECORATOR_METHODS[inner.name]
+              if key
+                readers << key
+                decorators[key] = literal_def_value(inner.body)
+              end
+            when Prism::CallNode
+              next unless inner.receiver.nil? && inner.name == :attr_reader
+
+              args = inner.arguments&.arguments || []
+              args.each do |arg|
+                name = Rigor::Source::Literals.symbol_name(arg) || (arg.is_a?(Prism::StringNode) ? arg.unescaped : nil)
+                key = TABLE_NAME_DECORATOR_METHODS[name.to_sym] if name
+                next unless key
+
+                readers << key
+                attr_readers << key
+                decorators[key] = ivars[key] || { computed: true }
+              end
+            when Prism::InstanceVariableWriteNode
+              ivar_name = inner.name.to_s.delete_prefix("@").to_sym
+              key = TABLE_NAME_DECORATOR_METHODS[ivar_name]
+              if key
+                val = inner.value.is_a?(Prism::StringNode) ? { literal: inner.value.unescaped } : { computed: true }
+                ivars[key] = val
+                decorators[key] = val if attr_readers.include?(key)
+              end
+            end
           end
-          decorators
+
+          [decorators, readers, attr_readers]
         end
 
         # `def self.table_name_prefix = "blog_"` and the equivalent regular-method spelling both parse to a
@@ -707,6 +919,128 @@ module Rigor
               else { computed: true }
               end
             [key, value]
+          end
+        end
+
+        # Scans ruby files under project root outside model search paths for table_name_prefix /
+        # table_name_suffix / isolate_namespace (#678).
+        def scan_outside_decorators
+          outside_ruby_files.each do |path|
+            contents = read_safely(path)
+            next if contents.nil?
+            next unless outside_decorator_candidate?(contents)
+
+            parsed = Prism.parse(contents)
+            next if parsed.failure?
+
+            walk_for_outside_decorators(parsed.value, [])
+          end
+        end
+
+        def outside_ruby_files
+          model_files = ruby_files_under(@search_paths).to_set
+          root = File.expand_path(@project_root)
+          return [] unless @io_boundary.directory?(root)
+
+          outside_roots = OUTSIDE_SEARCH_DIRECTORIES.map { |dir| File.join(root, dir) }
+          ruby_files_under(outside_roots).reject { |path| model_files.include?(path) }
+        end
+
+        def outside_decorator_candidate?(contents)
+          contents.include?("table_name_prefix") ||
+            contents.include?("table_name_suffix") ||
+            contents.include?("isolate_namespace")
+        end
+
+        def walk_for_outside_decorators(node, lexical_path)
+          return if node.nil?
+
+          case node
+          when Prism::ClassNode
+            class_local_name = constant_path_name(node.constant_path)
+            if class_local_name
+              full_name = declared_constant_name(class_local_name, lexical_path)
+              record_outside_decorators(full_name, node.body, [full_name, *lexical_path], is_class: true)
+              node.body&.rigor_each_child { |child| walk_for_outside_decorators(child, [full_name, *lexical_path]) }
+            end
+          when Prism::ModuleNode
+            module_local_name = constant_path_name(node.constant_path)
+            if module_local_name
+              full_name = declared_constant_name(module_local_name, lexical_path)
+              record_outside_decorators(full_name, node.body, [full_name, *lexical_path], is_class: false)
+              node.body&.rigor_each_child { |child| walk_for_outside_decorators(child, [full_name, *lexical_path]) }
+            end
+          when Prism::CallNode
+            handle_outside_call(node, lexical_path)
+          when Prism::DefNode
+            handle_outside_def(node)
+          else
+            node.rigor_each_child { |child| walk_for_outside_decorators(child, lexical_path) }
+          end
+        end
+
+        def record_outside_decorators(full_name, body, lexical_path, is_class: false)
+          return if body.nil?
+
+          found = table_name_decorators(body, is_class: is_class)
+          if found.any?
+            @namespace_table_name_decorators[full_name] ||= {}
+            found.each_key do |key|
+              @namespace_table_name_decorators[full_name][key] = { computed: true }
+            end
+          end
+
+          body.rigor_each_child do |child|
+            if child.is_a?(Prism::CallNode) && child.name == :isolate_namespace
+              target = isolate_namespace_target(child, lexical_path.first)
+              if target
+                @namespace_table_name_decorators[target] ||= {}
+                @namespace_table_name_decorators[target][:prefix] = { computed: true }
+              end
+            end
+          end
+        end
+
+        def handle_outside_call(node, lexical_path)
+          if node.name == :isolate_namespace
+            target = isolate_namespace_target(node, lexical_path.first)
+            if target
+              @namespace_table_name_decorators[target] ||= {}
+              @namespace_table_name_decorators[target][:prefix] = { computed: true }
+            end
+          elsif node.receiver && %i[table_name_prefix= table_name_suffix=].include?(node.name)
+            target = strip_root(constant_path_name(node.receiver))
+            if target
+              key = TABLE_NAME_DECORATOR_METHODS[node.name.to_s.delete_suffix("=").to_sym]
+              if key
+                @namespace_table_name_decorators[target] ||= {}
+                @namespace_table_name_decorators[target][key] = { computed: true }
+              end
+            end
+          end
+        end
+
+        def handle_outside_def(node)
+          return unless node.receiver
+
+          target = strip_root(constant_path_name(node.receiver))
+          return unless target
+
+          key = TABLE_NAME_DECORATOR_METHODS[node.name]
+          return unless key
+
+          @namespace_table_name_decorators[target] ||= {}
+          @namespace_table_name_decorators[target][key] = { computed: true }
+        end
+
+        def isolate_namespace_target(node, lexical_name)
+          arg = node.arguments&.arguments&.first
+          if arg
+            name = constant_path_name(arg)
+            strip_root(name) if name
+          elsif lexical_name
+            segments = lexical_name.to_s.split("::")
+            segments.length > 1 ? segments[0..-2].join("::") : segments.first
           end
         end
 

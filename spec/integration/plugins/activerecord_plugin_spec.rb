@@ -99,6 +99,25 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  def run_warm(dir, cache_root)
+    Rigor::Plugin.unregister!
+    store = Rigor::Cache::Store.new(root: cache_root)
+    result = Dir.chdir(dir) do
+      runner = Rigor::Analysis::Runner.new(
+        configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]),
+        cache_store: store, collect_stats: false, plugin_requirer: build_plugin_requirer
+      )
+      guarded_run(runner)
+    end
+    counters = store.stats.fetch(:by_producer)
+                    .fetch(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID) { { hits: 0, misses: 0 } }
+    [result, counters.slice(:hits, :misses)]
+  end
+
+  def unknown_column(result)
+    result.diagnostics.find { |d| d.rule == "unknown-column" }
+  end
+
   describe "recognised AR finder calls" do
     it "annotates `Model.find(id)` with the resolved table" do
       diags = plugin_diagnostics(run_ar("User.find(1)\n"))
@@ -2207,27 +2226,6 @@ RSpec.describe "plugins/rigor-activerecord" do
       }
     end
 
-    # Returns `[result, counters]` where the counters are the run-diagnostics slot's `hits:` / `misses:` for
-    # this run — the direct read of whether the run was SERVED or RE-ANALYZED.
-    def run_warm(dir, cache_root)
-      Rigor::Plugin.unregister!
-      store = Rigor::Cache::Store.new(root: cache_root)
-      result = Dir.chdir(dir) do
-        runner = Rigor::Analysis::Runner.new(
-          configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]),
-          cache_store: store, collect_stats: false, plugin_requirer: build_plugin_requirer
-        )
-        guarded_run(runner)
-      end
-      counters = store.stats.fetch(:by_producer)
-                      .fetch(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID) { { hits: 0, misses: 0 } }
-      [result, counters.slice(:hits, :misses)]
-    end
-
-    def unknown_column(result)
-      result.diagnostics.find { |d| d.rule == "unknown-column" }
-    end
-
     def schema_disclosure(result)
       result.diagnostics.find { |d| d.rule == "load-error" }
     end
@@ -3076,6 +3074,459 @@ RSpec.describe "plugins/rigor-activerecord" do
     it "does not fire on the decoy table's real column (stood down, not confirmed)" do
       diags = plugin_diagnostics(run_ar("Blog::Post.where(decoy: 'x')\n", schema: schema, models: models))
       expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+  end
+
+  describe "model-level and base-class table_name_prefix (#671)" do
+    context "with a literal table_name_prefix declared on the model itself" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/post.rb" => <<~RUBY
+            class Post < ApplicationRecord
+              self.table_name_prefix = "my_"
+            end
+          RUBY
+        }
+      end
+
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "my_posts", force: :cascade do |t|
+              t.string "title"
+            end
+          end
+        SCHEMA
+      end
+
+      it "prepends the model's own prefix to its table name" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Post").table_name).to eq("my_posts")
+      end
+
+      it "accepts a valid column query on the prefixed table" do
+        diags = plugin_diagnostics(run_ar("Post.where(title: 'x')\n", schema: schema, models: models))
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "flags a typo on the prefixed table" do
+        diags = plugin_diagnostics(run_ar("Post.where(headlnie: 'x')\n", schema: schema, models: models))
+        expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+      end
+    end
+
+    context "with a non-literal table_name_prefix declared on the model itself" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/post.rb" => <<~RUBY
+            class Post < ApplicationRecord
+              self.table_name_prefix = compute_prefix
+            end
+          RUBY
+        }
+      end
+
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "decoy"
+            end
+          end
+        SCHEMA
+      end
+
+      it "stands down with empty column names instead of guessing" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Post").column_names).to be_empty
+      end
+
+      it "does not fire unknown-column on the decoy table's column" do
+        diags = plugin_diagnostics(run_ar("Post.where(decoy: 'x')\n", schema: schema, models: models))
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+    end
+
+    context "with table_name_prefix declared on the base class" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => <<~RUBY,
+            class ApplicationRecord
+              self.table_name_prefix = "app_"
+            end
+          RUBY
+          "app/models/post.rb" => "class Post < ApplicationRecord\nend\n",
+          "app/models/article.rb" => <<~RUBY
+            class Article < ApplicationRecord
+              self.table_name_prefix = "art_"
+            end
+          RUBY
+        }
+      end
+
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "app_posts", force: :cascade do |t|
+              t.string "headline"
+            end
+
+            create_table "art_articles", force: :cascade do |t|
+              t.string "body"
+            end
+          end
+        SCHEMA
+      end
+
+      it "inherits the base class prefix on child models" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Post").table_name).to eq("app_posts")
+      end
+
+      it "allows a model to override the base class prefix" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Article").table_name).to eq("art_articles")
+      end
+
+      it "matches columns from the inherited prefix table" do
+        diags = plugin_diagnostics(run_ar("Post.where(headline: 'x')\n", schema: schema, models: models))
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "flags typos on the inherited prefix table" do
+        diags = plugin_diagnostics(run_ar("Post.where(headlnie: 'x')\n", schema: schema, models: models))
+        expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+      end
+    end
+
+    context "with a non-literal table_name_prefix declared on the base class" do
+      let(:models) do
+        {
+          "app/models/application_record.rb" => <<~RUBY,
+            class ApplicationRecord
+              self.table_name_prefix = dynamic_prefix
+            end
+          RUBY
+          "app/models/post.rb" => "class Post < ApplicationRecord\nend\n"
+        }
+      end
+
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "decoy"
+            end
+          end
+        SCHEMA
+      end
+
+      it "stands down on inheriting models" do
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Post").column_names).to be_empty
+      end
+    end
+  end
+
+  describe "table_name_prefix declared outside model search paths (#678)" do
+    let(:schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "posts", force: :cascade do |t|
+            t.string "decoy"
+          end
+        end
+      SCHEMA
+    end
+
+    it "detects external declaration in lib/ and stands down" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/blog/post.rb" => "class Blog::Post < ApplicationRecord\nend\n",
+        "lib/blog.rb" => <<~RUBY
+          module Blog
+            def self.table_name_prefix = "blog_"
+          end
+        RUBY
+      }
+
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+      expect(index.find("Blog::Post").column_names).to be_empty
+
+      diags = plugin_diagnostics(run_ar("Blog::Post.where(decoy: 'x')\n", schema: schema, models: models))
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "detects engine isolate_namespace in lib/ and stands down" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/blog/post.rb" => "class Blog::Post < ApplicationRecord\nend\n",
+        "lib/blog/engine.rb" => <<~RUBY
+          module Blog
+            class Engine < Rails::Engine
+              isolate_namespace Blog
+            end
+          end
+        RUBY
+      }
+
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+      expect(index.find("Blog::Post").column_names).to be_empty
+    end
+
+    it "invalidates warm cache when an outside declaration file is added" do
+      initial_files = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/blog/post.rb" => "class Blog::Post < ApplicationRecord\nend\n",
+        "db/schema.rb" => <<~SCHEMA,
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "title"
+            end
+          end
+        SCHEMA
+        "demo.rb" => "Blog::Post.where(headlnie: 'a')\n"
+      }
+
+      Dir.mktmpdir do |dir|
+        Dir.mktmpdir do |cache_root|
+          materialize_files(dir, initial_files)
+          cold, = run_warm(dir, cache_root)
+          expect(unknown_column(cold)).not_to be_nil
+
+          materialize_files(dir, "lib/blog.rb" => "module Blog\ndef self.table_name_prefix = 'blog_'\nend\n")
+          warm, counters = run_warm(dir, cache_root)
+          expect(counters).to eq(hits: 0, misses: 1)
+          expect(unknown_column(warm)).to be_nil
+        end
+      end
+    end
+
+    it "does not invalidate warm cache when an irrelevant file is added outside target directories" do
+      initial_files = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/blog/post.rb" => "class Blog::Post < ApplicationRecord\nend\n",
+        "db/schema.rb" => <<~SCHEMA,
+          ActiveRecord::Schema[8.0].define do
+            create_table "posts", force: :cascade do |t|
+              t.string "title"
+            end
+          end
+        SCHEMA
+        "demo.rb" => "Blog::Post.where(title: 'a')\n"
+      }
+
+      Dir.mktmpdir do |dir|
+        Dir.mktmpdir do |cache_root|
+          materialize_files(dir, initial_files)
+          cold, = run_warm(dir, cache_root)
+          expect(unknown_column(cold)).to be_nil
+
+          materialize_files(dir, "tmp/scratch.rb" => "module Blog\ndef self.table_name_prefix = 'blog_'\nend\n")
+          warm, counters = run_warm(dir, cache_root)
+          expect(counters).to eq(hits: 1, misses: 0)
+          expect(unknown_column(warm)).to be_nil
+        end
+      end
+    end
+  end
+
+  describe "abstract parents in nested models and exotic reader spellings (#679)" do
+    describe "abstract parent classes in nested models" do
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "comments", force: :cascade do |t|
+              t.string "content"
+            end
+          end
+        SCHEMA
+      end
+
+      it "resolves demodulized table name with live columns when nested in an abstract class" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/base.rb" => <<~RUBY,
+            class Base < ApplicationRecord
+              self.abstract_class = true
+            end
+          RUBY
+          "app/models/base/comment.rb" => <<~RUBY
+            class Base::Comment < ApplicationRecord
+            end
+          RUBY
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Base::Comment").table_name).to eq("comments")
+        expect(index.find("Base::Comment").column_names).to include("content")
+
+        diags_valid = plugin_diagnostics(run_ar("Base::Comment.where(content: 'ok')\n", schema: schema, models: models))
+        expect(diags_valid.select { |d| d.rule == "unknown-column" }).to be_empty
+
+        diags_typo = plugin_diagnostics(run_ar("Base::Comment.where(typo: 1)\n", schema: schema, models: models))
+        expect(diags_typo.find { |d| d.rule == "unknown-column" }).not_to be_nil
+      end
+
+      it "recognizes primary_abstract_class on the parent class" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/base.rb" => <<~RUBY,
+            class Base < ApplicationRecord
+              primary_abstract_class
+            end
+          RUBY
+          "app/models/base/comment.rb" => <<~RUBY
+            class Base::Comment < ApplicationRecord
+            end
+          RUBY
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Base::Comment").table_name).to eq("comments")
+        expect(index.find("Base::Comment").column_names).to include("content")
+      end
+
+      it "stands down when nested in a non-abstract model class" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/post.rb" => "class Post < ApplicationRecord\nend\n",
+          "app/models/post/comment.rb" => "class Post::Comment < ApplicationRecord\nend\n"
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Post::Comment").column_names).to be_empty
+      end
+    end
+
+    describe "four exotic reader spellings without assignment" do
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "vt_posts", force: :cascade do |t|
+              t.string "headline"
+            end
+
+            create_table "posts", force: :cascade do |t|
+              t.string "decoy"
+            end
+          end
+        SCHEMA
+      end
+
+      it "recognizes singleton attr_reader paired with instance variable write (spelling 1)" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              class << self
+                attr_reader :table_name_prefix
+              end
+              @table_name_prefix = "vt_"
+            end
+          RUBY
+          "app/models/vault/post.rb" => "class Vault::Post < ApplicationRecord\nend\n"
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Vault::Post").table_name).to eq("vt_posts")
+        expect(index.find("Vault::Post").column_names).to include("headline")
+      end
+
+      it "recognizes define_singleton_method (spelling 2)" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              define_singleton_method(:table_name_prefix) { "vt_" }
+            end
+          RUBY
+          "app/models/vault/post.rb" => "class Vault::Post < ApplicationRecord\nend\n"
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Vault::Post").table_name).to eq("vt_posts")
+        expect(index.find("Vault::Post").column_names).to include("headline")
+      end
+
+      it "recognizes module_function with def or symbol argument (spelling 3)" do
+        models1 = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              module_function def table_name_prefix = "vt_"
+            end
+          RUBY
+          "app/models/vault/post.rb" => "class Vault::Post < ApplicationRecord\nend\n"
+        }
+
+        _result, index1 = run_ar_with_index("x = 1\n", models: models1, schema: schema)
+        expect(index1.find("Vault::Post").table_name).to eq("vt_posts")
+
+        models2 = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              def table_name_prefix = "vt_"
+              module_function :table_name_prefix
+            end
+          RUBY
+          "app/models/vault/post.rb" => "class Vault::Post < ApplicationRecord\nend\n"
+        }
+
+        _result, index2 = run_ar_with_index("x = 1\n", models: models2, schema: schema)
+        expect(index2.find("Vault::Post").table_name).to eq("vt_posts")
+      end
+
+      it "recognizes extend self with def (spelling 4)" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              extend self
+              def table_name_prefix = "vt_"
+            end
+          RUBY
+          "app/models/vault/post.rb" => "class Vault::Post < ApplicationRecord\nend\n"
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Vault::Post").table_name).to eq("vt_posts")
+        expect(index.find("Vault::Post").column_names).to include("headline")
+      end
+
+      it "ignores bare mattr_writer without reader and inflects to demodulized table name" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              mattr_writer :table_name_prefix
+            end
+          RUBY
+          "app/models/vault/post.rb" => "class Vault::Post < ApplicationRecord\nend\n"
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Vault::Post").table_name).to eq("posts")
+      end
+
+      it "stands down when mattr_writer is assigned without reader" do
+        models = {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/vault.rb" => <<~RUBY,
+            module Vault
+              mattr_writer :table_name_prefix
+              self.table_name_prefix = "vt_"
+            end
+          RUBY
+          "app/models/vault/post.rb" => "class Vault::Post < ApplicationRecord\nend\n"
+        }
+
+        _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+        expect(index.find("Vault::Post").column_names).to be_empty
+      end
     end
   end
 end

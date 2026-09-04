@@ -103,25 +103,44 @@ module Rigor
         end
       end
 
+      class ExpectedPluginNotRegisteredError < StandardError; end
+
       def run_plugin_in_dir(dir:, source:, plugin_entry: nil, cache_store: DEFAULT_CACHE_STORE,
                             files: {}, paths: nil, signature_paths: nil)
         materialize_files(dir, files)
         File.write(File.join(dir, "demo.rb"), source)
+        effective_entry = plugin_entry || default_plugin_entry
         configuration = build_plugin_configuration(
           dir: dir,
-          plugin_entry: plugin_entry || default_plugin_entry,
+          plugin_entry: effective_entry,
           paths: paths,
           signature_paths: signature_paths
         )
         effective_cache = resolve_cache_store(cache_store)
+        runner = Rigor::Analysis::Runner.new(
+          configuration: configuration,
+          cache_store: effective_cache,
+          plugin_requirer: build_plugin_requirer
+        )
+
         result = Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
-            configuration: configuration,
-            cache_store: effective_cache,
-            plugin_requirer: build_plugin_requirer
-          ).run
+          runner.run
         end
+
+        assert_expected_plugin_registered!(runner, effective_entry)
         InternalAnalyzerErrorGuard.check!(result, context: "run_plugin_in_dir")
+      end
+
+      def assert_expected_plugin_registered!(runner, effective_entry)
+        expected_id = plugin_class.manifest.id
+        entry_hash = effective_entry.is_a?(Hash) ? effective_entry.to_h { |k, v| [k.to_s, v] } : {}
+        return if entry_hash["enabled"] == false || runner.plugin_registry.find(expected_id)
+
+        errors = runner.plugin_registry.load_errors.map(&:message)
+        suffix = errors.empty? ? nil : " (load errors: #{errors.join('; ')})"
+        raise ExpectedPluginNotRegisteredError,
+              "run_plugin_in_dir: expected plugin #{expected_id.inspect} to be registered, " \
+              "but loaded plugins were #{runner.plugin_registry.ids.inspect}#{suffix}"
       end
 
       def resolve_cache_store(cache_store)
@@ -163,9 +182,17 @@ module Rigor
 
       def build_plugin_configuration(dir:, plugin_entry:, paths:, signature_paths: nil)
         path_list = paths || ["demo.rb"]
+        entry = case plugin_entry
+                when Hash
+                  e = plugin_entry.to_h { |k, v| [k.to_s, v] }
+                  e["id"] ||= plugin_class.manifest.id if respond_to?(:plugin_class) && plugin_class
+                  e
+                else
+                  plugin_entry
+                end
         merged = Rigor::Configuration::DEFAULTS.merge(
           "paths" => path_list.map { |p| File.join(dir, p) },
-          "plugins" => [plugin_entry]
+          "plugins" => [entry]
         )
         merged = merged.merge("signature_paths" => signature_paths.map { |p| File.join(dir, p) }) if signature_paths
         Rigor::Configuration.new(merged)

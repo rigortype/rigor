@@ -1,0 +1,1 @@
+- **[plugin]** Enforce expected plugin registration in test harness runners and register FFI binding recognizers in public API drift snapshots. ([#704](https://github.com/rigortype/rigor/issues/704), [#727](https://github.com/rigortype/rigor/issues/727))

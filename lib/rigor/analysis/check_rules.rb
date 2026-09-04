@@ -1617,7 +1617,7 @@ module Rigor
         # method must be absent from `NilClass` (so the nil path really raises).
         def nil_bearing_union_witnesses?(receiver_type, method_name, scope)
           union_contains_nil?(receiver_type) &&
-            union_has_nameable_non_nil_arm?(receiver_type) &&
+            union_has_nameable_non_nil_arm?(receiver_type, scope) &&
             union_method_present_on_non_nil?(receiver_type, method_name, scope) &&
             !nil_class_has_method?(method_name, scope)
         end
@@ -1659,8 +1659,23 @@ module Rigor
         # `String | nil` keeps firing, and so does `Dynamic | String | nil` —
         # the nameless arm stays permissive inside the all-arms check, which is
         # only about the arms' method surface.
-        def union_has_nameable_non_nil_arm?(union)
-          union.members.any? { |m| !nil_member?(m) && !concrete_class_name(m).nil? }
+        def union_has_nameable_non_nil_arm?(union, scope)
+          union.members.any? do |m|
+            next false if nil_member?(m)
+
+            class_name = concrete_class_name(m)
+            next false if class_name.nil?
+
+            # Issue #574 -- MEASUREMENT ARM. A named arm whose surface nothing knows is not a
+            # witness: `method_present_anywhere?` answers "present" for it only because nothing is
+            # known, which is the vacuity this gate exists to prevent.
+            known = Rigor::Reflection.rbs_class_known?(class_name, scope: scope) ||
+                    scope.discovered_classes.key?(class_name)
+            if !known && ENV["RIGOR_574_PROBE"]
+              warn("RIGOR_574_DIVERGENCE #{class_name}")
+            end
+            known
+          end
         end
 
         # The non-nil members must collectively support the
@@ -1681,7 +1696,10 @@ module Rigor
           class_name = concrete_class_name(member)
           return true if class_name.nil? # Dynamic / Top / Bot — be permissive.
           return true if scope.discovered_method?(class_name, method_name, :instance)
-          return true unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+          unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+            warn("RIGOR_574_VACUOUS_PRESENT #{class_name}##{method_name}") if ENV["RIGOR_574_PROBE"]
+            return true
+          end
           return true unless definition_available?(member, class_name, scope)
           return true if lookup_method(member, class_name, method_name, scope)
 

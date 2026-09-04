@@ -99,7 +99,8 @@ classes:
         arity: 1
         defined_at: references/ruby/io.c:15743
         c_body_at: references/ruby/io.c:8555
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       reopen:
         source: c
@@ -1195,7 +1196,8 @@ classes:
         arity: 1
         defined_at: references/ruby/io.c:15891
         c_body_at: references/ruby/io.c:10048
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
       to_s:
         source: c

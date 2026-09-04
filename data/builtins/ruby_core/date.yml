@@ -445,7 +445,8 @@ classes:
         arity: 1
         defined_at: references/ruby/ext/date/date_core.c:9775
         c_body_at: references/ruby/ext/date/date_core.c:5952
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(Numeric & _ToR other) -> Date"

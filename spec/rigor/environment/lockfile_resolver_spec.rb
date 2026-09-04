@@ -56,6 +56,12 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       expect(rack.platform).to eq("ruby")
     end
 
+    it "marks a rubygems-sourced entry as git_source: false" do
+      path = write_lockfile(simple_lockfile_body)
+      result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      expect(result.fetch("rack").git_source).to be(false)
+    end
+
     it "resolves relative lockfile_path against project_root" do
       sub = File.join(tmpdir, "app")
       FileUtils.mkdir_p(sub)
@@ -165,6 +171,47 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       # form is acceptable. The point is the resolver returns *some* consistent platform string.
       expect(ffi.platform).to be_a(String)
       expect(ffi.platform).not_to be_empty
+    end
+  end
+
+  describe ".locked_gems with a GIT-sourced entry (issue #611)" do
+    let(:git_and_gem_lockfile_body) do
+      <<~LOCKFILE
+        GIT
+          remote: https://example.com/acme_git_fork.git
+          revision: 3a357404c083916d379104428a3d51c8a25f7d0
+          specs:
+            acme_git_fork (3.0.0)
+
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            rack (3.0.2)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          acme_git_fork!
+          rack
+
+        BUNDLED WITH
+           2.5.3
+      LOCKFILE
+    end
+
+    it "marks a GIT-stanza entry as git_source: true, still carrying its (name, version)" do
+      path = write_lockfile(git_and_gem_lockfile_body)
+      result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      fork = result.fetch("acme_git_fork")
+      expect(fork.git_source).to be(true)
+      expect(fork.version).to eq("3.0.0")
+    end
+
+    it "leaves a same-lockfile GEM-stanza entry marked git_source: false" do
+      path = write_lockfile(git_and_gem_lockfile_body)
+      result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      expect(result.fetch("rack").git_source).to be(false)
     end
   end
 

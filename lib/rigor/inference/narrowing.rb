@@ -2436,9 +2436,34 @@ module Rigor
           context.polarity == :positive ? narrow_class_other(type, class_name) : type
         end
 
+        # Issue #657 — `Bot` is the assertion "this can never match", and only a KNOWN-disjoint ordering
+        # supports it. `subclass_of?` folds `:disjoint` and `:unknown` into one `false`, which is safe on
+        # the negative edge (where the pre-state survives) and an over-claim on the positive one:
+        #
+        #   module Taggable; def tag = "t"; end
+        #   class Integer; include Taggable; end
+        #   x = 1
+        #   case x
+        #   when Taggable then x.tag      # reported unreachable; `1.is_a?(Taggable)` is true
+        #   end
+        #
+        # The ordering is `:unknown` because an in-source `include` into a CORE class never reaches the
+        # environment's class ordering — the include is discovered in project source, `Integer`'s ancestry
+        # comes from RBS, and the two are not joined (the precision half, left in #657).
+        #
+        # `:unknown` joins to Dynamic, the same answer {#narrow_nominal_to_class} gives and for the same
+        # reason: keeping the old bound licenses `call.undefined-method` on the guard-proven branch. Keeping
+        # the literal was tried first and did exactly that — `s = "str"` under `when Unrelated` stayed
+        # `Constant["str"]` and reported `undefined method 'other'`, trading one false positive for
+        # another. The value is lost only on the guarded arm, which is where the guard just told us the
+        # environment's picture was incomplete.
         def narrow_constant_to_class(constant, class_name, context)
           rigor_class = constant.value.class.name
-          subclass_of?(rigor_class, class_name, context) ? constant : Type::Combinator.bot
+          return constant if subclass_of?(rigor_class, class_name, context)
+          return Type::Combinator.untyped if !context.exact &&
+                                             class_ordering(rigor_class, class_name, context) == :unknown
+
+          Type::Combinator.bot
         end
 
         def narrow_constant_not_class(constant, class_name, context)

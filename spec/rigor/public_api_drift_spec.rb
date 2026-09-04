@@ -104,6 +104,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     seed_declaration_sourced_ivar(req:name,req:type)
     self_type()
     singleton_def_for(req:class_name,req:method_name)
+    singleton_def_through_ancestors(req:class_name,req:method_name,key:name_memo)
     source_path()
     struct_fold_safe?(req:name)
     struct_fold_safe_locals()

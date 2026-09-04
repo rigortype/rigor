@@ -130,13 +130,10 @@ RSpec.describe "a sig-declared class and its project ancestry (#723)" do
   end
 
   it "does not fire for an inherited class method, or one an extend contributes" do
-    # The singleton side walks the superclass chain, and `extend` reaches it because `ScopeIndexer` folds
-    # an extend into the extender's own singleton entries before the discovery table is frozen.
-    #
-    # The two dumps differ deliberately. `label` (the extend) resolves; `build` (the inherited class
-    # method) reads `Dynamic[top]` because the singleton-side lookup has no ancestor walk behind it at all
-    # — issue #731, pre-existing and independent of this suppression. It is asserted rather than elided so
-    # closing #731 fails HERE with the reason, instead of silently passing a weaker gate.
+    # Both dumps resolve. `label` comes from the extend, which `ScopeIndexer` folds into the class's own
+    # singleton entries; `build` is inherited from the project superclass, which #731 taught the
+    # singleton-side lookup to walk. This example asserted `Dynamic[top]` for `build` until then — the
+    # pointer that made closing #731 fail here with the reason rather than pass a weaker gate.
     result = run_analysis(<<~RUBY)
       class Base
         def self.build = :built
@@ -160,7 +157,7 @@ RSpec.describe "a sig-declared class and its project ancestry (#723)" do
       end
     RUBY
     expect(undefined_messages(result)).to be_empty
-    expect(dumps(result)).to eq(["dump_type: Dynamic[top]", "dump_type: :labelled"])
+    expect(dumps(result)).to eq(["dump_type: :built", "dump_type: :labelled"])
   end
 
   it "still fires for a module's own class method called on an includer" do

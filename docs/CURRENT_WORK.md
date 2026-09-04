@@ -17,12 +17,12 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**Master is the release candidate and `make verify` is green on it.** 66 changelog fragments and ~520 commits
+**Master is the release candidate and `make verify` is green on it.** 68 changelog fragments and ~530 commits
 since v0.3.6, every fragment carrying its landing PR link. The version bump is NOT autonomous —
 `Rigor::VERSION`, `CHANGELOG.md` and `Gemfile.lock` move only on an explicit request (ADR-50 § WD5, the
 `rigor-release-prep` skill), which consolidates `changelog.d/` at the cut.
 
-**Four false-positive fixes landed on 2026-09-04, all found by vetting the backlog against the release
+**Six false-positive fixes landed on 2026-09-04, all found by vetting the backlog against the release
 rather than by a gate.** One theme runs through every one of them: *the analysis had the answer and the
 output said otherwise.*
 
@@ -39,16 +39,25 @@ output said otherwise.*
   builds.
 - [#738](https://github.com/rigortype/rigor/pull/738) (#722 residue 3) — a flattened declaration's
   superclass token silently re-pointed at a different class than the checker resolves.
+- [#740](https://github.com/rigortype/rigor/pull/740) (#736) — `mattr_accessor` / `cattr_accessor` /
+  `class_attribute` introduce methods discovery never recorded.
+- [#741](https://github.com/rigortype/rigor/pull/741) (#739) — a mixin module's surface belongs to its
+  includer and cannot be enumerated; the rule enumerated it anyway, and its union twin never had.
+
+**The sig-gen workflow is the measurement that drove four of the six.** `sig-gen --write` on redmine then
+`check`, deduplicated by site, against the project's own no-`sig/` baseline of **29** `call.undefined-method`:
+111 before today, **43** now — the penalty for running the command ADR-14 recommends fell from 82 extra
+diagnostics to 14. The baseline itself never moved, so none of it was bought by silencing real findings.
 
 **The three external reports (#609/#610/#611) are triaged** — they had sat unlabelled. #609 and #610 carry
 what today's investigation established and, as importantly, what it could NOT reproduce.
 
 ## Backlog, ranked
 
-1. **[#736](https://github.com/rigortype/rigor/issues/736)** — `mattr_accessor` / `cattr_accessor` introduce
-   methods discovery never records. Invisible while a class has no RBS; **92 false positives** the moment any
-   `sig/` declares it, and the whole of the remaining gap between a generated-`sig/` redmine run (121) and
-   the no-`sig/` baseline (29). A DSL-recognition problem, not a suppression one.
+1. **The last 14.** A generated `sig/` still costs 14 `call.undefined-method` over baseline on redmine, now
+   spread across shapes rather than concentrated (`FixedIssuesExtension`, `Redmine::Plugin`,
+   `Redmine::Scm::Adapters::FilesystemAdapter`, a `Module` receiver, four with a `nil` receiver). Nobody has
+   adjudicated them one by one yet; that is the next honest step, and it is small enough to finish.
 2. **[#610](https://github.com/rigortype/rigor/issues/610)** — every AR relation degrades to `Dynamic[top]`
    when `rbs collection install` and `rigor-activerecord` are both used, which is the documented Rails setup.
    Structurally confirmed; **not reproduced end-to-end** — the issue comment records why (a synthetic fixture

@@ -126,3 +126,48 @@ RSpec.describe Rigor::Environment::MissingGemConstantIndex do
     end
   end
 end
+
+# Issue #763 — the git-sourced bundler layout.
+#
+# `bundle_gem_dirs` walked `<bundle>/ruby/*/gems/*` only, so a `git:`-sourced gem owned none of its
+# constants and every reference into it recorded the generic engine-gap cause instead of the honest
+# add-RBS one. The assertions are positive (a constant maps to its gem) because the failure being fixed
+# is an ABSENT mapping, which every "does not include" assertion also passes on.
+RSpec.describe Rigor::Environment::MissingGemConstantIndex, "git-sourced layout (#763)" do
+  # Writes a bundle tree with one rubygems-layout gem and one git-layout gem, and returns the root.
+  def bundle_with(dir, git_repo_dirname:, git_gemspec_name:)
+    rubygems = File.join(dir, "ruby", "4.0.0", "gems", "plain_gem-1.2.3", "lib")
+    git = File.join(dir, "ruby", "4.0.0", "bundler", "gems", git_repo_dirname, "lib")
+    FileUtils.mkdir_p(rubygems)
+    FileUtils.mkdir_p(git)
+    File.write(File.join(rubygems, "plain_gem.rb"), "module PlainGemConst; end\n")
+    File.write(File.join(git, "#{git_gemspec_name}.rb"), "module GitGemConst; end\n")
+    File.write(File.join(File.dirname(git), "#{git_gemspec_name}.gemspec"), "# not evaluated\n")
+    dir
+  end
+
+  it "indexes a git-sourced gem's constants, keyed by the name its gemspec declares" do
+    Dir.mktmpdir do |dir|
+      # The repository directory name deliberately differs from the gem name — a fork, or a monorepo.
+      bundle_with(dir, git_repo_dirname: "some-fork-abcdef123456", git_gemspec_name: "git_gem")
+      index = described_class.build(
+        [["plain_gem", "1.2.3"], ["git_gem", "9.9.9"]],
+        bundle_path: dir, spec_resolver: ->(_n, _v) { nil }
+      )
+      expect(index["GitGemConst"]).to eq("git_gem")
+      # The must-still-work half: the rubygems layout is untouched.
+      expect(index["PlainGemConst"]).to eq("plain_gem")
+    end
+  end
+
+  it "contributes nothing for a checkout with no gemspec rather than guessing from the directory name" do
+    Dir.mktmpdir do |dir|
+      bundle_with(dir, git_repo_dirname: "git_gem-abcdef123456", git_gemspec_name: "git_gem")
+      FileUtils.rm(Dir.glob(File.join(dir, "ruby", "4.0.0", "bundler", "gems", "*", "*.gemspec")))
+      index = described_class.build(
+        [["git_gem", "9.9.9"]], bundle_path: dir, spec_resolver: ->(_n, _v) { nil }
+      )
+      expect(index).not_to have_key("GitGemConst")
+    end
+  end
+end

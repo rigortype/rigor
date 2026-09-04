@@ -47,9 +47,10 @@ module Rigor
       #   (external gem without RBS) is true under either owner.
       def build(gems, bundle_path: nil, spec_resolver: method(:installed_gem_dir))
         bundle_dirs = bundle_gem_dirs(bundle_path)
+        git_dirs = git_gem_dirs(bundle_path)
         index = {}
         gems.each do |gem_name, version|
-          dir = bundle_dirs["#{gem_name}-#{version}"] || spec_resolver.call(gem_name, version)
+          dir = bundle_dirs["#{gem_name}-#{version}"] || git_dirs[gem_name] || spec_resolver.call(gem_name, version)
           next unless dir
 
           entry_files(dir, gem_name).each do |file|
@@ -60,9 +61,10 @@ module Rigor
       end
 
       # `{"<name>-<version>" => gem_dir}` for the target's bundle, or `{}` when no bundle is resolvable. The
-      # glob mirrors {BundleSigDiscovery}: `<bundle>/ruby/X.Y.Z/gems/<name>-<version>/`. Keyed on the dir
-      # basename so a platform-tagged variant (`ffi-1.17.4-aarch64-linux-gnu`) simply doesn't match a
-      # `<name>-<version>` lookup — those gems ship native code, not the pure-Ruby constants this indexes.
+      # glob covers the RUBYGEMS-sourced layout only, `<bundle>/ruby/X.Y.Z/gems/<name>-<version>/`; the
+      # git-sourced layout is {.git_gem_dirs}'s. Keyed on the dir basename so a platform-tagged variant
+      # (`ffi-1.17.4-aarch64-linux-gnu`) simply doesn't match a `<name>-<version>` lookup — those gems ship
+      # native code, not the pure-Ruby constants this indexes.
       def bundle_gem_dirs(bundle_path)
         return {} if bundle_path.nil?
 
@@ -72,6 +74,45 @@ module Rigor
         Dir.glob(base.join("ruby", "*", "gems", "*")).each_with_object({}) do |dir, acc|
           acc[File.basename(dir)] ||= dir
         end
+      end
+
+      # Issue #763 — `{gem_name => gem_dir}` for the target's GIT-sourced gems,
+      # `<bundle>/ruby/X.Y.Z/bundler/gems/<repo>-<12-hex-revision>/`. Before this, a `git:`-sourced gem was
+      # invisible to the index, so every constant reaching into it recorded the generic engine-gap cause
+      # where the honest story is add-RBS — the same mislabelling #530 measures from two other directions.
+      #
+      # Keyed on the name read from the directory's `*.gemspec` FILENAME, not on the directory basename: a
+      # git install's directory carries the repository name, which need not equal the gem name (a fork
+      # hosted under a different repo name, a gem inside a monorepo). No gem code is loaded — this is the
+      # filename, not an evaluated gemspec. A directory with no gemspec, or more than one, contributes
+      # nothing rather than a guess.
+      #
+      # Deliberately NOT gated on the lockfile's `git_source` the way {BundleSigDiscovery} is, and the
+      # difference is worth stating because the two look like the same problem. There, a stale
+      # `bundler/gems/` directory left behind by a gem that moved to a released version made the loader
+      # load the WRONG SIGNATURES, collapsing the RBS environment. Here the index's whole output is a gem
+      # NAME, so reading a stale checkout of the same gem yields the same answer; and the rubygems lookup
+      # is consulted FIRST in {.build}, so a gem now installed from RubyGems never reaches this map at all.
+      def git_gem_dirs(bundle_path)
+        return {} if bundle_path.nil?
+
+        base = Pathname.new(bundle_path)
+        return {} unless base.directory?
+
+        Dir.glob(base.join("ruby", "*", "bundler", "gems", "*")).each_with_object({}) do |dir, acc|
+          name = gemspec_gem_name(dir)
+          acc[name] ||= dir if name
+        end
+      end
+
+      # The gem name a checkout declares, from the single `*.gemspec` at its root, or nil when there is not
+      # exactly one. Bundler requires a git-sourced gem to ship one, so "not exactly one" means this is not
+      # the shape we think it is — and a guess from the directory basename is what this exists to avoid.
+      def gemspec_gem_name(dir)
+        specs = Dir.glob(File.join(dir, "*.gemspec"))
+        return nil unless specs.size == 1
+
+        File.basename(specs.first, ".gemspec")
       end
 
       # RubyGems spec metadata lookup — the gem's on-disk source root, without loading any of its code.

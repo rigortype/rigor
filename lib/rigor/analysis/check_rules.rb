@@ -1327,6 +1327,10 @@ module Rigor
         # an unrelated namespace.
         def parent_matches?(child, parent, class_name)
           parent_name = parent.to_s
+          # Issue #722 residue 1 — a rooted parent (`< ::Base`) names the top level, so the namespace walk
+          # below must not run for it. This peel is one of the two that predate
+          # `Scope#ancestor_name_candidates` and resolve their own pair.
+          return parent_name.delete_prefix("::") == class_name if parent_name.start_with?("::")
           return true if parent_name == class_name
 
           segments = child.to_s.split("::")[0...-1]

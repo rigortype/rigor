@@ -909,6 +909,13 @@ module Rigor
     # everything here. That rung is deliberately still missing — it was missing from the peel too, and
     # adding it is a widening this change does not need.
     def ancestor_name_candidates(subclass_qualified, raw_ancestor)
+      # Issue #722 residue 1 / #637 — a ROOTED ancestor name is anchored at the top level and has no
+      # candidate list: `class Rooted < ::Base` names `::Base` wherever it is written, exactly as
+      # `Source::ConstantPath.declaration_prefix` already re-anchors a rooted HEADER. The marker is the
+      # leading `::` `Inference::ScopeIndexer.recorded_ancestor_name` preserves.
+      raw = raw_ancestor.to_s
+      return [raw.delete_prefix("::")] if raw.start_with?("::")
+
       recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
       entries = recorded || peeled_header_nesting(subclass_qualified)
       entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s

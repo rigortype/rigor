@@ -71,7 +71,13 @@ module Rigor
       # nil (a clean cold rebuild — no migration). Absence here is gradual rather than misread (the resolver
       # falls back to the peel), but a warm run that peels where a cold run does not is exactly the
       # `--verify-incremental` divergence 14 was bumped for.
-      SCHEMA = 15
+      # 16: issue #722 residue 1 gives each seed bundle's `superclasses` values a ROOTED MARKER — a leading
+      # `::` on an ancestor name the site wrote rooted (`class X < ::Base`, `Class.new(::Parent)`) — so the
+      # resolvers anchor it at the top level instead of walking the enclosing nesting. The value stays a
+      # String, so a pre-16 blob deserialises cleanly and is exactly why the gate has to reject it: an
+      # un-rooted value is indistinguishable from "not rooted", and every unchanged file would keep the
+      # pre-fix answer on a warm run while a cold run gave the right one.
+      SCHEMA = 16
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

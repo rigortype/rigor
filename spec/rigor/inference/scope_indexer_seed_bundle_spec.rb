@@ -262,23 +262,34 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
-  # Issue #724 Gate — removing any one table from the fold (specifically the three previously omitted tables:
-  # singleton_def_sources, extends, constant_writes, plus def_sources) must fail equivalence.
+  # Issue #724 Gate — removing any one of all plain tables from the fold must fail equivalence,
+  # ensuring that no table is checked vacuously.
   describe "equivalence gate discrimination (#724)" do
+    def discrimination_fixture_source
+      <<~RUBY
+        class Parent
+          def inherited_m = 1
+        end
+        class Child < Parent
+          include Enumerable
+          extend Comparable
+          CONST = 42
+          def foo = 1
+          def self.bar = 2
+          protected :foo
+        end
+        DataStruct = Data.define(:a, :b)
+        NormalStruct = Struct.new(:x, :y)
+      RUBY
+    end
+
     it "fails equivalence when any plain table is stripped from the compared index" do
       Dir.mktmpdir do |dir|
-        File.write(File.join(dir, "ext.rb"), <<~RUBY)
-          module Mod
-            def bar = 2
-            def self.foo = 1
-            extend Enumerable
-            CONST = 42
-          end
-        RUBY
+        File.write(File.join(dir, "ext.rb"), discrimination_fixture_source)
         paths = [File.join(dir, "ext.rb")]
         reference = described_class.discovered_project_index_for_paths(paths)
 
-        %i[singleton_def_sources extends constant_writes def_sources].each do |table_key|
+        plain_tables.each do |table_key|
           tampered = {
             classes: reference[:classes],
             def_index: reference[:def_index].merge(table_key => {})

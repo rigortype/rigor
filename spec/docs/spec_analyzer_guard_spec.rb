@@ -72,7 +72,7 @@ SPEC_ANALYZER_GUARD_ALLOWLIST = {
 # `check!(a)`-vouches-for-`b` shape is the one that would happen by accident). Requiring the guard to name
 # the value costs nothing: on the tree as it stands the structural rule accepts every site the textual one
 # did.
-module SpecAnalyzerGuardScan
+module SpecAnalyzerGuardScan # rubocop:disable Metrics/ModuleLength -- standalone test guard scanner logic
   # Issue #683 — `IncrementalSession` is the third analyzer class the gate tracks, alongside `Runner`
   # and `WorkerSession`.
   ANALYZER_CLASSES = %w[Runner WorkerSession IncrementalSession].freeze
@@ -187,7 +187,7 @@ module SpecAnalyzerGuardScan
     # `def build_runner(...) = <construction>` — a factory, so `build_runner(...).run` is a run site too.
     # Issue #695 — transitive and conditional:
     # 1. A factory whose body calls another factory (`def make(d) = session_for(d)`) is recognised.
-    # 2. A factory whose return expression is an `if` statement returns an analyzer if any branch does.
+    # 2. A factory whose return expression (or any branch / return statement) yields an analyzer.
     def collect_factory_methods(root)
       described = describes_analyzer?(root)
       factories = []
@@ -197,26 +197,105 @@ module SpecAnalyzerGuardScan
           next unless node.is_a?(Prism::DefNode)
           next if factories.include?(node.name)
 
-          last = node.body.is_a?(Prism::StatementsNode) ? node.body.body.last : node.body
-          factories << node.name if produces_analyzer?(last, described: described, factories: factories)
+          factories << node.name if def_produces_analyzer?(node, described: described, factories: factories)
         end
         break if factories.size == size_before
       end
       factories.uniq
     end
 
+    def def_produces_analyzer?(def_node, described:, factories:)
+      return false if def_node.body.nil?
+
+      has_exit = false
+      walk(def_node.body, []) do |child, _|
+        if child.is_a?(Prism::ReturnNode) || child.is_a?(Prism::BreakNode)
+          arg = child.arguments&.arguments&.last
+          has_exit = true if produces_analyzer?(arg, described: described, factories: factories)
+        end
+      end
+      return true if has_exit
+
+      last = def_node.body.is_a?(Prism::StatementsNode) ? def_node.body.body.last : def_node.body
+      produces_analyzer?(last, described: described, factories: factories)
+    end
+
     def produces_analyzer?(node, described:, factories:)
       return false if node.nil?
       return true if construction?(node, described: described) || factory_call?(node, factories)
 
-      if node.is_a?(Prism::IfNode)
-        then_body = node.statements&.body&.last
-        else_body = node.subsequent.is_a?(Prism::StatementsNode) ? node.subsequent.body.last : node.subsequent
-        return produces_analyzer?(then_body, described: described, factories: factories) ||
-               produces_analyzer?(else_body, described: described, factories: factories)
-      end
+      branch_produces_analyzer?(node, described: described, factories: factories)
+    end
 
+    def branch_produces_analyzer?(node, described:, factories:)
+      case node
+      when Prism::IfNode
+        conditional_produces_analyzer?(node.statements, node.subsequent, described: described, factories: factories)
+      when Prism::UnlessNode
+        conditional_produces_analyzer?(node.statements, node.else_clause, described: described, factories: factories)
+      when Prism::ElseNode
+        produces_analyzer?(node.statements&.body&.last, described: described, factories: factories)
+      when Prism::CaseNode
+        case_produces_analyzer?(node, described: described, factories: factories)
+      else
+        wrapper_produces_analyzer?(node, described: described, factories: factories)
+      end
+    end
+
+    def conditional_produces_analyzer?(statements, subsequent, described:, factories:)
+      produces_analyzer?(statements&.body&.last, described: described, factories: factories) ||
+        produces_analyzer?(subsequent, described: described, factories: factories)
+    end
+
+    def wrapper_produces_analyzer?(node, described:, factories:)
+      case node
+      when Prism::BeginNode
+        begin_produces_analyzer?(node, described: described, factories: factories)
+      when Prism::ParenthesesNode
+        produces_analyzer?(node.body&.body&.last, described: described, factories: factories)
+      when Prism::RescueModifierNode
+        produces_analyzer?(node.expression, described: described, factories: factories) ||
+          produces_analyzer?(node.rescue_expression, described: described, factories: factories)
+      when Prism::AndNode, Prism::OrNode
+        produces_analyzer?(node.left, described: described, factories: factories) ||
+          produces_analyzer?(node.right, described: described, factories: factories)
+      else
+        write_produces_analyzer?(node, described: described, factories: factories)
+      end
+    end
+
+    def write_produces_analyzer?(node, described:, factories:)
+      case node
+      when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode,
+           Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode, Prism::ConstantWriteNode
+        produces_analyzer?(node.value, described: described, factories: factories)
+      else
+        false
+      end
+    end
+
+    def begin_produces_analyzer?(node, described:, factories:)
+      ensure_stmt = node.ensure_clause&.statements
+      produces_analyzer?(node.statements&.body&.last, described: described, factories: factories) ||
+        rescue_produces_analyzer?(node.rescue_clause, described: described, factories: factories) ||
+        produces_analyzer?(node.else_clause, described: described, factories: factories) ||
+        produces_analyzer?(ensure_stmt&.body&.last, described: described, factories: factories)
+    end
+
+    def rescue_produces_analyzer?(node, described:, factories:)
+      curr = node
+      while curr
+        return true if produces_analyzer?(curr.statements&.body&.last, described: described, factories: factories)
+
+        curr = curr.subsequent
+      end
       false
+    end
+
+    def case_produces_analyzer?(node, described:, factories:)
+      node.conditions.any? do |w|
+        produces_analyzer?(w.statements&.body&.last, described: described, factories: factories)
+      end || produces_analyzer?(node.else_clause, described: described, factories: factories)
     end
 
     def run_site?(node, analyzer_locals:, factories:, described:)
@@ -393,6 +472,168 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
 
         it "x" do
           runner = make_runner(true, dir)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through an else-branch analyzer factory" do
+      expect(offense_lines(<<~RUBY)).to eq([11])
+        def make_runner(flag, dir)
+          if flag
+            123
+          else
+            Rigor::Analysis::Runner.new(configuration: config(dir))
+          end
+        end
+
+        it "x" do
+          runner = make_runner(false, dir)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a ternary else-branch factory" do
+      expect(offense_lines(<<~RUBY)).to eq([7])
+        def make_runner(flag, dir)
+          flag ? 123 : Rigor::Analysis::Runner.new(configuration: config(dir))
+        end
+
+        it "x" do
+          runner = make_runner(false, dir)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a begin-block endless factory" do
+      expect(offense_lines(<<~RUBY)).to eq([5])
+        def make = begin; Rigor::Analysis::Runner.new; end
+
+        it "x" do
+          runner = make
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through an early-return factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner(cond)
+          return Rigor::Analysis::Runner.new if cond
+
+          nil
+        end
+
+        it "x" do
+          runner = make_runner(true)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a rescue-clause factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner
+          risky_call
+        rescue StandardError
+          Rigor::Analysis::Runner.new
+        end
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a rescue-modifier factory" do
+      expect(offense_lines(<<~RUBY)).to eq([5])
+        def make_runner = nil rescue Rigor::Analysis::Runner.new
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through an ensure-clause factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner
+          nil
+        ensure
+          Rigor::Analysis::Runner.new
+        end
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a loop-break factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner
+          loop do
+            break Rigor::Analysis::Runner.new
+          end
+        end
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through an unless-branch factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner(cond)
+          unless cond
+            Rigor::Analysis::Runner.new
+          end
+        end
+
+        it "x" do
+          runner = make_runner(false)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a parentheses-wrapped factory" do
+      expect(offense_lines(<<~RUBY)).to eq([5])
+        def make_runner = (Rigor::Analysis::Runner.new)
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a short-circuit boolean factory" do
+      expect(offense_lines(<<~RUBY)).to eq([5])
+        def make_runner(cond) = cond && Rigor::Analysis::Runner.new
+
+        it "x" do
+          runner = make_runner(true)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a final-assignment factory" do
+      expect(offense_lines(<<~RUBY)).to eq([7])
+        def make_runner
+          runner = Rigor::Analysis::Runner.new
+        end
+
+        it "x" do
+          runner = make_runner
           runner.run
         end
       RUBY

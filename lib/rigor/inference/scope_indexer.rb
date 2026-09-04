@@ -234,8 +234,9 @@ module Rigor
 
       # Issue #681 — the per-file nesting table over the cross-file seed. Both are keyed by node identity, so
       # a same-file declaration and its cross-file twin are distinct keys and the merge order is immaterial;
-      # the copy exists only so the seed stays frozen. Skipped when the file declares no nested `def`, which
-      # keeps a file of plain top-level helpers pointing at the seed itself.
+      # the copy exists only so the seed stays frozen. Skipped when the file declares no `def` at all — since
+      # issue #716 a top-level `def` records its empty chain, so a file of plain top-level helpers no longer
+      # takes that path and pays one copy of the seed, the same as any file that declares a method.
       def merge_def_nestings(seed, file_nestings)
         return seed if file_nestings.empty?
         return file_nestings if seed.empty?
@@ -2332,9 +2333,16 @@ module Rigor
       # Records `nesting` for every `def` reachable from `node`. Only a `class` / `module` keyword pushes an
       # entry (qualified against the entry already on top, so a compact `class Admin::X` contributes ONE);
       # every other body — a singleton class, a `Class.new` / `Module.new` block, any other block — inherits
-      # the chain unchanged, because Ruby pushes no cref for them. A top-level `def` records nothing: an
-      # empty chain is not a recorded chain, and answering it would retract the peel fallback
-      # {Reflection.lexical_nesting_chain} deliberately keeps for a scope built from a self type alone.
+      # the chain unchanged, because Ruby pushes no cref for them.
+      #
+      # Issue #716 — a top-level `def` records the EMPTY chain, and that is a recorded answer rather than the
+      # absence of one. Ruby's `Module.nesting` in a top-level body IS `[]`, so `def helper = Post.new` names
+      # `::Post` wherever it is later called from; recording nothing left
+      # {Reflection.lexical_nesting_chain} peeling the CALLER's qualified name, which answered `Admin::Post`
+      # for a call made from inside `module Admin`. The table is keyed by node identity and populated only by
+      # this walk, so "present with `[]`" (walked, and top level) stays distinguishable from "absent" (no
+      # declaration walk built this scope — a plugin-constructed scope, an anonymous `Class.new` re-entered
+      # through `Scope#evaluate`), which keeps the peel where it is still the only available answer.
       def walk_def_nestings(node, nesting, accumulator)
         return unless node.is_a?(Prism::Node)
 
@@ -2346,7 +2354,7 @@ module Rigor
           end
           return
         when Prism::DefNode
-          accumulator[node] = nesting unless nesting.nil? || nesting.empty?
+          accumulator[node] = nesting unless nesting.nil?
           return
         end
 
@@ -3635,7 +3643,8 @@ module Rigor
       # `{class => {method => Prism::DefNode}}` → `{class => {method => [node_id, name, fingerprint,
       # nesting]}}`. Issue #707 — `nestings` is this file's identity-keyed `{DefNode => Module.nesting}` table,
       # read here while the live nodes are still in hand, because it is the LAST moment the two can be paired:
-      # the bundle's reader has only the row. Nil for a top-level def, which records no chain.
+      # the bundle's reader has only the row. Issue #716 — `[]` for a top-level def, which records the empty
+      # chain; nil only for a def no declaration walk reached.
       def live_defs_to_bundle(defs, nestings)
         defs.transform_values do |methods|
           methods.transform_values do |node|

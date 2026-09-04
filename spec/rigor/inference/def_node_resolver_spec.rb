@@ -115,13 +115,28 @@ RSpec.describe Rigor::Inference::DefNodeResolver do
       end
     end
 
-    it "records nothing for a top-level def's absent chain, keeping the peel fallback" do
+    it "records nothing for a handle whose chain is absent, keeping the peel fallback" do
       Dir.mktmpdir do |dir|
         _path, handle = write_and_handle(dir, nesting: nil)
         described_class.with_run do
           node = described_class.resolve(handle)
           expect(node).to be_a(Prism::DefNode)
           expect(described_class.rehydrated_nesting(node)).to be_nil
+        end
+      end
+    end
+
+    # Issue #716 — a top-level def's chain is `[]`, and `[]` is an ANSWER (Ruby's `Module.nesting` there)
+    # rather than the absence of one. Dropping it here would leave the warm path peeling the caller's
+    # namespace where a cold run resolves at the top level, so the two states have to stay distinguishable
+    # all the way through the handle. Paired with the example above: together they pin `[]` and `nil` apart,
+    # which neither can do alone.
+    it "carries a RECORDED EMPTY chain distinctly from an absent one" do
+      Dir.mktmpdir do |dir|
+        _path, handle = write_and_handle(dir, nesting: [])
+        described_class.with_run do
+          node = described_class.resolve(handle)
+          expect(described_class.rehydrated_nesting(node)).to eq([])
         end
       end
     end

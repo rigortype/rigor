@@ -77,7 +77,14 @@ module Rigor
       # String, so a pre-16 blob deserialises cleanly and is exactly why the gate has to reject it: an
       # un-rooted value is indistinguishable from "not rooted", and every unchanged file would keep the
       # pre-fix answer on a warm run while a cold run gave the right one.
-      SCHEMA = 16
+      # 17: issue #716 changes what a seed-bundle def row's `nesting` MEANS without changing its shape. A
+      # top-level def now records the EMPTY chain (Ruby's `Module.nesting` there is `[]`), so the resolver
+      # anchors its constants at the top level instead of peeling the caller's namespace; `nil` narrows to
+      # "no chain recorded at all". A pre-17 blob stored `nil` for exactly the top-level defs that now store
+      # `[]`, deserialises cleanly, and would send every unchanged file's top-level helper back to the peel
+      # on a warm run while a cold run resolved at the top level — the `--verify-incremental` divergence 14
+      # was bumped for, in the same table.
+      SCHEMA = 17
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

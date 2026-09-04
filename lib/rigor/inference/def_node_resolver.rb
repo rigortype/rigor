@@ -99,10 +99,14 @@ module Rigor
         memo && memo[:nestings][node]
       end
 
-      # Files the chain the bundle recorded against the node just minted for it. A top-level def carries no
-      # chain (`nil`), and recording an empty one would RETRACT the peel fallback rather than improve on it.
+      # Files the chain the bundle recorded against the node just minted for it. Issue #716 — an EMPTY chain
+      # is recorded like any other: it is the bundle saying the def is written at the top level, and dropping
+      # it would leave the warm path peeling the caller's namespace where a cold run resolves at the top
+      # level. Only `nil` — a bundle that recorded nothing for the def — is skipped, and
+      # `Cache::IncrementalSnapshot::SCHEMA` 17 is what keeps a pre-#716 blob (where `nil` MEANT top level)
+      # from being read as one.
       def self.record_nesting(memo, node, nesting)
-        return if node.nil? || nesting.nil? || nesting.empty?
+        return if node.nil? || nesting.nil?
 
         memo[:nestings][node] = nesting
       end

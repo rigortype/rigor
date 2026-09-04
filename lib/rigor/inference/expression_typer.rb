@@ -2815,7 +2815,8 @@ module Rigor
           # `receiver`'s qualified name — which cannot tell a compact `class Admin::Maker` from the nested
           # spelling, and for an INHERITED body peels the subclass rather than the declaration that owns it.
           # The same `Post.new` then typed one way on the line that writes it and another through this
-          # re-walk. `nil` for a top-level def, which records no chain and keeps the peel.
+          # re-walk. Issue #716 — `[]` for a top-level def: that IS Ruby's `Module.nesting` there, and it
+          # sends the body's constants to the top level instead of to the caller's namespace.
           lexical_nesting: recorded_def_nesting(def_node),
           discovery: scope.discovery,
           struct_fold_safe_locals: body_fold_safe_locals(def_node, receiver, self_fold_safe),

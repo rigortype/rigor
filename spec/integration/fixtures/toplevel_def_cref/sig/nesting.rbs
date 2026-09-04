@@ -1,0 +1,31 @@
+# The marker methods live here rather than in `demo.rb` so a wrong constant
+# resolution surfaces as `call.undefined-method` — the rule declines on a
+# receiver whose class RBS does not know, so every class that appears as a
+# resolved receiver has to be declared. Each pair is DISJOINT, so which class a
+# read resolves to is observable either way round.
+
+class Post
+  def top_post: () -> String
+end
+
+class Widget
+  def top_widget: () -> String
+end
+
+module Admin
+  class Post
+    def admin_post: () -> String
+  end
+end
+
+module Shared
+  class Widget
+    def shared_widget: () -> String
+  end
+end
+
+module Shop
+  class Gadget
+    def shop_gadget: () -> String
+  end
+end

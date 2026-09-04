@@ -16,8 +16,9 @@ module Rigor
     # - `fingerprint` — the SHA-256 of the def's source slice, captured when the bundle was built. This lets
     #   `Runner#symbol_fingerprints` read the change-detection fingerprint (ADR-46 slice 4) off the handle
     #   without re-parsing the file — the one value-deref consumer besides the three accessor choke points.
-    # - `nesting` — the `Module.nesting` in force where the def is WRITTEN (issue #681's chain), or nil for a
-    #   top-level def, which records none. The cross-file `def_nestings` table is keyed by node IDENTITY, and
+    # - `nesting` — the `Module.nesting` in force where the def is WRITTEN (issue #681's chain), `[]` for a
+    #   top-level def (issue #716: that is Ruby's answer, not the absence of one), and nil only when no
+    #   declaration walk recorded any. The cross-file `def_nestings` table is keyed by node IDENTITY, and
     #   {DefNodeResolver} hands back a node from its OWN parse, so no identity-keyed table built by the
     #   discovery walk can ever contain it. Travelling on the handle is what lets the resolver re-attach the
     #   chain to the node it mints, instead of the re-walk falling back to peeling the receiver's qualified

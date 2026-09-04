@@ -63,12 +63,16 @@ module Rigor
         in_source_constants: EMPTY_TABLE,
         discovered_methods: EMPTY_TABLE,
         discovered_def_nodes: EMPTY_TABLE,
-        # Issue #681 — `{Prism::DefNode => Module.nesting}` for every `def` declared inside a class or
-        # module body, recorded by `Inference::ScopeIndexer` where the declaration is indexed. Read by
+        # Issue #681 — `{Prism::DefNode => Module.nesting}` for every `def` the declaration walk reaches,
+        # recorded by `Inference::ScopeIndexer` where the declaration is indexed. Read by
         # `Inference::ExpressionTyper#build_user_method_body_scope`, which rebuilds a callee's body scope
         # from the receiver's type alone and so has no prefix of its own to derive one from. Keyed by node
         # IDENTITY, because an inherited body is re-walked with the subclass as receiver while its
-        # constants resolve under the declaration that owns it. An absent entry means "not recorded", and
+        # constants resolve under the declaration that owns it.
+        #
+        # Issue #716 — PRESENT with `[]` and ABSENT are different facts, and only this table can tell them
+        # apart: it is populated by the declaration walk alone, so `[]` means "walked, and written at the top
+        # level" (Ruby's `Module.nesting` there) while an absent entry still means "not recorded" and
         # `Reflection.lexical_nesting_chain` keeps its peel fallback for it.
         discovered_def_nestings: EMPTY_NODE_TABLE,
         discovered_singleton_def_nodes: EMPTY_TABLE,

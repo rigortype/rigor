@@ -541,6 +541,41 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #716 — the last rung of the family. Ruby's `Module.nesting` inside a TOP-LEVEL `def`
+  # body is `[]`, so its constants name the top level no matter which namespace calls it.
+  # #709 recorded nothing for such a def, and the peel then reached for the CALLER's
+  # namespace: `def helper = Post.new` answered `Admin::Post` when read from inside
+  # `module Admin`. The empty chain is now RECORDED, and "recorded empty" resolves at the
+  # top level first — while an ABSENT entry still peels, which is what keeps the
+  # nested-only arm below resolving.
+  describe "fixtures/toplevel_def_cref/ — a top-level def resolves its constants at the top level" do
+    let(:harness) { harness_for("toplevel_def_cref") }
+
+    it "types a top-level def's constants under the top level, not under the caller" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity, and why the fixture needs every arm. Retracting the caller-derived rungs
+    # WHOLESALE satisfies the two `Post` arms and fails `Shop::Gadget`, whose name exists
+    # only under the caller; suppressing the nesting rung ALONE satisfies both `Post` arms
+    # and fails `Widget`, which the caller's ANCESTOR rung answers; changing nothing fails
+    # the `Post` arms. The two `Admin::*Maker` arms are the recorded-chain twins, which no
+    # variant of this change may move.
+    it "still asserts every arm, on both spellings" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(6)
+    end
+
+    # The false-positive arm. Each assertion is followed by a call only the correctly
+    # resolved class owns (`Post#top_post`, `Widget#top_widget`, `Shop::Gadget#shop_gadget`,
+    # `Admin::Post#admin_post`), declared in the fixture's `sig/` so `call.undefined-method`
+    # can fire at all — a receiver that failed to resolve produces no diagnostic, so
+    # asserting the resolved TYPE is what makes the arms discriminating.
+    it "leaves no other diagnostic on the resolved receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   # #708 — a ROOTED declaration header. `::` re-anchors a `class` / `module`
   # header exactly as it re-anchors a reference, and every walk that built a
   # qualified name from a header read only the rendered name, which drops the

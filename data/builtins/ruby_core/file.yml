@@ -53,7 +53,8 @@ classes:
         arity: 0
         defined_at: references/ruby/file.c:7599
         c_body_at: references/ruby/file.c:1565
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> (File::Stat | nil)"
@@ -64,7 +65,8 @@ classes:
         arity: 0
         defined_at: references/ruby/file.c:7601
         c_body_at: references/ruby/file.c:2469
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> Time"
@@ -75,7 +77,8 @@ classes:
         arity: 0
         defined_at: references/ruby/file.c:7602
         c_body_at: references/ruby/file.c:2517
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> Time"
@@ -86,7 +89,8 @@ classes:
         arity: 0
         defined_at: references/ruby/file.c:7603
         c_body_at: references/ruby/file.c:2572
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "() -> Time"
@@ -118,7 +122,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7607
         c_body_at: references/ruby/file.c:2773
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(int mode) -> (0 | nil)"
@@ -129,7 +134,8 @@ classes:
         arity: 2
         defined_at: references/ruby/file.c:7608
         c_body_at: references/ruby/file.c:2952
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(int? owner, int? group) -> (0 | nil)"
@@ -150,7 +156,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7611
         c_body_at: references/ruby/file.c:5524
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(int locking_constant) -> (0 | false)"
@@ -162,7 +169,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7545
         c_body_at: references/ruby/file.c:1460
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(path file_name) -> File::Stat"
@@ -173,7 +181,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7546
         c_body_at: references/ruby/file.c:1534
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(path file_name) -> File::Stat"
@@ -184,7 +193,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7547
         c_body_at: references/ruby/file.c:2419
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(path file_name) -> String"
@@ -195,7 +205,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7549
         c_body_at: references/ruby/file.c:2445
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(path | IO file_name) -> Time"
@@ -206,7 +217,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7550
         c_body_at: references/ruby/file.c:2494
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(path | IO file_name) -> Time"
@@ -217,7 +229,8 @@ classes:
         arity: 1
         defined_at: references/ruby/file.c:7551
         c_body_at: references/ruby/file.c:2546
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(path | IO file_name) -> Time"
@@ -361,7 +374,8 @@ classes:
         arity: -1
         defined_at: references/ruby/file.c:7568
         c_body_at: references/ruby/file.c:3496
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(?int umask) -> Integer"

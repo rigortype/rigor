@@ -492,6 +492,7 @@ classes:
         c_body_at: references/ruby/enum.c:4236
         c_effects:
         - block
+        - raises
         purity: block_dependent
       slice_after:
         source: c

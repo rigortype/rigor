@@ -608,7 +608,8 @@ classes:
         arity: -1
         defined_at: references/ruby/error.c:3728
         c_body_at: references/ruby/error.c:287
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
     singleton_methods:
       "[]":

@@ -1,0 +1,1 @@
+- **[dev]** Precision snapshots now pin fixture-declared `assert_type` expressions as well as top-level locals, so inference changes in declaration-only fixtures cannot pass vacuously. ([#713](https://github.com/rigortype/rigor/issues/713), [#769](https://github.com/rigortype/rigor/pull/769))

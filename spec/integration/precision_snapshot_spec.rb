@@ -341,7 +341,8 @@ RSpec.describe "Precision snapshots (inference regression gate)" do
     it "pins distinct compact and nested callee-rewalk types" do
       assertions = build_snapshot(Rigor::IntegrationSupport::FixtureHarness.new("callee_rewalk_nesting"))["assertions"]
 
-      expect(assertions.values).to include("Post", "Admin::Post")
+      expect(assertions.fetch("6")).to eq("Post")
+      expect(assertions.fetch("7")).to eq("Admin::Post")
     end
 
     # The hard failure has to be checked by RUNNING it. Every golden exists now, so reverting the

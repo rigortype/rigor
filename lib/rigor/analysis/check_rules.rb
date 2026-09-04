@@ -717,7 +717,7 @@ module Rigor
           # because the real type is empty (the real `DRb` has
           # `start_service`), so enumerating it to prove a call
           # "undefined" would be a false positive.
-          return nil if unbounded_receiver_surface?(class_name, scope)
+          return nil if unenumerable_receiver?(class_name, scope)
 
           # Slice 7 phase 12 — suppress when the user has
           # declared the method in source (`def` /
@@ -962,6 +962,23 @@ module Rigor
             rule: RULE_UNRESOLVED_TOPLEVEL,
             method_name: call_node.name.to_s
           )
+        end
+
+        # Issue #742 — the receivers whose method surface this rule cannot enumerate, in one question.
+        #
+        # {#unbounded_receiver_surface?} covers the ADR-26 open receivers and Rigor's own synthesized stubs.
+        # The generic metaclasses join it here: a value typed `Class` or `Module` is SOME class or module
+        # object, and its singleton methods cannot be read off the metaclass — `def self.included(base)`
+        # receives the includer, so `base.class_attribute :main_menu` and `base.main_menu = true` are calls
+        # on whatever included the module. The union twin has declined these arms since it was written
+        # (`METACLASS_ARMS`, "a `plugin_class : Class` really holds a `Plugin` subclass with `.manifest`");
+        # the scalar rule enumerated `Module`'s own RBS instead and reported them.
+        #
+        # Kept beside `unbounded_receiver_surface?` rather than folded into it: that predicate has eight
+        # other callers (arity, the `raise` verdicts), and widening all of them is a separate change with
+        # its own evidence to gather.
+        def unenumerable_receiver?(class_name, scope)
+          METACLASS_ARMS.include?(class_name) || unbounded_receiver_surface?(class_name, scope)
         end
 
         # Returns a qualified class name for the in-scope check.

@@ -509,15 +509,16 @@ end
 # ---------------------------------------------------------------
 
 class Date
+  # The whole date-constructing singleton surface `core_ext/date/calculations.rb`'s `class << self`
+  # adds. `self.end_of_week`, `self.beginning_of_month`, `self.end_of_month`,
+  # `self.beginning_of_year` and `self.end_of_year` were declared here until #762 and do not exist —
+  # `Date` only INCLUDES `DateAndTime::Calculations`, so those five are instance methods, below. The
+  # declarations made `Date.end_of_month`, a real `NoMethodError`, type-check as a `Date`, and
+  # `DateTime` inherited all five. `self.beginning_of_week` exists but is the week-start
+  # configuration reader, declared with that group at the bottom of this class.
   def self.current: () -> Date
   def self.yesterday: () -> Date
   def self.tomorrow: () -> Date
-  def self.beginning_of_week: () -> Date
-  def self.end_of_week: () -> Date
-  def self.beginning_of_month: () -> Date
-  def self.end_of_month: () -> Date
-  def self.beginning_of_year: () -> Date
-  def self.end_of_year: () -> Date
 
   def yesterday: () -> Date
   def tomorrow: () -> Date
@@ -626,6 +627,10 @@ class Date
   def readable_inspect: () -> String
   def default_inspect: () -> String
   def in_time_zone: (?untyped zone) -> untyped
+  # The week-start configuration group. `self.beginning_of_week` is its READER and answers the week
+  # start (`:monday` by default), not a date — it was `() -> Date` until #762, which made every
+  # correct Symbol use of the value look wrong and every incorrect `Date` use look right.
+  def self.beginning_of_week: () -> Symbol
   def self.beginning_of_week=: (Symbol week_start) -> Symbol
   def self.beginning_of_week_default: () -> Symbol?
   def self.beginning_of_week_default=: (Symbol? week_start) -> Symbol?

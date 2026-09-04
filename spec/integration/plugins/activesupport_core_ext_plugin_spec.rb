@@ -407,6 +407,96 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
   end
 
+  # Issue #762. This bundle declared nine `Date` singletons; ActiveSupport 8.1.3.1 defines four of
+  # those names on `Date`'s `class << self` and five nowhere at all. Re-verified against the vendored
+  # gem two ways before the fix — the `class << self` block in `core_ext/date/calculations.rb` reads
+  # `beginning_of_week`, `beginning_of_week=`, `find_beginning_of_week!`, `yesterday`, `tomorrow`,
+  # `current` and nothing else, and at runtime after `require "active_support/all"`,
+  # `Date.respond_to?` answers false for all five phantoms while every one of them resolves as an
+  # INSTANCE method owned by `DateAndTime::Calculations`.
+  #
+  # This direction of error is the rarer one. The usual closed-class bug is an OMISSION, which costs
+  # a false positive; these five were the opposite — extra declarations that SUPPRESS a true
+  # positive, so `rigor check` accepted `Date.end_of_month` and then typed the `NoMethodError` it
+  # raises as a `Date` for everything downstream. `DateTime` inherited all five through its singleton.
+  describe "the Date singletons ActiveSupport does not define (#762)" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
+    end
+
+    # The must-STILL-fire half, and here it is the primary assertion rather than the pairing: each of
+    # these five is a genuine `NoMethodError`, so reporting them is the fix, not a regression.
+    it "reports every one of the five phantom singletons on Date and on DateTime" do
+      source = <<~RUBY
+        Date.end_of_week
+        Date.beginning_of_month
+        Date.end_of_month
+        Date.beginning_of_year
+        Date.end_of_year
+        DateTime.end_of_month
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result).size).to eq(6)
+      expect(undefined_methods(result).join).to include(
+        "end_of_week", "beginning_of_month", "end_of_month", "beginning_of_year", "end_of_year"
+      )
+    end
+
+    # The pairing, and the one that makes the removal a correction rather than a blunt deletion: the
+    # five names are real ActiveSupport API on an INSTANCE receiver, and every one still resolves to a
+    # real `Date`. Deleting them from the wrong nesting level would have taken these with them.
+    it "keeps all five resolving on an instance receiver, where they actually live" do
+      source = <<~RUBY
+        d = Date.current
+        Rigor.dump_type(d.end_of_week)
+        Rigor.dump_type(d.beginning_of_month)
+        Rigor.dump_type(d.end_of_month)
+        Rigor.dump_type(d.beginning_of_year)
+        Rigor.dump_type(d.end_of_year)
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(Array.new(5, "dump_type: Date"))
+    end
+
+    # The sixth. It exists, so it must not be reported — but a silent collapse to `Dynamic` also
+    # reports nothing, so the load-bearing assertion is that it RESOLVES, and to `Symbol`.
+    # `find_beginning_of_week!` returns the identical value and already said `Symbol`.
+    it "types Date.beginning_of_week as the Symbol week start, not as a Date" do
+      source = <<~RUBY
+        Rigor.dump_type(Date.beginning_of_week)
+        Rigor.dump_type(DateTime.beginning_of_week)
+        Rigor.dump_type(Date.find_beginning_of_week!(:monday))
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(Array.new(3, "dump_type: Symbol"))
+    end
+
+    # The three real date-constructing singletons are untouched, asserted by resolution: if the edit
+    # had over-reached and emptied the block, this would read `Dynamic[top]` while the phantom
+    # assertion above stayed green.
+    it "leaves Date.current / .yesterday / .tomorrow answering Date" do
+      source = <<~RUBY
+        Rigor.dump_type(Date.current)
+        Rigor.dump_type(Date.yesterday)
+        Rigor.dump_type(Date.tomorrow)
+        Rigor.dump_type(Date.current.beginning_of_quarter)
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(Array.new(4, "dump_type: Date"))
+    end
+  end
+
   # Issue #534 item 3. The multipliers were `() -> untyped` in the RBS bundle, so `1.day` was
   # `Dynamic[top]` on ~265 mastodon sites. They now return the RBS-less `ActiveSupport::Duration`
   # nominal, and the arithmetic rule keeps the operators around it honest.

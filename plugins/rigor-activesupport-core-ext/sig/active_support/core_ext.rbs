@@ -895,20 +895,22 @@ end
 # ---------------------------------------------------------------
 
 class Date
-  # NOT %a{pure}: `self.current` / `self.yesterday` / `self.tomorrow` are
-  # already attributed nondet.time/global.read by `effects.rb` (#387).
-  # The other five singletons declared here — `self.beginning_of_week`
-  # through `self.end_of_year` — do not soundly exist; see the file-header
-  # note. None get an annotation.
+  # These three are the WHOLE date-constructing singleton surface `core_ext/date/calculations.rb`'s
+  # `class << self` adds. NOT %a{pure}: all three are already attributed nondet.time/global.read by
+  # `effects.rb` (#387).
+  #
+  # Five more used to be declared here — `self.end_of_week`, `self.beginning_of_month`,
+  # `self.end_of_month`, `self.beginning_of_year`, `self.end_of_year` — and none of them exist
+  # (#762, re-verified against activesupport 8.1.3.1 by `Date.respond_to?`). `Date` only INCLUDES
+  # `DateAndTime::Calculations`, so that module's members are instance methods, declared below and
+  # nowhere else. Declaring them as singletons made `Date.end_of_month` — a real `NoMethodError` —
+  # type-check and answer a `Date`, so everything chained off it was checked against a value that
+  # never exists; `DateTime` inherited all five through its own singleton and was wrong the same way.
+  # `self.beginning_of_week` is not here either: it exists, but it is the week-start CONFIGURATION
+  # reader and is declared with the rest of that group at the bottom of this class.
   def self.current: () -> Date
   def self.yesterday: () -> Date
   def self.tomorrow: () -> Date
-  def self.beginning_of_week: () -> Date
-  def self.end_of_week: () -> Date
-  def self.beginning_of_month: () -> Date
-  def self.end_of_month: () -> Date
-  def self.beginning_of_year: () -> Date
-  def self.end_of_year: () -> Date
 
   # `advance(days: -1)` / `advance(days: 1)` — pure y/m/d arithmetic on the
   # receiver (`core_ext/date_and_time/calculations.rb`), unlike the
@@ -1180,14 +1182,30 @@ class Date
   # (`lib/rigor/plugin/activesupport_core_ext/effects.rb`), next to the `Time` and `DateTime` rows.
   def in_time_zone: (?untyped zone) -> untyped
 
-  # `core_ext/date/calculations.rb`'s `class << self` — the rest of the week-start configuration
-  # surface behind `Date.beginning_of_week`. `Date` is closed, so these omissions were false
-  # positives on an ordinary `config/initializers` line.
+  # `core_ext/date/calculations.rb`'s `class << self` — the week-start configuration surface. `Date`
+  # is closed, so these omissions were false positives on an ordinary `config/initializers` line.
   #
-  # NONE are annotated: `beginning_of_week=` / `beginning_of_week_default` / `beginning_of_week_default=`
-  # read and write `ActiveSupport::IsolatedExecutionState` and a class-level `attr_accessor`.
-  # `find_beginning_of_week!` is a pure guard over a frozen constant, but it is left unannotated to
-  # match the `Time` singletons above, none of which claim an envelope either.
+  # `self.beginning_of_week` is the READER of this group and belongs to it, not to the date
+  # constructors at the top of the class. It answers a **Symbol** — the week start, `:monday` by
+  # default:
+  #
+  #     def beginning_of_week
+  #       ::ActiveSupport::IsolatedExecutionState[:beginning_of_week] || beginning_of_week_default || :monday
+  #     end
+  #
+  # It was declared `() -> Date` until #762, up with `self.current` and friends, which is where the
+  # wrong reading came from. That was a false-positive generator rather than lost precision, because
+  # `Date` is closed in both directions: every correct Symbol use of the value (`== :monday`, `to_s`,
+  # feeding it back to the instance `beginning_of_week(start_day)`) looked wrong, while an incorrect
+  # `Date` use of it looked right — and `find_beginning_of_week!` below returns that same value and
+  # already said `Symbol`.
+  #
+  # NONE are annotated: `beginning_of_week` / `beginning_of_week=` / `beginning_of_week_default` /
+  # `beginning_of_week_default=` read and write `ActiveSupport::IsolatedExecutionState` and a
+  # class-level `attr_accessor`. `find_beginning_of_week!` is a pure guard over a frozen constant,
+  # but it is left unannotated to match the `Time` singletons above, none of which claim an envelope
+  # either.
+  def self.beginning_of_week: () -> Symbol
   def self.beginning_of_week=: (Symbol week_start) -> Symbol
   def self.beginning_of_week_default: () -> Symbol?
   def self.beginning_of_week_default=: (Symbol? week_start) -> Symbol?

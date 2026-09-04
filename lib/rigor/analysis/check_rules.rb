@@ -717,7 +717,7 @@ module Rigor
           # because the real type is empty (the real `DRb` has
           # `start_service`), so enumerating it to prove a call
           # "undefined" would be a false positive.
-          return nil if unbounded_receiver_surface?(class_name, scope)
+          return nil if unenumerable_receiver?(class_name, scope)
 
           # Slice 7 phase 12 — suppress when the user has
           # declared the method in source (`def` /
@@ -844,9 +844,15 @@ module Rigor
         # the larger half — modules with class-method surfaces are how that codebase is organised.
         def project_defines_method?(scope, class_name, method_name, kind)
           if kind == :singleton
+            # The singleton side has no ancestor walk to ask (#731); it answers for the receiver's own name.
             !scope.user_singleton_def_site_for(class_name, method_name).nil?
           else
-            !scope.user_def_site_for(class_name, method_name).nil?
+            # Through the project's ancestry, not the receiver's name alone: a base class defining a helper
+            # its subclasses call is ordinary Ruby, and a sidecar `sig/` that declares the SUBCLASS without
+            # that helper was reporting it (`AbstractAdapter#url`, called from `FilesystemAdapter#target`).
+            # The def-node walk is what has to answer here — `discovered_methods` deliberately withholds a
+            # plain cross-file `def` (`ScopeIndexer#finalize_def_index`), which is exactly this shape.
+            !scope.user_def_through_ancestors(class_name, method_name).first.nil?
           end
         end
 
@@ -956,6 +962,23 @@ module Rigor
             rule: RULE_UNRESOLVED_TOPLEVEL,
             method_name: call_node.name.to_s
           )
+        end
+
+        # Issue #742 — the receivers whose method surface this rule cannot enumerate, in one question.
+        #
+        # {#unbounded_receiver_surface?} covers the ADR-26 open receivers and Rigor's own synthesized stubs.
+        # The generic metaclasses join it here: a value typed `Class` or `Module` is SOME class or module
+        # object, and its singleton methods cannot be read off the metaclass — `def self.included(base)`
+        # receives the includer, so `base.class_attribute :main_menu` and `base.main_menu = true` are calls
+        # on whatever included the module. The union twin has declined these arms since it was written
+        # (`METACLASS_ARMS`, "a `plugin_class : Class` really holds a `Plugin` subclass with `.manifest`");
+        # the scalar rule enumerated `Module`'s own RBS instead and reported them.
+        #
+        # Kept beside `unbounded_receiver_surface?` rather than folded into it: that predicate has eight
+        # other callers (arity, the `raise` verdicts), and widening all of them is a separate change with
+        # its own evidence to gather.
+        def unenumerable_receiver?(class_name, scope)
+          METACLASS_ARMS.include?(class_name) || unbounded_receiver_surface?(class_name, scope)
         end
 
         # Returns a qualified class name for the in-scope check.

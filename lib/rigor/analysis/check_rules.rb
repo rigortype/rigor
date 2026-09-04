@@ -783,6 +783,7 @@ module Rigor
         def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind)
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
+          return true if unknown_mixin_includer?(class_name, scope)
 
           ancestry_declares_method?(scope, class_name, call_node.name, kind)
         end
@@ -979,6 +980,35 @@ module Rigor
         # its own evidence to gather.
         def unenumerable_receiver?(class_name, scope)
           METACLASS_ARMS.include?(class_name) || unbounded_receiver_surface?(class_name, scope)
+        end
+
+        # Issue #746 — a class that includes a module the environment does not know. `SudoMode::Form`
+        # includes `ActiveModel::Validations`, which no RBS in redmine's environment declares, and `valid?`
+        # comes from it: the ancestors are not fully known, so the method table is not enumerable and a
+        # verdict read off the part we can see is unsound. Same reasoning `unbounded_receiver_surface?`
+        # already applies to an ADR-26 open receiver and to Rigor's own synthesized stubs.
+        #
+        # Asked LATE, with {#ancestry_declares_method?} and for the same reason: `Scope#includes_of` records
+        # an ADR-46 file-level ancestry edge, so running it on the hot path made `Widget.new` — a call RBS
+        # answers, that never reaches a verdict — depend on `Widget`'s declaring file.
+        # `dependency_recorder_spec` caught it here exactly as it caught #723's walk.
+        #
+        # The receiver's OWN includes only. A project ancestor's unknown include makes the surface just as
+        # unknown; walking the chain is a deliberate deferral rather than an oversight.
+        def unknown_mixin_includer?(class_name, scope)
+          includes = scope.includes_of(class_name)
+          return false if includes.empty?
+
+          includes.any? { |raw| !known_mixin?(raw, class_name, scope) }
+        end
+
+        def known_mixin?(raw_name, class_name, scope)
+          scope.ancestor_name_candidates(class_name, raw_name).any? do |candidate|
+            next true if scope.discovered_classes.key?(candidate)
+
+            Rigor::Reflection.rbs_class_known?(candidate, scope: scope) &&
+              !synthesized_stub_receiver?(candidate, scope)
+          end
         end
 
         # Returns a qualified class name for the in-scope check.

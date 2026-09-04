@@ -532,13 +532,10 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     # readers below can resolve precisely while the rest of the class (arithmetic, `==`, and anything
     # `method_missing` forwards to the wrapped numeric) stays undeclared without becoming a false positive.
     #
-    # `ago`/`until`/`before`/`since`/`from_now`/`after` are deliberately NOT among these readers — see the
-    # `ActiveSupport::Duration` class comment in `sig/active_support/core_ext.rbs` (issue #659, blocked on
-    # #658): they default to `Time.current`, and typing them needs the Rails `Time` instance surface, which
-    # is a CLOSED core class this bundle does not declare, first. A review round caught exactly this: typing
-    # `ago` `() -> Time` fired 9 false positives on real Rails `Time` extension calls
-    # (`.ago.to_fs(:db)`, `.ago.in_time_zone`, …) that read `Dynamic` and silent on master. The with-argument
-    # / undeclared-member test below covers `ago` itself, proving it is back to declining safely.
+    # `ago`/`until`/`before`/`since`/`from_now`/`after` joined these readers in #659; their own describe
+    # block is below. They were held back until #658 and #670 had declared the Rails `Time` / `Date` /
+    # `DateTime` surface, because the diagnostic they caused landed on the `Time` they RETURN, where
+    # open_receivers has no reach.
     it "resolves the declared reader surface to real types" do
       source = <<~RUBY
         Rigor.dump_type(1.day.to_i)
@@ -560,21 +557,102 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       )
     end
 
-    it "still witnesses no undefined-method for ago/since (undeclared, #659/#658) or a method_missing member" do
-      # `ago` / `since` are real Duration API this declaration does NOT list (issue #659, blocked on #658 —
-      # the Rails `Time` instance surface is a closed core class this bundle doesn't declare). `round` is
-      # real Duration API `method_missing`-forwards to the wrapped numeric — a DIFFERENT reason to stay
-      # undeclared, from `sig/active_support/core_ext.rbs`'s own top-of-block comment. Both shapes decline
-      # to `Dynamic` rather than fire `call.undefined-method`, and open_receivers is what keeps them silent.
-      source = <<~RUBY
-        Rigor.dump_type(1.day.ago)
-        Rigor.dump_type(1.day.since(Time.now))
-        Rigor.dump_type(1.day.round)
-      RUBY
-      result = run_plugin(source: source)
+    it "still declines a method_missing member to Dynamic without firing undefined-method" do
+      # `round` is real Duration API that `method_missing` forwards to the wrapped numeric, so it stays
+      # undeclared on purpose — `sig/active_support/core_ext.rbs`'s own top-of-block comment. It declines
+      # to `Dynamic` rather than firing `call.undefined-method`, and open_receivers is what keeps it
+      # silent. `1.day.ago` used to be asserted here for the same shape; #659 declares it, so it moved to
+      # the block below and this example keeps only the member that is still genuinely undeclared.
+      result = run_plugin(source: "Rigor.dump_type(1.day.round)\n")
+
       expect(rules(result)).not_to include("call.undefined-method")
-      expect(dumps(result).size).to eq(3)
-      expect(dumps(result)).to all(eq("dump_type: Dynamic[top]"))
+      expect(dumps(result)).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    # Issue #659, the half of #632's Duration surface that could not land with it. `since` and `ago` are
+    # the only two real methods (`from_now` / `after` alias the first, `until` / `before` the second —
+    # checked against activesupport 8.1.3.1, since a mis-transcribed alias arity is the bug #658 found on
+    # `Time#at_beginning_of_week`), and every FP-viable return routes into `Time`. That was the blocker:
+    # `Time` is a CLOSED core class, and until #658 declared its Rails instance surface, typing `ago` as
+    # `Time` moved the false positive from the Duration receiver onto the returned `Time` — where
+    # `open_receivers: ["ActiveSupport::Duration"]` has no reach.
+    #
+    # `Time` is the honest class rather than a compromise: under a zone these answer an
+    # `ActiveSupport::TimeWithZone`, and Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`.
+    # A `Time | ActiveSupport::TimeWithZone` union was measured and rejected — it fires nothing but types
+    # the whole downstream chain `Dynamic[top]`, which buys no more than leaving the methods undeclared.
+    describe "the Duration ago family (#659)" do
+      def undefined_methods(result)
+        result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
+      end
+
+      it "types all six zero-arg spellings as Time" do
+        source = <<~RUBY
+          Rigor.dump_type(30.minutes.ago)
+          Rigor.dump_type(30.minutes.until)
+          Rigor.dump_type(30.minutes.before)
+          Rigor.dump_type(30.minutes.since)
+          Rigor.dump_type(30.minutes.from_now)
+          Rigor.dump_type(30.minutes.after)
+        RUBY
+        result = run_plugin(source: source)
+
+        expect(undefined_methods(result)).to be_empty
+        expect(dumps(result)).to eq(Array.new(6, "dump_type: Time"))
+      end
+
+      # The point of declaring them at all: the chain has to keep resolving past the `Time`. Each of
+      # these reads a real type only because #658 and #670 declared the surface they land on — a
+      # collapsed `Time` would answer `Dynamic[top]` here while every must-not-fire assertion stayed
+      # green.
+      it "resolves the Rails Time chain hanging off the returned value" do
+        source = <<~RUBY
+          Rigor.dump_type(30.minutes.ago.iso8601)
+          Rigor.dump_type(1.day.ago.to_fs(:db))
+          Rigor.dump_type(2.hours.from_now.beginning_of_day)
+          Rigor.dump_type(1.week.ago.to_date)
+          Rigor.dump_type(3.days.ago.past?)
+          Rigor.dump_type(1.day.ago.at_beginning_of_hour)
+        RUBY
+        result = run_plugin(source: source)
+
+        expect(undefined_methods(result)).to be_empty
+        expect(dumps(result)).to eq(
+          [
+            "dump_type: String", "dump_type: String", "dump_type: Time",
+            "dump_type: Date", "dump_type: bool", "dump_type: Time"
+          ]
+        )
+      end
+
+      # The with-an-argument form declines on purpose. The runtime return depends on the argument's
+      # class AND on whether the duration carries a date-scale part — `(1.month).ago(Date.today)` is a
+      # `Date` where `(30.minutes).ago(Date.today)` is a `TimeWithZone` — so no overload expresses it
+      # without guessing, and a guess is a false positive on correct code. It must decline to `Dynamic`
+      # WITHOUT firing, which is the arity half of the assertion too: declaring only `() -> Time` would
+      # have made every one-argument call a `call.wrong-arity` on correct Rails.
+      it "declines the with-an-argument form to Dynamic rather than guessing, and never on arity" do
+        source = <<~RUBY
+          Rigor.dump_type(1.month.ago(Date.today))
+          Rigor.dump_type(30.minutes.ago(Time.now))
+          Rigor.dump_type(1.day.since(Time.now))
+          Rigor.dump_type(2.weeks.from_now(Date.current))
+        RUBY
+        result = run_plugin(source: source)
+
+        expect(rules(result)).not_to include("call.wrong-arity", "call.undefined-method")
+        expect(dumps(result)).to eq(Array.new(4, "dump_type: Dynamic[top]"))
+      end
+
+      # The must-still-fire pairing. Silence is not evidence here: an `ActiveSupport::Duration` receiver
+      # is an open receiver, so the genuine diagnostic this change must not swallow is the one on the
+      # returned `Time`, which is closed.
+      it "still witnesses a genuinely undefined method on the returned Time" do
+        result = run_plugin(source: "1.day.ago.definitely_not_a_time_method\n")
+
+        expect(undefined_methods(result).size).to eq(1)
+        expect(undefined_methods(result).first).to include("definitely_not_a_time_method", "Time")
+      end
     end
 
     it "does NOT retype `day` / `month` / `year` / `hour` on Time and Date receivers" do

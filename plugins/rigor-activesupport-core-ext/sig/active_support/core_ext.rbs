@@ -487,24 +487,51 @@ end
 # are simply outside this issue's scope and remain silently `Dynamic` rather than a guess.
 module ActiveSupport
   class Duration
-    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
-    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
-    # so typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`, `past?`,
-    # `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, and the rest of
-    # `DateAndTime::Calculations` / `Zones` / `Conversions`) to already be closed and complete — `Time` is a
-    # CORE Ruby class, RBS-known from stdlib, and this bundle's own `Time` block above never declared that
-    # instance surface (#658 — already a live FP on master with the plugin loaded, independent of this
-    # class: `Time.current.to_fs(:db)` fires today). Answering `ago` with `Time` therefore does not leave
-    # the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN undeclared
-    # members (open_receivers only protects a receiver of the class it names) — it makes
-    # `1.hour.ago.to_fs(:db)`, ordinary Rails, fire a false `call.undefined-method` for `to_fs` on `Time`,
-    # and the same for every other Rails `Time` extension nothing here declares: 9 false positives measured
-    # on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658 lands so
-    # nobody re-derives it: the return type is plain `Time`, not a `Time | ActiveSupport::TimeWithZone`
-    # union — Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`, so `Time` is the class Rails
-    # ITSELF tells callers a `TimeWithZone` is, and the union was measured and degrades every downstream
-    # chain to `Dynamic[top]`, equivalent to leaving `ago` undeclared. Do not re-add these methods until
-    # #658 lands the `Time` surface first.
+    # The `ago` family (issue #659). `since(time = ::Time.current)` and `ago(time = ::Time.current)` are
+    # the only two real methods; `from_now` / `after` are `alias`es of the first and `until` / `before`
+    # of the second, so all six share one signature — checked, because a mis-transcribed alias arity is
+    # exactly the bug #658 found on `Time#at_beginning_of_week`.
+    #
+    # These were declared once before and REMOVED, and the reason they can return now is that the
+    # blocker was elsewhere: every FP-viable return routes into `Time`, and `Time` is a CORE Ruby class,
+    # RBS-known and therefore closed, whose Rails instance surface this bundle did not declare. Typing
+    # `ago` as `Time` while `to_fs` / `in_time_zone` / `past?` / `middle_of_day` were undeclared turned
+    # `1.hour.ago.to_fs(:db)` — ordinary Rails — into a false `call.undefined-method` on `Time`, nine per
+    # fixture, `to_fs` alone at ~92 corpus sites. `open_receivers: ["ActiveSupport::Duration"]` does not
+    # help there: it protects a Duration receiver, and the diagnostic lands on the `Time` the call
+    # RETURNS. #658 declared that surface and #670 the `Date` / `DateTime` twins, so the chains resolve.
+    #
+    # `() -> Time` is the correct class, not a compromise. Under a zone these answer an
+    # `ActiveSupport::TimeWithZone` (verified by calling them), and Rails overrides `TimeWithZone#is_a?`
+    # to answer true for `::Time` — so `Time` is the class Rails ITSELF tells callers the value is, and
+    # `Time.current` above already answers `Time` for the same reason. A `Time | TimeWithZone` union was
+    # measured and rejected: it draws no `undefined-method`, but types every downstream call
+    # `Dynamic[top]` (`iso8601`, `beginning_of_day`, `to_date`, `- 1.day`), which is worth no more than
+    # leaving them undeclared while still firing a parameter mismatch on the TimeWithZone arm.
+    #
+    # The with-an-argument form stays `(untyped) -> untyped` on purpose, and this is not caution: the
+    # runtime return depends on the argument's class AND on whether the duration carries a date-scale
+    # part, because `sum` dispatches per part to `advance` for date scales and to `since` for clock
+    # scales. Measured — `(1.month).ago(Date.today)` answers a `Date` where `(30.minutes).ago(Date.today)`
+    # answers a `TimeWithZone`, and `(1.day).ago(DateTime.now)` answers a `DateTime`. No overload
+    # expresses that without guessing, and a guess here is a false positive on correct code.
+    #
+    # NONE are `%a{pure}`: all six read the clock (and the zone) through the default argument, which is
+    # what stops `created_at > 7.days.ago` folding to a constant. They are already attributed `nondet.time`
+    # in `lib/rigor/plugin/activesupport_core_ext/effects.rb` — annotating them here would duplicate an
+    # envelope the manifest already owns, and risk the two disagreeing.
+    def ago: () -> Time
+           | (untyped time) -> untyped
+    def until: () -> Time
+             | (untyped time) -> untyped
+    def before: () -> Time
+              | (untyped time) -> untyped
+    def since: () -> Time
+             | (untyped time) -> untyped
+    def from_now: () -> Time
+                | (untyped time) -> untyped
+    def after: () -> Time
+             | (untyped time) -> untyped
 
     # `to_i` returns `@value.to_i` — always Integer, whether `@value` itself is Integer (`1.day`) or Float
     # (`1.5.days`). `in_seconds` is a literal alias.

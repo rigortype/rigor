@@ -67,6 +67,8 @@ module Rigor
         @unrenderable = []
         # Issue #735 — whole-run too: `{ class name => the superclass token that resolves nowhere }`.
         @unresolvable_superclasses = {}
+        # Issue #722 — whole-run: `{ class name => the lexical nesting its header is written in }`.
+        @superclass_nestings = {}
       end
 
       # Lifts legacy plain-`Array[Type]` observation entries into {ObservedCall} carriers. Specs from the
@@ -82,10 +84,77 @@ module Rigor
       def run
         @environment = build_environment
         resolved = resolve_paths(@paths)
-        demote_unresolvable_superclasses(resolved.flat_map { |path| analyse_file(path, @environment) })
+        candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
+        demote_unresolvable_superclasses(resolve_superclass_spellings(candidates))
       end
 
       private
+
+      # Issue #722 — resolves each recorded superclass token to the class Ruby means by it, and rewrites the
+      # emitted spelling when the two differ.
+      #
+      # `record_superclass` kept the source token verbatim on the reasoning that "RBS resolves it relative to
+      # the emitted namespace, matching Ruby's lexical scope". That holds only while the emitted namespace
+      # equals the source nesting, and sig-gen FLATTENS: `module Admin; class Record2 < Record` is written
+      # out as the compact `class Admin::Record2 < Record`, and RBS resolves a compact header's superclass at
+      # the TOP level (verified against the rbs gem), so the emitted token silently re-points at `::Record`
+      # where the program means `Admin::Record`. The checker resolves the same declaration correctly, so the
+      # generated sidecar contradicted the analyzer that wrote it.
+      #
+      # Candidate order is Ruby's own for the superclass expression: the header's nesting innermost-first,
+      # then the bare name — the reading `Scope#ancestor_name_candidates` owns for the analyzer's class
+      # graph. The question here is about the EMITTED tree, so the "is this a class" test is this run's
+      # declarations plus the RBS environment rather than the discovery tables; keep the two orders in step.
+      def resolve_superclass_spellings(candidates)
+        return candidates if @superclass_nestings.empty?
+
+        known = candidates.each_with_object(Set.new) do |candidate, acc|
+          acc << candidate.class_name if candidate.class_name
+          acc.merge(candidate.class_shells || [])
+        end
+        rewrites = superclass_rewrites(known)
+        return candidates if rewrites.empty?
+
+        candidates.map do |candidate|
+          overlap = rewrites.slice(*candidate.class_superclasses.keys)
+          next candidate if overlap.empty?
+
+          rebuild_with_superclasses(candidate, candidate.class_superclasses.merge(overlap))
+        end
+      end
+
+      def superclass_rewrites(known)
+        @superclass_nestings.each_with_object({}) do |(full, (nesting, token)), acc|
+          next if token.nil? || nesting.empty?
+
+          resolved = resolve_superclass_token(token, nesting, known)
+          acc[full] = resolved if resolved && resolved != token
+        end
+      end
+
+      # The first candidate spelling that names a class this run declares or the RBS environment knows, or
+      # nil when none does — an unresolvable superclass is #735's business, not this pass's.
+      def resolve_superclass_token(token, nesting, known)
+        base = token.sub(/\[.*\]\z/, "")
+        args = token[base.length..] || ""
+        nesting.length.downto(1) do |i|
+          candidate = "#{nesting[0, i].join('::')}::#{base}"
+          return "#{candidate}#{args}" if known.include?(candidate) ||
+                                          Reflection.rbs_class_known?(candidate, environment: @environment)
+        end
+        token
+      end
+
+      def rebuild_with_superclasses(candidate, superclasses)
+        MethodCandidate.new(
+          path: candidate.path, class_name: candidate.class_name, method_name: candidate.method_name,
+          kind: candidate.kind, classification: candidate.classification,
+          inferred_return: candidate.inferred_return, declared_return_rbs: candidate.declared_return_rbs,
+          rbs: candidate.rbs, skip_reason: candidate.skip_reason,
+          namespace_kinds: candidate.namespace_kinds, class_shells: candidate.class_shells,
+          class_superclasses: superclasses
+        )
+      end
 
       # Issue #735 — a generated declaration whose superclass chain does not terminate in a class the RBS
       # environment knows is DROPPED rather than emitted.
@@ -280,7 +349,7 @@ module Rigor
 
         full = (prefix + [name]).join("::")
         @namespace_kinds[full] = node.is_a?(Prism::ClassNode) ? :class : :module
-        record_superclass(node, full)
+        record_superclass(node, full, prefix)
         walk_namespace_body(node, prefix + [name], out)
         true
       end
@@ -294,11 +363,20 @@ module Rigor
       # superclass (`Class.new`, any other `CallNode`) is left unrecorded — a `Data.define` / `Struct.new` one is
       # already carried by {#register_meta_classes}, and the rest are un-representable, where guessing would
       # misfold.
-      def record_superclass(node, full)
+      def record_superclass(node, full, prefix)
         return unless node.is_a?(Prism::ClassNode)
 
         superclass = qualified_constant_path(node.superclass)
-        @class_superclasses[full] = generic_superclass_spelling(superclass) if superclass
+        return if superclass.nil?
+
+        # Issue #722 — the nesting the header is WRITTEN in, kept whole-run (not per-file scratch) because
+        # the name it resolves to may be a class another file declares. Resolved once every file has been
+        # walked, in {#resolve_superclass_spellings}.
+        spelling = generic_superclass_spelling(superclass)
+        # The token rides along because `@class_superclasses` is per-FILE scratch, reset before the next
+        # file, while this table is whole-run.
+        @superclass_nestings[full] = [prefix.dup, spelling]
+        @class_superclasses[full] = spelling
       end
 
       # Issue #735 — a GENERIC superclass has to be written with its arguments. `class Entries < Array`

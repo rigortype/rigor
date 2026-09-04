@@ -768,6 +768,36 @@ module Rigor
       [nil, nil]
     end
 
+    # Issue #731 — the singleton-side twin of {#user_def_through_ancestors}: resolves `method_name` against
+    # `class_name`'s own `def self.` / `class << self` bodies, then up the SUPERCLASS chain. Returns
+    # `[def_node, owner]`, or `[nil, nil]`.
+    #
+    # Superclasses only, and that is the whole shape of class-method inheritance in Ruby: a subclass
+    # inherits its parent's class methods, while an `include`d module contributes INSTANCE methods and its
+    # own `def self.x` is not callable on the includer. `extend M` needs no walk either — `ScopeIndexer`
+    # folds an extend into the extender's own singleton entries before the table is frozen — so the one
+    # edge this misses is a module's singleton surface reached through some other route, which nothing
+    # resolves today.
+    def singleton_def_through_ancestors(class_name, method_name, name_memo: {})
+      queue = [class_name.to_s]
+      seen = {}
+      visited = 0
+      until queue.empty?
+        current = queue.shift
+        next if current.nil? || seen[current]
+
+        seen[current] = true
+        visited += 1
+        return ancestor_walk_gave_up if visited > ANCESTOR_WALK_LIMIT
+
+        found = singleton_def_for(current, method_name)
+        return [found, current] if found
+
+        enqueue_ancestors(current, queue, name_memo, mixins: false)
+      end
+      [nil, nil]
+    end
+
     # The BFS node cap; a hierarchy past it gives up rather than walking unboundedly (ADR-41 WD4).
     ANCESTOR_WALK_LIMIT = 100
 

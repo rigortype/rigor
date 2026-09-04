@@ -114,6 +114,12 @@ RSpec.describe "plugins/rigor-railties" do
       # of rooted?" — would wrongly pass this receiver too: `rooted?` answers true for every node along a
       # rooted chain, not only a single segment, so the gate would hijack `LoggerBase.logger`, inherited by
       # `Baz::Rails`, into the framework's `BroadcastLogger`.
+      #
+      # The observable moved with #731 and got STRONGER. It read `Dynamic[top]` while the singleton-side
+      # lookup resolved the receiver's own name only, so "the gate declined" showed up as the absence of an
+      # answer — which a fixture that resolved nothing at all would also have produced. Now the project's
+      # own inherited `LoggerBase.logger` answers, so the assertion distinguishes the plugin's
+      # `BroadcastLogger` from the project's literal instead of from silence.
       source = <<~RUBY
         class LoggerBase
           def self.logger
@@ -129,7 +135,7 @@ RSpec.describe "plugins/rigor-railties" do
         Rigor.dump_type(::Baz::Rails.logger)
       RUBY
       result = run_plugin(source: source)
-      expect(dumps(result)).to eq(["dump_type: Dynamic[top]"])
+      expect(dumps(result)).to eq(['dump_type: "base-logger"'])
     end
 
     it "declines the reader the project defines on its own top-level `Rails` (#588)" do

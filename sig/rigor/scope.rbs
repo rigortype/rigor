@@ -143,6 +143,7 @@ module Rigor
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
     def ancestor_name_candidates: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
     def singleton_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
+    def singleton_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> [untyped?, String?]
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def user_singleton_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def top_level_def_for: (String | Symbol method_name) -> untyped?

@@ -1756,21 +1756,44 @@ module Rigor
       # (`def self.via; helper(x); end`) re-enters this tier and resolves against the same singleton table
       # — the symmetric counterpart of the instance-side ancestor walk.
       #
-      # Resolution is OWN-class only: the singleton-ancestry chain (`extend`ed modules, inherited
-      # class-method dispatch) is not walked at this slice. A miss degrades to today's `Dynamic[top]`, never
-      # a false resolution (ADR-57 follow-up § module-singleton).
+      # Issue #731 — resolution walks the SUPERCLASS chain, so a class method a base class defines answers
+      # on its subclasses (`class Plain < Base` with `def self.build` on `Base`: `Plain.build` was
+      # `Dynamic[top]` while `Plain.new.inst` resolved on the same fixture). Superclasses only, which is the
+      # whole shape of class-method inheritance — an `include`d module's `def self.x` is not callable on the
+      # includer, and `extend M` is already folded into the extender's own singleton entries by
+      # `ScopeIndexer`. A miss still degrades to `Dynamic[top]`, never a false resolution.
+      #
+      # The OWNER — not the receiver class — is what the overridable gate keys on, exactly as the instance
+      # side does: adopting `Base`'s literal return is unsound when a subclass redefines the method, and
+      # after this change the resolved body is routinely not the receiver's own.
       def try_singleton_method_inference(receiver, call_node, arg_types, method_name: call_node.name)
         return nil unless receiver.is_a?(Type::Singleton)
 
-        def_node = scope.singleton_def_for(receiver.class_name, method_name)
+        def_node, owner = resolve_singleton_def_with_owner(receiver.class_name, method_name)
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types)
         return result if result.nil?
 
-        degrade_if_overridable(result, receiver.class_name, method_name, :singleton)
+        degrade_if_overridable(result, owner, method_name, :singleton)
       rescue StandardError
         nil
+      end
+
+      # The singleton twin of {#resolve_user_def_with_owner}. Memoised in a bucket nested under the
+      # SINGLETON def table's identity as well as the class-graph trio: `class_graph_buckets` keys on
+      # `discovered_def_nodes` / `discovered_superclasses` / `discovered_includes`, and this walk reads a
+      # fourth table those three do not imply. Keying on what the answer actually depends on is the #682
+      # lesson — a memo that outlives its inputs serves one scope's answer to another.
+      def resolve_singleton_def_with_owner(class_name, method_name)
+        by_singleton = (class_graph_buckets[:singleton_def] ||= {}.compare_by_identity)
+        cache = (by_singleton[scope.discovered_singleton_def_nodes] ||= {})
+        table = (cache[class_name.to_s] ||= {})
+        key = method_name.to_sym
+        return table[key] if table.key?(key)
+
+        table[key] = scope.singleton_def_through_ancestors(class_name, method_name,
+                                                           name_memo: class_graph_buckets[:name])
       end
 
       # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`

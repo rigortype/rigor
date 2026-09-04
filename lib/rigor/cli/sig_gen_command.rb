@@ -55,6 +55,7 @@ module Rigor
                    0
                  end
         report_unrenderable(generator.unrenderable)
+        report_unresolvable_superclasses(generator.unresolvable_superclasses)
         status
       end
 
@@ -77,6 +78,23 @@ module Rigor
           @err.puts("    rendered: #{method.rbs}")
           @err.puts("    #{method.error}")
         end
+      end
+
+      # Issue #735 — unlike {#report_unrenderable} this is a fact about the PROJECT's type universe, not a
+      # Rigor defect: the class's superclass is not declared by any RBS the environment loads, so a sidecar
+      # declaring it would fail to build and take the class's type coverage with it. Naming the unresolved
+      # superclass is the actionable part — it is usually one gem's missing RBS standing between the user
+      # and signatures for a whole layer of their app.
+      def report_unresolvable_superclasses(unresolvable)
+        return if unresolvable.empty?
+
+        @err.puts(
+          "rigor sig-gen: skipped #{unresolvable.size} class(es) whose superclass no loaded RBS declares. " \
+          "A signature for them would fail to build (`RBS::NoSuperclassFoundError`) and would leave the " \
+          "class LESS typed than it is now. Provide RBS for the superclass — `rbs collection install`, the " \
+          "gem's own `sig/`, or a `signature_paths:` entry — and re-run."
+        )
+        unresolvable.sort.each { |class_name, superclass| @err.puts("  #{class_name} < #{superclass}") }
       end
 
       def dispatch_print_or_diff(candidates, mode, options)

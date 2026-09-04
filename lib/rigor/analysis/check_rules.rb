@@ -745,6 +745,15 @@ module Rigor
           return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind)
 
           definition_site = project_definition_site(scope, class_name, call_node.name, kind)
+          # Issue #735 — the site is evidence, and whose RBS this is decides what it is evidence OF. On a
+          # BUNDLED declaration (core / stdlib / a gem) the class is not the project's, so a project `def`
+          # on it is the ADR-17 monkey-patch this rule surfaces with the `pre_eval:` nudge. On the
+          # project's OWN sidecar `sig/` the declaration describes the source being analysed, the "patch"
+          # is just another of the project's files, and the nudge is not something a user can act on: it
+          # asks them to `pre_eval:` their own application. `rigor sig-gen --write` on redmine turned 29
+          # `call.undefined-method` into 171 through exactly this reading, 49 of them here.
+          return nil if project_sidecar_owns_method?(scope, class_name, call_node.name, kind)
+
           build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
         end
 
@@ -780,6 +789,32 @@ module Rigor
           return nil unless kind == :instance
 
           scope.user_def_site_for(class_name, method_name)
+        end
+
+        # Issue #735 — the site is evidence, and whose RBS the class has decides what it is evidence OF. On
+        # a BUNDLED declaration (core / stdlib / a gem) the class is not the project's, so a project `def`
+        # on it is the ADR-17 monkey-patch this rule surfaces with the `pre_eval:` nudge. On the project's
+        # OWN sidecar `sig/` the declaration describes the source being analysed, the "patch" is just
+        # another of the project's files, and the nudge is not something a user can act on: it asks them to
+        # `pre_eval:` their own application. `rigor sig-gen --write` on redmine turned 29
+        # `call.undefined-method` into 171 through exactly this reading, 49 of them here.
+        def project_sidecar_owns_method?(scope, class_name, method_name, kind)
+          Rigor::Reflection.project_declared_class?(class_name, scope: scope) &&
+            project_defines_method?(scope, class_name, method_name, kind)
+        end
+
+        # Issue #735 — "does the project define this method, on either side, somewhere in its own files".
+        # Distinct from {#project_definition_site}, which answers the narrower question the ADR-17 MESSAGE
+        # asks (instance-side only, because that is the monkey-patch shape whose `pre_eval:` advice applies).
+        # The suppression needs both sides: `def self.available_search_types` in one file and its call in
+        # another is the same "second file of my own class" shape as the instance case, and on redmine it is
+        # the larger half — modules with class-method surfaces are how that codebase is organised.
+        def project_defines_method?(scope, class_name, method_name, kind)
+          if kind == :singleton
+            !scope.user_singleton_def_site_for(class_name, method_name).nil?
+          else
+            !scope.user_def_site_for(class_name, method_name).nil?
+          end
         end
 
         def module_mixin_receiver?(receiver_type, scope)

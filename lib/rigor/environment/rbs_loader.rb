@@ -945,6 +945,46 @@ module Rigor
         @state[:quarantined] ||= self.class.quarantined_project_signatures(@signature_paths).freeze
       end
 
+      # Issue #735 — the class / module names whose PRIMARY declaration lives under the project's own
+      # `signature_paths:`, top-level prefix stripped ("::Admin::Widget" reads back as "Admin::Widget").
+      #
+      # The distinction it exists to draw: a BUNDLED declaration (core, stdlib, a gem's RBS) is
+      # authoritative about its class, so a project `def` on that class is a monkey-patch and ADR-17 has
+      # the analyzer report it rather than adopt it. A declaration the project wrote itself — by hand or
+      # through `rigor sig-gen --write` — is a sidecar of the same source tree, and a `def` in another of
+      # the project's own files is not a monkey-patch, just the second file of an ordinary class. Reading
+      # a partial sidecar as authoritative made `sig-gen --write` on redmine report 5.9x more
+      # `call.undefined-method` than the same project with no `sig/` at all.
+      #
+      # Memoised per loader: one pass over `class_decls` (~1-2k entries), and every consumer is a check
+      # rule on the analysis hot path. Attribution is by buffer NAME, which survives the ADR-54 environment
+      # cache since #725 — an environment blob written before that carries the `<cached>` sentinel instead,
+      # which lands every class outside this set and leaves the pre-#735 behaviour, never a new silence.
+      def project_declared_classes
+        @state[:project_declared_classes] ||= build_project_declared_classes
+      end
+
+      def build_project_declared_classes
+        environment = env
+        return Set.new.freeze if environment.nil?
+
+        project_files = self.class.project_sig_files(@signature_paths)
+        return Set.new.freeze if project_files.empty?
+
+        names = environment.class_decls.each_with_object(Set.new) do |(rbs_name, entry), acc|
+          acc << rbs_name.to_s.delete_prefix("::") if self.class.project_entry?(entry, project_files)
+        end
+        names.freeze
+      rescue ::RBS::BaseError
+        Set.new.freeze
+      end
+      private :build_project_declared_classes
+
+      # True when `class_name`'s RBS declaration is one the project wrote (see {#project_declared_classes}).
+      def project_declared_class?(class_name)
+        project_declared_classes.include?(class_name.to_s.delete_prefix("::"))
+      end
+
       # The total RBS-environment build failure captured this run, or nil when the env built. Unlike
       # {#quarantined_signatures} — which the env survives, one file lighter, and which is re-derived by
       # re-parsing so a cache HIT reports it too — a total failure (typically `RBS::DuplicatedDeclarationError`:

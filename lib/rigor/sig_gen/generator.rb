@@ -41,7 +41,7 @@ module Rigor
       UnrenderableMethod = Data.define(:path, :class_name, :method_name, :rbs, :error)
 
       # @return [Array<UnrenderableMethod>] empty on a healthy run; read after {#run}.
-      attr_reader :unrenderable
+      attr_reader :unrenderable, :unresolvable_superclasses
 
       # @param configuration [Rigor::Configuration]
       # @param paths [Array<String>] files / directories to scan.
@@ -65,6 +65,8 @@ module Rigor
         @meta_layouts = {}
         # Whole-run, NOT per-file: a rendering defect is reported once at the end of the run.
         @unrenderable = []
+        # Issue #735 — whole-run too: `{ class name => the superclass token that resolves nowhere }`.
+        @unresolvable_superclasses = {}
       end
 
       # Lifts legacy plain-`Array[Type]` observation entries into {ObservedCall} carriers. Specs from the
@@ -80,10 +82,95 @@ module Rigor
       def run
         @environment = build_environment
         resolved = resolve_paths(@paths)
-        resolved.flat_map { |path| analyse_file(path, @environment) }
+        demote_unresolvable_superclasses(resolved.flat_map { |path| analyse_file(path, @environment) })
       end
 
       private
+
+      # Issue #735 — a generated declaration whose superclass chain does not terminate in a class the RBS
+      # environment knows is DROPPED rather than emitted.
+      #
+      # `record_superclass` is right that a subclass declaration must carry its superclass: without it the
+      # sidecar misrepresents the class and dispatch degrades. But emitting one the environment cannot
+      # resolve is worse than either — `RBS::NoSuperclassFoundError` collapses the class, so every call into
+      # it reads `Dynamic[top]` and the whole declaration is a liability. On redmine, `class Principal <
+      # ApplicationRecord` (nothing declares `ApplicationRecord`, and nothing could: the chain ends at
+      # `ActiveRecord::Base`, which no RBS in the environment carries) collapsed 98 classes on the very next
+      # run. A chain that LOOPS is dropped for the same reason, and is the shape that made an
+      # `AncestorBuilder` walk recurse until `SystemStackError` (#609).
+      #
+      # Dropping is the conservative end: no declaration leaves the class exactly as it was before sig-gen
+      # ran — source discovery and the plugins still type it. Emitting the class with the superclass merely
+      # OMITTED would be the harmful middle: the class becomes RBS-known with only the emitted methods, so
+      # every inherited call fires `call.undefined-method`.
+      def demote_unresolvable_superclasses(candidates)
+        superclasses = candidates.each_with_object({}) do |candidate, acc|
+          (candidate.class_superclasses || {}).each { |name, sup| acc[name] = sup }
+        end
+        # Everything this run declares, superclass or not: a chain that reaches `class Record` — emitted
+        # here, with no superclass of its own — terminates in a class the next run WILL know.
+        emitted = candidates.each_with_object(Set.new) do |candidate, acc|
+          acc << candidate.class_name if candidate.class_name
+          acc.merge(candidate.class_shells || [])
+        end
+        unresolvable = superclasses.each_with_object({}) do |(name, _sup), acc|
+          root = unresolved_superclass_root(name, superclasses, emitted)
+          acc[name] = root if root
+        end
+        return candidates if unresolvable.empty?
+
+        candidates.map do |candidate|
+          owner = unresolvable_for(candidate.class_name, unresolvable)
+          next candidate if owner.nil?
+
+          record_unresolvable_superclass(candidate, owner)
+        end
+      end
+
+      # A nested class or module goes with its wrapper. `WikiPage::Webhookable`'s declaration is emitted
+      # INSIDE `class WikiPage < ApplicationRecord`, so keeping the inner one while dropping the outer emits
+      # the unresolvable header anyway — the wrapper is not a candidate of its own and carries no methods,
+      # so nothing else would have demoted it.
+      def unresolvable_for(class_name, unresolvable)
+        return nil if class_name.nil?
+        return [class_name, unresolvable[class_name]] if unresolvable.key?(class_name)
+
+        unresolvable.each do |name, root|
+          return [name, root] if class_name.start_with?("#{name}::")
+        end
+        nil
+      end
+
+      # The first superclass token on `name`'s recorded chain that neither the RBS environment knows nor this
+      # run emits, or nil when the chain terminates in a known class. A chain that revisits a class returns
+      # that class's own superclass token — a cycle resolves nowhere.
+      def unresolved_superclass_root(name, superclasses, emitted, seen = {})
+        superclass = superclasses[name]
+        return nil if superclass.nil?
+        return superclass if seen[name]
+
+        seen[name] = true
+        # The recorded spelling may carry the type arguments {#generic_superclass_spelling} added; the
+        # resolvability question is about the class, so it is asked of the bare name.
+        base = superclass.sub(/\[.*\]\z/, "")
+        return nil if Reflection.rbs_class_known?(base, environment: @environment)
+        return superclass unless emitted.include?(base)
+
+        unresolved_superclass_root(base, superclasses, emitted, seen)
+      end
+
+      def record_unresolvable_superclass(candidate, owner)
+        class_name, root = owner
+        @unresolvable_superclasses[class_name] ||= root
+        MethodCandidate.new(
+          path: candidate.path, class_name: candidate.class_name, method_name: candidate.method_name,
+          kind: candidate.kind, classification: Classification::SKIPPED,
+          skip_reason: :unresolvable_superclass, inferred_return: candidate.inferred_return,
+          declared_return_rbs: candidate.declared_return_rbs,
+          namespace_kinds: candidate.namespace_kinds, class_shells: candidate.class_shells,
+          class_superclasses: candidate.class_superclasses
+        )
+      end
 
       def build_environment
         Environment.for_project(
@@ -211,7 +298,25 @@ module Rigor
         return unless node.is_a?(Prism::ClassNode)
 
         superclass = qualified_constant_path(node.superclass)
-        @class_superclasses[full] = superclass if superclass
+        @class_superclasses[full] = generic_superclass_spelling(superclass) if superclass
+      end
+
+      # Issue #735 — a GENERIC superclass has to be written with its arguments. `class Entries < Array`
+      # yields `RBS::InvalidTypeApplicationError: ::Array expects parameters [unchecked out E], but given
+      # args []`, which fails the build for that class exactly as an unresolvable superclass does — redmine
+      # subclasses `Array` five times. The element type is not something this pass can infer, so it is
+      # `untyped`: the subclass's OWN methods are what sig-gen is here to record, and `Array[untyped]` keeps
+      # the inherited surface resolving instead of collapsing the class.
+      def generic_superclass_spelling(superclass)
+        loader = @environment&.rbs_loader
+        return superclass if loader.nil?
+
+        arity = loader.class_type_param_names(superclass).size
+        return superclass if arity.zero?
+
+        "#{superclass}[#{(['untyped'] * arity).join(', ')}]"
+      rescue StandardError
+        superclass
       end
 
       # The ADR-48 member layouts for this file, in one table keyed by qualified class name. Reading the engine's

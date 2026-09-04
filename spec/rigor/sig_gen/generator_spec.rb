@@ -944,4 +944,83 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(gen.unrenderable).to be_empty
     end
   end
+
+  # Issue #735 — a generated declaration whose superclass the RBS environment cannot resolve is worse than
+  # no declaration at all: `RBS::NoSuperclassFoundError` collapses the class on the next run, so every call
+  # into it reads `Dynamic[top]`. On redmine, `class Principal < ApplicationRecord` collapsed 98 classes.
+  describe "#run with an unresolvable superclass" do
+    def skipped_for(candidates, reason)
+      candidates.select { |c| c.skip_reason == reason }.map(&:class_name).uniq.sort
+    end
+
+    it "skips the class, records why, and leaves an unrelated class emittable" do
+      path = write_fixture("lib/x.rb", <<~RUBY)
+        class Widget < UnknownBase
+          def price = 100
+        end
+        class Plain
+          def ok = "s"
+        end
+      RUBY
+
+      gen = generator(paths: [path])
+      candidates = gen.run
+
+      expect(skipped_for(candidates, :unresolvable_superclass)).to eq(["Widget"])
+      expect(gen.unresolvable_superclasses).to eq({ "Widget" => "UnknownBase" })
+      # The must-still-emit half: the gate is per class, not a bail-out for the file.
+      emitted = candidates.select { |c| c.classification == Rigor::SigGen::Classification::NEW_METHOD }
+      expect(emitted.map(&:class_name)).to eq(["Plain"])
+    end
+
+    it "skips a class nested under the unresolvable one" do
+      # `Widget::Helper` is emitted INSIDE `class Widget < UnknownBase`, so keeping it would write the
+      # unresolvable header anyway — the wrapper is not a candidate of its own.
+      path = write_fixture("lib/x.rb", <<~RUBY)
+        class Widget < UnknownBase
+          def price = 100
+        end
+        module Widget::Helper
+          def help = :h
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(skipped_for(candidates, :unresolvable_superclass)).to eq(["Widget", "Widget::Helper"])
+    end
+
+    it "keeps a class whose superclass this run emits" do
+      # The chain terminates in `Record`, which has no superclass of its own and IS declared by this run —
+      # so the next run will know it. Without the emitted-class set every project subclass was skipped.
+      path = write_fixture("lib/x.rb", <<~RUBY)
+        class Record
+          def rec = 1
+        end
+        class Admin::Record < Record
+          def adm = 2
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(skipped_for(candidates, :unresolvable_superclass)).to be_empty
+      expect(candidates.map(&:class_name).uniq.sort).to eq(["Admin::Record", "Record"])
+    end
+
+    it "writes a generic superclass with its type arguments" do
+      # `class Entries < Array` yields `RBS::InvalidTypeApplicationError: ::Array expects parameters
+      # [unchecked out E], but given args []` — a build failure for the same class, by another route.
+      # redmine subclasses `Array` five times.
+      path = write_fixture("lib/x.rb", "class Entries < Array
+  def latest = 42
+end
+")
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.first.class_superclasses).to eq({ "Entries" => "Array[untyped]" })
+      expect(candidates.first.skip_reason).to be_nil
+    end
+  end
 end

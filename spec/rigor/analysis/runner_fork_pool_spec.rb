@@ -36,12 +36,16 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
   # Two-file fixture for the cross-file seed regression: `Widget` is RBS-known via `signature_paths:` while
   # `Widget#render` is defined in a different source file than its caller. Returns the definition path, the caller path,
   # and the configuration entries.
+  # The receiver is a BUNDLED class reopened by the project, not a project class with a sidecar `sig/`.
+  # Issue #735 made that distinction load-bearing: on the project's own sidecar declaration a cross-file
+  # `def` is the class's own second file and is suppressed, so the fixture that used one stopped producing
+  # the ADR-17 diagnostic this spec observes. Reopening `String` keeps the observable — the RBS is
+  # authoritative, the project `def` IS a monkey-patch, and the message still has to carry the def site
+  # that only the seeded `discovered_def_sources` table can supply.
   def write_cross_file_fixture(dir)
-    FileUtils.mkdir_p(File.join(dir, "sig"))
-    File.write(File.join(dir, "sig", "widget.rbs"), "class Widget\nend\n")
     defn = File.join(dir, "a_widget.rb")
     File.write(defn, <<~RUBY)
-      class Widget
+      class String
         def render
           "ok"
         end
@@ -51,11 +55,11 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
     File.write(caller_path, <<~RUBY)
       class Board
         def show
-          Widget.new.render
+          "x".render
         end
       end
     RUBY
-    [defn, caller_path, { "signature_paths" => [File.join(dir, "sig")] }]
+    [defn, caller_path, {}]
   end
 
   describe "equivalence with the sequential path" do

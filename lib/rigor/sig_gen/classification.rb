@@ -29,7 +29,10 @@ module Rigor
         # The generator rendered a line `rbs` itself rejects. Skipping the method keeps sig-gen useful on a
         # project with one pathological def, where failing the command outright would deny the user every other
         # signature; the count is reported so the defect is not silent. See {SigGen::RbsValidity}.
-        unrenderable_rbs: "sig.skipped.unrenderable-rbs"
+        unrenderable_rbs: "sig.skipped.unrenderable-rbs",
+        # Issue #735 — the class's superclass chain does not terminate in a class the RBS environment knows,
+        # so emitting the declaration would collapse the class on the next run rather than type it.
+        unresolvable_superclass: "sig.skipped.unresolvable-superclass"
       }.freeze
     end
   end

@@ -57,8 +57,12 @@ module Rigor
       #   When non-nil and non-empty, only `sig/` directories whose gem `(name, version, platform)` tuple
       #   matches a lockfile entry are returned. Bundle entries absent from the lockfile (or at a drifted
       #   version) are silently dropped — the lockfile is treated as the source of truth for "what gems this
-      #   project actually declares". Pass `nil` (the default) to keep the pre-Layer-3 behaviour of
-      #   returning every non-skipped `sig/` under the bundle.
+      #   project actually declares". A git-sourced directory carries no version to compare (see
+      #   {.gem_name_from_sig_path}), so for those the filter instead requires the matching `locked_gems`
+      #   entry to have `git_source: true` — name alone is not enough, since a gem that moved off a `git:`
+      #   source keeps its stale `bundler/gems/` directory under the SAME name until a `bundle clean`. Pass
+      #   `nil` (the default) to keep the pre-Layer-3 behaviour of returning every non-skipped `sig/` under
+      #   the bundle.
       # @return [Array<Pathname>] every `<gem-dir>/sig` directory under the resolved bundle path, minus any
       #   whose gem name is in `skip_gems` and (when `locked_gems` is supplied) minus any whose `(name,
       #   version, platform)` does not match a lockfile entry.
@@ -72,14 +76,41 @@ module Rigor
         )
         return [] if resolved.nil?
 
-        # `<bundle>/ruby/X.Y.Z/gems/<name>-<ver>/sig/` is the canonical bundler layout. `*` on the ruby
-        # version dir picks up whichever Ruby the bundle was installed for.
-        all = Dir.glob(resolved.join("ruby", "*", "gems", "*", "sig")).map { |d| Pathname.new(d) }
+        # Two bundler-install layouts, both under the same `ruby/X.Y.Z/` root (`*` picks up whichever Ruby
+        # the bundle was installed for):
+        #
+        # - `gems/<name>-<ver>/sig/` — the RubyGems-sourced layout, the canonical case.
+        # - `bundler/gems/<repo>-<12-hex-revision>/sig/` — `git:`-sourced gems (`Bundler::Source::Git#
+        #   install_path`); the directory name carries the git repository's basename and a 12-character
+        #   revision prefix, not the gem name or version. Before this, a fork's own `sig/` was invisible to
+        #   rigor no matter how it was authored — see issue #611.
+        #
+        # `path:`-sourced gems are NOT under either glob: Bundler does not copy them into the bundle root at
+        # all (`Bundler::Source::Path#path` is the user's own `path:` directory, used in place), so there is
+        # no bundle-relative location to walk. A `path:`-sourced gem's `sig/` is only reachable by adding it
+        # directly to the project's `signature_paths:` — which already works today and needs no discovery.
+        all = (Dir.glob(resolved.join("ruby", "*", "gems", "*", "sig")) +
+               Dir.glob(resolved.join("ruby", "*", "bundler", "gems", "*", "sig"))).map { |d| Pathname.new(d) }
         filtered = all.reject { |sig_dir| skip_gems.include?(gem_name_from_sig_path(sig_dir)) }
         return filtered if locked_gems.nil? || locked_gems.empty?
 
         expected_dirs = expected_gem_dirs(locked_gems)
-        filtered.select { |sig_dir| expected_dirs.include?(sig_dir.parent.basename.to_s) }
+        filtered.select do |sig_dir|
+          if git_sourced_layout?(sig_dir)
+            # A git install's directory name carries no resolvable version (see above), so the lockfile
+            # filter can only check the gem NAME, not `(name, version)` — but name alone is not enough: a
+            # gem that used to be `git:`-sourced and has since moved to a released version keeps its old
+            # `bundler/gems/<repo>-<sha>/` directory sitting in the bundle tree until a `bundle clean`, and
+            # its NAME is still present in the lockfile (now via the rubygems entry). Matching on name only
+            # would silently readmit that stale git install — this repo's own `vendor/bundle` had exactly
+            # this after `binpacker` moved from `git:` to a released gem. `locked_gems` must say this name is
+            # CURRENTLY git-sourced, not merely present.
+            locked = locked_gems[gem_name_from_sig_path(sig_dir)]
+            !!locked&.git_source
+          else
+            expected_dirs.include?(sig_dir.parent.basename.to_s)
+          end
+        end
       end
 
       # `{name => LockedGem}` → set of canonical bundler gem directory basenames. Pure-Ruby gems install as
@@ -98,19 +129,39 @@ module Rigor
       end
       private_class_method :expected_gem_dirs
 
-      # `<bundle>/ruby/X.Y.Z/gems/<name>-<ver>/sig` → `<name>`. The gem directory follows the canonical
-      # `<name>-<version>` pattern; we strip everything from the last hyphen onwards to recover the name.
-      # (Platform-tagged variants like `ffi-1.17.4-aarch64-linux-gnu/` keep their platform suffix in the
-      # version part, so the first hyphen from the right is still the name boundary.)
+      # `<bundle>/ruby/X.Y.Z/gems/<name>-<ver>/sig` → `<name>`, or
+      # `<bundle>/ruby/X.Y.Z/bundler/gems/<repo>-<12-hex-revision>/sig` → `<repo>`. The two bundler-install
+      # layouts name their gem directory differently, so which suffix to strip depends on which layout
+      # `sig_dir` came from:
+      #
+      # - rubygems layout: `<name>-<version>` (platform-tagged variants like `ffi-1.17.4-aarch64-linux-gnu/`
+      #   keep their platform suffix in the version part) — the version always starts with a digit, so strip
+      #   from the first `-` followed by a digit.
+      # - git layout: `<repo-basename>-<12-hex-char-revision>` (`Bundler::Source::Git#install_path`) — no
+      #   version at all, and the repository name need not equal the gem name (a fork hosted under a
+      #   different repo name, a monorepo). Strip the fixed-width hex suffix instead; best-effort only, since
+      #   the true gem name isn't recoverable from the filesystem without running Bundler.
       #
       # Public so the O4 Layer 3 slice-3 coverage report (`RbsCoverageReport`) can classify discovered bundle
       # sigs against locked gem names without re-running discovery.
       def self.gem_name_from_sig_path(sig_dir)
         gem_dir = sig_dir.parent.basename.to_s
-        # Strip `-<version>` and any platform suffix. The version always starts with a digit, so split at
-        # the first `-` followed by a digit.
-        gem_dir.sub(/-\d.*\z/, "")
+        if git_sourced_layout?(sig_dir)
+          gem_dir.sub(/-[0-9a-f]{12}\z/, "")
+        else
+          gem_dir.sub(/-\d.*\z/, "")
+        end
       end
+
+      # True when `sig_dir` sits under the `bundler/gems/` (git-sourced) layout rather than the plain
+      # `gems/` (rubygems-sourced) layout — `<bundle>/ruby/X.Y.Z/bundler/gems/<dir>/sig` vs.
+      # `<bundle>/ruby/X.Y.Z/gems/<dir>/sig`. A directory-shape check, not a name-shape guess: the two glob
+      # roots in {.discover} are already disjoint, so this just recovers which one a given path came from.
+      def self.git_sourced_layout?(sig_dir)
+        gem_dir = sig_dir.parent
+        gem_dir.parent.basename.to_s == "gems" && gem_dir.parent.parent.basename.to_s == "bundler"
+      end
+      private_class_method :git_sourced_layout?
 
       # Returns `Pathname` resolved bundle path, or `nil` when neither explicit nor auto-detected. Public
       # for the stats banner so end users can see what rigor picked up.

@@ -22,13 +22,19 @@ module Rigor
       #
       # `version` is the resolved version string (e.g. "8.0.1"); `platform` is the lockfile's platform tag,
       # normalised to `"ruby"` when the lockfile records `ruby` and to the raw String otherwise (e.g.
-      # "aarch64-linux-gnu").
-      LockedGem = Data.define(:name, :version, :platform) do
-        def initialize(name:, version:, platform:)
+      # "aarch64-linux-gnu"). `git_source` is true when the lockfile's `GIT` stanza (rather than `GEM`)
+      # resolved this gem — see {BundleSigDiscovery}, which needs it to tell a genuine git install apart
+      # from a same-named gem the bundle tree has an out-of-band `bundler/gems/` leftover for (e.g. a
+      # dependency that moved from a `git:` source to a released version without a `bundle clean`, so its
+      # git-installed directory is still sitting there under the OLD source's name). Defaults `false` so
+      # existing callers that construct a `LockedGem` without an opinion stay conservative.
+      LockedGem = Data.define(:name, :version, :platform, :git_source) do
+        def initialize(name:, version:, platform:, git_source: false)
           super(
             name: -name.to_s,
             version: -version.to_s,
-            platform: -platform.to_s
+            platform: -platform.to_s,
+            git_source: git_source ? true : false
           )
         end
       end
@@ -94,8 +100,12 @@ module Rigor
           # (references/rbs/sig/shims/bundler.rbs) does NOT declare `LazySpecification#platform` so the call
           # site needs a suppression marker.
           platform = spec.platform.to_s # rigor:disable undefined-method
+          # `#source` is the `Bundler::Source::*` this spec resolved from — `Git` for a `GIT` lockfile
+          # stanza, `Rubygems` for a `GEM` one, `Path`/`Gemspec` for `path:`. Only `Git` sources land under
+          # {BundleSigDiscovery}'s `bundler/gems/` walk.
           h[spec.name.to_s] = LockedGem.new(
-            name: spec.name, version: spec.version.to_s, platform: platform
+            name: spec.name, version: spec.version.to_s, platform: platform,
+            git_source: spec.source.is_a?(Bundler::Source::Git)
           )
         end
         locked.freeze

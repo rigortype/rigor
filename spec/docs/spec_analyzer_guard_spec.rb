@@ -207,14 +207,14 @@ module SpecAnalyzerGuardScan
     def def_produces_analyzer?(def_node, described:, factories:)
       return false if def_node.body.nil?
 
-      has_return = false
+      has_exit = false
       walk(def_node.body, []) do |child, _|
-        if child.is_a?(Prism::ReturnNode)
+        if child.is_a?(Prism::ReturnNode) || child.is_a?(Prism::BreakNode)
           arg = child.arguments&.arguments&.last
-          has_return = true if produces_analyzer?(arg, described: described, factories: factories)
+          has_exit = true if produces_analyzer?(arg, described: described, factories: factories)
         end
       end
-      return true if has_return
+      return true if has_exit
 
       last = def_node.body.is_a?(Prism::StatementsNode) ? def_node.body.body.last : def_node.body
       produces_analyzer?(last, described: described, factories: factories)
@@ -232,13 +232,36 @@ module SpecAnalyzerGuardScan
       when Prism::IfNode
         produces_analyzer?(node.statements&.body&.last, described: described, factories: factories) ||
           produces_analyzer?(node.subsequent, described: described, factories: factories)
-      when Prism::ElseNode, Prism::BeginNode
+      when Prism::ElseNode
         produces_analyzer?(node.statements&.body&.last, described: described, factories: factories)
+      when Prism::BeginNode
+        begin_produces_analyzer?(node, described: described, factories: factories)
+      when Prism::RescueModifierNode
+        produces_analyzer?(node.expression, described: described, factories: factories) ||
+          produces_analyzer?(node.rescue_expression, described: described, factories: factories)
       when Prism::CaseNode
         case_produces_analyzer?(node, described: described, factories: factories)
       else
         false
       end
+    end
+
+    def begin_produces_analyzer?(node, described:, factories:)
+      ensure_stmt = node.ensure_clause&.statements
+      produces_analyzer?(node.statements&.body&.last, described: described, factories: factories) ||
+        rescue_produces_analyzer?(node.rescue_clause, described: described, factories: factories) ||
+        produces_analyzer?(node.else_clause, described: described, factories: factories) ||
+        produces_analyzer?(ensure_stmt&.body&.last, described: described, factories: factories)
+    end
+
+    def rescue_produces_analyzer?(node, described:, factories:)
+      curr = node
+      while curr
+        return true if produces_analyzer?(curr.statements&.body&.last, described: described, factories: factories)
+
+        curr = curr.subsequent
+      end
+      false
     end
 
     def case_produces_analyzer?(node, described:, factories:)
@@ -477,6 +500,62 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
 
         it "x" do
           runner = make_runner(true)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a rescue-clause factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner
+          risky_call
+        rescue StandardError
+          Rigor::Analysis::Runner.new
+        end
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a rescue-modifier factory" do
+      expect(offense_lines(<<~RUBY)).to eq([5])
+        def make_runner = nil rescue Rigor::Analysis::Runner.new
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through an ensure-clause factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner
+          nil
+        ensure
+          Rigor::Analysis::Runner.new
+        end
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a loop-break factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner
+          loop do
+            break Rigor::Analysis::Runner.new
+          end
+        end
+
+        it "x" do
+          runner = make_runner
           runner.run
         end
       RUBY

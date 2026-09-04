@@ -177,6 +177,7 @@ classes:
         c_effects:
         - block
         - dispatch
+        - raises
         purity: block_dependent
         rbs:
         - "(_Key key) -> V"

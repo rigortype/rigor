@@ -333,6 +333,7 @@ classes:
         c_body_at: references/ruby/struct.c:1833
         c_effects:
         - mutate
+        - raises
         purity: mutates_self
       initialize_copy:
         source: c

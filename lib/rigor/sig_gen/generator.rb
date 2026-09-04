@@ -85,10 +85,76 @@ module Rigor
         @environment = build_environment
         resolved = resolve_paths(@paths)
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
-        demote_unresolvable_superclasses(resolve_superclass_spellings(candidates))
+        demote_overridden_base_methods(
+          demote_unresolvable_superclasses(resolve_superclass_spellings(candidates))
+        )
       end
 
       private
+
+      # Issue #744 — a base class's method is NOT emitted when a project subclass overrides it and the
+      # override is not emitted itself.
+      #
+      # RBS resolves an undeclared subclass method through its ancestors, so a precise return written for
+      # the base becomes the subclass's answer. redmine's `FieldFormat::Base#target_class` honestly returns
+      # `nil`; `RecordList#target_class` overrides it with a real lookup that sig-gen could not type, and
+      # the emitted `def target_class: () -> nil` then produced four `undefined method … for nil` on the
+      # subclass's own working code, plus a `def.return-type-mismatch` telling the user their correct
+      # override was wrong.
+      #
+      # Emitting nothing puts both classes back on source inference, which answers correctly for each. The
+      # base keeps its signature whenever nothing overrides the method, and whenever the override IS
+      # emitted with a type of its own — the declaration is only dangerous when it is the only one.
+      #
+      # Whether an inherited declaration SHOULD outrank a class's own source `def` is a separate question
+      # (#744 half 2) and is not decided here: this pass only stops sig-gen manufacturing the conflict.
+      def demote_overridden_base_methods(candidates)
+        superclasses = candidates.each_with_object({}) do |candidate, acc|
+          (candidate.class_superclasses || {}).each { |name, sup| acc[name] = sup.sub(/\[.*\]\z/, "") }
+        end
+        return candidates if superclasses.empty?
+
+        overridden = unsigned_override_ancestors(candidates, superclasses)
+        return candidates if overridden.empty?
+
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+          next candidate unless overridden.include?([candidate.class_name, candidate.method_name])
+
+          demoted_candidate(candidate, :overridden_by_unsigned_subclass)
+        end
+      end
+
+      # `[class name, method name]` pairs an UNSIGNED override shadows: for every candidate that will not
+      # be emitted, every ancestor of its class paired with its method name.
+      def unsigned_override_ancestors(candidates, superclasses)
+        candidates.each_with_object(Set.new) do |candidate, acc|
+          next if Classification::EMITTABLE.include?(candidate.classification)
+          next if candidate.class_name.nil?
+
+          each_ancestor(candidate.class_name, superclasses) { |name| acc << [name, candidate.method_name] }
+        end
+      end
+
+      def each_ancestor(class_name, superclasses)
+        seen = {}
+        current = class_name
+        while (parent = superclasses[current]) && !seen[parent]
+          seen[parent] = true
+          yield parent
+          current = parent
+        end
+      end
+
+      def demoted_candidate(candidate, reason)
+        MethodCandidate.new(
+          path: candidate.path, class_name: candidate.class_name, method_name: candidate.method_name,
+          kind: candidate.kind, classification: Classification::SKIPPED, skip_reason: reason,
+          inferred_return: candidate.inferred_return, declared_return_rbs: candidate.declared_return_rbs,
+          namespace_kinds: candidate.namespace_kinds, class_shells: candidate.class_shells,
+          class_superclasses: candidate.class_superclasses
+        )
+      end
 
       # Issue #722 — resolves each recorded superclass token to the class Ruby means by it, and rewrites the
       # emitted spelling when the two differ.

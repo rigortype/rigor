@@ -1079,4 +1079,71 @@ end
       expect(superclass_of(candidates, "Admin::Widget")).to eq("Base")
     end
   end
+
+  # Issue #744 — RBS resolves an undeclared subclass method through its ancestors, so a precise return
+  # written for a base class becomes the answer for a subclass that overrides it. redmine's
+  # `FieldFormat::Base#target_class` honestly returns `nil`, `RecordList#target_class` overrides it with a
+  # lookup sig-gen could not type, and the emitted `-> nil` produced four `undefined method … for nil` on
+  # the subclass's own working code.
+  describe "#run with a base method a subclass overrides" do
+    def emitted(candidates)
+      candidates.select { |c| Rigor::SigGen::Classification::EMITTABLE.include?(c.classification) }
+                .map { |c| [c.class_name, c.method_name] }
+    end
+
+    it "skips the base method when the override is not emitted" do
+      path = write_fixture("lib/fmt.rb", <<~RUBY)
+        class Base
+          def target_class = nil
+          def label = "base"
+        end
+        class RecordList < Base
+          def target_class
+            @cache ||= compute_something
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      # `label` is untouched: the declaration is only dangerous when it is the only one.
+      expect(emitted(candidates)).to eq([["Base", :label]])
+      skipped = candidates.select { |c| c.skip_reason == :overridden_by_unsigned_subclass }
+      expect(skipped.map { |c| [c.class_name, c.method_name] }).to eq([["Base", :target_class]])
+    end
+
+    it "keeps the base method when the override is emitted too" do
+      # Both declarations exist, so the subclass's own answer wins on its own receiver and nothing is
+      # inherited that does not describe it.
+      path = write_fixture("lib/fmt.rb", <<~RUBY)
+        class Base
+          def target_class = nil
+        end
+        class RecordList < Base
+          def target_class = "Issue"
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(emitted(candidates)).to contain_exactly(["Base", :target_class], ["RecordList", :target_class])
+    end
+
+    it "keeps a method nothing overrides" do
+      path = write_fixture("lib/fmt.rb", <<~RUBY)
+        class Base
+          def target_class = nil
+        end
+        class RecordList < Base
+          def other
+            @cache ||= compute_something
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(emitted(candidates)).to eq([["Base", :target_class]])
+    end
+  end
 end

@@ -40,13 +40,8 @@ module Rigor
 
       private
 
-      EMITTABLE = [Classification::NEW_FILE,
-                   Classification::NEW_METHOD,
-                   Classification::TIGHTER_RETURN].freeze
-      private_constant :EMITTABLE
-
       def filter(candidates, selection)
-        active = selection.empty? ? EMITTABLE : selection
+        active = selection.empty? ? Classification::EMITTABLE : selection
         candidates.select { |c| active.include?(c.classification) }
       end
 

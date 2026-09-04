@@ -63,8 +63,12 @@ module RbsEnvMemo
       value
     end
 
-    def digest(libraries, signature_paths, virtual_rbs)
+    def digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths = [])
       parts = ["lib\0#{Array(libraries).map(&:to_s).sort.join(',')}"]
+      # Issue #610 — which paths are DEFERRED changes the built env (a deferred file stands down against a
+      # colliding generic arity), so it is an input like any other. Digesting the path list is enough: the
+      # files themselves are already digested below, since every deferred path is also a signature path.
+      parts << "deferred\0#{Array(deferred_signature_paths).map(&:to_s).sort.join(',')}"
 
       Array(signature_paths).map(&:to_s).sort.each do |root|
         signature_files(root).each { |path| parts << "sig\0#{path}\0#{file_digest(path)}" }
@@ -110,10 +114,10 @@ module RbsEnvMemo
   # Prepended onto the loader's singleton so it wraps `build_env_for` for every caller, including
   # `Cache::RbsEnvironment.compute` on a cache miss.
   module Interception
-    def build_env_for(libraries:, signature_paths:, virtual_rbs: [])
+    def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [])
       return super unless RbsEnvMemo.enabled?
 
-      key = RbsEnvMemo.digest(libraries, signature_paths, virtual_rbs)
+      key = RbsEnvMemo.digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths)
       cached = RbsEnvMemo.fetch(key)
       return cached if cached
 

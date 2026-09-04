@@ -760,19 +760,52 @@ module Rigor
         # The two probes that run only once every cheaper answer has come back "absent", kept together
         # because they share that position and nothing else.
         #
-        # - Module-mixin fallback (mirror of `MethodDispatcher#user_class_fallback_receiver`'s module
-        #   path): an instance method on a module-mixin like `PP::ObjectMixin` observes Kernel / Object
-        #   methods through every concrete includer's ancestor chain, so an unresolved `self.inspect` /
-        #   `self.respond_to?` / `self.class` MUST NOT fire. Retry against Object first.
+        # - Issue #739 — an instance-side MODULE receiver. A value typed as a mixin module is an instance of
+        #   some class that includes it, and that class contributes an arbitrary surface: inside
+        #   `module Attachable::InstanceMethods`, `self.project` is defined by the ActiveRecord model that
+        #   includes the module, and in RBS a parameter typed `Taggable` means "something whose class
+        #   includes Taggable", not "something whose methods are Taggable's". The surface is not
+        #   enumerable, so nothing here can prove a method absent. This probe used to RETRY against Object
+        #   — enough for `self.inspect` / `self.class`, and nothing else — which left 45 firings on
+        #   redmine's `acts_as_*` mixins the moment a `sig/` declared them.
+        #
+        #   The union twin already declines these arms outright (`union_arm_blocks_undefined_fire?`, "a
+        #   module mixin whose Object-inherited methods the per-arm lookup would miss"). The two rules
+        #   answering the same question differently about the same receiver is the fork this closes; the
+        #   union's reading is the correct one.
+        #
+        #   Singleton-side module receivers are NOT covered and must not be: `M.typo` on a namespace module
+        #   with `module_function` / `def self.` has a real, enumerable surface and keeps firing.
         # - Issue #723 — the project's own ancestry. Everything above answered "the RBS does not have
         #   it"; a project ancestor still might, and the typer has already resolved the site through
         #   exactly this walk. It is last because it is the only probe here that walks the class graph
         #   (see {#ancestry_declares_method?} for why that placement is load-bearing, not tidiness).
         def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind)
-          return true if module_mixin_receiver?(receiver_type, scope) &&
-                         lookup_method(receiver_type, "Object", call_node.name, scope)
+          return true if module_mixin_receiver?(receiver_type, scope)
+          return true if mixin_self_class_receiver?(call_node, scope)
 
           ancestry_declares_method?(scope, class_name, call_node.name, kind)
+        end
+
+        # Issue #739 — the singleton twin of the module-mixin receiver, and the only shape that reaches the
+        # singleton side legitimately. `self.class` inside a mixin's instance method is the INCLUDER's class
+        # at runtime; the engine types it `Singleton[<the module>]`, one hop along from the same wrong
+        # `self`. redmine's `acts_as_*` mixins reach their configuration that way
+        # (`self.class.attachable_options`), 17 sites of it.
+        #
+        # Keyed on the call-site SYNTAX rather than on the receiver type, because `Singleton[M]` is also
+        # what a namespace module's own `M.helper` produces, and that surface is real and enumerable — a
+        # type-only test would silence every `M.typo` in the project. Here the question is narrower: was
+        # this singleton produced by `.class` on a value whose type is a mixin module?
+        def mixin_self_class_receiver?(call_node, scope)
+          receiver = call_node.receiver
+          return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :class
+          return false unless receiver.arguments.nil?
+
+          inner = receiver.receiver
+          return false if inner.nil?
+
+          module_mixin_receiver?(scope.type_of(inner), scope)
         end
 
         # ADR-17 — when the project itself defines this method on the

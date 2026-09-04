@@ -195,6 +195,7 @@ classes:
         c_body_at: references/ruby/struct.c:1296
         c_effects:
         - mutate
+        - raises
         purity: mutates_self
         rbs:
         - "(index name_or_position, E value) -> E"

@@ -69,7 +69,8 @@ classes:
         arity: 1
         defined_at: references/ruby/re.c:4841
         c_body_at: references/ruby/re.c:4459
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(self object) -> self"
@@ -579,7 +580,8 @@ classes:
         arity: 1
         defined_at: references/ruby/re.c:4902
         c_body_at: references/ruby/re.c:2495
-        c_effects: []
+        c_effects:
+        - raises
         purity: leaf
         rbs:
         - "(Array[Symbol]? array_of_names) -> Hash[Symbol, String?]"

@@ -72,7 +72,7 @@ SPEC_ANALYZER_GUARD_ALLOWLIST = {
 # `check!(a)`-vouches-for-`b` shape is the one that would happen by accident). Requiring the guard to name
 # the value costs nothing: on the tree as it stands the structural rule accepts every site the textual one
 # did.
-module SpecAnalyzerGuardScan
+module SpecAnalyzerGuardScan # rubocop:disable Metrics/ModuleLength -- standalone test guard scanner logic
   # Issue #683 — `IncrementalSession` is the third analyzer class the gate tracks, alongside `Runner`
   # and `WorkerSession`.
   ANALYZER_CLASSES = %w[Runner WorkerSession IncrementalSession].freeze
@@ -230,17 +230,45 @@ module SpecAnalyzerGuardScan
     def branch_produces_analyzer?(node, described:, factories:)
       case node
       when Prism::IfNode
-        produces_analyzer?(node.statements&.body&.last, described: described, factories: factories) ||
-          produces_analyzer?(node.subsequent, described: described, factories: factories)
+        conditional_produces_analyzer?(node.statements, node.subsequent, described: described, factories: factories)
+      when Prism::UnlessNode
+        conditional_produces_analyzer?(node.statements, node.else_clause, described: described, factories: factories)
       when Prism::ElseNode
         produces_analyzer?(node.statements&.body&.last, described: described, factories: factories)
+      when Prism::CaseNode
+        case_produces_analyzer?(node, described: described, factories: factories)
+      else
+        wrapper_produces_analyzer?(node, described: described, factories: factories)
+      end
+    end
+
+    def conditional_produces_analyzer?(statements, subsequent, described:, factories:)
+      produces_analyzer?(statements&.body&.last, described: described, factories: factories) ||
+        produces_analyzer?(subsequent, described: described, factories: factories)
+    end
+
+    def wrapper_produces_analyzer?(node, described:, factories:)
+      case node
       when Prism::BeginNode
         begin_produces_analyzer?(node, described: described, factories: factories)
+      when Prism::ParenthesesNode
+        produces_analyzer?(node.body&.body&.last, described: described, factories: factories)
       when Prism::RescueModifierNode
         produces_analyzer?(node.expression, described: described, factories: factories) ||
           produces_analyzer?(node.rescue_expression, described: described, factories: factories)
-      when Prism::CaseNode
-        case_produces_analyzer?(node, described: described, factories: factories)
+      when Prism::AndNode, Prism::OrNode
+        produces_analyzer?(node.left, described: described, factories: factories) ||
+          produces_analyzer?(node.right, described: described, factories: factories)
+      else
+        write_produces_analyzer?(node, described: described, factories: factories)
+      end
+    end
+
+    def write_produces_analyzer?(node, described:, factories:)
+      case node
+      when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode,
+           Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode, Prism::ConstantWriteNode
+        produces_analyzer?(node.value, described: described, factories: factories)
       else
         false
       end
@@ -552,6 +580,56 @@ RSpec.describe "analyzer runs in spec/ reach the internal-error guard (#674)" do
           loop do
             break Rigor::Analysis::Runner.new
           end
+        end
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through an unless-branch factory" do
+      expect(offense_lines(<<~RUBY)).to eq([9])
+        def make_runner(cond)
+          unless cond
+            Rigor::Analysis::Runner.new
+          end
+        end
+
+        it "x" do
+          runner = make_runner(false)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a parentheses-wrapped factory" do
+      expect(offense_lines(<<~RUBY)).to eq([5])
+        def make_runner = (Rigor::Analysis::Runner.new)
+
+        it "x" do
+          runner = make_runner
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a short-circuit boolean factory" do
+      expect(offense_lines(<<~RUBY)).to eq([5])
+        def make_runner(cond) = cond && Rigor::Analysis::Runner.new
+
+        it "x" do
+          runner = make_runner(true)
+          runner.run
+        end
+      RUBY
+    end
+
+    it "flags a run through a final-assignment factory" do
+      expect(offense_lines(<<~RUBY)).to eq([7])
+        def make_runner
+          runner = Rigor::Analysis::Runner.new
         end
 
         it "x" do

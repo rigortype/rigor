@@ -22,16 +22,50 @@ require "rigor/rbs_extended/envelope_scanner"
 # from the RBS (or never annotated) fails `#has every annotated method`, and a name added here without
 # the RBS actually carrying `%a{pure}` fails `#carries no extra annotations`.
 #
-# The date/time family is a table of its own (and not only to stay under `Metrics/CollectionLiteralLength`):
-# it is the part of the audit that DIVERGES by receiver class for the same method name — `Time#ago` is
-# pure and `Date#ago` is not — so the reviewer wants those rows side by side rather than scattered
-# alphabetically through the rest.
-CORE_EXT_PURE_DATE_AND_TIME_KEYS = %w[
-  Date#acts_like_date? Date#advance Date#beginning_of_month Date#beginning_of_year
-  Date#end_of_month Date#end_of_year Date#to_time Date#tomorrow Date#yesterday
-  DateTime#acts_like_time? DateTime#ago DateTime#beginning_of_day DateTime#beginning_of_hour
-  DateTime#beginning_of_minute DateTime#end_of_day DateTime#end_of_hour DateTime#end_of_minute
-  DateTime#since DateTime#tomorrow DateTime#utc DateTime#yesterday
+# The date/time family is split into one table PER RECEIVER CLASS, and not only to stay under
+# `Metrics/CollectionLiteralLength`: it is the part of the audit that DIVERGES by receiver class for the
+# same method name — `Time#ago` is pure and `Date#ago` is not — so the reviewer wants to read one class's
+# verdicts as a block and compare it against the next, rather than find the three spellings of a name
+# scattered through one alphabetical list. Reading the three tables side by side is how you see that
+# `Date` is the odd one out: on `Date` the whole `beginning_of_day` / `middle_of_day` / `all_day` family
+# routes through `in_time_zone` and reads `Time.zone`, while on `Time` and `DateTime` the same names are
+# receiver-local arithmetic (#670).
+CORE_EXT_PURE_DATE_KEYS = %w[
+  Date#acts_like_date? Date#advance Date#all_month Date#all_quarter Date#all_year
+  Date#at_beginning_of_month Date#at_beginning_of_quarter Date#at_beginning_of_year
+  Date#at_end_of_month Date#at_end_of_quarter Date#at_end_of_year Date#beginning_of_month
+  Date#beginning_of_quarter Date#beginning_of_year Date#change Date#days_ago Date#days_since
+  Date#end_of_month Date#end_of_quarter Date#end_of_year Date#last_month Date#last_quarter
+  Date#last_weekday Date#last_year Date#monday Date#months_ago Date#months_since
+  Date#next_occurring Date#next_quarter Date#on_weekday? Date#on_weekend? Date#prev_occurring
+  Date#prev_quarter Date#prev_weekday Date#quarter Date#sunday Date#to_time Date#tomorrow
+  Date#weeks_ago Date#weeks_since Date#years_ago Date#years_since Date#yesterday
+].freeze
+
+CORE_EXT_PURE_DATETIME_KEYS = %w[
+  DateTime#acts_like_time? DateTime#advance DateTime#ago DateTime#all_day DateTime#all_month
+  DateTime#all_quarter DateTime#all_year DateTime#at_beginning_of_day
+  DateTime#at_beginning_of_hour DateTime#at_beginning_of_minute DateTime#at_beginning_of_month
+  DateTime#at_beginning_of_quarter DateTime#at_beginning_of_year DateTime#at_end_of_day
+  DateTime#at_end_of_hour DateTime#at_end_of_minute DateTime#at_end_of_month
+  DateTime#at_end_of_quarter DateTime#at_end_of_year DateTime#at_midday DateTime#at_middle_of_day
+  DateTime#at_midnight DateTime#at_noon DateTime#beginning_of_day DateTime#beginning_of_hour
+  DateTime#beginning_of_minute DateTime#beginning_of_month DateTime#beginning_of_quarter
+  DateTime#beginning_of_year DateTime#change DateTime#days_ago DateTime#days_since
+  DateTime#end_of_day DateTime#end_of_hour DateTime#end_of_minute DateTime#end_of_month
+  DateTime#end_of_quarter DateTime#end_of_year DateTime#formatted_offset DateTime#getgm
+  DateTime#getutc DateTime#gmtime DateTime#in DateTime#last_month DateTime#last_quarter
+  DateTime#last_weekday DateTime#last_year DateTime#midday DateTime#middle_of_day
+  DateTime#midnight DateTime#monday DateTime#months_ago DateTime#months_since
+  DateTime#next_occurring DateTime#next_quarter DateTime#noon DateTime#nsec
+  DateTime#prev_occurring DateTime#prev_quarter DateTime#prev_weekday
+  DateTime#seconds_since_midnight DateTime#seconds_until_end_of_day DateTime#since
+  DateTime#subsec DateTime#sunday DateTime#to_f DateTime#to_i DateTime#tomorrow DateTime#usec
+  DateTime#utc DateTime#utc? DateTime#utc_offset DateTime#weeks_ago DateTime#weeks_since
+  DateTime#years_ago DateTime#years_since DateTime#yesterday
+].freeze
+
+CORE_EXT_PURE_TIME_KEYS = %w[
   Time#acts_like_time? Time#advance Time#ago Time#all_day Time#at_beginning_of_day
   Time#at_end_of_day Time#at_midnight Time#at_noon Time#beginning_of_day Time#beginning_of_hour
   Time#beginning_of_minute Time#beginning_of_month Time#beginning_of_year Time#change Time#end_of_day
@@ -49,6 +83,9 @@ CORE_EXT_PURE_DATE_AND_TIME_KEYS = %w[
   Time#sec_fraction Time#seconds_since_midnight Time#seconds_until_end_of_day Time#sunday
   Time#weeks_ago Time#weeks_since Time#years_ago Time#years_since
 ].freeze
+
+CORE_EXT_PURE_DATE_AND_TIME_KEYS =
+  (CORE_EXT_PURE_DATE_KEYS + CORE_EXT_PURE_DATETIME_KEYS + CORE_EXT_PURE_TIME_KEYS).freeze
 
 CORE_EXT_PURE_OTHER_KEYS = %w[
   ActiveSupport::Duration#in_days ActiveSupport::Duration#in_hours ActiveSupport::Duration#in_minutes
@@ -92,6 +129,12 @@ CORE_EXT_PURE_KEYS = (CORE_EXT_PURE_OTHER_KEYS + CORE_EXT_PURE_DATE_AND_TIME_KEY
 # The interesting NOT-pure cases: one per reason a method was skipped, plus every same-named pair that
 # diverges by class (`Time#ago` is pure, `Date#ago` is not; `Time#beginning_of_day` is pure,
 # `Date#beginning_of_day` is not) — the exact shape a careless class-wide annotation would get wrong.
+#
+# Two rows here are pure in fact and bare on purpose. `Date#readable_inspect` / `#default_inspect` ARE
+# pure on a `Date` receiver (`strftime` and the original `inspect`), but `DateTime < Date`, so an
+# envelope on the `Date` row reaches `DateTime` — where `readable_inspect` is `to_fs(:rfc822)` over the
+# mutable `Time::DATE_FORMATS` and is NOT pure. Under-claiming an envelope costs precision;
+# over-claiming one is unsound. These two lines are what stops someone "completing" the sweep (#670).
 CORE_EXT_NOT_PURE_KEYS = %w[
   Object#as_json Object#try Object#try!
   String#constantize String#safe_constantize String#parameterize
@@ -107,10 +150,22 @@ CORE_EXT_NOT_PURE_KEYS = %w[
   Date.current Date.yesterday Date.tomorrow
   Date.beginning_of_week Date.end_of_week Date.beginning_of_month Date.end_of_month
   Date.beginning_of_year Date.end_of_year
+  Date.beginning_of_week= Date.beginning_of_week_default Date.beginning_of_week_default=
+  Date.find_beginning_of_week!
   Date#beginning_of_week Date#end_of_week Date#ago Date#since Date#beginning_of_day
   Date#midnight Date#at_midnight Date#at_beginning_of_day Date#end_of_day Date#at_end_of_day
   Date#all_day
-  DateTime#in_time_zone
+  Date#today? Date#tomorrow? Date#yesterday? Date#next_day? Date#prev_day? Date#past? Date#future?
+  Date#before? Date#after? Date#at_beginning_of_week Date#at_end_of_week Date#next_week
+  Date#prev_week Date#last_week Date#next_weekday Date#days_to_week_start Date#all_week
+  Date#in Date#middle_of_day Date#midday Date#noon Date#at_midday Date#at_noon
+  Date#at_middle_of_day Date#to_fs Date#to_formatted_s Date#in_time_zone
+  Date#readable_inspect Date#default_inspect
+  DateTime.current DateTime.civil_from_format
+  DateTime#in_time_zone DateTime#beginning_of_week DateTime#end_of_week
+  DateTime#at_beginning_of_week DateTime#at_end_of_week DateTime#next_week DateTime#prev_week
+  DateTime#last_week DateTime#next_weekday DateTime#all_week DateTime#localtime
+  DateTime#getlocal DateTime#utc_to_local_returns_utc_offset_times
   Array#to_sentence Array#to_formatted_s Array#to_fs Array#to_xml Array#extract!
   Array#compact_blank!
   Hash#symbolize_keys! Hash#deep_symbolize_keys! Hash#stringify_keys! Hash#deep_stringify_keys!
@@ -158,5 +213,29 @@ RSpec.describe "plugins/rigor-activesupport-core-ext %a{pure} sweep (#388)" do
     expect(pure?("Date#ago")).to be(false)
     expect(pure?("Time#beginning_of_day")).to be(true)
     expect(pure?("Date#beginning_of_day")).to be(false)
+  end
+
+  # #670. `Date` is the odd one out of the three, and it is worth pinning as a three-way comparison
+  # rather than a pair: on `Date` this whole family is `in_time_zone.xxx` and reads `Time.zone`, while
+  # `Time` and `DateTime` compute it from the receiver. A class-wide annotation copied from either of
+  # the other two onto `Date` is the mistake this catches.
+  it "keeps Date impure where Time and DateTime are pure, across the in_time_zone-routed family" do
+    %w[middle_of_day midday noon at_midday at_noon at_middle_of_day all_day in].each do |selector|
+      expect(pure?("Date##{selector}")).to be(false), "expected Date##{selector} to carry no %a{pure}"
+      expect(pure?("DateTime##{selector}")).to be(true), "expected DateTime##{selector} to read %a{pure}"
+      expect(pure?("Time##{selector}")).to be(true), "expected Time##{selector} to read %a{pure}"
+    end
+  end
+
+  # The week-start family goes the other way: it reads `Date.beginning_of_week` through a default
+  # argument on ALL THREE receivers, so no class in the trio may claim it.
+  it "keeps the week-start family impure on every receiver, including the at_-prefixed aliases" do
+    %w[beginning_of_week end_of_week at_beginning_of_week at_end_of_week next_week prev_week
+       last_week next_weekday all_week].each do |selector|
+      %w[Date DateTime Time].each do |receiver|
+        expect(pure?("#{receiver}##{selector}")).to be(false),
+                                                    "expected #{receiver}##{selector} to carry no %a{pure}"
+      end
+    end
   end
 end

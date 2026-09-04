@@ -259,6 +259,154 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
   end
 
+  # Issue #670 — the `Date` / `DateTime` half of #658. Both are CLOSED core classes carrying the same
+  # undeclared `DateAndTime::Calculations` / `Zones` surface, so the same omission-is-a-false-positive
+  # rule applies. What makes it more than "#658 again for two more classes" is that `DateTime < Date`:
+  # every row declared on `Date` is INHERITED by `DateTime`, and for most of the shared module the
+  # inherited return is wrong, so declaring the surface on `Date` alone would have CONVERTED the
+  # undefined-method false positives into wrong-return ones rather than fixing them.
+  describe "the Rails Date and DateTime instance surface (#670)" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
+    end
+
+    # The four calls the issue opened on, verbatim. Each is `error: undefined method … for Date` /
+    # `… for DateTime` on master with this plugin loaded.
+    let(:issue_source) do
+      <<~RUBY
+        Date.current.past?
+        Date.current.beginning_of_quarter
+        DateTime.now.past?
+        DateTime.now.beginning_of_quarter
+        Date.current.in_time_zone
+      RUBY
+    end
+
+    it "reports nothing for the Rails Date / DateTime calls the issue opened on" do
+      expect(undefined_methods(run_plugin(source: issue_source))).to be_empty
+    end
+
+    # The must-still-succeed half, and it is the mandatory one: the failure mode of this change is a
+    # class that silently stops reporting anything (#437 — a duplicate declaration collapses the whole
+    # class to `Dynamic[top]`), and that failure looks exactly like a green must-not-fire assertion.
+    it "still witnesses a genuinely undefined method on a Date and on a DateTime receiver" do
+      result = run_plugin(
+        source: "#{issue_source}Date.current.definitely_not_a_method\nDateTime.now.also_not_a_method\n"
+      )
+
+      expect(undefined_methods(result).size).to eq(2)
+      expect(undefined_methods(result).join).to include("definitely_not_a_method", "also_not_a_method")
+    end
+
+    # The other half of "no silent collapse": a declared return has to RESOLVE, not merely fail to draw
+    # a diagnostic. A collapsed class answers `Dynamic[top]` for every one of these.
+    it "resolves the new Date surface to real types rather than leaving it Dynamic" do
+      source = <<~RUBY
+        d = Date.current
+        Rigor.dump_type(d.beginning_of_quarter)
+        Rigor.dump_type(d.days_ago(3))
+        Rigor.dump_type(d.quarter)
+        Rigor.dump_type(d.all_month)
+        Rigor.dump_type(d.to_fs(:db))
+        Rigor.dump_type(d.middle_of_day)
+        Rigor.dump_type(d.months_since(2).end_of_year.to_fs(:db))
+      RUBY
+
+      expect(dumps(run_plugin(source: source))).to eq(
+        [
+          "dump_type: Date", "dump_type: Date", "dump_type: Integer", "dump_type: Range[Date]",
+          "dump_type: String", "dump_type: Time", "dump_type: String"
+        ]
+      )
+    end
+
+    # THE regression this issue exists for. `DateTime.now.beginning_of_month` typed as `Date` on master
+    # — inherited from the `Date` block — while returning a `DateTime` at runtime, so `.hour` on the
+    # result was a latent false positive independent of the undeclared surface. Every row whose return
+    # differs between the two classes needed an explicit override, and this is the assertion that the
+    # overrides are actually in force rather than the `Date` rows leaking through.
+    it "types the DateTime calculations family as DateTime, not as the inherited Date" do
+      source = <<~RUBY
+        t = DateTime.now
+        Rigor.dump_type(t.beginning_of_month)
+        Rigor.dump_type(t.beginning_of_month.hour)
+        Rigor.dump_type(t.beginning_of_quarter)
+        Rigor.dump_type(t.days_ago(3))
+        Rigor.dump_type(t.last_year)
+        Rigor.dump_type(t.all_month)
+        Rigor.dump_type(t.middle_of_day)
+        Rigor.dump_type(t.seconds_since_midnight)
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(
+        [
+          "dump_type: DateTime", "dump_type: Integer", "dump_type: DateTime", "dump_type: DateTime",
+          "dump_type: DateTime", "dump_type: Range[DateTime]", "dump_type: DateTime",
+          "dump_type: Integer"
+        ]
+      )
+    end
+
+    # Not every inherited row is wrong, and getting that half right matters as much: `DateTime.yesterday`
+    # and `.tomorrow` are a hardcoded `::Date.current.yesterday` in the source and really do answer a
+    # `Date`, so overriding them would have been the false positive. `DateTime.current` is the singleton
+    # that IS wrong inherited. Verified by calling all three against activesupport-8.1.3.1.
+    it "overrides DateTime.current but leaves DateTime.yesterday / .tomorrow answering Date" do
+      source = <<~RUBY
+        Rigor.dump_type(DateTime.current)
+        Rigor.dump_type(DateTime.yesterday)
+        Rigor.dump_type(DateTime.tomorrow)
+        Rigor.dump_type(Date.current)
+      RUBY
+
+      expect(dumps(run_plugin(source: source))).to eq(
+        ["dump_type: DateTime", "dump_type: Date", "dump_type: Date", "dump_type: Date"]
+      )
+    end
+
+    # `at_beginning_of_week` / `at_end_of_week` are `alias`es of the `start_day`-taking methods on both
+    # classes — the same FP #658 found on the `Time` twins, in rows this change is adding rather than
+    # in rows that were already there. The last line is the must-still-fire half: a genuinely
+    # over-applied zero-arity method still reports, so this is not the receiver going lenient.
+    it "takes the optional start_day on the at_-prefixed week aliases, and still catches a real overrun" do
+      source = <<~RUBY
+        d = Date.current
+        Rigor.dump_type(d.at_beginning_of_week(:sunday))
+        Rigor.dump_type(d.at_end_of_week(:sunday))
+        Rigor.dump_type(DateTime.now.at_beginning_of_week(:sunday))
+        d.beginning_of_quarter(1, 2)
+      RUBY
+      result = run_plugin(source: source)
+      arity = result.diagnostics.select { |d| d.qualified_rule == "call.wrong-arity" }
+
+      expect(arity.map(&:message)).to eq(
+        ["wrong number of arguments to `beginning_of_quarter' on Date (given 2, expected 0)"]
+      )
+      expect(dumps(result)).to eq(["dump_type: Date", "dump_type: Date", "dump_type: DateTime"])
+    end
+
+    # The week-start configuration singletons `core_ext/date/calculations.rb` adds behind
+    # `Date.beginning_of_week`. `Date` is closed, so these omissions fired on an ordinary
+    # `config/initializers` line.
+    it "declares the Date week-start configuration singletons" do
+      source = <<~RUBY
+        Date.beginning_of_week = :sunday
+        Date.beginning_of_week_default
+        Rigor.dump_type(Date.find_beginning_of_week!(:monday))
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(["dump_type: Symbol"])
+    end
+  end
+
   # Issue #534 item 3. The multipliers were `() -> untyped` in the RBS bundle, so `1.day` was
   # `Dynamic[top]` on ~265 mastodon sites. They now return the RBS-less `ActiveSupport::Duration`
   # nominal, and the arithmetic rule keeps the operators around it honest.

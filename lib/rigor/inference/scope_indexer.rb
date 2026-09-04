@@ -2011,6 +2011,7 @@ module Rigor
       def record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
         record_define_method(node, qualified_prefix, in_singleton_class, methods_acc) if node.name == :define_method
         record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc) if ATTR_MACROS.include?(node.name)
+        record_module_attr_methods(node, qualified_prefix, methods_acc) if MODULE_ATTR_MACROS.key?(node.name)
         record_alias_method_call(node, qualified_prefix, in_singleton_class, methods_acc)
         AnonymousMetaClass.name_for(node, source_path)
       end
@@ -3058,6 +3059,53 @@ module Rigor
           record_method_kind(accumulator, class_name, base, kind) if reader
           record_method_kind(accumulator, class_name, :"#{base}=", kind) if writer
         end
+      end
+
+      # Issue #736 — the module-level accessor macros, which introduce methods on BOTH sides of the class.
+      # ActiveSupport defines them on `Module`, so every class and module body can use them, and Rails codebases
+      # do: `mattr_accessor` / `cattr_accessor` (an alias of it) and `class_attribute` account for 92 false
+      # `call.undefined-method` on redmine the moment any `sig/` declares the class — invisible before that,
+      # because an undeclared receiver is not a receiver the rule can speak about.
+      #
+      # The value is `[reader, writer, predicate]`. `class_attribute` also defines `x?` on both sides.
+      #
+      # Recognising ActiveSupport's spellings in the engine's own walk is a deliberate exception to "steer
+      # metaprogramming toward the plugin API": the consumer that has to see these is the cross-file
+      # `discovered_methods` table (`finalize_def_index` keeps accessor-introduced names there precisely
+      # because they are not monkey-patches), and no plugin surface reaches it — the ADR-16 synthetic-method
+      # tier feeds the DISPATCHER, which `Analysis::CheckRules` does not consult. A name table is the smallest
+      # thing that works; a plugin-supplied one can replace it whenever that surface exists.
+      MODULE_ATTR_MACROS = {
+        mattr_reader: [true, false, false], mattr_writer: [false, true, false],
+        mattr_accessor: [true, true, false], cattr_reader: [true, false, false],
+        cattr_writer: [false, true, false], cattr_accessor: [true, true, false],
+        class_attribute: [true, true, true]
+      }.freeze
+
+      # Both kinds, unconditionally. `instance_accessor: false` (and its `instance_reader:` /
+      # `instance_writer:` / `instance_predicate:` siblings) narrows the real surface, and honouring them here
+      # would buy a missed detection on a shape nobody writes by accident — this table's only consumer is a
+      # SUPPRESSION, where over-recording costs a diagnostic that would have fired on working code anyway.
+      def record_module_attr_methods(call_node, qualified_prefix, accumulator)
+        return if qualified_prefix.empty?
+        return unless call_node.receiver.nil? # only the implicit-self macro defines on the lexical class
+        return if call_node.arguments.nil?
+
+        reader, writer, predicate = MODULE_ATTR_MACROS.fetch(call_node.name)
+        class_name = qualified_prefix.join("::")
+        call_node.arguments.arguments.each do |arg|
+          base = literal_method_name(arg)
+          next if base.nil?
+
+          record_both_kinds(accumulator, class_name, base) if reader
+          record_both_kinds(accumulator, class_name, :"#{base}=") if writer
+          record_both_kinds(accumulator, class_name, :"#{base}?") if predicate
+        end
+      end
+
+      def record_both_kinds(accumulator, class_name, method_name)
+        record_method_kind(accumulator, class_name, method_name, :instance)
+        record_method_kind(accumulator, class_name, method_name, :singleton)
       end
 
       def literal_method_name(node)

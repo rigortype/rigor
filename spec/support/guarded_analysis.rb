@@ -99,6 +99,19 @@ module GuardedAnalysis
     result
   end
 
+  # `IncrementalSession#reanalyze_subset` — the verification engine (`--verify-incremental`). Returns
+  # `Array<Diagnostic>` directly (the merged diagnostics), so the guard checks the returned array.
+  #
+  # @param session [Rigor::Analysis::IncrementalSession]
+  # @param subset [Enumerable<String>]
+  # @return [Array<Rigor::Analysis::Diagnostic>]
+  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  def guarded_reanalyze_subset(session, subset)
+    InternalAnalyzerErrorGuard.check_diagnostics!(
+      session.reanalyze_subset(subset), context: guarded_analysis_context("guarded_reanalyze_subset")
+    )
+  end
+
   # `IncrementalSession#run_incremental` — the `--incremental` CLI engine — returns `[diagnostics,
   # warm]`. Guards the diagnostics half and hands back the same tuple.
   #

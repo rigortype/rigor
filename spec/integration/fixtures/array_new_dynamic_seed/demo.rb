@@ -128,8 +128,10 @@ class Grid
     a
   end
 
-  # The widening is RECURSIVE, not one level deep. Every nested position is a
-  # fresh object per constructed slot that the program goes on to mutate, so
+  # The widening is RECURSIVE, not one level deep. For the block form, every
+  # nested position is a fresh object per constructed slot that the program
+  # goes on to mutate. For the fill form, all slots alias a single object,
+  # so mutating a nested slot mutates every slot's view of it. In both cases,
   # stopping at the outermost container only moved the wrong-precise answer one
   # level in: `Array[Array[[1]]]` left the inner tuple fixed-arity, and
   # `a[0][0].last == 5` folded always-falsey on correct code.

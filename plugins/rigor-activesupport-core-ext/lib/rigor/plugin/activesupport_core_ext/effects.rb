@@ -110,11 +110,13 @@ module Rigor
         # `nondet.time` + `global.read` pair `CLOCK` carries) — `in_time_zone` converts an already-fixed
         # instant into a zone, it does not read the clock itself.
         #
-        # `DateAndTime::Zones` is included into `Time` as well as `Date` and `DateTime`, and #658 declares
-        # the `Time` spelling in the RBS bundle, so it takes the identical row. `Date#in_time_zone` is
-        # absent because the bundle does not declare it yet — see the `Date` block in the RBS.
+        # `DateAndTime::Zones` is included into `Time` as well as `Date` and `DateTime`, so all three take
+        # the identical row: #658 declared the `Time` spelling in the RBS bundle and #670 the `Date` one,
+        # which is what earns `Date` its row here — the label is a fact about the module, not about the
+        # receiver, and the three only ever differed in which spellings the bundle had got round to
+        # declaring.
         def in_time_zone_rows
-          [TIME, DATETIME].map do |receiver|
+          [TIME, DATE, DATETIME].map do |receiver|
             row(receiver, :in_time_zone, ZONE_READ,
                 why: "the default argument reads `Time.zone` when the caller doesn't name one explicitly")
           end

@@ -81,7 +81,8 @@ module Rigor
             next if use.name.nil?
 
             Scan::Reference.new(as_written: use.name.sub(/\A::/, ""), nesting: [].freeze, from: nil,
-                                role: :production, path: use.path, line: use.line)
+                                role: :production, path: use.path, line: use.line,
+                                rooted: use.name.start_with?("::"))
           end
         end
 
@@ -148,7 +149,7 @@ module Rigor
           @references.each do |ref|
             next unless yield(ref)
 
-            target = resolve(ref.as_written, ref.nesting)
+            target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
             set << target if target && @owned.include?(target)
           end
           set
@@ -157,7 +158,7 @@ module Rigor
         # `[from_fqn_or_nil, to_fqn, role]` for every reference that resolves to an owned declaration.
         def resolved_edges
           @resolved_edges ||= @references.filter_map do |ref|
-            target = resolve(ref.as_written, ref.nesting)
+            target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
             next unless target && @owned.include?(target)
             next if ref.from == target # a declaration referencing itself is not evidence of use
 
@@ -197,8 +198,16 @@ module Rigor
         end
 
         # Ruby's constant lookup at name granularity: `Module.nesting` innermost first, then the ancestors of
-        # the innermost cresting scope (#354), then the bare name.
-        def resolve(as_written, nesting)
+        # the innermost cresting scope (#354), then the bare name. When `rooted: true`, lexical nesting and
+        # ancestors are skipped, answering the top-level declaration directly (#625).
+        def resolve(as_written, nesting, rooted: false)
+          if rooted
+            return as_written if @by_fqn.key?(as_written)
+
+            idx = as_written.rindex("::")
+            return idx ? resolve(as_written[0, idx], nesting, rooted: true) : nil
+          end
+
           walker = nesting.dup
           until walker.empty?
             candidate = (walker + [as_written]).join("::")

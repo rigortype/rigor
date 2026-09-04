@@ -28,8 +28,11 @@ module Rigor
 
         # One constant reference. `from` is the fully-qualified name of the innermost enclosing declaration, or
         # nil for a reference written at file level — that is what makes the graph a reachability graph rather
-        # than a reference count (ADR-102 WD2). `role` is the referring FILE's role (WD8).
-        Reference = Data.define(:as_written, :nesting, :from, :role, :path, :line)
+        # than a reference count (ADR-102 WD2). `role` is the referring FILE's role (WD8). `rooted` is true
+        # when the constant was written with a leading `::` (#625).
+        Reference = Data.define(:as_written, :nesting, :from, :role, :path, :line, :rooted) do
+          def initialize(rooted: false, **) = super
+        end
 
         # ADR-102 WD4 — a site where a constant is reached by a mechanism the static reading cannot follow.
         # `name` is the exact constant when the argument is a literal (`"Foo".constantize`), in which case this
@@ -248,7 +251,8 @@ module Rigor
 
             @references << Reference.new(as_written: as_written, nesting: nesting.dup.freeze,
                                          from: nesting.empty? ? nil : nesting.join("::"),
-                                         role: @role, path: @path, line: node.location.start_line)
+                                         role: @role, path: @path, line: node.location.start_line,
+                                         rooted: Source::ConstantPath.rooted?(node))
           end
         end
       end

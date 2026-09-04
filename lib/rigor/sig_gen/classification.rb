@@ -16,6 +16,11 @@ module Rigor
       EQUIVALENT = :equivalent
       SKIPPED = :skipped
 
+      # The classifications that actually produce a line in a generated `sig/`. Consulted by the renderer,
+      # the writer and the generator's own post-passes; it lived as a private constant in the first two,
+      # which is one fork too many for a list this load-bearing.
+      EMITTABLE = [NEW_FILE, NEW_METHOD, TIGHTER_RETURN].freeze
+
       DIAGNOSTIC_IDS = {
         NEW_FILE => "sig.generated.new-file",
         NEW_METHOD => "sig.generated.new-method",
@@ -32,7 +37,10 @@ module Rigor
         unrenderable_rbs: "sig.skipped.unrenderable-rbs",
         # Issue #735 — the class's superclass chain does not terminate in a class the RBS environment knows,
         # so emitting the declaration would collapse the class on the next run rather than type it.
-        unresolvable_superclass: "sig.skipped.unresolvable-superclass"
+        unresolvable_superclass: "sig.skipped.unresolvable-superclass",
+        # Issue #744 — a project subclass overrides this method and its override is NOT emitted, so the
+        # declaration would be inherited by a subclass it does not describe.
+        overridden_by_unsigned_subclass: "sig.skipped.overridden-by-unsigned-subclass"
       }.freeze
     end
   end

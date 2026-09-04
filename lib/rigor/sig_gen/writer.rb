@@ -90,6 +90,9 @@ module Rigor
         target.exist? ? update_existing(source_path, target, candidates) : create_new(source_path, target, candidates)
       end
 
+      # Deliberately NARROWER than {Classification::EMITTABLE}: the write path has never produced a
+      # `:new_file` row (the generator does not classify one), and admitting it here would let a
+      # classification with no writer behind it decide that a target file must be created.
       EMITTABLE = [Classification::NEW_METHOD, Classification::TIGHTER_RETURN].freeze
       private_constant :EMITTABLE
 

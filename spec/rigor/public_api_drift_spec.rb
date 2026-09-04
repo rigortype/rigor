@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+# Issue #727: rigor-ffi contributes ffi_* DSL methods to Rigor::Plugin::Base.
+# Explicitly requiring it ensures the public API snapshot is order-independent
+# regardless of whether spec/integration loaded FFI plugins in the same process.
+require File.expand_path("../../plugins/rigor-ffi/lib/rigor-ffi", __dir__)
 
 # Drift tests for the public API surface ADR-2 § "Public API
 # Declaration" expects plugin authors to depend on. The
@@ -237,9 +241,14 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     signature_paths()
   ].freeze
 
+  # ADR-30 / issue #727: `ffi_binding_recognizer` and `ffi_binding_recognizers` are defined on
+  # Rigor::Plugin::Base by the `rigor-ffi` plugin as public extension points for FFI-based
+  # sub-plugins (e.g., rigor-rbnacl, rigor-sassc) to register custom binding recognizers.
   PLUGIN_BASE_SINGLETON = %w[
     dynamic_return(key:receivers,key:methods,key:file_methods,block:block)
     dynamic_returns()
+    ffi_binding_recognizer(req:name,block:&)
+    ffi_binding_recognizers()
     manifest(keyrest:fields)
     narrowing_facts(keyreq:methods,block:block)
     narrowing_facts_rules()

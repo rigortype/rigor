@@ -77,11 +77,12 @@ pins instance and singleton method sets for:
 - `Rigor::Plugin` — `register`, `registered`, `registered_for`,
   `unregister!` (test helper). v0.1.0 slice 1.
 - `Rigor::Plugin::Base` — the class-level `manifest(**fields)`,
-  `producer`, `node_rule`, and `node_file_context` DSLs;
+  `producer`, `node_rule`, `node_file_context`, and FFI recognition
+  (`ffi_binding_recognizer`, `ffi_binding_recognizers`) DSLs;
   instance-level `services` / `config` / `manifest`, the override
   hooks `#init` / `#prepare` / `#diagnostics_for_file`, the engine-owned-walk dispatcher
   `#node_rule_diagnostics`, and the `#diagnostic(node, …)` builder.
-  v0.1.0 slice 1 + ADR-37.
+  v0.1.0 slice 1 + ADR-37 + ADR-30 (#727).
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
   `protocol_contracts`, `config_schema`, `validate_config(config)`.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,

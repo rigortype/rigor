@@ -234,4 +234,75 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
       expect(scanner.send(:safe_describe, bad)).to eq("Object")
     end
   end
+
+  # Issue #530 item 1 — the superclass reach.
+  #
+  # WD9's tagging keys on CONSTANT READS, so it labels `Parser::AST::Node` where the name is WRITTEN (the
+  # superclass position) and nothing after it. Every implicit-self call INHERITED into a subclass body then
+  # recorded the generic `unsupported_syntax` cause, so a target whose base class lives in an RBS-less gem
+  # reported almost all of its holes as engine gaps. Measured on rubocop-ast: 687 engine-gap / 13 add-rbs
+  # before, 527 / 173 after, with diagnostics byte-identical.
+  #
+  # The walk this exercises reads `discovered_superclasses`, which `ProtectionScanner#scan` builds from the
+  # source it is given — so the fixture below has to DECLARE the intermediate class, not just name it.
+  describe "external-gem ancestry (#530)" do
+    # `#scan` indexes the tree itself, so the discovered-superclass table this walk reads is built from the
+    # source below rather than seeded here.
+    def scan_indexed(source, environment:)
+      root = Prism.parse(source).value
+      described_class.new(scope: Rigor::Scope.empty(environment: environment)).scan(root)
+    end
+
+    let(:environment) do
+      allow(Rigor::Environment::MissingGemConstantIndex).to receive(:build).and_return({ "Parser" => "parser" })
+      Rigor::Environment.new(missing_rbs_gems: [["parser", "3.3.0"]])
+    end
+
+    # `node_parts` is defined by neither class — it is inherited from the gem's `Parser::AST::Node`. The
+    # scanner records sites by RECEIVER, so the assertion is on the chained call whose receiver is that
+    # inherited result: `node_parts[1]` is the shape that dominates rubocop-ast (125 `#[]` sites).
+    let(:source) do
+      <<~RUBY
+        module Demo
+          class Node < Parser::AST::Node
+          end
+
+          class AliasNode < Node
+            def old_identifier
+              node_parts.first
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "attributes an inherited implicit-self call to the RBS-less gem the ancestry reaches" do
+      result = scan_indexed(source, environment: environment)
+      site = result.sites.find { |s| s.method_name == "first" }
+      expect(site).not_to be_nil
+      expect(site.dynamic_origin).to eq(:external_gem_without_rbs)
+    end
+
+    it "keeps the generic cause when the ancestry stays inside the project" do
+      # The must-still-decline arm: a base class the project itself declares reaches no gem, so nothing
+      # should be relabelled. Without this, a change that returned the gem cause unconditionally would pass
+      # the example above.
+      local = <<~RUBY
+        module Demo
+          class Base
+          end
+
+          class Child < Base
+            def probe
+              node_parts.first
+            end
+          end
+        end
+      RUBY
+      result = scan_indexed(local, environment: environment)
+      site = result.sites.find { |s| s.method_name == "first" }
+      expect(site).not_to be_nil
+      expect(site.dynamic_origin).to eq(:unsupported_syntax)
+    end
+  end
 end

@@ -77,6 +77,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     ivar_origins()
     ivars()
     join(req:other)
+    known_user_class?(req:name)
     lexical_nesting()
     local(req:name)
     local_constant_names()

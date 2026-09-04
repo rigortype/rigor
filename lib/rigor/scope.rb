@@ -954,7 +954,12 @@ module Rigor
       discovered_superclasses.key?(name) || discovered_def_nodes.key?(name) ||
         discovered_includes.key?(name) || discovered_methods.key?(name)
     end
-    private :ancestor_walk_gave_up, :compute_ancestor_class_name, :known_user_class?
+    # `known_user_class?` is PUBLIC (issue #530): `Inference::ExpressionTyper`'s external-gem ancestry probe
+    # has to ask the same "is this name a project class?" question this walk asks, and answering it with a
+    # narrower predicate (`discovered_classes` alone) would read a project class as having left the project
+    # and attribute its root name to a same-named locked gem — a WRONG provenance label, which is the one
+    # direction ADR-82 forbids.
+    private :ancestor_walk_gave_up, :compute_ancestor_class_name
 
     # Records, for a resolved cross-class ancestry read, every file that declares `class_name` (its declaration /
     # reopening / superclass / include sites). The `discovered_class_sources` table it reads is populated only by

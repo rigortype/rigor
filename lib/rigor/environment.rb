@@ -278,7 +278,11 @@ module Rigor
           libraries: merged_libraries,
           signature_paths: loader_signature_paths,
           cache_store: cache_store,
-          virtual_rbs: virtual_rbs
+          virtual_rbs: virtual_rbs,
+          # Issue #610 — the plugin-contributed subset is loaded LAST and may stand down against a colliding
+          # generic arity. Only the bundled plugins' own `sig/` is deferred: the user's `signature_paths:`,
+          # the bundle walk and `rbs collection install` all stay authoritative.
+          deferred_signature_paths: plugin_sig_paths
         )
         # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
         # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that

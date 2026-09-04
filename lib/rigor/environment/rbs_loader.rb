@@ -67,7 +67,7 @@ module Rigor
         # Vendored gem stubs (`data/vendored_gem_sigs/<gem>/`) are loaded on top of `signature_paths` so the
         # per-gem RBS bundled with Rigor itself is in scope for every analysis run. The gem stubs are
         # intentionally read-only and appended LAST so user-supplied `signature_paths` win on name conflicts.
-        def build_env_for(libraries:, signature_paths:, virtual_rbs: [])
+        def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [])
           rbs_loader = RBS::EnvironmentLoader.new
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
           loaded_libraries = libraries.select do |library|
@@ -84,7 +84,7 @@ module Rigor
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
           add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s))
           env = RBS::Environment.from_loader(rbs_loader)
-          add_project_signatures(env, signature_paths)
+          add_project_signatures(env, signature_paths, deferred_signature_paths)
           add_virtual_rbs(env, virtual_rbs)
           synthesize_missing_namespaces(env)
           env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs)
@@ -291,13 +291,97 @@ module Rigor
         # Buffer names are the file's absolute path (matching {.project_sig_files}) so {.project_entry?} — which
         # attributes a `class_decls` entry to the project by buffer name — still recognises these declarations.
         # Sorted for a deterministic add order (the env feeds the cache, ADR-54).
-        def add_project_signatures(env, signature_paths)
-          project_sig_files(signature_paths).sort.each do |file|
+        def add_project_signatures(env, signature_paths, deferred_paths = [])
+          deferred = project_sig_files(deferred_paths)
+          (project_sig_files(signature_paths) - deferred).sort.each do |file|
             parsed = parse_signature_file(file)
             next if parsed.nil? # quarantined (unparseable) or unreadable — skip so the env survives
 
             buffer, directives, decls = parsed
             add_parsed_decls(env, buffer, directives, decls)
+          end
+          add_deferred_signatures(env, deferred)
+        end
+
+        # Issue #610 — the DEFERRED half: signature files a bundled plugin contributes through its manifest,
+        # added after every other source so each can be asked a question the eager half cannot be asked —
+        # "does something already declare this class, at a different generic arity?".
+        #
+        # `plugins/rigor-activerecord/sig` declares `class Relation[Elem]`; `rbs collection install` ships a
+        # NON-generic `ActiveRecord::Relation`. Two declarations of one class with different arity make
+        # `RBS::DefinitionBuilder` raise `GenericParameterMismatchError`, and Rigor keeps the class KNOWN
+        # after a failed build, so every call INTO a relation reads `Dynamic[top]` — the plugin and
+        # `rigor-project-init`'s own advice to install the collection cancel each other out.
+        #
+        # The plugin stands down, not the user's source, for the reason `Reflection.constant_type_at`
+        # already encodes: the project's own sources are authoritative for the project. Standing down is
+        # strictly better than the collision it replaces — the collection's own declaration builds, where
+        # today NEITHER does — and it cannot regress a project without a colliding declaration, because
+        # nothing triggers.
+        #
+        # Granularity is the FILE, not the declaration: a bundled plugin's `sig/` file is single-purpose
+        # (rigor-activerecord's is `relation.rbs`, declaring exactly `Relation`), so dropping the file drops
+        # exactly the conflicting declaration. Splitting a plugin file that mixes a colliding class with
+        # innocent ones is the change to make if that ever stops being true.
+        def add_deferred_signatures(env, deferred_files)
+          deferred_files.sort.each do |file|
+            parsed = parse_signature_file(file)
+            next if parsed.nil?
+
+            buffer, directives, decls = parsed
+            next if generic_arity_conflict(env, decls)
+
+            add_parsed_decls(env, buffer, directives, decls)
+          end
+        end
+
+        # Issue #610 — which deferred (plugin-contributed) files stood down, as
+        # `[absolute_path, class_name, existing_arity, incoming_arity]`, sorted. DERIVED from a built env
+        # rather than recorded during the build, for {RbsLoader#quarantined_signatures}' reason: a cache HIT
+        # never runs the build, and a condition only the build knew would silently disappear on the second
+        # run. Re-asking the same question of the FINAL env gives the same answer — the file's declaration is
+        # absent from it, and the source that displaced it is still there with its own arity.
+        def deferred_standdowns(env, deferred_paths)
+          return [] if env.nil? || deferred_paths.nil? || deferred_paths.empty?
+
+          project_sig_files(deferred_paths).sort.filter_map do |file|
+            parsed = parse_signature_file(file)
+            next if parsed.nil?
+
+            conflict = generic_arity_conflict(env, parsed[2])
+            conflict && [file, *conflict]
+          end
+        end
+
+        # The first `[class_name, existing_arity, incoming_arity]` where `decls` would re-declare a class the
+        # env already has with a DIFFERENT number of type parameters, or nil when they agree everywhere.
+        # Equal arity is not a conflict: RBS reopens the class, which is the ordinary and supported case, so
+        # the stand-down must not fire on it.
+        def generic_arity_conflict(env, decls)
+          each_declared_class(decls) do |name, arity|
+            entry = env.class_decls[::RBS::TypeName.parse(name)]
+            next if entry.nil? || !entry.respond_to?(:type_params)
+
+            existing = entry.type_params&.size
+            return [name, existing, arity] if existing && existing != arity
+          end
+          nil
+        end
+
+        # Yields `[absolute_class_name, type_param_count]` for every class declared anywhere in `decls`,
+        # descending through modules and nested classes. Names inside a `module`/`class` body are parsed
+        # RELATIVE, so the enclosing path is accumulated here — the env is keyed by absolute name, and
+        # comparing a relative `Relation` against it would silently never match.
+        def each_declared_class(decls, prefix = [], &block)
+          decls.each do |decl|
+            case decl
+            when ::RBS::AST::Declarations::Module
+              each_declared_class(decl.members, prefix + [decl.name.to_s], &block)
+            when ::RBS::AST::Declarations::Class
+              inner = prefix + [decl.name.to_s]
+              block.call("::#{inner.join('::')}", decl.type_params.size)
+              each_declared_class(decl.members, inner, &block)
+            end
           end
         end
 
@@ -902,9 +986,14 @@ module Rigor
       #   synthesised from project source by a plugin's `Manifest#source_rbs_synthesizer`. Merged into the
       #   env after `signature_paths:` and the vendored stubs. Pass `[]` (the default) when no
       #   synthesizer-emitting plugin is loaded.
-      def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [])
+      def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [],
+                     deferred_signature_paths: [])
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
+        # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and
+        # allowed to stand down against a colliding generic arity ({.add_deferred_signatures}). Every entry
+        # is also in `@signature_paths`, so the env cache descriptor already digests these files.
+        @deferred_signature_paths = deferred_signature_paths.map { |p| Pathname(p) }.freeze
         @cache_store = cache_store
         @virtual_rbs = virtual_rbs.map { |name, content| [name.to_s.dup.freeze, content.to_s.dup.freeze].freeze }.freeze
         # Per-loader memoization bucket. Held as a single mutable Hash so the loader instance itself can be
@@ -943,6 +1032,14 @@ module Rigor
       # @return [Array<Array(String, String)>] empty when every `signature_paths:` file parses.
       def quarantined_signatures
         @state[:quarantined] ||= self.class.quarantined_project_signatures(@signature_paths).freeze
+      end
+
+      # Issue #610 — plugin-contributed signature files that stood down against a colliding generic arity,
+      # as `[absolute_path, class_name, existing_arity, incoming_arity]`. Empty whenever no plugin sig
+      # collides, which is every project that has not run `rbs collection install` for a gem a bundled
+      # plugin also declares.
+      def signature_standdowns
+        @state[:signature_standdowns] ||= self.class.deferred_standdowns(env, @deferred_signature_paths).freeze
       end
 
       # Issue #735 — the class / module names whose PRIMARY declaration lives under the project's own
@@ -1804,7 +1901,8 @@ module Rigor
         self.class.build_env_for(
           libraries: @libraries,
           signature_paths: @signature_paths,
-          virtual_rbs: @virtual_rbs
+          virtual_rbs: @virtual_rbs,
+          deferred_signature_paths: @deferred_signature_paths
         )
       end
 

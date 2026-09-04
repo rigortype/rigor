@@ -17,95 +17,85 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**A release is imminent and master is the release candidate.** 64 changelog fragments and ~510 commits since
-v0.3.6; `make verify` green on the integrated tree. The version bump is NOT autonomous — `Rigor::VERSION`,
-`CHANGELOG.md` and `Gemfile.lock` move only on an explicit request (ADR-50 § WD5, the `rigor-release-prep`
-skill). Release prep consolidates `changelog.d/` at the cut; every fragment now carries its landing PR link.
+**Master is the release candidate and `make verify` is green on it.** 66 changelog fragments and ~520 commits
+since v0.3.6, every fragment carrying its landing PR link. The version bump is NOT autonomous —
+`Rigor::VERSION`, `CHANGELOG.md` and `Gemfile.lock` move only on an explicit request (ADR-50 § WD5, the
+`rigor-release-prep` skill), which consolidates `changelog.d/` at the cut.
 
-**Two false positives on correct code landed today, both found by vetting the backlog against the release
-rather than by a gate.** [#733](https://github.com/rigortype/rigor/pull/733) (#723) and
-[#734](https://github.com/rigortype/rigor/pull/734) (#684) are the same family — *the analysis had the
-answer and the rule reported otherwise* — with two unrelated roots:
+**Four false-positive fixes landed on 2026-09-04, all found by vetting the backlog against the release
+rather than by a gate.** One theme runs through every one of them: *the analysis had the answer and the
+output said otherwise.*
 
-- #723: `CheckRules#source_declared_method?` asked a table keyed on the receiver's own NAME while the typer
-  resolved the call through the project ancestor walk, so a class declared in `sig/` without its project
-  superclass drew `undefined method 'x'` on the line `dump_type` printed `x`'s return type on. Writing MORE
-  RBS made the run worse — #653's incentive with the project's own ancestry in the plugin's place.
-- #684: the cross-file discovery pre-pass ran over the INVOCATION's file set, so `rigor check one_file.rb`
-  reported what `rigor check .` does not. Discovery now spans the configured project while the analysis
-  still targets the given files (ADR-46 §2's property, extended to the CLI's own invocation). Measured:
-  the discovery pass is 0.55s over `lib`'s 444 files, so a cold single-file check goes 0.54s → 1.15s; a
-  whole-project run is byte-identical and pays nothing.
+- [#733](https://github.com/rigortype/rigor/pull/733) (#723) — the rule asked a name-keyed table while the
+  typer walked the project's ancestry, so a class declared in `sig/` without its superclass drew
+  `undefined method 'x'` on the line `dump_type` printed `x`'s type on.
+- [#734](https://github.com/rigortype/rigor/pull/734) (#684) — discovery ran over the INVOCATION's file
+  set, so `rigor check one_file.rb` reported what `rigor check .` does not. It now spans the configured
+  project while the analysis still targets the given files (0.55s over `lib`'s 444 files; whole-project runs
+  are byte-identical and pay nothing).
+- [#737](https://github.com/rigortype/rigor/pull/737) (#735) — `sig-gen --write` on redmine made the next
+  run **5.9× noisier**: unresolvable superclasses collapsed 98 classes, and a partial project sidecar turned
+  every cross-file `def` into an ADR-17 monkey-patch report. 171 → 121 `call.undefined-method`, 8 → 0 failed
+  builds.
+- [#738](https://github.com/rigortype/rigor/pull/738) (#722 residue 3) — a flattened declaration's
+  superclass token silently re-pointed at a different class than the checker resolves.
 
-## Backlog, ranked — vetted against this release, reproduction status stated
+**The three external reports (#609/#610/#611) are triaged** — they had sat unlabelled. #609 and #610 carry
+what today's investigation established and, as importantly, what it could NOT reproduce.
 
-Everything below was reproduced on master today unless marked otherwise. Titles are not evidence; three
-issues that read like the same bug turned out to have three different roots.
+## Backlog, ranked
 
-1. **[#610](https://github.com/rigortype/rigor/issues/610)** (external, still untriaged with #609/#611) —
-   `rigor-activerecord`'s `class Relation[Elem]` collides with `gem_rbs_collection`'s non-generic
-   `Relation`, and EVERY AR relation degrades to `Dynamic[top]`. The documented Rails setup
-   (`rbs collection install` + the plugin) is what triggers it. Structurally confirmed
-   (`plugins/rigor-activerecord/sig/active_record/relation.rbs:51`); not reproduced end-to-end, which needs
-   a real collection checkout. This is the biggest user-facing item open.
-2. **[#722](https://github.com/rigortype/rigor/issues/722) residue 3 — SigGen's renderer.** Two live wrong
-   outputs confirmed today: `module Outer; class ::Rooted < ::Base` is emitted as `class Outer::Rooted`
-   (a class that does not exist, and the real one omitted), and a cross-file lexical superclass is emitted
-   as `< Record` where the checker itself resolves `Admin::Record` on the same tree. RBS resolves a compact
-   header's superclass at the TOP level (verified against the rbs gem), so flattening a nested declaration
-   changes what the emitted token means — `generator.rb:record_superclass`'s "matches Ruby's lexical scope"
-   comment is true only when the emitted namespace equals the source nesting. A complete fix needs sig-gen's
-   per-file scope seeded with project discovery; it has none today.
-3. **[#609](https://github.com/rigortype/rigor/issues/609)** (external) — `sig-gen --write` produces a
-   `sig/` the next run cannot load. Probe first: the self-inheritance shapes #721 repaired are the leading
-   suspect, so this may already be closed on master. Cheap to settle against the reporter's repro, and a
-   good release note either way.
-4. **[#728](https://github.com/rigortype/rigor/issues/728)** — reproduced: rigor answers `:outer` where MRI
-   answers `:top`. A wrong class, not a wider candidate list; #721's residual union.
-5. **[#731](https://github.com/rigortype/rigor/issues/731)** (new) — a class method inherited from a project
-   superclass types `Dynamic[top]`: the singleton-side lookup has no ancestor walk. Precision, not an FP.
-   `spec/integration/sig_declared_ancestor_undefined_method_spec.rb` ASSERTS the `Dynamic[top]`, so closing
-   it fails there with the reason.
-6. **[#732](https://github.com/rigortype/rigor/issues/732)** (new) — `known_user_class?` is forked between
-   `Scope` and `CheckRules`; #733 widened only the `Scope` copy.
-7. **[#717](https://github.com/rigortype/rigor/issues/717) / [#718](https://github.com/rigortype/rigor/issues/718)** —
-   banner noise around #696's new diagnostic. Note #725 already made `Location#_dump` preserve the buffer
-   name, so re-check what `<cached>` still reaches: the cold path now prints real paths.
-8. **[#700](https://github.com/rigortype/rigor/issues/700)**, **[#660](https://github.com/rigortype/rigor/issues/660)**,
+1. **[#736](https://github.com/rigortype/rigor/issues/736)** — `mattr_accessor` / `cattr_accessor` introduce
+   methods discovery never records. Invisible while a class has no RBS; **92 false positives** the moment any
+   `sig/` declares it, and the whole of the remaining gap between a generated-`sig/` redmine run (121) and
+   the no-`sig/` baseline (29). A DSL-recognition problem, not a suppression one.
+2. **[#610](https://github.com/rigortype/rigor/issues/610)** — every AR relation degrades to `Dynamic[top]`
+   when `rbs collection install` and `rigor-activerecord` are both used, which is the documented Rails setup.
+   Structurally confirmed; **not reproduced end-to-end** — the issue comment records why (a synthetic fixture
+   cannot exercise the plugin's `Relation` typing) and what a real reproduction needs.
+3. **[#728](https://github.com/rigortype/rigor/issues/728)** — reproduced: rigor answers `:outer` where MRI
+   answers `:top`. A wrong class, not a wider candidate list.
+4. **[#731](https://github.com/rigortype/rigor/issues/731)** — a class method inherited from a project
+   superclass types `Dynamic[top]`: the singleton-side lookup has no ancestor walk.
+   `sig_declared_ancestor_undefined_method_spec` ASSERTS that `Dynamic[top]`, so closing it fails there.
+5. **[#722](https://github.com/rigortype/rigor/issues/722)** residues 1, 2 and 4;
+   **[#732](https://github.com/rigortype/rigor/issues/732)** (the forked `known_user_class?`);
+   **[#717](https://github.com/rigortype/rigor/issues/717)** / **[#718](https://github.com/rigortype/rigor/issues/718)**
+   (banner noise — but #725 already made `Location#_dump` preserve buffer names, so re-check what `<cached>`
+   still reaches before working it).
+6. **[#700](https://github.com/rigortype/rigor/issues/700)**, **[#660](https://github.com/rigortype/rigor/issues/660)**,
    **[#574](https://github.com/rigortype/rigor/issues/574)** — the human ADR adjudications. #574 still gates
    the corpus's biggest pair (`Parameters#[]`, 581 redmine + 496 mastodon).
 
 ## Measurement — read before writing a gate or trusting a number
 
-- **"The gate is green" and "the gate can EXECUTE that path" are different claims.** #696 paid for this
-  three times. The working form: neuter the change and confirm the new example — and ONLY that example —
-  fails. #734's cache arm was verified that way; three of its five examples fail on master and two are
-  controls that pass both ways by design.
-- **A corpus diff can be inert by construction, and saying so is part of the result.** #733 is
-  byte-identical on redmine (1,019 diagnostics) and on Rigor's own `lib` (2) — but redmine has no `sig/`
-  at all and Rigor's own `sig/` declares its superclasses, so neither corpus contains a movable site. That
-  is evidence the change silences nothing, not evidence it fixes anything. The fixture was the instrument.
-- **A collapsed class, a crashed run, an empty plugin registry and an empty capture all produce zero
-  diagnostics.** Assert the TYPE alongside the rule set; compare two non-empty answers, not two empties.
-- **Ask the expensive probe where the answer is needed, not where it is convenient.** #733's ancestor walk
-  reads `superclass_of` / `includes_of`, which record ADR-46 ancestry edges. Placed on the hot path it made
-  `Widget.new` — a call RBS answers — record an ancestry dependency, coarsening incremental invalidation
-  project-wide. `dependency_recorder_spec` caught it; nothing else would have.
+- **Neuter the change and confirm the new example — and ONLY that example — fails.** #734's cache arm was
+  verified that way; #737's and #738's discriminating examples likewise, with their controls stated as
+  controls. "The gate is green" and "the gate can execute that path" remain different claims.
+- **A corpus diff can be inert by construction, and saying so is part of the result.** #733 is byte-identical
+  on redmine (1,019 diagnostics) and on Rigor's own `lib` (2) — but redmine has no `sig/` and Rigor's own
+  declares its superclasses, so neither contains a movable site. Evidence it silences nothing, not evidence
+  it fixes anything.
+- **Run the user's own workflow end to end before believing the feature works.** `sig-gen --write` on a real
+  Rails app, then `check`, is what found #735 and #736; every gate in the repo was green throughout, because
+  our own `sig/` is thorough enough never to hit the shape.
+- **Ask the expensive probe where the answer is needed.** #733's ancestor walk records ADR-46 ancestry edges;
+  on the hot path it coarsened incremental invalidation project-wide (`dependency_recorder_spec` caught it).
 - **Measure the obvious optimisation before adopting it.** A `sig/`-presence gate on #734's widening looked
-  free and would have missed the whole monkey-patching population: the same shape occurs with no project
-  signatures, through a reopened core class.
+  free and would have missed the whole monkey-patching population.
 - A compatibility claim about a **persisted** format needs both directions run (#725).
 
 ## Pipeline notes (each earned by an incident)
 
-- **`gh pr checks --watch` exits 0 with "no checks reported" when it runs inside the registration window.**
-  That is the #608 misread, and it is silent. Confirm `statusCheckRollup` is non-empty before believing an
-  exit code, then watch.
+- **`gh pr checks --watch` exits 0 with "no checks reported" inside the registration window**, and again on a
+  network drop mid-watch. Confirm `statusCheckRollup` is non-empty first, and read the per-check outcomes
+  (`awk -F'\t' '{print $2}' | sort | uniq -c`) rather than the wrapper's exit code.
 - **A finding's REPRO is reproducible; its CHARACTERISATION is a separate claim.** #723 and #684 were filed
-  as one family and are not: one is a name-keyed table, the other a file-set-scoped pre-pass. The shared-root
-  hypothesis in the plan was wrong, and reading the code — not the issues — is what settled it.
-- **Structural guards ENUMERATE a surface**: `public_api_drift_spec` (runtime AND the `sig/` coverage half),
-  `scope_spec`, `project_pre_passes_spec`, `precision_snapshot_spec`, `scope_indexer_seed_bundle_spec`.
-  Check by COMPUTING what they pin, not by grepping your identifiers.
+  as one family and have two unrelated roots; reading the code, not the issues, settled it.
+- **A spec can use a diagnostic as its observable and be invalidated by a correct fix.**
+  `runner_fork_pool_spec` asserted the ADR-17 message to prove the pool's discovery seeding; #737 legitimately
+  removed that message, and the fixture moved to a bundled class rather than the contract being weakened.
+- Structural guards ENUMERATE a surface (`public_api_drift_spec` in BOTH halves — the runtime list is
+  order-sensitive and the `sig/` coverage half is separate). Check by COMPUTING what they pin.
 - Read gate exit codes UNPIPED. Lint your own diff with `--force-exclusion`. File a follow-up issue BEFORE
   opening the PR that cites it. After a parallel batch, verify the INTEGRATED master.

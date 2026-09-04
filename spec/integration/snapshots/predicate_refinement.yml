@@ -8,3 +8,24 @@ locals:
   s: lowercase-string
   t: uppercase-string
   user: Username
+assertions:
+  '1': lowercase-string
+  '2': lowercase-string
+  '3': uppercase-string
+  '4': non-negative-int
+  '5': uppercase-string
+  '6': uppercase-string
+  '7': lowercase-string
+  '8': numeric-string
+  '9': numeric-string
+  '10': String
+  '11': decimal-int-string
+  '12': decimal-int-string
+  '13': decimal-int-string
+  '14': int
+  '15': octal-int-string
+  '16': octal-int-string
+  '17': octal-int-string
+  '18': hex-int-string
+  '19': hex-int-string
+  '20': hex-int-string

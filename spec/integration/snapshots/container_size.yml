@@ -4,3 +4,11 @@ locals:
   "n": Dynamic[top]
   text: String
   words: Dynamic[top]
+assertions:
+  '1': non-negative-int
+  '2': non-negative-int
+  '3': non-negative-int
+  '4': non-negative-int
+  '5': non-negative-int
+  '6': positive-int
+  '7': non-negative-int

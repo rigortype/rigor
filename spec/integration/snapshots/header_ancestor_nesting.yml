@@ -1,2 +1,19 @@
 ---
 locals: {}
+assertions:
+  '1': ":top_val"
+  '2': ":top_key"
+  '3': ":admin_val"
+  '4': ":admin_key"
+  '5': ":top_val"
+  '6': ":top_key"
+  '7': ":top_helper"
+  '8': ":admin_helper"
+  '9': ":top_val"
+  '10': ":top_helper"
+  '11': ":admin_val"
+  '12': ":admin_helper"
+  '13': ":found"
+  '14': ":top_peer"
+  '15': ":top_peer"
+  '16': ":top_peer"

@@ -3,3 +3,7 @@ locals:
   a: bool
   b: bool
   p: Parity
+assertions:
+  '1': Parity
+  '2': bool
+  '3': bool

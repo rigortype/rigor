@@ -15,3 +15,35 @@ locals:
   _regexp_union_splat: "/a|b/"
   _uri_comp: '"hello%20world"'
   str: '"hello" | "world"'
+assertions:
+  '1': '"hello\\.world"'
+  '2': '"\\[a\\-z\\]"'
+  '3': "/hello/"
+  '4': "/world/i"
+  '5': "/hello/"
+  '6': "/world/i"
+  '7': "/a|b/"
+  '8': "/a|b/"
+  '9': "/(?!)/"
+  '10': "/a|(?-mix:b)/"
+  '11': 'true'
+  '12': 'true'
+  '13': '"&lt;b&gt;"'
+  '14': '"&lt;b&gt;"'
+  '15': '"<b>"'
+  '16': '"hello+world"'
+  '17': '"hello%20world"'
+  '18': '"hello+world"'
+  '19': '"hello world"'
+  '20': '"k=v&x=1"'
+  '21': '"k=v"'
+  '22': '[["k", "v"], ["x", "1"]]'
+  '23': '["http://a.example"]'
+  '24': String
+  '25': String
+  '26': String
+  '27': Regexp
+  '28': Regexp
+  '29': bool
+  '30': String
+  '31': Array[[String, String]]

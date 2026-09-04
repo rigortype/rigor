@@ -6,3 +6,13 @@ locals:
   "n": 0 | negative-int | positive-int
   power: '125'
   shift: '256'
+assertions:
+  '1': positive-int
+  '2': '0'
+  '3': negative-int
+  '4': int<0, 5>
+  '5': '125'
+  '6': '15'
+  '7': '256'
+  '8': negative-int
+  '9': positive-int

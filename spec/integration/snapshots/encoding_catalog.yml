@@ -1,3 +1,16 @@
 ---
 locals:
   e: Encoding
+assertions:
+  '1': Encoding
+  '2': String
+  '3': Array[String]
+  '4': bool
+  '5': bool
+  '6': String
+  '7': Encoding?
+  '8': Array[Encoding]
+  '9': Hash[String, String]
+  '10': Array[String]
+  '11': Encoding
+  '12': Encoding?

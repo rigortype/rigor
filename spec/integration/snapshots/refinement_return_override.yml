@@ -3,3 +3,10 @@ locals:
   a: positive-int
   "n": non-empty-string
   user: User
+assertions:
+  '1': non-empty-string
+  '2': positive-int
+  '3': positive-int
+  '4': 'false'
+  '5': positive-int
+  '6': 'false'

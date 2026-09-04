@@ -2,3 +2,20 @@
 locals:
   exists: bool
   p1: "#<Pathname:/usr/bin/ruby>"
+assertions:
+  '1': "#<Pathname:/usr/bin/ruby>"
+  '2': "#<Pathname:ruby>"
+  '3': "#<Pathname:/usr/bin>"
+  '4': '""'
+  '5': '"/usr/bin/ruby"'
+  '6': 'true'
+  '7': 'false'
+  '8': "#<Pathname:/usr/bin/ruby/lib>"
+  '9': "#<Pathname:/usr/bin/ruby/lib>"
+  '10': "#<Pathname:/usr/bin/ruby.rbx>"
+  '11': "#<Pathname:/usr/bin>"
+  '12': "#<Pathname:ruby>"
+  '13': "[#<Pathname:/usr/bin>, #<Pathname:ruby>]"
+  '14': '0'
+  '15': 'true'
+  '16': bool

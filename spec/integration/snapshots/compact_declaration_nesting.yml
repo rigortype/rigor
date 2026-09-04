@@ -1,2 +1,16 @@
 ---
 locals: {}
+assertions:
+  '1': ":top"
+  '2': Post
+  '3': Post
+  '4': Post
+  '5': ":top"
+  '6': ":admin"
+  '7': Admin::Post
+  '8': Admin::Post
+  '9': Admin::Post
+  '10': Wrap::Marker
+  '11': ":inherited"
+  '12': Loner
+  '13': Dynamic[top]

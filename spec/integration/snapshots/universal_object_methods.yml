@@ -2,3 +2,16 @@
 locals:
   folded_inspect: '":sym"'
   folded_nil: 'true'
+assertions:
+  '1': bool
+  '2': bool
+  '3': bool
+  '4': bool
+  '5': bool
+  '6': bool
+  '7': String
+  '8': Integer
+  '9': Integer
+  '10': Dynamic[top]
+  '11': Dynamic[top]
+  '12': Dynamic[top]

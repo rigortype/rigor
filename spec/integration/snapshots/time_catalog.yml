@@ -1,3 +1,22 @@
 ---
 locals:
   t: Time
+assertions:
+  '1': Time
+  '2': Integer
+  '3': Integer
+  '4': Integer
+  '5': Integer
+  '6': Integer
+  '7': Integer
+  '8': Integer
+  '9': Integer
+  '10': bool
+  '11': bool
+  '12': bool
+  '13': String
+  '14': Time
+  '15': Time
+  '16': Time
+  '17': Time
+  '18': Time

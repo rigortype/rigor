@@ -1,3 +1,6 @@
 ---
 locals:
   "n": Normaliser
+assertions:
+  '1': non-empty-string
+  '2': positive-int

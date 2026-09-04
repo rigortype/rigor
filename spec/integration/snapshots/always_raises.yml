@@ -10,3 +10,4 @@ locals:
   h: Infinity
   i: Infinity
   "n": Integer
+assertions: {}

@@ -3,3 +3,7 @@ locals:
   a: '30'
   h: '{ name: "Alice", age: 30 }'
   "n": '"Alice"'
+assertions:
+  '1': '{ name: "Alice", age: 30 }'
+  '2': '"Alice"'
+  '3': '30'

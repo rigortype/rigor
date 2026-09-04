@@ -5,3 +5,8 @@ locals:
   mask: '0'
   parity: 1 | 2 | 3
   spread: int<11, 55>
+assertions:
+  '1': 3 | 4 | 5
+  '2': '0'
+  '3': bool
+  '4': int<11, 55>

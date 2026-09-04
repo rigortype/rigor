@@ -3,3 +3,14 @@ locals:
   dyn: "/abc/"
   flagged: "/abc/mi"
   r: "/abc/"
+assertions:
+  '1': "/abc/"
+  '2': '"abc"'
+  '3': '0'
+  '4': 'false'
+  '5': 'false'
+  '6': '"(?-mix:abc)"'
+  '7': '"/abc/"'
+  '8': '5'
+  '9': 'true'
+  '10': "/abc/"

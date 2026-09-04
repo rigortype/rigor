@@ -1,2 +1,19 @@
 ---
 locals: {}
+assertions:
+  '1': 'true'
+  '2': 'false'
+  '3': "[1, 2]"
+  '4': "[:b, 2]"
+  '5': nil
+  '6': ":b"
+  '7': nil
+  '8': "[:b, 2]"
+  '9': nil
+  '10': 'true'
+  '11': 'false'
+  '12': nil
+  '13': 'true'
+  '14': 'true'
+  '15': 'false'
+  '16': 'true'

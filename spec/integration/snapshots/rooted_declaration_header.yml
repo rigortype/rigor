@@ -1,2 +1,24 @@
 ---
 locals: {}
+assertions:
+  '1': ":top_bar_mark"
+  '2': ":outer_only"
+  '3': ":outer_bar_mark"
+  '4': ":top_bar_mark"
+  '5': ":foo_ok"
+  '6': ":plain_ok"
+  '7': ":outer2_base"
+  '8': ":outer_sentinel"
+  '9': ":outer_sentinel"
+  '10': ":outer_sentinel"
+  '11': ":outer_sentinel"
+  '12': bool
+  '13': ":outer2_base"
+  '14': ":outer_sentinel"
+  '15': ":outer_sentinel"
+  '16': ":outer_sentinel"
+  '17': bool
+  '18': bool
+  '19': bool
+  '20': ":outer2_base"
+  '21': ":outer2_base"

@@ -5,3 +5,8 @@ locals:
   c: Dynamic[top]
   d: Dynamic[top]
   f: Dynamic[top]
+assertions:
+  '1': '2'
+  '2': '1'
+  '3': '"x"'
+  '4': nil

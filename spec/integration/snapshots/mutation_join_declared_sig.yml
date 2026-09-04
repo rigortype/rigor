@@ -2,3 +2,13 @@
 locals:
   heterogeneous: Array[:multi | Dynamic[top]]
   homogeneous: Array[:multi | Dynamic[top] | Symbol]
+assertions:
+  '1': Array[Dynamic[top] | Integer]
+  '2': Array[Dynamic[top] | Integer]
+  '3': Hash[1 | 2 | Dynamic[top], Dynamic[top] | Integer]
+  '4': Array[Integer]
+  '5': Array[Integer]
+  '6': Array[1 | 2 | String]
+  '7': Array[1 | String]
+  '8': Array[:multi | Dynamic[top]]
+  '9': Array[:multi | Dynamic[top] | Symbol]

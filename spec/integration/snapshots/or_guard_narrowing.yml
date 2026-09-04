@@ -1,3 +1,5 @@
 ---
 locals:
   x: Dynamic[top]
+assertions:
+  '1': '"x"'

@@ -1,2 +1,23 @@
 ---
 locals: {}
+assertions:
+  '1': singleton(Post)
+  '2': bool
+  '3': 'true'
+  '4': singleton(Post)
+  '5': singleton(Admin::Post)
+  '6': singleton(Post)
+  '7': singleton(Admin::Post)
+  '8': singleton(Admin::Post)
+  '9': singleton(Admin::OwnCompact::Value)
+  '10': singleton(Admin::OwnNested::Value)
+  '11': singleton(Post)
+  '12': singleton(Post)
+  '13': singleton(Admin::Post)
+  '14': singleton(Admin::Post)
+  '15': singleton(Admin::Post)
+  '16': singleton(Post)
+  '17': singleton(Post)
+  '18': singleton(Admin::Evalled)
+  '19': String
+  '20': singleton(Admin::Evalled)

@@ -3,3 +3,10 @@ locals:
   empty_klass: singleton(#<Class>)
   klass_with_parent: singleton(StandardError)
   parented: singleton(StandardError)
+assertions:
+  '1': singleton(StandardError)
+  '2': singleton(StandardError)
+  '3': singleton(#<Class>)
+  '4': '42'
+  '5': singleton(StandardError)
+  '6': singleton(StandardError)

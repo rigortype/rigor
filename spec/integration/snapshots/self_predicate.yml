@@ -1,2 +1,12 @@
 ---
 locals: {}
+assertions:
+  '1': LoggedInUser
+  '2': User
+  '3': AdminUser
+  '4': User
+  '5': RegisteredUser
+  '6': LoggedInUser
+  '7': User
+  '8': LoggedInUser
+  '9': User

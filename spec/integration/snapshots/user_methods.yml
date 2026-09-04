@@ -3,3 +3,7 @@ locals:
   a: Dynamic[top]
   b: Dynamic[top]
   p: Dynamic[top]
+assertions:
+  '1': Parity
+  '2': 'true'
+  '3': 'true'

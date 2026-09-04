@@ -5,3 +5,12 @@ locals:
   ne: NameError
   nme: NoMethodError
   re: RuntimeError
+assertions:
+  '1': singleton(Exception)
+  '2': singleton(RuntimeError)
+  '3': singleton(KeyError)
+  '4': Exception
+  '5': RuntimeError
+  '6': KeyError
+  '7': NameError
+  '8': NoMethodError

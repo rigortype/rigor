@@ -6,3 +6,15 @@ locals:
   point: Struct.new(:x, :y)
   stored: 'Struct(foo: 1)'
   zero: 'Struct(foo: nil, bar: nil)'
+assertions:
+  '1': Struct.new(:foo, :bar)
+  '2': "[:foo, :bar]"
+  '3': 'Struct(foo: 1)'
+  '4': 'Struct(foo: nil, bar: nil)'
+  '5': '1'
+  '6': '2'
+  '7': '3'
+  '8': "{ x: 1, y: 2 }"
+  '9': "[1, 2]"
+  '10': '1'
+  '11': '9'

@@ -11,3 +11,15 @@ locals:
   present: 'true'
   s: "{ a: 2 }"
   truthy: ":yes"
+assertions:
+  '1': "{ 1 => 2, 1.0 => 4 }"
+  '2': '2'
+  '3': '4'
+  '4': nil
+  '5': "[1, 1.0]"
+  '6': 'true'
+  '7': 'false'
+  '8': "{ true => :yes, false => :no, nil => :none }"
+  '9': ":yes"
+  '10': ":none"
+  '11': "{ a: 2 }"

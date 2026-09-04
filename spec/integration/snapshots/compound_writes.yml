@@ -2,3 +2,6 @@
 locals:
   cached: '"hit"'
   "n": '12'
+assertions:
+  '1': '12'
+  '2': '"hit"'

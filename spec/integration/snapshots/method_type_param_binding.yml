@@ -2,3 +2,11 @@
 locals:
   dyn: Dynamic[top]
   xs: "[1, 2]"
+assertions:
+  '1': '"x"'
+  '2': '1'
+  '3': ":sym"
+  '4': "{ a: 1 }"
+  '5': "[1, 2]"
+  '6': Dynamic[top]
+  '7': Dynamic[top]

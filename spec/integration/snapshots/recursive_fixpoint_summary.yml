@@ -1,2 +1,10 @@
 ---
 locals: {}
+assertions:
+  '1': 1 | Integer
+  '2': String
+  '3': ":done"
+  '4': nil
+  '5': bot
+  '6': Dynamic[top]
+  '7': Dynamic[top]

@@ -1,2 +1,6 @@
 ---
 locals: {}
+assertions:
+  '1': String
+  '2': Integer
+  '3': NilClass

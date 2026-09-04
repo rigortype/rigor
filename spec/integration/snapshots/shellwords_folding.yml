@@ -4,3 +4,23 @@ locals:
   _join_arr: '"git commit -m initial\\ commit"'
   _split_cmd: '["git", "commit", "-m", "initial commit"]'
   str: '"a b" | "c d"'
+assertions:
+  '1': '"hello"'
+  '2': '"hello\\ world"'
+  '3': '"''''"'
+  '4': '"hello\\ world"'
+  '5': '["echo", "hello", "world"]'
+  '6': '["git", "commit", "-m", "initial commit"]'
+  '7': "[]"
+  '8': '["ls", "-la"]'
+  '9': '["ls", "-la"]'
+  '10': '"echo hello world"'
+  '11': '"git commit -m initial\\ commit"'
+  '12': '""'
+  '13': '"ls -la"'
+  '14': '"hello\\ world"'
+  '15': '"''''"'
+  '16': '["ls", "-la"]'
+  '17': Array[String]
+  '18': String
+  '19': Array[String]

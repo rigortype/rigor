@@ -1,3 +1,11 @@
 ---
 locals:
   s: Set
+assertions:
+  '1': non-negative-int
+  '2': non-negative-int
+  '3': bool
+  '4': bool
+  '5': bool
+  '6': Set
+  '7': Set

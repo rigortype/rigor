@@ -1,3 +1,11 @@
 ---
 locals:
   contents: '"fallback" | String'
+assertions:
+  '1': String
+  '2': non-empty-string
+  '3': String
+  '4': String
+  '5': "[String, String]"
+  '6': bool
+  '7': '"fallback" | String'

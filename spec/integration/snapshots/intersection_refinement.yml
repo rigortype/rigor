@@ -3,3 +3,8 @@ locals:
   l: non-empty-lowercase-string
   s: Slug
   u: non-empty-uppercase-string
+assertions:
+  '1': non-empty-lowercase-string
+  '2': positive-int
+  '3': non-empty-uppercase-string
+  '4': positive-int

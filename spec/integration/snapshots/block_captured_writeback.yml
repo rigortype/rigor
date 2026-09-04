@@ -22,3 +22,28 @@ locals:
   table: Hash[1 | 2 | 3, "1" | "2" | "3"]
   total: Integer
   untouched: '7'
+assertions:
+  '1': Integer
+  '2': Integer
+  '3': Integer
+  '4': Integer
+  '5': 1 | 99
+  '6': String
+  '7': 1 | 2
+  '8': 1 | 2
+  '9': 5?
+  '10': '7'
+  '11': Dynamic[top]
+  '12': Dynamic[top]
+  '13': Array[0 | 1 | 2 | 3]
+  '14': 0 | 1 | 2 | 3
+  '15': Array[2 | 4 | 6]
+  '16': Array[1 | 2 | 3]
+  '17': Array[1 | 2 | Dynamic[top]]
+  '18': Array[0 | 1 | 2 | 3 | 4]
+  '19': Hash[1 | 2 | 3, "1" | "2" | "3"]
+  '20': String
+  '21': Hash[1 | 2 | 3, Dynamic[top]]
+  '22': Array[2 | 4 | 6]
+  '23': Hash[1 | 2 | 3, 2 | 4 | 6]
+  '24': "[1, 2]"

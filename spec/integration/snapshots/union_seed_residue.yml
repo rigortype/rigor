@@ -1,2 +1,11 @@
 ---
 locals: {}
+assertions:
+  '1': Array[2] | Dynamic[top]
+  '2': Array[2] | Dynamic[top]
+  '3': Dynamic[top] | Hash[:b | Symbol, 1 | 2]
+  '4': Array[2] | Bag
+  '5': Array[1]
+  '6': Array[1 | 2 | 3]
+  '7': Array[2 | 3]
+  '8': Array[2]

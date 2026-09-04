@@ -3,3 +3,13 @@ locals:
   acc: Dynamic[top]
   cleared: Dynamic[top]
   shape: '{ name: "Alice", age: 30 }'
+assertions:
+  '1': '{ name: "Alice", age: 30 }'
+  '2': '2'
+  '3': '2'
+  '4': '"Alice"'
+  '5': '30'
+  '6': '"Alice"'
+  '7': non-negative-int
+  '8': non-negative-int
+  '9': Hash

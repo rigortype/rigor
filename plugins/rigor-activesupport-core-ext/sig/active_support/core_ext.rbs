@@ -487,24 +487,51 @@ end
 # are simply outside this issue's scope and remain silently `Dynamic` rather than a guess.
 module ActiveSupport
   class Duration
-    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
-    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
-    # so typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`, `past?`,
-    # `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, and the rest of
-    # `DateAndTime::Calculations` / `Zones` / `Conversions`) to already be closed and complete — `Time` is a
-    # CORE Ruby class, RBS-known from stdlib, and this bundle's own `Time` block above never declared that
-    # instance surface (#658 — already a live FP on master with the plugin loaded, independent of this
-    # class: `Time.current.to_fs(:db)` fires today). Answering `ago` with `Time` therefore does not leave
-    # the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN undeclared
-    # members (open_receivers only protects a receiver of the class it names) — it makes
-    # `1.hour.ago.to_fs(:db)`, ordinary Rails, fire a false `call.undefined-method` for `to_fs` on `Time`,
-    # and the same for every other Rails `Time` extension nothing here declares: 9 false positives measured
-    # on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658 lands so
-    # nobody re-derives it: the return type is plain `Time`, not a `Time | ActiveSupport::TimeWithZone`
-    # union — Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`, so `Time` is the class Rails
-    # ITSELF tells callers a `TimeWithZone` is, and the union was measured and degrades every downstream
-    # chain to `Dynamic[top]`, equivalent to leaving `ago` undeclared. Do not re-add these methods until
-    # #658 lands the `Time` surface first.
+    # The `ago` family (issue #659). `since(time = ::Time.current)` and `ago(time = ::Time.current)` are
+    # the only two real methods; `from_now` / `after` are `alias`es of the first and `until` / `before`
+    # of the second, so all six share one signature — checked, because a mis-transcribed alias arity is
+    # exactly the bug #658 found on `Time#at_beginning_of_week`.
+    #
+    # These were declared once before and REMOVED, and the reason they can return now is that the
+    # blocker was elsewhere: every FP-viable return routes into `Time`, and `Time` is a CORE Ruby class,
+    # RBS-known and therefore closed, whose Rails instance surface this bundle did not declare. Typing
+    # `ago` as `Time` while `to_fs` / `in_time_zone` / `past?` / `middle_of_day` were undeclared turned
+    # `1.hour.ago.to_fs(:db)` — ordinary Rails — into a false `call.undefined-method` on `Time`, nine per
+    # fixture, `to_fs` alone at ~92 corpus sites. `open_receivers: ["ActiveSupport::Duration"]` does not
+    # help there: it protects a Duration receiver, and the diagnostic lands on the `Time` the call
+    # RETURNS. #658 declared that surface and #670 the `Date` / `DateTime` twins, so the chains resolve.
+    #
+    # `() -> Time` is the correct class, not a compromise. Under a zone these answer an
+    # `ActiveSupport::TimeWithZone` (verified by calling them), and Rails overrides `TimeWithZone#is_a?`
+    # to answer true for `::Time` — so `Time` is the class Rails ITSELF tells callers the value is, and
+    # `Time.current` above already answers `Time` for the same reason. A `Time | TimeWithZone` union was
+    # measured and rejected: it draws no `undefined-method`, but types every downstream call
+    # `Dynamic[top]` (`iso8601`, `beginning_of_day`, `to_date`, `- 1.day`), which is worth no more than
+    # leaving them undeclared while still firing a parameter mismatch on the TimeWithZone arm.
+    #
+    # The with-an-argument form stays `(untyped) -> untyped` on purpose, and this is not caution: the
+    # runtime return depends on the argument's class AND on whether the duration carries a date-scale
+    # part, because `sum` dispatches per part to `advance` for date scales and to `since` for clock
+    # scales. Measured — `(1.month).ago(Date.today)` answers a `Date` where `(30.minutes).ago(Date.today)`
+    # answers a `TimeWithZone`, and `(1.day).ago(DateTime.now)` answers a `DateTime`. No overload
+    # expresses that without guessing, and a guess here is a false positive on correct code.
+    #
+    # NONE are `%a{pure}`: all six read the clock (and the zone) through the default argument, which is
+    # what stops `created_at > 7.days.ago` folding to a constant. They are already attributed `nondet.time`
+    # in `lib/rigor/plugin/activesupport_core_ext/effects.rb` — annotating them here would duplicate an
+    # envelope the manifest already owns, and risk the two disagreeing.
+    def ago: () -> Time
+           | (untyped time) -> untyped
+    def until: () -> Time
+             | (untyped time) -> untyped
+    def before: () -> Time
+              | (untyped time) -> untyped
+    def since: () -> Time
+             | (untyped time) -> untyped
+    def from_now: () -> Time
+                | (untyped time) -> untyped
+    def after: () -> Time
+             | (untyped time) -> untyped
 
     # `to_i` returns `@value.to_i` — always Integer, whether `@value` itself is Integer (`1.day`) or Float
     # (`1.5.days`). `in_seconds` is a literal alias.
@@ -895,20 +922,22 @@ end
 # ---------------------------------------------------------------
 
 class Date
-  # NOT %a{pure}: `self.current` / `self.yesterday` / `self.tomorrow` are
-  # already attributed nondet.time/global.read by `effects.rb` (#387).
-  # The other five singletons declared here — `self.beginning_of_week`
-  # through `self.end_of_year` — do not soundly exist; see the file-header
-  # note. None get an annotation.
+  # These three are the WHOLE date-constructing singleton surface `core_ext/date/calculations.rb`'s
+  # `class << self` adds. NOT %a{pure}: all three are already attributed nondet.time/global.read by
+  # `effects.rb` (#387).
+  #
+  # Five more used to be declared here — `self.end_of_week`, `self.beginning_of_month`,
+  # `self.end_of_month`, `self.beginning_of_year`, `self.end_of_year` — and none of them exist
+  # (#762, re-verified against activesupport 8.1.3.1 by `Date.respond_to?`). `Date` only INCLUDES
+  # `DateAndTime::Calculations`, so that module's members are instance methods, declared below and
+  # nowhere else. Declaring them as singletons made `Date.end_of_month` — a real `NoMethodError` —
+  # type-check and answer a `Date`, so everything chained off it was checked against a value that
+  # never exists; `DateTime` inherited all five through its own singleton and was wrong the same way.
+  # `self.beginning_of_week` is not here either: it exists, but it is the week-start CONFIGURATION
+  # reader and is declared with the rest of that group at the bottom of this class.
   def self.current: () -> Date
   def self.yesterday: () -> Date
   def self.tomorrow: () -> Date
-  def self.beginning_of_week: () -> Date
-  def self.end_of_week: () -> Date
-  def self.beginning_of_month: () -> Date
-  def self.end_of_month: () -> Date
-  def self.beginning_of_year: () -> Date
-  def self.end_of_year: () -> Date
 
   # `advance(days: -1)` / `advance(days: 1)` — pure y/m/d arithmetic on the
   # receiver (`core_ext/date_and_time/calculations.rb`), unlike the
@@ -1180,14 +1209,30 @@ class Date
   # (`lib/rigor/plugin/activesupport_core_ext/effects.rb`), next to the `Time` and `DateTime` rows.
   def in_time_zone: (?untyped zone) -> untyped
 
-  # `core_ext/date/calculations.rb`'s `class << self` — the rest of the week-start configuration
-  # surface behind `Date.beginning_of_week`. `Date` is closed, so these omissions were false
-  # positives on an ordinary `config/initializers` line.
+  # `core_ext/date/calculations.rb`'s `class << self` — the week-start configuration surface. `Date`
+  # is closed, so these omissions were false positives on an ordinary `config/initializers` line.
   #
-  # NONE are annotated: `beginning_of_week=` / `beginning_of_week_default` / `beginning_of_week_default=`
-  # read and write `ActiveSupport::IsolatedExecutionState` and a class-level `attr_accessor`.
-  # `find_beginning_of_week!` is a pure guard over a frozen constant, but it is left unannotated to
-  # match the `Time` singletons above, none of which claim an envelope either.
+  # `self.beginning_of_week` is the READER of this group and belongs to it, not to the date
+  # constructors at the top of the class. It answers a **Symbol** — the week start, `:monday` by
+  # default:
+  #
+  #     def beginning_of_week
+  #       ::ActiveSupport::IsolatedExecutionState[:beginning_of_week] || beginning_of_week_default || :monday
+  #     end
+  #
+  # It was declared `() -> Date` until #762, up with `self.current` and friends, which is where the
+  # wrong reading came from. That was a false-positive generator rather than lost precision, because
+  # `Date` is closed in both directions: every correct Symbol use of the value (`== :monday`, `to_s`,
+  # feeding it back to the instance `beginning_of_week(start_day)`) looked wrong, while an incorrect
+  # `Date` use of it looked right — and `find_beginning_of_week!` below returns that same value and
+  # already said `Symbol`.
+  #
+  # NONE are annotated: `beginning_of_week` / `beginning_of_week=` / `beginning_of_week_default` /
+  # `beginning_of_week_default=` read and write `ActiveSupport::IsolatedExecutionState` and a
+  # class-level `attr_accessor`. `find_beginning_of_week!` is a pure guard over a frozen constant,
+  # but it is left unannotated to match the `Time` singletons above, none of which claim an envelope
+  # either.
+  def self.beginning_of_week: () -> Symbol
   def self.beginning_of_week=: (Symbol week_start) -> Symbol
   def self.beginning_of_week_default: () -> Symbol?
   def self.beginning_of_week_default=: (Symbol? week_start) -> Symbol?

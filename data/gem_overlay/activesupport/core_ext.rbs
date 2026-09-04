@@ -264,20 +264,32 @@ end
 # undeclared and silently `Dynamic` rather than guessed.
 module ActiveSupport
   class Duration
-    # `ago`/`until`/`before`/`since`/`from_now`/`after` are DELIBERATELY NOT declared here, reversing an
-    # earlier version of this file (issue #659, blocked on #658). They default to `time = ::Time.current`,
-    # and typing the zero-arg form needs the Rails `Time` INSTANCE surface (`to_fs`, `in_time_zone`,
-    # `past?`, `future?`, `today?`, `formatted_offset`, `at_beginning_of_hour`, `middle_of_day`, …) to
-    # already be closed and complete — `Time` is CORE, RBS-known from stdlib, and this bundle's `Time`
-    # block below never declared that instance surface (#658 — already a live FP on master:
-    # `Time.current.to_fs(:db)` fires today, independent of Duration). Answering `ago` with `Time` does not
-    # leave the receiver silently `Dynamic` the way naming `ActiveSupport::Duration` does for its OWN
-    # undeclared members — it fires a false `call.undefined-method` on `to_fs` for `1.hour.ago.to_fs(:db)`,
-    # ordinary Rails, and the same for every other Rails `Time` extension nothing here declares: 9 false
-    # positives on one fixture, `to_fs` alone at ~92 corpus sites. #659 records the answer for when #658
-    # lands: plain `Time`, not a `Time | ActiveSupport::TimeWithZone` union (Rails overrides
-    # `TimeWithZone#is_a?` to answer true for `::Time`, and the union measured to `Dynamic[top]`
-    # everywhere downstream). Do not re-add these until #658 lands the `Time` surface first.
+    # The `ago` family (issue #659). `since(time = ::Time.current)` and `ago(time = ::Time.current)` are
+    # the only two real methods; `from_now` / `after` alias the first and `until` / `before` the second,
+    # so all six share one signature. They were declared once before and removed, because typing them
+    # `Time` while the Rails `Time` INSTANCE surface was undeclared made `1.hour.ago.to_fs(:db)` —
+    # ordinary Rails — a false `call.undefined-method` on the returned `Time`, which
+    # `GEM_OVERLAY_OPEN_RECEIVERS` cannot suppress since it protects a Duration receiver, not a `Time`
+    # one. #658 declared that surface and #670 the `Date` / `DateTime` twins, so the chains resolve now.
+    #
+    # `Time` is the right class rather than a compromise: under a zone these answer an
+    # `ActiveSupport::TimeWithZone`, and Rails overrides `TimeWithZone#is_a?` to answer true for
+    # `::Time`. A `Time | ActiveSupport::TimeWithZone` union was measured and rejected — it types every
+    # downstream call `Dynamic[top]`. The with-an-argument form stays `untyped` because the runtime
+    # return depends on the argument's class AND on whether the duration carries a date-scale part
+    # (`(1.month).ago(Date.today)` answers a `Date`; `(30.minutes).ago(Date.today)` a `TimeWithZone`).
+    def ago: () -> Time
+           | (untyped time) -> untyped
+    def until: () -> Time
+             | (untyped time) -> untyped
+    def before: () -> Time
+              | (untyped time) -> untyped
+    def since: () -> Time
+             | (untyped time) -> untyped
+    def from_now: () -> Time
+                | (untyped time) -> untyped
+    def after: () -> Time
+             | (untyped time) -> untyped
 
     # `to_i` / its `in_seconds` alias return `@value.to_i` — always Integer.
     def to_i: () -> Integer
@@ -509,15 +521,16 @@ end
 # ---------------------------------------------------------------
 
 class Date
+  # The whole date-constructing singleton surface `core_ext/date/calculations.rb`'s `class << self`
+  # adds. `self.end_of_week`, `self.beginning_of_month`, `self.end_of_month`,
+  # `self.beginning_of_year` and `self.end_of_year` were declared here until #762 and do not exist —
+  # `Date` only INCLUDES `DateAndTime::Calculations`, so those five are instance methods, below. The
+  # declarations made `Date.end_of_month`, a real `NoMethodError`, type-check as a `Date`, and
+  # `DateTime` inherited all five. `self.beginning_of_week` exists but is the week-start
+  # configuration reader, declared with that group at the bottom of this class.
   def self.current: () -> Date
   def self.yesterday: () -> Date
   def self.tomorrow: () -> Date
-  def self.beginning_of_week: () -> Date
-  def self.end_of_week: () -> Date
-  def self.beginning_of_month: () -> Date
-  def self.end_of_month: () -> Date
-  def self.beginning_of_year: () -> Date
-  def self.end_of_year: () -> Date
 
   def yesterday: () -> Date
   def tomorrow: () -> Date
@@ -626,6 +639,10 @@ class Date
   def readable_inspect: () -> String
   def default_inspect: () -> String
   def in_time_zone: (?untyped zone) -> untyped
+  # The week-start configuration group. `self.beginning_of_week` is its READER and answers the week
+  # start (`:monday` by default), not a date — it was `() -> Date` until #762, which made every
+  # correct Symbol use of the value look wrong and every incorrect `Date` use look right.
+  def self.beginning_of_week: () -> Symbol
   def self.beginning_of_week=: (Symbol week_start) -> Symbol
   def self.beginning_of_week_default: () -> Symbol?
   def self.beginning_of_week_default=: (Symbol? week_start) -> Symbol?

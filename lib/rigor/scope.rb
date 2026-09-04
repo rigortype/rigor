@@ -678,6 +678,15 @@ module Rigor
       site
     end
 
+    # Issue #735 — the singleton-side mirror of {#user_def_site_for}: the `"path:line"` where the project
+    # defines `class_name.method_name`, or nil. Records the same cross-file edge, keyed `"Class.method"`.
+    def user_singleton_def_site_for(class_name, method_name)
+      table = @discovery.discovered_singleton_def_sources[class_name.to_s]
+      site = table && table[method_name.to_sym]
+      record_cross_file_method(class_name, method_name, site, singleton: true) if Analysis::DependencyRecorder.active?
+      site
+    end
+
     # ADR-24 slice 2 — per-class table mapping a fully qualified user-class name to its superclass name AS WRITTEN
     # at the `class Foo < Bar` declaration (`"Bar"`, possibly a qualified `"A::B"`). Populated by `ScopeIndexer` —
     # per-file plus the cross-file project pre-pass — and consumed by

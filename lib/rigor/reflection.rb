@@ -77,6 +77,21 @@ module Rigor
       loader.class_known?(class_name)
     end
 
+    # Issue #735 — true when the class's RBS declaration is the PROJECT's own (a file under
+    # `signature_paths:`) rather than bundled core / stdlib / gem RBS. The two carry different authority:
+    # a bundled signature describes a class the project does not own, so a project `def` on it is the
+    # ADR-17 monkey-patch the analyzer reports; a project sidecar describes the very source being
+    # analysed, and a `def` in another of the project's files is that class's own definition.
+    #
+    # False whenever the question cannot be answered (no loader, no environment, an environment cached
+    # before #725 preserved buffer names), which is the pre-#735 reading in every case.
+    def project_declared_class?(class_name, scope: nil, environment: nil)
+      loader = rbs_loader_for(scope, environment)
+      return false if loader.nil?
+
+      loader.project_declared_class?(class_name)
+    end
+
     # @return [Symbol] one of `:equal`, `:subclass`, `:superclass`,
     #   `:disjoint`, `:unknown`.
     def class_ordering(lhs, rhs, scope: Scope.empty)

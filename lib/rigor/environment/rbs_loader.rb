@@ -2113,8 +2113,9 @@ module Rigor
       # review, second pass).
       #
       # Save-and-restore rather than a bare flag: `#prewarm` wraps a body whose members wrap themselves, and
-      # a nested demand must not un-mark its caller on the way out. Only the outermost exit flushes the
-      # deferred stderr summary, including when the body raises before a diagnostic can be assembled.
+      # a nested demand must not un-mark its caller on the way out. The first outermost exit flushes the
+      # deferred stderr summary, including when the body raises before a diagnostic can be assembled; later
+      # internal-demand episodes in this loader stay behind the same process-level banner.
       #
       # Per LOADER, not per thread. Nesting and a raise mid-demand are both handled, and the fork pool forks
       # after `#prewarm` returns, so no CLI path shares a loader across concurrent analyses. An in-process
@@ -2124,9 +2125,8 @@ module Rigor
         previous = @state[:internal_demand]
         outermost = !previous
         if outermost
-          @state[:definition_build_deferred_count] = 0
-          @state[:definition_build_deferred_first] = nil
-          @state[:definition_build_summary_warned] = false
+          @state[:definition_build_deferred_count] ||= 0
+          @state[:definition_build_deferred_first] ||= nil
         end
         @state[:internal_demand] = true
         yield

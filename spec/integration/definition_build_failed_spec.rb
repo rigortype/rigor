@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "tmpdir"
+require "fileutils"
 
 require "rigor"
 require "rigor/analysis/runner"
@@ -78,7 +79,11 @@ RSpec.describe "definition build failed reporting" do
 
   # The loader's stderr banner is a separate channel (it serves `coverage` / `sig-gen`, which have no
   # diagnostic stream); it is not what these examples are about.
-  before { allow_any_instance_of(Rigor::Environment::RbsLoader).to receive(:warn) } # rubocop:disable RSpec/AnyInstance
+  before do |example|
+    next if example.metadata[:captures_rbs_banner]
+
+    allow_any_instance_of(Rigor::Environment::RbsLoader).to receive(:warn) # rubocop:disable RSpec/AnyInstance
+  end
 
   it "reports the failed class as a :warning without failing the run" do
     write_project(rbs: conflicting_rbs)
@@ -217,6 +222,24 @@ RSpec.describe "definition build failed reporting" do
     expect(sequential.first).to start_with("3 RBS class definition(s) failed to build: String, Integer, Array.")
     expect(sequential.first).to include("::Object#blank?")
     expect(pooled).to eq(sequential)
+  end
+
+  it "bounds pooled stderr banners while retaining the aggregated diagnostic", :captures_rbs_banner do
+    FileUtils.mkdir_p("sig")
+    File.write(
+      File.join("sig", "object.rbs"),
+      "class Object\n  def blank?: () -> bool\nend\n\nclass Object\n  def blank?: () -> bool\nend\n"
+    )
+    File.write("app.rb", "\"a\".upcase\n1.abs\n[].size\n")
+
+    result = nil
+    one_banner = /\Arigor: RBS definition build failed(?:(?!rigor: RBS definition build failed).)*\z/m
+    expect { result = run(config, workers: 2, cache_store: cold_store) }
+      .to output(one_banner).to_stderr_from_any_process
+
+    diagnostics = build_failed_diagnostics(result)
+    expect(diagnostics.size).to eq(1)
+    expect(diagnostics.first.message).to include("Object", "::Object#blank?")
   end
 
   # Issue #696's structural problem 3. The existing whole-run signature snapshot is gated on

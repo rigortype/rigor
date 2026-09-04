@@ -5870,5 +5870,32 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(reporter_b).not_to equal(reporter_a)
       end
     end
+
+    it "deduplicates watched globs across producers in the run dependency descriptor" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [dir])
+        runner = described_class.new(configuration: configuration, cache_store: nil)
+        expansion = runner.send(:expand_paths, configuration.paths)
+        rbs_descriptor = Rigor::Cache::Descriptor.new(files: [], globs: [])
+
+        plugin_class = Class.new(Rigor::Plugin::Base) do
+          producer :p1, watch: -> { [["lib", "**/*.rb"]] } do
+            1
+          end
+          producer :p2, watch: -> { [["lib", "**/*.rb"]] } do
+            2
+          end
+        end
+        plugin = plugin_class.allocate
+
+        registry = Rigor::Plugin::Registry.new(plugins: [plugin])
+        runner.instance_variable_set(:@plugin_registry, registry)
+
+        desc = runner.send(:build_run_dependency_descriptor, expansion, rbs_descriptor)
+        matching_globs = desc.globs.select { |g| g.pattern == "**/*.rb" && g.root.end_with?("/lib") }
+        expect(matching_globs.size).to eq(1)
+      end
+    end
   end
 end

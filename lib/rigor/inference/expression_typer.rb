@@ -1507,10 +1507,61 @@ module Rigor
                            else [nil, nil]
                            end
         return DynamicOrigin::UNSUPPORTED_SYNTAX if class_name.nil?
-        return DynamicOrigin::UNSUPPORTED_SYNTAX unless scope.discovered_method?(class_name, method_name, kind)
+        return DynamicOrigin::INFERRED_RETURN_UNTYPED if scope.discovered_method?(class_name, method_name, kind)
+        # Issue #530 item 1 — the receiver's own class declares nothing, but its ancestry LEAVES the project
+        # into a locked gem that ships no RBS. That gem is the honest cause: the method is inherited from a
+        # class Rigor cannot see, and the user's action is `add_rbs`, not "report an engine gap".
+        return DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS if external_gem_reached_through_ancestry?(class_name)
 
-        DynamicOrigin::INFERRED_RETURN_UNTYPED
+        DynamicOrigin::UNSUPPORTED_SYNTAX
       end
+
+      # Issue #530 item 1 — whether `class_name`'s ancestry crosses out of the project into a locked, RBS-less
+      # gem. WD9's tagging keys on CONSTANT READS, which catches `Parser::AST::Node` where it is WRITTEN (the
+      # superclass position) and nothing after: every implicit-self call inherited into the subclass body —
+      # `node_parts` on rubocop-ast, and the 125-site `#[]` chain hanging off it — recorded the generic cause,
+      # so the target reported 13 add-rbs against 687 engine-gap where the honest story is a gem with no RBS.
+      #
+      # The boundary is exactly the ancestor name that resolves to NO project class. Inside the project the
+      # walk continues; the first name that leaves is the one whose root segment the missing-gem index can
+      # own. A name that leaves into a gem the index does NOT claim (RBS present, not locked, entry file
+      # unreadable) yields nothing and the generic cause stands — the fail-open direction ADR-82 requires,
+      # where the failure mode is a missing label and never a wrong one.
+      #
+      # Bounded by {Scope::ANCESTOR_WALK_LIMIT}'s spirit rather than its constant: this is a provenance
+      # side-channel on an ALREADY-unresolved call, so a deep hierarchy must cost a bounded amount and then
+      # give up rather than pay for a perfect answer nothing type-checks against.
+      def external_gem_reached_through_ancestry?(class_name)
+        environment = scope.environment
+        return false if environment.nil? || !environment.respond_to?(:missing_rbs_gem_owner)
+
+        seen = {}
+        queue = [class_name.to_s]
+        visited = 0
+        until queue.empty?
+          current = queue.shift
+          next if current.nil? || seen[current]
+
+          seen[current] = true
+          visited += 1
+          return false if visited > EXTERNAL_GEM_ANCESTRY_LIMIT
+
+          raw_ancestors = scope.includes_of(current) + [scope.superclass_of(current)].compact
+          raw_ancestors.each do |raw|
+            resolved = scope.ancestor_name_candidates(current, raw).find { |c| scope.known_user_class?(c) }
+            next queue.push(resolved) if resolved
+
+            root = raw.to_s.delete_prefix("::").split("::").first
+            return true if root && environment.missing_rbs_gem_owner(root)
+          end
+        end
+        false
+      end
+
+      # Deliberately smaller than the dispatch walk's cap: this answers a REPORTING question, and a hierarchy
+      # deeper than this has already told us the receiver is not a simple project class.
+      EXTERNAL_GEM_ANCESTRY_LIMIT = 16
+      private_constant :EXTERNAL_GEM_ANCESTRY_LIMIT
 
       # ADR-82 WD6 — carry the receiver's provenance onto the call it produces (returning the unchanged
       # `dynamic_top` result), so a specific cause survives a method chain (`x.foo.bar`): without this,

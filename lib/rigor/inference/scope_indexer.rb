@@ -2721,12 +2721,43 @@ module Rigor
             walk_class_includes(node.body, child_prefix, full, accumulator) if node.body
             return
           end
+        when Prism::SingletonClassNode
+          # Issue #728 — `class << self; include M; end` mixes M into the SINGLETON: it contributes class
+          # methods, not the instance surface this table feeds. Descending with no owner keeps any nested
+          # declaration walked (a `ClassNode` child sets its own owner) while the mixin calls in the
+          # singleton body record nothing, which is what `extends` is for.
+          current_class = nil
         when Prism::CallNode
           record_mixin_call(node, current_class, accumulator)
+          return walk_mixin_call_children(node, qualified_prefix, current_class, accumulator)
         end
 
         node.rigor_each_child do |child|
           walk_class_includes(child, qualified_prefix, current_class, accumulator)
+        end
+      end
+
+      # Issue #728 — a block that REBINDS `self` owns the mixin calls written in it, and this walk used to
+      # hand them to the lexically enclosing declaration. `Thing = Class.new { include Taggable }` inside
+      # `class Outer` registered `Taggable` on `Outer`, so `Outer.new.tag` typed `:tagged` where MRI raises
+      # `NoMethodError` — a wrong answer, not a wider one. The classification is
+      # {#rebound_block_self}, the same one #721 gave its own mixin scan.
+      #
+      # `Recv.class_eval { include M }` resolves to `Recv` and now records there, which it never did before
+      # (the block's owner was the lexical enclosure, so at the top level the include was simply dropped).
+      # An OPAQUE rebinding — `Class.new` / `Module.new` / a non-constant `class_eval` receiver — records
+      # nothing: the class exists but this walk cannot name it, and naming the lexical enclosure instead is
+      # the one answer Ruby is guaranteed not to have written.
+      def walk_mixin_call_children(node, qualified_prefix, current_class, accumulator)
+        rebound = rebound_block_self(node, qualified_prefix)
+        node.rigor_each_child do |child|
+          owner =
+            if rebound && child.is_a?(Prism::BlockNode)
+              rebound == OPAQUE_SELF ? nil : rebound
+            else
+              current_class
+            end
+          walk_class_includes(child, qualified_prefix, owner, accumulator)
         end
       end
 

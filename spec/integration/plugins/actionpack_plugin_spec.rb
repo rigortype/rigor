@@ -371,6 +371,25 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    # #574 / #534 item 1 — the positive half. The two hazard controls around this one are ABSENCE
+    # assertions, and absence is also what a regression to `Dynamic` produces, so on their own they
+    # would keep passing if the typing silently went away. This pins the answer itself.
+    it "types `params[:key]` as a nilable Parameters" do
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(params[:q])
+            Rigor.dump_type(params[:user][:name])
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(2)
+        expect(dumps).to all(include("ActionController::Parameters?"))
+      end
+    end
+
     it "draws no possible-nil-receiver on an assigned `params[:key]` — the `[] -> Parameters?` hazard (#534)" do
       # `#[] -> Parameters | nil` fixes every fold above and still carries the chain, but
       # `call.possible-nil-receiver` fires on `Prism::LocalVariableReadNode` receivers
@@ -390,6 +409,9 @@ RSpec.describe "plugins/rigor-actionpack" do
       with_demo(source) do |result|
         nil_receivers = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
         expect(nil_receivers).to be_empty
+        # #574 — the chain still carries, so the silence is the rule declining on an unknowable witness
+        # rather than the typing having evaporated back to `Dynamic`.
+        expect(result.diagnostics.map(&:rule)).not_to include("call.undefined-method")
       end
     end
 

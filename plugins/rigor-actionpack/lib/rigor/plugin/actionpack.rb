@@ -247,7 +247,7 @@ module Rigor
       # and are admissible under the same argument — deferred only to keep this change at the
       # reviewed set; admit them with the next batch.
       #
-      # ## Why `Parameters#[]` is NOT here (issue #534 item 1, adjudicated 2026-09-01)
+      # ## `Parameters#[]`: rejected 2026-09-01, adopted 2026-09-05 (issue #534 item 1, #574)
       #
       # `#[]` is the single largest named-receiver pair on both survey apps (redmine 581, mastodon
       # ~475), so it is the entry with by far the most to gain — and both typings of it were measured
@@ -275,13 +275,22 @@ module Rigor
       #   rule; it is the rule working, on a shape working Rails controllers use constantly. Adopting
       #   it would put an error on correct code in exchange for a coverage metric.
       #
-      # Both trades buy protection-coverage with false positives, which inverts the project's ordering
-      # of those two goods (AGENTS.md: "false positives outrank worst-case static reading"). `#[]`
-      # therefore stays Dynamic, and three control specs pin that answer with the exact probe shapes
-      # above — two negatives, each verified to go RED under the typing it rejects, plus a must-fire
-      # sibling proving the fixture can raise both rules. Reopening it needs a *rules-level* change
-      # first — a receiver-position nullable the flow rules read as unknown rather than as nil — not
-      # another plugin table row.
+      # The first trade is still refused: `-> Parameters` buys protection-coverage with false positives,
+      # which inverts the project's ordering of those two goods (AGENTS.md: "false positives outrank
+      # worst-case static reading").
+      #
+      # The SECOND is no longer a trade. The `possible-nil-receiver` firing above was never this typing
+      # being wrong — it was the rules-level vacuity #574 describes, and the paragraph that stood here
+      # named the precondition exactly: "a receiver-position nullable the flow rules read as unknown
+      # rather than as nil". #574's witness gate is that change. `ActionController::Parameters` ships no
+      # RBS and has no project source, so the gate now reads it as UNKNOWN rather than as a full witness,
+      # the nil-arm has nothing confirming it, and the rule declines. `q = params[:q]; q.strip` is silent
+      # on the shape that rejected this typing, measured through the real CLI rather than argued.
+      #
+      # The control specs stay, and they still bite: they pin the HAZARD (no truthiness fold, no `bot`
+      # branch, no possible-nil firing), not the Dynamic answer, so they go red if either typing's
+      # hazard ever returns — and they now carry a positive assertion that `params[:k]` types
+      # `Parameters?`, so a silent regression to `Dynamic` or to the non-nil nominal fails them too.
       STRONG_PARAMS_CHAIN_METHODS = %i[
         require permit permit! expect slice
         except without extract! slice!
@@ -293,6 +302,30 @@ module Rigor
         next nil unless call_node.is_a?(Prism::CallNode)
 
         Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
+      end
+
+      # Issue #534 item 1, reopened by #574. `#[]` is the single largest named-receiver pair on both survey
+      # apps (redmine 581, mastodon ~475). The honest contract is `Parameters | nil` — a missing key really
+      # returns nil — and the block comment above records why that typing was REJECTED in 2026-09-01: it put
+      # `call.possible-nil-receiver` at ERROR severity on `q = params[:q]; q.strip`, a shape working Rails
+      # controllers use constantly.
+      #
+      # That firing was a rules-level vacuity, not this typing being wrong, and #574 fixed it: the
+      # possible-nil witness gate counted a named-but-RBS-less arm as answerable, so a plugin-minted
+      # nominal with no RBS and no project source stood in as a full witness for a question nothing could
+      # answer. With the gate requiring a KNOWABLE arm, the nil-arm has no confirmed witness and the rule
+      # declines — which is the FP-first ordering, and what the comment above named as the precondition
+      # ("a receiver-position nullable the flow rules read as unknown rather than as nil").
+      #
+      # The non-nil `-> Parameters` typing stays rejected on its own merits, unchanged: it makes every
+      # `params[:k]` condition always-truthy and folds a ternary over one to its true arm.
+      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: %i[[]] do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]),
+          Rigor::Type::Combinator.constant_of(nil)
+        )
       end
 
       # Phase 5c (2026-09-02, issue #534 "same lane") — the rest of the request-context surface the

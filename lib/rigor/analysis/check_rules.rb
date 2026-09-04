@@ -1617,7 +1617,7 @@ module Rigor
         # method must be absent from `NilClass` (so the nil path really raises).
         def nil_bearing_union_witnesses?(receiver_type, method_name, scope)
           union_contains_nil?(receiver_type) &&
-            union_has_nameable_non_nil_arm?(receiver_type) &&
+            union_has_nameable_non_nil_arm?(receiver_type, scope) &&
             union_method_present_on_non_nil?(receiver_type, method_name, scope) &&
             !nil_class_has_method?(method_name, scope)
         end
@@ -1659,8 +1659,22 @@ module Rigor
         # `String | nil` keeps firing, and so does `Dynamic | String | nil` —
         # the nameless arm stays permissive inside the all-arms check, which is
         # only about the arms' method surface.
-        def union_has_nameable_non_nil_arm?(union)
-          union.members.any? { |m| !nil_member?(m) && !concrete_class_name(m).nil? }
+        def union_has_nameable_non_nil_arm?(union, scope)
+          union.members.any? do |m|
+            next false if nil_member?(m)
+
+            class_name = concrete_class_name(m)
+            next false if class_name.nil?
+
+            # Issue #574 — nameable is not the same as ANSWERABLE. `method_present_anywhere?` reports
+            # "present" for a named arm nothing knows the surface of, purely because nothing is known —
+            # which is the same vacuity this gate's docstring says it exists to prevent, one level in. A
+            # plugin-minted nominal like `ActionController::Parameters` ships no RBS and has no project
+            # source, so it counted as a full witness and `q = params[:q]; q.strip` fired at ERROR severity
+            # on correct Rails code.
+            Rigor::Reflection.rbs_class_known?(class_name, scope: scope) ||
+              scope.discovered_classes.key?(class_name)
+          end
         end
 
         # The non-nil members must collectively support the

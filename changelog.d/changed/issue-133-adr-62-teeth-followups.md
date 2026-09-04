@@ -1,1 +1,1 @@
-- **[protection]** Implement ADR-62 mutation-teeth follow-ups: complete Type::* carrier RBS coverage, expand broad-fuzz across plugins and examples, and promote arity_extra with a signature-arity guard. ([#133](https://github.com/rigortype/rigor/issues/133))
+- **[protection]** Implement ADR-62 mutation-teeth follow-ups: complete Type::* carrier RBS coverage, expand broad-fuzz across plugins and examples, and promote arity_extra with a signature-arity guard. ([#133](https://github.com/rigortype/rigor/issues/133), [#726](https://github.com/rigortype/rigor/pull/726))

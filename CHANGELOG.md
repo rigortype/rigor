@@ -14,181 +14,254 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
-- **[plugins]** The core `rigor-ffi` plugin and adapters for sassc, ethon, rbnacl, and ffi-rzmq type FFI bindings: `attach_function` calls, struct layouts, callbacks, and thin wrappers around them ([ADR-30](docs/adr/30-rigor-ffi-plugin-shape.md), [#141](https://github.com/rigortype/rigor/issues/141), [#719](https://github.com/rigortype/rigor/pull/719)).
+- **[plugins]** The `rigor-ffi` plugin family types FFI bindings instead of leaving them untyped ([ADR-30](docs/adr/30-rigor-ffi-plugin-shape.md), [#141](https://github.com/rigortype/rigor/issues/141), [#719](https://github.com/rigortype/rigor/pull/719)).
+  - Core `rigor-ffi` covers `attach_function`, struct layouts, callbacks and thin wrappers; adapters ship for sassc, ethon, rbnacl and ffi-rzmq.
 
-- **[types]** First-class `Result` and `Maybe` generic carriers, implicit HKT registration through recursive `type` aliases, the `rigor-dry-monads` plugin, and let-pattern binding in `rigor-lisp-eval` ([ADR-20](docs/adr/20-lightweight-hkt.md), [#128](https://github.com/rigortype/rigor/issues/128), [#712](https://github.com/rigortype/rigor/pull/712)).
+- **[types]** First-class `Result` and `Maybe` carriers land, with the `rigor-dry-monads` plugin to register them ([ADR-20](docs/adr/20-lightweight-hkt.md), [#128](https://github.com/rigortype/rigor/issues/128), [#712](https://github.com/rigortype/rigor/pull/712)).
+  - Recursive `type` aliases now register HKT implicitly, and `rigor-lisp-eval` binds let-patterns onto those carriers.
 
-- **[rigor check]** A `.rbs` that declares the same method twice is now reported as the `rbs.coverage.definition-build-failed` warning, so a class that silently lost its whole method surface is visible in `--format json`, SARIF, CI annotations and the LSP instead of only as a line on stderr ([#696](https://github.com/rigortype/rigor/issues/696), [#725](https://github.com/rigortype/rigor/pull/725)).
+- **[rigor check]** A `.rbs` that declares the same method twice is now reported as `rbs.coverage.definition-build-failed` instead of only as a line on stderr ([#696](https://github.com/rigortype/rigor/issues/696), [#725](https://github.com/rigortype/rigor/pull/725)).
+  - The warning appears in `--format json`, SARIF, CI annotations and the LSP, so a class that silently lost its whole method surface is visible.
   - The `reject-unparseable-signatures` bleeding-edge feature promotes it to an error.
 
-- **[engine]** `JSON.generate` and `JSON.pretty_generate` now type as `String` instead of widening to untyped, closing a named-receiver-opaque gap upstream RBS left on `pretty_generate` ([#571](https://github.com/rigortype/rigor/pull/571)).
+- **[engine]** `JSON.generate` and `JSON.pretty_generate` now type as `String` instead of untyped ([#571](https://github.com/rigortype/rigor/pull/571)).
+  - Upstream RBS left `pretty_generate` as a named-receiver-opaque gap.
 
-- **[inference]** A constant assigned a Symbol, Integer, Float, or boolean literal in one file now types at its readers in every other file, so `DEFAULT_LIMIT = 50` in a config file is `50` everywhere it is used instead of untyped ([#644](https://github.com/rigortype/rigor/issues/644), [#669](https://github.com/rigortype/rigor/pull/669)).
-  - A constant that two files assign, that one file assigns twice, or whose value is a String, Array, Hash, `nil`, or any computed expression stays gradual, and `flow.always-truthy-condition` no longer fires on a condition that reads such a constant directly or through a project predicate method.
+- **[inference]** A Symbol, Integer, Float, or boolean literal assigned to a constant in one file now types at its readers in every other file ([#644](https://github.com/rigortype/rigor/issues/644), [#669](https://github.com/rigortype/rigor/pull/669)).
+  - `DEFAULT_LIMIT = 50` in a config file is `50` everywhere it is used instead of untyped.
+  - A constant that two files assign, that one file assigns twice, or whose value is a String, Array, Hash, `nil`, or any computed expression stays gradual.
 
-- **[plugins]** Three Rails surfaces that used to read as untyped now carry a type: `Rails.logger` / `.cache` / `.configuration` / `.application` (rigor-railties), `1.day` and every other ActiveSupport duration multiplier together with the `+` / `-` / `*` arithmetic around them (rigor-activesupport-core-ext), and the job id `perform_async` / `perform_in` / `perform_at` return (rigor-sidekiq) ([#534](https://github.com/rigortype/rigor/issues/534), [#585](https://github.com/rigortype/rigor/pull/585)).
+- **[plugins]** Three Rails surfaces that used to read as untyped now carry a type ([#534](https://github.com/rigortype/rigor/issues/534), [#585](https://github.com/rigortype/rigor/pull/585)).
+  - `Rails.logger` / `.cache` / `.configuration` / `.application` (rigor-railties).
+  - `1.day` and every other ActiveSupport duration multiplier, with the `+` / `-` / `*` arithmetic around them (rigor-activesupport-core-ext).
+  - The job id `perform_async` / `perform_in` / `perform_at` return (rigor-sidekiq).
 
-- **[plugins]** rigor-activesupport-core-ext now types `ActiveSupport::Duration`'s readers (`to_i` / `in_seconds`, `to_f`, the `in_minutes` family, `iso8601`, `parts`) and the `ago` / `until` / `before` / `since` / `from_now` / `after` family as `Time`, so `1.day.to_i * 2` and `30.minutes.ago.iso8601` resolve instead of going opaque ([#632](https://github.com/rigortype/rigor/issues/632), [#666](https://github.com/rigortype/rigor/pull/666), [#659](https://github.com/rigortype/rigor/issues/659), [#765](https://github.com/rigortype/rigor/pull/765)).
-  - The same declarations ship in the auto-applied activesupport overlay, but an overlay-only project (no plugin loaded) only reaches the readers through its own `ActiveSupport::Duration`-typed signature, since the overlay's numeric multipliers stay untyped.
+- **[plugins]** `ActiveSupport::Duration` readers and the `ago` family now type instead of going opaque ([#632](https://github.com/rigortype/rigor/issues/632), [#666](https://github.com/rigortype/rigor/pull/666), [#659](https://github.com/rigortype/rigor/issues/659), [#765](https://github.com/rigortype/rigor/pull/765)).
+  - `to_i` / `in_seconds`, `to_f`, the `in_minutes` family, `iso8601` and `parts` resolve, so `1.day.to_i * 2` stays typed.
+  - `ago` / `until` / `before` / `since` / `from_now` / `after` type as `Time`, so `30.minutes.ago.iso8601` resolves.
+  - The same declarations ship in the auto-applied overlay; an overlay-only project only reaches the readers through its own `ActiveSupport::Duration`-typed signature.
 
-- **[plugins]** `params[:key]` now types as a nilable `ActionController::Parameters` instead of `Dynamic`, so chained reads like `params[:user][:name]` carry a type ([#574](https://github.com/rigortype/rigor/issues/574), [#534](https://github.com/rigortype/rigor/issues/534), [#771](https://github.com/rigortype/rigor/pull/771)).
-  - An engine fix stops `call.possible-nil-receiver` treating a class nothing knows the surface of as proof that a nil check is missing, so `q = params[:q]; q.strip` stays silent.
+- **[plugins]** `params[:key]` now types as `ActionController::Parameters?` instead of `Dynamic` ([#574](https://github.com/rigortype/rigor/issues/574), [#534](https://github.com/rigortype/rigor/issues/534), [#771](https://github.com/rigortype/rigor/pull/771)).
+  - Chained reads like `params[:user][:name]` carry a type.
+  - `call.possible-nil-receiver` no longer treats a class nothing knows the surface of as proof that a nil check is missing, so `q = params[:q]; q.strip` stays silent.
 
-- **[plugins]** rigor-actionpack now keeps the `ActionController::Parameters` chain typed through `except`, `without`, `extract!`, `slice!`, `merge`, `merge!`, `reverse_merge`, `reverse_merge!`, `with_defaults`, `with_defaults!`, `compact`, `compact_blank` and `deep_dup`, so a builder written around them stays a concrete receiver end to end ([#534](https://github.com/rigortype/rigor/issues/534), [#578](https://github.com/rigortype/rigor/pull/578)).
+- **[plugins]** rigor-actionpack keeps the `ActionController::Parameters` chain typed through the builder family ([#534](https://github.com/rigortype/rigor/issues/534), [#578](https://github.com/rigortype/rigor/pull/578)).
+  - Covered: `except`, `without`, `extract!`, `slice!`, `merge`, `merge!`, `reverse_merge`, `reverse_merge!`, `with_defaults`, `with_defaults!`, `compact`, `compact_blank` and `deep_dup`.
 
-- **[plugins]** rigor-actionpack now types the fifteen `request` predicates (`post?`, `xhr?`, `ssl?`, …) as `bool`, and `flash.now` / `flash.keep` / `flash.discard` as their Action Pack carriers, so a flash chain keeps a concrete receiver ([#534](https://github.com/rigortype/rigor/issues/534), [#592](https://github.com/rigortype/rigor/pull/592)).
+- **[plugins]** rigor-actionpack now types the `request` predicates as `bool` and the `flash` chain as its Action Pack carriers ([#534](https://github.com/rigortype/rigor/issues/534), [#592](https://github.com/rigortype/rigor/pull/592)).
+  - The fifteen predicates include `post?`, `xhr?` and `ssl?`; `flash.now` / `flash.keep` / `flash.discard` keep a concrete receiver.
 
 ### Changed
 
-- **[engine]** Methods a class gains through `extend SomeModule`, `extend self`, or `module_function` now resolve on the class itself, so existence checks and inferred return types both work (39 undefined-method false positives removed across the survey corpus) ([#554](https://github.com/rigortype/rigor/pull/554), [#526](https://github.com/rigortype/rigor/issues/526)).
+- **[engine]** Methods a class gains through `extend`, `extend self`, or `module_function` now resolve on the class itself ([#554](https://github.com/rigortype/rigor/pull/554), [#526](https://github.com/rigortype/rigor/issues/526)).
+  - Existence checks and inferred return types both work (39 undefined-method false positives left the survey corpus).
 
-- **[engine]** Rails-style implicit namespaces now resolve: `Api` in `class Api::V1::AccountsController` types as the namespace module even though Zeitwerk means no `module Api` ever appears in source ([#551](https://github.com/rigortype/rigor/pull/551), [#528](https://github.com/rigortype/rigor/issues/528)).
-  - Worth +1.16 points of type precision on Mastodon.
+- **[engine]** Rails-style implicit namespaces now resolve even when no `module Api` ever appears in source ([#551](https://github.com/rigortype/rigor/pull/551), [#528](https://github.com/rigortype/rigor/issues/528)).
+  - `Api` in `class Api::V1::AccountsController` types as the namespace module (+1.16 points of type precision on Mastodon).
 
-- **[plugins]** rigor-actionpack now types `params.expect(...)` and `params.slice(...)` as strong-parameter chains, so Rails 8's `expect` idiom keeps the same typed, protected receiver `require`/`permit` chains have ([#548](https://github.com/rigortype/rigor/pull/548), [#534](https://github.com/rigortype/rigor/issues/534)).
+- **[plugins]** rigor-actionpack now types `params.expect(...)` and `params.slice(...)` as strong-parameter chains ([#548](https://github.com/rigortype/rigor/pull/548), [#534](https://github.com/rigortype/rigor/issues/534)).
+  - Rails 8's `expect` idiom keeps the same typed, protected receiver `require`/`permit` chains have.
 
-- **[cli]** `rigor type-of` accepts several positions in one invocation and makes the column optional, so `rigor type-of file.rb:42` lists up to 40 expressions on line 42 and walking a chain of expressions costs one process instead of one each ([#515](https://github.com/rigortype/rigor/pull/515)).
-  - Five positions on a Rails application: 10.3 s → 2.1 s.
+- **[cli]** `rigor type-of` accepts several positions in one invocation and makes the column optional ([#515](https://github.com/rigortype/rigor/pull/515)).
+  - `rigor type-of file.rb:42` lists up to 40 expressions on line 42, so walking a chain costs one process instead of one each (five positions on a Rails application: 10.3 s → 2.1 s).
 
-- **[cli]** `rigor type-scan` now uses the same cross-file discovery `rigor check` does, so a class defined in a sibling file is no longer counted as an unrecognized node ([#511](https://github.com/rigortype/rigor/pull/511)).
+- **[cli]** `rigor type-scan` now uses the same cross-file discovery `rigor check` does ([#511](https://github.com/rigortype/rigor/pull/511)).
+  - A class defined in a sibling file is no longer counted as an unrecognized node.
 
-- **[engine]** `Foo.instance` on a class that includes the stdlib `Singleton` mixin now types as `Foo` instead of untyped, so the methods you call on that instance are typed too ([#514](https://github.com/rigortype/rigor/pull/514)).
+- **[engine]** `Foo.instance` on a class that includes the stdlib `Singleton` mixin now types as `Foo` instead of untyped ([#514](https://github.com/rigortype/rigor/pull/514)).
+  - Methods you call on that instance are typed too.
 
-- **[engine]** `x.nil?`, `x.is_a?(C)`, `x.respond_to?(:m)`, `!x`, `x.frozen?`, `x.equal?(y)`, `x.inspect`, `x.hash` and `x.object_id` now carry their own type even when Rigor cannot type `x`, because their result never depended on the receiver ([#508](https://github.com/rigortype/rigor/pull/508), [#503](https://github.com/rigortype/rigor/issues/503)).
-  - Worth 2.3 points of type precision on Rigor's own `lib`, with no new diagnostics.
+- **[engine]** Receiver-independent `Object` methods now carry their own type even when Rigor cannot type `x` ([#508](https://github.com/rigortype/rigor/pull/508), [#503](https://github.com/rigortype/rigor/issues/503)).
+  - Covered: `nil?`, `is_a?`, `respond_to?`, `!`, `frozen?`, `equal?`, `inspect`, `hash` and `object_id` (2.3 points of type precision on Rigor's own `lib`, no new diagnostics).
 
-- **[cli]** `rigor coverage` and `rigor check --coverage` now measure the same engine `rigor check` runs: the precision ratio sees your project's cross-file methods, ancestry, and plugin-contributed types instead of under-reporting them as untyped, and precisely-folded `Data` / `Struct` values count as typed ([#535](https://github.com/rigortype/rigor/pull/535), [#505](https://github.com/rigortype/rigor/pull/505), [#513](https://github.com/rigortype/rigor/issues/513), [#523](https://github.com/rigortype/rigor/issues/523), [#502](https://github.com/rigortype/rigor/issues/502)).
-  - A class defined in a sibling file now counts as typed (1.4 points on Rigor's own `lib`), and turning `parameter_inference:` on is worth 3.4 more.
+- **[cli]** `rigor coverage` and `rigor check --coverage` now measure the same engine `rigor check` runs ([#535](https://github.com/rigortype/rigor/pull/535), [#505](https://github.com/rigortype/rigor/pull/505), [#513](https://github.com/rigortype/rigor/issues/513), [#523](https://github.com/rigortype/rigor/issues/523), [#502](https://github.com/rigortype/rigor/issues/502)).
+  - The precision ratio sees your project's cross-file methods, ancestry, and plugin-contributed types instead of under-reporting them as untyped.
+  - Precisely-folded `Data` / `Struct` values count as typed; a class defined in a sibling file is worth 1.4 points on Rigor's own `lib`, and `parameter_inference:` is worth 3.4 more.
 
 ### Fixed
 
-- **[engine]** Safe navigation is no longer typed as a plain call: `x&.m` keeps the nil the skipped call produces and answers the non-nil arm's type instead of collapsing to untyped ([#543](https://github.com/rigortype/rigor/pull/543), [#518](https://github.com/rigortype/rigor/issues/518), [#519](https://github.com/rigortype/rigor/issues/519), [#540](https://github.com/rigortype/rigor/issues/540)).
+- **[engine]** Safe navigation is no longer typed as a plain call ([#543](https://github.com/rigortype/rigor/pull/543), [#518](https://github.com/rigortype/rigor/issues/518), [#519](https://github.com/rigortype/rigor/issues/519), [#540](https://github.com/rigortype/rigor/issues/540)).
+  - `x&.m` keeps the nil the skipped call produces and answers the non-nil arm's type instead of collapsing to untyped.
   - A plain call on a `T | nil` receiver answers `T`'s type when the method would raise on nil, and a mutable literal constant (`CACHE = {}`) the same file mutates stops folding reads through its stale empty shape.
-  - `call.possible-nil-receiver` no longer fires on a value guarded by a safe-navigation chain (`if custom&.value.present?`, `return if backup&.user.nil?`) or by an `include?` test against a collection that cannot hold nil ([#606](https://github.com/rigortype/rigor/issues/606), [#607](https://github.com/rigortype/rigor/pull/607)).
+  - `call.possible-nil-receiver` no longer fires on a value guarded by a safe-navigation chain or by an `include?` test against a collection that cannot hold nil ([#606](https://github.com/rigortype/rigor/issues/606), [#607](https://github.com/rigortype/rigor/pull/607)).
 
-- **[engine]** An attribute or index assignment (`x.attr = v`, `h[k] = v`) now carries the assigned value's type, as Ruby defines, instead of the writer method's declared return, so `h[k] = true` no longer reads as untyped on an untyped hash ([#538](https://github.com/rigortype/rigor/pull/538), [#520](https://github.com/rigortype/rigor/issues/520)).
+- **[engine]** An attribute or index assignment now carries the assigned value's type, as Ruby defines, instead of the writer method's declared return ([#538](https://github.com/rigortype/rigor/pull/538), [#520](https://github.com/rigortype/rigor/issues/520)).
+  - `h[k] = true` no longer reads as untyped on an untyped hash.
 
-- **[engine]** `x.attr ||= v`, `x.attr &&= v`, and `x.attr += v` now carry their real value semantics instead of falling to untyped as unsupported syntax ([#552](https://github.com/rigortype/rigor/pull/552), [#532](https://github.com/rigortype/rigor/issues/532)).
+- **[engine]** `x.attr ||= v`, `x.attr &&= v`, and `x.attr += v` now carry their real value semantics instead of falling to untyped ([#552](https://github.com/rigortype/rigor/pull/552), [#532](https://github.com/rigortype/rigor/issues/532)).
+  - `user.name ||= "anon"` types as the assigned value rather than as unsupported syntax.
 
-- **[engine]** Methods defined in a `Struct.new(...) do ... end` block now resolve on the struct's values, so `Line.new(text).describe` infers the block def's return instead of reading untyped ([#555](https://github.com/rigortype/rigor/pull/555), [#525](https://github.com/rigortype/rigor/issues/525), [#591](https://github.com/rigortype/rigor/pull/591)).
-  - A receiverless `text` read inside that body folds to the caller's value when the members are known, and a body that could have changed a member before reading it still declines.
+- **[engine]** Methods defined in a `Struct.new(...) do ... end` block now resolve on the struct's values ([#555](https://github.com/rigortype/rigor/pull/555), [#525](https://github.com/rigortype/rigor/issues/525), [#591](https://github.com/rigortype/rigor/pull/591)).
+  - `Line.new(text).describe` infers the block def's return instead of reading untyped, and a receiverless member read folds to the caller's value when the members are known.
   - `Class.new(Struct.new(...))` and `Class.new(Data.define(...))` no longer report an argument-type mismatch, and the resulting classes keep their declared members ([#634](https://github.com/rigortype/rigor/issues/634), [#687](https://github.com/rigortype/rigor/pull/687)).
   - A fluent chain such as `Line.new("a").with_text("z").text` no longer reports the construction-time value after a setter has changed it ([#595](https://github.com/rigortype/rigor/issues/595), [#598](https://github.com/rigortype/rigor/pull/598)).
   - A `Struct` member read still folds to its known value after an `if` or `while` earlier in the method ([#589](https://github.com/rigortype/rigor/issues/589), [#596](https://github.com/rigortype/rigor/pull/596)).
-  - `call.unresolved-toplevel` no longer fires inside a `Const = Struct.new(…) do … end` body (or its `Data.define` / `Class.new` / `Module.new` twins), and a member that shadows a `Kernel` method (`lambda`) now reads as the member ([#590](https://github.com/rigortype/rigor/issues/590), [#619](https://github.com/rigortype/rigor/pull/619)).
-  - A method a class defines itself (a `Struct.new` / `Data.define` member, its own `attr_reader`, an inherited or included `def`) is no longer shadowed by an unrelated top-level `def` of the same name ([#618](https://github.com/rigortype/rigor/issues/618), [#636](https://github.com/rigortype/rigor/pull/636)).
+  - `call.unresolved-toplevel` no longer fires inside a `Const = Struct.new(…) do … end` body, and a member that shadows a `Kernel` method now reads as the member ([#590](https://github.com/rigortype/rigor/issues/590), [#619](https://github.com/rigortype/rigor/pull/619)).
+  - A method a class defines itself is no longer shadowed by an unrelated top-level `def` of the same name ([#618](https://github.com/rigortype/rigor/issues/618), [#636](https://github.com/rigortype/rigor/pull/636)).
 
-- **[engine]** Calling your own method with optional, keyword, rest, or block parameters no longer loses its inferred return type: the call-site binder binds each parameter it can identify (defaults included, `options = {}` too) instead of giving up on the whole signature ([#547](https://github.com/rigortype/rigor/pull/547), [#524](https://github.com/rigortype/rigor/issues/524)).
+- **[engine]** Calling your own method with optional, keyword, rest, or block parameters no longer loses its inferred return type ([#547](https://github.com/rigortype/rigor/pull/547), [#524](https://github.com/rigortype/rigor/issues/524)).
+  - The call-site binder binds each parameter it can identify, defaults and `options = {}` included, instead of giving up on the whole signature.
 
-- **[engine]** `File.read(path)` and `IO.read(path)` without a length now type as `String` instead of `String?`, so guards on whole-file reads stop flagging impossible nils ([#547](https://github.com/rigortype/rigor/pull/547)).
+- **[engine]** `File.read(path)` and `IO.read(path)` without a length now type as `String` instead of `String?` ([#547](https://github.com/rigortype/rigor/pull/547)).
+  - Guards on whole-file reads stop flagging impossible nils.
 
-- **[engine]** `alias_method :new_name, :old_name` now resolves like the `alias` keyword, and `x.send(:selector)` with a literal symbol resolves as the direct call would, private methods included ([#549](https://github.com/rigortype/rigor/pull/549), [#533](https://github.com/rigortype/rigor/issues/533)).
+- **[engine]** `alias_method :new_name, :old_name` now resolves like the `alias` keyword ([#549](https://github.com/rigortype/rigor/pull/549), [#533](https://github.com/rigortype/rigor/issues/533)).
+  - `x.send(:selector)` with a literal symbol resolves as the direct call would, private methods included.
 
-- **[engine]** A call whose argument Rigor cannot type no longer picks one RBS overload by declaration order, so `[true] * n` with an untyped `n` no longer reads as `String` (18 false positives removed across the survey corpus, none added) ([#537](https://github.com/rigortype/rigor/pull/537), [#521](https://github.com/rigortype/rigor/issues/521)).
+- **[engine]** A call whose argument Rigor cannot type no longer picks one RBS overload by declaration order ([#537](https://github.com/rigortype/rigor/pull/537), [#521](https://github.com/rigortype/rigor/issues/521)).
+  - `[true] * n` with an untyped `n` no longer reads as `String` (18 false positives removed across the survey corpus, none added).
 
-- **[engine]** Overload selection now sees through alias-declared parameters, so an alias expanding to a concrete class rejects a non-matching argument instead of gradually accepting everything and winning by list position ([#558](https://github.com/rigortype/rigor/pull/558), [#529](https://github.com/rigortype/rigor/issues/529)).
+- **[engine]** Overload selection now sees through alias-declared parameters ([#558](https://github.com/rigortype/rigor/pull/558), [#529](https://github.com/rigortype/rigor/issues/529)).
+  - An alias expanding to a concrete class rejects a non-matching argument instead of gradually accepting everything and winning by list position.
 
-- **[engine]** RBS type aliases and intersections now translate instead of collapsing to untyped: prism's `type node = Node & _Node` reads as `Prism::Node`, and aliased returns, parameters, and block parameters resolve through the alias table ([#556](https://github.com/rigortype/rigor/pull/556), [#529](https://github.com/rigortype/rigor/issues/529)).
+- **[engine]** RBS type aliases and intersections now translate instead of collapsing to untyped ([#556](https://github.com/rigortype/rigor/pull/556), [#529](https://github.com/rigortype/rigor/issues/529)).
+  - Prism's `type node = Node & _Node` reads as `Prism::Node`, and aliased returns, parameters, and block parameters resolve through the alias table.
 
-- **[check]** The declared side of `def.return-type-mismatch` and the ADR-35 override rules now sees through RBS type aliases, so a redefinition contradicting an alias-declared signature is reported instead of silently accepted ([#557](https://github.com/rigortype/rigor/pull/557), [#529](https://github.com/rigortype/rigor/issues/529)).
+- **[check]** The declared side of `def.return-type-mismatch` and the ADR-35 override rules now sees through RBS type aliases ([#557](https://github.com/rigortype/rigor/pull/557), [#529](https://github.com/rigortype/rigor/issues/529)).
+  - A redefinition contradicting an alias-declared signature is reported instead of silently accepted.
 
-- **[engine]** Slot-rewriting mutators (`t[0] += 5`, `opts[:k] = v`, `fill`, `map!`, `push`, `concat`) now widen a literal collection's value pinning along with its shape, so the stale constant union no longer feeds a false always-falsey on the new value ([#561](https://github.com/rigortype/rigor/pull/561), [#560](https://github.com/rigortype/rigor/issues/560), [#581](https://github.com/rigortype/rigor/pull/581), [#593](https://github.com/rigortype/rigor/pull/593)).
+- **[engine]** Slot-rewriting mutators now widen a literal collection's value pinning along with its shape ([#561](https://github.com/rigortype/rigor/pull/561), [#560](https://github.com/rigortype/rigor/issues/560), [#581](https://github.com/rigortype/rigor/pull/581), [#593](https://github.com/rigortype/rigor/pull/593)).
+  - Covered: `t[0] += 5`, `opts[:k] = v`, `fill`, `map!`, `push` and `concat`.
   - A collection mutated with arguments the analyzer cannot read (`m.concat(xs)`) no longer keeps its original element values ([#580](https://github.com/rigortype/rigor/issues/580), [#593](https://github.com/rigortype/rigor/pull/593)).
 
-- **[engine]** An index write on a receiver the engine cannot shape no longer synthesizes a Hash type, so mail's `compose_codepoints` (which mutates its Array parameter through integer and range index writes) returns untyped instead of a phantom `Hash[Integer | Range, ...]` that fired on the caller's `.pack` ([#559](https://github.com/rigortype/rigor/pull/559), [#553](https://github.com/rigortype/rigor/issues/553)).
+- **[engine]** An index write on a receiver the engine cannot shape no longer synthesizes a Hash type ([#559](https://github.com/rigortype/rigor/pull/559), [#553](https://github.com/rigortype/rigor/issues/553)).
+  - mail's `compose_codepoints` returns untyped instead of a phantom `Hash[Integer | Range, ...]` that fired on the caller's `.pack`.
 
-- **[engine]** `Array.new(n)`, `Array.new(n, value)` and `Array.new(n) { … }` with a non-literal size now carry an element type, so a value appended inside a later block no longer replaces it ([#615](https://github.com/rigortype/rigor/issues/615), [#650](https://github.com/rigortype/rigor/pull/650)).
+- **[engine]** `Array.new(n)`, `Array.new(n, value)` and `Array.new(n) { … }` with a non-literal size now carry an element type ([#615](https://github.com/rigortype/rigor/issues/615), [#650](https://github.com/rigortype/rigor/pull/650)).
+  - A value appended inside a later block no longer replaces it, so `acc = Array.new(n, "x"); acc.push(1); acc.first.upcase` no longer reports `undefined method 'upcase' for 1`.
 
-- **[engine]** A parameter declared `Array[untyped]` or `Hash[untyped, untyped]` that a block or loop body appends to keeps its declared gradual arm instead of closing to the appended type, so a later `a.first.upcase` on correct code no longer draws `call.undefined-method` ([#586](https://github.com/rigortype/rigor/issues/586), [#616](https://github.com/rigortype/rigor/pull/616)).
+- **[engine]** A parameter declared `Array[untyped]` or `Hash[untyped, untyped]` that a block or loop body appends to keeps its declared gradual arm ([#586](https://github.com/rigortype/rigor/issues/586), [#616](https://github.com/rigortype/rigor/pull/616)).
+  - A later `a.first.upcase` on correct code no longer draws `call.undefined-method`.
 
-- **[engine]** A variable that may hold either an untyped value or an array (`out = flag ? u : [2]`) no longer loses the untyped half when a block or `while` body appends to it ([#631](https://github.com/rigortype/rigor/issues/631), [#649](https://github.com/rigortype/rigor/pull/649)).
+- **[engine]** A variable that may hold either an untyped value or an array no longer loses the untyped half when a block or `while` body appends to it ([#631](https://github.com/rigortype/rigor/issues/631), [#649](https://github.com/rigortype/rigor/pull/649)).
+  - `out = flag ? u : [2]` keeps both arms, so `out.first.upcase` on correct code stops drawing `call.undefined-method`.
 
-- **[engine]** A block that mutates a captured collection in place and then returns it now types the call as the widened collection instead of the stale empty literal the block entered with ([#587](https://github.com/rigortype/rigor/issues/587), [#620](https://github.com/rigortype/rigor/pull/620)).
-  - A `map` / `select` block over an array literal that reassigns an outer local now types every element as what that local can be in any iteration, instead of pinning all of them to the first iteration's value.
+- **[engine]** A block that mutates a captured collection in place and then returns it now types the call as the widened collection ([#587](https://github.com/rigortype/rigor/issues/587), [#620](https://github.com/rigortype/rigor/pull/620)).
+  - A `map` / `select` block over an array literal that reassigns an outer local types every element as what that local can be in any iteration, instead of pinning all of them to the first iteration's value.
 
-- **[engine]** A block whose last expression reads a variable the block itself assigned now types as that value instead of falling back to an unknown type, so `m.synchronize do v = compute; v end` is typed as precisely as `m.synchronize { compute }` ([#533](https://github.com/rigortype/rigor/issues/533), [#584](https://github.com/rigortype/rigor/pull/584)).
+- **[engine]** A block whose last expression reads a variable the block itself assigned now types as that value ([#533](https://github.com/rigortype/rigor/issues/533), [#584](https://github.com/rigortype/rigor/pull/584)).
+  - `m.synchronize do v = compute; v end` is typed as precisely as `m.synchronize { compute }`.
 
-- **[engine]** Methods on refined strings (`RUBY_VERSION != "1.0"`, `RUBY_VERSION.split(".")`) now resolve through the underlying `String` instead of losing the whole call to untyped, and an `is_a?` guard against a class Rigor cannot see no longer keeps the old type on the guarded branch ([#550](https://github.com/rigortype/rigor/pull/550), [#533](https://github.com/rigortype/rigor/issues/533)).
+- **[engine]** Methods on refined strings now resolve through the underlying `String` instead of losing the whole call to untyped ([#550](https://github.com/rigortype/rigor/pull/550), [#533](https://github.com/rigortype/rigor/issues/533)).
+  - `RUBY_VERSION != "1.0"` and `RUBY_VERSION.split(".")` type; an `is_a?` guard against a class Rigor cannot see no longer keeps the old type on the guarded branch.
 
-- **[engine]** A block-taking call on a statically-folded `Set` constant (`NAMES.any? { … }`) no longer answers the blockless method's constant, so the wrong fold can no longer flag a reachable condition as always-truthy ([#546](https://github.com/rigortype/rigor/pull/546), [#539](https://github.com/rigortype/rigor/issues/539)).
+- **[engine]** A block-taking call on a statically-folded `Set` constant no longer answers the blockless method's constant ([#546](https://github.com/rigortype/rigor/pull/546), [#539](https://github.com/rigortype/rigor/issues/539)).
+  - `NAMES.any? { … }` is decided by the block, so the wrong fold can no longer flag a reachable condition as always-truthy.
 
-- **[engine]** `h[k] ||= default` no longer pins later `h[k]` reads to the default when Rigor cannot fully see the hash, so a caller-supplied value kept by the `||=` is no longer folded away ([#545](https://github.com/rigortype/rigor/pull/545), [#544](https://github.com/rigortype/rigor/issues/544)).
+- **[engine]** `h[k] ||= default` no longer pins later `h[k]` reads to the default when Rigor cannot fully see the hash ([#545](https://github.com/rigortype/rigor/pull/545), [#544](https://github.com/rigortype/rigor/issues/544)).
+  - A caller-supplied value kept by the `||=` is no longer folded away.
 
-- **[engine]** A collection handed out by one method and filled through that reference (`(bucket_for(entry)[key] ||= {})[name] = row`) is no longer read as still empty, so `empty?` and `size` on it stop folding to a constant in every other method of the class ([#507](https://github.com/rigortype/rigor/pull/507), [#506](https://github.com/rigortype/rigor/issues/506)).
+- **[engine]** A collection handed out by one method and filled through that reference is no longer read as still empty ([#507](https://github.com/rigortype/rigor/pull/507), [#506](https://github.com/rigortype/rigor/issues/506)).
+  - `(bucket_for(entry)[key] ||= {})[name] = row` no longer makes `empty?` and `size` fold to a constant in every other method of the class.
 
-- **[engine]** A collection filled through `h[k] ||= v`, `h[k] &&= v` or `h[k] += v` is no longer read as still carrying the literal shape it was initialized with, so `empty?` and `size` on it stop folding to a constant ([#504](https://github.com/rigortype/rigor/pull/504), [#501](https://github.com/rigortype/rigor/issues/501)).
+- **[engine]** A collection filled through `h[k] ||= v`, `h[k] &&= v` or `h[k] += v` is no longer read as still carrying its initialization shape ([#504](https://github.com/rigortype/rigor/pull/504), [#501](https://github.com/rigortype/rigor/issues/501)).
+  - `empty?` and `size` on it stop folding to a constant.
 
-- **[engine]** A constant referenced inside a compact namespace declaration (`Rails` written in `module MyApp::Inner`, `User` written in `class Admin::UsersController`) now resolves the way Ruby does, to the top-level constant rather than to a same-named one under the enclosing namespace ([#652](https://github.com/rigortype/rigor/issues/652), [#685](https://github.com/rigortype/rigor/pull/685), [#681](https://github.com/rigortype/rigor/issues/681), [#692](https://github.com/rigortype/rigor/pull/692), [#709](https://github.com/rigortype/rigor/pull/709), [#715](https://github.com/rigortype/rigor/pull/715)).
-  - `is_a?` / `kind_of?` / `instance_of?`, `case` / `when` and `Class === x` guards over such a name are fixed along with the constant read itself, including nested paths such as `x.is_a?(Type::Union)` ([#635](https://github.com/rigortype/rigor/issues/635), [#664](https://github.com/rigortype/rigor/pull/664)).
-  - An instance variable, class variable or constant assigned inside that compact form is recorded as the class Ruby resolves it to ([#692](https://github.com/rigortype/rigor/pull/692)).
-  - A method's inferred return type now resolves its constants with the declaring class's namespace, including on `--incremental` rechecks of an unchanged file ([#707](https://github.com/rigortype/rigor/issues/707), [#709](https://github.com/rigortype/rigor/pull/709), [#715](https://github.com/rigortype/rigor/pull/715)).
+- **[engine]** A constant referenced inside a compact namespace declaration now resolves the way Ruby does ([#652](https://github.com/rigortype/rigor/issues/652), [#685](https://github.com/rigortype/rigor/pull/685)).
+  - `Rails` written in `module MyApp::Inner` reaches top-level `Rails`, not `MyApp::Rails`.
+  - `is_a?` / `case` / `when` / `Class === x` guards over such a name are fixed along with the read, including nested paths ([#635](https://github.com/rigortype/rigor/issues/635), [#664](https://github.com/rigortype/rigor/pull/664)).
+  - An ivar, cvar or constant assigned inside that form is recorded as the class Ruby resolves it to ([#681](https://github.com/rigortype/rigor/issues/681), [#692](https://github.com/rigortype/rigor/pull/692)).
+  - A method's inferred return type resolves its constants with the declaring class's namespace, including on `--incremental` rechecks ([#707](https://github.com/rigortype/rigor/issues/707), [#709](https://github.com/rigortype/rigor/pull/709), [#715](https://github.com/rigortype/rigor/pull/715)).
 
-- **[engine]** A constant written with a leading `::` now resolves to the top-level constant instead of a same-named one in the surrounding namespace, so `::Rails.logger` inside a `module MyApp` that also defines `MyApp::Rails` types as the framework's `Rails` ([#614](https://github.com/rigortype/rigor/issues/614), [#642](https://github.com/rigortype/rigor/pull/642), [#721](https://github.com/rigortype/rigor/pull/721), [#754](https://github.com/rigortype/rigor/pull/754)).
-  - A class or module opened with a leading `::` is known by the name Ruby gives it: `class ::Admin::Widget` inside `module Outer` is `Admin::Widget`, not `Outer::Admin::Widget` ([#708](https://github.com/rigortype/rigor/issues/708), [#638](https://github.com/rigortype/rigor/issues/638), [#721](https://github.com/rigortype/rigor/pull/721)).
+- **[engine]** A constant written with a leading `::` now resolves to the top-level constant instead of a same-named one in the surrounding namespace ([#614](https://github.com/rigortype/rigor/issues/614), [#642](https://github.com/rigortype/rigor/pull/642)).
+  - `::Rails.logger` inside a `module MyApp` that also defines `MyApp::Rails` types as the framework's `Rails`.
+  - A class or module opened with a leading `::` is known by the name Ruby gives it: `class ::Admin::Widget` inside `module Outer` is `Admin::Widget` ([#708](https://github.com/rigortype/rigor/issues/708), [#638](https://github.com/rigortype/rigor/issues/638), [#721](https://github.com/rigortype/rigor/pull/721)).
   - `class Sub < ::Base` now inherits the top-level `Base` even inside a namespace that defines its own `Base` ([#722](https://github.com/rigortype/rigor/issues/722), [#637](https://github.com/rigortype/rigor/issues/637), [#754](https://github.com/rigortype/rigor/pull/754)).
   - `rigor unused` attributes a `::Foo` reference to the top-level declaration instead of a same-named shadow ([#625](https://github.com/rigortype/rigor/issues/625), [#755](https://github.com/rigortype/rigor/pull/755)).
 
-- **[engine]** A constant assigned through a path inside a namespace (`Holder::DEFAULT = Post` written in `module Admin`) is filed under the namespace that spelling resolves to, and a `class_eval` block's constant write is attributed to the class the block runs on rather than the enclosing module ([#690](https://github.com/rigortype/rigor/issues/690), [#706](https://github.com/rigortype/rigor/pull/706), [#705](https://github.com/rigortype/rigor/issues/705), [#711](https://github.com/rigortype/rigor/pull/711)).
-  - A constant assigned through a runtime receiver (`[Foo].each { |k| k::X = 1 }`) no longer publishes its value to the whole project under the bare `X`.
+- **[engine]** A constant assigned through a path inside a namespace is filed under the namespace that spelling resolves to ([#690](https://github.com/rigortype/rigor/issues/690), [#706](https://github.com/rigortype/rigor/pull/706)).
+  - `Holder::DEFAULT = Post` written in `module Admin` types with that enclosing namespace in scope.
+  - A `class_eval` block's constant write is attributed to the class the block runs on, and a runtime receiver (`[Foo].each { |k| k::X = 1 }`) no longer publishes under the bare `X` ([#705](https://github.com/rigortype/rigor/issues/705), [#711](https://github.com/rigortype/rigor/pull/711)).
 
-- **[engine]** A method defined at the top level now resolves the constants in its body at the top level, the way Ruby does, instead of under the namespace it happens to be called from ([#716](https://github.com/rigortype/rigor/issues/716), [#764](https://github.com/rigortype/rigor/pull/764)).
+- **[engine]** A method defined at the top level now resolves the constants in its body at the top level, the way Ruby does ([#716](https://github.com/rigortype/rigor/issues/716), [#764](https://github.com/rigortype/rigor/pull/764)).
+  - `def helper = Post.new` written outside any `class` or `module` names `::Post` even when called from inside a `module Admin` that declares its own `Post`.
 
-- **[engine]** Refining a constant, or resolving a class name during analysis, no longer loads and runs a library inside Rigor itself, so an autoload that calls `exit` when an optional gem is missing can no longer kill `rigor check` with no diagnostics ([#680](https://github.com/rigortype/rigor/issues/680), [#691](https://github.com/rigortype/rigor/pull/691), [#689](https://github.com/rigortype/rigor/issues/689), [#753](https://github.com/rigortype/rigor/pull/753)).
+- **[engine]** Analysing a constant or class name no longer loads and runs a library inside Rigor itself ([#680](https://github.com/rigortype/rigor/issues/680), [#691](https://github.com/rigortype/rigor/pull/691), [#689](https://github.com/rigortype/rigor/issues/689), [#753](https://github.com/rigortype/rigor/pull/753)).
+  - An autoload that calls `exit` when an optional gem is missing can no longer kill `rigor check` with no diagnostics.
 
-- **[engine]** A call inside an RSpec-style block no longer starts binding to a same-named top-level `def` from an unrelated file as soon as the block contains an `if`, so a matcher like `expect { … }.to output(/x/)` is no longer captured by your own `def output` ([#600](https://github.com/rigortype/rigor/issues/600), [#603](https://github.com/rigortype/rigor/pull/603)).
+- **[engine]** A call inside an RSpec-style block no longer binds to a same-named top-level `def` from an unrelated file as soon as the block contains an `if` ([#600](https://github.com/rigortype/rigor/issues/600), [#603](https://github.com/rigortype/rigor/pull/603)).
+  - `expect { … }.to output(/x/)` is no longer captured by your own `def output`.
 
-- **[engine]** Code in the arm a Ruby-version guard rules out no longer reports: when `rigor` can decide the condition from literals (`RUBY_VERSION >= "3.1"`, `RUBY_ENGINE == "jruby"`), the branch that cannot run on the Ruby you are checking with is treated as unreachable ([#627](https://github.com/rigortype/rigor/issues/627), [#647](https://github.com/rigortype/rigor/pull/647)).
+- **[engine]** Code in the arm a Ruby-version guard rules out no longer reports ([#627](https://github.com/rigortype/rigor/issues/627), [#647](https://github.com/rigortype/rigor/pull/647)).
+  - When `rigor` can decide `RUBY_VERSION >= "3.1"` or `RUBY_ENGINE == "jruby"` from literals, the branch that cannot run on the Ruby you are checking with is treated as unreachable.
 
-- **[engine]** A call whose type comes from a plugin (`Rails.logger` under `rigor-railties`) no longer reports `undefined method` when your own `sig/` declares part of that receiver but not the method the plugin covers ([#653](https://github.com/rigortype/rigor/issues/653), [#702](https://github.com/rigortype/rigor/pull/702)).
+- **[engine]** A call whose type comes from a plugin no longer reports `undefined method` when your own `sig/` declares part of that receiver but not the method the plugin covers ([#653](https://github.com/rigortype/rigor/issues/653), [#702](https://github.com/rigortype/rigor/pull/702)).
+  - `Rails.logger` under `rigor-railties` is the case.
 
-- **[engine]** Rigor now discovers a gem's own `sig/` when the gem is installed from a `git:` source, and a `git:`-sourced gem owns its constants in the missing-RBS provenance index, so a fork's signatures are picked up and references into it are reported as "this gem ships no RBS" rather than as a generic engine gap ([#611](https://github.com/rigortype/rigor/issues/611), [#761](https://github.com/rigortype/rigor/pull/761), [#763](https://github.com/rigortype/rigor/issues/763), [#772](https://github.com/rigortype/rigor/pull/772)).
+- **[engine]** A `git:`-sourced gem now contributes its `sig/` and owns its constants in the missing-RBS index ([#611](https://github.com/rigortype/rigor/issues/611), [#761](https://github.com/rigortype/rigor/pull/761), [#763](https://github.com/rigortype/rigor/issues/763), [#772](https://github.com/rigortype/rigor/pull/772)).
+  - A fork's signatures are picked up the same way a published gem's are.
+  - References into it are reported as "this gem ships no RBS" rather than as a generic engine gap.
 
-- **[engine]** `rigor check --incremental` now re-analyses the files that read a constant nothing in the project declared yet, so adding the class or module that defines it later reports the same diagnostics a full run does ([#622](https://github.com/rigortype/rigor/issues/622), [#648](https://github.com/rigortype/rigor/pull/648)).
+- **[engine]** `rigor check --incremental` now re-analyses the files that read a constant nothing in the project declared yet ([#622](https://github.com/rigortype/rigor/issues/622), [#648](https://github.com/rigortype/rigor/pull/648)).
+  - Adding the class or module that defines it later reports the same diagnostics a full run does.
 
 - **[types]** A class method defined on a project base class now resolves on its subclasses instead of typing `Dynamic[top]` ([#731](https://github.com/rigortype/rigor/issues/731), [#748](https://github.com/rigortype/rigor/pull/748)).
+  - Inherited factories, registries and `class << self` helpers gain their return type.
 
-- **[types]** A mixin call inside a block that rebinds `self` is no longer attributed to the lexically enclosing class: `Thing = Class.new { include M }` no longer puts `M`'s methods on that class, `Recv.class_eval { include M }` records on `Recv`, and a `class << self` include stops reaching the instance surface ([#728](https://github.com/rigortype/rigor/issues/728), [#749](https://github.com/rigortype/rigor/pull/749)).
+- **[types]** A mixin call inside a block that rebinds `self` is no longer attributed to the lexically enclosing class ([#728](https://github.com/rigortype/rigor/issues/728), [#749](https://github.com/rigortype/rigor/pull/749)).
+  - `Thing = Class.new { include M }` no longer puts `M`'s methods on that class; `Recv.class_eval { include M }` records on `Recv`; a `class << self` include stops reaching the instance surface.
 
-- **[check]** `call.undefined-method` no longer fires when the receiver's method surface cannot be enumerated: a mixin-module type, a `Class` / `Module` value, a class whose include no loaded RBS declares, or a `sig/` class whose project superclass defines the method in source ([#723](https://github.com/rigortype/rigor/issues/723), [#733](https://github.com/rigortype/rigor/pull/733), [#739](https://github.com/rigortype/rigor/issues/739), [#741](https://github.com/rigortype/rigor/pull/741), [#742](https://github.com/rigortype/rigor/issues/742), [#743](https://github.com/rigortype/rigor/pull/743), [#746](https://github.com/rigortype/rigor/issues/746), [#747](https://github.com/rigortype/rigor/pull/747)).
+- **[check]** `call.undefined-method` no longer fires when the receiver's method surface cannot be enumerated ([#723](https://github.com/rigortype/rigor/issues/723), [#733](https://github.com/rigortype/rigor/pull/733), [#739](https://github.com/rigortype/rigor/issues/739), [#741](https://github.com/rigortype/rigor/pull/741), [#742](https://github.com/rigortype/rigor/issues/742), [#743](https://github.com/rigortype/rigor/pull/743), [#746](https://github.com/rigortype/rigor/issues/746), [#747](https://github.com/rigortype/rigor/pull/747)).
+  - That covers a mixin-module type, a `Class` / `Module` value, a class whose include no loaded RBS declares, and a `sig/` class whose project superclass defines the method in source.
 
-- **[check]** `mattr_accessor`, `cattr_accessor`, their reader/writer spellings and `class_attribute` are now recorded as method-introducing, so a class whose `sig/` does not declare them stops drawing false `call.undefined-method` for the accessors they define ([#736](https://github.com/rigortype/rigor/issues/736), [#740](https://github.com/rigortype/rigor/pull/740)).
+- **[check]** `mattr_accessor`, `cattr_accessor`, their reader/writer spellings and `class_attribute` are now recorded as method-introducing ([#736](https://github.com/rigortype/rigor/issues/736), [#740](https://github.com/rigortype/rigor/pull/740)).
+  - A class whose `sig/` does not declare them stops drawing false `call.undefined-method` for the accessors they define.
 
-- **[check]** `rigor check path/to/one_file.rb` now reports what a whole-project run reports for that file: the cross-file discovery pass spans the configured project even when the analysis targets an explicit file list ([#684](https://github.com/rigortype/rigor/issues/684), [#734](https://github.com/rigortype/rigor/pull/734)).
+- **[check]** `rigor check path/to/one_file.rb` now reports what a whole-project run reports for that file ([#684](https://github.com/rigortype/rigor/issues/684), [#734](https://github.com/rigortype/rigor/pull/734)).
+  - The cross-file discovery pass spans the configured project even when the analysis targets an explicit file list.
 
-- **[check]** A `case` / `is_a?` arm whose class relationship Rigor cannot determine is no longer reported unreachable, so reopening a core class to include a project module no longer makes every match on that module read as dead code ([#657](https://github.com/rigortype/rigor/issues/657), [#751](https://github.com/rigortype/rigor/pull/751)).
+- **[check]** A `case` / `is_a?` arm whose class relationship Rigor cannot determine is no longer reported unreachable ([#657](https://github.com/rigortype/rigor/issues/657), [#751](https://github.com/rigortype/rigor/pull/751)).
+  - Reopening a core class to include a project module no longer makes every match on that module read as dead code.
 
-- **[sig-gen]** `rigor sig-gen --write` no longer emits a declaration whose superclass no loaded RBS declares, writes a generic superclass with its type arguments, names the superclass Ruby actually resolves, and withholds a base method's signature when an unsigned subclass overrides it ([#735](https://github.com/rigortype/rigor/issues/735), [#737](https://github.com/rigortype/rigor/pull/737), [#722](https://github.com/rigortype/rigor/issues/722), [#738](https://github.com/rigortype/rigor/pull/738), [#744](https://github.com/rigortype/rigor/issues/744), [#745](https://github.com/rigortype/rigor/pull/745)).
+- **[sig-gen]** `rigor sig-gen --write` no longer emits a `sig/` that makes the next run worse ([#735](https://github.com/rigortype/rigor/issues/735), [#737](https://github.com/rigortype/rigor/pull/737)).
+  - A declaration whose superclass no loaded RBS declares is skipped, and an unresolved superclass is named on stderr.
+  - A generic superclass is written with its type arguments, and a generated superclass is the one Ruby resolves ([#722](https://github.com/rigortype/rigor/issues/722), [#738](https://github.com/rigortype/rigor/pull/738)).
+  - A base method's signature is withheld when an unsigned subclass overrides it ([#744](https://github.com/rigortype/rigor/issues/744), [#745](https://github.com/rigortype/rigor/pull/745)).
 
-- **[cli]** `rigor coverage --protection` no longer reports a call to your own method as an "unsupported syntax" hole when the real story is a return type Rigor could not infer, and a method inherited from a class that lives in a gem shipping no RBS is attributed to that gem instead of as an engine gap ([#536](https://github.com/rigortype/rigor/pull/536), [#522](https://github.com/rigortype/rigor/issues/522), [#530](https://github.com/rigortype/rigor/issues/530), [#773](https://github.com/rigortype/rigor/pull/773)).
+- **[cli]** `rigor coverage --protection` now attributes holes to the cause that would actually help ([#536](https://github.com/rigortype/rigor/pull/536), [#522](https://github.com/rigortype/rigor/issues/522), [#530](https://github.com/rigortype/rigor/issues/530), [#773](https://github.com/rigortype/rigor/pull/773)).
+  - A call to your own method whose return type Rigor could not infer is an inference gap, not "unsupported syntax".
+  - A method inherited from a class that lives in a gem shipping no RBS is attributed to that gem instead of as an engine gap.
 
-- **[rigor coverage]** `--protection --mutation` no longer reports mutants as survivors when Rigor's own analysis crashed while measuring them, and no longer passes `--threshold` on a file it could not measure at all: those mutants go to the `harness_errors` bucket, the effectiveness figure is withheld, and the command exits non-zero naming the unmeasured files ([#686](https://github.com/rigortype/rigor/issues/686), [#725](https://github.com/rigortype/rigor/pull/725)).
+- **[rigor coverage]** `--protection --mutation` no longer reports mutants as survivors when Rigor's own analysis crashed while measuring them ([#686](https://github.com/rigortype/rigor/issues/686), [#725](https://github.com/rigortype/rigor/pull/725)).
+  - Those mutants go to the `harness_errors` bucket, the effectiveness figure is withheld, and the command exits non-zero naming the unmeasured files.
 
-- **[plugins]** `rigor-activerecord` no longer switches itself off on a project that ships raw migrations without a committed `db/schema.rb`: it types table names, finders, scopes and associations from the model source alone and stands down only the column-dependent checks ([#569](https://github.com/rigortype/rigor/issues/569), [#576](https://github.com/rigortype/rigor/pull/576)).
-  - `Model.table_name` now types as `String`, and as the exact table name when your source declares one with `self.table_name = "…"` (inherited down an STI chain).
-  - A method name an "open" receiver only inherited (an ActiveRecord scope called `open`, `select` or `format`) no longer reports `call.wrong-arity` or `call.argument-type-mismatch` against a `Kernel` signature the call never runs.
+- **[plugins]** `rigor-activerecord` no longer switches itself off on a project that ships raw migrations without a committed `db/schema.rb` ([#569](https://github.com/rigortype/rigor/issues/569), [#576](https://github.com/rigortype/rigor/pull/576)).
+  - It types table names, finders, scopes and associations from the model source alone and stands down only the column-dependent checks.
+  - `Model.table_name` types as `String`, and as the exact table name when your source declares one with `self.table_name = "…"`.
+  - A method name an "open" receiver only inherited (`open`, `select`, `format`) no longer reports arity or argument errors against a `Kernel` signature the call never runs.
 
-- **[plugins]** `rigor-activerecord` no longer flattens a namespaced model's constant path into its table name (`Blog::Post` → `blog_posts`): it demodulizes first, the way Rails does, and applies a `table_name_prefix` / `table_name_suffix` declared as a literal on the enclosing module, the model's own class, a base class, or an engine ([#623](https://github.com/rigortype/rigor/issues/623), [#677](https://github.com/rigortype/rigor/pull/677), [#671](https://github.com/rigortype/rigor/issues/671), [#678](https://github.com/rigortype/rigor/issues/678), [#679](https://github.com/rigortype/rigor/issues/679), [#750](https://github.com/rigortype/rigor/pull/750)).
+- **[plugins]** `rigor-activerecord` no longer flattens a namespaced model's constant path into its table name ([#623](https://github.com/rigortype/rigor/issues/623), [#677](https://github.com/rigortype/rigor/pull/677), [#750](https://github.com/rigortype/rigor/pull/750)).
+  - `Blog::Post` demodulizes to `posts`, the way Rails does, instead of `blog_posts`.
+  - A `table_name_prefix` / `table_name_suffix` declared as a literal on the enclosing module, the model, a base class, or an engine is applied ([#671](https://github.com/rigortype/rigor/issues/671), [#678](https://github.com/rigortype/rigor/issues/678), [#679](https://github.com/rigortype/rigor/issues/679)).
 
-- **[plugins]** A model, mailer, job, Sidekiq worker, channel, attachment owner or controller declared as `class ::Foo`, or reopened in a second file, keeps its whole surface: plugins index every declaration under its plain name and merge the reopens into one entry ([#583](https://github.com/rigortype/rigor/issues/583), [#624](https://github.com/rigortype/rigor/pull/624), [#621](https://github.com/rigortype/rigor/issues/621), [#646](https://github.com/rigortype/rigor/pull/646)).
+- **[plugins]** A model, mailer, job, worker, channel, attachment owner or controller declared as `class ::Foo`, or reopened in a second file, keeps its whole surface ([#583](https://github.com/rigortype/rigor/issues/583), [#624](https://github.com/rigortype/rigor/pull/624), [#621](https://github.com/rigortype/rigor/issues/621), [#646](https://github.com/rigortype/rigor/pull/646)).
+  - Plugins index every declaration under its plain name and merge the reopens into one entry.
 
-- **[plugins]** `rigor-shoulda-matchers` now reads the `:model_index` fact published by `rigor-activerecord` as the flat Hash it actually is, so `have_db_column` / `validate_presence_of` / `belong_to` / `have_many` and the rest of its matcher checks fire on real projects again ([#573](https://github.com/rigortype/rigor/issues/573), [#582](https://github.com/rigortype/rigor/pull/582)).
+- **[plugins]** `rigor-shoulda-matchers` now reads the `:model_index` fact as the flat Hash it actually is ([#573](https://github.com/rigortype/rigor/issues/573), [#582](https://github.com/rigortype/rigor/pull/582)).
+  - `have_db_column` / `validate_presence_of` / `belong_to` / `have_many` and the rest of its matcher checks fire on real projects again.
 
-- **[plugins]** Ordinary Rails code on a `Time` value no longer draws a false `undefined method`: `Time.current.to_fs(:db)`, `.in_time_zone`, `.past?`, `.future?`, `.today?` and the rest of the ActiveSupport `Time` instance surface now type, while a genuine typo still reports ([#658](https://github.com/rigortype/rigor/issues/658), [#675](https://github.com/rigortype/rigor/pull/675)).
+- **[plugins]** Ordinary Rails code on a `Time` value no longer draws a false `undefined method` ([#658](https://github.com/rigortype/rigor/issues/658), [#675](https://github.com/rigortype/rigor/pull/675)).
+  - `Time.current.to_fs(:db)`, `.in_time_zone`, `.past?`, `.future?`, `.today?` and the rest of the ActiveSupport `Time` instance surface now type; a genuine typo still reports.
 
-- **[plugins]** Ordinary Rails code on a `Date` or `DateTime` receiver no longer draws `undefined method`: `Date.current.past?`, `Date.current.beginning_of_quarter`, `DateTime.now.past?`, `Date#in_time_zone` and the rest of the ActiveSupport calculation, conversion and time-zone surface are now declared ([#670](https://github.com/rigortype/rigor/issues/670), [#760](https://github.com/rigortype/rigor/pull/760), [#762](https://github.com/rigortype/rigor/issues/762), [#765](https://github.com/rigortype/rigor/pull/765)).
-  - Because `DateTime` inherits from `Date`, the rows whose result differs between the two are declared separately, so `DateTime.now.beginning_of_month` reads as `DateTime`.
-  - `Date.end_of_week`, `Date.beginning_of_month` and the other class-side names ActiveSupport defines only on an instance are no longer accepted, and `Date.beginning_of_week` now answers the `Symbol` week start instead of a `Date`.
+- **[plugins]** Ordinary Rails code on a `Date` or `DateTime` receiver no longer draws `undefined method` ([#670](https://github.com/rigortype/rigor/issues/670), [#760](https://github.com/rigortype/rigor/pull/760), [#762](https://github.com/rigortype/rigor/issues/762), [#765](https://github.com/rigortype/rigor/pull/765)).
+  - `Date.current.past?`, `DateTime.now.past?`, `Date#in_time_zone` and the rest of the ActiveSupport calculation, conversion and time-zone surface are now declared.
+  - Rows whose result differs between `Date` and `DateTime` are declared separately, so `DateTime.now.beginning_of_month` reads as `DateTime`.
+  - Class-side names ActiveSupport defines only on an instance (`Date.end_of_week`, `Date.beginning_of_month`, …) are no longer accepted, and `Date.beginning_of_week` answers the `Symbol` week start.
 
-- **[plugins]** rigor-activesupport-core-ext no longer types `30.minutes + Time.now` and the other Duration-on-the-left-of-a-Time/Date expressions, which raise at runtime, as `ActiveSupport::Duration` ([#588](https://github.com/rigortype/rigor/issues/588), [#628](https://github.com/rigortype/rigor/pull/628)).
-  - rigor-railties now leaves `Rails.logger` / `.cache` / `.configuration` / `.application` alone at sites where the project defines that very reader on its own `Rails`.
+- **[plugins]** rigor-activesupport-core-ext no longer types Duration-on-the-left-of-a-Time/Date expressions, which raise at runtime, as `ActiveSupport::Duration` ([#588](https://github.com/rigortype/rigor/issues/588), [#628](https://github.com/rigortype/rigor/pull/628)).
+  - `30.minutes + Time.now` is the case; rigor-railties also leaves `Rails.logger` / `.cache` / `.configuration` / `.application` alone at sites where the project defines that reader on its own `Rails`.
 
-- **[plugins]** A bundled plugin's RBS no longer collides with a signature you supply yourself: when `rbs collection install` (or your own `sig/`) declares a class the plugin also declares, but with a different number of generic parameters, the plugin's declaration steps aside instead of failing the definition build ([#610](https://github.com/rigortype/rigor/issues/610), [#770](https://github.com/rigortype/rigor/pull/770)).
+- **[plugins]** A bundled plugin's RBS no longer collides with a signature you supply yourself at a different generic arity ([#610](https://github.com/rigortype/rigor/issues/610), [#770](https://github.com/rigortype/rigor/pull/770)).
+  - The plugin's declaration steps aside, so `rigor-activerecord` and `rbs collection install` no longer cancel each other out on `ActiveRecord::Relation`.
 
-- **[rbs]** A project that wires `rigor-activesupport-core-ext`'s signatures through `signature_paths:` instead of `plugins:` no longer loads Rigor's bundled ActiveSupport overlay on top of them, so the duplicate declarations no longer collapse `Time`, `Integer`, `String` and any project class whose signature named them ([#672](https://github.com/rigortype/rigor/issues/672), [#699](https://github.com/rigortype/rigor/pull/699)).
+- **[rbs]** Wiring `rigor-activesupport-core-ext` through `signature_paths:` no longer loads Rigor's bundled ActiveSupport overlay on top of those signatures ([#672](https://github.com/rigortype/rigor/issues/672), [#699](https://github.com/rigortype/rigor/pull/699)).
+  - Duplicate declarations no longer collapse `Time`, `Integer`, `String` and any project class whose signature named them.
 
-- **[cache]** A warm `rigor check` now re-analyzes after a `bundle add` / `bundle remove`, and when a file a plugin had looked for and not found (a `db/schema.rb`, `config/sidekiq.yml`, an `app/models` discovery root) appears later, instead of replaying the diagnostics of the run that found it missing ([#565](https://github.com/rigortype/rigor/pull/565), [#577](https://github.com/rigortype/rigor/issues/577), [#612](https://github.com/rigortype/rigor/pull/612), [#613](https://github.com/rigortype/rigor/issues/613), [#641](https://github.com/rigortype/rigor/pull/641)).
+- **[cache]** A warm `rigor check` now re-analyzes after the lockfile changes, and when a file a plugin had looked for and not found appears later ([#565](https://github.com/rigortype/rigor/pull/565), [#577](https://github.com/rigortype/rigor/issues/577), [#612](https://github.com/rigortype/rigor/pull/612), [#613](https://github.com/rigortype/rigor/issues/613), [#641](https://github.com/rigortype/rigor/pull/641)).
+  - `bundle add` / `bundle remove`, a newly committed `db/schema.rb`, `config/sidekiq.yml`, or an `app/models` discovery root no longer replay the diagnostics of the run that found them missing.
 
-- **[engine]** Thirty-six builtin catalogue rows that claimed a C method never raises now record that it does, so `rigor effects` no longer treats those `File` / `IO` / `Hash` / `Struct` calls as pure ([#757](https://github.com/rigortype/rigor/pull/757)).
+- **[engine]** Thirty-six builtin catalogue rows that claimed a C method never raises now record that it does ([#757](https://github.com/rigortype/rigor/pull/757)).
+  - `rigor effects` no longer treats those `File` / `IO` / `Hash` / `Struct` calls as pure.
 
 ## [0.3.6] - 2026-08-30
 

@@ -487,6 +487,14 @@ module Rigor
         # {.add_project_parsed_decls} / {.resolve_quarantining_virtual_collisions} quarantined a duplicated
         # declaration (typically class-vs-module or a constant already shipped by bundled RBS). Derived from
         # the env like {#virtual_rbs_collision_quarantined}, so a cache HIT reports the same condition.
+        #
+        # Path membership alone is not enough: the suite's {RbsEnvMemo} reuses a byte-identical env across
+        # `Dir.mktmpdir` roots when `signature_paths:` are relative (`sig/sink.rbs`), leaving buffers named
+        # after the FIRST path. A later example's absolute path is then absent from `present` even though
+        # the declarations loaded — that used to spam `duplicated declaration against bundled RBS` banners
+        # (~60 per CI shard) for fixtures that never collided. Basename + content equality catches that
+        # reuse without hiding a real quarantine (e.g. project `class Base64` vs bundled `module Base64`,
+        # same basename, different bytes).
         COLLISION_QUARANTINE_NOTE =
           "duplicated declaration against bundled RBS — quarantined so the rest of the RBS env still loads"
 
@@ -501,12 +509,27 @@ module Rigor
           rescue ArgumentError, TypeError
             name.to_s
           end
+          buffers_by_basename = env.buffers.group_by { |buffer| File.basename(buffer.name.to_s) }
           project_sig_files(signature_paths).sort.filter_map do |file|
             next if present.include?(file)
             next if parse_signature_file(file).nil? # parse / encoding quarantine owns these
+            next if project_signature_loaded_under_other_path?(file, buffers_by_basename)
 
             [file, "#{file}: #{COLLISION_QUARANTINE_NOTE}"]
           end
+        end
+
+        # True when `file`'s bytes are already in `env` under a different absolute path (same basename).
+        # See {#collision_quarantined_project_signatures} — keeps memoised env reuse from looking like a
+        # collision quarantine.
+        def project_signature_loaded_under_other_path?(file, buffers_by_basename)
+          peers = buffers_by_basename[File.basename(file)]
+          return false if peers.nil? || peers.empty?
+
+          content = File.read(file, encoding: "UTF-8")
+          peers.any? { |buffer| buffer.content == content }
+        rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
+          false
         end
 
         # The `::`-stripped names of every type a PROJECT signature references that no loaded declaration

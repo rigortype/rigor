@@ -791,6 +791,25 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(messages.first).to include(File.join(tmpdir, "base64.rbs"))
       expect(messages.first).to match(/duplicated|bundled RBS/i)
     end
+
+    it "does not treat a path-mismatched copy of an already-loaded signature as collision-quarantined" do
+      # Mirrors the suite's RbsEnvMemo: byte-identical sig content under a fresh Dir.mktmpdir with
+      # relative `signature_paths:` reuses the env whose buffers still name the FIRST path. Path-only
+      # membership would false-positive every memo hit as "duplicated against bundled RBS" (CI spam).
+      content = "class Sink\n  def take_int: (Integer value) -> void\nend\n"
+      File.write(File.join(tmpdir, "sink.rbs"), content)
+      env = build_loader.send(:env)
+      expect(env).not_to be_nil
+
+      other = Dir.mktmpdir("rigor-rbs-loader-collision-other-")
+      begin
+        File.write(File.join(other, "sink.rbs"), content)
+        reported = described_class.collision_quarantined_project_signatures(env, [other])
+        expect(reported).to be_empty
+      ensure
+        FileUtils.rm_rf(other)
+      end
+    end
   end
 
   describe "unparseable project signature quarantine (env-build resilience)" do

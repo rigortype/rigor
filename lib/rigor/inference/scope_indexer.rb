@@ -3231,7 +3231,6 @@ module Rigor
           root = Prism.parse(File.read(physical), filepath: path).value
           accumulate_project_index(acc, path, root)
         rescue StandardError
-          # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
         finalize_def_index(acc)
@@ -3448,7 +3447,6 @@ module Rigor
           collect_class_decls(root, [], classes)
           accumulate_project_index(acc, path, root)
         rescue StandardError
-          # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
         { classes: classes.freeze, def_index: finalize_def_index(acc) }

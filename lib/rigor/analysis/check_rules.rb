@@ -2880,13 +2880,7 @@ module Rigor
         def build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site = nil, class_name = nil)
           rendered_receiver = receiver_type.describe
           message = "undefined method `#{call_node.name}' for #{rendered_receiver}"
-          # ADR-17 — when the project itself defines this method on the
-          # receiver class somewhere in the file set, name the site and
-          # point at `pre_eval:`. Rigor does not apply project monkey-
-          # patches cross-file automatically, so the diagnostic still
-          # fires, but the enriched message makes it actionable (and
-          # `rigor triage` keys on the structured `project_definition_site`
-          # field to recommend `pre_eval:` with high confidence).
+          # See {#project_definition_site}.
           if definition_site
             def_owner = class_name || rendered_receiver
             message += "; the project defines `#{def_owner}##{call_node.name}' at " \

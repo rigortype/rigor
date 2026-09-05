@@ -183,7 +183,6 @@ module Rigor
               sites << fused_site(mut, :none)
             end
           when :harness_error then harness_errors += 1
-            # :invalid — a parse-broken mutant; not a measurement, skip it.
           end
         end
         FusedFileResult.new(path: path, type_killed: type_killed, test_killed: test_killed, sites: sites,

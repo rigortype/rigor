@@ -180,29 +180,41 @@ module Rigor
           (virtual_names.size + project_names.size + 1).times do
             return [env, env.resolve_type_names]
           rescue ::RBS::DuplicatedDeclarationError => e
-            raise unless env.respond_to?(:unload)
-
-            culprits = e.decls.filter_map { |decl| decl.location&.buffer&.name }.uniq
-            virtual_culprits = culprits.select { |name| virtual_names.include?(name.to_s) }
-            unless virtual_culprits.empty?
-              env = env.unload(virtual_culprits)
-              next
-            end
-
-            # Issue #777 — project `signature_paths:` colliding with bundled (or sibling project) RBS.
-            # Prefer dropping the project buffer(s): the bundled declaration stays, Greeter/core stay
-            # usable, and only the conflicting file is absent. A duplicate with no project/virtual
-            # culprit (bundled-vs-bundled) still re-raises into the total-failure path.
-            project_culprits = culprits.select do |name|
-              project_names.include?(File.expand_path(name.to_s))
-            rescue ArgumentError, TypeError
-              project_names.include?(name.to_s)
-            end
-            raise if project_culprits.empty?
-
-            env = env.unload(project_culprits)
+            env = unload_duplicated_declaration_culprits(
+              env, e, virtual_names: virtual_names, project_names: project_names
+            )
           end
           [env, env.resolve_type_names]
+        end
+
+        # Prefer dropping colliding VIRTUAL buffers (explicit `.rbs` wins), else PROJECT `signature_paths:`
+        # buffers (issue #777 — bundled RBS wins over a kind-colliding project file). A duplicate with
+        # neither virtual nor project culprits (bundled-vs-bundled), or an env without `#unload`, re-raises.
+        def unload_duplicated_declaration_culprits(env, error, virtual_names:, project_names:)
+          raise unless env.respond_to?(:unload)
+
+          culprits = duplicated_declaration_buffer_names(error)
+          virtual_culprits = culprits.select { |name| virtual_names.include?(name.to_s) }
+          return env.unload(virtual_culprits) unless virtual_culprits.empty?
+
+          # Prefer dropping the project buffer(s): the bundled declaration stays, Greeter/core stay
+          # usable, and only the conflicting file is absent.
+          project_culprits = select_project_collision_culprits(culprits, project_names)
+          raise if project_culprits.empty?
+
+          env.unload(project_culprits)
+        end
+
+        def duplicated_declaration_buffer_names(error)
+          error.decls.filter_map { |decl| decl.location&.buffer&.name }.uniq
+        end
+
+        def select_project_collision_culprits(culprits, project_names)
+          culprits.select do |name|
+            project_names.include?(File.expand_path(name.to_s))
+          rescue ArgumentError, TypeError
+            project_names.include?(name.to_s)
+          end
         end
 
         # ADR-5 robustness, second tier. A project `signature_paths:` RBS that *references* a type no loaded
@@ -1100,7 +1112,7 @@ module Rigor
           parse_paths = parse_quarantined.to_set { |path, _note| path }
           (
             parse_quarantined +
-            collision_quarantined.reject { |path, _note| parse_paths.include?(path) }
+            collision_quarantined.reject { |entry| parse_paths.include?(entry[0]) }
           ).freeze
         end
       end

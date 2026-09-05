@@ -318,7 +318,8 @@ module Rigor
         # An unparseable or declaration-colliding `.rbs` under `signature_paths:` is QUARANTINED so the
         # rest of the env survives (PR #50; issue #777 extends this to class-vs-module / constant
         # collisions against bundled RBS), which means the types it declares are silently absent — calls
-        # into them read `Dynamic[top]`, and the run gets *quieter*, not louder. The stderr banner alone never reached CI:
+        # into them read `Dynamic[top]`, and the run gets *quieter*, not louder. The stderr banner alone
+        # never reached CI:
         # it is not a diagnostic, so it is absent from `--format json` / SARIF / GitHub annotations / the LSP
         # and cannot move the exit code. This puts it in the diagnostic stream where every channel sees it.
         #

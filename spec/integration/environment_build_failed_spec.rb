@@ -75,7 +75,8 @@ RSpec.describe "environment build failed / conflict quarantine reporting" do
     expect(env_failed_diagnostics(result)).to be_empty
     expect(quarantine_diagnostics(result).map(&:message).join).to include("sig/base64.rbs")
     undefined = result.diagnostics.select { |d| d.rule.to_s.include?("undefined") || d.message.include?("lenght") }
-    expect(undefined).not_to be_empty, "expected lenght typo diagnostic, got: #{result.diagnostics.map { |d| [d.rule, d.message] }}"
+    got = result.diagnostics.map { |d| [d.rule, d.message] }
+    expect(undefined).not_to be_empty, "expected lenght typo diagnostic, got: #{got}"
   end
 
   it "fires nothing when the RBS environment builds cleanly" do

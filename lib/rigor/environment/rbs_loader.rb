@@ -84,11 +84,14 @@ module Rigor
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
           add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s))
           env = RBS::Environment.from_loader(rbs_loader)
+          project_files = project_sig_files(signature_paths)
           add_project_signatures(env, signature_paths, deferred_signature_paths)
           add_virtual_rbs(env, virtual_rbs)
           synthesize_missing_namespaces(env)
-          env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs)
-          stub_missing_referenced_types(env, resolved, project_sig_files(signature_paths))
+          # Issue #777 — resolve-time backstop: also unload colliding PROJECT buffers (class-vs-module /
+          # constant redeclarations against bundled RBS). Virtual culprits are preferred when both appear.
+          env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs, project_files: project_files)
+          stub_missing_referenced_types(env, resolved, project_files)
         end
 
         # rbs ships `stdlib/bigdecimal/` and `stdlib/bigdecimal-math/` as two libraries, so
@@ -157,32 +160,61 @@ module Rigor
           false
         end
 
-        # Backstop for a virtual-vs-anything `RBS::DuplicatedDeclarationError` that only materialises at
-        # `resolve_type_names` (which rebuilds the env from `sources`). {.add_virtual_rbs}'s transactional
-        # rescue already handles the add-time case — empirically everything on rbs 4.x — but the rbs gemspec
-        # range spans `>= 3.0, < 5.0` (ADR-79) and WHERE duplicate detection fires is an rbs-internal choice
-        # this code must not depend on. Resolution rule is the same as the add-time path: the explicit
-        # signature wins, the colliding VIRTUAL buffer is dropped whole (`RBS::Environment#unload`) and
-        # resolution retries; every pass removes at least one virtual buffer, so the loop is bounded by the
-        # virtual-entry count. A duplicate involving no virtual buffer (sig-vs-sig), or an env without
-        # `#unload` (rbs 3.x), re-raises into the existing one-warning degrade path.
+        # Backstop for a `RBS::DuplicatedDeclarationError` that only materialises at `resolve_type_names`
+        # (which rebuilds the env from `sources`). {.add_virtual_rbs} / {.add_project_parsed_decls}
+        # transactionally handle the add-time case — empirically everything on rbs 4.x — but the rbs
+        # gemspec range spans `>= 3.0, < 5.0` (ADR-79) and WHERE duplicate detection fires is an
+        # rbs-internal choice this code must not depend on. Resolution preference: drop colliding VIRTUAL
+        # buffers first (explicit `.rbs` wins), else drop colliding PROJECT `signature_paths:` buffers
+        # (issue #777 — bundled RBS wins over a kind-colliding project file), then retry. Every pass
+        # removes at least one buffer, so the loop is bounded. A duplicate with neither virtual nor
+        # project culprits (bundled-vs-bundled), or an env without `#unload` (rbs 3.x), re-raises into
+        # the existing one-warning total-failure path.
         #
         # The dropped set is not returned: consumers recover it from the built env via
         # {#virtual_rbs_collision_quarantined}, which also works on a cache HIT where this build never ran.
-        def resolve_quarantining_virtual_collisions(env, virtual_rbs)
+        def resolve_quarantining_virtual_collisions(env, virtual_rbs, project_files: [])
           virtual_names = virtual_rbs.to_set { |name, _content| name.to_s }
-          (virtual_names.size + 1).times do
+          project_names = Array(project_files).to_set(&:to_s)
+          # Bound by virtual + project culprit candidates: each pass removes at least one buffer.
+          (virtual_names.size + project_names.size + 1).times do
             return [env, env.resolve_type_names]
           rescue ::RBS::DuplicatedDeclarationError => e
-            raise unless env.respond_to?(:unload)
-
-            culprits = e.decls.filter_map { |decl| decl.location&.buffer&.name }
-                        .uniq.select { |name| virtual_names.include?(name) }
-            raise if culprits.empty?
-
-            env = env.unload(culprits)
+            env = unload_duplicated_declaration_culprits(
+              env, e, virtual_names: virtual_names, project_names: project_names
+            )
           end
           [env, env.resolve_type_names]
+        end
+
+        # Prefer dropping colliding VIRTUAL buffers (explicit `.rbs` wins), else PROJECT `signature_paths:`
+        # buffers (issue #777 — bundled RBS wins over a kind-colliding project file). A duplicate with
+        # neither virtual nor project culprits (bundled-vs-bundled), or an env without `#unload`, re-raises.
+        def unload_duplicated_declaration_culprits(env, error, virtual_names:, project_names:)
+          raise unless env.respond_to?(:unload)
+
+          culprits = duplicated_declaration_buffer_names(error)
+          virtual_culprits = culprits.select { |name| virtual_names.include?(name.to_s) }
+          return env.unload(virtual_culprits) unless virtual_culprits.empty?
+
+          # Prefer dropping the project buffer(s): the bundled declaration stays, Greeter/core stay
+          # usable, and only the conflicting file is absent.
+          project_culprits = select_project_collision_culprits(culprits, project_names)
+          raise if project_culprits.empty?
+
+          env.unload(project_culprits)
+        end
+
+        def duplicated_declaration_buffer_names(error)
+          error.decls.filter_map { |decl| decl.location&.buffer&.name }.uniq
+        end
+
+        def select_project_collision_culprits(culprits, project_names)
+          culprits.select do |name|
+            project_names.include?(File.expand_path(name.to_s))
+          rescue ArgumentError, TypeError
+            project_names.include?(name.to_s)
+          end
         end
 
         # ADR-5 robustness, second tier. A project `signature_paths:` RBS that *references* a type no loaded
@@ -298,9 +330,24 @@ module Rigor
             next if parsed.nil? # quarantined (unparseable) or unreadable — skip so the env survives
 
             buffer, directives, decls = parsed
-            add_parsed_decls(env, buffer, directives, decls)
+            add_project_parsed_decls(env, buffer, directives, decls)
           end
           add_deferred_signatures(env, deferred)
+        end
+
+        # Issue #777 — add one project signature transactionally. `RBS::Environment#add_source` appends to
+        # `sources` BEFORE inserting decls, so a mid-insert `RBS::DuplicatedDeclarationError` (class-vs-module
+        # kind collision against bundled RBS, or a constant redeclared from core) would otherwise leave a
+        # poisoned source that `resolve_type_names` re-raises outside every per-file rescue, collapsing the
+        # WHOLE env to nil. Mirror {.add_virtual_rbs}: drop the poisoned source and continue so Greeter /
+        # core / every non-conflicting project file still load. Without a `sources` table (rbs 3.x) re-raise
+        # into the existing total-failure path — we cannot make the skip transactional there.
+        def add_project_parsed_decls(env, buffer, directives, decls)
+          add_parsed_decls(env, buffer, directives, decls)
+        rescue ::RBS::DuplicatedDeclarationError
+          raise unless env.respond_to?(:sources)
+
+          env.sources.reject! { |source| source.buffer.name == buffer.name }
         end
 
         # Issue #610 — the DEFERRED half: signature files a bundled plugin contributes through its manifest,
@@ -331,7 +378,7 @@ module Rigor
             buffer, directives, decls = parsed
             next if generic_arity_conflict(env, decls)
 
-            add_parsed_decls(env, buffer, directives, decls)
+            add_project_parsed_decls(env, buffer, directives, decls)
           end
         end
 
@@ -434,6 +481,55 @@ module Rigor
           rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
             nil
           end
+        end
+
+        # Issue #777 — project `signature_paths:` files that PARSE but are absent from the built env because
+        # {.add_project_parsed_decls} / {.resolve_quarantining_virtual_collisions} quarantined a duplicated
+        # declaration (typically class-vs-module or a constant already shipped by bundled RBS). Derived from
+        # the env like {#virtual_rbs_collision_quarantined}, so a cache HIT reports the same condition.
+        #
+        # Path membership alone is not enough: the suite's {RbsEnvMemo} reuses a byte-identical env across
+        # `Dir.mktmpdir` roots when `signature_paths:` are relative (`sig/sink.rbs`), leaving buffers named
+        # after the FIRST path. A later example's absolute path is then absent from `present` even though
+        # the declarations loaded — that used to spam `duplicated declaration against bundled RBS` banners
+        # (~60 per CI shard) for fixtures that never collided. Basename + content equality catches that
+        # reuse without hiding a real quarantine (e.g. project `class Base64` vs bundled `module Base64`,
+        # same basename, different bytes).
+        COLLISION_QUARANTINE_NOTE =
+          "duplicated declaration against bundled RBS — quarantined so the rest of the RBS env still loads"
+
+        def collision_quarantined_project_signatures(env, signature_paths)
+          return [] if env.nil?
+
+          present = env.buffers.to_set do |buffer|
+            name = buffer.name
+            next name.to_s unless name
+
+            File.expand_path(name.to_s)
+          rescue ArgumentError, TypeError
+            name.to_s
+          end
+          buffers_by_basename = env.buffers.group_by { |buffer| File.basename(buffer.name.to_s) }
+          project_sig_files(signature_paths).sort.filter_map do |file|
+            next if present.include?(file)
+            next if parse_signature_file(file).nil? # parse / encoding quarantine owns these
+            next if project_signature_loaded_under_other_path?(file, buffers_by_basename)
+
+            [file, "#{file}: #{COLLISION_QUARANTINE_NOTE}"]
+          end
+        end
+
+        # True when `file`'s bytes are already in `env` under a different absolute path (same basename).
+        # See {#collision_quarantined_project_signatures} — keeps memoised env reuse from looking like a
+        # collision quarantine.
+        def project_signature_loaded_under_other_path?(file, buffers_by_basename)
+          peers = buffers_by_basename[File.basename(file)]
+          return false if peers.nil? || peers.empty?
+
+          content = File.read(file, encoding: "UTF-8")
+          peers.any? { |buffer| buffer.content == content }
+        rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
+          false
         end
 
         # The `::`-stripped names of every type a PROJECT signature references that no loaded declaration
@@ -1031,7 +1127,17 @@ module Rigor
       #
       # @return [Array<Array(String, String)>] empty when every `signature_paths:` file parses.
       def quarantined_signatures
-        @state[:quarantined] ||= self.class.quarantined_project_signatures(@signature_paths).freeze
+        @state[:quarantined] ||= begin
+          parse_quarantined = self.class.quarantined_project_signatures(@signature_paths)
+          collision_quarantined = self.class.collision_quarantined_project_signatures(
+            @state[:env], @signature_paths
+          )
+          parse_paths = parse_quarantined.to_set { |path, _note| path }
+          (
+            parse_quarantined +
+            collision_quarantined.reject { |entry| parse_paths.include?(entry[0]) }
+          ).freeze
+        end
       end
 
       # Issue #610 — plugin-contributed signature files that stood down against a colliding generic arity,
@@ -1083,12 +1189,13 @@ module Rigor
       end
 
       # The total RBS-environment build failure captured this run, or nil when the env built. Unlike
-      # {#quarantined_signatures} — which the env survives, one file lighter, and which is re-derived by
-      # re-parsing so a cache HIT reports it too — a total failure (typically `RBS::DuplicatedDeclarationError`:
-      # a `signature_paths:` entry redeclaring a constant/class Rigor's bundled RBS already ships) collapses the
-      # WHOLE env to nil. A failed build produces no cached success to hide behind (nothing is persisted, so
-      # every run re-attempts and re-raises), so this is captured directly in {#env}'s rescue rather than
-      # re-derived. Forcing `env` (any query does) populates it.
+      # {#quarantined_signatures} — which the env survives, one file lighter, and which is re-derived so a
+      # cache HIT reports it too — a total failure collapses the WHOLE env to nil. Project-vs-bundled
+      # `RBS::DuplicatedDeclarationError`s are quarantined per-file since #777; this slot remains for
+      # unrecoverable build errors (e.g. bundled-vs-bundled collisions, or hosts without a transactional
+      # `sources`/`unload` API). A failed build produces no cached success to hide behind (nothing is
+      # persisted, so every run re-attempts and re-raises), so this is captured directly in {#env}'s rescue
+      # rather than re-derived. Forcing `env` (any query does) populates it.
       #
       # @return [Array(String, String, Array<String>), nil] `[error_class_name, first_error_line,
       #   conflicting_buffer_names]`, or nil when the environment built successfully.
@@ -1736,11 +1843,10 @@ module Rigor
       end
 
       # The RBS environment for this loader. Memoised both on success AND on failure: when the env build
-      # raises (typically `RBS::DuplicatedDeclarationError` because a `signature_paths:` entry redeclares a
-      # constant or class already shipped by stdlib RBS), retrying on every subsequent `env` call would
-      # re-parse and re-resolve the whole sig set per AST node touched during analysis, multiplying per-file
-      # analysis cost by ~100x. Failures short-circuit to `nil` here and are surfaced to the user via
-      # `warn_about_env_build_failure_once` so the broken `signature_paths:` entry is identifiable.
+      # raises an *unrecoverable* `RBS::BaseError` (project-vs-bundled duplicates are quarantined per-file
+      # since #777), retrying on every subsequent `env` call would re-parse and re-resolve the whole sig set
+      # per AST node touched during analysis, multiplying per-file analysis cost by ~100x. Failures
+      # short-circuit to `nil` here and are surfaced to the user via `warn_about_env_build_failure_once`.
       def env
         return @state[:env] if @state[:env_loaded]
 
@@ -1778,10 +1884,11 @@ module Rigor
         lines = listed.map { |_path, first_line| "    - #{first_line}" }
         lines << "    … and #{more} more" if more.positive?
         warn(
-          "rigor: skipped #{quarantined.size} unparseable RBS file(s) under `signature_paths:`.\n  " \
-          "They were QUARANTINED so the rest of your RBS env still loads, but the types they\n  " \
-          "declare are absent — calls into them read `Dynamic[top]`, so coverage and diagnostics\n  " \
-          "are reduced. Fix the parse error(s) to restore that coverage:\n" \
+          "rigor: skipped #{quarantined.size} RBS file(s) under `signature_paths:` (unparseable or\n  " \
+          "duplicated against bundled RBS). They were QUARANTINED so the rest of your RBS env\n  " \
+          "still loads, but the types they declare are absent — calls into them read\n  " \
+          "`Dynamic[top]`, so coverage and diagnostics are reduced. Fix the parse error(s) or\n  " \
+          "remove the conflicting declaration(s) to restore that coverage:\n" \
           "#{lines.join("\n")}"
         )
       end

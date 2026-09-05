@@ -50,7 +50,7 @@ module Rigor
       # ADR-14 follow-up: this is the consolidated-layout entry point. The legacy `write(source_path,
       # candidates)` below assumes all candidates share a target and remains for spec convenience.
       #
-      # @return [Array<WriteResult>] one per target sig file.
+      # @rbs return: Array[WriteResult] -- One per target sig file.
       def write_all(candidates)
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         return [] if emittable.empty?
@@ -61,10 +61,9 @@ module Rigor
                  .map { |target, group| write_target(target, group) }
       end
 
-      # @param candidates [Array<MethodCandidate>] only
-      #   emittable classifications (new-method /
-      #   tighter-return) are honoured; the caller is
-      #   responsible for filtering.
+      # @rbs candidates: Array[MethodCandidate] --
+      #   Only emittable classifications (new-method / tighter-return) are honoured; the caller is responsible for
+      #   filtering.
       def write(source_path, candidates)
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         return WriteResult.new(source_path: source_path, target_path: nil, action: :noop) if emittable.empty?

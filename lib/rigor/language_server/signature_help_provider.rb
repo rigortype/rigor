@@ -44,8 +44,8 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return [Hash, nil] LSP `SignatureHelp` payload or nil
-      #   when the cursor isn't inside a resolvable method call.
+      # @rbs return: Hash[untyped, untyped]? --
+      #   LSP `SignatureHelp` payload or nil when the cursor isn't inside a resolvable method call.
       def provide(uri:, line:, character:, context: nil)
         _ = context # Trigger info accepted but not routed in v1.
         path, entry = buffer_for(uri)

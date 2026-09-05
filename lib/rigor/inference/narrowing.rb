@@ -362,9 +362,8 @@ module Rigor
       # constants narrow as `is_a?`; integer/float-endpoint ranges narrow to `Numeric`;
       # string-endpoint ranges and regexp literals narrow to `String`.
       #
-      # @param subject [Prism::Node, nil] the `case` subject.
-      # @param conditions [Array<Prism::Node>] the `when`
-      #   clause's `conditions` array.
+      # @rbs subject: Prism::Node? -- The `case` subject.
+      # @rbs conditions: Array[Prism::Node] -- The `when` clause's `conditions` array.
       def case_when_scopes(subject, conditions, scope)
         # C1 — `case x when /re/` runs `/re/ === x`, which sets the regex match-data globals
         # exactly as a successful `=~` does. Narrow `$~`/`$&`/`$1..$N` on the clause body (the

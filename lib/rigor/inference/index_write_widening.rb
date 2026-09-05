@@ -35,7 +35,7 @@ module Rigor
       # the widening joins the stored value into the carrier's content evidence exactly as a real `[]=` does
       # (issue #560). Empty means "no evidence" and widens without joining.
       #
-      # @param node          [Prism::Node] one of {NODE_CLASSES}
+      # @rbs node: Prism::Node -- One of {NODE_CLASSES}
       def widen(node:, current_scope:, arg_types: MutationWidening::NO_ARG_TYPES)
         MutationWidening.widen_receiver_aliases(node.receiver, MUTATOR, current_scope, arg_types: arg_types)
       end

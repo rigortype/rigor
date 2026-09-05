@@ -17,10 +17,10 @@ module Rigor
     # {.for} answers `nil` unless {LabelIntent} says the spelling is evidently a label — the whole
     # point of the diagnostic is that it fires where intent is evident and nowhere else.
     class UnknownLabelReport < Data.define(:token, :suggestion, :retirement)
-      # @param token [String] the spelling as written.
-      # @param registry [Rigor::Effects::Registry, nil] the vocabulary after plugin load.
-      # @param siblings [Array<String>] the other tokens written alongside it.
-      # @return [UnknownLabelReport, nil]
+      # @rbs token: String -- The spelling as written.
+      # @rbs registry: Rigor::Effects::Registry? -- The vocabulary after plugin load.
+      # @rbs siblings: Array[String] -- The other tokens written alongside it.
+      # @rbs return: UnknownLabelReport?
       def self.for(token:, registry:, siblings: [])
         return nil unless LabelIntent.evident?(token, registry, siblings: siblings)
 

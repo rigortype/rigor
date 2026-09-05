@@ -22,7 +22,7 @@ module Rigor
       # The outcome of {.attempt} — the best-effort variant. Exactly one of the two is non-nil, so a caller can never
       # read "the check could not run" as "the check ran clean": `result` is nil precisely when `error` is set.
       Outcome = Data.define(:result, :error) do
-        # @return [Boolean] true when an analysis actually completed.
+        # @rbs return: bool -- True when an analysis actually completed.
         def ran?
           !result.nil?
         end
@@ -42,9 +42,10 @@ module Rigor
 
       # Runs the analysis the way `rigor check` does and returns the runner + its raw result.
       #
-      # @param options [Hash] at least `:no_cache`, `:explain`, `:stats`, `:workers` (see {CheckRunnerFactory.build}).
-      # @param paths [Array<String>, nil] analysed paths; nil falls back to the configuration's `paths:`.
-      # @param cache_root [String, nil] nil falls back to the configuration's cache path.
+      # @rbs options: Hash[untyped, untyped] --
+      #   At least `:no_cache`, `:explain`, `:stats`, `:workers` (see {CheckRunnerFactory.build}).
+      # @rbs paths: Array[String]? -- Analysed paths; nil falls back to the configuration's `paths:`.
+      # @rbs cache_root: String? -- Nil falls back to the configuration's cache path.
       def run(configuration:, options:, paths: nil, buffer: nil, cache_root: nil)
         require_relative "check_runner_factory"
         runner = CheckRunnerFactory.build(
@@ -65,8 +66,8 @@ module Rigor
       # routing hint is outside the false-positive envelope, but a crash in it is not — `describe` must stay a command
       # an agent can run freely.
       #
-      # @param config_path [String, nil] path to the config file; nil uses {Configuration.discover}.
-      # @param options [Hash] runner options (defaults to {DEEP_OPTIONS}).
+      # @rbs config_path: String? -- Path to the config file; nil uses {Configuration.discover}.
+      # @rbs options: Hash[untyped, untyped] -- Runner options (defaults to {DEEP_OPTIONS}).
       def attempt(config_path: nil, options: DEEP_OPTIONS, paths: nil)
         require_relative "../configuration"
         configuration = Configuration.load(config_path)

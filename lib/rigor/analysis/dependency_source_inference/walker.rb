@@ -55,15 +55,18 @@ module Rigor
 
         module_function
 
-        # @param gem_dir [String, Pathname] absolute path to the gem's installation directory.
-        # @param roots [Array<String>] subdirectory names within the gem to walk (defaults to `["lib"]` per
+        # @rbs gem_dir: String | Pathname -- Absolute path to the gem's installation directory.
+        # @rbs roots: Array[String] --
+        #   Subdirectory names within the gem to walk (defaults to `["lib"]` per
         #   `Configuration::Dependencies::Entry`).
-        # @param budget [Integer, Float] per-gem catalog cap (method-definition count). When unset, defaults
-        #   to `UNBOUNDED` for backwards-compatible test paths.
-        # @return [Outcome] frozen wrapper carrying the catalog (`Hash{[class_name, method_name] =>
-        #   :instance | :singleton}`) and a `truncated?` flag set when the walker stopped harvesting because
-        #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
-        #   private API mostly) carry the kind that wins the per-class first walk.
+        # @rbs budget: Integer | Float --
+        #   Per-gem catalog cap (method-definition count). When unset, defaults to `UNBOUNDED` for
+        #   backwards-compatible test paths.
+        # @rbs return: Outcome --
+        #   Frozen wrapper carrying the catalog (`Hash{[class_name, method_name] => :instance | :singleton}`) and a
+        #   `truncated?` flag set when the walker stopped harvesting because the budget was reached. Methods of
+        #   identical name on the same class with different kinds (rare; private API mostly) carry the kind that wins
+        #   the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
           accumulator = {}
           truncated = false

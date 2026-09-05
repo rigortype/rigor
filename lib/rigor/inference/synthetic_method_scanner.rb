@@ -40,22 +40,14 @@ module Rigor
     module SyntheticMethodScanner # rubocop:disable Metrics/ModuleLength
       module_function
 
-      # @param paths [Array<String>] absolute paths to the project
-      #   source files to scan.
-      # @param environment [Rigor::Environment, nil] used for
-      #   inheritance resolution against RBS-known classes
-      #   (ActiveRecord::Base, Dry::Struct, etc.) that aren't
-      #   declared in project source.
-      #   the per-run cross-plugin fact store. ADR-18 lookups
-      #   (`Plugin::Macro::HeredocTemplate::Emit#returns_from_arg`)
-      #   consult this at scan time to resolve per-call-site
-      #   return types from published facts; without it, those
-      #   emit rows fall back to their static `returns:` (or
-      #   `"untyped"` → `Dynamic[Top]`).
-      #   editor-mode buffer binding. When set, reads for the
-      #   logical path resolve to the buffer's physical path so
-      #   the pre-pass sees the in-flight bytes instead of the
-      #   on-disk copy.
+      # @rbs paths: Array[String] -- Absolute paths to the project source files to scan.
+      # @rbs environment: Rigor::Environment? --
+      #   Used for inheritance resolution against RBS-known classes (ActiveRecord::Base, Dry::Struct, etc.) that
+      #   aren't declared in project source. the per-run cross-plugin fact store. ADR-18 lookups
+      #   (`Plugin::Macro::HeredocTemplate::Emit#returns_from_arg`) consult this at scan time to resolve per-call-site
+      #   return types from published facts; without it, those emit rows fall back to their static `returns:` (or
+      #   `"untyped"` → `Dynamic[Top]`). editor-mode buffer binding. When set, reads for the logical path resolve to
+      #   the buffer's physical path so the pre-pass sees the in-flight bytes instead of the on-disk copy.
       def scan(plugin_registry:, paths:, environment: nil, fact_store: nil, buffer: nil)
         templates = collect_templates(plugin_registry)
         registries = collect_trait_registries(plugin_registry)

@@ -53,7 +53,7 @@ module Rigor
       # `--test-command`.
       DEFAULT_TEST_COMMAND = %w[bundle exec rake].freeze
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       #
       # Deferred YJIT enablement (Runtime::Jit) is armed by `CLI#dispatch` for every command, this
       # one included: a scan long enough to amortize JIT compile cost enables mid-flight; a short one

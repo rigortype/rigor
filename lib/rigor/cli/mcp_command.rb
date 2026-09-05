@@ -17,7 +17,7 @@ module Rigor
     class McpCommand < Command
       USAGE = "Usage: rigor mcp [options]"
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         return CLI::EXIT_USAGE if options == :usage_error

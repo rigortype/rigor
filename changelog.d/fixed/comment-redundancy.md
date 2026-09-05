@@ -1,0 +1,1 @@
+- **[rigor-rbs-inline]** An `# @rbs` annotation next to a method already declared in `sig/` no longer duplicates the definition (the `.rbs` wins), and unannotated siblings in the same file no longer synthesize `untyped` skeletons. ([#779](https://github.com/rigortype/rigor/pull/779))

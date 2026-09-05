@@ -45,7 +45,7 @@ module Rigor
         # Issue #595 / #525 — the shared materialisation test; see {StructMaterialization}.
         extend StructMaterialization
 
-        # @return [Rigor::Type, nil] the folded result, or nil to defer.
+        # @rbs return: Rigor::Type? -- The folded result, or nil to defer.
         def try_dispatch(context)
           receiver = context.receiver
 
@@ -344,9 +344,9 @@ module Rigor
         # local's true member state at every later read on the path. A non-fold-safe local is left untouched
         # (its reads do not fold, so the binding is never consulted for folding).
         #
-        # @param call_node    [Prism::CallNode]  the `local.member = v` call
-        # @param assigned_type [Rigor::Type, nil] the setter's assigned value type (the call's own result)
-        # @return             [Rigor::Scope]     the (possibly) rebound scope
+        # @rbs call_node: Prism::CallNode -- The `local.member = v` call
+        # @rbs assigned_type: Rigor::Type? -- The setter's assigned value type (the call's own result)
+        # @rbs return: Rigor::Scope -- The (possibly) rebound scope
         def apply_setter_writeback(call_node:, assigned_type:, scope:)
           return scope if scope.nil? || assigned_type.nil?
 

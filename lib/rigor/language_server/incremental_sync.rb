@@ -46,10 +46,9 @@ module Rigor
       # Applies every change in order, each against the result of the previous — the LSP contract for a
       # multi-change `didChange` notification.
       #
-      # @param text [String, nil] the held buffer text; nil when no buffer is open for the URI.
-      # @param changes [Array<Hash>] the `contentChanges` array.
-      # @return [String] the new buffer text.
-      # @raise [UnappliableChange] if any change cannot be applied.
+      # @rbs text: String? -- The held buffer text; nil when no buffer is open for the URI.
+      # @rbs changes: Array[Hash[untyped, untyped]] -- The `contentChanges` array.
+      # @rbs return: String -- The new buffer text. Raises UnappliableChange if any change cannot be applied.
       def apply_all(text, changes)
         raise UnappliableChange, "contentChanges must be an Array, got #{changes.class}" unless changes.is_a?(Array)
 
@@ -64,7 +63,7 @@ module Rigor
       # companion to `range` and is accepted-but-ignored: it is redundant with `range`, historically ambiguous
       # about its units, and `range` is the authoritative field.
       #
-      # @raise [UnappliableChange]
+      # Raises UnappliableChange
       def apply(text, change)
         raise UnappliableChange, "contentChanges entry must be a Hash, got #{change.class}" unless change.is_a?(Hash)
 
@@ -95,10 +94,11 @@ module Rigor
         raise UnappliableChange, "held text is not valid UTF-8: #{e.message}"
       end
 
-      # @return [Array<Array(Integer, Integer)>] one `[content_start, content_end]` pair per line, in Ruby
-      #   character indices. `content_end` excludes the line terminator, so it doubles as the clamp target for
-      #   an over-long `character`. A trailing terminator yields a final empty span — the virtual last line an
-      #   editor puts the cursor on, and the anchor for an end-of-document insert.
+      # @rbs return: Array[[Integer, Integer]] --
+      #   One `[content_start, content_end]` pair per line, in Ruby character indices. `content_end` excludes the line
+      #   terminator, so it doubles as the clamp target for an over-long `character`. A trailing terminator yields a
+      #   final empty span — the virtual last line an editor puts the cursor on, and the anchor for an end-of-document
+      #   insert.
       def line_spans(text)
         spans = []
         scanner = StringScanner.new(text)

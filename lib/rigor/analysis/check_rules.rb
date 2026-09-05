@@ -83,8 +83,7 @@ module Rigor
       # have already produced `scope_index` through
       # `Rigor::Inference::ScopeIndexer.index(root, default_scope:)`.
       #
-      # @param path [String] used to populate
-      #   `Diagnostic#path`; the rule does not open files.
+      # @rbs path: String -- Used to populate `Diagnostic#path`; the rule does not open files.
       #
       # ADR-53 B4 — when `node_collectors` is supplied, the converged
       # {Plugin::NodeRuleWalk} traversal has already populated the built-in
@@ -487,9 +486,8 @@ module Rigor
         /\A#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
       private_constant :UNKNOWN_SUPPRESSION_MARKER
 
-      # @return [Array<(Hash{Integer => Set}, Set)>] pair of
-      #   `(line_suppressions, file_suppressions)`. Line
-      #   suppressions are keyed by source line number; file
+      # @rbs return: Array[(Hash{Integer => Set}, Set)] --
+      #   Pair of `(line_suppressions, file_suppressions)`. Line suppressions are keyed by source line number; file
       #   suppressions apply to every line.
       def parse_suppression_comments(comments)
         line_suppressions = Hash.new { |h, k| h[k] = Set.new }

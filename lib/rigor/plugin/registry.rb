@@ -217,16 +217,16 @@ module Rigor
     class Registry
       attr_reader :plugins, :load_errors, :blueprints, :contribution_index, :resolved_gem_paths
 
-      # @param plugins [Array<Rigor::Plugin::Base>] instantiated plugin instances in deterministic order.
-      # @param load_errors [Array<Rigor::Plugin::LoadError>] failures surfaced during loading. Each error is
-      #   also turned into a diagnostic by the runner.
-      # @param blueprints [Array<Rigor::Plugin::Blueprint>] frozen, Ractor-shareable replay descriptors
-      #   aligned 1:1 with `plugins`. The loader fills this in; callers that construct Registry manually MAY
-      #   pass `[]` and accept that {.materialize} cannot replay the set.
-      # @param resolved_gem_paths [Hash{String=>String,nil}] #194 slice 1 — `gem name => resolved file path`
-      #   for each successfully required plugin gem, so `rigor plugins` can print where a loaded (and
-      #   possibly frozen) plugin actually loaded from. Defaults to empty; a worker registry built by
-      #   {.materialize} carries none (the provenance surface runs only on the coordinator).
+      # @rbs plugins: Array[Rigor::Plugin::Base] -- Instantiated plugin instances in deterministic order.
+      # @rbs load_errors: Array[Rigor::Plugin::LoadError] --
+      #   Failures surfaced during loading. Each error is also turned into a diagnostic by the runner.
+      # @rbs blueprints: Array[Rigor::Plugin::Blueprint] --
+      #   Frozen, Ractor-shareable replay descriptors aligned 1:1 with `plugins`. The loader fills this in; callers
+      #   that construct Registry manually MAY pass `[]` and accept that {.materialize} cannot replay the set.
+      # @rbs resolved_gem_paths: Hash[String, String?] --
+      #   #194 slice 1 — `gem name => resolved file path` for each successfully required plugin gem, so `rigor
+      #   plugins` can print where a loaded (and possibly frozen) plugin actually loaded from. Defaults to empty; a
+      #   worker registry built by {.materialize} carries none (the provenance surface runs only on the coordinator).
       def initialize(plugins: [], load_errors: [], blueprints: [], resolved_gem_paths: {})
         @plugins = plugins.dup.freeze
         @load_errors = load_errors.dup.freeze

@@ -20,10 +20,9 @@ module Rigor
         @out = out
       end
 
-      # @param format [String] "text" or "json"
-      # @param selection [Array<Symbol>] subset of
-      #   {Classification} constants to include; an empty
-      #   array means "all emittable classifications".
+      # @rbs format: String -- "text" or "json"
+      # @rbs selection: Array[Symbol] --
+      #   Subset of {Classification} constants to include; an empty array means "all emittable classifications".
       def render(candidates:, mode:, format:, selection:)
         filtered = filter(candidates, selection)
 

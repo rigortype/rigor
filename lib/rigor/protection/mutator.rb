@@ -171,8 +171,9 @@ module Rigor
       # only removes provably-Dynamic sites. Returns [kept, dropped_count]. Builds the scope index from THIS
       # mutator's parse so anchor node identity matches the keys.
       #
-      # @param base_scope [Rigor::Scope, nil] a pre-seeded scope to judge anchors against (see
-      #   {#anchor_base_scope}); nil builds the bare empty scope, which is the shipped default.
+      # @rbs base_scope: Rigor::Scope? --
+      #   A pre-seeded scope to judge anchors against (see {#anchor_base_scope}); nil builds the bare empty scope,
+      #   which is the shipped default.
       def filter_by_type(mutations, environment:, path:, base_scope: nil)
         base = anchor_base_scope(environment, path, base_scope)
         index = Rigor::Inference::ScopeIndexer.index(@parse.value, default_scope: base)

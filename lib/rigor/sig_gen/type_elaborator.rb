@@ -20,8 +20,7 @@ module Rigor
     # The module is sig-gen-local; the broader question of whether the inference engine itself should always
     # construct generics with explicit type_args is queued as an ADR-14 follow-up.
     module TypeElaborator
-      # @return [Rigor::Type] same shape with bare generic
-      #   nominals filled in.
+      # @rbs return: Rigor::Type -- Same shape with bare generic nominals filled in.
       def self.elaborate(type, environment:)
         arity_cache = {}
         walk(type, environment, arity_cache)

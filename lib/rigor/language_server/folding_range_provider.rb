@@ -23,8 +23,8 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return [Array<Hash>, nil] LSP `FoldingRange[]` for the
-      #   buffer, or nil when the URI isn't open / parseable.
+      # @rbs return: Array[Hash[untyped, untyped]]? --
+      #   LSP `FoldingRange[]` for the buffer, or nil when the URI isn't open / parseable.
       def provide(uri)
         path, entry = buffer_for(uri)
         return nil if entry.nil?

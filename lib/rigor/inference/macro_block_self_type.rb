@@ -28,8 +28,7 @@ module Rigor
     module MacroBlockSelfType
       module_function
 
-      # @return [Rigor::Type, nil] the narrowed self-type, or
-      #   `nil` when no registered entry matches the call shape.
+      # @rbs return: Rigor::Type? -- The narrowed self-type, or `nil` when no registered entry matches the call shape.
       def narrow_self_type_for(scope:, call_node:, receiver_type:)
         return nil if receiver_type.nil?
 

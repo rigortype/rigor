@@ -47,17 +47,17 @@ module Rigor
                 :reporters, :name_scope,
                 :synthetic_method_index, :project_patched_methods
 
-    # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the environment is "RBS-blind"; useful
-    #   in tests that want to assert how the engine behaves without RBS data. The default Environment wires
-    #   the shared core loader, which is itself lazy: requesting an environment instance does NOT load RBS
-    #   until a method or class query actually consults the loader.
-    # @param plugin_registry [Rigor::Plugin::Registry, nil] v0.1.1 Track 2 slice 7. The per-run plugin
-    #   registry the inference engine consults at call sites for plugin `dynamic_return` rules. When nil
-    #   (the default), no plugin-level return-type contribution participates — useful for tests, the
-    #   `Environment.default` facade, and analyses that don't load plugins.
-    # @param dependency_source_index [Rigor::Analysis::DependencySourceInference::Index, nil] ADR-10 slice
-    #   2b-ii. The per-run index of opt-in gem sources the dispatcher consults BELOW RBS dispatch. When nil
-    #   (the default), no dep-source contribution participates and the dispatcher tier is a no-op.
+    # @rbs rbs_loader: Rigor::Environment::RbsLoader? --
+    #   When nil the environment is "RBS-blind"; useful in tests that want to assert how the engine behaves without
+    #   RBS data. The default Environment wires the shared core loader, which is itself lazy: requesting an
+    #   environment instance does NOT load RBS until a method or class query actually consults the loader.
+    # @rbs plugin_registry: Rigor::Plugin::Registry? --
+    #   v0.1.1 Track 2 slice 7. The per-run plugin registry the inference engine consults at call sites for plugin
+    #   `dynamic_return` rules. When nil (the default), no plugin-level return-type contribution participates — useful
+    #   for tests, the `Environment.default` facade, and analyses that don't load plugins.
+    # @rbs dependency_source_index: Rigor::Analysis::DependencySourceInference::Index? --
+    #   ADR-10 slice 2b-ii. The per-run index of opt-in gem sources the dispatcher consults BELOW RBS dispatch. When
+    #   nil (the default), no dep-source contribution participates and the dispatcher tier is a no-op.
     def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, # rubocop:disable Metrics/ParameterLists
                    plugin_registry: nil, dependency_source_index: nil,
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil,
@@ -177,17 +177,18 @@ module Rigor
       # Builds an Environment that consults the project's local signatures and any opt-in stdlib libraries on
       # top of RBS core.
       #
-      # @param root [String, Pathname] project root used to auto-detect the default signature path. Defaults
-      #   to the current working directory.
-      # @param libraries [Array<String, Symbol>] additional stdlib libraries to load on top of
-      #   {DEFAULT_LIBRARIES}. The final list is the union of the two, de-duplicated while preserving order.
-      #   Pass an empty array (the default) to load only the defaults.
-      # @param signature_paths [Array<String, Pathname>, nil] explicit list of `sig/`-style directories. When
-      #   `nil` (the default), the canonical project layout `<root>/sig` is used if it exists, otherwise no
-      #   signature path is loaded.
-      # @param cache_store [Rigor::Cache::Store, nil] persistent cache threaded into the underlying
-      #   {Environment::RbsLoader} so constant lookups (and, in later v0.0.9 slices, other reflection
-      #   artefacts) consult the cache. Pass `nil` (the default) to skip caching for this environment.
+      # @rbs root: String | Pathname --
+      #   Project root used to auto-detect the default signature path. Defaults to the current working directory.
+      # @rbs libraries: Array[String | Symbol] --
+      #   Additional stdlib libraries to load on top of {DEFAULT_LIBRARIES}. The final list is the union of the two,
+      #   de-duplicated while preserving order. Pass an empty array (the default) to load only the defaults.
+      # @rbs signature_paths: Array[String | Pathname]? --
+      #   Explicit list of `sig/`-style directories. When `nil` (the default), the canonical project layout
+      #   `<root>/sig` is used if it exists, otherwise no signature path is loaded.
+      # @rbs cache_store: Rigor::Cache::Store? --
+      #   Persistent cache threaded into the underlying {Environment::RbsLoader} so constant lookups (and, in later
+      #   v0.0.9 slices, other reflection artefacts) consult the cache. Pass `nil` (the default) to skip caching for
+      #   this environment.
       # rubocop:disable-next Metrics/MethodLength, Metrics/ParameterLists
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil,
                       plugin_registry: nil, dependency_source_index: nil,

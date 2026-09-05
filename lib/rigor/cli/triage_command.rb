@@ -22,7 +22,7 @@ module Rigor
       USAGE = "Usage: rigor triage [options] [paths]"
       DEFAULT_SECTIONS = %i[distribution selectors hotspots hints].freeze
 
-      # @return [Integer] CLI exit status (always 0).
+      # @rbs return: Integer -- CLI exit status (always 0).
       def run
         options = parse_options
         configuration = Configuration.load(options.fetch(:config))

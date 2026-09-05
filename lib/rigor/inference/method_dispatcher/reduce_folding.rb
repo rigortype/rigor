@@ -58,7 +58,7 @@ module Rigor
         CONSTANT_FOLD_BIT_CAP = 256
         private_constant :CONSTANT_FOLD_ELEMENT_CAP, :CONSTANT_FOLD_BIT_CAP
 
-        # @return [Rigor::Type, nil]
+        # @rbs return: Rigor::Type?
         def try_dispatch(context)
           return nil unless REDUCE_METHODS.include?(context.method_name)
           return nil if context.block_type
@@ -84,9 +84,9 @@ module Rigor
         # Executes the reduction on real constant values, or returns nil to decline. The caller falls
         # through to the nominal fold on a nil return, so every guard here is precision-additive only.
         #
-        # @param seed [Rigor::Type, nil] the optional seed type; only a foldable `Constant` seed is
-        #   honoured, any other seed declines.
-        # @return [Rigor::Type::Constant, nil]
+        # @rbs seed: Rigor::Type? --
+        #   The optional seed type; only a foldable `Constant` seed is honoured, any other seed declines.
+        # @rbs return: Rigor::Type::Constant?
         def try_constant_reduce(receiver, operator, seed)
           return nil unless CONSTANT_FOLD_OPERATORS.include?(operator)
 
@@ -103,7 +103,7 @@ module Rigor
         # Checks the size cap BEFORE enumerating so an unbounded / huge `Constant[Range]` (e.g.
         # `(1..1_000_000)`) never calls `to_a`.
         #
-        # @return [Array, nil]
+        # @rbs return: Array[untyped]?
         def constant_members(receiver)
           case receiver
           when Type::Constant
@@ -140,9 +140,9 @@ module Rigor
           elements.map(&:value)
         end
 
-        # @return [Array(Object, Boolean)] `[seed_value, present?]`. A nil seed type yields `[nil, false]`
-        #   (no-seed form). A foldable `Constant` seed yields `[value, true]`. Any other seed yields
-        #   `[nil, false]` so the caller can decline.
+        # @rbs return: [untyped, bool] --
+        #   `[seed_value, present?]`. A nil seed type yields `[nil, false]` (no-seed form). A foldable `Constant` seed
+        #   yields `[value, true]`. Any other seed yields `[nil, false]` so the caller can decline.
         def constant_seed(seed)
           return [nil, false] if seed.nil?
           return [nil, false] unless seed.is_a?(Type::Constant) && foldable?(seed.value)
@@ -154,7 +154,7 @@ module Rigor
         # semantics match Ruby: `[].reduce(s, :op) == s` (seed form) and `[].reduce(:op) == nil` (no-seed
         # form → declines so the nominal fold's no-nil contract stands; see `fold_result`).
         #
-        # @return [Rigor::Type::Constant, nil]
+        # @rbs return: Rigor::Type::Constant?
         def execute_constant_reduce(members, operator, seed_value, seed_present)
           result =
             if seed_present

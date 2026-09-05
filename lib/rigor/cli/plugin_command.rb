@@ -64,7 +64,7 @@ module Rigor
       PLUGINS_ROOT = File.join(GEM_ROOT, "plugins")
       EXAMPLES_ROOT = File.join(GEM_ROOT, "examples")
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         subcommand = @argv.shift || "list"
 

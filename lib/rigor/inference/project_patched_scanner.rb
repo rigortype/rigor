@@ -31,13 +31,13 @@ module Rigor
 
       module_function
 
-      # @param paths [Array<String>] absolute paths to the pre-eval files. The runner has already
-      #   validated that each path exists (slice-1 `pre-eval.file-not-found` `:error` covers missing
-      #   entries); the scanner does NOT re-check existence.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil] editor-mode buffer binding. When set, the
-      #   scanner reads the buffer's physical bytes if a pre-eval entry matches the logical path, so
-      #   users editing a monkey-patch file see the in-flight version in their analysis.
-      # @return [Result] the populated registry plus any per-file warnings.
+      # @rbs paths: Array[String] --
+      #   Absolute paths to the pre-eval files. The runner has already validated that each path exists (slice-1
+      #   `pre-eval.file-not-found` `:error` covers missing entries); the scanner does NOT re-check existence.
+      # @rbs buffer: Rigor::Analysis::BufferBinding? --
+      #   Editor-mode buffer binding. When set, the scanner reads the buffer's physical bytes if a pre-eval entry
+      #   matches the logical path, so users editing a monkey-patch file see the in-flight version in their analysis.
+      # @rbs return: Result -- The populated registry plus any per-file warnings.
       def scan(paths, buffer: nil)
         entries = []
         diagnostics = []

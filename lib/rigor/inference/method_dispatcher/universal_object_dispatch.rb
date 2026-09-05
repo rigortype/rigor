@@ -68,7 +68,7 @@ module Rigor
 
         module_function
 
-        # @return [Rigor::Type, nil] the receiver-independent return type, or nil to decline.
+        # @rbs return: Rigor::Type? -- The receiver-independent return type, or nil to decline.
         def try_dispatch(context)
           return nil unless context.receiver.is_a?(Type::Dynamic)
 

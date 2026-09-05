@@ -35,16 +35,16 @@ module Rigor
         "idn-ruby", "mysql2", "nokogiri", "pg", "prism", "racc", "redis", "rubygems"
       ].freeze
 
-      # @param locked_gems [Hash{String => LockfileResolver::LockedGem}] The lockfile-resolved gem set. Empty
-      #   hash → no coverage analysis to do.
-      # @param default_libraries [Array<String>] gem names rigor auto-loads through
-      #   `RBS::EnvironmentLoader#add(library:)`. Pass `Rigor::Environment::DEFAULT_LIBRARIES` from callers
-      #   running in a project context.
-      # @param bundle_sig_paths [Array<Pathname, String>] the discovered `<bundle>/.../gems/<name>-<ver>/sig`
-      #   paths from {BundleSigDiscovery.discover}.
-      # @param rbs_collection_paths [Array<Pathname, String>] the discovered `<collection>/<name>/<version>/`
-      #   paths from {RbsCollectionDiscovery.discover}.
-      # @return [Array<Coverage>] one row per locked gem; sorted by gem name for deterministic output.
+      # @rbs locked_gems: Hash[String, LockfileResolver::LockedGem] --
+      #   The lockfile-resolved gem set. Empty hash → no coverage analysis to do.
+      # @rbs default_libraries: Array[String] --
+      #   Gem names rigor auto-loads through `RBS::EnvironmentLoader#add(library:)`. Pass
+      #   `Rigor::Environment::DEFAULT_LIBRARIES` from callers running in a project context.
+      # @rbs bundle_sig_paths: Array[Pathname | String] --
+      #   The discovered `<bundle>/.../gems/<name>-<ver>/sig` paths from {BundleSigDiscovery.discover}.
+      # @rbs rbs_collection_paths: Array[Pathname | String] --
+      #   The discovered `<collection>/<name>/<version>/` paths from {RbsCollectionDiscovery.discover}.
+      # @rbs return: Array[Coverage] -- One row per locked gem; sorted by gem name for deterministic output.
       def self.classify(locked_gems:, default_libraries:,
                         bundle_sig_paths:, rbs_collection_paths:)
         default_set = default_libraries.to_set

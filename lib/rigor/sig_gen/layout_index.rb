@@ -30,11 +30,10 @@ module Rigor
         @index = nil
       end
 
-      # @param class_name [String] fully-qualified Ruby class
-      #   name (e.g. `"Rigor::Type::Top"`).
-      # @return [Pathname, nil] absolute path of the sig file
-      #   that already declares this class, or `nil` when no
-      #   existing declaration is found.
+      # @rbs class_name: String -- Fully-qualified Ruby class name (e.g. `"Rigor::Type::Top"`).
+      # @rbs return: Pathname? --
+      #   Absolute path of the sig file that already declares this class, or `nil` when no existing declaration is
+      #   found.
       def file_for(class_name)
         index[class_name]
       end

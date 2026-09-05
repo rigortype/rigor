@@ -54,18 +54,15 @@ module Rigor
     module MethodDispatcher # rubocop:disable Metrics/ModuleLength
       module_function
 
-      # @param receiver_type [Rigor::Type, nil] type of the receiver expression, or
-      #   `nil` for an implicit-self call.
-      # @param arg_types [Array<Rigor::Type>] positional argument types.
-      # @param block_type [Rigor::Type, nil] inferred return type of the
-      #   accompanying `do ... end` / `{ ... }` block (Slice 6 phase C
-      #   sub-phase 2). When non-nil, the dispatcher prefers an
-      #   overload that declares a block, and binds the method's
-      #   block-return type variable to `block_type` so a return type
-      #   like `Array[U]` resolves to `Array[block_type]`.
-      # @param environment [Rigor::Environment, nil] required for
-      #   RBS-backed dispatch; when nil only constant folding can fire.
-      # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
+      # @rbs receiver_type: Rigor::Type? -- Type of the receiver expression, or `nil` for an implicit-self call.
+      # @rbs arg_types: Array[Rigor::Type] -- Positional argument types.
+      # @rbs block_type: Rigor::Type? --
+      #   Inferred return type of the accompanying `do ... end` / `{ ... }` block (Slice 6 phase C sub-phase 2). When
+      #   non-nil, the dispatcher prefers an overload that declares a block, and binds the method's block-return type
+      #   variable to `block_type` so a return type like `Array[U]` resolves to `Array[block_type]`.
+      # @rbs environment: Rigor::Environment? --
+      #   Required for RBS-backed dispatch; when nil only constant folding can fire.
+      # @rbs return: Rigor::Type? -- Inferred result type, or `nil` for "no rule".
       def dispatch(receiver_type:, method_name:, arg_types:,
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)

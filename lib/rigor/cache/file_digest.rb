@@ -74,8 +74,9 @@ module Rigor
         memo[path] ||= Digest::SHA256.file(path).hexdigest
       end
 
-      # @return [Boolean] whether digest-always validation is forced for this run. The env var wins over the
-      #   run-scoped config flag so an operator can bypass the stat tier without editing `.rigor.yml`.
+      # @rbs return: bool --
+      #   Whether digest-always validation is forced for this run. The env var wins over the run-scoped config flag so
+      #   an operator can bypass the stat tier without editing `.rigor.yml`.
       def self.strict_validation?
         return true if ENV[STRICT_ENV] == "1"
 

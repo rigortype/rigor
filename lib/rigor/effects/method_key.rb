@@ -14,8 +14,8 @@ module Rigor
     module MethodKey
       module_function
 
-      # @return [Array(String, String, String), nil] `[owner, separator, selector]`, or nil when `key` is
-      #   not a method key at all.
+      # @rbs return: [String, String, String]? --
+      #   `[owner, separator, selector]`, or nil when `key` is not a method key at all.
       def split(key)
         text = key.to_s
         index = text.index("#") || text.index(".")

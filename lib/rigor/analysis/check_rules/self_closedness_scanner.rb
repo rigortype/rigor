@@ -29,7 +29,7 @@ module Rigor
           @root = root
         end
 
-        # @return [Set<String>] qualified names to exclude from the rule.
+        # @rbs return: Set[String] -- Qualified names to exclude from the rule.
         def open_class_names
           names = Set.new
           walk(@root, [], names)

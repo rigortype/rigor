@@ -43,7 +43,7 @@ module Rigor
       # paging stays off because the CLI may itself sit in a pipeline.
       BAT_ARGS = %w[--language=ruby --style=plain --paging=never --color=always].freeze
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         file = @argv.shift
@@ -220,7 +220,7 @@ module Rigor
         @scope_index = scope_index
       end
 
-      # @return [Hash{Integer => Rigor::Type}] 1-indexed line => type.
+      # @rbs return: Hash[Integer, Rigor::Type] -- 1-indexed line => type.
       def collect(program)
         by_line = {}
         each_statement(program) do |statement|

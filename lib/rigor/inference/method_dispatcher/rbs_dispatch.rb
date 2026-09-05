@@ -72,26 +72,28 @@ module Rigor
         EMPTY_TYPE_PARAM_NAMES = [].freeze
         private_constant :EMPTY_TYPE_PARAM_NAMES
 
-        # @param block_type [Rigor::Type, nil] inferred block return type, propagated from
-        #   `MethodDispatcher.dispatch`. When non-nil, the selector prefers a block-bearing overload and
-        #   binds the method-level type parameter that the block's return type references to `block_type`
-        #   (Slice 6 phase C sub-phase 2).
-        # @param self_type_override [Rigor::Type, nil] when set, the substitution for `Bases::Self` in the
-        #   method's return type. Used by `MethodDispatcher#try_user_class_fallback` to preserve the
-        #   ORIGINAL receiver as the substitute for `self` even though the dispatch is routed through
-        #   `Nominal[Object]` — so that `Bundler::URI::Generic.dup` (which resolves through the `Object`
-        #   fallback because `Bundler::URI::Generic` lacks RBS) returns `Bundler::URI::Generic` per
-        #   `Kernel#dup: () -> self` rather than `Object`. Defaults to nil (compute self from the resolved
-        #   class_name as before).
-        # @param public_only [Boolean] when true, a method whose RBS accessibility is `:private` does not
-        #   resolve (the call yields `nil`, i.e. "no rule"). Set by the explicit-non-`self`-receiver
-        #   user-class fallback so a call like `Favourite.select(...)` does not adopt the private
-        #   `Kernel#select` signature.
-        # @return [Rigor::Type, nil] inferred return type, or `nil` when no rule resolves (no class name,
-        #   no method, dispatch on a Top/Dynamic[Top] receiver, etc.).
-        # @param scope [Rigor::Scope, nil] when supplied, enables ADR-43 RBS-complete-ancestor resolution
-        #   against `ALLOWED_RBS_COMPLETE_ANCESTORS`. `nil` keeps inherited calls unresolved
-        #   (`Dynamic[Top]`) — the FP-safe default for open hierarchies (`< ActionController::Base`, …).
+        # @rbs block_type: Rigor::Type? --
+        #   Inferred block return type, propagated from `MethodDispatcher.dispatch`. When non-nil, the selector
+        #   prefers a block-bearing overload and binds the method-level type parameter that the block's return type
+        #   references to `block_type` (Slice 6 phase C sub-phase 2).
+        # @rbs self_type_override: Rigor::Type? --
+        #   When set, the substitution for `Bases::Self` in the method's return type. Used by
+        #   `MethodDispatcher#try_user_class_fallback` to preserve the ORIGINAL receiver as the substitute for `self`
+        #   even though the dispatch is routed through `Nominal[Object]` — so that `Bundler::URI::Generic.dup` (which
+        #   resolves through the `Object` fallback because `Bundler::URI::Generic` lacks RBS) returns
+        #   `Bundler::URI::Generic` per `Kernel#dup: () -> self` rather than `Object`. Defaults to nil (compute self
+        #   from the resolved class_name as before).
+        # @rbs public_only: bool --
+        #   When true, a method whose RBS accessibility is `:private` does not resolve (the call yields `nil`, i.e.
+        #   "no rule"). Set by the explicit-non-`self`-receiver user-class fallback so a call like
+        #   `Favourite.select(...)` does not adopt the private `Kernel#select` signature.
+        # @rbs return: Rigor::Type? --
+        #   Inferred return type, or `nil` when no rule resolves (no class name, no method, dispatch on a
+        #   Top/Dynamic[Top] receiver, etc.).
+        # @rbs scope: Rigor::Scope? --
+        #   When supplied, enables ADR-43 RBS-complete-ancestor resolution against `ALLOWED_RBS_COMPLETE_ANCESTORS`.
+        #   `nil` keeps inherited calls unresolved (`Dynamic[Top]`) — the FP-safe default for open hierarchies (`<
+        #   ActionController::Base`, …).
         def try_dispatch(context)
           environment = context.environment
           return nil if environment.nil?
@@ -126,7 +128,7 @@ module Rigor
         #
         # This deliberately does NOT differentiate "no overload had a block" from "the block is untyped";
         # the binder treats both the same way (every parameter defaults to `Dynamic[Top]`).
-        # @return [Array<Rigor::Type>] positional block parameter types.
+        # @rbs return: Array[Rigor::Type] -- Positional block parameter types.
         def block_param_types(context)
           environment = context.environment
           return [] if environment.nil?

@@ -21,7 +21,7 @@ module Rigor
     class ShowBleedingedgeCommand < Command
       USAGE = "Usage: rigor show-bleedingedge [options]"
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         configuration = load_configuration(options)

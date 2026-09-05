@@ -80,8 +80,9 @@ module Rigor
       # collecting project's path-set churn is the same churn, and over-evicting costs one recompute.
       EFFECTS_GENERATION_CAP = GENERATION_CAP
 
-      # @param rbs_config_entries [Array<Cache::Descriptor::ConfigEntry>] the RBS-derived config slots
-      #   (`rbs.libraries` [+ `rbs.virtual_rbs`]). nil on any failure so a malformed key disables the cache.
+      # @rbs rbs_config_entries: Array[Cache::Descriptor::ConfigEntry] --
+      #   The RBS-derived config slots (`rbs.libraries` [+ `rbs.virtual_rbs`]). nil on any failure so a malformed key
+      #   disables the cache.
       def descriptor(configuration:, files:, explain:, rbs_config_entries:)
         Cache::Descriptor.new(
           gems: [Cache::RbsDescriptor.rbs_gem_entry],

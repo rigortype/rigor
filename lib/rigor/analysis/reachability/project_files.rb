@@ -46,8 +46,8 @@ module Rigor
           File.fnmatch?(pattern, path, File::FNM_PATHNAME)
         end
 
-        # @param relative_paths [Array<String>] paths relative to `root`.
-        # @return [Array<String>] those that belong to the project itself.
+        # @rbs relative_paths: Array[String] -- Paths relative to `root`.
+        # @rbs return: Array[String] -- Those that belong to the project itself.
         def own(relative_paths, root)
           prefixes = submodule_prefixes(root)
           relative_paths.grep_v(VENDOR_DIRS).reject { |rel| prefixes.any? { |prefix| rel.start_with?(prefix) } }

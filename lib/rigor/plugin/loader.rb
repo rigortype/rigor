@@ -43,13 +43,13 @@ module Rigor
       # the engine's own bundled plugin copies.
       ENGINE_ROOT = File.expand_path("../../..", __dir__)
 
-      # @param requirer [#call] takes a gem name OR an absolute file path (#194 slice 2 — a bundled plugin is
-      #   required by its {.bundled_plugin_path}) and returns truthy on successful require. Defaulted to
-      #   `Kernel.require` via a lambda, which accepts both forms; the spec injects a fake to avoid touching
-      #   the real load path.
-      # @param feature_resolver [#call] takes a gem name and returns the absolute path `require` resolved it
-      #   to (or nil). Defaulted to {FEATURE_RESOLVER}; the spec injects a fake so it never has to mutate the
-      #   real `$LOADED_FEATURES` global.
+      # @rbs requirer: untyped --
+      #   Takes a gem name OR an absolute file path (#194 slice 2 — a bundled plugin is required by its
+      #   {.bundled_plugin_path}) and returns truthy on successful require. Defaulted to `Kernel.require` via a
+      #   lambda, which accepts both forms; the spec injects a fake to avoid touching the real load path.
+      # @rbs feature_resolver: untyped --
+      #   Takes a gem name and returns the absolute path `require` resolved it to (or nil). Defaulted to
+      #   {FEATURE_RESOLVER}; the spec injects a fake so it never has to mutate the real `$LOADED_FEATURES` global.
       def initialize(services:, requirer: ->(name) { require name }, feature_resolver: FEATURE_RESOLVER)
         @services = services
         @requirer = requirer
@@ -89,7 +89,7 @@ module Rigor
         File.directory?(path) ? path : nil
       end
 
-      # @param entries [Array<String, Hash>] the raw `plugins:` list from the configuration.
+      # @rbs entries: Array[String | Hash[untyped, untyped]] -- The raw `plugins:` list from the configuration.
       def load(entries)
         plugins = []
         load_errors = []

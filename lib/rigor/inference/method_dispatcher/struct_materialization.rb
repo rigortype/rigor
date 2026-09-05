@@ -33,8 +33,8 @@ module Rigor
         # firing off a receiver the other gate should never have called fresh.
         #
         #
-        # @param node [Prism::Node, nil] the receiver EXPRESSION.
-        # @param receiver [Rigor::Type, nil] the carrier the expression produced.
+        # @rbs node: Prism::Node? -- The receiver EXPRESSION.
+        # @rbs receiver: Rigor::Type? -- The carrier the expression produced.
         def materialization_call?(node, receiver, scope)
           return false unless node.is_a?(Prism::CallNode)
 

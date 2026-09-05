@@ -30,7 +30,7 @@ module Rigor
       DEFAULT_KINDS = %i[bind union dispatch].freeze
       VERBOSE_KINDS = (%i[enter result] + DEFAULT_KINDS).freeze
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         file = @argv.first

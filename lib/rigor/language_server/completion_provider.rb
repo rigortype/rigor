@@ -42,12 +42,10 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return [Array<Hash>, nil] LSP `CompletionItem[]` or nil
-      #   when the cursor isn't at a position the provider can
-      #   enumerate completions for. Returning nil maps to
-      #   `result: null` per the LSP spec — clients treat it as
-      #   "no completions available," distinct from `[]` which
-      #   means "we tried and got nothing".
+      # @rbs return: Array[Hash[untyped, untyped]]? --
+      #   LSP `CompletionItem[]` or nil when the cursor isn't at a position the provider can enumerate completions
+      #   for. Returning nil maps to `result: null` per the LSP spec — clients treat it as "no completions available,"
+      #   distinct from `[]` which means "we tried and got nothing".
       def provide(uri:, line:, character:, trigger_character: nil)
         _ = trigger_character # Trigger info logged-not-routed in v1.
         path, entry = buffer_for(uri)

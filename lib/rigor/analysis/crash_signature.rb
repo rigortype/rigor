@@ -77,7 +77,7 @@ module Rigor
 
       module_function
 
-      # @return [Symbol, nil] `:check_rule`, `:plugin`, `:rbs_build`, or nil for an ordinary diagnostic.
+      # @rbs return: Symbol? -- `:check_rule`, `:plugin`, `:rbs_build`, or nil for an ordinary diagnostic.
       def reason(diagnostic)
         return :check_rule if diagnostic.message.to_s.start_with?(CHECK_RULE_MESSAGE_PREFIX)
         return :plugin if plugin_isolation_row?(diagnostic)

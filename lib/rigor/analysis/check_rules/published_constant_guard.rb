@@ -66,7 +66,7 @@ module Rigor
 
         module_function
 
-        # @return [Boolean] true when the rule MUST withhold its firing.
+        # @rbs return: bool -- True when the rule MUST withhold its firing.
         def rooted?(node, scope, depth = 0)
           return false if node.nil? || depth > MAX_DEPTH || scope.nil?
 

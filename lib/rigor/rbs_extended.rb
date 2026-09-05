@@ -98,11 +98,9 @@ module Rigor
     # source order; duplicates and unrecognised `rigor:v1:` directives are dropped. Returns an empty array (NEVER
     # `nil`) for a method with no recognised annotations so callers can iterate unconditionally.
     #
-    # @param environment [Rigor::Environment, nil] ADR-13 slice
-    #   3b. When provided, threads the plugin-supplied
-    #   `name_scope:` and the per-run reporter through the
-    #   annotation-parse path. `nil` (default) preserves the
-    #   pre-slice-3b behaviour — no plugin resolvers consulted
+    # @rbs environment: Rigor::Environment? --
+    #   ADR-13 slice 3b. When provided, threads the plugin-supplied `name_scope:` and the per-run reporter through the
+    #   annotation-parse path. `nil` (default) preserves the pre-slice-3b behaviour — no plugin resolvers consulted
     #   and no diagnostics accumulated.
     def read_predicate_effects(method_def, environment: nil)
       return [] if method_def.nil?
@@ -708,10 +706,11 @@ module Rigor
     # `RBS::Extended` conflict channel) rather than silently resolved. Returns `nil` when the list
     # carries neither spelling.
     #
-    # @param annotations [Array<#string>] the node's annotations, in source order.
-    # @param owner_key [String] the method key (`Class#m` / `Class.m`) or class name the bound binds.
-    # @param source [Symbol] {Effects::Envelope::SOURCES} member to stamp when the labelled spelling
-    #   matched; `%a{pure}` always stamps `:pure_annotation`, and a class-level read overrides both.
+    # @rbs annotations: Array[untyped] -- The node's annotations, in source order.
+    # @rbs owner_key: String -- The method key (`Class#m` / `Class.m`) or class name the bound binds.
+    # @rbs source: Symbol --
+    #   {Effects::Envelope::SOURCES} member to stamp when the labelled spelling matched; `%a{pure}` always stamps
+    #   `:pure_annotation`, and a class-level read overrides both.
     def read_effect_envelope(annotations, owner_key:, source: :effect_annotation, registry: nil, reporter: nil)
       return nil if annotations.nil? || annotations.empty?
 

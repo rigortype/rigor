@@ -1607,5 +1607,21 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(collision_warnings.first).to include(colliding_virtual.first)
       expect(collision_warnings.first).not_to include(clean_virtual.first)
     end
+
+    it "keeps an inline method that sig/ does not declare, and drops the duplicate" do
+      File.write(File.join(tmpdir, "m.rbs"), "class Demo\n  def shared: () -> ::String\nend\n")
+      virtual = [
+        "virtual:rbs-inline:/app/lib/demo.rb",
+        "class Demo\n  def shared: () -> ::Integer\n  def only_inline: () -> ::Integer\nend\n"
+      ]
+      loader = build_loader([virtual])
+      env = loader.send(:env)
+      expect(env).not_to be_nil
+      builder = RBS::DefinitionBuilder.new(env: env)
+      definition = builder.build_instance(RBS::TypeName.parse("::Demo"))
+      expect(definition.methods[:shared].defs.first.type.type.return_type.to_s).to include("String")
+      expect(definition.methods[:only_inline]).not_to be_nil
+      expect(loader.definition_build_failures).to eq([])
+    end
   end
 end

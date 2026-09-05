@@ -153,31 +153,28 @@ module Rigor
 
       module_function
 
-      # @param name [String] kebab-case refinement name.
-      # @return [Rigor::Type, nil] the matching refinement carrier, or `nil` if the name is
-      #   not registered.
+      # @rbs name: String -- Kebab-case refinement name.
+      # @rbs return: Rigor::Type? -- The matching refinement carrier, or `nil` if the name is not registered.
       def lookup(name)
         builder = REGISTRY[name.to_s]
         builder&.call
       end
 
-      # @param payload [String] the trailing payload of a `rigor:v1:return:` (or sibling)
-      #   directive. Accepts the bare-name forms `lookup` already handles plus the
-      #   parameterised forms documented on {Parser}.
-      #   ADR-13 slice 3 — when provided, the parser consults the scope's `#resolver` chain
-      #   after the built-in registry and built-in parametric forms but before the RBS
-      #   Nominal fallback. `nil` (default) preserves the slice-1 / slice-2 behaviour of
-      #   consulting only built-ins + RBS.
-      #   ADR-13 slice 3b — collector that the Resolver feeds `dynamic.shape.lossy-projection`
-      #   events into when a shape-projection head (`pick_of`, `omit_of`, `partial_of`,
-      #   `required_of`, `readonly_of`) is applied to a carrier that does not preserve shape
-      #   information. `nil` (default) suppresses event accumulation; legacy call sites that
-      #   have no reporter to thread keep the pre-slice-3b silent fall-through.
-      # @param source_location [RBS::Location, nil] location attribution for the events the
-      #   Resolver records. Carries the annotation's filename / line / column so the runner
-      #   can stamp diagnostics with the user-visible source site.
-      # @return [Rigor::Type, nil] the resolved refinement carrier, or `nil` when the payload
-      #   is unparseable or names a refinement / class no registered source resolved.
+      # @rbs payload: String --
+      #   The trailing payload of a `rigor:v1:return:` (or sibling) directive. Accepts the bare-name forms `lookup`
+      #   already handles plus the parameterised forms documented on {Parser}. ADR-13 slice 3 — when provided, the
+      #   parser consults the scope's `#resolver` chain after the built-in registry and built-in parametric forms but
+      #   before the RBS Nominal fallback. `nil` (default) preserves the slice-1 / slice-2 behaviour of consulting
+      #   only built-ins + RBS. ADR-13 slice 3b — collector that the Resolver feeds `dynamic.shape.lossy-projection`
+      #   events into when a shape-projection head (`pick_of`, `omit_of`, `partial_of`, `required_of`, `readonly_of`)
+      #   is applied to a carrier that does not preserve shape information. `nil` (default) suppresses event
+      #   accumulation; legacy call sites that have no reporter to thread keep the pre-slice-3b silent fall-through.
+      # @rbs source_location: RBS::Location? --
+      #   Location attribution for the events the Resolver records. Carries the annotation's filename / line / column
+      #   so the runner can stamp diagnostics with the user-visible source site.
+      # @rbs return: Rigor::Type? --
+      #   The resolved refinement carrier, or `nil` when the payload is unparseable or names a refinement / class no
+      #   registered source resolved.
       def parse(payload, name_scope: nil, reporter: nil, source_location: nil)
         Parser.new(
           payload.to_s,

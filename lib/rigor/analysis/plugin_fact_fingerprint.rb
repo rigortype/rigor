@@ -79,7 +79,7 @@ module Rigor
       #
       # Keeping the opaque decision here, rather than at each cache's call site, means a new consumer cannot
       # key on `digest` while forgetting that an opaque surface makes it meaningless.
-      # @return [String, nil]
+      # @rbs return: String?
       def self.key_digest(registry)
         result = from_registry(registry)
         result.opaque? ? nil : result.digest.to_s

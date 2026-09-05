@@ -32,7 +32,7 @@ module Rigor
       # The Symbol a literal `Prism::SymbolNode` / `Prism::StringNode` names, or `nil` for any other node
       # (including `nil`).
       #
-      # @return [Symbol, nil]
+      # @rbs return: Symbol?
       def symbol_or_string(node)
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
@@ -44,7 +44,7 @@ module Rigor
       # raw name rather than the interned Symbol (route helpers, factory names, filter targets).
       # `#unescaped` round-trips an interpolation-free `:foo` / `"foo"` to `"foo"` for both kinds.
       #
-      # @return [String, nil]
+      # @rbs return: String?
       def symbol_or_string_name(node)
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
@@ -55,7 +55,7 @@ module Rigor
       # `Prism::StringNode` and `nil`). Stricter than {.symbol_or_string}: a DSL that accepts only `:draft`
       # and not `"draft"` keeps that distinction by reaching for this rather than the Symbol-or-String form.
       #
-      # @return [Symbol, nil]
+      # @rbs return: Symbol?
       def symbol(node)
         return nil unless node.is_a?(Prism::SymbolNode)
 
@@ -66,7 +66,7 @@ module Rigor
       # `Prism::StringNode` and `nil`). The String-returning sibling of {.symbol} — SymbolNode-only, but the
       # caller wants the raw name rather than the interned Symbol.
       #
-      # @return [String, nil]
+      # @rbs return: String?
       def symbol_name(node)
         return nil unless node.is_a?(Prism::SymbolNode)
 
@@ -93,7 +93,7 @@ module Rigor
       # The literal Symbol/String at positional `index`, or `nil` when the call has no argument list, the
       # index is out of range, or the argument there is not a literal Symbol/String.
       #
-      # @return [Symbol, nil]
+      # @rbs return: Symbol?
       def symbol_arg(call_node, index)
         args = call_node&.arguments&.arguments
         return nil if args.nil?

@@ -32,8 +32,8 @@ module Rigor
         freeze
       end
 
-      # @return [Array<Rigor::Plugin::TypeNodeResolver>] ordered
-      #   resolver instances, in plugin-registration order.
+      # @rbs return: Array[Rigor::Plugin::TypeNodeResolver] --
+      #   Ordered resolver instances, in plugin-registration order.
       attr_reader :resolvers
 
       # First non-nil `resolve(node, scope)` answer from the chain;

@@ -101,14 +101,15 @@ module Rigor
       private_constant :ALIAS_EXPANSION_LIMIT
 
       class << self
-        # @param self_type [Rigor::Type, nil] substitute for `Bases::Self`.
-        # @param instance_type [Rigor::Type, nil] substitute for `Bases::Instance`. Defaults to `nil`,
-        #   which degrades to Dynamic[Top].
-        # @param type_vars [Hash{Symbol => Rigor::Type}] substitution map for `Bases::Variable`. Keys
-        #   are the RBS variable names (e.g., `:Elem`); values are Rigor types that replace the
-        #   variable. Variables that are not bound in the map degrade to Dynamic[Top].
-        # @param alias_expander [#expand_type_alias, nil] resolves `RBS::Types::Alias` one level out —
-        #   in practice the environment's `RbsLoader`. When nil, aliases degrade to Dynamic[Top].
+        # @rbs self_type: Rigor::Type? -- Substitute for `Bases::Self`.
+        # @rbs instance_type: Rigor::Type? --
+        #   Substitute for `Bases::Instance`. Defaults to `nil`, which degrades to Dynamic[Top].
+        # @rbs type_vars: Hash[Symbol, Rigor::Type] --
+        #   Substitution map for `Bases::Variable`. Keys are the RBS variable names (e.g., `:Elem`); values are Rigor
+        #   types that replace the variable. Variables that are not bound in the map degrade to Dynamic[Top].
+        # @rbs alias_expander: untyped --
+        #   Resolves `RBS::Types::Alias` one level out — in practice the environment's `RbsLoader`. When nil, aliases
+        #   degrade to Dynamic[Top].
         def translate(rbs_type, self_type: nil, instance_type: nil, type_vars: EMPTY_TYPE_VARS,
                       alias_expander: nil)
           translate_in(rbs_type, Context.new(self_type, instance_type, type_vars, alias_expander, 0))

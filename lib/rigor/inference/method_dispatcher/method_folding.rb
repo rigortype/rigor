@@ -29,11 +29,10 @@ module Rigor
         # `.method("name")` with a precisely-known Symbol / String argument. Declines on every other shape
         # so the RBS tier still answers `Method` for non-folding cases.
         #
-        # @param receiver [Rigor::Type] caller's receiver
-        # @param method_name [Symbol] the method being dispatched on `receiver` — only `:method` triggers
-        #   the fold.
-        # @param args [Array<Rigor::Type>] caller's argument types in order. Only the single-argument case
-        #   matches; other arities decline.
+        # @rbs receiver: Rigor::Type -- Caller's receiver
+        # @rbs method_name: Symbol -- The method being dispatched on `receiver` — only `:method` triggers the fold.
+        # @rbs args: Array[Rigor::Type] --
+        #   Caller's argument types in order. Only the single-argument case matches; other arities decline.
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name

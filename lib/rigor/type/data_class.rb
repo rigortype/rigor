@@ -24,9 +24,8 @@ module Rigor
     class DataClass
       attr_reader :members, :class_name
 
-      # @param members [Array<Symbol>] ordered member names.
-      # @param class_name [String, nil] the bound class name, or nil for
-      #   the anonymous `Data.define(...)` result.
+      # @rbs members: Array[Symbol] -- Ordered member names.
+      # @rbs class_name: String? -- The bound class name, or nil for the anonymous `Data.define(...)` result.
       def initialize(members, class_name = nil)
         unless members.is_a?(Array) && members.all?(Symbol)
           raise ArgumentError, "members must be an Array of Symbols, got #{members.inspect}"

@@ -31,7 +31,7 @@ module Rigor
         # and the reader-redefinition guard are shared with {StructFolding}.
         extend MemberShapeProjection
 
-        # @return [Rigor::Type, nil] the folded result, or nil to defer.
+        # @rbs return: Rigor::Type? -- The folded result, or nil to defer.
         def try_dispatch(context)
           receiver = context.receiver
 

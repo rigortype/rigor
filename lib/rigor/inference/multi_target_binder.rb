@@ -50,7 +50,7 @@ module Rigor
     module MultiTargetBinder
       module_function
 
-      # @param rhs_type [Rigor::Type] type of the right-hand side
+      # @rbs rhs_type: Rigor::Type -- Type of the right-hand side
       def bind(target_node, rhs_type)
         bindings = {}
         visit(target_node, rhs_type, bindings)

@@ -14,8 +14,7 @@ module Rigor
       FILE_SCHEME = "file://"
       private_constant :FILE_SCHEME
 
-      # @return [String, nil] absolute filesystem path for a
-      #   `file://` URI, or nil for unsupported schemes.
+      # @rbs return: String? -- Absolute filesystem path for a `file://` URI, or nil for unsupported schemes.
       def to_path(uri)
         return nil unless uri.is_a?(String) && uri.start_with?(FILE_SCHEME)
 

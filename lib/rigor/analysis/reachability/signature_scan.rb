@@ -26,9 +26,10 @@ module Rigor
       module SignatureScan
         module_function
 
-        # @param file [String] path to a `.rbs` file.
-        # @return [Array<Scan::Reference>] one file-level reference per distinct referenced name. Empty when the
-        #   file cannot be read or parsed — a broken signature is the analyzer's business, not this scan's.
+        # @rbs file: String -- Path to a `.rbs` file.
+        # @rbs return: Array[Scan::Reference] --
+        #   One file-level reference per distinct referenced name. Empty when the file cannot be read or parsed — a
+        #   broken signature is the analyzer's business, not this scan's.
         def call(file)
           _, _, decls = ::RBS::Parser.parse_signature(::RBS::Buffer.new(name: file, content: File.read(file)))
           found = []

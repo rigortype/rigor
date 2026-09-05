@@ -118,18 +118,13 @@ module Rigor
         )
       end
 
-      # @return [Rigor::Inference::HktRegistry] frozen registry
-      #   pre-seeded with all bundled HKT registrations +
-      #   bodies. Allocated fresh each call rather than
-      #   memoised — memoisation through a module-level
-      #   `@registry` ivar surfaces a `Ractor::IsolationError`
-      #   in pool workers (the ivar's contents include
-      #   `HktBody::AppRef` Symbol-keyed structures that the
-      #   current Ractor shareability audit hasn't yet been
-      #   walked through). The registry is small enough that
-      #   per-Environment construction is acceptable; an
-      #   eager-frozen constant is a future optimisation
-      #   once ADR-15 phase 4b.x covers the dependency graph.
+      # @rbs return: Rigor::Inference::HktRegistry --
+      #   Frozen registry pre-seeded with all bundled HKT registrations + bodies. Allocated fresh each call rather
+      #   than memoised — memoisation through a module-level `@registry` ivar surfaces a `Ractor::IsolationError` in
+      #   pool workers (the ivar's contents include `HktBody::AppRef` Symbol-keyed structures that the current Ractor
+      #   shareability audit hasn't yet been walked through). The registry is small enough that per-Environment
+      #   construction is acceptable; an eager-frozen constant is a future optimisation once ADR-15 phase 4b.x covers
+      #   the dependency graph.
       def registry
         Rigor::Inference::HktRegistry.new(
           registrations: [json_value_registration, csv_parsed_registration, csv_row_registration],
@@ -242,14 +237,11 @@ module Rigor
         ["CSV", :parse_line, :singleton] => CSV_ROW_SPEC
       }.freeze
 
-      # @return [Rigor::Type, nil] the reduced HKT type for
-      #   the given (class_name, method_name, kind) triple,
-      #   or `nil` when no built-in override is registered.
-      #   When `arg_types` is supplied AND the entry carries a
-      #   `:discriminator` symbol, the discriminator may swap
-      #   the spec's default args for an alternate (e.g.
-      #   `JSON.parse(str, symbolize_names: true)` discriminates
-      #   `K = Symbol` instead of the default `K = String`).
+      # @rbs return: Rigor::Type? --
+      #   The reduced HKT type for the given (class_name, method_name, kind) triple, or `nil` when no built-in
+      #   override is registered. When `arg_types` is supplied AND the entry carries a `:discriminator` symbol, the
+      #   discriminator may swap the spec's default args for an alternate (e.g. `JSON.parse(str, symbolize_names:
+      #   true)` discriminates `K = Symbol` instead of the default `K = String`).
       def method_return_override(class_name:, method_name:, kind:, arg_types: nil, hkt_registry: nil)
         spec = METHOD_RETURN_OVERRIDES[[class_name, method_name.to_sym, kind]]
         return nil unless spec

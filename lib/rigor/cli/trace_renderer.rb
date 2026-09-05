@@ -28,8 +28,8 @@ module Rigor
       BODY_HEIGHT_MIN = 3    # never shrink the source window below this
       DEFAULT_SIZE = [24, 80].freeze
 
-      # @param source [String] the traced file's source.
-      # @param file [String] display path.
+      # @rbs source: String -- The traced file's source.
+      # @rbs file: String -- Display path.
       def initialize(out:, source:, file:)
         @out = out
         @source = source
@@ -37,11 +37,10 @@ module Rigor
         @lines = source.lines.map(&:chomp)
       end
 
-      # @param events [Array<Rigor::Inference::FlowTracer::Event>] the
-      #   pre-filtered frame list (the command owns kind filtering).
-      # @param delay [Float, nil] seconds between frames (autoplay);
-      #   nil = step on key press when interactive.
-      # @param interactive [Boolean] whether to clear/redraw and wait.
+      # @rbs events: Array[Rigor::Inference::FlowTracer::Event] --
+      #   The pre-filtered frame list (the command owns kind filtering).
+      # @rbs delay: Float? -- Seconds between frames (autoplay); nil = step on key press when interactive.
+      # @rbs interactive: bool -- Whether to clear/redraw and wait.
       def play(events, delay: nil, interactive: false)
         @rows, @cols = interactive ? terminal_size : DEFAULT_SIZE
         @interactive = interactive

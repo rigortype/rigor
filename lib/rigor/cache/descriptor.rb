@@ -114,7 +114,7 @@ module Rigor
           new(path: path, comparator: :exists, value: PRESENT)
         end
 
-        # @return [Boolean] whether this row records the path as absent (see {.absent}).
+        # @rbs return: bool -- Whether this row records the path as absent (see {.absent}).
         def absent?
           comparator == :exists && value == ABSENT
         end
@@ -352,8 +352,8 @@ module Rigor
             dependencies: dependencies, globs: globs)
       end
 
-      # @param params [Hash] inputs the producer was called with
-      # @return [String] hex SHA-256 cache key for the value
+      # @rbs params: Hash[untyped, untyped] -- Inputs the producer was called with
+      # @rbs return: String -- Hex SHA-256 cache key for the value
       def cache_key_for(producer_id:, params: {})
         payload = {
           "schema_version" => SCHEMA_VERSION,

@@ -65,15 +65,15 @@ module Rigor
 
       module_function
 
-      # @return [String] the gem root — the directory holding `lib/`, three levels above this file.
+      # @rbs return: String -- The gem root — the directory holding `lib/`, three levels above this file.
       def root
         @root ||= File.expand_path("../../..", __dir__)
       end
 
-      # @param root [String] the gem root, defaulted through {.root} so a spec can relocate the tree.
-      # @return [String, nil] a digest identifying the engine's current source, or nil when the tree is
-      #   version-pinned and the caller should add no slot at all.
-      # @raise [Unavailable] when a mutable tree's source cannot be read.
+      # @rbs root: String -- The gem root, defaulted through {.root} so a spec can relocate the tree.
+      # @rbs return: String? --
+      #   A digest identifying the engine's current source, or nil when the tree is version-pinned and the caller
+      #   should add no slot at all. Raises Unavailable when a mutable tree's source cannot be read.
       def identity(root = self.root)
         return nil if version_pinned?(root)
 

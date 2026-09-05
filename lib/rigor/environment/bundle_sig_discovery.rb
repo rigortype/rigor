@@ -46,26 +46,27 @@ module Rigor
         "bundler", "rubygems"
       ].freeze
 
-      # @param bundle_path [String, Pathname, nil] explicit path to the bundler install root. When `nil`,
-      #   falls back to `auto_detect` if `auto_detect:` is true.
-      # @param project_root [String] resolution base for relative `bundle_path:` and the auto-detect search.
-      # @param auto_detect [Boolean] when true and `bundle_path:` is nil, try `.bundle/config`'s
-      #   `BUNDLE_PATH:` and `vendor/bundle/` under `project_root`.
-      # @param skip_gems [Set<String>] gem names to exclude from discovery. Defaults to
-      #   {SKIPPED_GEMS_BY_DEFAULT}.
-      # @param locked_gems [Hash{String => LockfileResolver::LockedGem}, nil] Optional O4-Layer-3 filter.
-      #   When non-nil and non-empty, only `sig/` directories whose gem `(name, version, platform)` tuple
-      #   matches a lockfile entry are returned. Bundle entries absent from the lockfile (or at a drifted
-      #   version) are silently dropped — the lockfile is treated as the source of truth for "what gems this
+      # @rbs bundle_path: (String | Pathname)? --
+      #   Explicit path to the bundler install root. When `nil`, falls back to `auto_detect` if `auto_detect:` is
+      #   true.
+      # @rbs project_root: String -- Resolution base for relative `bundle_path:` and the auto-detect search.
+      # @rbs auto_detect: bool --
+      #   When true and `bundle_path:` is nil, try `.bundle/config`'s `BUNDLE_PATH:` and `vendor/bundle/` under
+      #   `project_root`.
+      # @rbs skip_gems: Set[String] -- Gem names to exclude from discovery. Defaults to {SKIPPED_GEMS_BY_DEFAULT}.
+      # @rbs locked_gems: Hash[String, LockfileResolver::LockedGem]? --
+      #   Optional O4-Layer-3 filter. When non-nil and non-empty, only `sig/` directories whose gem `(name, version,
+      #   platform)` tuple matches a lockfile entry are returned. Bundle entries absent from the lockfile (or at a
+      #   drifted version) are silently dropped — the lockfile is treated as the source of truth for "what gems this
       #   project actually declares". A git-sourced directory carries no version to compare (see
-      #   {.gem_name_from_sig_path}), so for those the filter instead requires the matching `locked_gems`
-      #   entry to have `git_source: true` — name alone is not enough, since a gem that moved off a `git:`
-      #   source keeps its stale `bundler/gems/` directory under the SAME name until a `bundle clean`. Pass
-      #   `nil` (the default) to keep the pre-Layer-3 behaviour of returning every non-skipped `sig/` under
-      #   the bundle.
-      # @return [Array<Pathname>] every `<gem-dir>/sig` directory under the resolved bundle path, minus any
-      #   whose gem name is in `skip_gems` and (when `locked_gems` is supplied) minus any whose `(name,
-      #   version, platform)` does not match a lockfile entry.
+      #   {.gem_name_from_sig_path}), so for those the filter instead requires the matching `locked_gems` entry to
+      #   have `git_source: true` — name alone is not enough, since a gem that moved off a `git:` source keeps its
+      #   stale `bundler/gems/` directory under the SAME name until a `bundle clean`. Pass `nil` (the default) to keep
+      #   the pre-Layer-3 behaviour of returning every non-skipped `sig/` under the bundle.
+      # @rbs return: Array[Pathname] --
+      #   Every `<gem-dir>/sig` directory under the resolved bundle path, minus any whose gem name is in `skip_gems`
+      #   and (when `locked_gems` is supplied) minus any whose `(name, version, platform)` does not match a lockfile
+      #   entry.
       def self.discover(bundle_path:, project_root: Dir.pwd, auto_detect: true,
                         skip_gems: SKIPPED_GEMS_BY_DEFAULT, locked_gems: nil, home: nil)
         resolved = resolve_bundle_path(

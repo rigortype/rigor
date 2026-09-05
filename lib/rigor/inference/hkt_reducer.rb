@@ -41,10 +41,12 @@ module Rigor
 
       # Reduce `app` against the registry.
       #
-      # @param fuel [Integer] reduction-step budget (default 64 per ADR-20 WD3). Each visited
-      #   body node costs one unit. On exhaustion the reduction returns `app.bound`.
-      # @return [Rigor::Type] the reduced type, or `app.bound` when reduction is impossible (URI
-      #   not defined, arity mismatch, body_tree absent, fuel exhausted).
+      # @rbs fuel: Integer --
+      #   Reduction-step budget (default 64 per ADR-20 WD3). Each visited body node costs one unit. On exhaustion the
+      #   reduction returns `app.bound`.
+      # @rbs return: Rigor::Type --
+      #   The reduced type, or `app.bound` when reduction is impossible (URI not defined, arity mismatch, body_tree
+      #   absent, fuel exhausted).
       def reduce(app, fuel: DEFAULT_FUEL)
         raise ArgumentError, "expected a Rigor::Type::App, got #{app.class}" unless app.is_a?(Type::App)
 

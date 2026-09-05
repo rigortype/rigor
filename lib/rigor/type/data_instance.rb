@@ -27,10 +27,10 @@ module Rigor
     class DataInstance
       attr_reader :members, :class_name
 
-      # @param members [Hash{Symbol => Rigor::Type}] ordered member -> type
-      #   map. Every declared member is present (Data instances are total).
-      # @param class_name [String, nil] the tagging class name, or nil for
-      #   an instance of an anonymous `Data.define(...)` class.
+      # @rbs members: Hash[Symbol, Rigor::Type] --
+      #   Ordered member -> type map. Every declared member is present (Data instances are total).
+      # @rbs class_name: String? --
+      #   The tagging class name, or nil for an instance of an anonymous `Data.define(...)` class.
       def initialize(members, class_name = nil)
         unless members.is_a?(Hash) && members.each_key.all?(Symbol)
           raise ArgumentError, "members must be a Hash with Symbol keys, got #{members.inspect}"
@@ -44,13 +44,12 @@ module Rigor
         freeze
       end
 
-      # @return [Array<Symbol>] ordered member names.
+      # @rbs return: Array[Symbol] -- Ordered member names.
       def member_names
         members.keys
       end
 
-      # @return [Rigor::Type, nil] the member's value type, or nil when the
-      #   name is not a declared member.
+      # @rbs return: Rigor::Type? -- The member's value type, or nil when the name is not a declared member.
       def member_type(name)
         members[name]
       end

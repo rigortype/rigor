@@ -13,7 +13,7 @@ module Rigor
     class UpgradeCommand < Command
       USAGE = "Usage: rigor upgrade [options]"
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         @out.puts("rigor upgrade: No migration target available yet (ADR-50 WD7, queued).")
         @out.puts("Current version: #{Rigor::VERSION}")

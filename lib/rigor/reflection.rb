@@ -89,8 +89,7 @@ module Rigor
       loader.project_declared_class?(class_name)
     end
 
-    # @return [Symbol] one of `:equal`, `:subclass`, `:superclass`,
-    #   `:disjoint`, `:unknown`.
+    # @rbs return: Symbol -- One of `:equal`, `:subclass`, `:superclass`, `:disjoint`, `:unknown`.
     def class_ordering(lhs, rhs, scope: Scope.empty)
       scope.environment.class_ordering(lhs, rhs)
     end
@@ -449,15 +448,15 @@ module Rigor
     end
     private_class_method :rbs_loader_for
 
-    # @return [Boolean] true when the analyzed source contains a class / module declaration
-    #   for the given name. Does NOT consult the RBS loader (use {.class_known?} for the
-    #   union).
+    # @rbs return: bool --
+    #   True when the analyzed source contains a class / module declaration for the given name. Does NOT consult the
+    #   RBS loader (use {.class_known?} for the union).
     def discovered_class?(class_name, scope: Scope.empty)
       scope.discovered_classes.key?(class_name.to_s)
     end
 
-    # @return [Boolean] true when the ScopeIndexer recorded a `def` for the given method on
-    #   the given class with the matching kind.
+    # @rbs return: bool --
+    #   True when the ScopeIndexer recorded a `def` for the given method on the given class with the matching kind.
     #
     # ADR-46 — a MISS records a negative cross-file dependency, so a consumer whose analysis
     # turned on "the project does not define this method" is re-checked once a later edit

@@ -21,7 +21,7 @@ module Rigor
     module CoverageScan
       module_function
 
-      # @param files [Array<String>] explicit `.rb` file paths to scan.
+      # @rbs files: Array[String] -- Explicit `.rb` file paths to scan.
       #
       # Issue #513 — the environment is PLUGIN-AWARE (`LanguageServer::ProjectContext`, the same builder
       # `--protection` uses), not the bare RBS environment this path carried until 2026-09-01. Without the

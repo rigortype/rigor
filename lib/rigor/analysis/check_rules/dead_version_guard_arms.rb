@@ -41,7 +41,7 @@ module Rigor
           diagnostics.reject { |diagnostic| arms.any? { |arm| covers?(arm, diagnostic) } }
         end
 
-        # @return [Array<Prism::Location>] the source ranges of every dead version-guard arm
+        # @rbs return: Array[Prism::Location] -- The source ranges of every dead version-guard arm
         def scan(root)
           arms = []
           collect(root, arms)

@@ -58,14 +58,14 @@ module Rigor
 
       VALID_PRODUCER_ID = /\A[a-z][a-z0-9._-]*\z/
 
-      # @param root [String] cache root directory.
-      # @param read_only [Boolean] when true, every disk-side side-effect is suppressed: `fetch_or_compute`
-      #   still reads existing entries (hits, gated on a current `schema_version.txt` marker — see
-      #   {#ensure_schema_version!}) and still runs the producer block on miss, but it does NOT write the
-      #   produced value to disk, does NOT update the marker, and does NOT touch the on-disk root directory.
-      #   The in-process memo is still populated so repeated lookups within the same run stay cheap. Used by
-      #   editor mode so multiple buffer-mode invocations can read from the same cache concurrently without
-      #   churning it. See `docs/design/20260516-editor-mode.md` § "Cache behaviour".
+      # @rbs root: String -- Cache root directory.
+      # @rbs read_only: bool --
+      #   When true, every disk-side side-effect is suppressed: `fetch_or_compute` still reads existing entries (hits,
+      #   gated on a current `schema_version.txt` marker — see {#ensure_schema_version!}) and still runs the producer
+      #   block on miss, but it does NOT write the produced value to disk, does NOT update the marker, and does NOT
+      #   touch the on-disk root directory. The in-process memo is still populated so repeated lookups within the same
+      #   run stay cheap. Used by editor mode so multiple buffer-mode invocations can read from the same cache
+      #   concurrently without churning it. See `docs/design/20260516-editor-mode.md` § "Cache behaviour".
       def initialize(root:, read_only: false, max_bytes: nil)
         @root = root.to_s.dup.freeze
         @read_only = read_only
@@ -100,8 +100,8 @@ module Rigor
 
       attr_reader :root
 
-      # @return [Boolean] whether this Store suppresses disk writes (`schema_version.txt`, entry creation).
-      #   Reads are unaffected.
+      # @rbs return: bool --
+      #   Whether this Store suppresses disk writes (`schema_version.txt`, entry creation). Reads are unaffected.
       def read_only?
         @read_only
       end
@@ -111,7 +111,8 @@ module Rigor
       # specific instance rather than the on-disk cache state. Disk-level state is reported separately by
       # {.disk_inventory}.
       #
-      # @return [Hash] `{ hits:, misses:, writes:, by_producer: { id => { hits:, misses:, writes: } } }`
+      # @rbs return: Hash[untyped, untyped] --
+      #   `{ hits:, misses:, writes:, by_producer: { id => { hits:, misses:, writes: } } }`
       def stats
         @monitor.synchronize do
           per_producer = @by_producer.transform_values { |counts| counts.dup.freeze }.freeze
@@ -123,9 +124,10 @@ module Rigor
       # `rigor check --cache-stats` to surface cache size and per-producer entry counts without depending on
       # in-process counters (which only reflect the current run).
       #
-      # @return [Hash] `{ root:, schema_version:, total_entries:, total_bytes:, producers: [{ id:, entries:,
-      #   bytes: }, ...] }`. When the root does not exist or has no schema-version marker, `schema_version` is
-      #   nil and the producer list is empty.
+      # @rbs return: Hash[untyped, untyped] --
+      #   `{ root:, schema_version:, total_entries:, total_bytes:, producers: [{ id:, entries:, bytes: }, ...] }`.
+      #   When the root does not exist or has no schema-version marker, `schema_version` is nil and the producer list
+      #   is empty.
       #
       # The `schema_version.txt` marker content. Covers BOTH invalidation axes: the descriptor schema and the
       # on-disk byte layout ({FORMAT_VERSION}, ADR-54). A format bump leaves the old entries permanently
@@ -169,27 +171,27 @@ module Rigor
       end
       private_class_method :collect_producers
 
-      # @param producer_id [String] stable cache namespace; only `[a-z][a-z0-9._-]*` is accepted.
-      # @param generation_cap [Integer, Symbol] how many generations of this producer survive a compaction
-      #   pass — a positive `Integer` for a whole-project producer (one live entry, older ones unreachable),
-      #   or {UNBOUNDED_GENERATIONS} for a producer with many simultaneously-live entries. REQUIRED, and
-      #   sourced from the producer's own declaration (`RbsCacheProducer.generation_cap`,
-      #   `RunCacheKey::GENERATION_CAP`, `Plugin::Base.producer generation_cap:`) rather than invented at the
-      #   call site. See {#evict!}.
-      # @param params [Hash] producer inputs; mixed into the cache key via {Descriptor#cache_key_for}.
-      # @param descriptor [Rigor::Cache::Descriptor] the invalidation descriptor for the value being cached.
-      # @param serialize [#call, nil] optional callable that turns the producer's return value into a binary
-      #   `String`. Defaults to `Marshal.dump(value).b`. Producers whose return values are not
-      #   `Marshal`-clean (RBS-native objects with `RBS::Location` members, raw `IO`, …) MUST provide a
-      #   serialiser. The pair `(serialize, deserialize)` MUST round-trip — a producer that reads with one
-      #   strategy and writes with another corrupts its own cache slice.
-      # @param deserialize [#call, nil] optional callable that turns bytes back into the producer's value.
-      #   Defaults to `Marshal.load`. Any exception (`StandardError`) raised by the deserialiser is treated as
-      #   a cache miss — the entry is considered corrupt, the producer block reruns, and the next write
-      #   overwrites it. This is consistent with the fault-tolerance contract for the default `Marshal.load`
-      #   path.
-      # @yieldreturn the value to cache.
-      # @return the cached value (loaded from disk on hit; produced by the block on miss).
+      # @rbs producer_id: String -- Stable cache namespace; only `[a-z][a-z0-9._-]*` is accepted.
+      # @rbs generation_cap: Integer | Symbol --
+      #   How many generations of this producer survive a compaction pass — a positive `Integer` for a whole-project
+      #   producer (one live entry, older ones unreachable), or {UNBOUNDED_GENERATIONS} for a producer with many
+      #   simultaneously-live entries. REQUIRED, and sourced from the producer's own declaration
+      #   (`RbsCacheProducer.generation_cap`, `RunCacheKey::GENERATION_CAP`, `Plugin::Base.producer generation_cap:`)
+      #   rather than invented at the call site. See {#evict!}.
+      # @rbs params: Hash[untyped, untyped] --
+      #   Producer inputs; mixed into the cache key via {Descriptor#cache_key_for}.
+      # @rbs descriptor: Rigor::Cache::Descriptor -- The invalidation descriptor for the value being cached.
+      # @rbs serialize: untyped --
+      #   Optional callable that turns the producer's return value into a binary `String`. Defaults to
+      #   `Marshal.dump(value).b`. Producers whose return values are not `Marshal`-clean (RBS-native objects with
+      #   `RBS::Location` members, raw `IO`, …) MUST provide a serialiser. The pair `(serialize, deserialize)` MUST
+      #   round-trip — a producer that reads with one strategy and writes with another corrupts its own cache slice.
+      # @rbs deserialize: untyped --
+      #   Optional callable that turns bytes back into the producer's value. Defaults to `Marshal.load`. Any exception
+      #   (`StandardError`) raised by the deserialiser is treated as a cache miss — the entry is considered corrupt,
+      #   the producer block reruns, and the next write overwrites it. This is consistent with the fault-tolerance
+      #   contract for the default `Marshal.load` path. Value to cache. Cached value (loaded from disk on hit;
+      #   produced by the block on miss).
       def fetch_or_compute(producer_id:, params:, descriptor:, generation_cap:,
                            serialize: nil, deserialize: nil, &block)
         validate_producer_id!(producer_id)

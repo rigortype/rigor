@@ -135,11 +135,10 @@ module Rigor
       NUMERIC_LITERAL_PREFIX = /\A[+-]?\d/
       private_constant :NUMERIC_LITERAL_PREFIX
 
-      # @param value [Object] typically a `Constant#value`
-      # @return [Boolean] true when `value` is a String that is a
-      #   single, complete Ruby numeric literal. Total over
-      #   arbitrary input — never raises (Prism reports malformed
-      #   input through `errors`, it does not throw).
+      # @rbs value: untyped -- Typically a `Constant#value`
+      # @rbs return: bool --
+      #   True when `value` is a String that is a single, complete Ruby numeric literal. Total over arbitrary input —
+      #   never raises (Prism reports malformed input through `errors`, it does not throw).
       def self.ruby_numeric_literal?(value)
         return false unless value.is_a?(String)
         return false if value.empty?
@@ -216,8 +215,8 @@ module Rigor
       }.freeze
       private_constant :COMPLEMENT_PAIRS
 
-      # @return [Symbol, nil] the registered complement predicate
-      #   id, or nil when no pair is registered for this predicate.
+      # @rbs return: Symbol? --
+      #   The registered complement predicate id, or nil when no pair is registered for this predicate.
       def complement_predicate_id
         COMPLEMENT_PAIRS[predicate_id]
       end

@@ -77,16 +77,19 @@ module Rigor
       # callable whose body is supplied by the application.
       TAINT_CAUSES = %w[template-not-analysed opaque-callable].freeze
 
-      # @param receiver [String] a class name or a receiver path (see above)
-      # @param method [Symbol, String] the selector this row colours
-      # @param singleton [Boolean] whether the row is `Receiver.method` rather than `Receiver#method`.
-      #   Meaningless — and ignored — for a receiver path, whose head already fixes the receiver object.
-      # @param labels [Array<String>] the effect labels the call contributes
-      # @param narrow [String, nil] a {Rigor::Effects::Narrowing} handler name, when the call's own
-      #   argument literals settle a question the row cannot (`connection.execute("SELECT …")`)
-      # @param discharge [Boolean] see above; honoured only for a first-party bundled plugin
-      # @param why [String] the audit justification, required exactly as `data/effects/core.yml` requires
-      #   one of every row: a label with no stated reason is a claim nobody can review.
+      # @rbs receiver: String -- A class name or a receiver path (see above)
+      # @rbs method: Symbol | String -- The selector this row colours
+      # @rbs singleton: bool --
+      #   Whether the row is `Receiver.method` rather than `Receiver#method`. Meaningless — and ignored — for a
+      #   receiver path, whose head already fixes the receiver object.
+      # @rbs labels: Array[String] -- The effect labels the call contributes
+      # @rbs narrow: String? --
+      #   A {Rigor::Effects::Narrowing} handler name, when the call's own argument literals settle a question the row
+      #   cannot (`connection.execute("SELECT …")`)
+      # @rbs discharge: bool -- See above; honoured only for a first-party bundled plugin
+      # @rbs why: String --
+      #   The audit justification, required exactly as `data/effects/core.yml` requires one of every row: a label with
+      #   no stated reason is a claim nobody can review.
       def initialize(receiver:, method:, labels:, why:, singleton: false, narrow: nil, discharge: false, # rubocop:disable Metrics/ParameterLists
                      within: nil, on_result: false, taint: nil)
         @receiver = validate_receiver!(receiver)

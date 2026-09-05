@@ -95,6 +95,7 @@ module Rigor
           return nil if parsed.nil?
 
           uses, decls, rbs_decls = parsed
+          drop_unannotated_defs!(decls)
           rendered = reattach_declaration_annotations(::RBS::Inline::Writer.write(uses, decls, rbs_decls))
           return nil if rendered.nil? || rendered.strip.empty?
 
@@ -108,6 +109,51 @@ module Rigor
         end
 
         private
+
+        # ADR-93 WD1, applied inside an annotated file: upstream's writer emits
+        # `def f: (untyped x) -> untyped` for every unannotated sibling of an annotated
+        # method. Those skeletons duplicate a project's `sig/` declarations
+        # (`DuplicatedMethodDefinitionError`) and replace body inference with `untyped`.
+        # Keep members that actually carry an annotation; leave nested declarations in place.
+        def drop_unannotated_defs!(nodes)
+          Array(nodes).each do |node|
+            next unless node.respond_to?(:members) && node.members.respond_to?(:select!)
+
+            node.members.select! { |member| keep_synthesized_member?(member) }
+            drop_unannotated_defs!(node.members)
+          end
+        end
+
+        def keep_synthesized_member?(member)
+          case member
+          when ::RBS::Inline::AST::Members::RubyDef
+            annotated_ruby_def?(member)
+          when ::RBS::Inline::AST::Members::RubyAttr
+            annotated_ruby_attr?(member)
+          else
+            true
+          end
+        end
+
+        def annotated_ruby_def?(member)
+          return true if member.assertion
+          return true if member.annotated_method_types
+          return true if member.return_type
+          return true if member.var_type_hash.any?
+          return true if member.comments&.each_annotation&.any?
+
+          false
+        end
+
+        def annotated_ruby_attr?(member)
+          return true if member.assertion
+          return false unless member.comments
+
+          member.comments.each_annotation.any? do |annotation|
+            annotation.is_a?(::RBS::Inline::AST::Annotations::VarType) ||
+              annotation.is_a?(::RBS::Inline::AST::Annotations::TypeAssertion)
+          end
+        end
 
         # Re-attaches a class- or module-level `%a{…}` that upstream's writer dropped (#452).
         #

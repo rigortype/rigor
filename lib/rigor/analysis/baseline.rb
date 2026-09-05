@@ -236,9 +236,10 @@ module Rigor
       # Walk the current diagnostic stream and report bucket-level drift. Each baseline bucket becomes one
       # DriftRow regardless of whether the current run still matches it.
       #
-      # @param diagnostics [Array<Diagnostic>] current run's diagnostic stream (PRE-filter — pass the raw
-      #   `result.diagnostics` from `Runner#run`, not the post-baseline surface).
-      # @return [Array<DriftRow>] one entry per baseline bucket, in baseline-file order.
+      # @rbs diagnostics: Array[Diagnostic] --
+      #   Current run's diagnostic stream (PRE-filter — pass the raw `result.diagnostics` from `Runner#run`, not the
+      #   post-baseline surface).
+      # @rbs return: Array[DriftRow] -- One entry per baseline bucket, in baseline-file order.
       def audit(diagnostics)
         counts = Hash.new(0)
         diagnostics.each do |diag|

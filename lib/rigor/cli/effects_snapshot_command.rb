@@ -51,7 +51,7 @@ module Rigor
         @verb = verb
       end
 
-      # @return [Integer] 0 fresh / written, 1 on drift under `check`, 64 on a usage error.
+      # @rbs return: Integer -- 0 fresh / written, 1 on drift under `check`, 64 on a usage error.
       def run
         options = parse_options
         return usage_error("unsupported format: #{options.fetch(:format)}") unless

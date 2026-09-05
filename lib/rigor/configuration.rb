@@ -466,14 +466,14 @@ module Rigor
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     #
-    # @param effects_key_present [Boolean] ADR-103 WD15 — whether the file this `data` came from carried an
-    #   `effects:` key at all, independent of its value. Defaults to `data.key?("effects")`, which is the
-    #   right answer for a caller that passes a raw (non-`DEFAULTS`-merged) hash directly — the common shape
-    #   in specs — but is always `true` once `data` has been through `DEFAULTS.merge`, because `DEFAULTS`
-    #   itself carries the key; {.load} therefore computes this from the pre-merge file and passes it
-    #   explicitly. See {#coerce_effects}. **Positional, deliberately not a keyword**: a bare (unbraced)
-    #   `"key" => value` hash literal — this class's usual call shape, all over the spec suite — is coerced
-    #   into keyword arguments by Ruby whenever the method declares ANY keyword parameter, which would break
+    # @rbs effects_key_present: bool --
+    #   ADR-103 WD15 — whether the file this `data` came from carried an `effects:` key at all, independent of its
+    #   value. Defaults to `data.key?("effects")`, which is the right answer for a caller that passes a raw
+    #   (non-`DEFAULTS`-merged) hash directly — the common shape in specs — but is always `true` once `data` has been
+    #   through `DEFAULTS.merge`, because `DEFAULTS` itself carries the key; {.load} therefore computes this from the
+    #   pre-merge file and passes it explicitly. See {#coerce_effects}. **Positional, deliberately not a keyword**: a
+    #   bare (unbraced) `"key" => value` hash literal — this class's usual call shape, all over the spec suite — is
+    #   coerced into keyword arguments by Ruby whenever the method declares ANY keyword parameter, which would break
     #   every `Configuration.new("some_key" => value)` call site with an "unknown keyword" `ArgumentError`.
     def initialize(data = DEFAULTS, effects_key_present = data.key?("effects"))
       # Record before the per-key fetches below discard the evidence. Top level only, deliberately —
@@ -626,8 +626,9 @@ module Rigor
     #   the same checkout: a typo is a bug, and reading it as `false` would ship the feature permanently off
     #   with no signal.
     #
-    # @param id [String] a feature id from {BleedingEdge::FEATURES} or {BleedingEdge::GRADUATED}.
-    # @raise [ArgumentError] if `id` names no known feature.
+    # @rbs id: String --
+    #   A feature id from {BleedingEdge::FEATURES} or {BleedingEdge::GRADUATED}. Raises ArgumentError if `id` names no
+    #   known feature.
     def bleeding_edge_active?(id)
       return true if BleedingEdge.graduated?(id)
       unless BleedingEdge.known_id?(id)

@@ -73,8 +73,7 @@ module Rigor
 
         module_function
 
-        # @return [Rigor::Type, nil] folded result, or nil to defer
-        #   to the next dispatcher tier.
+        # @rbs return: Rigor::Type? -- Folded result, or nil to defer to the next dispatcher tier.
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name

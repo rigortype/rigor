@@ -19,7 +19,7 @@ module Rigor
     module MeasurementIntegrity
       module_function
 
-      # @return [Boolean] false only when nothing could be measured AND something failed trying.
+      # @rbs return: bool -- False only when nothing could be measured AND something failed trying.
       def measured?(total:, harness_errors:)
         !(total.zero? && harness_errors.positive?)
       end

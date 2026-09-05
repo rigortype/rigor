@@ -50,12 +50,12 @@ module Rigor
       REGENERATION_CLOSING_LINE = "Run `rigor effects update` to regenerate the record under the current " \
                                   "rules."
 
-      # @param sources [Hash{String=>Array<String>}] `Runner#effect_sources` — where each unit is defined.
-      #   A drift row names `file:line` so a reviewer does not have to search for the method (#435). The
-      #   file rides the cached summary entry and is free; the line is resolved by parsing the row's own
-      #   file ({Effects::DefinitionLines}), which is why a fresh report — no rows — still parses nothing
-      #   and the whole-project parse ADR-104 removed from this command stays removed.
-      # @param lines [Effects::DefinitionLines] seam for the specs; the default parses on demand.
+      # @rbs sources: Hash[String, Array[String]] --
+      #   `Runner#effect_sources` — where each unit is defined. A drift row names `file:line` so a reviewer does not
+      #   have to search for the method (#435). The file rides the cached summary entry and is free; the line is
+      #   resolved by parsing the row's own file ({Effects::DefinitionLines}), which is why a fresh report — no rows —
+      #   still parses nothing and the whole-project parse ADR-104 removed from this command stays removed.
+      # @rbs lines: Effects::DefinitionLines -- Seam for the specs; the default parses on demand.
       def initialize(out:, path:, sources: nil, lines: Effects::DefinitionLines.new)
         @out = out
         @path = path
@@ -121,8 +121,9 @@ module Rigor
       # method that no longer exists was not defined by it. Such a row renders exactly as it did before
       # this suffix existed.
       #
-      # @return [Array<Array(String, Integer)>] `[relative path, line]` per file, the line nil when that
-      #   file spells the key with no `def` — an accessor, or a definition the nesting cannot name.
+      # @rbs return: Array[[String, Integer]] --
+      #   `[relative path, line]` per file, the line nil when that file spells the key with no `def` — an accessor, or
+      #   a definition the nesting cannot name.
       def sources_of(symbol)
         Array(@sources[symbol]).map do |path|
           [Effects::Snapshot.relativize(path, Dir.pwd), @lines.for(key: symbol, path: path)]

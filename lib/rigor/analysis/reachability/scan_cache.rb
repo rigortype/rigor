@@ -43,9 +43,9 @@ module Rigor
         RACY_WINDOW_NS = 2_000_000_000
         private_constant :RACY_WINDOW_NS
 
-        # @param cache_path [String, nil] the configuration's cache root; nil or empty is an inert
-        #   cache (every fetch computes, nothing persists).
-        # @param target_ruby [String, nil] parse-affecting configuration, part of the identity.
+        # @rbs cache_path: String? --
+        #   The configuration's cache root; nil or empty is an inert cache (every fetch computes, nothing persists).
+        # @rbs target_ruby: String? -- Parse-affecting configuration, part of the identity.
         def self.open(cache_path, target_ruby: nil)
           return new(path: nil, header: nil) if cache_path.nil? || cache_path.to_s.empty?
 

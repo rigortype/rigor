@@ -97,16 +97,16 @@ module Rigor
 
       # Looks up a refined return type for the given call.
       #
-      # @param owner_class_name [String, nil] the class on which the method is defined
-      #   (e.g., `"Kernel"`). Pass `nil` when the caller hasn't resolved a defining owner
-      #   yet — the lookup will then fall back to matching by `(method_name, kind)` against
-      #   entries whose owner is currently in the table.
-      # @param kind [Symbol] one of `:singleton`, `:instance`. The caller passes the shape of
-      #   the actual call site; the table stores `:both` for entries that match either.
-      # @param arg_types [Array<Rigor::Type>] positional argument types. Forwarded to the
-      #   handler so future entries can discriminate on argument shape.
-      # @return [Rigor::Type, nil] the refined return type, or `nil` when no override
-      #   matches.
+      # @rbs owner_class_name: String? --
+      #   The class on which the method is defined (e.g., `"Kernel"`). Pass `nil` when the caller hasn't resolved a
+      #   defining owner yet — the lookup will then fall back to matching by `(method_name, kind)` against entries
+      #   whose owner is currently in the table.
+      # @rbs kind: Symbol --
+      #   One of `:singleton`, `:instance`. The caller passes the shape of the actual call site; the table stores
+      #   `:both` for entries that match either.
+      # @rbs arg_types: Array[Rigor::Type] --
+      #   Positional argument types. Forwarded to the handler so future entries can discriminate on argument shape.
+      # @rbs return: Rigor::Type? -- The refined return type, or `nil` when no override matches.
       def self.lookup(owner_class_name:, method_name:, kind:, arg_types: [])
         return nil if owner_class_name.nil?
 
@@ -126,8 +126,8 @@ module Rigor
       end.freeze
       private_constant :OWNERS_BY_METHOD
 
-      # @return [Array<String>] the candidate owner class names for a bare method-name
-      #   lookup. Empty when no override names this method.
+      # @rbs return: Array[String] --
+      #   The candidate owner class names for a bare method-name lookup. Empty when no override names this method.
       NO_OWNERS = [].freeze
       private_constant :NO_OWNERS
 

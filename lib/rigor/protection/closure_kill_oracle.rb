@@ -55,20 +55,21 @@ module Rigor
       # knowledge the single-file run does not have) must not mask a kill the shipped oracle would report.
       Baseline = Data.define(:own, :dependents)
 
-      # @param environment [Rigor::Environment] built once by the caller.
-      # @param project_scan [Rigor::Analysis::ProjectScan] built once by the caller; adopted per analysis
-      #   through `prebuilt:`, exactly as {DiagnosticOracle} does.
-      # @param paths [Array<String>] the measured file set, in canonical order (the seed's span: a class
-      #   declared outside it stays unknown, as it does for Tier 1's seed and for {DiscoverySeed}).
-      # @param dependents [Hash{String => Array<String>}] {DependencyClosure} map, restricted to `paths`.
-      # @param seed_bundles [Hash{String => Hash}] {DiscoverySeed.bundles} over the same `paths`.
-      # @param discovery_seed [Hash, nil] the `discovery-seeded-mutation-sites` seed when that feature is also
-      #   adopted, nil otherwise. It goes to the delegated {DiagnosticOracle} verbatim, so the mutated file's
-      #   verdict is byte-for-byte the verdict that feature combination produces without this one; its
-      #   `param_inferred_types` slot additionally rides the per-mutant closure seed, so an admitted site is
-      #   judged with the knowledge that admitted it (issue #260's amended decision). The table is not
-      #   refreshed per mutant — the collector is a whole-project pre-pass, and one mutated method body does
-      #   not justify re-running it thousands of times.
+      # @rbs environment: Rigor::Environment -- Built once by the caller.
+      # @rbs project_scan: Rigor::Analysis::ProjectScan --
+      #   Built once by the caller; adopted per analysis through `prebuilt:`, exactly as {DiagnosticOracle} does.
+      # @rbs paths: Array[String] --
+      #   The measured file set, in canonical order (the seed's span: a class declared outside it stays unknown, as it
+      #   does for Tier 1's seed and for {DiscoverySeed}).
+      # @rbs dependents: Hash[String, Array[String]] -- {DependencyClosure} map, restricted to `paths`.
+      # @rbs seed_bundles: Hash[String, Hash[untyped, untyped]] -- {DiscoverySeed.bundles} over the same `paths`.
+      # @rbs discovery_seed: Hash[untyped, untyped]? --
+      #   The `discovery-seeded-mutation-sites` seed when that feature is also adopted, nil otherwise. It goes to the
+      #   delegated {DiagnosticOracle} verbatim, so the mutated file's verdict is byte-for-byte the verdict that
+      #   feature combination produces without this one; its `param_inferred_types` slot additionally rides the
+      #   per-mutant closure seed, so an admitted site is judged with the knowledge that admitted it (issue #260's
+      #   amended decision). The table is not refreshed per mutant — the collector is a whole-project pre-pass, and
+      #   one mutated method body does not justify re-running it thousands of times.
       def initialize(configuration:, environment:, project_scan:, paths:, dependents:, seed_bundles:,
                      discovery_seed: nil)
         @configuration = configuration

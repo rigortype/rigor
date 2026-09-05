@@ -30,8 +30,9 @@ module Rigor
         @empty ||= new({})
       end
 
-      # @param table [Hash{String => Array<String>}] `Configuration#effects_attribution` — method key to
-      #   label list, both already shape-validated at load (tier 2).
+      # @rbs table: Hash[String, Array[String]] --
+      #   `Configuration#effects_attribution` — method key to label list, both already shape-validated at load (tier
+      #   2).
       def self.build(table)
         return empty if table.nil? || table.empty?
 
@@ -50,7 +51,7 @@ module Rigor
       # The labels attributed to a method key (`Net::HTTP.get`), or nil when the table says nothing about
       # it. The key is spelled by the caller, which already builds the same string for the catalogue.
       #
-      # @return [LabelSet, nil]
+      # @rbs return: LabelSet?
       def [](key)
         @rows[key]
       end

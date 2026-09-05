@@ -66,8 +66,8 @@ module Rigor
         # via `RIGOR_LSP_POOL_MIN_BATCH` (mirrors `RIGOR_RACTOR_WORKERS`'s override shape).
         DEFAULT_MIN_BATCH_SIZE = 16
 
-        # @return [Integer] `RIGOR_LSP_POOL_MIN_BATCH` when set to a non-empty value, else
-        #   {DEFAULT_MIN_BATCH_SIZE}.
+        # @rbs return: Integer --
+        #   `RIGOR_LSP_POOL_MIN_BATCH` when set to a non-empty value, else {DEFAULT_MIN_BATCH_SIZE}.
         def self.resolve_min_batch_size
           env_value = ENV.fetch("RIGOR_LSP_POOL_MIN_BATCH", nil)
           return DEFAULT_MIN_BATCH_SIZE if env_value.nil? || env_value.empty?
@@ -75,19 +75,21 @@ module Rigor
           Integer(env_value)
         end
 
-        # @param environment [Rigor::Environment] the warm, shared per-session Environment
-        #   (`ProjectContext#environment`) every job's Runner reuses instead of rebuilding.
-        # @param prebuilt [Rigor::Analysis::ProjectScan] the warm, shared pre-pass snapshot
-        #   (`ProjectContext#project_scan`) every job's Runner adopts instead of re-scanning.
-        # @param workers [Integer] pool size. `#analyze` degrades to sequential in-process execution — one
-        #   job at a time, no `fork` — when fewer than 2 bindings are submitted, fewer than `min_batch_size`
-        #   bindings are submitted, `workers` is not positive, `fork` is unavailable on this platform, or
-        #   `cache_store` is nil. The middle two are the fork-pool-is-not-worth-it-yet gate documented on
-        #   {DEFAULT_MIN_BATCH_SIZE}; the last two mirror
+        # @rbs environment: Rigor::Environment --
+        #   The warm, shared per-session Environment (`ProjectContext#environment`) every job's Runner reuses instead
+        #   of rebuilding.
+        # @rbs prebuilt: Rigor::Analysis::ProjectScan --
+        #   The warm, shared pre-pass snapshot (`ProjectContext#project_scan`) every job's Runner adopts instead of
+        #   re-scanning.
+        # @rbs workers: Integer --
+        #   Pool size. `#analyze` degrades to sequential in-process execution — one job at a time, no `fork` — when
+        #   fewer than 2 bindings are submitted, fewer than `min_batch_size` bindings are submitted, `workers` is not
+        #   positive, `fork` is unavailable on this platform, or `cache_store` is nil. The middle two are the
+        #   fork-pool-is-not-worth-it-yet gate documented on {DEFAULT_MIN_BATCH_SIZE}; the last two mirror
         #   {PoolCoordinator#analyze_files_in_pool}'s own fork-pool preconditions.
-        # @param min_batch_size [Integer] see {DEFAULT_MIN_BATCH_SIZE}. Exposed as a constructor param
-        #   (rather than read from the env internally) purely for spec control; production callers get the
-        #   resolved default.
+        # @rbs min_batch_size: Integer --
+        #   See {DEFAULT_MIN_BATCH_SIZE}. Exposed as a constructor param (rather than read from the env internally)
+        #   purely for spec control; production callers get the resolved default.
         def initialize(configuration:, cache_store:, environment:, prebuilt:, workers:,
                        min_batch_size: self.class.resolve_min_batch_size)
           @configuration = configuration
@@ -183,9 +185,10 @@ module Rigor
           degraded
         end
 
-        # @return [Hash, nil] the child's `{index => diagnostics}` payload, or nil when the child exited
-        #   abnormally or wrote no readable payload. `Marshal.load` is safe here: the blob was written by our
-        #   own forked child to a temp file we created.
+        # @rbs return: Hash[untyped, untyped]? --
+        #   The child's `{index => diagnostics}` payload, or nil when the child exited abnormally or wrote no readable
+        #   payload. `Marshal.load` is safe here: the blob was written by our own forked child to a temp file we
+        #   created.
         def fork_worker_payload(status, out_path)
           return nil unless status.success? && File.exist?(out_path)
 

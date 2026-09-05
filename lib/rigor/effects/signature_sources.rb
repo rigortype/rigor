@@ -52,8 +52,8 @@ module Rigor
         stripped.start_with?(root) ? stripped[root.length..] : stripped
       end
 
-      # @param signature_paths [Array<String>, nil] the configured roots; empty / nil takes the default.
-      # @param virtual_rbs [Array<Array(String, String)>, nil] the loader's virtual entries.
+      # @rbs signature_paths: Array[String]? -- The configured roots; empty / nil takes the default.
+      # @rbs virtual_rbs: Array[[String, String]]? -- The loader's virtual entries.
       def collect(signature_paths:, virtual_rbs: nil)
         files = roots(signature_paths).flat_map { |root| Dir.glob(File.join(root.to_s, "**", "*.rbs")).sort }
         sources = files.filter_map do |path|
@@ -75,7 +75,7 @@ module Rigor
       # residual reports one annotation per run, so the carrier a run holds past the environment's own
       # lifetime is a single synthesized buffer rather than the project's whole virtual tree.
       #
-      # @return [Array<Array(String, String)>] zero or one pair.
+      # @rbs return: Array[[String, String]] -- Zero or one pair.
       def annotated_carrier(virtual_rbs)
         Array(virtual_rbs).each do |name, content|
           return [[name.to_s, content.to_s]] if ANNOTATION_HINT.match?(content)

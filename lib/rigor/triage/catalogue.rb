@@ -91,7 +91,7 @@ module Rigor
       INFO_GUARDED = %i[h5_systemic_cluster h6_genuine_bugs].freeze
       private_constant :INFO_GUARDED
 
-      # @param include_info [Boolean] let H5/H6 see `:info` diagnostics
+      # @rbs include_info: bool -- Let H5/H6 see `:info` diagnostics
       def recognise(diagnostics, include_info: false)
         claimed = {}.compare_by_identity
         recognisers.filter_map do |recogniser|

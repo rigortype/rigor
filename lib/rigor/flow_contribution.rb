@@ -49,25 +49,26 @@ module Rigor
 
     attr_reader(*SLOT_NAMES, :provenance)
 
-    # @param return_type [Object, nil] normal-edge return type. Use `nil` when the contribution does not
-    #   refine the return type selected from the RBS contract.
-    # @param truthy_facts [Array, nil] facts that hold only on the truthy control-flow edge. Edge-local: a
-    #   truthy-edge fact does NOT imply its falsey-edge complement (ADR-2 § "Plugin Contribution Merging").
-    # @param falsey_facts [Array, nil] dual of `truthy_facts`.
-    # @param post_return_facts [Array, nil] facts that hold after the call returns normally on every edge —
-    #   the carrier for assertion-style contributions.
-    # @param mutations [Array, nil] receiver and argument mutation effects.
-    # @param invalidations [Array, nil] targeted fact invalidations beyond what mutation effects already
-    #   imply.
-    # @param exceptional [Object, nil] non-returning, raising, or unreachable effect.
-    # @param role_conformance [Array, nil] capability-role conformance facts the contribution provides.
-    # @param effects [Rigor::Effects::LabelSet, nil] ADR-103 WD5 — the effect labels this call edge
-    #   attributes to its callee, as an upper bound. `nil` means "says nothing about effects", which is
-    #   NOT the same as the empty set (which asserts the call performs none). Merged by union, the
-    #   conservative direction: two sources that each name part of a call's footprint together name
-    #   more of it, and neither can shrink the other's claim.
-    # @param provenance [Provenance] source-family, plugin-id, node, and cache-descriptor metadata. Defaults
-    #   to `Provenance.builtin`.
+    # @rbs return_type: untyped? --
+    #   Normal-edge return type. Use `nil` when the contribution does not refine the return type selected from the RBS
+    #   contract.
+    # @rbs truthy_facts: Array[untyped]? --
+    #   Facts that hold only on the truthy control-flow edge. Edge-local: a truthy-edge fact does NOT imply its
+    #   falsey-edge complement (ADR-2 § "Plugin Contribution Merging").
+    # @rbs falsey_facts: Array[untyped]? -- Dual of `truthy_facts`.
+    # @rbs post_return_facts: Array[untyped]? --
+    #   Facts that hold after the call returns normally on every edge — the carrier for assertion-style contributions.
+    # @rbs mutations: Array[untyped]? -- Receiver and argument mutation effects.
+    # @rbs invalidations: Array[untyped]? -- Targeted fact invalidations beyond what mutation effects already imply.
+    # @rbs exceptional: untyped? -- Non-returning, raising, or unreachable effect.
+    # @rbs role_conformance: Array[untyped]? -- Capability-role conformance facts the contribution provides.
+    # @rbs effects: Rigor::Effects::LabelSet? --
+    #   ADR-103 WD5 — the effect labels this call edge attributes to its callee, as an upper bound. `nil` means "says
+    #   nothing about effects", which is NOT the same as the empty set (which asserts the call performs none). Merged
+    #   by union, the conservative direction: two sources that each name part of a call's footprint together name more
+    #   of it, and neither can shrink the other's claim.
+    # @rbs provenance: Provenance --
+    #   Source-family, plugin-id, node, and cache-descriptor metadata. Defaults to `Provenance.builtin`.
     # rubocop:disable Metrics/ParameterLists
     def initialize(return_type: nil, truthy_facts: nil, falsey_facts: nil,
                    post_return_facts: nil, mutations: nil, invalidations: nil,
@@ -87,8 +88,9 @@ module Rigor
       freeze
     end
 
-    # @return [Boolean] true when every content slot is unset (nil or an empty collection). Provenance does
-    #   not count toward emptiness — an empty bundle still carries source attribution.
+    # @rbs return: bool --
+    #   True when every content slot is unset (nil or an empty collection). Provenance does not count toward emptiness
+    #   — an empty bundle still carries source attribution.
     def empty?
       SLOT_NAMES.all? { |slot| slot_empty?(slot, public_send(slot)) }
     end

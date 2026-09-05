@@ -53,8 +53,8 @@ module Rigor
         NODE_CLASSES = [Prism::IfNode, Prism::UnlessNode].freeze
         RULE_WALK_GATES = [:loop_or_block].freeze
 
-        # @return [Array<Result>] one entry per qualifying predicate. Empty when the tree carries no firing
-        #   predicates.
+        # @rbs return: Array[Result] --
+        #   One entry per qualifying predicate. Empty when the tree carries no firing predicates.
         def initialize(scope_index)
           @scope_index = scope_index
           @results = []

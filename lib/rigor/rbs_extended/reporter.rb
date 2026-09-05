@@ -32,12 +32,12 @@ module Rigor
         @mutex = Mutex.new
       end
 
-      # @return [Array<UnresolvedEntry>] frozen snapshot of the accumulated unresolved-payload events.
+      # @rbs return: Array[UnresolvedEntry] -- Frozen snapshot of the accumulated unresolved-payload events.
       def unresolved_payloads
         @mutex.synchronize { @unresolved_payloads.dup.freeze }
       end
 
-      # @return [Array<LossyProjectionEntry>] frozen snapshot of the accumulated lossy-projection events.
+      # @rbs return: Array[LossyProjectionEntry] -- Frozen snapshot of the accumulated lossy-projection events.
       def lossy_projections
         @mutex.synchronize { @lossy_projections.dup.freeze }
       end

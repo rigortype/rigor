@@ -76,7 +76,7 @@ module Rigor
       # up.
       SKILLS_ROOT = File.expand_path("../../../skills", __dir__)
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         case @argv.first
         when nil

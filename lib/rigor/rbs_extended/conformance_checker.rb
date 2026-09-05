@@ -60,7 +60,7 @@ module Rigor
         results
       end
 
-      # @return [Array] zero or more records for one (class, interface) pair.
+      # @rbs return: Array[untyped] -- Zero or more records for one (class, interface) pair.
       def check_one(rbs_loader, class_name, interface_name, location)
         interface_def = resolve_interface(rbs_loader, class_name, interface_name)
         if interface_def.nil?

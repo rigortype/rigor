@@ -62,12 +62,12 @@ module Rigor
 
       module_function
 
-      # @param body [String, nil] a regex sub-pattern, typically the inner body of a
-      #   `(?<name>body)` named capture. Anchors (`\A`, `\z`, `^`, `$`) are not stripped — the
-      #   recogniser table targets bodies that the regex engine treats as anchored to the
+      # @rbs body: String? --
+      #   A regex sub-pattern, typically the inner body of a `(?<name>body)` named capture. Anchors (`\A`, `\z`, `^`,
+      #   `$`) are not stripped — the recogniser table targets bodies that the regex engine treats as anchored to the
       #   capture group bounds.
-      # @return [Rigor::Type, nil] the matching imported refinement carrier, or `nil` if
-      #   `body` is not a recognised shape.
+      # @rbs return: Rigor::Type? --
+      #   The matching imported refinement carrier, or `nil` if `body` is not a recognised shape.
       def for_capture_body(body)
         return nil if body.nil? || body.empty?
 
@@ -100,8 +100,8 @@ module Rigor
       # free-whitespace/`#`-comment flag from the `source` alone, so consumers bail on it before
       # calling here.
       #
-      # @param source [String, nil] the full regex source string.
-      # @return [Rigor::Type, nil] the matching imported refinement carrier, or `nil`.
+      # @rbs source: String? -- The full regex source string.
+      # @rbs return: Rigor::Type? -- The matching imported refinement carrier, or `nil`.
       def for_whole_pattern(source)
         return nil if source.nil?
         return nil unless source.start_with?('\A') && source.end_with?('\z')

@@ -21,21 +21,22 @@ module Rigor
       # end-of-pass snapshots) is read through injected reader procs so this collaborator never calls back
       # into the {Runner} and the read happens at the exact point in the run the original inline read did.
       class DiagnosticAggregator # rubocop:disable Metrics/ClassLength
-        # @param plugin_registry [#call] reader returning the current {Plugin::Registry} (varies per run).
-        # @param dependency_source_index [#call] reader returning the current
-        #   {DependencySourceInference::Index}.
-        # @param pool_mode [#call] reader returning the pool-mode flag.
-        # @param cached_plugin_prepare_diagnostics [#call] reader returning the prepare-diagnostic snapshot.
-        # @param pre_eval_diagnostics_from_scanner [#call] reader returning the pre-eval scanner diagnostics.
-        # @param synthesized_namespaces_snapshot [#call] reader.
-        # @param quarantined_signatures_snapshot [#call] reader returning the `signature_paths:` files skipped
-        #   because they do not parse (`[path, first_error_line]` pairs).
-        # @param env_build_failure_snapshot [#call] reader returning the total RBS env-build failure tuple
-        #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
-        # @param definition_build_failures_snapshot [#call] issue #696 — reader returning the per-class
-        #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
-        #   conflicting_buffer_names]` tuples. Empty for a healthy sig set.
-        # @param conformance_results_snapshot [#call] reader.
+        # @rbs plugin_registry: untyped -- Reader returning the current {Plugin::Registry} (varies per run).
+        # @rbs dependency_source_index: untyped -- Reader returning the current {DependencySourceInference::Index}.
+        # @rbs pool_mode: untyped -- Reader returning the pool-mode flag.
+        # @rbs cached_plugin_prepare_diagnostics: untyped -- Reader returning the prepare-diagnostic snapshot.
+        # @rbs pre_eval_diagnostics_from_scanner: untyped -- Reader returning the pre-eval scanner diagnostics.
+        # @rbs synthesized_namespaces_snapshot: untyped -- Reader.
+        # @rbs quarantined_signatures_snapshot: untyped --
+        #   Reader returning the `signature_paths:` files skipped because they do not parse (`[path,
+        #   first_error_line]` pairs).
+        # @rbs env_build_failure_snapshot: untyped --
+        #   Reader returning the total RBS env-build failure tuple (`[error_class, first_error_line,
+        #   conflicting_buffer_names]`) or nil when the env built.
+        # @rbs definition_build_failures_snapshot: untyped --
+        #   Issue #696 — reader returning the per-class `RBS::DefinitionBuilder` failures the run observed, as
+        #   `[class_name, error_class, member, conflicting_buffer_names]` tuples. Empty for a healthy sig set.
+        # @rbs conformance_results_snapshot: untyped -- Reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
                        pool_mode:, cached_plugin_prepare_diagnostics:,

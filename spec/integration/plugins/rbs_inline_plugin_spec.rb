@@ -187,6 +187,23 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       RUBY
     end
 
+    it "does not emit untyped skeletons for unannotated sibling methods" do
+      rendered = synthesized_for(<<~RUBY)
+        class Mixed
+          # @rbs x: Integer
+          def one(x)
+            x
+          end
+
+          def two(y)
+            y
+          end
+        end
+      RUBY
+      expect(rendered).to include("def one")
+      expect(rendered).not_to include("def two")
+    end
+
     # `class Foo #:nodoc:` is one of the most common comments in Ruby, and upstream's parser reads the RDoc
     # directive as a type assertion of an alias named `nodoc`. Left alone, 61 of mail's files opted into
     # synthesis on that alone — which is why the annotation gate by itself only got mail from 42 to 31

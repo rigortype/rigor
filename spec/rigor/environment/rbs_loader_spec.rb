@@ -430,6 +430,29 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(messages.first).to include("Widget")
     end
 
+    it "keeps an abort-time fallback banner after an earlier internal-demand summary" do
+      write_duplicate_method_rbs(tmpdir)
+      File.write(
+        File.join(tmpdir, "gadget.rbs"),
+        "class Gadget\n  def baz: () -> void\n  def baz: () -> String\nend\n"
+      )
+      cache_store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+      loader = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      allow(loader).to receive(:singleton_definitions_table).and_raise("aggregation unavailable")
+
+      loader.send(:during_internal_demand) { loader.instance_definition("Widget") }
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("Internal whole-universe demand found")
+
+      expect { loader.prewarm }.to raise_error(RuntimeError, "aggregation unavailable")
+      expect(messages.size).to eq(2)
+      expect(messages.last).to include("RBS definition build failed")
+      expect(messages.last).to include("Gadget")
+      expect(messages.last).not_to include("Internal whole-universe demand found")
+    end
+
     it "keeps the class known and fails soft: dispatch degrades without a crash or new diagnostic" do
       write_duplicate_method_rbs(tmpdir)
       loader = described_class.new(signature_paths: [tmpdir])

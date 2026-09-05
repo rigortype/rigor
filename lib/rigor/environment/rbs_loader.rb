@@ -2113,26 +2113,35 @@ module Rigor
       # review, second pass).
       #
       # Save-and-restore rather than a bare flag: `#prewarm` wraps a body whose members wrap themselves, and
-      # a nested demand must not un-mark its caller on the way out. The first outermost exit flushes the
-      # deferred stderr summary, including when the body raises before a diagnostic can be assembled; later
-      # internal-demand episodes in this loader stay behind the same process-level banner.
+      # a nested demand must not un-mark its caller on the way out. A successful outermost exit flushes the
+      # deferred stderr summary; an outermost exit that raises keeps the detailed fallback banner armed even
+      # when an earlier internal-demand episode already emitted the process-level summary.
       #
       # Per LOADER, not per thread. Nesting and a raise mid-demand are both handled, and the fork pool forks
       # after `#prewarm` returns, so no CLI path shares a loader across concurrent analyses. An in-process
       # host that did (`language_server/debouncer.rb` runs analysis on a `Thread`) could have one analysis
       # silence another's reporting; not reachable today, and not worth a thread-local until it is.
       def during_internal_demand
+        completed = false
         previous = @state[:internal_demand]
         outermost = !previous
         if outermost
-          @state[:definition_build_deferred_count] ||= 0
-          @state[:definition_build_deferred_first] ||= nil
+          @state[:definition_build_deferred_count] = 0
+          @state[:definition_build_deferred_first] = nil
         end
         @state[:internal_demand] = true
-        yield
+        result = yield
+        completed = true
+        result
       ensure
         @state[:internal_demand] = previous
-        warn_about_deferred_definition_build_failures if outermost
+        if outermost
+          if completed
+            warn_about_deferred_definition_build_failures
+          else
+            warn_about_aborted_definition_build_failures
+          end
+        end
       end
 
       # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
@@ -2208,6 +2217,14 @@ module Rigor
           "Internal whole-universe demand found #{affected}; see the " \
           "`rbs.coverage.definition-build-failed` diagnostic for the affected classes."
         )
+      end
+
+      def warn_about_aborted_definition_build_failures
+        count = @state[:definition_build_deferred_count]
+        return if count.nil? || count.zero?
+
+        first_class, first_error = @state[:definition_build_deferred_first]
+        warn(definition_build_failure_warning(first_class, first_error))
       end
 
       # The definition-build twin of {#env_build_conflict_buffers}: the declaration source file(s) named by a

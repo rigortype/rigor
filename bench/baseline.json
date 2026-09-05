@@ -1,14 +1,14 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-08-20T23:48:13Z",
-  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.3.4 @ run 32428356981 (rerun)",
-  "note": "Linux CI measurements. allocations is the tight signal; wall_s is a coarse backstop. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated UP from 15,769,515 at the v0.3.4 release because THE TARGET GREW, not because analysis got slower: `lib` went from 347 files / 75,343 lines at the 2026-07-30 calibration to 420 / 90,131 here (+21% files, +19.6% lines), largely the ADR-103 effect subsystem and ADR-102's `rigor unused`. Allocations rose +17.6% against +19.6% more code, so cost per line fell slightly. The rise is NOT effect collection: rigor's own .rigor.yml has no `effects:` block, and docs/notes/20260817-effect-collection-perf.md measured the effects-OFF path at +0.07% allocations while independently recording 17,926,639 for `lib` on 2026-08-17 — which brackets 2.16M of the 2.78M gap, the residual being the handful of PRs since. allocations reproduced across two runs of the same commit to within 87 (18,552,196 / 18,552,109), which is what says this is a real target measurement rather than noise. wall_s and peak_rss_kb take the LOWER of the two runs so the bands keep their teeth (wall 15.089 vs 15.869; RSS 300,068 vs 321,972 KB, and the +10% band still admits the higher one).",
+  "calibrated_at": "2026-09-05T04:33:22Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.3.7 @ run 33944842772",
+  "note": "Linux CI measurements. allocations is the tight signal; wall_s is a coarse backstop. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated UP from 18,849,919 (v0.3.6 run 33312083066) at the v0.3.7 cut because ANALYSIS GOT MORE EXPENSIVE, not because the target grew: `lib` went from 427 files / 92,261 lines to 444 / 100,804 (+4.0% files, +9.3% lines) while allocations rose +91.9% to 36,171,454 and peak_rss_kb +32.4% to 417,716. Mastodon OSS sweep on the same run stayed inside its thresholds, so the extra work did not show up as a diagnostic flood. diagnostics 1 → 2 is the `def.return-type-mismatch` warning on lib/rigor/inference/expression_typer.rb after Maybe / Result joined the declared union. Single-run sample (no second measurement to take the lower of wall/RSS). This number is a blessing so the release can land, not an explanation; recover it in #775.",
   "targets": {
     "lib": {
-      "wall_s": 15.089,
-      "allocations": 18552109,
-      "peak_rss_kb": 300068,
-      "diagnostics": 1
+      "wall_s": 25.266,
+      "allocations": 36171454,
+      "peak_rss_kb": 417716,
+      "diagnostics": 2
     }
   }
 }

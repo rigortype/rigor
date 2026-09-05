@@ -672,62 +672,124 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   describe "env build failure short-circuit (O7)" do
-    # Open item O7 (real-world Rails survey, 2026-05-15):
-    # when a `signature_paths:` entry redeclares a constant or
-    # class already shipped by rigor's bundled RBS,
-    # `RBS::Environment.from_loader(...).resolve_type_names`
-    # raises `RBS::DuplicatedDeclarationError`. Pre-fix, the
-    # `||=` memo in `#env` did not capture the failure, so
-    # every subsequent `env` access (one per AST node touched
-    # during analysis) re-parsed the whole sig set — a ~100x
-    # per-file slowdown for projects that wire a conflicting
-    # gem-shipped `sig/` into `signature_paths:` (the typical
-    # case for prism, which ships its own RBS via the gem
-    # AND via the bundled stdlib RBS in Ruby 4.0+).
+    # Open item O7 (real-world Rails survey, 2026-05-15): when env build raised,
+    # pre-fix the `||=` memo in `#env` did not capture the failure, so every
+    # subsequent `env` access re-parsed the whole sig set (~100x per-file).
+    # Project-vs-bundled `DuplicatedDeclarationError`s are quarantined per-file
+    # since #777; this describe keeps the *unrecoverable* failure memoisation
+    # contract by stubbing `build_env_for` to raise.
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-conflict-spec-") }
 
     after { FileUtils.rm_rf(tmpdir) }
 
-    it "memoises the failure so a duplicated decl rebuilds env only once" do
-      File.write(
-        File.join(tmpdir, "duplicate_prism_version.rbs"),
-        "module Prism\n  VERSION: String\nend\n"
-      )
-      loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
-      allow(loader).to receive(:warn) # silence the once-per-loader env-build-failure warning
-      allow(described_class).to receive(:build_env_for).and_call_original
-      # Touch env many times; the broken state should be memoised so build_env_for runs at most once.
+    def force_unrecoverable_build!(loader)
+      error = Class.new(RBS::BaseError) do
+        def message = "forced unrecoverable build failure"
+      end.new
+      allow(loader).to receive(:warn)
+      allow(described_class).to receive(:build_env_for).and_raise(error)
+      error
+    end
+
+    it "memoises an unrecoverable failure so env rebuilds only once" do
+      loader = described_class.new(signature_paths: [tmpdir])
+      force_unrecoverable_build!(loader)
       10.times { loader.send(:env) }
       expect(described_class).to have_received(:build_env_for).at_most(:once)
       expect(loader.send(:env)).to be_nil
     end
 
-    it "emits a single warning identifying the conflicting decl" do
-      File.write(
-        File.join(tmpdir, "duplicate_prism_version.rbs"),
-        "module Prism\n  VERSION: String\nend\n"
-      )
-      loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
+    it "emits a single warning for an unrecoverable env-build failure" do
+      loader = described_class.new(signature_paths: [tmpdir])
       messages = []
       allow(loader).to receive(:warn) { |msg| messages << msg }
+      error = Class.new(RBS::BaseError) do
+        def message = "forced unrecoverable build failure"
+      end.new
+      allow(described_class).to receive(:build_env_for).and_raise(error)
       3.times { loader.send(:env) }
       expect(messages.size).to eq(1)
       expect(messages.first).to include("RBS environment build failed")
-      expect(messages.first).to include("DuplicatedDeclarationError")
-      expect(messages.first).to include("Prism::VERSION")
     end
 
     it "returns empty results from each_known_class_name / class_decl_paths when env is nil" do
-      File.write(
-        File.join(tmpdir, "duplicate_prism_version.rbs"),
-        "module Prism\n  VERSION: String\nend\n"
-      )
-      loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
-      allow(loader).to receive(:warn) # silence
+      loader = described_class.new(signature_paths: [tmpdir])
+      force_unrecoverable_build!(loader)
       expect(loader.each_known_class_name.to_a).to eq([])
       expect(loader.class_decl_paths).to eq({})
       expect(loader.constant_names).to eq([])
       expect(loader.class_known?("String")).to be(false)
+    end
+  end
+
+  describe "project signature collision quarantine (issue #777)" do
+    # A `signature_paths:` file that parses but kind-collides with bundled RBS
+    # (`class Base64` vs bundled `module Base64`) used to raise
+    # `RBS::DuplicatedDeclarationError` and collapse the WHOLE env to nil —
+    # Greeter, core, and every other signature vanished, so dependent
+    # diagnostics (e.g. a `lenght` typo) silently disappeared and the run
+    # looked clean. Quarantine the conflicting project file only.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-collision-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    before do
+      skip "requires the sources-based RBS::Environment (rbs 4.x)" unless RBS::Environment.new.respond_to?(:sources)
+    end
+
+    def build_loader
+      loader = described_class.new(
+        libraries: Rigor::Environment::DEFAULT_LIBRARIES,
+        signature_paths: [tmpdir]
+      )
+      allow(loader).to receive(:warn)
+      loader
+    end
+
+    it "keeps the env usable when a project class collides with a bundled module" do
+      File.write(File.join(tmpdir, "base64.rbs"),
+                 "class Base64\n  def self.encode64: (String) -> String\nend\n")
+      File.write(File.join(tmpdir, "greeter.rbs"),
+                 "class Greeter\n  def greet: () -> String\nend\n")
+      loader = build_loader
+      env = loader.send(:env)
+      expect(env).not_to be_nil
+      expect(loader.env_build_failure).to be_nil
+      expect(loader.class_known?("Greeter")).to be(true)
+      expect(loader.class_known?("String")).to be(true)
+      expect(loader.class_known?("Base64")).to be(true) # bundled module remains
+      quarantined_paths = loader.quarantined_signatures.map(&:first)
+      expect(quarantined_paths).to include(File.join(tmpdir, "base64.rbs"))
+      expect(quarantined_paths).not_to include(File.join(tmpdir, "greeter.rbs"))
+    end
+
+    it "does not quarantine a same-kind reopen of the bundled module" do
+      File.write(File.join(tmpdir, "base64.rbs"),
+                 "module Base64\n  def self.encode64: (String) -> String\nend\n")
+      File.write(File.join(tmpdir, "greeter.rbs"),
+                 "class Greeter\n  def greet: () -> String\nend\n")
+      loader = build_loader
+      expect(loader.send(:env)).not_to be_nil
+      expect(loader.quarantined_signatures).to be_empty
+      expect(loader.class_known?("Greeter")).to be(true)
+    end
+
+    it "warns once naming the collision-quarantined file" do
+      File.write(File.join(tmpdir, "base64.rbs"),
+                 "class Base64\n  def self.encode64: (String) -> String\nend\n")
+      File.write(File.join(tmpdir, "greeter.rbs"),
+                 "class Greeter\n  def greet: () -> String\nend\n")
+      loader = described_class.new(
+        libraries: Rigor::Environment::DEFAULT_LIBRARIES,
+        signature_paths: [tmpdir]
+      )
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      3.times { loader.send(:env) }
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("QUARANTINED")
+      expect(messages.first).to include(File.join(tmpdir, "base64.rbs"))
+      expect(messages.first).to match(/duplicated|bundled RBS/i)
     end
   end
 

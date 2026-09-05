@@ -315,9 +315,10 @@ module Rigor
         # user knows their sig set is malformed (`rbs validate` rejects it) and can fix it at the source.
         # Authored `:info`: the analysis already succeeded; this is advisory, never a gate. Empty for a
         # well-formed sig set.
-        # An unparseable `.rbs` under `signature_paths:` is QUARANTINED so the rest of the env survives
-        # (PR #50), which means the types it declares are silently absent — calls into them read
-        # `Dynamic[top]`, and the run gets *quieter*, not louder. The stderr banner alone never reached CI:
+        # An unparseable or declaration-colliding `.rbs` under `signature_paths:` is QUARANTINED so the
+        # rest of the env survives (PR #50; issue #777 extends this to class-vs-module / constant
+        # collisions against bundled RBS), which means the types it declares are silently absent — calls
+        # into them read `Dynamic[top]`, and the run gets *quieter*, not louder. The stderr banner alone never reached CI:
         # it is not a diagnostic, so it is absent from `--format json` / SARIF / GitHub annotations / the LSP
         # and cannot move the exit code. This puts it in the diagnostic stream where every channel sees it.
         #
@@ -458,11 +459,12 @@ module Rigor
             path: ".rigor.yml",
             line: 1,
             column: 1,
-            message: "#{quarantined.size} RBS file(s) under `signature_paths:` do not parse and were " \
-                     "SKIPPED: #{sample.join(', ')}#{suffix}. The rest of your RBS environment still " \
-                     "loaded, but the types those files declare are absent — calls into them read " \
-                     "`Dynamic[top]`, so this run is quieter than it should be, not cleaner. Fix the " \
-                     "parse error(s) (`rbs validate`) to restore that coverage.",
+            message: "#{quarantined.size} RBS file(s) under `signature_paths:` were SKIPPED " \
+                     "(unparseable, or duplicated against bundled RBS): #{sample.join(', ')}#{suffix}. " \
+                     "The rest of your RBS environment still loaded, but the types those files declare " \
+                     "are absent — calls into them read `Dynamic[top]`, so this run is quieter than it " \
+                     "should be, not cleaner. Fix the parse error(s) or remove the conflicting " \
+                     "declaration(s) (`rbs validate`) to restore that coverage.",
             severity: :warning,
             rule: "rbs.coverage.quarantined-signature",
             source_family: :builtin

@@ -1,1 +1,0 @@
-- **[engine]** A collection mutated with arguments the analyzer cannot read — `m = [1, 2]; m.concat(xs)` — no longer keeps its original element values, so a later `m.last == 6` is no longer reported as an always-false condition on correct code. ([#580](https://github.com/rigortype/rigor/issues/580), [#593](https://github.com/rigortype/rigor/pull/593))

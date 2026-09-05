@@ -166,8 +166,6 @@ module Rigor
 
       # The resolved {enable_after} deadline: {DEADLINE_ENV} when it parses to a
       # non-negative float, else {DEFAULT_DEADLINE_SECONDS}.
-      #
-      # @return [Numeric]
       def deadline_seconds
         raw = ENV.fetch(DEADLINE_ENV, nil)
         return DEFAULT_DEADLINE_SECONDS if raw.nil? || raw.empty?

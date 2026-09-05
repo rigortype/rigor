@@ -89,11 +89,9 @@ module Rigor
       UNIDENTIFIED_ENGINE = "the engine's own source tree could not be digested"
 
       class << self
-        # @param configuration [Rigor::Configuration]
         # @param roots [Array<String>] the analysis roots to look for a snapshot under, most-specific first
         #   (the command's own path arguments, then the configured `paths:`).
         # @param project_scan [Rigor::Analysis::ProjectScan] the prepared whole-project scan.
-        # @param sampling [Sampling]
         # @param feature_ids [Array<String>] the ADOPTED bleeding-edge ids that change this measurement.
         # @param seed_inputs [Array<String>, nil] the files the {DiscoverySeed} was built over when it is
         #   active, nil when it is not. The CLI stays the only place that knows a feature id exists.

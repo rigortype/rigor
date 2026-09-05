@@ -55,7 +55,6 @@ module Rigor
       # knowledge the single-file run does not have) must not mask a kill the shipped oracle would report.
       Baseline = Data.define(:own, :dependents)
 
-      # @param configuration [Rigor::Configuration]
       # @param environment [Rigor::Environment] built once by the caller.
       # @param project_scan [Rigor::Analysis::ProjectScan] built once by the caller; adopted per analysis
       #   through `prebuilt:`, exactly as {DiagnosticOracle} does.

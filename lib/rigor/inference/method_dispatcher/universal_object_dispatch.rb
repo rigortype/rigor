@@ -68,7 +68,6 @@ module Rigor
 
         module_function
 
-        # @param context [CallContext]
         # @return [Rigor::Type, nil] the receiver-independent return type, or nil to decline.
         def try_dispatch(context)
           return nil unless context.receiver.is_a?(Type::Dynamic)

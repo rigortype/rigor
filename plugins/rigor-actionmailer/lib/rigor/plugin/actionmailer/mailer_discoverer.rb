@@ -38,7 +38,6 @@ module Rigor
         VIEW_FORMATS = %w[html text].freeze
         VIEW_EXTENSIONS = %w[erb haml slim].freeze
 
-        # @param io_boundary [Rigor::Plugin::IoBoundary]
         # @param search_paths [Array<String>] absolute or project-relative paths to scan for mailers.
         # @param base_classes [Array<String>] direct superclasses that mark a class as a mailer.
         # @param views_root [String] absolute or project-relative path to the views directory (typically
@@ -53,7 +52,6 @@ module Rigor
           @views_root = views_root
         end
 
-        # @return [MailerIndex]
         def discover
           # Two-pass: first collect every module's defs (for the include-following step), then build
           # per-class entries that pull in actions from include'd modules. GitLab's `Notify` mailer

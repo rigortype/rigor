@@ -220,7 +220,6 @@ module Rigor
         @scope_index = scope_index
       end
 
-      # @param program [Prism::ProgramNode]
       # @return [Hash{Integer => Rigor::Type}] 1-indexed line => type.
       def collect(program)
         by_line = {}

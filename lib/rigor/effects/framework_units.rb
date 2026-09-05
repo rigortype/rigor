@@ -76,12 +76,10 @@ module Rigor
 
       # Every synthetic unit `class_name` earns, as `[key, Summary, edges]` triples.
       #
-      # @param class_name [String]
       # @param instance_methods [Array<String>] the instance methods the class body defines, in source order
       # @param macros [Hash{String=>Array<String>}] receiver-less class-body calls to their literal symbol
       #   arguments, as the scanner harvested them
       # @param uniqueness [Boolean] whether the class body declares a uniqueness validator
-      # @param plugin_facts [PluginFacts]
       # @param own_units [Hash{String=>Boolean}] the units the class body itself defines, keyed by the
       #   suffix a synthetic key carries (`"#save"`, `".create"`), each mapped to whether that body
       #   reaches `super`. Read by {.framework_row} and by nothing else.

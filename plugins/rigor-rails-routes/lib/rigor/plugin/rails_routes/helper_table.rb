@@ -71,7 +71,6 @@ module Rigor
           @by_name[helper_name.to_s]&.first
         end
 
-        # @return [Boolean]
         def known?(helper_name)
           @by_name.key?(helper_name.to_s)
         end

@@ -64,7 +64,6 @@ module Rigor
         }.freeze
         private_constant :ALIAS_STRICT_NOMINALS
 
-        # @param method_definition [RBS::Definition::Method]
         # @param arg_types [Array<Rigor::Type>] caller-provided types in positional order. Empty when
         #   there are no arguments.
         # @param self_type [Rigor::Type] substitute for `Bases::Self`.

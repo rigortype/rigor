@@ -208,7 +208,6 @@ module Rigor
       # Nested `def` / `class` / `module` bodies are skipped: their statements do not run during THIS body's
       # evaluation. Blocks are descended into — they share `self`.
       #
-      # @param body [Prism::Node, nil]
       # @param member_names [Enumerable<Symbol>] the receiver carrier's member names.
       # @yieldparam name [Symbol] an unrecognised self-call selector.
       # @yieldreturn [Boolean] whether that sibling method is itself self-fold-safe.

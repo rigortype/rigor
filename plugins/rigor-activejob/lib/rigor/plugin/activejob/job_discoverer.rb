@@ -32,7 +32,6 @@ module Rigor
           @base_classes = base_classes.to_set { |name| strip_root(name.to_s) }
         end
 
-        # @return [JobIndex]
         def discover
           candidates = []
           ruby_files_under(@search_paths).each do |path|

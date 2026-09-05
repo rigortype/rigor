@@ -21,7 +21,6 @@ module Rigor
     # When the source path is not under any configured source root (e.g. files supplied directly on the CLI
     # from outside `lib/`), the full relative path is preserved under the sig root.
     class PathMapper
-      # @param configuration [Rigor::Configuration]
       # @param project_root [String, Pathname] (defaults to `Dir.pwd`)
       # @param layout_index [LayoutIndex, nil] optional class
       #   → existing sig file index; routes the target to the
@@ -32,7 +31,6 @@ module Rigor
         @layout_index = layout_index
       end
 
-      # @param source_path [String]
       # @param class_name [String, nil] fully-qualified Ruby
       #   class name. When supplied and matched by the
       #   `LayoutIndex`, the consolidated sig file's path is

@@ -29,8 +29,6 @@ module Rigor
         # bucket on trust.
         Undecidable = Data.define(:fqn, :path, :line, :reason)
 
-        # @param declarations [Array<Scan::Declaration>]
-        # @param references [Array<Scan::Reference>]
         # @param root_fqns [Enumerable<String>] declarations that are entry points regardless of who references
         #   them (config-declared globs in this slice; plugin-supplied roots are #349).
         # @param foreign [#call] predicate answering "is this FQN owned by something outside the project?" —

@@ -42,12 +42,9 @@ module Rigor
 
       # Runs the analysis the way `rigor check` does and returns the runner + its raw result.
       #
-      # @param configuration [Rigor::Configuration]
       # @param options [Hash] at least `:no_cache`, `:explain`, `:stats`, `:workers` (see {CheckRunnerFactory.build}).
       # @param paths [Array<String>, nil] analysed paths; nil falls back to the configuration's `paths:`.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
       # @param cache_root [String, nil] nil falls back to the configuration's cache path.
-      # @return [Invocation]
       def run(configuration:, options:, paths: nil, buffer: nil, cache_root: nil)
         require_relative "check_runner_factory"
         runner = CheckRunnerFactory.build(
@@ -70,8 +67,6 @@ module Rigor
       #
       # @param config_path [String, nil] path to the config file; nil uses {Configuration.discover}.
       # @param options [Hash] runner options (defaults to {DEEP_OPTIONS}).
-      # @param paths [Array<String>, nil]
-      # @return [Outcome]
       def attempt(config_path: nil, options: DEEP_OPTIONS, paths: nil)
         require_relative "../configuration"
         configuration = Configuration.load(config_path)

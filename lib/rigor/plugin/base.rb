@@ -806,7 +806,6 @@ module Rigor
       # @param roots    [Array<String>] search roots (relative to the project root, or absolute paths)
       # @param patterns [Array<String>] glob suffixes joined under each root via `File.join(root, pattern)`.
       #   Multiple patterns union into one descriptor (`"**/*.erb", "**/*.html"` etc.).
-      # @return [Rigor::Cache::Descriptor]
       def glob_descriptor(roots, *patterns)
         files = collect_glob_files(Array(roots), patterns)
         entries = files.map do |path|

@@ -118,7 +118,6 @@ module Rigor
       # --- private ------------------------------------------------------
 
       # @param value [String] a non-empty string
-      # @return [Rigor::Type]
       def self.classify_string(value)
         if Type::Refined.ruby_numeric_literal?(value)
           NUMERIC_STRING

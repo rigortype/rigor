@@ -37,7 +37,6 @@ module Rigor
       #   run, so the same Prism node object is seen in both the `dynamic_return` rule and
       #   `diagnostics_for_file`.
       module AbsurdRecognizer
-        # @param call_node [Prism::CallNode]
         # @return [Boolean] true when `call_node` is `T.absurd(x)`.
         def self.absurd_call?(call_node)
           return false unless call_node.is_a?(Prism::CallNode)
@@ -50,8 +49,6 @@ module Rigor
           arguments&.size == 1
         end
 
-        # @param call_node [Prism::CallNode]
-        # @param scope [Rigor::Scope, nil]
         # @return [Boolean] true when the discriminant has been narrowed to `bot` (the branch is
         #   unreachable, so `T.absurd` is correct). The caller suppresses the `absurd-reachable` diagnostic
         #   in this case.

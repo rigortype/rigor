@@ -30,7 +30,6 @@ module Rigor
 
       module_function
 
-      # @param block_node [Prism::BlockNode]
       # @param base_scope [Rigor::Scope] the call-site scope the block closes over.
       # @return [Array<Symbol>] the captured names the body writes, each once, in first-write order.
       def writes(block_node, base_scope)

@@ -346,7 +346,6 @@ module Rigor
         #
         # @param call_node    [Prism::CallNode]  the `local.member = v` call
         # @param assigned_type [Rigor::Type, nil] the setter's assigned value type (the call's own result)
-        # @param scope        [Rigor::Scope, nil]
         # @return             [Rigor::Scope]     the (possibly) rebound scope
         def apply_setter_writeback(call_node:, assigned_type:, scope:)
           return scope if scope.nil? || assigned_type.nil?

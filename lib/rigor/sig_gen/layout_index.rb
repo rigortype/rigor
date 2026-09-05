@@ -21,12 +21,10 @@ module Rigor
     # in multiple files for additive member contributions, but the writer only needs one canonical target per
     # class.
     class LayoutIndex
-      # @param signature_paths [Array<String, Pathname>, nil]
       #   the `.rigor.yml`-configured signature directories.
       #   When `nil` or empty, falls back to `<project_root>/sig`
       #   if it exists (matching `Environment.for_project`'s
       #   auto-detection convention).
-      # @param project_root [String, Pathname]
       def initialize(signature_paths:, project_root: Dir.pwd)
         @signature_paths = resolve_paths(signature_paths, project_root)
         @index = nil

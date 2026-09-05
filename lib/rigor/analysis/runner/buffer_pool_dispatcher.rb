@@ -75,8 +75,6 @@ module Rigor
           Integer(env_value)
         end
 
-        # @param configuration [Rigor::Configuration]
-        # @param cache_store [Rigor::Cache::Store, nil]
         # @param environment [Rigor::Environment] the warm, shared per-session Environment
         #   (`ProjectContext#environment`) every job's Runner reuses instead of rebuilding.
         # @param prebuilt [Rigor::Analysis::ProjectScan] the warm, shared pre-pass snapshot

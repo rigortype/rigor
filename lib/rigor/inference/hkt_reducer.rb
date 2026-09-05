@@ -41,7 +41,6 @@ module Rigor
 
       # Reduce `app` against the registry.
       #
-      # @param app [Rigor::Type::App]
       # @param fuel [Integer] reduction-step budget (default 64 per ADR-20 WD3). Each visited
       #   body node costs one unit. On exhaustion the reduction returns `app.bound`.
       # @return [Rigor::Type] the reduced type, or `app.bound` when reduction is impossible (URI

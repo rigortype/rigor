@@ -42,9 +42,7 @@ module Rigor
                   :signature_help_provider, :folding_range_provider,
                   :selection_range_provider, :project_context
 
-      # @param completion_provider [Rigor::LanguageServer::CompletionProvider, nil]
       #   resolves `textDocument/completion`. Nil → `MethodNotFound`.
-      # @param signature_help_provider [Rigor::LanguageServer::SignatureHelpProvider, nil]
       #   resolves `textDocument/signatureHelp`. Nil → `MethodNotFound`.
       # @param project_context [Rigor::LanguageServer::ProjectContext, nil] the per-session cache of
       #   `Environment` + `Cache::Store` the providers read on every request. When present,

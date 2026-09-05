@@ -145,8 +145,6 @@ module Rigor
       EMPTY_NESTING = [].freeze
       private_constant :EMPTY_NESTING
 
-      # @param scope [Rigor::Scope]
-      # @param tracer [Rigor::Inference::FallbackTracer, nil]
       # @param on_enter [#call, nil] optional `(node, scope) ->` callable
       #   invoked once at the start of every {#evaluate} call (the node
       #   itself, *before* its handler runs). Threaded through every
@@ -195,9 +193,6 @@ module Rigor
 
       # Evaluate `node` under the receiver scope. Returns `[type, scope']` where `type` is the value the node produces
       # and `scope'` is the scope observable after the node has run. The receiver scope is never mutated.
-      #
-      # @param node [Prism::Node]
-      # @return [Array(Rigor::Type, Rigor::Scope)]
       def evaluate(node)
         @on_enter&.call(node, @scope)
 

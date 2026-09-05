@@ -53,8 +53,6 @@ module Rigor
 
         module_function
 
-        # @param call_node [Prism::CallNode]
-        # @param scope [Rigor::Scope]
         # @param plugin_id [String] used for the contribution's `provenance.source_family`.
         # @return [Rigor::FlowContribution, nil]
         def recognize(call_node:, scope:, plugin_id:)

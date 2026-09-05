@@ -30,7 +30,6 @@ module Rigor
         hint: 4
       }.freeze
 
-      # @param debouncer [Rigor::LanguageServer::Debouncer, nil]
       #   when present, `publish_for` schedules its work through
       #   the debouncer (cancels prior pending task for the same
       #   URI, fires after `debounce_seconds` quiet-time). Nil

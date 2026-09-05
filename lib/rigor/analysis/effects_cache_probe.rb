@@ -53,7 +53,6 @@ module Rigor
       Served = Data.define(:table, :sources, :registry, :plugin_facts)
 
       # @param configuration [Rigor::Configuration] with effects already enabled by the caller.
-      # @param cache_root [String, nil]
       def initialize(configuration:, cache_root:)
         @configuration = configuration
         @cache_root = cache_root

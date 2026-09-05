@@ -28,7 +28,6 @@ module Rigor
       BODY_HEIGHT_MIN = 3    # never shrink the source window below this
       DEFAULT_SIZE = [24, 80].freeze
 
-      # @param out [IO]
       # @param source [String] the traced file's source.
       # @param file [String] display path.
       def initialize(out:, source:, file:)

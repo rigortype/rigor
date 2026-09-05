@@ -81,10 +81,8 @@ module Rigor
         # duplicates on Mastodon and ~119 on Redmine, exactly stacked with the rails-routes diagnostics.
         # Returns `[]` for unknown / arity-mismatch shapes.
         #
-        # @param call_node [Prism::Node]
         # @param helper_table [Hash{String => Hash}] each entry carries `name`, `arity`,
         #   `acceptable_arities`, `path`, `http_method`, `action`.
-        # @return [Array<Violation>]
         def helper_violations_for(call_node:, helper_table:)
           return [] unless implicit_helper_call?(call_node)
 
@@ -108,10 +106,7 @@ module Rigor
         # each filter name reference is validated against it. Calls outside a known controller
         # contribute nothing.
         #
-        # @param call_node [Prism::Node]
         # @param ancestors [Array<Prism::Node>] the lexical ancestor chain
-        # @param controller_index [ControllerIndex]
-        # @return [Array<Violation>]
         def filter_violations_for(call_node:, ancestors:, controller_index:)
           return [] unless filter_call?(call_node)
 
@@ -144,10 +139,6 @@ module Rigor
         # AR model's column list (looked up via the model_index fact published by `rigor-activerecord`).
         # Calls whose `:require` argument is a non-literal Symbol are passed through; namespaced models
         # (`params.require(:admin_user)` → `Admin::User`) are deferred.
-        #
-        # @param call_node [Prism::Node]
-        # @param model_index [Hash{String => Hash}]
-        # @return [Array<Violation>]
         def permit_violations_for(call_node:, model_index:)
           return [] unless permit_chain?(call_node)
 
@@ -179,12 +170,8 @@ module Rigor
         # method that doesn't call `render`) is also skipped — Phase 3 validates explicit renders only,
         # since the implicit path would false-positive on `redirect_to` / `head` / early returns.
         #
-        # @param call_node [Prism::Node]
         # @param ancestors [Array<Prism::Node>] the lexical ancestor chain
         # @param path [String] file being analysed
-        # @param view_search_roots [Array<String>]
-        # @param controller_index [ControllerIndex, nil]
-        # @return [Array<Violation>]
         def render_violations_for(call_node:, ancestors:, path:, view_search_roots:, controller_index: nil)
           return [] unless render_call?(call_node)
 

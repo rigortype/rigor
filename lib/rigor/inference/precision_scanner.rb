@@ -128,7 +128,6 @@ module Rigor
       end
 
       # @param root [Prism::Node] the parsed AST
-      # @return [FileResult]
       def scan(root)
         scope_index = ScopeIndexer.index(root, default_scope: @scope)
         tier_counts = TIERS.to_h { |t| [t, 0] }

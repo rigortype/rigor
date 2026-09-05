@@ -15,9 +15,6 @@ module Rigor
     class RbsConstantTable < RbsCacheProducer
       PRODUCER_ID = "rbs.constant_type_table"
 
-      # @param loader [Rigor::Environment::RbsLoader]
-      # @param store [Rigor::Cache::Store]
-      # @return [Hash{String => Rigor::Type}]
       def self.compute(loader)
         table = {}
         loader.each_constant_decl do |name, entry|

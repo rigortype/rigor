@@ -54,8 +54,6 @@ module Rigor
       # a write in value position, `if (x = MAP[k])`) resolves through, then the predicate-fold derivation
       # issue #313 added.
       #
-      # @param node [Prism::Node, nil]
-      # @param scope [Rigor::Scope, nil]
       # @return [Symbol, nil]
       def resolve(node, scope)
         return nil if node.nil? || scope.nil?
@@ -97,9 +95,7 @@ module Rigor
       # per-overload, which is what makes it precise: `Array#first` is optimistic while `Array#first(3)` is
       # not, and `String#[]` / `Enumerable#find` are honest because they already spell the miss as `?`.
       #
-      # @param method_definition [RBS::Definition::Method]
       # @param method_type [RBS::MethodType] the overload {OverloadSelector.select} returned
-      # @return [Boolean]
       def optimistic_overload?(method_definition, method_type)
         type_def = matching_type_def(method_definition, method_type)
         return false unless type_def.respond_to?(:overload_annotations)

@@ -117,7 +117,6 @@ module Rigor
       DEFAULT_ROUNDS = 3
 
       # @param files [Array<String>] project `.rb` paths to scan for call sites.
-      # @param environment [Rigor::Environment]
       # @param target_ruby [String, nil] Prism parse target.
       # @param max_rounds [Integer] the WD5 fixpoint cap (1 = single-level).
       # @return [Hash{[String,Symbol,Symbol] => Hash{Symbol => Rigor::Type}}] frozen.

@@ -23,7 +23,6 @@ module Rigor
       # @param report [MutationProtectionReport, FusedProtectionReport] both expose the two counts.
       # @param err [IO] the stream to warn on.
       # @param floor [Integer] {CoverageMutation::HARNESS_ERROR_WARN_FLOOR}.
-      # @return [void]
       def emit(report, err:, floor:)
         lines_for(report, floor: floor).each { |line| err.puts(line) }
       end

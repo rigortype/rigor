@@ -46,9 +46,6 @@ module Rigor
         # a finitely-sized receiver it is `Constant[size]`.
         COUNT_METHOD = :count
 
-        # @param receiver    [Rigor::Type, nil]
-        # @param method_name [Symbol]
-        # @param args        [Array<Rigor::Type>]
         # @param block_type  [Rigor::Type, nil] inferred return type of
         #   the call's block. `nil` means "no block at the call site"
         #   and disqualifies every rule here.
@@ -167,7 +164,6 @@ module Rigor
           )
         end
 
-        # @return [:empty, :non_empty, :unknown]
         def receiver_emptiness(receiver)
           case receiver
           when Type::Tuple

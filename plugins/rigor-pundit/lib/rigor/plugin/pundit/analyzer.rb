@@ -33,11 +33,6 @@ module Rigor
         # The policy violations for a single call node (0..2 of them), or `[]` when the node is not a
         # Pundit entry call or its record type is not statically determinable. ADR-37: the engine owns the
         # walk, so this is per-node logic.
-        #
-        # @param call_node [Prism::Node]
-        # @param policy_index [PolicyIndex]
-        # @param scope [Rigor::Scope, nil]
-        # @return [Array<Violation>]
         def violations_for(call_node:, policy_index:, scope:)
           return [] unless call_node.is_a?(Prism::CallNode) && entry_call?(call_node)
 

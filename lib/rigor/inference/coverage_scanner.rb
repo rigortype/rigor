@@ -46,8 +46,6 @@ module Rigor
         @scope = scope || Scope.empty
       end
 
-      # @param root [Prism::Node]
-      # @return [Result]
       def scan(root)
         visits = Hash.new(0)
         unrecognized = Hash.new(0)

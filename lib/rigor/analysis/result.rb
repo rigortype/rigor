@@ -43,8 +43,6 @@ module Rigor
 
       # The diagnostics {#crashed?} answers true for, so a caller can name what it saw rather than only that
       # it saw something.
-      #
-      # @return [Array<Rigor::Analysis::Diagnostic>]
       def crash_diagnostics
         diagnostics.select { |diagnostic| CrashSignature.discards_file_analysis?(diagnostic) }
       end

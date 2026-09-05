@@ -43,7 +43,6 @@ module Rigor
       # the engine's own bundled plugin copies.
       ENGINE_ROOT = File.expand_path("../../..", __dir__)
 
-      # @param services [Rigor::Plugin::Services]
       # @param requirer [#call] takes a gem name OR an absolute file path (#194 slice 2 — a bundled plugin is
       #   required by its {.bundled_plugin_path}) and returns truthy on successful require. Defaulted to
       #   `Kernel.require` via a lambda, which accepts both forms; the spec injects a fake to avoid touching
@@ -91,7 +90,6 @@ module Rigor
       end
 
       # @param entries [Array<String, Hash>] the raw `plugins:` list from the configuration.
-      # @return [Registry]
       def load(entries)
         plugins = []
         load_errors = []

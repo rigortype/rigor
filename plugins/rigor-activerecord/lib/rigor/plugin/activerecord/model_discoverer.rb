@@ -77,7 +77,6 @@ module Rigor
       #   `ApplicationRecord`) setting `self.table_name_prefix` for every model under it — both already
       #   guess wrong identically on unpatched code.
       class ModelDiscoverer
-        # @param io_boundary [Rigor::Plugin::IoBoundary]
         # @param search_paths [Array<String>] absolute or project-relative paths.
         # @param base_classes [Array<String>] superclass names that identify a class as an AR model.
         # Declaration macros whose column's runtime value is a rich object, not the SQL scalar. Their column

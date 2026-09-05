@@ -78,7 +78,6 @@ module Rigor
         LABELS_CONSEQUENCE = "the label is not registered"
         private_constant :LABELS_CONSEQUENCE
 
-        # @param configuration [Rigor::Configuration]
         # @param rbs_loader [Rigor::Environment::RbsLoader, nil] the run's loader; nil disables the pass.
         # @param effect_table [Rigor::Effects::EffectTable] the propagated graph.
         # @param discovery [#call] forces and returns the cross-file discovery tables as

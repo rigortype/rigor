@@ -101,7 +101,6 @@ module Rigor
       #   (e.g., `"Kernel"`). Pass `nil` when the caller hasn't resolved a defining owner
       #   yet — the lookup will then fall back to matching by `(method_name, kind)` against
       #   entries whose owner is currently in the table.
-      # @param method_name [Symbol]
       # @param kind [Symbol] one of `:singleton`, `:instance`. The caller passes the shape of
       #   the actual call site; the table stores `:both` for entries that match either.
       # @param arg_types [Array<Rigor::Type>] positional argument types. Forwarded to the

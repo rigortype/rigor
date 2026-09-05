@@ -126,10 +126,6 @@ module Rigor
       # pre-join behaviour exactly.
       NO_ARG_TYPES = [].freeze
 
-      # @param call_node     [Prism::CallNode]
-      # @param current_scope [Rigor::Scope]
-      # @param arg_types     [Array<Rigor::Type::Base>]
-      # @return              [Rigor::Scope]
       def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES)
         return current_scope if pure_self_returner?(call_node.name)
 

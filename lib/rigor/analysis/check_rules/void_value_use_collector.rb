@@ -52,7 +52,6 @@ module Rigor
         # Legacy single-collector walk — kept as the oracle the ADR-53 Track B equivalence harness compares
         # {RuleWalk} against. Walks the whole subtree once, checking each consumer node's value slots.
         # Returns one {Result} per value-context use of a recovered-`void` call.
-        # @return [Array<Result>]
         def collect(root)
           walk(root)
           @results.freeze

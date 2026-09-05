@@ -43,7 +43,6 @@ module Rigor
       #   ADR-93 auto-wired `rigor-rbs-inline` entry when the library is resolvable).
       # @param source_files [Array<String>] the file(s) the probe inspects. Threaded so each loaded plugin's
       #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
-      # @return [Rigor::Environment]
       def build(configuration:, source_files:)
         Environment.for_project(
           libraries: configuration.libraries,

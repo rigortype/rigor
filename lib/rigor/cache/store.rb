@@ -508,8 +508,6 @@ module Rigor
       # (permission, disk full, deleted root) also reports unavailable, degrading this Store instance to
       # in-memory-memo-only for the rest of its lifetime — the producer block still runs, its result still
       # lands in `@memo`, and disk reads/writes are simply skipped.
-      #
-      # @return [Boolean]
       def ensure_schema_version!
         return @disk_available unless @disk_available.nil?
 

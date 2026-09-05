@@ -43,7 +43,6 @@ module Rigor
       # @return [Array<UnrenderableMethod>] empty on a healthy run; read after {#run}.
       attr_reader :unrenderable, :unresolvable_superclasses
 
-      # @param configuration [Rigor::Configuration]
       # @param paths [Array<String>] files / directories to scan.
       # @param observations [Hash{[String, Symbol] => Array<Array<Rigor::Type>>}]
       #   ADR-14 slice 3 — per-target-method arg-tuple observations
@@ -80,7 +79,6 @@ module Rigor
         map.transform_values { |entries| entries.map { |entry| ObservedCall.from(entry) } }
       end
 
-      # @return [Array<MethodCandidate>]
       def run
         @environment = build_environment
         resolved = resolve_paths(@paths)

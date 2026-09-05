@@ -46,7 +46,6 @@ module Rigor
         ].freeze
 
         # @param source [String] contents of `db/schema.rb`
-        # @return [SchemaTable]
         def self.parse(source)
           tree = Prism.parse(source).value
           new.parse(tree)

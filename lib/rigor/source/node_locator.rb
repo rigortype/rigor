@@ -22,8 +22,6 @@ module Rigor
       class OutOfRangeError < StandardError; end
 
       class << self
-        # @param source [String]
-        # @param root [Prism::Node]
         # @param line [Integer] 1-indexed line number
         # @param column [Integer] 1-indexed column number (byte index within the line)
         # @return [Prism::Node, nil]
@@ -31,7 +29,6 @@ module Rigor
           new(source: source, root: root).at_position(line: line, column: column)
         end
 
-        # @param root [Prism::Node]
         # @param offset [Integer] 0-indexed byte offset
         # @return [Prism::Node, nil]
         def at_offset(root:, offset:)
@@ -40,7 +37,6 @@ module Rigor
       end
 
       # @param source [String, nil] used by `#at_position`; may be omitted when only `#at_offset` is needed.
-      # @param root [Prism::Node]
       def initialize(source:, root:)
         @source = source
         @root = root

@@ -206,7 +206,6 @@ module Rigor
         end
       end
 
-      # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events as `:info` diagnostics.
       # @param cache_store [Rigor::Cache::Store, nil] the persistent cache the runner exposes to producers
       #   (`RbsConstantTable` and successors). Pass `nil` to disable caching for this run; the CLI's
@@ -469,7 +468,6 @@ module Rigor
       #
       # @param source [String] Ruby source to analyze.
       # @param path [String] logical path for diagnostic locations.
-      # @return [Result]
       def run_source(source:, path: "(source).rb")
         @in_memory_sources = { path => source }
         run([path])

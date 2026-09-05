@@ -52,7 +52,6 @@ module Rigor
           DEFAULT_LEVEL
         end
 
-        # @param level [Symbol]
         # @return [Boolean] true when `# typed: ignore`. The harvest pipeline calls this to short-circuit
         #   walking the file's AST.
         def ignored?(level)

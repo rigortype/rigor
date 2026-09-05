@@ -58,7 +58,6 @@ module Rigor
                   "every run of the project."
         private_constant :MESSAGE
 
-        # @param configuration [Rigor::Configuration]
         # @param virtual_rbs [Array<Array(String, String)>, nil] `[buffer name, RBS source]` pairs the
         #   run ALREADY resolved; never a loader built for this pass. Empty / nil simply drops the
         #   virtual-RBS stratum.

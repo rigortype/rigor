@@ -27,7 +27,6 @@ module Rigor
 
       module_function
 
-      # @param node [Prism::Node]
       def index_write?(node)
         NODE_CLASSES.any? { |klass| node.is_a?(klass) }
       end
@@ -37,9 +36,6 @@ module Rigor
       # (issue #560). Empty means "no evidence" and widens without joining.
       #
       # @param node          [Prism::Node] one of {NODE_CLASSES}
-      # @param current_scope [Rigor::Scope]
-      # @param arg_types     [Array<Rigor::Type::Base>]
-      # @return              [Rigor::Scope]
       def widen(node:, current_scope:, arg_types: MutationWidening::NO_ARG_TYPES)
         MutationWidening.widen_receiver_aliases(node.receiver, MUTATOR, current_scope, arg_types: arg_types)
       end

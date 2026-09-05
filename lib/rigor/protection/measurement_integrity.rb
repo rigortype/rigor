@@ -26,8 +26,6 @@ module Rigor
 
       # The report-level companion: a project ratio computed over nothing, where something went wrong.
       # Distinct from an empty project, which is legitimately vacuous.
-      #
-      # @return [Boolean]
       def ratio_unmeasurable?(grand_total:, unmeasured_files:)
         grand_total.zero? && unmeasured_files.positive?
       end

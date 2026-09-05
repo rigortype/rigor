@@ -87,7 +87,6 @@ module Rigor
         end
       end
 
-      # @param configuration [Rigor::Configuration]
       # @param environment [Rigor::Environment] pre-built once by the caller
       # @param project_scan [Rigor::Analysis::ProjectScan] pre-built once
       # @param limit [Integer, nil] optional per-file mutation cap (sampled with
@@ -129,7 +128,6 @@ module Rigor
 
       # @param path [String] the file to measure (used as the in-memory bind path)
       # @param source [String, nil] the file's source; read from disk when nil
-      # @return [FileResult]
       def scan_file(path, source: nil)
         source ||= File.read(path, encoding: Encoding::UTF_8)
         kept = kept_mutations(source, path)
@@ -156,8 +154,6 @@ module Rigor
       # mutant the type checker did **not** kill, asks `test_oracle` whether the project's test suite catches it.
       # The expensive suite run is paid only for type-survivors (the gradual short-circuit), so the cost is
       # proportional to the protection hole.
-      # @param test_oracle [TestSuiteOracle]
-      # @return [FusedFileResult]
       def scan_file_fused(path, test_oracle:, source: nil)
         source ||= File.read(path, encoding: Encoding::UTF_8)
         kept = kept_mutations(source, path)

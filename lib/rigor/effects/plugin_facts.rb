@@ -77,7 +77,6 @@ module Rigor
         @empty ||= new(contributions: [], superclasses: NO_ROWS, includes: NO_ROWS)
       end
 
-      # @param plugin_registry [Rigor::Plugin::Registry, nil]
       # @param superclasses [Hash{String=>String,Array<String>}] the project's as-written superclass table
       #   (`Scope::DiscoveryIndex#discovered_superclasses`). Empty is legal and simply means no row matches
       #   through inheritance.

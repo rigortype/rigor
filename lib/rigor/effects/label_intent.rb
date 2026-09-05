@@ -41,7 +41,6 @@ module Rigor
       # @param registry [Rigor::Effects::Registry, nil] the vocabulary AFTER plugin load; `nil` (no
       #   vocabulary at all) makes every token unjudgeable and therefore silent.
       # @param siblings [Array<String>] the other tokens of the same list / the same config value.
-      # @return [Boolean]
       def evident?(token, registry, siblings: [])
         return false if registry.nil?
         return false unless Label.valid?(token)

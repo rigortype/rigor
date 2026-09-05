@@ -116,8 +116,6 @@ module Rigor
     # | exceptional         | exceptional   | exception           | :raise                  |
     # | role_conformance    | normal        | role                | (per-role target)       |
     # | effects             | normal        | effects             | :effects                |
-    #
-    # @return [Array<Element>]
     def to_element_list # rubocop:disable Metrics/AbcSize
       elements = []
       elements << element_for(:return, :normal, :return_type, return_type) unless return_type.nil?

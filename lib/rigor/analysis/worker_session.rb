@@ -72,7 +72,6 @@ module Rigor
                   :rbs_extended_reporter, :boundary_cross_reporter,
                   :prepare_diagnostics
 
-      # @param configuration [Rigor::Configuration]
       # @param cache_store [Rigor::Cache::Store, nil] persistent cache the session exposes to plugin-side
       #   producers and the RBS loader. Pass `nil` to disable caching.
       # @param plugin_blueprints [Array<Rigor::Plugin::Blueprint>] replay descriptors. Empty array yields a

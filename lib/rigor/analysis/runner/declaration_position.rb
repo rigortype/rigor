@@ -20,7 +20,6 @@ module Rigor
 
         module_function
 
-        # @param finding [#location]
         # @return [Array(String, Integer)] `[path, line]`
         def of(finding)
           location = finding.location

@@ -52,7 +52,6 @@ module Rigor
 
         module_function
 
-        # @param node [Prism::Node, nil]
         # @return [Rigor::Type] never `nil`; unrecognised forms degrade to `Type::Combinator.untyped`.
         def translate(node)
           return Rigor::Type::Combinator.untyped if node.nil?
@@ -67,7 +66,6 @@ module Rigor
           end
         end
 
-        # @param node [Prism::ConstantReadNode]
         def translate_constant_read(node)
           name = node.name.to_s
           return Rigor::Type::Combinator.untyped if name.empty?
@@ -75,7 +73,6 @@ module Rigor
           Rigor::Type::Combinator.nominal_of(name)
         end
 
-        # @param node [Prism::ConstantPathNode]
         def translate_constant_path(node)
           name = constant_path_name(node)
           return degraded if name.nil?

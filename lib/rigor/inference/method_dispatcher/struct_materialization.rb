@@ -35,7 +35,6 @@ module Rigor
         #
         # @param node [Prism::Node, nil] the receiver EXPRESSION.
         # @param receiver [Rigor::Type, nil] the carrier the expression produced.
-        # @param scope [Rigor::Scope, nil]
         def materialization_call?(node, receiver, scope)
           return false unless node.is_a?(Prism::CallNode)
 

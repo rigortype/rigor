@@ -41,7 +41,6 @@ module Rigor
         @expected_param_types = expected_param_types
       end
 
-      # @param block_node [Prism::BlockNode]
       # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter name to bound type. Anonymous
       #   parameters are skipped; MultiTargetNode destructuring slots delegate to {MultiTargetBinder} and
       #   contribute every named local in declaration order. Numbered-parameter forms (`_1`, `_2`, ...) bind

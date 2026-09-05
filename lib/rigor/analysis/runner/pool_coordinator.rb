@@ -29,16 +29,6 @@ module Rigor
       # delegated back through an injected `analyze_file` callable so the CheckRules / recorder /
       # plugin-emission machinery stays on the {Runner}.
       class PoolCoordinator # rubocop:disable Metrics/ClassLength
-        # @param configuration [Rigor::Configuration]
-        # @param cache_store [Rigor::Cache::Store, nil]
-        # @param explain [Boolean]
-        # @param workers [Integer]
-        # @param collect_stats [Boolean]
-        # @param buffer [BufferBinding, nil]
-        # @param environment_override [Rigor::Environment, nil]
-        # @param rbs_extended_reporter [RbsExtended::Reporter]
-        # @param boundary_cross_reporter [DependencySourceInference::BoundaryCrossReporter]
-        # @param source_rbs_synthesis_reporter [Plugin::SourceRbsSynthesisReporter]
         # @param snapshots [RunSnapshots] shared end-of-pass snapshot sink.
         # @param plugin_registry [#call] reader for the current registry.
         # @param dependency_source_index [#call] reader.

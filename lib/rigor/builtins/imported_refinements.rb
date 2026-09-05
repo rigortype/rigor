@@ -164,12 +164,10 @@ module Rigor
       # @param payload [String] the trailing payload of a `rigor:v1:return:` (or sibling)
       #   directive. Accepts the bare-name forms `lookup` already handles plus the
       #   parameterised forms documented on {Parser}.
-      # @param name_scope [Rigor::TypeNode::NameScope, nil]
       #   ADR-13 slice 3 — when provided, the parser consults the scope's `#resolver` chain
       #   after the built-in registry and built-in parametric forms but before the RBS
       #   Nominal fallback. `nil` (default) preserves the slice-1 / slice-2 behaviour of
       #   consulting only built-ins + RBS.
-      # @param reporter [Rigor::RbsExtended::Reporter, nil]
       #   ADR-13 slice 3b — collector that the Resolver feeds `dynamic.shape.lossy-projection`
       #   events into when a shape-projection head (`pick_of`, `omit_of`, `partial_of`,
       #   `required_of`, `readonly_of`) is applied to a carrier that does not preserve shape

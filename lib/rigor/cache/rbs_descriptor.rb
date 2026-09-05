@@ -12,8 +12,6 @@ module Rigor
     # slots, so factoring the construction here keeps the producers small and ensures invalidation behaves
     # identically across them.
     module RbsDescriptor
-      # @param loader [Rigor::Environment::RbsLoader]
-      # @return [Rigor::Cache::Descriptor]
       def self.build(loader)
         Descriptor.new(
           gems: [rbs_gem_entry],

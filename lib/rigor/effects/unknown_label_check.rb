@@ -30,10 +30,6 @@ module Rigor
 
       module_function
 
-      # @param method_envelopes [Hash{String => Envelope}]
-      # @param class_envelopes [Hash{String => Envelope}]
-      # @param registry [Rigor::Effects::Registry]
-      # @return [Array<Finding>]
       def for_envelopes(method_envelopes:, class_envelopes:, registry:)
         seen = {}
         declarations(method_envelopes, class_envelopes).each do |envelope|
@@ -52,7 +48,6 @@ module Rigor
       # @param labels [Array<String>] the list as written, in source order.
       # @param key_path [String] the `.rigor.yml` key, for the message (`effects.tolerated`).
       # @param consequence [String] what the degradation cost, for the message.
-      # @return [Array<Finding>]
       def for_config(labels:, key_path:, consequence:, registry:)
         tokens = Array(labels).map(&:to_s)
         tokens.filter_map do |token|

@@ -20,8 +20,6 @@ module Rigor
         @out = out
       end
 
-      # @param candidates [Array<MethodCandidate>]
-      # @param mode [:print, :diff]
       # @param format [String] "text" or "json"
       # @param selection [Array<Symbol>] subset of
       #   {Classification} constants to include; an empty

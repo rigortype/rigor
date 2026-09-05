@@ -34,11 +34,9 @@ module Rigor
     # `rbs.coverage.missing-gem`) survives; the count-based H5/H6 recognisers guard against info themselves so
     # recognition trace never reads as a bug.
     #
-    # @param diagnostics [Array<Analysis::Diagnostic>]
     # @param top [Integer] hotspot-file cap
     # @param hints [Boolean] run the heuristic catalogue
     # @param include_info [Boolean] route info into the volume views
-    # @return [Report]
     def analyze(diagnostics, top: 10, hints: true, include_info: false)
       routed = include_info ? diagnostics : diagnostics.reject { |d| d.severity == :info }
       Report.new(

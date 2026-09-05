@@ -21,10 +21,6 @@ module Rigor
       # end-of-pass snapshots) is read through injected reader procs so this collaborator never calls back
       # into the {Runner} and the read happens at the exact point in the run the original inline read did.
       class DiagnosticAggregator # rubocop:disable Metrics/ClassLength
-        # @param configuration [Rigor::Configuration]
-        # @param rbs_extended_reporter [RbsExtended::Reporter]
-        # @param boundary_cross_reporter [DependencySourceInference::BoundaryCrossReporter]
-        # @param source_rbs_synthesis_reporter [Plugin::SourceRbsSynthesisReporter]
         # @param plugin_registry [#call] reader returning the current {Plugin::Registry} (varies per run).
         # @param dependency_source_index [#call] reader returning the current
         #   {DependencySourceInference::Index}.

@@ -58,7 +58,6 @@ module Rigor
         # @param file_reader [Proc, nil] called with `"name.rb"` to load a
         #   draw partial from `config/routes/name.rb`. Returns file contents
         #   or nil when the file is absent.
-        # @return [HelperTable]
         def parse(contents, file_reader: nil, custom_helpers: [], grape_prefixes: [], acronyms: [])
           parse_result = Prism.parse(contents)
           unless parse_result.errors.empty?

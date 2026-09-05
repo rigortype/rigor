@@ -51,8 +51,6 @@ module Rigor
     module ClosureEscapeAnalyzer
       module_function
 
-      # @param receiver_type [Rigor::Type, nil]
-      # @param method_name [Symbol]
       # @param environment [Rigor::Environment, nil] reserved for the future sub-phase that consults
       #   `RBS::Extended` call-timing effects; sub-phase 3a ignores it.
       # @return [Symbol] one of `:non_escaping`, `:escaping`, `:unknown`.

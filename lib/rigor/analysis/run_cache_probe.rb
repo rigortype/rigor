@@ -51,8 +51,6 @@ module Rigor
     #   serves it instead. The decline is measured against the declarations alone, never against what they
     #   would judge to, so it costs one glob and never a wrong answer.
     class RunCacheProbe
-      # @param configuration [Rigor::Configuration]
-      # @param cache_root [String]
       # @param explain [Boolean] the `--explain` flag (folded into the key, as the runner does).
       def initialize(configuration:, cache_root:, explain:)
         @configuration = configuration

@@ -3191,8 +3191,6 @@ module Rigor
       # only code that raises `NoMethodError` at runtime.
       #
       # @param paths [Array<String>] project file paths.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      # @return [Hash{String => Rigor::Type::Singleton}]
       def discovered_classes_for_paths(paths, buffer: nil)
         accumulator = {}
         paths.each do |path|
@@ -3221,8 +3219,6 @@ module Rigor
       # own merge order.
       #
       # @param paths [Array<String>] project file paths.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      # @return [Hash{Symbol => Hash}]
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
@@ -3436,7 +3432,6 @@ module Rigor
       # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
       #
       # @param paths [Array<String>] project file paths.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
       # @return [Hash{Symbol => Object}] `{ classes: Hash, def_index: Hash }`.
       def discovered_project_index_for_paths(paths, buffer: nil)
         classes = {}
@@ -3468,7 +3463,6 @@ module Rigor
       #
       # @param paths [Array<String>] project file paths, in canonical order.
       # @param seed_bundles [Hash{String => Hash}] the prior run's per-file bundles, keyed by logical path.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
       # @return [Hash{Symbol => Object}] `{ classes:, def_index:, bundles: }`.
       def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil)
         classes = {}

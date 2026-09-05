@@ -55,7 +55,6 @@ module Rigor
     end
 
     class MethodParameterBinder
-      # @param environment [Rigor::Environment]
       # @param class_path [String, nil] the qualified name of the class the method is defined in
       #   (e.g., `"Foo::Bar"`), or `nil` for a top-level `def` outside any class. When `nil` (or
       #   when the class is unknown to RBS), every parameter falls back to `Dynamic[Top]`.
@@ -72,7 +71,6 @@ module Rigor
         @source_path = source_path
       end
 
-      # @param def_node [Prism::DefNode]
       # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter name to bound type.
       #   Anonymous parameters (`*` and `**` without a name) are skipped.
       def bind(def_node)

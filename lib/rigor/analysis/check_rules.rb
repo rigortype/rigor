@@ -85,9 +85,6 @@ module Rigor
       #
       # @param path [String] used to populate
       #   `Diagnostic#path`; the rule does not open files.
-      # @param root [Prism::Node]
-      # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
-      # @return [Array<Rigor::Analysis::Diagnostic>]
       #
       # ADR-53 B4 — when `node_collectors` is supplied, the converged
       # {Plugin::NodeRuleWalk} traversal has already populated the built-in

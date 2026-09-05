@@ -29,11 +29,9 @@ module Rigor
 
       module_function
 
-      # @param kind [:data, :struct]
       # @param members [Array<Symbol>] ordered member names from the ADR-48 layout.
       # @param member_types [Hash{Symbol => String}] erased RBS spellings; a member with no entry renders `untyped`.
       # @param keyword_init [Boolean] the `Struct.new(..., keyword_init: true)` flag; ignored for `:data`.
-      # @return [Shape]
       def of(kind:, members:, member_types: {}, keyword_init: false)
         types = members.to_h { |member| [member, member_types[member] || "untyped"] }
         accessors = kind == :struct ? struct_accessors(members, types) : readers(members, types)

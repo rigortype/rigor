@@ -99,8 +99,6 @@ module Rigor
 
       attr_reader :registrations, :definitions
 
-      # @param registrations [Array<Registration>]
-      # @param definitions [Array<Definition>]
       def initialize(registrations: [], definitions: [])
         @registrations = registrations.to_h { |r| [r.uri, r] }.freeze
         @definitions = definitions.to_h { |d| [d.uri, d] }.freeze
@@ -152,7 +150,6 @@ module Rigor
       # collisions per {#merge}'s contract. Fail-soft on per-annotation parse errors (the reporter
       # records an `:info` entry; the other annotations still apply).
       #
-      # @param rbs_loader [Rigor::Environment::RbsLoader]
       # @param base [HktRegistry] starting registry (typically the bundled
       #   `Rigor::Builtins::HktBuiltins.registry`).
       # @param name_scope [Rigor::Environment::NameScope, nil] threaded through to the bound

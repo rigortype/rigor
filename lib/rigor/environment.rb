@@ -47,7 +47,6 @@ module Rigor
                 :reporters, :name_scope,
                 :synthetic_method_index, :project_patched_methods
 
-    # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the environment is "RBS-blind"; useful
     #   in tests that want to assert how the engine behaves without RBS data. The default Environment wires
     #   the shared core loader, which is itself lazy: requesting an environment instance does NOT load RBS
@@ -189,7 +188,6 @@ module Rigor
       # @param cache_store [Rigor::Cache::Store, nil] persistent cache threaded into the underlying
       #   {Environment::RbsLoader} so constant lookups (and, in later v0.0.9 slices, other reflection
       #   artefacts) consult the cache. Pass `nil` (the default) to skip caching for this environment.
-      # @return [Rigor::Environment]
       # rubocop:disable-next Metrics/MethodLength, Metrics/ParameterLists
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil,
                       plugin_registry: nil, dependency_source_index: nil,

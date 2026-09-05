@@ -72,10 +72,6 @@ module Rigor
         EMPTY_TYPE_PARAM_NAMES = [].freeze
         private_constant :EMPTY_TYPE_PARAM_NAMES
 
-        # @param receiver [Rigor::Type]
-        # @param method_name [Symbol]
-        # @param args [Array<Rigor::Type>]
-        # @param environment [Rigor::Environment]
         # @param block_type [Rigor::Type, nil] inferred block return type, propagated from
         #   `MethodDispatcher.dispatch`. When non-nil, the selector prefers a block-bearing overload and
         #   binds the method-level type parameter that the block's return type references to `block_type`

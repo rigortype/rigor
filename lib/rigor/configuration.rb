@@ -627,7 +627,6 @@ module Rigor
     #   with no signal.
     #
     # @param id [String] a feature id from {BleedingEdge::FEATURES} or {BleedingEdge::GRADUATED}.
-    # @return [Boolean]
     # @raise [ArgumentError] if `id` names no known feature.
     def bleeding_edge_active?(id)
       return true if BleedingEdge.graduated?(id)

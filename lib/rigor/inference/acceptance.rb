@@ -27,10 +27,7 @@ module Rigor
     module Acceptance
       module_function
 
-      # @param self_type [Rigor::Type]
-      # @param other_type [Rigor::Type]
       # @param mode [Symbol] `:gradual` (default) or `:strict`.
-      # @return [Rigor::Type::AcceptsResult]
       def accepts(self_type, other_type, mode: :gradual)
         raise ArgumentError, "Acceptance mode #{mode.inspect} is not implemented yet" unless mode == :gradual
 

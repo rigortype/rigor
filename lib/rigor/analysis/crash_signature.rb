@@ -77,7 +77,6 @@ module Rigor
 
       module_function
 
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
       # @return [Symbol, nil] `:check_rule`, `:plugin`, `:rbs_build`, or nil for an ordinary diagnostic.
       def reason(diagnostic)
         return :check_rule if diagnostic.message.to_s.start_with?(CHECK_RULE_MESSAGE_PREFIX)
@@ -90,17 +89,12 @@ module Rigor
       # True when `diagnostic` is the rescue row that REPLACED a file's analysis — the only shape after which
       # the run's diagnostics say nothing about the code. NOT a general "something went wrong" predicate; see
       # the class doc for why `:plugin` and `:rbs_build` are excluded.
-      #
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
       def discards_file_analysis?(diagnostic)
         reason(diagnostic) == DISCARDS_FILE_ANALYSIS_REASON
       end
 
       # A one-line "<reason> at <path>:<line>: <message>" for a failure message, so whoever reads the raise
       # sees which shape fired and where without re-deriving it.
-      #
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
-      # @return [String]
       def describe(diagnostic)
         "#{reason(diagnostic) || :unknown} at #{diagnostic.path}:#{diagnostic.line}: #{diagnostic.message}"
       end

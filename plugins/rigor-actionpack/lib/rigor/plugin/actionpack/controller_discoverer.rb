@@ -42,7 +42,6 @@ module Rigor
           @search_paths = search_paths
         end
 
-        # @return [ControllerIndex]
         def discover
           entries = {}
           ruby_files_under(@search_paths).each do |path|

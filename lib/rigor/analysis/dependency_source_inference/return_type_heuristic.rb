@@ -28,7 +28,6 @@ module Rigor
       module ReturnTypeHeuristic
         module_function
 
-        # @param def_node [Prism::DefNode]
         # @return [Rigor::Type, nil] heuristic return type, or `nil` when the body's tail expression doesn't
         #   match any of the recognised shapes.
         def extract(def_node)

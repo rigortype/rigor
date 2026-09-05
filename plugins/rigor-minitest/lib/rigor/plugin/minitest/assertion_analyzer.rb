@@ -59,8 +59,6 @@ module Rigor
       module AssertionAnalyzer
         module_function
 
-        # @param call_node [Prism::CallNode]
-        # @param environment [Rigor::Environment, nil]
         # @return [Rigor::FlowContribution, nil]
         def contribution_for(call_node, environment:)
           return nil unless call_node.is_a?(Prism::CallNode)

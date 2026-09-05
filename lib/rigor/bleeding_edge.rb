@@ -76,12 +76,10 @@ module Rigor
         super
       end
 
-      # @return [Boolean]
       def severity?
         kind == :severity
       end
 
-      # @return [Boolean]
       def behaviour?
         kind == :behaviour
       end
@@ -96,8 +94,6 @@ module Rigor
       end
     end
 
-    # The overlay.
-    #
     # Feature ids are **kebab-case, and name the discipline rather than the rule** it happens to
     # promote (`reject-unparseable-signatures`, not `rbs-quarantine-error`): a discipline may grow
     # to cover more rules without its id going stale, and the id is contract vocabulary that
@@ -193,35 +189,27 @@ module Rigor
     # cleanup can lag graduation by as many releases as it takes. The id also stays in the
     # contract vocabulary the CHANGELOG migration note keys on. Entries are removed only once
     # no call site names them.
-    #
-    # @return [Array<String>]
     GRADUATED = [].freeze
 
     module_function
 
-    # @return [Array<Feature>] the whole overlay.
     def features
       FEATURES
     end
 
-    # @return [Array<String>] every feature id in the overlay.
     def feature_ids
       FEATURES.map(&:id)
     end
 
-    # @param id [String]
     # @return [Feature, nil]
     def feature(id)
       FEATURES.find { |f| f.id == id }
     end
 
-    # @param id [String]
-    # @return [Boolean] whether the id has graduated to default-on ({GRADUATED}).
     def graduated?(id)
       GRADUATED.include?(id)
     end
 
-    # @param id [String]
     # @return [Boolean] whether the id names a feature this gem knows at all — queued or
     #   graduated. Distinct from "adopted"; see {Configuration#bleeding_edge_active?}.
     def known_id?(id)
@@ -237,7 +225,6 @@ module Rigor
     # @param selector [Hash] `{ "mode" => "none" }`,
     #   `{ "mode" => "all" }`, `{ "mode" => "all", "except" => [ids] }`,
     #   or `{ "mode" => "list", "ids" => [ids] }`.
-    # @return [Array<Feature>]
     def active_features(selector)
       case selector["mode"]
       when "all"
@@ -255,7 +242,6 @@ module Rigor
     # the result is `Ractor.shareable?`.
     #
     # @param selector [Hash] see {#active_features}.
-    # @return [Hash{String => Symbol}]
     def severity_overrides_for(selector)
       active_features(selector).each_with_object({}) do |feature, acc|
         acc.merge!(feature.severity_overrides)
@@ -268,7 +254,6 @@ module Rigor
     # `Ractor.shareable?` across the worker boundary.
     #
     # @param selector [Hash] see {#active_features}.
-    # @return [Set<String>]
     def active_ids_for(selector)
       Set.new(active_features(selector).map(&:id)).freeze
     end
@@ -277,7 +262,6 @@ module Rigor
     # newer gem). Surfaced by `rigor show-bleedingedge` as a hint; never an error.
     #
     # @param selector [Hash] see {#active_features}.
-    # @return [Array<String>]
     def unknown_selected_ids(selector)
       named =
         case selector["mode"]

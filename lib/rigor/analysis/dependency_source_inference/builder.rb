@@ -17,8 +17,6 @@ module Rigor
       module Builder
         module_function
 
-        # @param dependencies [Rigor::Configuration::Dependencies]
-        # @return [Index]
         def build(dependencies)
           return Index::EMPTY if dependencies.empty?
 

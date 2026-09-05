@@ -1,3 +1,6 @@
 ---
 locals:
   x: '"hello"?'
+assertions:
+  '1': '"hello"'
+  '2': nil

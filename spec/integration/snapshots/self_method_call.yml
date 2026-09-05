@@ -1,2 +1,5 @@
 ---
 locals: {}
+assertions:
+  '1': '7'
+  '2': bot

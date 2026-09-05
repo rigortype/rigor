@@ -1,0 +1,1 @@
+- **[dev]** Precision snapshots now capture fixture-declared `assert_type` expressions alongside top-level locals, extending inference-regression coverage to declaration-only fixtures that contain those assertions. ([#713](https://github.com/rigortype/rigor/issues/713), [#769](https://github.com/rigortype/rigor/pull/769))

@@ -1,2 +1,4 @@
 ---
 locals: {}
+assertions:
+  '1': Foo::Inner

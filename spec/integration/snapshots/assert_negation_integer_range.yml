@@ -1,2 +1,4 @@
 ---
 locals: {}
+assertions:
+  '1': int<11, max> | int<min, 4>

@@ -4,3 +4,9 @@ locals:
   c: Catalog
   ids: non-empty-array[Integer]
   idx: int<5, 10>
+assertions:
+  '1': non-empty-array[Integer]
+  '2': positive-int
+  '3': non-empty-hash[Symbol, Integer]
+  '4': positive-int
+  '5': int<5, 10>

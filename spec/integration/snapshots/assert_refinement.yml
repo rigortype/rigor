@@ -2,3 +2,6 @@
 locals:
   name: non-empty-string
   v: Validator
+assertions:
+  '1': non-empty-string
+  '2': positive-int

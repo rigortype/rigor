@@ -6,3 +6,4 @@ locals:
   local_op_empty: bool
   local_or: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
   local_or_empty: bool
+assertions: {}

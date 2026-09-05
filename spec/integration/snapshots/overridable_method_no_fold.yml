@@ -1,2 +1,5 @@
 ---
 locals: {}
+assertions:
+  '1': ":directed | :undirected"
+  '2': ":leaf"

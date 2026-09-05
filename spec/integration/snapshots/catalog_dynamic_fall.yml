@@ -1,2 +1,12 @@
 ---
 locals: {}
+assertions:
+  '1': "[1, 2, 3, 4]"
+  '2': "[1, 2, 3]"
+  '3': "[1, 2, 3, 4]"
+  '4': Hash[Integer, Integer]
+  '5': Hash[String, Integer]
+  '6': Hash[Dynamic[top], Integer]
+  '7': Integer
+  '8': Integer
+  '9': Hash

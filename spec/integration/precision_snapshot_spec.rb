@@ -4,7 +4,8 @@
 #
 # For every fixture under `spec/integration/fixtures/` this spec:
 #   1. Runs the engine end-to-end via `FixtureHarness`.
-#   2. Captures the type string (`Type#describe(:short)`) of every top-level local variable in the evaluated scope.
+#   2. Captures the type string (`Type#describe(:short)`) of every top-level local variable in the evaluated scope
+#      and every fixture-declared `assert_type` expression through its indexed scope.
 #   3. Compares the result to a YAML golden file under `spec/integration/snapshots/`.
 #
 # A failed example means a type CHANGED — either it became more precise (good — update the snapshot) or it
@@ -27,6 +28,10 @@
 #
 #   # The WHOLE corpus — only after an engine-wide change whose full diff you intend to review.
 #   UPDATE_SNAPSHOTS=1 bundle exec rspec spec/integration/precision_snapshot_spec.rb
+#
+# The verifying run reports and pins the number of snapshots that contain no captured type. This is deliberately a
+# corpus-level count: adding a fixture without a local or an `assert_type` expression must not quietly enlarge the
+# gate's vacuous surface.
 #
 # Whatever the selection, READ the recorded types before committing them: a golden taken from a buggy run pins
 # the bug, in the one artifact whose purpose is to notice it.
@@ -112,9 +117,59 @@ end
 # "every file that is not this one" is 100-odd false positives.
 UPDATE_ALL = UPDATE_TARGETS.sort == SNAPSHOT_FIXTURE_NAMES.sort
 
+# A vacuous snapshot has neither a top-level local nor a fixture assertion to pin. Keep this count explicit: the
+# verifying mode is the mode CI runs, so a warning emitted only while regenerating would leave growth invisible.
+EXPECTED_VACUOUS_SNAPSHOT_COUNT = 11
+
+class PrecisionSnapshotAssertionVisitor < Prism::Visitor
+  RIGOR_TESTING_RECEIVERS = ["Rigor", "Rigor::Testing", "Testing"].freeze
+
+  attr_reader :captures
+
+  def initialize(scope_index:)
+    super()
+    @scope_index = scope_index
+    @captures = {}
+  end
+
+  def visit_call_node(node)
+    capture(node) if assertion_call?(node)
+    super
+  end
+
+  private
+
+  def assertion_call?(node)
+    return false unless node.name == :assert_type
+
+    receiver = node.receiver
+    receiver.nil? || RIGOR_TESTING_RECEIVERS.include?(Rigor::Source::ConstantPath.qualified_name_or_nil(receiver))
+  end
+
+  def capture(node)
+    arguments = node.arguments&.arguments
+    return if arguments.nil? || arguments.size < 2
+
+    expected_node, value_node = arguments.first(2)
+    return unless expected_node.is_a?(Prism::StringNode)
+
+    scope = @scope_index[value_node] || @scope_index[node]
+    return if scope.nil?
+
+    assertion_index = @captures.length + 1
+    @captures[assertion_index.to_s] = scope.type_of(value_node).describe(:short)
+  end
+end
+
+def assertion_snapshot(harness)
+  visitor = PrecisionSnapshotAssertionVisitor.new(scope_index: harness.index)
+  harness.tree.accept(visitor)
+  visitor.captures
+end
+
 def build_snapshot(harness)
   locals = harness.post_scope.locals.transform_keys(&:to_s).transform_values { |t| t.describe(:short) }
-  { "locals" => locals.sort.to_h }
+  { "locals" => locals.sort.to_h, "assertions" => assertion_snapshot(harness) }
 end
 
 def snapshot_path(fixture_name)
@@ -123,15 +178,26 @@ def snapshot_path(fixture_name)
   File.join(SNAPSHOTS_DIR, "#{safe}.yml")
 end
 
-# This gate captures TOP-LEVEL LOCALS only, so a fixture written entirely as class and method definitions
-# records an EMPTY golden: committed, counted, and pinning nothing beyond "the fixture still evaluates without
-# raising". That is not a reason to withhold the golden — the types in such a fixture are gated by its
-# `assert_type` lines in `type_construction_spec` — but it IS a reason its author should be told, at the moment
-# they generate it, that the precision gate is not the one watching their fixture.
+# A snapshot with neither top-level locals nor fixture assertions pins no type. It remains useful as a fixture
+# execution check, but its vacuity is reported and counted so the precision gate cannot silently lose coverage.
 def vacuous_snapshot_warning(names)
   "\n#{names.size} snapshot(s) pinned no type at all: #{names.sort.join(', ')}.\n" \
-    "This gate captures top-level locals only, and those fixtures declare none, so their goldens are empty. " \
-    "Assert the types they are about through `assert_type` in spec/integration/type_construction_spec.rb.\n"
+    "This gate captures top-level locals and fixture-declared `assert_type` expressions, and those fixtures " \
+    "declare neither. Add one of those captures if the fixture is meant to pin inference precision.\n"
+end
+
+def vacuous_snapshot?(snapshot)
+  snapshot.fetch("locals", {}).empty? && snapshot.fetch("assertions", {}).empty?
+end
+
+def vacuous_snapshot_names
+  SNAPSHOT_FIXTURE_NAMES.filter_map do |name|
+    path = snapshot_path(name)
+    next unless File.file?(path)
+
+    snapshot = YAML.load_file(path)
+    name if vacuous_snapshot?(snapshot)
+  end
 end
 
 # Re-runs THIS file in a subprocess, narrowed to one fixture's example, against a scratch snapshots
@@ -146,7 +212,10 @@ def run_against_scratch_snapshots(fixture, golden:)
     env = {
       "PRECISION_SNAPSHOTS_DIR" => dir,
       "PRECISION_SNAPSHOT_SELF_TEST" => "1",
-      "UPDATE_SNAPSHOTS" => "0"
+      "UPDATE_SNAPSHOTS" => "0",
+      # `Bundler.with_unbundled_env` clears Bundler's own environment before the child starts. Forward the
+      # selected bundle explicitly so this self-test exercises the snapshot failure, not a missing dependency.
+      "BUNDLE_PATH" => ENV.fetch("BUNDLE_PATH", nil)
     }
     command = ["bundle", "exec", "rspec", __FILE__, "-e", "fixtures/#{fixture} matches the golden snapshot"]
 
@@ -160,17 +229,16 @@ def run_against_scratch_snapshots(fixture, golden:)
   end
 end
 
-# Human-readable per-local diff, built before failing so the engineer immediately sees which locals moved.
 def snapshot_diff(golden, actual)
-  golden_locals = golden["locals"] || {}
-  actual_locals = actual["locals"] || {}
-
-  changed = golden_locals.filter_map do |var, expected_type|
-    actual_type = actual_locals[var]
-    "  #{var}: was #{expected_type.inspect}, now #{actual_type.inspect}" if actual_type != expected_type
+  %w[locals assertions].flat_map do |section|
+    golden_values = golden.fetch(section, {})
+    actual_values = actual.fetch(section, {})
+    golden_values.filter_map do |key, expected_type|
+      actual_type = actual_values[key]
+      "  #{section}.#{key}: was #{expected_type.inspect}, now #{actual_type.inspect}" if actual_type != expected_type
+    end + actual_values.each_key.reject { |key| golden_values.key?(key) }
+                       .map { |key| "  #{section}.#{key}: new capture not in snapshot" }
   end
-  changed + actual_locals.each_key.reject { |var| golden_locals.key?(var) }
-                         .map { |var| "  #{var}: new local not in snapshot" }
 end
 
 RSpec.describe "Precision snapshots (inference regression gate)" do
@@ -189,7 +257,7 @@ RSpec.describe "Precision snapshots (inference regression gate)" do
       failures = UPDATE_TARGETS.filter_map do |name|
         snapshot = build_snapshot(Rigor::IntegrationSupport::FixtureHarness.new(name))
         File.write(snapshot_path(name), YAML.dump(snapshot))
-        vacuous << name if snapshot["locals"].empty?
+        vacuous << name if vacuous_snapshot?(snapshot)
         nil
       rescue StandardError => e
         "  #{name}: #{e.class}: #{e.message}"
@@ -259,6 +327,22 @@ RSpec.describe "Precision snapshots (inference regression gate)" do
         expect(snapshot_update_targets(SNAPSHOT_FIXTURE_NAMES.first, SNAPSHOT_FIXTURE_NAMES))
           .to eq([SNAPSHOT_FIXTURE_NAMES.first])
       end
+    end
+
+    it "reports and enforces the stable vacuous snapshot count" do
+      vacuous = vacuous_snapshot_names
+      warn "Vacuous precision snapshots: #{vacuous.size} (expected #{EXPECTED_VACUOUS_SNAPSHOT_COUNT}) — " \
+           "#{vacuous.sort.join(', ')}"
+      expect(vacuous.size).to eq(EXPECTED_VACUOUS_SNAPSHOT_COUNT),
+                              "Expected #{EXPECTED_VACUOUS_SNAPSHOT_COUNT} vacuous snapshots, found #{vacuous.size}: " \
+                              "#{vacuous.sort.join(', ')}"
+    end
+
+    it "pins distinct compact and nested callee-rewalk types" do
+      assertions = build_snapshot(Rigor::IntegrationSupport::FixtureHarness.new("callee_rewalk_nesting"))["assertions"]
+
+      expect(assertions.fetch("6")).to eq("Post")
+      expect(assertions.fetch("7")).to eq("Admin::Post")
     end
 
     # The hard failure has to be checked by RUNNING it. Every golden exists now, so reverting the

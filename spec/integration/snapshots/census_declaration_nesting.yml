@@ -1,2 +1,14 @@
 ---
 locals: {}
+assertions:
+  '1': Post
+  '2': Admin::CompactCensus::Own
+  '3': Loner
+  '4': singleton(Post)
+  '5': singleton(Admin::CompactCensus::Own)
+  '6': singleton(Post)
+  '7': Admin::Post
+  '8': Admin::NestedCensus::Own
+  '9': singleton(Admin::Post)
+  '10': singleton(Admin::NestedCensus::Own)
+  '11': singleton(Admin::Post)

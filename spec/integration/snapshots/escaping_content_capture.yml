@@ -8,3 +8,12 @@ locals:
   options: Hash[Dynamic[top], Dynamic[top]]
   routed: '{ mode: "print", mutation: false }'
   seen: "{}"
+assertions:
+  '1': Hash[Dynamic[top], Dynamic[top]]
+  '2': String
+  '3': Array[Dynamic[top]]
+  '4': Hash[Dynamic[top], Dynamic[top]]
+  '5': "{}"
+  '6': Hash[Dynamic[top], Dynamic[top]]
+  '7': Hash[Dynamic[top], Dynamic[top]]
+  '8': Hash[Dynamic[top], Dynamic[top]]

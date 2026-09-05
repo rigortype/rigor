@@ -1,2 +1,8 @@
 ---
 locals: {}
+assertions:
+  '1': bool
+  '2': '"label"?'
+  '3': 0 | :found
+  '4': '"outer"'
+  '5': '[1, "x"] | [2, "y"]'

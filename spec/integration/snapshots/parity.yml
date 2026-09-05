@@ -3,3 +3,6 @@ locals:
   both: Dynamic[top]
   "n": '4'
   result: ":even"
+assertions:
+  '1': ":even"
+  '2': ":even | :odd"

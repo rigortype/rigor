@@ -1,2 +1,16 @@
 ---
 locals: {}
+assertions:
+  '1': Bar::Nested::Leaf
+  '2': Bar::Nested::Leaf
+  '3': Bar::Nested::Leaf
+  '4': Bar::Outerish::Thing
+  '5': Outerish::Thing
+  '6': Far::Thing
+  '7': Far::Thing
+  '8': Outerish::Thing
+  '9': Bar::Nested::Beacon
+  '10': Bar::Nested::Beacon
+  '11': Sentinel
+  '12': Bar::Nested::Random
+  '13': Random

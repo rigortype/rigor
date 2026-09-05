@@ -20,3 +20,20 @@ locals:
   stack: Array[Dynamic[top] | Integer]
   unshifted: Array[1 | 2 | Dynamic[top] | Integer]
   untouched: "[1, 2]"
+assertions:
+  '1': Array[1 | 2 | Dynamic[top] | Integer]
+  '2': 1 | 2 | Dynamic[top] | Integer
+  '3': Array[1 | 2 | Dynamic[top] | Integer]
+  '4': Array[1 | 2 | Dynamic[top] | Integer]
+  '5': Array[Dynamic[top] | Integer]
+  '6': Array[Dynamic[top] | Integer]
+  '7': Array[Dynamic[top] | Integer]
+  '8': Array[Dynamic[top] | String]
+  '9': Array[Dynamic[top] | Integer]
+  '10': Array[1 | 2 | Dynamic[top]]
+  '11': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
+  '12': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  '13': Array[1 | 2 | 3]
+  '14': Array[1 | 2]
+  '15': Array[1 | 2]
+  '16': "[1, 2]"

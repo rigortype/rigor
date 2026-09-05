@@ -3,3 +3,37 @@ locals:
   d: Date
   dt: DateTime
   parsed: Date
+assertions:
+  '1': Date
+  '2': Date
+  '3': Integer
+  '4': Integer
+  '5': Integer
+  '6': Integer
+  '7': Integer
+  '8': Integer
+  '9': Integer
+  '10': Integer
+  '11': bool
+  '12': bool
+  '13': bool
+  '14': bool
+  '15': String
+  '16': String
+  '17': String
+  '18': Date
+  '19': Date
+  '20': Date
+  '21': Date
+  '22': Date
+  '23': Date
+  '24': Date
+  '25': DateTime
+  '26': Integer
+  '27': Integer
+  '28': Integer
+  '29': String
+  '30': String
+  '31': Integer
+  '32': Integer
+  '33': Integer

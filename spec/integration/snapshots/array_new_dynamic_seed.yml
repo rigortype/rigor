@@ -1,2 +1,27 @@
 ---
 locals: {}
+assertions:
+  '1': Array[String]
+  '2': Array[1 | String]
+  '3': Array[1 | String]
+  '4': Array[Dynamic[top]]
+  '5': Array[1 | Dynamic[top]]
+  '6': Array[Dynamic[top]]
+  '7': Array[1 | Dynamic[top]]
+  '8': Array[Integer]
+  '9': Array["s" | Integer]
+  '10': Array[Array[Dynamic[top]]]
+  '11': Array[Array[Integer]]
+  '12': Array[Array[Dynamic[top]] | String]
+  '13': Array[Array[Array[Integer]]]
+  '14': Array[Array[Array[Integer]]]
+  '15': Array[Array[Hash[Symbol, Integer]]]
+  '16': Array[Array[Array[Integer]]]
+  '17': Array[Array[Integer]]
+  '18': Array[Dynamic[top]]
+  '19': "[0, 0, 0]"
+  '20': "[nil, nil]"
+  '21': '["s", "s"]'
+  '22': Array[Integer]
+  '23': Array[Dynamic[top]]
+  '24': Array[Integer]

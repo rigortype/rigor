@@ -2,3 +2,8 @@
 locals:
   o: Dynamic[top]
   w: Dynamic[top]
+assertions:
+  '1': '42'
+  '2': '42'
+  '3': 1 | 2 | 3 | nil
+  '4': '"s" | Dynamic[top]'

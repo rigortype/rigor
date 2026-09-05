@@ -6,3 +6,11 @@ locals:
   label: ":large | :small | :zero"
   m: Integer | int<1, 10> | int<11, 20>
   "n": '0'
+assertions:
+  '1': ":large | :small | :zero"
+  '2': int<1, 10>
+  '3': int<11, 20>
+  '4': int<0, 9>
+  '5': int<100, max>
+  '6': negative-int
+  '7': '0'

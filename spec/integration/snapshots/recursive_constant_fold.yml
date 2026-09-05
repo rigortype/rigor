@@ -3,3 +3,9 @@ locals:
   f: Dynamic[top]
   p: Dynamic[top]
   s: Dynamic[top]
+assertions:
+  '1': '120'
+  '2': Integer
+  '3': '"***"'
+  '4': 'true'
+  '5': 'true'

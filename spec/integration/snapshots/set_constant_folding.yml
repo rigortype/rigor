@@ -12,3 +12,23 @@ locals:
   _union: Set[:a, :b, :c, :d]
   arr_dyn: "[1, Integer]"
   s_dynamic: Set
+assertions:
+  '1': Set[]
+  '2': Set[:a, :b, :c]
+  '3': Set[]
+  '4': Set[:x, :y]
+  '5': '3'
+  '6': 'false'
+  '7': 'true'
+  '8': 'false'
+  '9': "[:a, :b, :c]"
+  '10': "[:a, :b, :c]"
+  '11': non-negative-int
+  '12': '3'
+  '13': 'true'
+  '14': 'false'
+  '15': Set[:a, :b, :c, :d]
+  '16': Set[:b, :c]
+  '17': Set[:b, :c]
+  '18': Set[:a]
+  '19': Set[:a, :z]

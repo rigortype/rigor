@@ -1,3 +1,10 @@
 ---
 locals:
   "n": Integer
+assertions:
+  '1': int<0, 4>
+  '2': '0'
+  '3': int<3, 7>
+  '4': int<3, 7>
+  '5': non-negative-int
+  '6': '0'

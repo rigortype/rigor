@@ -10,3 +10,11 @@ locals:
   sym_keyed: '{ name: "Alice", age: 30 }'
   sym_noop: '{ name: "Alice", age: 30 }'
   up: '{ x: "1", y: "hello" }'
+assertions:
+  '1': '{ name: "Alice", age: 30 }'
+  '2': '{ "name": "Alice", "age": 30 }'
+  '3': '{ name: "Alice", age: 30 }'
+  '4': '{ "name": "Alice", "age": 30 }'
+  '5': '{ name: "Alice", age: "30" }'
+  '6': '{ name: "Alice", age: "30" }'
+  '7': '{ x: "1", y: "hello" }'

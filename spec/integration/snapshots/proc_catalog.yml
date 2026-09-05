@@ -3,3 +3,14 @@ locals:
   m: Method<5#+>
   prc: Proc
   um: UnboundMethod
+assertions:
+  '1': Proc
+  '2': Integer
+  '3': bool
+  '4': Method<5#+>
+  '5': Class | Module
+  '6': Symbol
+  '7': Integer
+  '8': UnboundMethod
+  '9': Class | Module
+  '10': Symbol

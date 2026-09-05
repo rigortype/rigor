@@ -1,1 +1,0 @@
-- **[engine]** A `Struct` member read now still folds to its known value after an `if` or `while` earlier in the method, instead of going untyped for the rest of the body whenever the code branched at all. ([#589](https://github.com/rigortype/rigor/issues/589), [#596](https://github.com/rigortype/rigor/pull/596))

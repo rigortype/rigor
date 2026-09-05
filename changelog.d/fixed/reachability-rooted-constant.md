@@ -1,1 +1,0 @@
-- **[unused]** A constant reference written with a leading `::` now resolves to the top-level declaration instead of a same-named shadow in the enclosing namespace, so `::Foo` inside `module MyApp` attributes reachability to top-level `Foo` and avoids false unused candidates. ([#625](https://github.com/rigortype/rigor/issues/625))

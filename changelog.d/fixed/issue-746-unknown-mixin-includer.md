@@ -1,1 +1,0 @@
-- **[check]** A class that includes a module no loaded RBS declares no longer draws `call.undefined-method`: its ancestors are not fully known, so its method surface cannot be enumerated — a class whose includes are all known keeps reporting typos as before. ([#746](https://github.com/rigortype/rigor/issues/746), [#747](https://github.com/rigortype/rigor/pull/747))

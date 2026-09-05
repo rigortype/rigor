@@ -1,1 +1,0 @@
-- **[HKT]** Added support for implicit HKT registration via recursive `type` aliases (ADR-20 Slice 5). [#712](https://github.com/rigortype/rigor/pull/712)

@@ -1,1 +1,0 @@
-- **[plugins]** rigor-actionpack now types the fifteen `request` predicates (`post?`, `xhr?`, `ssl?`, …) as `bool`, and `flash.now` / `flash.keep` / `flash.discard` as their Action Pack carriers, so a flash chain keeps a concrete receiver. ([#534](https://github.com/rigortype/rigor/issues/534), [#592](https://github.com/rigortype/rigor/pull/592))

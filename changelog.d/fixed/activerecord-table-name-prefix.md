@@ -1,1 +1,0 @@
-- **[plugins]** Recognize ActiveRecord base-class and model-level table_name_prefix, external and engine prefixes, and abstract parent classes in nested models. ([#671](https://github.com/rigortype/rigor/issues/671), [#678](https://github.com/rigortype/rigor/issues/678), [#679](https://github.com/rigortype/rigor/issues/679))

@@ -12,6 +12,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-05
+
+v0.3.7 is about typing the Ruby and Rails you already write. Compact and rooted namespaces now resolve the way Ruby does, so `class Admin::UsersController` and `::Rails` stop drawing false `undefined method`, and ordinary Rails surfaces (`params`, Duration, `Time`/`Date`, ActiveRecord table names) carry a type instead of going opaque. New plugins cover FFI bindings and dry-monads `Result` / `Maybe` ([ADR-20](docs/adr/20-lightweight-hkt.md), [ADR-30](docs/adr/30-rigor-ffi-plugin-shape.md)). `rigor type-of` answers several positions in one process, coverage measures the same engine `check` runs, and remaining fixes close Struct factory bodies, git-sourced gems, and a class of false `undefined-method` on receivers whose surface cannot be enumerated.
+
 ### Added
 
 - **[plugins]** The `rigor-ffi` plugin family types FFI bindings instead of leaving them untyped ([ADR-30](docs/adr/30-rigor-ffi-plugin-shape.md), [#141](https://github.com/rigortype/rigor/issues/141), [#719](https://github.com/rigortype/rigor/pull/719)).
@@ -846,7 +850,8 @@ This release is dominated by a performance arc that makes repeat and incremental
 - **[plugin]** The plugin isolation worker no longer dies with an opaque `Inflector::Unavailable: process isolation worker failed (EOFError)` when a target library cannot be loaded ([#109](https://github.com/rigortype/rigor/pull/109)).
   - `Rigor::Plugin::LoadError` lexically shadowed the global `LoadError`, so the worker loop's bare `rescue` matched the wrong class and the real `::LoadError` killed the forked worker; the rescues are now `::`-qualified. The same shadowing bug is fixed in `rigor-rspec-rails`'s Rack status-table loader.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/rigortype/rigor/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/rigortype/rigor/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/rigortype/rigor/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/rigortype/rigor/compare/v0.3.3...v0.3.4

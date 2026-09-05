@@ -2122,7 +2122,6 @@ module Rigor
       # host that did (`language_server/debouncer.rb` runs analysis on a `Thread`) could have one analysis
       # silence another's reporting; not reachable today, and not worth a thread-local until it is.
       def during_internal_demand
-        completed = false
         previous = @state[:internal_demand]
         outermost = !previous
         if outermost
@@ -2130,17 +2129,22 @@ module Rigor
           @state[:definition_build_deferred_first] = nil
         end
         @state[:internal_demand] = true
-        result = yield
-        completed = true
-        result
-      ensure
-        @state[:internal_demand] = previous
-        if outermost
-          if completed
-            warn_about_deferred_definition_build_failures
-          else
-            warn_about_aborted_definition_build_failures
-          end
+        # `rescue`/`else` keeps the normal block result precise for the analyzer; the pending marker covers
+        # non-local exits (e.g. `throw`) that unwind through `ensure` without entering either branch.
+        @state[:internal_demand_status] = :pending if outermost
+        begin
+          result = yield
+          @state[:internal_demand_status] = :completed if outermost
+        rescue StandardError, ScriptError => e
+          @state[:internal_demand_status] = :aborted if outermost
+          warn_about_aborted_definition_build_failures if outermost
+          raise e
+        else
+          warn_about_deferred_definition_build_failures if outermost
+          result
+        ensure
+          @state[:internal_demand] = previous
+          warn_about_aborted_definition_build_failures if outermost && @state[:internal_demand_status] == :pending
         end
       end
 

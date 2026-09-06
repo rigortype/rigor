@@ -69,9 +69,9 @@ enforces this table against the engine's emitted vocabulary.
 
 ### RBS definition-build stderr fallback
 
-The `rbs.coverage.definition-build-failed` diagnostic and the RBS definition-build stderr banner are separate outputs. A successful internal demand that visits many RBS classes MUST emit at most one bounded summary per loader process, even when the loader later starts another internal-demand episode; that summary points to the diagnostic for the affected classes. Ordinary, analysis-driven definition demands retain their existing detailed warning behavior.
+The `rbs.coverage.definition-build-failed` diagnostic and the RBS definition-build stderr banner are separate outputs. A successful internal demand that visits many RBS classes MUST emit at most one bounded summary per loader instance, even when that loader later starts another internal-demand episode; the summary names the first failure seen by the internal traversal, while the diagnostic separately reports the classes the analysis demanded and carries the culprit member and signature files. Ordinary, analysis-driven definition demands retain their existing detailed warning behavior.
 
-If an internal-demand episode records a definition-build failure and then raises before the run can assemble its diagnostic, Rigor MUST emit the detailed stderr warning for the first newly encountered failure in that episode, even if an earlier episode already emitted the process summary. This abort-time fallback is one warning for the episode and does not create a second `rbs.coverage.definition-build-failed` diagnostic.
+If an internal-demand episode records a definition-build failure and then raises before the run can assemble its diagnostic, Rigor MUST emit the detailed stderr warning for the first newly encountered failure in that episode, even if an earlier episode already emitted the loader-instance summary. This abort-time fallback is one warning for the episode and does not create a second `rbs.coverage.definition-build-failed` diagnostic.
 
 ## `Dynamic[T]` display rules
 

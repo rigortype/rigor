@@ -1097,7 +1097,8 @@ module Rigor
         # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
         # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
         # `:definition_build_deferred_count`, `:definition_build_deferred_first`,
-        # `:definition_build_summary_warned`, `:internal_demand`, `:builder`, `:reflection`,
+        # `:definition_build_summary_warned`, `:internal_demand`, `:internal_demand_status`, `:builder`,
+        # `:reflection`,
         # `:instance_definitions_table`, `:singleton_definitions_table`.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
@@ -2115,7 +2116,7 @@ module Rigor
       # Save-and-restore rather than a bare flag: `#prewarm` wraps a body whose members wrap themselves, and
       # a nested demand must not un-mark its caller on the way out. A successful outermost exit flushes the
       # deferred stderr summary; an outermost exit that raises keeps the detailed fallback banner armed even
-      # when an earlier internal-demand episode already emitted the process-level summary.
+      # when an earlier internal-demand episode already emitted the loader-instance summary.
       #
       # Per LOADER, not per thread. Nesting and a raise mid-demand are both handled, and the fork pool forks
       # after `#prewarm` returns, so no CLI path shares a loader across concurrent analyses. An in-process
@@ -2161,13 +2162,14 @@ module Rigor
       # affected classes even exist. An ordinary demand therefore warns inline at the rescue site; Rigor's
       # own internal demand defers until its outermost boundary and collapses the whole walk to one summary
       # (issue #718). Both routes share `@state[:definition_build_warned]` (keyed by normalized class name),
-      # so the instance and singleton sides — and any re-entry once the per-process definition caches memoize
+      # so the instance and singleton sides — and any re-entry once the per-loader-instance definition caches memoize
       # the failure — count or warn at most once per class name, cache-hit runs included.
       #
       # `@state` is per LOADER INSTANCE, not process-global. A fork-pool prewarm finishes before the fork, so
-      # its summary is emitted once by the parent and its dedupe state is inherited by the workers. A failure
-      # first reached by an ordinary demand can still warn once in each worker that reaches it; deduplicating
-      # that across processes is out of scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
+      # that loader instance emits its summary once in the parent and its dedupe state is inherited by the
+      # workers. A separate loader instance (for example, a parameter-inference pre-pass) has its own summary
+      # budget. A failure first reached by an ordinary demand can still warn once in each worker that reaches
+      # it; deduplicating that across processes is out of scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
       def warn_about_definition_build_failure(class_name, error)
         warned = (@state[:definition_build_warned] ||= {})
         key = class_name.to_s.delete_prefix("::")
@@ -2218,8 +2220,9 @@ module Rigor
                    end
         warn(
           "#{definition_build_failure_warning(first_class, first_error)}\n  " \
-          "Internal whole-universe demand found #{affected}; see the " \
-          "`rbs.coverage.definition-build-failed` diagnostic for the affected classes."
+          "Internal whole-universe demand found #{affected}; the " \
+          "`rbs.coverage.definition-build-failed` diagnostic reports the classes the analysis demanded and " \
+          "the culprit member and signature files."
         )
       end
 

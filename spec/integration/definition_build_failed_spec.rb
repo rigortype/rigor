@@ -43,17 +43,33 @@ RSpec.describe "definition build failed reporting" do
     File.write("app.rb", source)
   end
 
-  def config(bleeding_edge: nil, signature_paths: %w[sig])
+  def config(bleeding_edge: nil, signature_paths: %w[sig], parameter_inference: nil)
     settings = Rigor::Configuration::DEFAULTS.merge("paths" => %w[app.rb], "signature_paths" => signature_paths)
     settings = settings.merge("bleeding_edge" => bleeding_edge) unless bleeding_edge.nil?
+    settings = settings.merge("parameter_inference" => parameter_inference) unless parameter_inference.nil?
     Rigor::Configuration.new(settings)
   end
 
-  def run(configuration, cache_store: nil, **runner_kwargs)
+  def run(configuration, cache_store: nil, paths: %w[app.rb], **runner_kwargs)
     guarded_run(
       Rigor::Analysis::Runner.new(configuration: configuration, cache_store: cache_store, **runner_kwargs),
-      %w[app.rb]
+      paths
     )
+  end
+
+  def write_object_collision_project
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "acme.rbs"),
+               "class Object\n  def blank?: () -> bool\nend\n\nclass Object\n  def blank?: () -> bool\nend\n")
+    File.write("app.rb", "\"a\".upcase\n1.abs\n[].size\n")
+    File.write("other.rb", "def passthrough(value)\n  value\nend\npassthrough(\"x\")\n")
+  end
+
+  def bounded_banner_output(count, containing: [])
+    marker = Regexp.escape("rigor: RBS definition build failed")
+    body = "(?:(?!#{marker}).)*"
+    required = containing.map { |text| "(?=.*#{Regexp.escape(text)})" }.join
+    /\A#{required}(?:#{marker}#{body}){#{count}}\z/m
   end
 
   # A real on-disk store, so `workers:` actually reaches the pre-warm path. `cache_store: nil` disables the
@@ -233,13 +249,28 @@ RSpec.describe "definition build failed reporting" do
     File.write("app.rb", "\"a\".upcase\n1.abs\n[].size\n")
 
     result = nil
-    one_banner = /\Arigor: RBS definition build failed(?:(?!rigor: RBS definition build failed).)*\z/m
     expect { result = run(config, workers: 2, cache_store: cold_store) }
-      .to output(one_banner).to_stderr_from_any_process
+      .to output(bounded_banner_output(1)).to_stderr_from_any_process
 
     diagnostics = build_failed_diagnostics(result)
     expect(diagnostics.size).to eq(1)
     expect(diagnostics.first.message).to include("Object", "::Object#blank?")
+  end
+
+  it "bounds one banner per loader instance when parameter inference is enabled", :captures_rbs_banner do
+    write_object_collision_project
+
+    result = nil
+    expect do
+      result = run(
+        config(parameter_inference: true), paths: %w[app.rb other.rb], workers: 2, cache_store: cold_store
+      )
+    end.to output(bounded_banner_output(2, containing: ["Object", "::Object#blank?", "sig/acme.rbs"]))
+      .to_stderr_from_any_process
+
+    diagnostics = build_failed_diagnostics(result)
+    expect(diagnostics.size).to eq(1)
+    expect(diagnostics.first.message).to include("String", "Integer", "Array", "::Object#blank?", "sig/acme.rbs")
   end
 
   # Issue #696's structural problem 3. The existing whole-run signature snapshot is gated on

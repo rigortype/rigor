@@ -1977,20 +1977,34 @@ end
     # `signature_paths:` file was reported cold and vanished on the warm run that changed nothing, and so did
     # a synthesized namespace. Cold, warm, a no-edit recheck and the full run must agree.
     # `data-contrast:` is a record key `rbs` rejects, so `broken.rbs` is quarantined; the qualified
-    # declaration with no enclosing `module Acme` is the namespace the loader synthesizes.
+    # declaration with no enclosing `module Acme` is the namespace the loader synthesizes; `DupDemo#read`
+    # declared twice fails the definition build, and the `conforms-to` annotation is what DEMANDS that
+    # build on a run whose only Ruby file never names the class — the conformance scan's demand, which the
+    # empty path must read after the scan (round 11; the row went 1 → 0 warm under
+    # `reject-unparseable-signatures`, where it is an `:error`).
     def project_signature_fixture(dir)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "a.rb"), "x = 1\n")
       File.write(File.join(dir, "sig", "broken.rbs"), "class Broken\n  def h: () -> { data-contrast: Integer }\nend\n")
       File.write(File.join(dir, "sig", "widget.rbs"), "class Acme::Widget\n  def size: () -> Integer\nend\n")
+      File.write(File.join(dir, "sig", "dup.rbs"), <<~RBS)
+        interface _Reads
+          def read: () -> String
+        end
+
+        %a{rigor:v1:conforms-to _Reads}
+        class DupDemo
+          def read: () -> String
+        end
+      RBS
+      File.write(File.join(dir, "sig", "dup2.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
       Rigor::Configuration.new("paths" => [dir], "signature_paths" => [File.join(dir, "sig")])
     end
 
-    # `[quarantined-signature count, synthesized-namespace count]`.
+    # `[quarantined-signature, synthesized-namespace, definition-build-failed]` counts.
     def project_signature_counts(diagnostics)
-      %w[rbs.coverage.quarantined-signature rbs.coverage.synthesized-namespace].map do |rule|
-        diagnostics.count { |d| d.qualified_rule == rule }
-      end
+      %w[rbs.coverage.quarantined-signature rbs.coverage.synthesized-namespace
+         rbs.coverage.definition-build-failed].map { |rule| diagnostics.count { |d| d.qualified_rule == rule } }
     end
 
     it "keeps the project-signature rows across a warm nothing-changed run and an empty-closure recheck" do
@@ -2008,14 +2022,14 @@ end
         cold, warm1 = incremental.call
         warm, warm2 = incremental.call
         expect([warm1, warm2]).to eq([false, true])
-        expect([project_signature_counts(cold), project_signature_counts(warm)]).to eq([[1, 1], [1, 1]])
+        expect([project_signature_counts(cold), project_signature_counts(warm)]).to eq([[1, 1, 1], [1, 1, 1]])
 
         session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
         guarded_baseline(session)
-        expect(project_signature_counts(guarded_recheck(session).diagnostics)).to eq([1, 1])
+        expect(project_signature_counts(guarded_recheck(session).diagnostics)).to eq([1, 1, 1])
 
         full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
-        expect(project_signature_counts(full)).to eq([1, 1])
+        expect(project_signature_counts(full)).to eq([1, 1, 1])
       end
     end
   end

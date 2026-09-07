@@ -310,7 +310,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     # an inline-only `effect.annotations-unchecked` goes 1 → 0 on every warm nothing-changed run.
     it "snapshots the effect-annotation carrier from the environment an empty run resolves (#788)" do
       annotated = ["lib/demo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"]
-      loader = instance_double(Rigor::Environment::RbsLoader, virtual_rbs: [["lib/plain.rb", "class P\nend\n"],
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [],
+                                                              virtual_rbs: [["lib/plain.rb", "class P\nend\n"],
                                                                             annotated])
       resolved = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: nil, rbs_loader: loader)
       allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
@@ -325,13 +326,21 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     # per-file cache holding only per-file rows, `synthesized-namespace`, `quarantined-signature`,
     # `environment-build-failed` and the conformance rows have no other producer on a warm recheck that
     # changed nothing, and an `:error`-level quarantine row went 1 → 0 on the second `--incremental` run.
+    # The conformance scan demands the definition of every `conforms-to` class, so the definition-build
+    # failures are read AFTER it (the sequential path's order): the loader here reports one only once the
+    # scan has run.
     it "snapshots the project-signature state from the environment an empty run resolves (#788)" do
+      failures = []
       loader = instance_double(Rigor::Environment::RbsLoader, virtual_rbs: [], synthesized_namespaces: [:ns],
                                                               quarantined_signatures: [:quarantined],
                                                               env_build_failure: :build_failure)
+      allow(loader).to receive(:definition_build_failures) { failures }
       resolved = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: nil, rbs_loader: loader)
       allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
-      allow(Rigor::RbsExtended::ConformanceChecker).to receive(:scan).with(loader).and_return([:conformance])
+      allow(Rigor::RbsExtended::ConformanceChecker).to receive(:scan).with(loader) do
+        failures << ["DupDemo", :duplicated_member]
+        [:conformance]
+      end
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("signature_paths" => ["sig"]))
 
@@ -339,6 +348,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect([snapshots.synthesized_namespaces, snapshots.quarantined_signatures, snapshots.env_build_failure,
               snapshots.conformance_results]).to eq([[:ns], [:quarantined], :build_failure, [:conformance]])
+      expect(snapshots.definition_build_failures).to eq([["DupDemo", :duplicated_member]])
     end
 
     it "snapshots empty project-signature state on an empty run over a project with no files" do
@@ -351,42 +361,6 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(Rigor::Environment).not_to have_received(:for_project)
       expect([snapshots.synthesized_namespaces, snapshots.quarantined_signatures, snapshots.env_build_failure,
               snapshots.conformance_results]).to eq([[], [], nil, []])
-    end
-
-    # Round 9 (user's reviewer, P2) — a Ractor worker that died never sends `:done`, so nothing drains its
-    # HKT outcome, and the in-process re-analysis of its files runs on a LOCAL environment with no session to
-    # drain. The helper must finalize that environment itself — the definition-build failures the
-    # re-analysis demanded, and the HKT outcome demanded once more by the run — or a rescued scan failure
-    # vanishes with the worker. Tested on the helper: the Ractor backend cannot run under the current rbs.
-    it "finalizes the Ractor backend's degraded in-process environment (definition failures + HKT outcome)" do
-      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
-      tuple = ["NameError", "simulated scan bug", nil]
-      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [])
-      local = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: tuple, rbs_loader: loader)
-      analyzed = []
-      coordinator = build_coordinator(snapshots: snapshots, analyze_file: lambda { |path, env|
-        analyzed << [path, env]
-        [:"row_#{path}"]
-      })
-      allow(coordinator).to receive(:build_runner_environment).with(source_files: ["a.rb", "b.rb"]).and_return(local)
-      results = {}
-
-      coordinator.send(:reanalyze_degraded_in_process, ["b.rb"], results, source_files: ["a.rb", "b.rb"])
-
-      expect(analyzed).to eq([["b.rb", local]])
-      expect(results).to eq({ "b.rb" => [:"row_b.rb"] })
-      expect(local).to have_received(:hkt_registry).once
-      expect(loader).to have_received(:definition_build_failures)
-      expect(snapshots.hkt_scan_failure).to eq(tuple)
-    end
-
-    it "builds nothing when no Ractor worker's files were left unreported" do
-      coordinator = build_coordinator
-      allow(coordinator).to receive(:build_runner_environment)
-
-      coordinator.send(:reanalyze_degraded_in_process, [], {}, source_files: ["a.rb"])
-
-      expect(coordinator).not_to have_received(:build_runner_environment)
     end
 
     # Issue #793 — a NON-empty narrowed run must build its environment over the whole project too, or the
@@ -641,6 +615,44 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(coordinator).to have_received(:analyze_files_sequentially_fallback).with(
         ["a.rb"], reason: a_string_matching(/requires a cache_store/), source_files: ["a.rb", "b.rb"]
       )
+    end
+  end
+
+  # Round 9 (user's reviewer, P2) — a Ractor worker that died never sends `:done`, so nothing drains its
+  # HKT outcome, and the in-process re-analysis of its files runs on a LOCAL environment with no session to
+  # drain. The helper must finalize that environment itself — the definition-build failures the re-analysis
+  # demanded, and the HKT outcome demanded once more by the run — or a rescued scan failure vanishes with
+  # the worker. Tested on the helper: the Ractor backend cannot run under the current rbs.
+  describe "#reanalyze_degraded_in_process (private)" do
+    it "finalizes the degraded in-process environment (definition failures + HKT outcome)" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      tuple = ["NameError", "simulated scan bug", nil]
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [])
+      local = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: tuple, rbs_loader: loader)
+      analyzed = []
+      coordinator = build_coordinator(snapshots: snapshots, analyze_file: lambda { |path, env|
+        analyzed << [path, env]
+        [:"row_#{path}"]
+      })
+      allow(coordinator).to receive(:build_runner_environment).with(source_files: ["a.rb", "b.rb"]).and_return(local)
+      results = {}
+
+      coordinator.send(:reanalyze_degraded_in_process, ["b.rb"], results, source_files: ["a.rb", "b.rb"])
+
+      expect(analyzed).to eq([["b.rb", local]])
+      expect(results).to eq({ "b.rb" => [:"row_b.rb"] })
+      expect(local).to have_received(:hkt_registry).once
+      expect(loader).to have_received(:definition_build_failures)
+      expect(snapshots.hkt_scan_failure).to eq(tuple)
+    end
+
+    it "builds nothing when no worker's files were left unreported" do
+      coordinator = build_coordinator
+      allow(coordinator).to receive(:build_runner_environment)
+
+      coordinator.send(:reanalyze_degraded_in_process, [], {}, source_files: ["a.rb"])
+
+      expect(coordinator).not_to have_received(:build_runner_environment)
     end
   end
 

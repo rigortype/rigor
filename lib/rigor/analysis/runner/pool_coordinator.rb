@@ -143,13 +143,18 @@ module Rigor
             # outcome. Now that run-level rows are never served from the per-file cache, this branch is the
             # only producer on a warm recheck that changed nothing — leaving any of them out turned a red
             # project green on its second `--incremental` run (the inline-only `effect.annotations-unchecked`
-            # went 1 → 0; a quarantined `signature_paths:` file went 1 → 0). Definition-build failures are
-            # deliberately NOT read: #696 forbids a Rigor-owned demand from contributing, and nothing else
-            # demanded a definition on this path (#796). This also retires the #441 "`.rbs` lane only when the run
-            # analyses nothing" boundary: its cost premise (no environment on this path) stopped holding the
-            # moment the branch above resolved one.
+            # went 1 → 0; a quarantined `signature_paths:` file went 1 → 0; a `conforms-to` class whose
+            # definition build fails went 1 → 0). Same ORDER as the sequential path, because the order is
+            # the contract: the conformance scan inside the signature-state snapshot demands the definition
+            # of every `rigor:v1:conforms-to` class — a user-authored, invocation-independent demand that
+            # #696 counts — so the definition-build failures are read AFTER it and BEFORE the HKT demand,
+            # exactly where `analyze_files_sequentially` reads them relative to its own. What this branch
+            # cannot regenerate is the part of that set the per-file ANALYSIS demanded (#796). This also
+            # retires the #441 "`.rbs` lane only when the run analyses nothing" boundary: its cost premise
+            # (no environment on this path) stopped holding the moment the branch above resolved one.
             snapshot_project_signature_state(env)
             snapshot_effect_annotation_carrier(env&.rbs_loader)
+            record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
             record_hkt_scan_failure(hkt_scan_outcome(env))
             return []
           end

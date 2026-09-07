@@ -29,6 +29,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/project_patched_scanner"
 require_relative "../inference/method_dispatcher/file_folding"
+require_relative "crash_signature"
 require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_recorder"
@@ -985,7 +986,11 @@ module Rigor
         # per-file cache, so it needs the full analyzed set to subtract the affected closure from.
         targets = target_files(expansion)
         @analyzed_files = targets
-        diagnostics += @pool_coordinator.analyze_files(targets, environment: environment)
+        # Issue #784 — fold N identical `internal analyzer error` rows (a shared sub-build that raised on
+        # every file) into one sample + one run-level summary, before this stream reaches the run cache.
+        diagnostics += @diagnostic_aggregator.collapse_repeated_internal_errors(
+          @pool_coordinator.analyze_files(targets, environment: environment), analyzed_count: targets.size
+        )
         # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
         # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
         # contributes NO diagnostics and its result leaves through `#effect_table`, never through the
@@ -1876,7 +1881,7 @@ module Rigor
             path: path,
             line: 1,
             column: 1,
-            message: "internal analyzer error: #{e.class}: #{e.message}",
+            message: CrashSignature.check_rule_message(e),
             severity: :error
           )
         ]

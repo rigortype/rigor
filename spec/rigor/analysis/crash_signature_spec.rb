@@ -102,6 +102,43 @@ RSpec.describe Rigor::Analysis::CrashSignature do
     end
   end
 
+  describe ".check_rule_message" do
+    it "keeps the prefix .reason matches on, and appends a repo-relative crash frame" do
+      error = RuntimeError.new("boom")
+      error.set_backtrace(["/opt/gems/rigor-9.9.9/lib/rigor/inference/method_dispatcher.rb:12:in 'resolve'"])
+
+      message = described_class.check_rule_message(error)
+
+      expect(message).to start_with("internal analyzer error: RuntimeError: boom")
+      expect(message).to end_with("(lib/rigor/inference/method_dispatcher.rb:12:in 'resolve')")
+      expect(described_class.reason(diagnostic(message: message))).to eq(:check_rule)
+    end
+
+    it "omits the frame when the exception carries no backtrace" do
+      expect(described_class.check_rule_message(RuntimeError.new("boom")))
+        .to eq("internal analyzer error: RuntimeError: boom")
+    end
+  end
+
+  describe ".crash_frame" do
+    it "prefers the first lib/rigor frame over a deeper dependency frame" do
+      error = RuntimeError.new("x")
+      error.set_backtrace([
+                            "/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'",
+                            "/checkout/lib/rigor/environment/rbs_loader.rb:900:in 'block in build'"
+                          ])
+
+      expect(described_class.crash_frame(error)).to eq("lib/rigor/environment/rbs_loader.rb:900:in 'block in build'")
+    end
+
+    it "falls back to the raw top frame when nothing is in lib/rigor" do
+      error = RuntimeError.new("x")
+      error.set_backtrace(["/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'"])
+
+      expect(described_class.crash_frame(error)).to eq("/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'")
+    end
+  end
+
   describe Rigor::Analysis::Result do
     it "answers crashed? and names the culprit when a check rule raised" do
       result = described_class.new(diagnostics: [diagnostic(message: "ok", rule: "call.undefined-method"),

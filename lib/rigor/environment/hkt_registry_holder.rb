@@ -13,12 +13,24 @@ module Rigor
       def initialize
         @loaded = false
         @value = nil
+        @error = nil
       end
 
+      # Memoizes the failure as well as the value. The build this guards is expensive and shared across
+      # every file in the run; without this a `yield` that raises is retried — and re-raised — once per
+      # file (issue #776 crashed hundreds of times before its fix). A `StandardError` from the build is
+      # a property of this Environment's inputs, so re-running cannot succeed; re-raise the original.
+      # Non-`StandardError` (Interrupt, SignalException) propagates without poisoning the slot.
       def fetch
+        raise @error if @error
         return @value if @loaded
 
-        @value = yield
+        begin
+          @value = yield
+        rescue StandardError => e
+          @error = e
+          raise
+        end
         @loaded = true
         @value
       end

@@ -16,7 +16,9 @@ module Rigor
     # ## The three shapes
     #
     # - `:check_rule` — message begins `internal analyzer error`, `rule: nil`. Built by
-    #   `Runner#analyze_file_body` / `WorkerSession#analyze_body`'s `rescue StandardError`.
+    #   `Runner#analyze_file_body` / `WorkerSession#analyze_body`'s `rescue StandardError`, or (issue #784,
+    #   `rule: "analyzer.internal-error"`) the run-level summary `Runner::DiagnosticAggregator` appends when
+    #   it collapses a group of byte-identical such rows — a shared sub-build that raised on every file.
     # - `:plugin` — `severity: :error`, `source_family: :plugin_loader`, `rule: "runtime-error"`. Built by
     #   `Runner#collect_plugin_diagnostics` / `Runner::ProjectPrePasses#invoke_plugin_prepare`.
     # - `:rbs_build` — `rule` in {RBS_BUILD_FAILURE_RULES}. Recorded by `Environment::RbsLoader`'s
@@ -76,6 +78,33 @@ module Rigor
       DISCARDS_FILE_ANALYSIS_REASON = :check_rule
 
       module_function
+
+      # The message `Runner#analyze_file_body` / `WorkerSession#analyze_body` fold a raised `StandardError`
+      # into. Built here, not at either rescue site, so the two twins cannot drift (issue #665) — and so
+      # the appended crash frame is derived identically on the sequential and pooled paths. Keeps the
+      # {CHECK_RULE_MESSAGE_PREFIX} prefix every consumer matches on; the frame is a trailing hint.
+      #
+      # @param error [StandardError]
+      # @return [String]
+      def check_rule_message(error)
+        base = "#{CHECK_RULE_MESSAGE_PREFIX}: #{error.class}: #{error.message}"
+        frame = crash_frame(error)
+        frame ? "#{base} (#{frame})" : base
+      end
+
+      # The first `lib/rigor/` backtrace frame — the raise site, path made repo-relative so it reads the
+      # same whether Rigor runs from a checkout or an installed gem. Falls back to the raw top frame when
+      # the crash is entirely inside a dependency, and to nil when there is no backtrace at all.
+      #
+      # @param error [Exception]
+      # @return [String, nil]
+      def crash_frame(error)
+        frames = error.backtrace
+        return nil if frames.nil? || frames.empty?
+
+        (frames.find { |f| f.include?("/lib/rigor/") } || frames.first)
+          .sub(%r{\A.*/(lib/rigor/)}, '\1')
+      end
 
       # @param diagnostic [Rigor::Analysis::Diagnostic]
       # @return [Symbol, nil] `:check_rule`, `:plugin`, `:rbs_build`, or nil for an ordinary diagnostic.

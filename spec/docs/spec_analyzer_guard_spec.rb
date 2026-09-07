@@ -48,6 +48,12 @@ SPEC_ANALYZER_GUARD_ROOT = File.expand_path("../..", __dir__)
 # A site that crashes a PLUGIN on purpose does NOT belong here — keep the guard and pass
 # `allow_plugin_crash: true`, which leaves the check-rule half armed.
 SPEC_ANALYZER_GUARD_ALLOWLIST = {
+  "spec/integration/shared_build_crash_collapse_spec.rb" => {
+    25 => "issue #784 — the subject is the aggregator collapsing N identical `internal analyzer error` " \
+          "rows (a shared sub-build that raised on every file) into one sample plus one run-level " \
+          "summary. `guarded_run` would raise AnalyzerCrashed on the retained rows before the collapse " \
+          "could be read."
+  },
   "spec/rigor/analysis/worker_session_spec.rb" => {
     399 => "the buffer half of the pair below: `target_ruby: \"3.0\"` is version-shaped but older than " \
            "Prism supports, so `Prism.parse` raises ArgumentError out of the buffer path and the example " \

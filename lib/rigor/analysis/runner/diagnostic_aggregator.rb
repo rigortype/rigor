@@ -2,6 +2,7 @@
 
 require_relative "../diagnostic"
 require_relative "../severity_stamp"
+require_relative "../crash_signature"
 
 module Rigor
   module Analysis
@@ -87,6 +88,49 @@ module Rigor
             rbs_coverage_diagnostics +
             rbs_inline_annotation_hint_diagnostics(expansion) +
             expansion.fetch(:errors)
+        end
+
+        # The smallest identical-`:check_rule`-row group {#collapse_repeated_internal_errors} folds. Two
+        # files reporting the byte-identical internal error is already the shared-cause shape.
+        COLLAPSE_MIN_GROUP = 2
+        private_constant :COLLAPSE_MIN_GROUP
+
+        # Issue #784 — a shared, memoised sub-build (the HKT registry, a plugin overlay, the RBS env) that
+        # raises during per-file analysis is caught by every file's `analyze_body` rescue and folded into
+        # the SAME `internal analyzer error` row (CrashSignature `:check_rule`). The run then comes back
+        # looking almost clean: N byte-identical rows, a non-zero exit, and nothing saying the analyzer
+        # never ran — #776 produced one such row per file across a whole Rails app.
+        #
+        # Collapse any group of two-or-more identical `:check_rule` rows to its first occurrence plus one
+        # run-level summary naming the count and a sample path. A healthy run has no such group, so this is
+        # a no-op there; a genuine per-file check-rule bug produces messages that vary by file and is not
+        # collapsed. The summary keeps the `internal analyzer error` prefix on purpose — CrashSignature
+        # still classifies it `:check_rule`, so `Result#crashed?`, the ADR-69 kill oracles and the
+        # spec-harness guard all keep recognising the run as one whose analysis was discarded.
+        #
+        # @param per_file_diagnostics [Array<Diagnostic>] what {PoolCoordinator#analyze_files} returned
+        # @param analyzed_count [Integer] files this run attempted — the summary's denominator
+        # @return [Array<Diagnostic>]
+        def collapse_repeated_internal_errors(per_file_diagnostics, analyzed_count:)
+          counts = Hash.new(0)
+          per_file_diagnostics.each do |d|
+            counts[d.message] += 1 if CrashSignature.reason(d) == :check_rule
+          end
+          collapsible = counts.select { |_message, n| n >= COLLAPSE_MIN_GROUP }
+          return per_file_diagnostics if collapsible.empty?
+
+          seen = Hash.new(0)
+          samples = {}
+          kept = per_file_diagnostics.reject do |d|
+            next false unless collapsible.key?(d.message) && CrashSignature.reason(d) == :check_rule
+
+            seen[d.message] += 1
+            samples[d.message] ||= d
+            seen[d.message] > 1
+          end
+          kept + collapsible.keys.map do |message|
+            build_collapsed_internal_error_diagnostic(message, samples[message], collapsible[message], analyzed_count)
+          end
         end
 
         # ADR-17 slice 1 — surface a `:error` diagnostic for each `pre_eval:` entry whose resolved path
@@ -781,6 +825,25 @@ module Rigor
 
         def conformance_results_snapshot
           @conformance_results_snapshot_reader.call
+        end
+
+        # Issue #784. Anchored at `.rigor.yml`, the same synthetic location the `rbs.coverage.*` run-level
+        # rows use. `:error`, not `:warning` like its RBS-coverage neighbours: those degradations are
+        # typically the user's own `sig/`, but a shared sub-build raising is always a Rigor defect, so an
+        # `:error` default cannot make a Rigor release turn a clean project red without a real bug.
+        def build_collapsed_internal_error_diagnostic(message, sample, count, analyzed_count)
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "#{message} — this identical error replaced analysis on #{count} of #{analyzed_count} " \
+                     "file(s), which were not checked (first: #{sample.path}:#{sample.line}). A shared " \
+                     "analyzer sub-build failed, so the run never really started; this is a defect in " \
+                     "Rigor, not a problem with your code — please report it with the message above.",
+            severity: :error,
+            rule: "analyzer.internal-error",
+            source_family: :builtin
+          )
         end
       end
     end

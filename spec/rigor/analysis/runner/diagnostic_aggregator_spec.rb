@@ -675,6 +675,68 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     end
   end
 
+  describe "collapse_repeated_internal_errors (issue #784)" do
+    def crash_row(path, message: "internal analyzer error: ArgumentError: unknown keyword: :name_scope")
+      Rigor::Analysis::Diagnostic.new(path: path, line: 1, column: 1, message: message, severity: :error)
+    end
+
+    def real_row(path, rule)
+      Rigor::Analysis::Diagnostic.new(path: path, line: 3, column: 1, message: "m", severity: :warning, rule: rule)
+    end
+
+    it "leaves a healthy run untouched" do
+      diagnostics = [real_row("a.rb", "call.undefined-method"), real_row("b.rb", "def.return-type-mismatch")]
+
+      expect(build_aggregator.collapse_repeated_internal_errors(diagnostics, analyzed_count: 2))
+        .to be(diagnostics)
+    end
+
+    it "does not collapse a lone internal error" do
+      diagnostics = [crash_row("a.rb"), real_row("b.rb", "call.undefined-method")]
+
+      expect(build_aggregator.collapse_repeated_internal_errors(diagnostics, analyzed_count: 2))
+        .to be(diagnostics)
+    end
+
+    it "does not collapse internal errors whose messages differ per file (a per-file check-rule bug)" do
+      diagnostics = [
+        crash_row("a.rb", message: "internal analyzer error: NoMethodError: undefined method `x' (a)"),
+        crash_row("b.rb", message: "internal analyzer error: NoMethodError: undefined method `y' (b)")
+      ]
+
+      expect(build_aggregator.collapse_repeated_internal_errors(diagnostics, analyzed_count: 2))
+        .to be(diagnostics)
+    end
+
+    it "folds an identical internal error on many files into the first row plus one run-level summary" do
+      sample = crash_row("a.rb")
+      real = real_row("b.rb", "call.undefined-method")
+      diagnostics = [sample, real, crash_row("c.rb"), crash_row("d.rb")]
+
+      result = build_aggregator.collapse_repeated_internal_errors(diagnostics, analyzed_count: 4)
+
+      expect(result[0]).to be(sample)   # the first crash row, kept in place, by identity
+      expect(result[1]).to be(real)
+      expect(result.size).to eq(3)      # a.rb + b.rb + summary; c.rb / d.rb dropped
+
+      summary = result.last
+      expect(summary.rule).to eq("analyzer.internal-error")
+      expect(summary.severity).to eq(:error)
+      expect(summary.path).to eq(".rigor.yml")
+      expect(summary.message).to start_with("internal analyzer error: ArgumentError: unknown keyword: :name_scope")
+      expect(summary.message).to include("replaced analysis on 3 of 4 file(s)")
+      expect(summary.message).to include("first: a.rb:1")
+    end
+
+    it "keeps the summary classified as a check-rule crash so the run still reads as discarded" do
+      diagnostics = [crash_row("a.rb"), crash_row("b.rb")]
+
+      summary = build_aggregator.collapse_repeated_internal_errors(diagnostics, analyzed_count: 2).last
+
+      expect(Rigor::Analysis::CrashSignature.reason(summary)).to eq(:check_rule)
+    end
+  end
+
   describe "apply_severity_profile" do
     it "delegates to SeverityStamp, dropping a rule the profile resolves to :off" do
       configuration = Rigor::Configuration.new("severity_overrides" => { "some.rule" => "off" })

@@ -132,12 +132,12 @@ module Rigor
 
       # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
       # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,
-      # `dynamic.dependency-source.*`, `rbs.coverage.*`, `pre-eval.parse-error`), plus the `plugin.` prefix
-      # reserved for plugin-produced identifiers. `suppression.unknown-rule` treats a dotted token whose
-      # first segment appears here as KNOWN and stays silent: these ids are legitimate suppression /
-      # `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load dynamically;
-      # aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
-      NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin].freeze
+      # `dynamic.dependency-source.*`, `rbs.coverage.*`, `pre-eval.parse-error`, `analyzer.internal-error`),
+      # plus the `plugin.` prefix reserved for plugin-produced identifiers. `suppression.unknown-rule` treats
+      # a dotted token whose first segment appears here as KNOWN and stays silent: these ids are legitimate
+      # suppression / `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load
+      # dynamically; aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
+      NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin analyzer].freeze
 
       # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in
       # `Analysis::Runner` / `Runner::DiagnosticAggregator`). A token equal to one of these is treated as

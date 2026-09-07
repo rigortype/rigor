@@ -79,4 +79,50 @@ RSpec.describe "RBS name Marshal hooks (rbs_environment_marshal_patch)" do
       end
     end
   end
+
+  # Issue #799 — the two `conforms-to` rows are positioned at the `%a{...}` the author wrote (there is no
+  # Ruby `def` a missing interface method could be reported at), so an annotation's location is the one
+  # position in a cached environment that a diagnostic reads. Through `RBS::Location#_dump` it collapsed to
+  # `1:1`, which moved the row on a warm run and made `--verify-incremental` fail on any project carrying
+  # an unsatisfied directive.
+  describe "RBS::AST::Annotation" do
+    def annotations_in(source)
+      buffer = RBS::Buffer.new(name: "fixture.rbs", content: source)
+      _, _, decls = RBS::Parser.parse_signature(buffer)
+      decls.last.annotations
+    end
+
+    def position_of(annotation)
+      location = annotation.location
+      [location.buffer.name.to_s, location.start_line, location.start_column,
+       location.end_line, location.end_column]
+    end
+
+    it "keeps the annotation's file AND position across the round trip" do
+      annotation = annotations_in("module M\nend\n\n%a{rigor:v1:conforms-to _Reads}\nclass C\nend\n").first
+
+      expect(position_of(round_trip(annotation))).to eq(position_of(annotation))
+      expect(position_of(annotation)).to eq(["fixture.rbs", 4, 0, 4, 31])
+    end
+
+    it "keeps the string, and stays equal to the annotation it was dumped from" do
+      annotation = annotations_in("%a{pure}\nclass C\nend\n").first
+      loaded = round_trip(annotation)
+
+      expect(loaded.string).to eq("pure")
+      expect(loaded).to eq(annotation)
+    end
+
+    it "carries an annotation that spans two lines, which a synthesized content string could not" do
+      annotation = annotations_in("%a{rigor:v1:conforms-to\n_Reads}\nclass C\nend\n").first
+
+      expect(position_of(round_trip(annotation))).to eq(["fixture.rbs", 1, 0, 2, 7])
+    end
+
+    it "round-trips a second time off the reconstructed location, so a re-dumped env does not degrade" do
+      annotation = annotations_in("%a{pure}\nclass C\nend\n").first
+
+      expect(position_of(round_trip(round_trip(annotation)))).to eq(position_of(annotation))
+    end
+  end
 end

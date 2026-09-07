@@ -198,6 +198,40 @@ RSpec.describe Rigor::CLI do
         expect(out).to include("--verify-incremental OK")
       end
     end
+
+    # Issue #799 — the replica normalises rows by position, and only one side of the comparison reads the
+    # RBS environment back out of the ADR-54 cache. An unsatisfied `conforms-to` is the row positioned at
+    # the `%a{...}` the author wrote, so while the cache dropped an annotation's position this failed on
+    # every project carrying one: identical message, identical file, one row at `6:1` and one at `1:1`.
+    it "reports OK when the only diagnostic is positioned at a signature file's conforms-to directive" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, ".rigor.yml"), "signature_paths:\n  - #{File.join(dir, 'sig')}\n")
+        File.write(File.join(dir, "sig", "widget.rbs"), <<~RBS)
+          interface _Drawable
+            def draw: () -> String
+          end
+
+          %a{rigor:v1:conforms-to _Drawable}
+          class Widget
+            def name: () -> String
+          end
+        RBS
+        File.write(File.join(dir, "widget.rb"), "class Widget\n  def name\n    \"widget\"\n  end\nend\n")
+
+        # Warm `.rigor/cache` first: the environment has to come BACK out of the store for this to be the
+        # comparison the issue reports, and a store memoises what it computed for the rest of its own life.
+        run_cli("check", "--no-stats", "--config", File.join(dir, ".rigor.yml"), dir)
+
+        status, out, _err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(out).to include("--verify-incremental OK")
+        expect(status).to eq(0)
+      end
+    end
   end
 
   describe "check --incremental" do

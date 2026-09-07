@@ -545,7 +545,7 @@ sha256               32 bytes — integrity hash of every preceding byte
 
 Descriptor and value are stored separately so a future cache-
 inspection tool can read just the descriptor without paying the
-inflate + `Marshal.load` cost. The format version (currently `2`)
+inflate + `Marshal.load` cost. The format version (currently `4`)
 is distinct from `Descriptor::SCHEMA_VERSION` — the former covers
 the byte layout, the latter the descriptor schema. Bumping the
 format version invalidates entries on the read path (header
@@ -900,20 +900,60 @@ machinery requires:
 
 ```ruby
 class RBS::Location
-  def _dump(_) = ""
-  def self._load(_) = new(buffer: ..., start_pos: 0, end_pos: 0)
+  def _dump(_) = buffer&.name.to_s
+  def self._load(name) = new(buffer: Buffer.new(name: name, content: ""), start_pos: 0, end_pos: 0)
 end
 ```
 
 The patch is purely additive (only adds methods that previously
 raised `TypeError` on dispatch) and idempotent (gated behind
-`method_defined?(:_dump)`). Cached `RBS::Location` instances
-lose their per-node source-position info — but Rigor never
-consults `RBS::Location` from any analysis code path (every
-diagnostic flows through Prism's own location), so the loss is
-inert in practice. Code paths that DO read Location after a
-cache hit (e.g. third-party tools) see a benign zero-range
-sentinel rather than crashing.
+`method_defined?(:_dump)`).
+
+A cached location keeps the buffer NAME and drops the per-node
+source POSITION. The name is not inert:
+`rbs.coverage.definition-build-failed` names the conflicting
+signature files, and a name-less dump made a warm run omit that
+clause while a cold run printed it (issue #696). The position is
+dropped because it is far more numerous — one per AST node — and
+no analysis path consults it: every diagnostic over Ruby code
+flows through Prism's own location. Code paths that DO read a
+Location after a cache hit (e.g. third-party tools) see a benign
+zero-range sentinel rather than crashing.
+
+**Annotations are the exception, and MUST carry their position.**
+`RBS::AST::Annotation` defines its own `marshal_dump` /
+`marshal_load` (issue #799) which carry
+`[string, [name, start_line, start_column, end_line, end_column]]`,
+reconstructed through `Rigor::Cache::AnnotationLocation`, whose
+nested `Buffer` is a content-less `RBS::Buffer` subclass that
+answers `pos_to_loc` from the carried pairs — all that
+`RBS::Location`'s C-level `start_line` and siblings consult.
+The two `conforms-to` rows,
+`rbs_extended.unsatisfied-conformance` and
+`dynamic.rbs-extended.unresolved`, are positioned at the `%a{…}`
+the author wrote rather than at any Ruby `def`, so an
+annotation's position is the one position in a cached environment
+that a diagnostic reads. (`effect.unknown-label` is positioned at
+an annotation too, but `EnvelopeScanner` reaches it by parsing
+the project's own `.rbs` rather than the built environment —
+refusing this loss is one of the two reasons it does.) Without
+the carry it
+collapsed to `1:1`: `rigor check --verify-incremental` FAILED on
+every project with an unsatisfied `conforms-to` (the replica
+normalises rows by position, and only one side of the comparison
+runs against the cached environment), and a warm `--incremental`
+run moved the row on a tree that had not changed. Scoping the
+carry to annotations rather than doing it in `RBS::Location#_dump`
+is what keeps it free: a Location hangs off every AST node, and
+carrying its position measured +2.9% on the environment blob,
+where the same carry on annotations alone — 18 of them in that
+env — measured +1.4 KB on ~10 MB.
+
+A blob written before the carry still loads — Marshal encodes an
+ivar dump and a `marshal_dump` payload differently, and only the
+latter reaches `marshal_load` — so `Store::FORMAT_VERSION` is
+what stops a stale blob from reporting the moved position
+indefinitely (ADR-6's store never evicts).
 
 The patch lives in
 `lib/rigor/cache/rbs_environment_marshal_patch.rb` and is

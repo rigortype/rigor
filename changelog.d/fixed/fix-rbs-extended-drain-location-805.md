@@ -1,1 +1,0 @@
-- **[rigor check]** A `--workers N` run no longer degrades to sequential re-analysis with a `pool-degraded` warning when the project's RBS carries an unresolvable `rigor:v1:*` directive payload or a lossy shape projection. ([#805](https://github.com/rigortype/rigor/issues/805), [#808](https://github.com/rigortype/rigor/pull/808))

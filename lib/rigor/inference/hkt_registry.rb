@@ -198,7 +198,14 @@ module Rigor
             params = decl.type_params.map(&:name)
             params_set = params.to_set
 
-            translator = HktSugarTranslator.new(uri: uri, params_set: params_set, name_scope: name_scope)
+            # No rescue around this translate. HktSugarTranslator degrades every alias shape it
+            # cannot model (a non-recursive alias, a malformed self-reference) to a leaf, so a
+            # parseable `type` alias never raises here — that is the fix for issue #776, where an
+            # unknown keyword aborted this shared, memoised build and turned every file into an
+            # `internal analyzer error`. An exception that still reaches this point is an analyzer
+            # bug and MUST propagate rather than silently dropping the alias, matching
+            # RbsLoader#each_known_class_name's fail-soft contract.
+            translator = HktSugarTranslator.new(uri: uri, params_set: params_set)
             body_tree = translator.translate(decl.type)
 
             next unless translator.recursive

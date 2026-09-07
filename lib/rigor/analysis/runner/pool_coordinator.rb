@@ -381,7 +381,24 @@ module Rigor
                      source_files: source_files
             )
           end
-          prewarm_rbs_cache_for_pool
+          # Issue #798 — the SAME gap the fork pool had: this coordinator never analyses a file itself, so
+          # without an explicit read the project-signature state (`synthesized-namespace`,
+          # `quarantined-signature`, `environment-build-failed`, the conformance results) has no producer.
+          # Unlike the fork pool's copy-on-write children, a Ractor worker builds its OWN Environment
+          # inside its own isolated Ractor, so nothing here inherits what the coordinator's environment
+          # finds. `#prewarm_rbs_cache_for_pool` already builds and fully loads exactly this
+          # coordinator-side environment (to warm the cache before any worker spawns); it now hands it
+          # back so its RBS state can be read the same way the fork pool reads its pre-fork session
+          # environment. The conformance scan inside the snapshot demands the definition of every
+          # `rigor:v1:conforms-to` class — a demand no Ractor worker shares memory with — so a resulting
+          # definition-build failure is recorded explicitly right after, exactly as the empty-closure
+          # branch reads its own environment's demand (#788). No matching explicit call for the HKT-scan
+          # outcome: every worker already demands it from its OWN environment in `#drain_reporters`, and
+          # the scan has one outcome whoever demands it, so a worker's report already says what the
+          # coordinator's own demand would.
+          warm_env = prewarm_rbs_cache_for_pool
+          snapshot_project_signature_state(warm_env)
+          record_definition_build_failures(warm_env&.rbs_loader&.definition_build_failures)
 
           configuration = @configuration
           cache_root = @cache_store&.root
@@ -496,6 +513,10 @@ module Rigor
         #
         # A child that exits non-zero (crash / unmarshalable payload) is degraded: the parent re-analyses
         # that slice in-process and prepends a `pool-degraded` warning.
+        #
+        # Also snapshots the project-signature state and the effect-annotation carrier off the pre-fork
+        # `session.environment` before any child spawns (#798) — the only environment this backend's
+        # coordinator ever holds, and so the only place those diagnostic rows can be read from.
         def analyze_files_in_fork_pool(files, source_files: files) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
           Environment::ClassRegistry.default
 
@@ -513,6 +534,21 @@ module Rigor
           # Force the full RBS load on the parent so children copy-on-write inherit a warm Environment
           # rather than each rebuilding it after the fork.
           session.environment.rbs_loader&.prewarm
+          # Issue #798 — same set, same ORDER as the sequential path (docs/type-specification/
+          # diagnostic-policy.md § `rbs.coverage.*`): the project-signature state
+          # (`synthesized-namespace`, `quarantined-signature`, `environment-build-failed`, the
+          # conformance results) has no per-file producer, so this coordinator-side environment is the
+          # only place a pooled run can take it from — exactly as the empty-closure branch above is the
+          # only place an empty run can (#788). Taken BEFORE the fork below: the conformance scan this
+          # runs demands the definition of every `rigor:v1:conforms-to` class, and doing that HERE means
+          # a resulting definition-build failure is already sitting in the parent's loader at the moment
+          # each child copy-on-write-inherits it — every child's own `#drain_reporters` then reports it
+          # right alongside whatever its own slice demanded, with no separate plumbing needed. Left
+          # unconditional, unlike `#snapshot_fork_pool_stats` below: these are diagnostic rows, not
+          # `RunStats` telemetry, and the stats gate must not decide which diagnostics a run reports (a
+          # `--workers N --no-stats` run used to say strictly LESS than the sequential path over the
+          # same project).
+          snapshot_project_signature_state(session.environment)
           snapshot_effect_annotation_carrier(session.environment.rbs_loader)
           snapshot_fork_pool_stats(session) if @collect_stats
 
@@ -566,18 +602,16 @@ module Rigor
           exit!(1)
         end
 
-        # Snapshots `class_decl_paths` from the parent session's loader so end-of-run {RunStats} can
-        # attribute the RBS class universe.
+        # Issue #798 — `RunStats` telemetry ONLY, now that `#snapshot_project_signature_state` (called
+        # unconditionally above) owns every diagnostic-bearing slot this method used to ALSO write
+        # (`quarantined_signatures`, `env_build_failure`): those must not be gated on `@collect_stats`, and
+        # this method's own name says what is left — `class_decl_paths` / `signature_paths`, read off the
+        # parent session's loader so end-of-run {RunStats} can attribute the RBS class universe, which a
+        # `--no-stats` run legitimately skips.
         def snapshot_fork_pool_stats(session)
           loader = session.environment.rbs_loader
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
-          # The workers each quarantine the same broken file, but they report no diagnostics for it — the row is
-          # a whole-run one. Read it off the parent session's loader so a pooled run says exactly what a
-          # sequential one says. The same reasoning holds for a total env-build failure.
-          @snapshots.quarantined_signatures =
-            project_signature_paths? ? (loader&.quarantined_signatures || []) : []
-          @snapshots.env_build_failure = project_signature_paths? ? loader&.env_build_failure : nil
         end
 
         # Waits for every forked child, merges each successful payload into `results_by_path`, and returns
@@ -623,9 +657,10 @@ module Rigor
 
         # ADR-15 Phase 4b.x — drives every cached RBS producer on the main Ractor so each worker can serve
         # all reflection queries from disk (Marshal-load only). Builds a single coordinator-side
-        # {Environment} for this purpose; the env object is discarded immediately after the cache is warm
-        # — workers build their own `Environment.for_project` inside the Ractor body, which then routes
-        # through `cached_env` instead of `RBS::EnvironmentLoader.new`.
+        # {Environment} for this purpose and returns it fully loaded — issue #798: the caller also reads
+        # the project-signature state off it, since it is the only environment this backend's coordinator
+        # ever holds. Workers still build their OWN `Environment.for_project` inside the Ractor body, which
+        # then routes through `cached_env` instead of `RBS::EnvironmentLoader.new`.
         def prewarm_rbs_cache_for_pool
           warm_env = Environment.for_project(
             libraries: @configuration.libraries,
@@ -638,6 +673,7 @@ module Rigor
             rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect
           )
           warm_env.rbs_loader&.prewarm
+          warm_env
         end
 
         # ADR-15 Phase 4b.x — pool-mode safety net. When pool mode is configured but a precondition fails

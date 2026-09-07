@@ -66,10 +66,12 @@ module Rigor
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
                   :rbs_extended_reporter, :boundary_cross_reporter,
                   :analyzed_files, :unresolved_self_calls, :seed_bundles,
-                  # #788 round 6 — the stream `PoolCoordinator#analyze_files` returned this run, before any
-                  # run-level stream was appended. `IncrementalSession` caches ONLY this: a run-level row is
-                  # regenerated every run wherever it is positioned, and slicing the full stream by path
-                  # cached the file-positioned ones (`effect.annotations-unchecked`, `source-rbs-*`).
+                  # #788 rounds 6–7 — the rows per-file analysis produced this run, severity-resolved exactly
+                  # as the run's stream is and sliced to this run's targets (a pool backend folds `.rigor.yml`
+                  # prepare / degraded rows into `analyze_files`'s return). `IncrementalSession` caches ONLY
+                  # this and serves reused files from it without re-stamping: a run-level row is regenerated
+                  # every run wherever it is positioned, and slicing the run's full stream by path cached the
+                  # file-positioned ones (`effect.annotations-unchecked`, `source-rbs-*`).
                   :per_file_diagnostics
 
       # ADR-46 — the per-file cross-file read records this run captured (empty unless
@@ -995,12 +997,14 @@ module Rigor
         # Issue #784 — the whole project's file list rides along so an EMPTY `targets` (a narrowed run whose
         # closure is empty) can still resolve the environment a full run would — same files, same
         # synthesized RBS — to demand the HKT registry once, while a project with no files resolves nothing.
-        # #788 round 6 — the per-file stream is kept apart from the run-level streams appended below,
-        # because `IncrementalSession` must cache ONLY what per-file analysis produced (#per_file_diagnostics).
-        @per_file_diagnostics = @pool_coordinator.analyze_files(
-          targets, environment: environment, project_files: expansion.fetch(:files)
-        ).freeze
-        diagnostics += @per_file_diagnostics
+        # #788 rounds 6–7 — the per-file stream is kept apart from the run-level streams appended below,
+        # because `IncrementalSession` must cache ONLY what per-file analysis produced (#per_file_diagnostics),
+        # and the reader is exposed SEVERITY-RESOLVED and sliced to this run's targets. The cache serves a
+        # reused file without re-stamping, so a raw row would resurrect a rule the profile resolves to `:off`
+        # (`static.value-use.void` ships off on the default profile) and serve the authored severity where an
+        # override re-stamps it; and a pool backend folds `.rigor.yml`-positioned prepare / pool-degraded rows
+        # into the same return, which the slice drops. The run's own stream is stamped once, at the end.
+        diagnostics += analyze_targets(targets, environment: environment, project_files: expansion.fetch(:files))
         # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
         # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
         # contributes NO diagnostics and its result leaves through `#effect_table`, never through the
@@ -1021,6 +1025,20 @@ module Rigor
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
         diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
         diagnostics + @diagnostic_aggregator.source_rbs_synthesis_diagnostics
+      end
+
+      # #788 round 7 — runs per-file analysis over `targets` and exposes what it produced as
+      # `#per_file_diagnostics`: the `analyze_files` return, stamped with the same severity profile the run's
+      # own stream gets (`SeverityStamp` drops `:off` rows and re-stamps overrides, and the per-file cache never
+      # re-stamps), sliced to the rows positioned at the targets. Returns the RAW return for the run's stream,
+      # which is stamped once, at the end of `#run_analysis`.
+      def analyze_targets(targets, environment:, project_files:)
+        raw = @pool_coordinator.analyze_files(targets, environment: environment, project_files: project_files)
+        analysed = targets.to_set
+        @per_file_diagnostics = @diagnostic_aggregator.apply_severity_profile(raw)
+                                                      .select { |diagnostic| analysed.include?(diagnostic.path) }
+                                                      .freeze
+        raw
       end
 
       # ADR-67 WD6a — the check-walk parameter-inference pre-pass. Populates `@project_param_inferred_types`

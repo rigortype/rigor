@@ -309,15 +309,16 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     # from the per-file cache, an empty-closure recheck must fill it from the environment it resolves, or
     # an inline-only `effect.annotations-unchecked` goes 1 → 0 on every warm nothing-changed run.
     it "snapshots the effect-annotation carrier from the environment an empty run resolves (#788)" do
-      loader = instance_double(Rigor::Environment::RbsLoader)
+      annotated = ["lib/demo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"]
+      loader = instance_double(Rigor::Environment::RbsLoader, virtual_rbs: [["lib/plain.rb", "class P\nend\n"],
+                                                                            annotated])
       resolved = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: nil, rbs_loader: loader)
       allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
-      coordinator = build_coordinator
-      allow(coordinator).to receive(:snapshot_effect_annotation_carrier)
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
 
-      coordinator.analyze_files([], project_files: ["a.rb"])
+      build_coordinator(snapshots: snapshots).analyze_files([], project_files: ["a.rb"])
 
-      expect(coordinator).to have_received(:snapshot_effect_annotation_carrier).with(loader)
+      expect(snapshots.effect_annotation_carrier).to eq([annotated])
     end
 
     # Issue #793 — a NON-empty narrowed run must build its environment over the whole project too, or the

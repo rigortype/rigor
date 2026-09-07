@@ -2138,4 +2138,86 @@ end
       end
     end
   end
+
+  # Issue #795 — `Runner#envelope_rbs_loader` resolved its OWN environment (separate from the per-file
+  # analysis one #793 fixed) over `target_files(expansion)`, the narrowed analyze set, rather than the
+  # whole project. `effect.unknown-label` (and its envelope-pass siblings, `effect.envelope-exceeded` /
+  # `effect.liskov-widened`) is positioned at the declaration — a project `.rb` line for an inline
+  # rbs-inline annotation — the same shape `effect.annotations-unchecked` is in the describe block above.
+  # But it is not a per-file cache duplication risk the way that row was: `IncrementalSession` caches only
+  # `Runner#per_file_diagnostics` (#788 round 7), and the envelope pass's findings are produced by
+  # `EffectEnvelopePass`, never by per-file analysis, so they were never in that cache to begin with. The
+  # bug here is narrower and different in kind: a subset run's envelope walk saw a SMALLER RBS universe
+  # than the full run's, so it could miss an envelope declared only in an excluded file entirely.
+  # `provider.rb` carries the misspelled label and is never a member of the re-analyzed subset;
+  # `consumer.rb` is the file the subset actually re-analyzes.
+  describe "the effects-check envelope loader resolves over the whole project (#795)" do
+    rbs_inline_lib = File.expand_path("../../../plugins/rigor-rbs-inline/lib", __dir__)
+    $LOAD_PATH.unshift(rbs_inline_lib) unless $LOAD_PATH.include?(rbs_inline_lib)
+    require "rigor-rbs-inline"
+
+    after { Rigor::Plugin.unregister! }
+
+    let(:requirer) { ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) } }
+
+    def envelope_config(dir)
+      Rigor::Configuration.new(
+        "paths" => [dir], "effects" => {},
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    end
+
+    def write_envelope_fixture(dir)
+      File.write(File.join(dir, "provider.rb"), <<~RUBY)
+        # rbs_inline: enabled
+        class Provider
+          # @rbs %a{rigor:v1:effect io.bd}
+          # @rbs return: Integer
+          def n
+            1
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "consumer.rb"), "x = 1\n")
+    end
+
+    def unknown_label_rows(diagnostics)
+      diagnostics.select { |d| d.rule == "effect.unknown-label" }.map { |d| [File.basename(d.path), d.line] }
+    end
+
+    it "keeps one effect.unknown-label on a --verify-incremental partition excluding the annotation's file" do
+      Dir.mktmpdir do |dir|
+        write_envelope_fixture(dir)
+        config = envelope_config(dir)
+        full = guarded_run(
+          Rigor::Analysis::Runner.new(configuration: config, cache_store: nil, plugin_requirer: requirer)
+        ).diagnostics
+        expect(unknown_label_rows(full)).to eq([["provider.rb", 3]])
+
+        session = described_class.new(configuration: config, paths: [dir], plugin_requirer: requirer)
+        guarded_baseline(session)
+        subset = session.analyzed_files.select { |p| File.basename(p) == "consumer.rb" }
+        merged = guarded_reanalyze_subset(session, subset)
+
+        expect(unknown_label_rows(merged)).to eq(unknown_label_rows(full))
+      end
+    end
+
+    it "keeps one effect.unknown-label on a recheck whose changed closure excludes the annotation's file" do
+      Dir.mktmpdir do |dir|
+        write_envelope_fixture(dir)
+        config = envelope_config(dir)
+        session = described_class.new(configuration: config, paths: [dir], plugin_requirer: requirer)
+        baseline = guarded_baseline(session)
+        expect(unknown_label_rows(baseline)).to eq([["provider.rb", 3]])
+
+        File.write(File.join(dir, "consumer.rb"), "x = 2\n")
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).not_to include(File.join(dir, "provider.rb"))
+        expect(unknown_label_rows(recheck.diagnostics)).to eq(unknown_label_rows(baseline))
+      end
+    end
+  end
 end

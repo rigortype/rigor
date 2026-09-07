@@ -1,0 +1,1 @@
+- **[rigor check]** A pooled `--workers N` run now reports the same quarantined-signature, synthesized-namespace, and definition-build-failed rows as the sequential run over the same project, including under `--no-stats`, instead of silently reporting fewer of them. ([#798](https://github.com/rigortype/rigor/issues/798), [#803](https://github.com/rigortype/rigor/pull/803))

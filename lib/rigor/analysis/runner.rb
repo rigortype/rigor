@@ -686,7 +686,14 @@ module Rigor
         @run_generation = Object.new.freeze
         run_project_pre_passes(expansion: expansion)
         ensure_project_discovery(expansion)
-        environment = @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
+        # Issue #795 — `source_files:` is the WHOLE project's file list, never `target_files(expansion)`.
+        # `IncrementalSession#build_runner` threads its own `@buffer` into this Runner, so in editor-buffer
+        # mode `target_files` narrows to the buffer's single logical path; an environment built over just
+        # that path drops every OTHER file's plugin-synthesized virtual RBS, which can flip a re-evaluated
+        # return descriptor and wrongly declare a caller's return type unstable (or stable) relative to the
+        # full-project answer. This probe never analyzes a file, so it carries none of #788's per-file-cache
+        # duplication concern either.
+        environment = @pool_coordinator.resolve_sequential_environment(source_files: expansion.fetch(:files))
         specs.to_h do |spec|
           [[spec[:class_name], spec[:method_name], spec[:singleton]], evaluate_spec_returns(spec, environment)]
         end
@@ -939,9 +946,19 @@ module Rigor
         ).diagnostics
       end
 
+      # Issue #795 — `source_files:` is the WHOLE project's file list (`expansion.fetch(:files)`), never
+      # `target_files(expansion)`. A subset or editor-buffer run's `target_files` narrows to the
+      # `analyze_only` closure or the buffer's single logical path; building the envelope walk's
+      # environment over that subset drops every plugin-synthesized virtual RBS from an excluded file, so
+      # an envelope declared only in that file's inline annotation is invisible to the walk — the same #793
+      # gap #788 closed for per-file analysis, left open here because #788's binding sentences scoped
+      # themselves to "the environments the per-file analysis builds". This path is exempt from #788's
+      # per-file-cache duplication concern: `effect.unknown-label` (and its envelope-pass siblings) are
+      # produced by this pass, never by `Runner#per_file_diagnostics`, so `IncrementalSession` never caches
+      # them and widening this source list cannot duplicate a row on recheck.
       def envelope_rbs_loader(expansion)
         environment = @run_environment ||
-                      @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
+                      @pool_coordinator.resolve_sequential_environment(source_files: expansion.fetch(:files))
         environment&.rbs_loader
       rescue StandardError
         nil

@@ -24,12 +24,16 @@ module Rigor
     # body's last expression to derive an inferred return, looks up the project's existing RBS declaration (if
     # any), and emits one {MethodCandidate} per def.
     #
-    # The MVP keeps the scope deliberately narrow:
-    # - Only instance methods inside a `class` / `module` body are considered. Top-level / DSL-block / singleton
-    #   defs are skipped (`sig.skipped.complex-shape`).
-    # - Parameter signatures are hard-coded to `untyped` per ADR-14 § "Robustness principle compliance" clause 2;
-    #   `--params=observed` arrives in slice 3.
-    # - Optional / rest / keyword / block params disqualify the def (`sig.skipped.complex-shape`).
+    # The scope, as it stands after the slices that widened the MVP:
+    # - Instance and singleton methods inside a nameable `class` / `module` body are considered. Top-level /
+    #   DSL-block defs have no nameable receiver and are not candidates.
+    # - Parameter types are `untyped` per ADR-14 § "Robustness principle compliance" clause 2 unless
+    #   `--params=observed` supplies call-site observations; the parameter LIST always mirrors the def's runtime
+    #   shape (required / optional / rest / trailing / keyword / keyword-rest / forwarding / block). Issue #778
+    #   retired the slice-1 gate that skipped every shape beyond required positionals as
+    #   `sig.skipped.complex-shape`: the body typer binds every parameter to `untyped` when no RBS declares the
+    #   method, so the inferred return is the same clause-1 answer for every shape, and the renderer the
+    #   `initialize` stub already used spells them all.
     # - A `Dynamic[top]` inferred return becomes `sig.skipped.untyped-return` — emitting `untyped` would obscure
     #   rather than help.
     # - Tighter-return detection compares the RBS-erased spellings only when the existing declared return
@@ -650,8 +654,8 @@ module Rigor
       end
 
       # Emits `def initialize: (<shape>) -> void`. The return is always `void` because Ruby's `initialize`
-      # return value is never meaningful. The parameter list mirrors the runtime shape (required / optional /
-      # rest / keyword / keyword-rest / block).
+      # return value is never meaningful. The parameter list mirrors the runtime shape through the same
+      # {#render_param_list} every other def renders with.
       #
       # When `--params=observed` populates `@observations` for `[class_name, :initialize]` (via the
       # `ObservationCollector`'s `.new` → `:initialize` routing), positional and keyword arg types come from the
@@ -659,7 +663,7 @@ module Rigor
       # clause 2.
       def initialize_stub_candidate(path, def_node, class_name)
         params = def_node.parameters
-        rbs = "def initialize: (#{render_initialize_param_list(params, class_name)})" \
+        rbs = "def initialize: (#{render_param_list(params, class_name, :initialize)})" \
               "#{block_signature_suffix(params)} -> void"
         build_candidate(
           path: path, class_name: class_name, method_name: :initialize,
@@ -668,26 +672,41 @@ module Rigor
         )
       end
 
-      def render_initialize_param_list(params, class_name)
+      # The RBS parameter list of a def, mirroring its runtime shape position by position: `untyped` per
+      # required positional, `?untyped` per optional, `*untyped` for a rest, one `untyped` per trailing
+      # positional after the rest, `name: untyped` / `?name: untyped` per keyword, `**untyped` for a keyword
+      # rest, and `*untyped, **untyped` for `...` forwarding (its block half is {#block_signature_suffix}'s).
+      # `**nil` declares that no keywords are accepted, which RBS cannot spell, so it renders nothing.
+      #
+      # Per ADR-5 clause 2 every position is `untyped` unless `--params=observed` supplied call-site
+      # observations, in which case each leading positional and each keyword carries the union of the types the
+      # arity-compatible observations passed there ({#arity_matched_observations}). The rest, the trailing
+      # positionals and the keyword rest stay `untyped`: an observation does not say which of its arguments the
+      # splat absorbed. Before #778 only `initialize` rendered through this path and every other def with a
+      # shape beyond required positionals was skipped as `sig.skipped.complex-shape`.
+      def render_param_list(params, class_name, method_name)
         return "" unless params.is_a?(Prism::ParametersNode)
 
-        observations = initialize_observations(class_name, params)
-        offset = 0
+        observations = arity_matched_observations(class_name, method_name, params)
         parts = []
-
-        params.requireds.each_with_index do |_, i|
-          parts << initialize_positional_type(observations, offset + i, "")
-        end
-        offset += params.requireds.size
-
-        params.optionals.each_with_index do |_, i|
-          parts << initialize_positional_type(observations, offset + i, "?")
-        end
-
+        params.requireds.each_index { |i| parts << positional_type(observations, i, "") }
+        offset = params.requireds.size
+        params.optionals.each_index { |i| parts << positional_type(observations, offset + i, "?") }
         parts << "*untyped" if params.rest
+        parts.concat(Array.new(params.posts.size, "untyped"))
         params.keywords.each { |kw| parts << render_keyword_param(kw, observations) }
-        parts << "**untyped" if params.keyword_rest
+        parts.concat(keyword_rest_parts(params))
         parts.join(", ")
+      end
+
+      def keyword_rest_parts(params)
+        case params.keyword_rest
+        when Prism::ForwardingParameterNode
+          # `...` forwards positionals as well as keywords; a rest already rendered covers the former.
+          params.rest ? ["**untyped"] : ["*untyped", "**untyped"]
+        when Prism::KeywordRestParameterNode then ["**untyped"]
+        else []
+        end
       end
 
       # The RBS block suffix for a `def` that takes a `&block` parameter, e.g. ` ?{ (*untyped) -> untyped }`.
@@ -695,30 +714,39 @@ module Rigor
       # emitting it as a comma-joined member produced `(**untyped, ?{ (?) -> void })`, which RBS rejects
       # (`optional keyword argument type is expected`) and which then collapsed the whole env build. sig-gen
       # never observes the block's own signature, so it is rendered maximally lenient (ADR-5): an optional
-      # block (`?{`, since a `&block` need not be passed) taking `*untyped` and returning `untyped`. Returns
-      # "" when the method takes no block.
+      # block (`?{`, since a `&block` need not be passed) taking `*untyped` and returning `untyped`. `...`
+      # forwards a block too and gets the same suffix. Returns "" when the method takes no block.
       def block_signature_suffix(params)
         return "" unless params.is_a?(Prism::ParametersNode)
-        return "" if params.block.nil?
+        return "" unless params.block || params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
 
         " ?{ (*untyped) -> untyped }"
       end
 
-      # Picks observations under `[class_name, :initialize]` whose positional arity matches the def's accepted
-      # range (required..required+optional). Looser arities don't get used because they describe a different
-      # overload the stub cannot express.
-      def initialize_observations(class_name, params)
+      # Observations under `[class_name, method_name]` whose positional arity the def accepts: at least its
+      # required count (leading plus trailing), and, unless a rest or `...` absorbs the surplus, at most
+      # required plus optional. An arity outside that window describes a different overload the signature
+      # cannot express, so it says nothing about these positions. #778 widened the window for ordinary defs
+      # from the exact required count — `def optional(text = "x")` called as `optional` AND as `optional("y")`
+      # now credits both call sites.
+      def arity_matched_observations(class_name, method_name, params)
         return [] if @observations.empty?
 
-        list = @observations[[class_name, :initialize]] || []
-        min = params.requireds.size
-        max = min + params.optionals.size
-        list.select { |obs| (min..max).cover?(obs.positional.size) }
+        list = @observations[[class_name, method_name]] || []
+        min = params.requireds.size + params.posts.size
+        max = unbounded_positionals?(params) ? Float::INFINITY : min + params.optionals.size
+        list.select { |obs| obs.positional.size.between?(min, max) }
       end
 
-      def initialize_positional_type(observations, index, prefix)
+      def unbounded_positionals?(params)
+        !params.rest.nil? || params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+      end
+
+      # A bare union is a valid positional type in RBS (`(String | Integer, ?String | Integer)`), so unlike the
+      # return position it is not parenthesised.
+      def positional_type(observations, index, prefix)
         types = observations.filter_map { |obs| obs.positional[index] }
-        "#{prefix}#{types.empty? ? 'untyped' : paren_wrap_union(union_erase(types))}"
+        "#{prefix}#{union_erase(types)}"
       end
 
       def render_keyword_param(keyword, observations)
@@ -746,10 +774,6 @@ module Rigor
         return nil if initialize_excludes?(def_node, kind)
         return initialize_stub_candidate(path, def_node, class_name) if non_trivial_initialize?(def_node, kind)
 
-        unless simple_parameter_shape?(def_node.parameters)
-          return skipped(path, def_node, class_name, kind, :complex_shape)
-        end
-
         inferred = infer_return_type(def_node, scope_index)
         return skipped(path, def_node, class_name, kind, :untyped_return) if inferred.nil? || dynamic_top?(inferred)
 
@@ -761,20 +785,6 @@ module Rigor
         else
           compare_against_declared(path, def_node, class_name, kind, inferred, method_def)
         end
-      end
-
-      # Required positionals only; the MVP's body-typing path gives well-defined returns for that shape.
-      # Optional / rest / keyword / block parameters route through the `sig.skipped.complex-shape` reason until
-      # slices 3+ widen the param policy.
-      def simple_parameter_shape?(params)
-        return true if params.nil?
-        return false unless params.is_a?(Prism::ParametersNode)
-
-        params.optionals.empty? &&
-          params.rest.nil? &&
-          params.keywords.empty? &&
-          params.keyword_rest.nil? &&
-          params.block.nil?
       end
 
       # Mirrors the `def.return-type-mismatch` rule's body-type extraction: type the implicit-return expression
@@ -991,8 +1001,8 @@ module Rigor
       end
 
       def render_rbs_line(def_node, inferred, class_name, kind)
-        arity = required_arity(def_node)
-        head = arity.zero? ? "()" : "(#{render_param_list(class_name, def_node.name, arity)})"
+        params = def_node.parameters
+        head = "(#{render_param_list(params, class_name, def_node.name)})#{block_signature_suffix(params)}"
         prefix = method_def_prefix(class_name, def_node.name, kind)
         "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred))}"
       end
@@ -1026,30 +1036,6 @@ module Rigor
           end
         end
         false
-      end
-
-      def required_arity(def_node)
-        params = def_node.parameters
-        params.is_a?(Prism::ParametersNode) ? params.requireds.size : 0
-      end
-
-      # Per ADR-5 clause 2 the default is `untyped` for every position. Observed-policy callers
-      # (`--params=observed`) pass an `observations:` map at construction time; the generator unions
-      # per-position arg types whose tuple arity matches the def's required-positional count. Observations from
-      # arities other than the def's count are discarded — they describe a different overload the MVP does not
-      # emit.
-      def render_param_list(class_name, method_name, arity)
-        tuples = matching_observations(class_name, method_name, arity)
-        return Array.new(arity, "untyped").join(", ") if tuples.empty?
-
-        Array.new(arity) { |i| union_erase(tuples.map { |obs| obs.positional[i] }) }.join(", ")
-      end
-
-      def matching_observations(class_name, method_name, arity)
-        return [] if @observations.empty?
-
-        list = @observations[[class_name, method_name]] || []
-        list.select { |obs| obs.positional.size == arity }
       end
 
       def union_erase(types)

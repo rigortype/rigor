@@ -32,6 +32,11 @@ Abbreviated `nix … develop --command` below; commands are otherwise shown in t
 - Target Ruby is `4.0.5`; the gemspec requires `>= 4.0.0`, `< 4.1`.
 - `flake.nix` points Bundler at `vendor/bundle`, keeping gem installs off the machine's global state.
 - First-time setup is `make setup`.
+- Parallel or isolated work gets a worktree via `bin/rigor-worktree <branch>` — it copy-on-write
+  clones `vendor/bundle` from the main clone (APFS clonefile), so every tree has an isolated,
+  writable bundle instead of a shared `vendor` symlink. `references/` submodules are **not**
+  populated in a worktree (pass `--with-references`), and `.git` is shared — never `git stash` or
+  deregister a submodule from one. Full contract: the `rigor-worktree` skill.
 - CI does **not** use Nix: it installs Ruby via `ruby/setup-ruby` and runs `make verify` directly.
 
 ## Common Commands

@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Create a git worktree whose gem bundle is a copy-on-write clone of the main clone.
+#
+# `vendor/bundle` (~126M, ~9800 files) is populated with APFS clonefile(2): a few
+# seconds, near-zero disk, and the worktree gets an ISOLATED, writable bundle. A
+# `bundle install` for a branch's own `Gemfile.lock` then diverges only the blocks
+# it changes and never touches the main clone or a sibling worktree — unlike a
+# `vendor` symlink, where one worktree's `bundle install` mutates everyone's gems.
+# On a non-APFS host `cp` falls back to a reflink (btrfs/xfs) or a plain copy.
+#
+# Usage:
+#   bin/rigor-worktree [--with-references] [--with-tools] <branch> [start-point]
+#
+#   <branch>            existing branch -> checked out; otherwise created from
+#                       <start-point> (default: origin/master).
+#   --with-references   also CoW-clone the populated references/ submodule
+#                       checkouts (read-only here) so a reference-reading gate
+#                       does not silently SKIP in the worktree.
+#   --with-tools        also CoW-clone the tool/steep and tool/sorbet bundles.
+#
+# The worktree is created at $RIGOR_WT_ROOT/<slug> (default: <main>/../rigor-wt/<slug>),
+# where <slug> is the branch name with a leading `codex/` stripped and `/` -> `-`.
+#
+# Exit code: 0 on success, non-zero on failure.
+
+set -euo pipefail
+
+prog=${0##*/}
+die() { echo "$prog: $*" >&2; exit 1; }
+
+usage() {
+  cat >&2 <<EOF
+usage: $prog [--with-references] [--with-tools] <branch> [start-point]
+
+  <branch>           existing branch is checked out; a new one is created from
+                     <start-point> (default: origin/master)
+  --with-references  also CoW-clone the populated references/ submodule checkouts
+  --with-tools       also CoW-clone the tool/steep and tool/sorbet bundles
+
+The worktree lands at \$RIGOR_WT_ROOT/<slug> (default: <main>/../rigor-wt/<slug>).
+EOF
+  exit "${1:-0}"
+}
+
+with_references=0
+with_tools=0
+args=()
+for a in "$@"; do
+  case "$a" in
+    --with-references) with_references=1 ;;
+    --with-tools)      with_tools=1 ;;
+    -h|--help)         usage 0 ;;
+    -*)               die "unknown option: $a (see --help)" ;;
+    *)                args+=("$a") ;;
+  esac
+done
+
+[ "${#args[@]}" -ge 1 ] || usage 1
+branch=${args[0]}
+start=${args[1]:-origin/master}
+
+main=$(git rev-parse --path-format=absolute --git-common-dir)
+main=${main%/.git}
+[ -d "$main" ] || die "cannot locate the main clone (resolved: $main)"
+[ -d "$main/vendor/bundle" ] || \
+  die "no $main/vendor/bundle — run 'make setup' (or 'bundle install') in the main clone first"
+
+slug=${branch#codex/}
+slug=${slug//\//-}
+wt_root=${RIGOR_WT_ROOT:-$(dirname "$main")/rigor-wt}
+wt=$wt_root/$slug
+if [ -e "$wt" ]; then die "$wt already exists"; fi
+
+# Pick a copy-on-write cp. macOS `cp -Rc` uses clonefile(2) and silently falls
+# back to copyfile(2) across filesystems; GNU cp gets --reflink=auto (CoW on
+# btrfs/xfs, plain copy elsewhere); anything else does a plain recursive copy.
+cow_cp() {
+  local src=$1 dst=$2
+  case "$(uname)" in
+    Darwin) cp -Rc "$src" "$dst" ;;
+    *) if cp --version 2>/dev/null | grep -q coreutils; then
+         cp -a --reflink=auto "$src" "$dst"
+       else
+         cp -R "$src" "$dst"
+       fi ;;
+  esac
+}
+
+clone_into_wt() { # clone_into_wt REL   (REL is relative to the repo root)
+  local rel=$1
+  if [ ! -e "$main/$rel" ]; then echo "  skip $rel (absent in main clone)"; return 0; fi
+  mkdir -p "$wt/$(dirname "$rel")"
+  cow_cp "$main/$rel" "$wt/$rel"
+  echo "  cloned $rel"
+}
+
+if git -C "$main" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+  echo "==> git worktree add $wt $branch"
+  git -C "$main" worktree add "$wt" "$branch"
+else
+  echo "==> git worktree add $wt -b $branch $start"
+  git -C "$main" worktree add "$wt" -b "$branch" "$start"
+fi
+
+echo "==> cloning the gem bundle (copy-on-write)"
+clone_into_wt vendor/bundle
+mkdir -p "$wt/.bundle"
+if cp "$main/.bundle/config" "$wt/.bundle/config" 2>/dev/null; then
+  echo "  copied .bundle/config"
+else
+  printf 'BUNDLE_PATH: "vendor/bundle"\n' > "$wt/.bundle/config"
+  echo "  wrote a default .bundle/config"
+fi
+
+if [ "$with_tools" -eq 1 ]; then
+  echo "==> cloning the tool bundles"
+  for t in tool/steep tool/sorbet; do
+    clone_into_wt "$t/vendor"
+    if [ -f "$main/$t/.bundle/config" ]; then
+      mkdir -p "$wt/$t/.bundle"
+      cp "$main/$t/.bundle/config" "$wt/$t/.bundle/config"
+    fi
+  done
+fi
+
+if [ "$with_references" -eq 1 ]; then
+  echo "==> cloning references/ submodule checkouts (read-only)"
+  for d in "$main"/references/*/; do
+    name=$(basename "$d")
+    if [ ! -e "${d}.git" ]; then echo "  skip references/$name (not initialized in main)"; continue; fi
+    cow_cp "${d%/}" "$wt/references/$name"
+    # A submodule `.git` file is relative to the main clone; re-point the copy
+    # at the shared module store so read-only git commands resolve.
+    printf 'gitdir: %s/.git/modules/references/%s\n' "$main" "$name" > "$wt/references/$name/.git"
+    if git -C "$wt/references/$name" rev-parse --verify --quiet HEAD >/dev/null; then
+      echo "  cloned references/$name"
+    else
+      echo "  WARNING: references/$name cloned but its git linkage looks wrong" >&2
+    fi
+  done
+fi
+
+echo
+echo "Worktree ready: $wt"
+echo "  branch:  $(git -C "$wt" rev-parse --abbrev-ref HEAD)"
+echo "  bundle:  vendor/bundle — CoW clone of the main clone, isolated and writable"
+if [ "$with_references" -eq 0 ]; then
+  echo "  refs:    references/ is NOT populated — a reference-reading gate will"
+  echo "           silently SKIP here. Re-run with --with-references, or run"
+  echo "           'make init-submodules' in the worktree, if a gate needs one."
+fi
+echo
+echo "Work inside the Flake as usual. If this branch changes Gemfile.lock, run"
+echo "'bundle install' in the worktree: it re-resolves against the clone and"
+echo "diverges only the changed blocks."

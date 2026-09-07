@@ -550,6 +550,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::RbsExtended::Reporter
     Rigor::RbsExtended::Reporter::UnresolvedEntry
     Rigor::RbsExtended::Reporter::LossyProjectionEntry
+    Rigor::RbsExtended::Reporter::HktDirectiveEntry
     Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter
     Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter::Entry
     Rigor::Environment::Reflection

@@ -286,10 +286,30 @@ module Rigor
         source_location.respond_to?(:start_line) ? source_location.start_line : nil
       end
 
+      # `RBS::Location#start_column` is 0-based; diagnostics are 1-based.
+      def source_column_of(source_location)
+        source_location.respond_to?(:start_column) ? source_location.start_column + 1 : nil
+      end
+
+      # Issue #785 — routes a declined directive to the per-run reporter. The FIRST arm is the one that
+      # matters: the production reporter is {RbsExtended::Reporter}, whose surface is `record_unresolved` /
+      # `record_lossy_projection` / `record_hkt_error` — it has neither `#record` nor `#<<`, so before this
+      # arm existed every call here fell off the end of the `if` and every malformed HKT directive was
+      # dropped in every real run, while the doc comments claimed an `:info` entry was recorded. The
+      # position is flattened here rather than in the reporter because {HktDirectives} is where the
+      # `RBS::Location` accessors already live, and because the entry has to reach the pool drain channel
+      # as primitives (see {RbsExtended::Reporter::HktDirectiveEntry}).
+      #
+      # The `#record` / `#<<` arms stay for the collecting doubles the directive specs and plugin authors
+      # use, which is the contract `scan_rbs_loader`'s `@param reporter [#record, nil]` documents.
       def record_hkt_error(reporter, message, source_location)
         return if reporter.nil?
 
-        if reporter.respond_to?(:record)
+        if reporter.respond_to?(:record_hkt_error)
+          reporter.record_hkt_error(message: message, path: source_path_of(source_location),
+                                    line: source_line_of(source_location),
+                                    column: source_column_of(source_location))
+        elsif reporter.respond_to?(:record)
           reporter.record(directive: "hkt", message: message, source_location: source_location)
         elsif reporter.respond_to?(:<<)
           reporter << { directive: "hkt", message: message, source_location: source_location }

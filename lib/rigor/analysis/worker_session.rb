@@ -259,7 +259,12 @@ module Rigor
         {
           rbs_extended: {
             unresolved_payloads: @rbs_extended_reporter.unresolved_payloads,
-            lossy_projections: @rbs_extended_reporter.lossy_projections
+            lossy_projections: @rbs_extended_reporter.lossy_projections,
+            # Issue #785 — the HKT directive stream rides the same channel for the same reason
+            # `hkt_scan_failure` does: the directives are read by the registry scan, and under the pool the
+            # PARENT never demands that scan, so a diagnostic wired off the parent's reporter would appear
+            # at `--workers=0` and vanish at `--workers=N`. The demand above is what fills this.
+            hkt_directive_errors: @rbs_extended_reporter.hkt_directive_errors
           },
           boundary_cross: @boundary_cross_reporter.entries,
           source_rbs_synthesis: @source_rbs_synthesis_reporter.entries,

@@ -612,6 +612,36 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(diagnostics.map(&:severity).uniq).to eq([:info])
     end
 
+    # Issue #785 — the third stream. Positioned from the entry's own `(path, line, column)` triple rather
+    # than from an `RBS::Location`, so the pool drain can carry it.
+    it "drains an hkt-directive failure at the annotation's own position" do
+      reporter = Rigor::RbsExtended::Reporter.new
+      reporter.record_hkt_error(message: "arity must be a positive Integer, got nil",
+                                path: "sig/overlay.rbs", line: 7, column: 3)
+
+      diagnostic = build_aggregator(rbs_extended_reporter: reporter)
+                   .rbs_extended_reporter_diagnostics
+                   .find { |d| d.rule == "dynamic.rbs-extended.hkt-directive-invalid" }
+
+      expect(diagnostic.severity).to eq(:info)
+      expect(diagnostic.source_family).to eq(:builtin)
+      expect(diagnostic.path).to eq("sig/overlay.rbs")
+      expect(diagnostic.line).to eq(7)
+      expect(diagnostic.column).to eq(3)
+      expect(diagnostic.message).to include("arity must be a positive Integer")
+      expect(diagnostic.message).to include("Dynamic[top]")
+    end
+
+    it "falls back to .rigor.yml:1:1 for an hkt-directive failure with no location" do
+      reporter = Rigor::RbsExtended::Reporter.new
+      reporter.record_hkt_error(message: "params= is required")
+
+      diagnostic = build_aggregator(rbs_extended_reporter: reporter)
+                   .rbs_extended_reporter_diagnostics.first
+
+      expect([diagnostic.path, diagnostic.line, diagnostic.column]).to eq([".rigor.yml", 1, 1])
+    end
+
     it "is silent when the reporter accumulated nothing" do
       expect(build_aggregator.rbs_extended_reporter_diagnostics).to eq([])
     end

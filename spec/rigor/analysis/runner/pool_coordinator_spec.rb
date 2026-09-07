@@ -680,6 +680,41 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(coordinator_reporter.lossy_projections.map(&:head)).to eq(["pick_of"])
     end
 
+    # Issue #785 — every worker scans the same RBS env, so N workers hand over N copies of one declined
+    # directive. The reporter's own `(message, path, line, column)` dedup is what makes `--workers=N` print
+    # the single row `--workers=0` prints; carrying an `RBS::Location` instead would defeat it, since two
+    # workers hold separate `RBS::Buffer` objects.
+    it "replays a worker's hkt-directive failures and collapses two workers' copies into one row" do
+      coordinator_reporter = Rigor::RbsExtended::Reporter.new
+      coordinator = build_coordinator(rbs_extended_reporter: coordinator_reporter)
+      worker_reporter = Rigor::RbsExtended::Reporter.new
+      worker_reporter.record_hkt_error(message: "uri= is required", path: "sig/a.rbs", line: 2, column: 1)
+
+      2.times do
+        coordinator.merge_worker_reporters(
+          rbs_extended: { unresolved_payloads: [], lossy_projections: [],
+                          hkt_directive_errors: worker_reporter.hkt_directive_errors },
+          boundary_cross: [], source_rbs_synthesis: []
+        )
+      end
+
+      expect(coordinator_reporter.hkt_directive_errors.map(&:message)).to eq(["uri= is required"])
+      expect(coordinator_reporter.hkt_directive_errors.first.path).to eq("sig/a.rbs")
+    end
+
+    it "tolerates a drain shape that carries no hkt-directive key" do
+      coordinator_reporter = Rigor::RbsExtended::Reporter.new
+      coordinator = build_coordinator(rbs_extended_reporter: coordinator_reporter)
+
+      expect do
+        coordinator.merge_worker_reporters(
+          rbs_extended: { unresolved_payloads: [], lossy_projections: [] },
+          boundary_cross: [], source_rbs_synthesis: []
+        )
+      end.not_to raise_error
+      expect(coordinator_reporter).to be_empty
+    end
+
     it "replays a worker's boundary-cross events into the run's own reporter" do
       worker_reporter = Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
       worker_reporter.record(class_name: "Foo", method_name: :bar, gem_name: "somegem", rbs_display: "() -> void")

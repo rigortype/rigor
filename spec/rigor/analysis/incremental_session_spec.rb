@@ -1806,33 +1806,114 @@ end
     end
   end
 
-  # #788 round 5 — `effect.annotations-unchecked` is a run-level row positioned at a project FILE, so the
-  # per-file cache would otherwise hold it and a recheck that regenerates it (every run does) would serve
-  # the cached copy too: two rows, and a `--verify-incremental` divergence. It surfaced once a narrowed
-  # run's environment carried the whole project's synthesized RBS (#793).
-  describe "#per_file excludes run-level rows positioned at a project file" do
-    it "drops effect.annotations-unchecked from the cache and keeps the file's real diagnostics" do
-      session = session_for(configuration("."))
-      session.instance_variable_set(:@analyzed, ["a.rb"])
-      residual = Rigor::Analysis::Diagnostic.new(
-        path: "a.rb", line: 3, column: 1, message: "annotations unchecked", severity: :info,
-        rule: Rigor::Analysis::Runner::EffectAnnotationResidualPass::RULE
-      )
-      real = Rigor::Analysis::Diagnostic.new(
-        path: "a.rb", line: 7, column: 1, message: "undefined method", severity: :error,
-        rule: "call.undefined-method"
-      )
+  # #788 rounds 5–6 — a narrowed run now builds its environment over the whole project (#793), so every
+  # run-level row that is POSITIONED at a project file is regenerated for files the run did not analyse:
+  # `effect.annotations-unchecked` at the first annotated file, `source-rbs-annotation-not-honoured` at the
+  # annotated source. The per-file cache must therefore hold only what per-file analysis produced
+  # (`Runner#per_file_diagnostics`), or a recheck serves the cached copy beside the fresh one and
+  # `--verify-incremental` goes red — and an empty-closure recheck must fill the effect-annotation carrier
+  # itself, or the inline-only residual goes 1 → 0 on every warm nothing-changed run. Both fixtures use the
+  # bundled rbs-inline plugin, the shipping ADR-93 shape.
+  describe "run-level rows positioned at project files across incremental paths (#788)" do
+    rbs_inline_lib = File.expand_path("../../../plugins/rigor-rbs-inline/lib", __dir__)
+    $LOAD_PATH.unshift(rbs_inline_lib) unless $LOAD_PATH.include?(rbs_inline_lib)
+    require "rigor-rbs-inline"
 
-      cached = session.send(:per_file, [residual, real])
+    after { Rigor::Plugin.unregister! }
 
-      expect(cached.fetch("a.rb")).to eq([real])
+    let(:requirer) { ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) } }
+
+    def inline_config(dir)
+      Rigor::Configuration.new(
+        "paths" => [dir],
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    end
+
+    def inline_session(config, dir, cache_store: nil)
+      described_class.new(configuration: config, paths: [dir], cache_store: cache_store, plugin_requirer: requirer)
+    end
+
+    def rows(diagnostics, rule)
+      diagnostics.select { |d| d.qualified_rule == rule }.map { |d| [File.basename(d.path), d.line] }
+    end
+
+    # `# @rbs module-self:` is an annotation rbs-inline synthesizes RBS for but Rigor does not honour, so
+    # the synthesis reporter records one `source-rbs-annotation-not-honoured` at b_provider.rb — a run-level
+    # row at a project file. A subset run over a_consumer.rb alone must report it exactly once, and match
+    # the full-run oracle.
+    it "keeps one source-rbs-annotation-not-honoured on a subset run and a recheck, matching the full run" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a_consumer.rb"), "x = 1\n")
+        File.write(File.join(dir, "b_provider.rb"), <<~RUBY)
+          # rbs_inline: enabled
+          # @rbs module-self: Comparable
+          module Sortable
+            # @rbs () -> Integer
+            def rank = 1
+          end
+        RUBY
+        config = inline_config(dir)
+        rule = "source-rbs-annotation-not-honoured"
+
+        session = inline_session(config, dir)
+        expect(rows(guarded_baseline(session), rule)).to eq([["b_provider.rb", 1]])
+
+        subset = session.analyzed_files.select { |p| File.basename(p) == "a_consumer.rb" }
+        merged = guarded_reanalyze_subset(session, subset)
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil,
+                                                       plugin_requirer: requirer)).diagnostics
+        expect(rows(merged, rule)).to eq([["b_provider.rb", 1]])
+        expect(rows(full, rule)).to eq([["b_provider.rb", 1]])
+
+        File.write(File.join(dir, "a_consumer.rb"), "x = 2\n")
+        expect(rows(guarded_recheck(session).diagnostics, rule)).to eq([["b_provider.rb", 1]])
+      end
+    end
+
+    # An inline `# @rbs %a{pure}` with no `effects:` block is the ADR-103 WD13 residual: one
+    # `effect.annotations-unchecked` at b_provider.rb, produced once per run off the environment. A warm
+    # `--incremental` run that changed nothing has an empty closure, so nothing per-file could carry it —
+    # the empty path must fill the carrier from the environment it resolves.
+    it "keeps one effect.annotations-unchecked on a warm nothing-changed run_incremental" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a_consumer.rb"), "x = 1\n")
+        File.write(File.join(dir, "b_provider.rb"), <<~RUBY)
+          # rbs_inline: enabled
+          class Provider
+            # @rbs %a{pure}
+            # @rbs return: Integer
+            def n
+              1
+            end
+          end
+        RUBY
+        config = inline_config(dir)
+        rule = "effect.annotations-unchecked"
+        cache_root = File.join(dir, ".rigor", "cache")
+        store = Rigor::Cache::Store.new(root: cache_root)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        fp = fingerprint(config, dir)
+
+        cold, warm1 = guarded_run_incremental(inline_session(config, dir, cache_store: store),
+                                              snapshot: snapshot, fingerprint: fp)
+        expect(warm1).to be(false)
+        expect(rows(cold, rule).size).to eq(1)
+
+        warm, warm2 = guarded_run_incremental(inline_session(config, dir, cache_store: store),
+                                              snapshot: snapshot, fingerprint: fp)
+        expect(warm2).to be(true)
+        expect(rows(warm, rule)).to eq(rows(cold, rule))
+      end
     end
   end
 
   # Issue #784 — the `rbs.coverage.hkt-scan-failed` row is regenerated by every run from a demand the run
   # makes ITSELF, so it survives every incremental path even when the analysed closure contains no
-  # `Klass.method` call: `per_file` drops `.rigor.yml` rows from the cache on exactly that promise, and
-  # before the run demanded on its own behalf these three paths each lost the row and turned a red project
+  # `Klass.method` call: the per-file cache holds only `Runner#per_file_diagnostics`, so no run-level row is
+  # ever served from it, and before the run demanded on its own behalf these three paths each lost the row
+  # and turned a red project
   # green. Every session here is built the way `CheckCommand#run_incremental_check` builds it — with NO
   # `environment:` — because the first cut of the fix passed only under an injected environment the CLI
   # never supplies (the empty-closure recheck then had nothing to demand on). A side effect is that each

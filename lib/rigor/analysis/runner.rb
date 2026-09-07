@@ -65,7 +65,12 @@ module Rigor
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
                   :rbs_extended_reporter, :boundary_cross_reporter,
-                  :analyzed_files, :unresolved_self_calls, :seed_bundles
+                  :analyzed_files, :unresolved_self_calls, :seed_bundles,
+                  # #788 round 6 — the stream `PoolCoordinator#analyze_files` returned this run, before any
+                  # run-level stream was appended. `IncrementalSession` caches ONLY this: a run-level row is
+                  # regenerated every run wherever it is positioned, and slicing the full stream by path
+                  # cached the file-positioned ones (`effect.annotations-unchecked`, `source-rbs-*`).
+                  :per_file_diagnostics
 
       # ADR-46 — the per-file cross-file read records this run captured (empty unless
       # `record_dependencies: true`). Sequential analysis records into `@file_dependencies` via
@@ -303,6 +308,7 @@ module Rigor
         # See `self_undefined_rule_active?`.
         @self_undefined_rule_active = nil
         @analyzed_files = [].freeze
+        @per_file_diagnostics = [].freeze
         # In-memory source map for `#run_source` — `{ logical_path => source String }`. When set,
         # `parse_source` reads bytes from here instead of disk and `expand_paths` accepts the (possibly
         # non-existent) logical path. nil on a normal disk-backed run.
@@ -989,9 +995,12 @@ module Rigor
         # Issue #784 — the whole project's file list rides along so an EMPTY `targets` (a narrowed run whose
         # closure is empty) can still resolve the environment a full run would — same files, same
         # synthesized RBS — to demand the HKT registry once, while a project with no files resolves nothing.
-        diagnostics += @pool_coordinator.analyze_files(
+        # #788 round 6 — the per-file stream is kept apart from the run-level streams appended below,
+        # because `IncrementalSession` must cache ONLY what per-file analysis produced (#per_file_diagnostics).
+        @per_file_diagnostics = @pool_coordinator.analyze_files(
           targets, environment: environment, project_files: expansion.fetch(:files)
-        )
+        ).freeze
+        diagnostics += @per_file_diagnostics
         # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
         # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
         # contributes NO diagnostics and its result leaves through `#effect_table`, never through the

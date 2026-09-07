@@ -121,8 +121,8 @@ module Rigor
         def analyze_files(files, environment: nil, project_files: nil)
           if files.empty?
             # Issue #784 — an EMPTY analyze set still owes the run its HKT-scan row: the per-file cache never
-            # holds it (`IncrementalSession#per_file` drops `.rigor.yml` rows on the promise they are
-            # regenerated every run), so returning here without recording flips a red project green — and
+            # holds it (`IncrementalSession` caches only `Runner#per_file_diagnostics`, so every run-level row
+            # is regenerated every run), so returning here without recording flips a red project green — and
             # the shipping `--incremental` path reaches this branch with NO environment in hand on every
             # warm recheck that changed nothing (`CheckCommand#run_incremental_check` builds its session
             # without one). So: an environment already in hand is consulted; otherwise one is resolved over
@@ -136,6 +136,14 @@ module Rigor
             if project_files && !project_files.empty?
               env ||= resolve_sequential_environment(source_files: project_files)
             end
+            # #788 round 6 — the residual pass (`Runner#effect_annotation_residual_diagnostics`) reads the
+            # carrier this snapshot fills; the non-empty path fills it in `analyze_files_sequentially`. A
+            # warm recheck that changed nothing used to keep `effect.annotations-unchecked` alive through the
+            # per-file cache; now that run-level rows are never cached, the empty path must fill the carrier
+            # itself or the inline-only row goes 1 → 0 on every null recheck. This retires the #441
+            # "`.rbs` lane only when the run analyses nothing" boundary: its cost premise (no environment
+            # on this path) stopped holding the moment the branch above resolved one.
+            snapshot_effect_annotation_carrier(env&.rbs_loader)
             record_hkt_scan_failure(hkt_scan_outcome(env))
             return []
           end

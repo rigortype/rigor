@@ -987,8 +987,18 @@ module Rigor
       # Group diagnostics by their file path, keeping only those whose path is an analyzed project file —
       # run-level streams (the gem-RBS info diagnostic, keyed on `.rigor.yml`) are recomputed fresh every
       # run and must not be served from the per-file cache.
+      #
+      # One run-level row is positioned at a project FILE, not at `.rigor.yml`, so the slice alone would
+      # cache it: `effect.annotations-unchecked`, which sits at the first annotated file. It is recomputed
+      # every run from the environment (`Runner#effect_annotation_residual_diagnostics`), so a recheck
+      # that served the cached copy AND regenerated one would report it twice — which is exactly what
+      # happened once a narrowed run's environment carried the whole project's synthesized RBS (#793,
+      # #788 round 5): the residual fired for a file the recheck did not analyse, met its cached twin in
+      # the merge, and `--verify-incremental` went red. Excluded here by rule id; the same treatment is
+      # owed to any future run-level, file-positioned row (`effect.unknown-label` would be one — #795).
       def per_file(diagnostics)
-        diagnostics.group_by(&:path).slice(*@analyzed)
+        diagnostics.reject { |diagnostic| diagnostic.rule == Runner::EffectAnnotationResidualPass::RULE }
+                   .group_by(&:path).slice(*@analyzed)
       end
 
       # ADR-87 WD1 — change detection over the candidate paths (files present in both the prior and current

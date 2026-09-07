@@ -357,7 +357,8 @@ module Rigor
           # constants.
           if @cache_store.nil?
             return analyze_files_sequentially_fallback(
-              files, reason: "pool mode requires a cache_store (--no-cache disables pool)"
+              files, reason: "pool mode requires a cache_store (--no-cache disables pool)",
+                     source_files: source_files
             )
           end
           prewarm_rbs_cache_for_pool

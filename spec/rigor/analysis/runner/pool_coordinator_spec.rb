@@ -544,6 +544,21 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     end
   end
 
+  describe "#analyze_files_in_pool without a cache store" do
+    # #788 round 5 — the one fallback exit that lives INSIDE the Ractor backend (not in `dispatch_pool`)
+    # was missed when `source_files:` was threaded everywhere else, so a narrowed Ractor-backend run with
+    # no store built its fallback environment over the narrowed set again (#793).
+    it "threads source_files to the sequential fallback it degrades to" do
+      coordinator = build_coordinator(workers: 2, cache_store: nil)
+      allow(coordinator).to receive(:analyze_files_sequentially_fallback).and_return([:seq_result])
+
+      expect(coordinator.analyze_files_in_pool(["a.rb"], source_files: ["a.rb", "b.rb"])).to eq([:seq_result])
+      expect(coordinator).to have_received(:analyze_files_sequentially_fallback).with(
+        ["a.rb"], reason: a_string_matching(/requires a cache_store/), source_files: ["a.rb", "b.rb"]
+      )
+    end
+  end
+
   describe "#collected_dependencies" do
     it "starts empty before any pooled recording run" do
       expect(build_coordinator.collected_dependencies).to eq({})

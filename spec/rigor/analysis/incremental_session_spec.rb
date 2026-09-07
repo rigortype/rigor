@@ -1998,6 +1998,15 @@ end
         end
       RBS
       File.write(File.join(dir, "sig", "dup2.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+      File.write(File.join(dir, "sig", "conform.rbs"), <<~RBS)
+        interface _Probes
+          def probe: () -> String
+        end
+
+        %a{rigor:v1:conforms-to _Probes}
+        class NeedsProbe
+        end
+      RBS
       Rigor::Configuration.new("paths" => [dir], "signature_paths" => [File.join(dir, "sig")])
     end
 
@@ -2007,14 +2016,25 @@ end
          rbs.coverage.definition-build-failed].map { |rule| diagnostics.count { |d| d.qualified_rule == rule } }
     end
 
+    # Issue #799 — the unsatisfied `conforms-to` row is the one project-signature row positioned at a `.rbs`
+    # LINE rather than at `.rigor.yml:1:1`, and it reads that line off an annotation the cached environment
+    # hands back. So "the row survives" is not the whole contract: it has to survive at the same place.
+    def conformance_position(diagnostics)
+      row = diagnostics.find { |d| d.qualified_rule == "rbs_extended.unsatisfied-conformance" }
+      row && [File.basename(row.path), row.line, row.column]
+    end
+
     it "keeps the project-signature rows across a warm nothing-changed run and an empty-closure recheck" do
       Dir.mktmpdir do |dir|
         config = project_signature_fixture(dir)
         cache_root = File.join(dir, ".rigor", "cache")
-        store = Rigor::Cache::Store.new(root: cache_root)
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
         fp = fingerprint(config, dir)
+        # A fresh `Store` per call, because a warm run is a second PROCESS: `Store#fetch_or_compute`
+        # memoises per instance, so a shared one would hand the second run the very environment object the
+        # first one built and never exercise the Marshal round trip the rows below are about (#799).
         incremental = lambda do
+          store = Rigor::Cache::Store.new(root: cache_root)
           guarded_run_incremental(described_class.new(configuration: config, paths: [dir], cache_store: store),
                                   snapshot: snapshot, fingerprint: fp)
         end
@@ -2026,10 +2046,17 @@ end
 
         session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
         guarded_baseline(session)
-        expect(project_signature_counts(guarded_recheck(session).diagnostics)).to eq([1, 1, 1])
+        recheck = guarded_recheck(session).diagnostics
+        expect(project_signature_counts(recheck)).to eq([1, 1, 1])
 
         full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
         expect(project_signature_counts(full)).to eq([1, 1, 1])
+
+        # Issue #799: the annotation sits on line 5 of `conform.rbs`, and the warm run reads it out of the
+        # Marshal-loaded environment. It used to come back as `1:1` there, which moved the row on a tree
+        # nothing had changed and made `--verify-incremental` fail against the full run below.
+        positions = [cold, warm, recheck, full].map { |rows| conformance_position(rows) }
+        expect(positions).to eq([["conform.rbs", 5, 1]] * 4)
       end
     end
   end

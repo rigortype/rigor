@@ -604,4 +604,42 @@ RSpec.describe Rigor::RbsExtended::ConformanceChecker do
       end
     end
   end
+
+  # Issue #799 — the record's `location` is the only thing downstream has to position the row with, and it is
+  # read off an environment that a warm run gets back from the ADR-54 cache. The two `Store` instances are
+  # what makes the second scan a real cache HIT: the blob goes to disk and comes back through `Marshal.load`,
+  # which is where the position used to be lost (the row moved to `1:1`, and `--verify-incremental` failed).
+  describe ".scan against a cache-loaded environment" do
+    let(:fixture) do
+      <<~RBS
+        interface _Reads
+          def read: () -> String
+        end
+
+        %a{rigor:v1:conforms-to _Reads}
+        class NeedsRead
+        end
+      RBS
+    end
+
+    def unsatisfied_position(tmpdir, store)
+      loader = Rigor::Environment::RbsLoader.new(signature_paths: [tmpdir], cache_store: store)
+      record = described_class.scan(loader).find { |r| r.is_a?(described_class::Unsatisfied) }
+      location = record.location
+      [location.buffer.name.to_s, location.start_line, location.start_column]
+    end
+
+    it "positions the record at the directive, cold and warm alike" do
+      Dir.mktmpdir("rigor-conformance-cache-spec-") do |tmpdir|
+        File.write(File.join(tmpdir, "fixture.rbs"), fixture)
+        cache_root = File.join(tmpdir, ".rigor", "cache")
+
+        cold = unsatisfied_position(tmpdir, Rigor::Cache::Store.new(root: cache_root))
+        warm = unsatisfied_position(tmpdir, Rigor::Cache::Store.new(root: cache_root))
+
+        expect(cold).to eq([File.join(tmpdir, "fixture.rbs"), 5, 0])
+        expect(warm).to eq(cold)
+      end
+    end
+  end
 end

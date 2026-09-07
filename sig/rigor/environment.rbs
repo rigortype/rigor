@@ -13,8 +13,10 @@ module Rigor
     attr_reader synthetic_method_index: untyped?
     attr_reader project_patched_methods: untyped?
     attr_reader hkt_registry: untyped?
-    # Issue #784 — `[error_class_name, first_message_line, raw_frame_or_nil]` when the RBS-overlay HKT scan
-    # raised at its seam, nil when it built or was never demanded. Declared `untyped?` like its neighbours:
+    # Issue #784 — `[error_class_name, first_message_line, raw_frame_or_nil, stage]` when either stage of
+    # the HKT-registry build raised at its seam (`:scan`, the RBS `type`-alias scan; `:overlay`, the
+    # plugin-manifest aggregation — #791), nil when both built or were never demanded. Declared `untyped?`
+    # like its neighbours:
     # `rigor sig-gen` emits nothing for this delegating reader, and the tuple shape is documented here.
     def hkt_scan_failure: () -> untyped?
 

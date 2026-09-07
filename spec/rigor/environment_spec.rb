@@ -297,14 +297,69 @@ RSpec.describe Rigor::Environment do
           # overlay scan on top of it raised.
           expect(registry).to be_registered(:"json::value")
           expect(env.hkt_scan_failure).to be_an(Array)
-          error_class, first_line, frame = env.hkt_scan_failure
+          error_class, first_line, frame, stage = env.hkt_scan_failure
           expect(error_class).to eq("NameError")
           expect(first_line).to eq("simulated scan bug")
           expect(frame).to be_a(String).or(be_nil)
+          expect(stage).to eq(:scan)
 
           # Memoised: the degraded registry is what keeps a second demand from re-attempting the scan.
           env.hkt_registry
           expect(Rigor::Inference::HktRegistry).to have_received(:scan_rbs_loader).once
+        end
+      end
+
+      # Issue #791 — the plugin-overlay merge used to sit one line ABOVE the #784 rescue, so a raise there
+      # escaped `#hkt_registry` altogether. Post-#788 that is not a per-file crash storm but an uncaught
+      # abort of the whole run: the holder memoises only on success, so the raise is re-attempted at every
+      # demand, and the run-owned demands (`PoolCoordinator#hkt_scan_outcome`, `WorkerSession#drain_reporters`)
+      # have no rescue above them.
+      describe "the #791 plugin-overlay stage of the same seam" do
+        # A real `Plugin::Registry` subclass rather than a stub: the registry the run holds is FROZEN, so
+        # `allow_any_instance_of` cannot reach it, and a bare double would have to answer every surface the
+        # Environment consults at construction.
+        let(:raising_plugin_registry) do
+          Class.new(Rigor::Plugin::Registry) do
+            def hkt_overlay_registry
+              raise ArgumentError, "plugin \"hktboom\" raised while contributing HKT registrations: boom"
+            end
+          end.new
+        end
+
+        it "records the overlay stage and degrades to the bundled base" do
+          env = described_class.for_project(signature_paths: [], plugin_registry: raising_plugin_registry)
+
+          # The bundled base survives — only the plugin overlay was dropped.
+          expect(env.hkt_registry).to be_registered(:"json::value")
+          error_class, first_line, _frame, stage = env.hkt_scan_failure
+          expect(error_class).to eq("ArgumentError")
+          expect(first_line).to include("hktboom")
+          expect(stage).to eq(:overlay)
+        end
+
+        it "layers the user's own `.rbs` HKT registrations on top of the base despite the plugin defect" do
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "box.rbs"), <<~RBS)
+              %a{rigor:v1:hkt_register: uri=user::box arity=1 variance=out bound=untyped}
+              %a{rigor:v1:hkt_define: uri=user::box params=K body=K | nil}
+              class UserHktOverlayDespitePluginDefect
+              end
+            RBS
+
+            env = described_class.for_project(
+              signature_paths: [dir], plugin_registry: raising_plugin_registry
+            )
+
+            expect(env.hkt_registry).to be_registered(:"user::box")
+            expect(env.hkt_scan_failure.last).to eq(:overlay)
+          end
+        end
+
+        it "does not raise out of #hkt_registry — the run-owned demands have no rescue above them" do
+          env = described_class.new(plugin_registry: raising_plugin_registry)
+
+          expect { env.hkt_registry }.not_to raise_error
+          expect { env.hkt_registry }.not_to raise_error
         end
       end
     end

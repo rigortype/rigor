@@ -43,10 +43,12 @@ module Rigor
     #   process.
     # - `:rbs_build` — the analysis ran to completion and every rule fired, over a type universe missing one
     #   class (`rbs.coverage.definition-build-failed`), all of them
-    #   (`rbs.coverage.environment-build-failed`), or only the implicit HKT registrations `type` aliases
-    #   would have contributed (`rbs.coverage.hkt-scan-failed`, issue #784). The first two are degradations
+    #   (`rbs.coverage.environment-build-failed`), or only the HKT registrations the `type` aliases and the
+    #   loaded plugins' manifests would have contributed (`rbs.coverage.hkt-scan-failed`, issues #784 and
+    #   #791). The first two are degradations
     #   the user causes and the diagnostic itself reports; a project can sit on one for a release while it
-    #   fixes its `sig/`. The third is NOT the user's: post-#783 the scan raising is an analyzer defect. It
+    #   fixes its `sig/`. The third is NOT the user's: post-#783 the scan raising is an analyzer defect, and
+    #   the overlay stage is a defect in Rigor or in a plugin the user installed, never in their `sig/`. It
     #   still belongs here rather than under `:check_rule`, because the question this classification
     #   answers is "may a consumer still read the run's diagnostics?" — and it may: every rule fired. What
     #   differs is whether the run is a valid measurement OF RIGOR, which is {.analyzer_defect?}'s question.

@@ -1,0 +1,22 @@
+[
+  {"query": "I'm about to kick off the FP-sweep with 4 parallel subagents all editing files under lib/rigor/inference. They keep deleting each other's .rigor/cache and one clobbered another's vendor/bundle last time. Set each of them up with its own isolated checkout of this repo.", "should_trigger": true},
+  {"query": "the docs-review agent keeps invoking exe/rigor for real CLI output while I'm halfway through rewriting the analyzer in lib/, so it's reading half-written code. can you give it a separate working tree so it stops picking up my in-progress edits", "should_trigger": true},
+  {"query": "I want to bump rbs from 4.1 to 4.2 on a branch and it'll need its own Gemfile.lock. I don't want the resolve to touch the main clone's gems that everything else is using. what's the clean way to get an isolated tree for that here", "should_trigger": true},
+  {"query": "whats the fastest way to spin up a throwaway worktree in this repo with the gem bundle already working so i don't have to sit through a full bundle install", "should_trigger": true},
+  {"query": "does rigor have a helper script for creating worktrees, or do I just run `git worktree add` and then `bundle install` in it by hand every time", "should_trigger": true},
+  {"query": "my worktree at ~/repo/ruby/rigor-wt/issue-777 has an empty references/ruby directory and spec/docs/c_effects_raises_gate_spec.rb is skipping instead of actually running. how do I get the reference checkouts into the worktree", "should_trigger": true},
+  {"query": "I ran `git stash` in one of the rigor-wt worktrees to save some WIP and when I popped it there were changes from a completely different session in my tree. what happened and how do I avoid it", "should_trigger": true},
+  {"query": "set me up one worktree per open PR branch (there are 5 right now) so I can do a parallel review pass with a subagent on each", "should_trigger": true},
+  {"query": "the existing worktrees under rigor-wt each ran their own full bundle install and they're eating 60MB apiece. is there a way to redo them so they share the bundle copy-on-write from the main clone instead", "should_trigger": true},
+  {"query": "I need a clean tree off master to reproduce issue #781 without disturbing my current branch, and I'll need to run the test suite in it", "should_trigger": true},
+  {"query": "run `bundle update` to bump all the gems to their latest versions within the gemspec ranges, then commit the Gemfile.lock", "should_trigger": false},
+  {"query": "vendor the ruby/spec repo as a new git submodule under references/ so I can cross-check our builtin catalogs against the official executable spec", "should_trigger": false},
+  {"query": "create a branch called fix-narrowing-regression off master and check it out, I'm going to start on the bug now", "should_trigger": false},
+  {"query": "I just cloned the rigor repo for the first time on this machine. walk me through getting the dev environment set up so I can run make verify", "should_trigger": false},
+  {"query": "I use git worktrees for my personal blog repo to preview two branches side by side in different terminal tabs. can you show me the git commands for adding and removing one", "should_trigger": false},
+  {"query": "sweep rigor's `check` output across every tagged release of redmine from v4.0.0 onward and tabulate how the surfaced-diagnostic count changes over the release line", "should_trigger": false},
+  {"query": "bump the development Ruby to 4.0.6 across flake.nix, .ruby-version, .tool-versions and the AGENTS.md target-Ruby line", "should_trigger": false},
+  {"query": "references/phpstan is showing as modified in git status and `git reset --hard` keeps aborting on the submodule. how do I get it back to a clean state", "should_trigger": false},
+  {"query": "the parallel spec run keeps OOM-killing my laptop when I have several make verify runs going at once. how many full-suite jobs can this machine actually handle in parallel", "should_trigger": false},
+  {"query": "delete all the local branches that have already been merged into master and prune the stale remote-tracking refs", "should_trigger": false}
+]

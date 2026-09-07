@@ -136,13 +136,19 @@ module Rigor
             if project_files && !project_files.empty?
               env ||= resolve_sequential_environment(source_files: project_files)
             end
-            # #788 round 6 — the residual pass (`Runner#effect_annotation_residual_diagnostics`) reads the
-            # carrier this snapshot fills; the non-empty path fills it in `analyze_files_sequentially`. A
-            # warm recheck that changed nothing used to keep `effect.annotations-unchecked` alive through the
-            # per-file cache; now that run-level rows are never cached, the empty path must fill the carrier
-            # itself or the inline-only row goes 1 → 0 on every null recheck. This retires the #441
-            # "`.rbs` lane only when the run analyses nothing" boundary: its cost premise (no environment
-            # on this path) stopped holding the moment the branch above resolved one.
+            # #788 rounds 6 and 9 — everything the run owes from its environment that no per-file analysis
+            # produces is taken here, the way `analyze_files_sequentially` takes it: the project-signature
+            # state (`synthesized-namespace`, `quarantined-signature`, `environment-build-failed`, the
+            # conformance results), the effect-annotation carrier the residual pass reads, and the HKT-scan
+            # outcome. Now that run-level rows are never served from the per-file cache, this branch is the
+            # only producer on a warm recheck that changed nothing — leaving any of them out turned a red
+            # project green on its second `--incremental` run (the inline-only `effect.annotations-unchecked`
+            # went 1 → 0; a quarantined `signature_paths:` file went 1 → 0). Definition-build failures are
+            # deliberately NOT read: #696 forbids a Rigor-owned demand from contributing, and nothing else
+            # demanded a definition on this path (#796). This also retires the #441 "`.rbs` lane only when the run
+            # analyses nothing" boundary: its cost premise (no environment on this path) stopped holding the
+            # moment the branch above resolved one.
+            snapshot_project_signature_state(env)
             snapshot_effect_annotation_carrier(env&.rbs_loader)
             record_hkt_scan_failure(hkt_scan_outcome(env))
             return []
@@ -203,7 +209,8 @@ module Rigor
             return
           end
 
-          loader = environment.rbs_loader
+          # nil-safe: the empty-closure path reaches here with no environment when the project has no files.
+          loader = environment&.rbs_loader
           @snapshots.synthesized_namespaces = loader&.synthesized_namespaces || []
           @snapshots.quarantined_signatures = loader&.quarantined_signatures || []
           @snapshots.env_build_failure = loader&.env_build_failure
@@ -450,13 +457,26 @@ module Rigor
           # The files no worker reported — every file of a worker that died, and any file in flight when
           # it did. Re-analysed in process, exactly as the fork backend re-analyses a dead child's slice.
           degraded = files.reject { |path| results_by_path.key?(path) }
-          unless degraded.empty?
-            environment = build_runner_environment(source_files: source_files)
-            degraded.each { |path| results_by_path[path] = @analyze_file.call(path, environment) }
-          end
+          reanalyze_degraded_in_process(degraded, results_by_path, source_files: source_files)
 
           diagnostics = Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
           degraded.empty? ? diagnostics : diagnostics.unshift(pool_degraded_diagnostic(degraded.size, "ractor"))
+        end
+
+        # The Ractor backend's degrade: the files of a worker that died are re-analysed on a LOCAL
+        # environment built over the whole project. That worker never sent `:done`, so nothing drains its
+        # reporters — and the local environment has no session to drain either — so the run-level state
+        # this analysis produced is taken here, exactly as the sequential fallback takes it: the
+        # definition-build failures the re-analysis demanded (#696) and the HKT-scan outcome, demanded
+        # once more by the run itself (#784 — a rescued scan failure otherwise vanished with the worker).
+        # The fork backend needs none of this: it re-analyses on the parent {WorkerSession} and drains it.
+        def reanalyze_degraded_in_process(degraded, results_by_path, source_files:)
+          return if degraded.empty?
+
+          environment = build_runner_environment(source_files: source_files)
+          degraded.each { |path| results_by_path[path] = @analyze_file.call(path, environment) }
+          record_definition_build_failures(environment.rbs_loader&.definition_build_failures)
+          record_hkt_scan_failure(hkt_scan_outcome(environment))
         end
 
         # ADR-15 Amendment (2026-05-20) — fork-based worker pool, the active backend for `workers > 0`.

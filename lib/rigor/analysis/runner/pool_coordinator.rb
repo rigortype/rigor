@@ -130,6 +130,10 @@ module Rigor
           # first demand), so a snapshot taken beside the ones above — which run BEFORE `files.flat_map` —
           # would read an empty list on every run, including the ones this diagnostic exists for.
           record_definition_build_failures(environment&.rbs_loader&.definition_build_failures)
+          # Issue #784 — same timing contract, same reason: the HKT scan is first demanded from inside a
+          # file's analysis (the dispatcher's Singleton-receiver tier), so a snapshot taken any earlier
+          # would read nil on every run.
+          record_hkt_scan_failure(environment&.hkt_scan_failure)
           if @collect_stats
             loader = environment.rbs_loader
             @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
@@ -576,6 +580,10 @@ module Rigor
           # `fork` is unavailable (Windows) and on `--incremental` / effects runs without it: a run that
           # degraded to sequential must not also report less than a sequential run would.
           record_definition_build_failures(loader&.definition_build_failures)
+          # Issue #784 — same reasoning: this path's Environment IS the one that reached the scan, so it
+          # must snapshot the slot too, or a run that degraded to sequential would report less than a
+          # sequential run would.
+          record_hkt_scan_failure(environment.hkt_scan_failure)
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
           @snapshots.quarantined_signatures =
@@ -619,6 +627,9 @@ module Rigor
           end
           # Issue #696. Fetched with a default so an older drain stays compatible, exactly as the line above.
           record_definition_build_failures(drained[:definition_build_failures])
+          # Issue #784. `Hash#[]` is already a nil default, exactly as `env_build_failure` is snapshotted
+          # elsewhere — an older drain shape simply has no key and records nothing.
+          record_hkt_scan_failure(drained[:hkt_scan_failure])
         end
 
         private
@@ -644,6 +655,17 @@ module Rigor
 
           @snapshots.definition_build_failures =
             (@snapshots.definition_build_failures + failures).uniq(&:first).freeze
+        end
+
+        # Issue #784 — first-wins, unlike {#record_definition_build_failures}'s accumulate-and-dedup. That
+        # method accumulates because each pool WORKER owns its own loader and its own per-class memo, so a
+        # collapsed class can genuinely be observed by only some workers and the run's set is the union.
+        # The HKT scan has no such per-worker variation: `Environment#hkt_registry` builds from the SAME
+        # `signature_paths:` overlay every worker was handed, so every worker that demands it either all
+        # raise identically or all succeed — there is only ever one tuple to record, and `||=` is correct
+        # (and cheap) rather than an accumulate-and-dedup this slot never needs.
+        def record_hkt_scan_failure(tuple)
+          @snapshots.hkt_scan_failure ||= tuple
         end
 
         # True when the project declares its own `signature_paths:` (the only place the

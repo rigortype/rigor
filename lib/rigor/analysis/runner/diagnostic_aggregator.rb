@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "../crash_signature"
 require_relative "../diagnostic"
 require_relative "../severity_stamp"
 
@@ -39,13 +40,17 @@ module Rigor
         # @param definition_build_failures_snapshot [#call] issue #696 — reader returning the per-class
         #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
         #   conflicting_buffer_names]` tuples. Empty for a healthy sig set.
+        # @param hkt_scan_failure_snapshot [#call] issue #784 — reader returning the `[error_class_name,
+        #   first_message_line, raw_frame_or_nil]` tuple the RBS-overlay HKT scan raised, or nil when the
+        #   scan built (or was never demanded).
         # @param conformance_results_snapshot [#call] reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
                        pool_mode:, cached_plugin_prepare_diagnostics:,
                        pre_eval_diagnostics_from_scanner:, synthesized_namespaces_snapshot:,
                        quarantined_signatures_snapshot:, env_build_failure_snapshot:,
-                       definition_build_failures_snapshot:, conformance_results_snapshot:)
+                       definition_build_failures_snapshot:, hkt_scan_failure_snapshot:,
+                       conformance_results_snapshot:)
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -59,6 +64,7 @@ module Rigor
           @quarantined_signatures_snapshot_reader = quarantined_signatures_snapshot
           @env_build_failure_snapshot_reader = env_build_failure_snapshot
           @definition_build_failures_snapshot_reader = definition_build_failures_snapshot
+          @hkt_scan_failure_snapshot_reader = hkt_scan_failure_snapshot
           @conformance_results_snapshot_reader = conformance_results_snapshot
         end
 
@@ -383,6 +389,21 @@ module Rigor
           [build_rbs_definition_build_failed_diagnostic(failures)]
         end
 
+        # Issue #784 — the fourth rung, narrowest consequence: the implicit HKT scan over RBS `type`
+        # aliases (ADR-20 WD2's `%a{rigor:v1:hkt_register / hkt_define}` overlay AND any recursive `type`
+        # alias in the project's own `.rbs` or an installed `rbs collection`) raised instead of building.
+        # Analysis proceeds over the PRE-scan registry — bundled builtins (`json::value`, …) plus any plugin
+        # overlay — so a `type` alias that would have registered as a type constructor reads its bound
+        # (`Dynamic[top]`) instead. Everything else this run reports is unaffected: no class loses its
+        # method surface, no signature file is skipped, the environment builds. That is why this sits LAST
+        # on the ladder, after its two `rbs.coverage.*` siblings above.
+        def rbs_hkt_scan_failed_diagnostics
+          failure = hkt_scan_failure_snapshot
+          return [] if failure.nil?
+
+          [build_rbs_hkt_scan_failed_diagnostic(failure)]
+        end
+
         def rbs_synthesized_namespace_diagnostics
           synthesized = synthesized_namespaces_snapshot
           return [] if synthesized.nil? || synthesized.empty?
@@ -551,6 +572,46 @@ module Rigor
           sample = names.first(sample_size)
           suffix = names.size > sample_size ? ", and #{names.size - sample_size} more" : ""
           "#{sample.join(', ')}#{suffix}"
+        end
+
+        # Issue #784 — one `:error` row per run, unlike its two `:warning` `rbs.coverage.*` siblings above.
+        # Those two are typically a collision between the user's OWN `sig/` and Rigor's bundled RBS, so an
+        # `:error` default would let a Rigor release turn a green project red with zero user change (ADR-5
+        # / AGENTS.md § FP discipline) — the reason both stay `:warning` by default. This row has no such
+        # neighbour: post-#783 the scan itself raising is an ANALYZER defect, never something a user's
+        # `sig/` could trigger on its own, so there is no green project this could newly redden. And the
+        # run was already non-zero before this row existed — issue #784's seam is what stopped the raise
+        # from reaching every file as N identical `internal analyzer error` rows in the first place, and
+        # THAT per-file rescue is what `Result#success?` was already reading as a failure; this row only
+        # makes the reason legible.
+        #
+        # One row per RUN, not per file: the scan is one build over the whole `signature_paths:` overlay
+        # (memoised — see {Environment#hkt_registry}), so every file that would have demanded it hit the
+        # exact same failure, and a row per file would say the same thing N times.
+        #
+        # `:rbs_build` (via {CrashSignature::RBS_BUILD_FAILURE_RULES}), not `:check_rule`: the analysis ran
+        # to completion over a DEGRADED type universe — every rule still fired, unlike `:check_rule`'s
+        # whole-file replacement — so a consumer gating on {CrashSignature.discards_file_analysis?} must
+        # keep reading this run's diagnostics rather than refuse it as a crash.
+        def build_rbs_hkt_scan_failed_diagnostic(failure)
+          error_class, first_line, frame = failure
+          relative_frame = CrashSignature.relativize_frame(frame)
+          frame_clause = relative_frame ? " at #{relative_frame}" : ""
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "The implicit HKT scan over RBS `type` aliases raised (#{error_class}): " \
+                     "#{first_line}#{frame_clause}. Rigor fell back to the bundled and plugin HKT " \
+                     "registrations, so a recursive `type` alias in your `.rbs` or an installed " \
+                     "`rbs collection` no longer registers as a type constructor and reads its bound " \
+                     "(`Dynamic[top]`) instead — this run is quieter than it should be, not cleaner. " \
+                     "This is an analyzer defect, not a problem with your signatures; please report it " \
+                     "with the message above.",
+            severity: :error,
+            rule: "rbs.coverage.hkt-scan-failed",
+            source_family: :builtin
+          )
         end
 
         # The absolute path is what the loader records; the user thinks in project-relative terms.
@@ -777,6 +838,10 @@ module Rigor
 
         def definition_build_failures_snapshot
           @definition_build_failures_snapshot_reader.call
+        end
+
+        def hkt_scan_failure_snapshot
+          @hkt_scan_failure_snapshot_reader.call
         end
 
         def conformance_results_snapshot

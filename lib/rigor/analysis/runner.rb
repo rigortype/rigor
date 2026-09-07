@@ -994,10 +994,14 @@ module Rigor
         close_effect_graph
         diagnostics += @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_environment_build_failed_diagnostics
-        # Issue #696 — after its env-wide twin and before the synthesized-namespace notice: the three
+        # Issue #696 — after its env-wide twin and before the synthesized-namespace notice: the four
         # `rbs.coverage.*` build conditions surface widest-consequence first, and their relative order is
         # the diagnostic output contract.
         diagnostics += @diagnostic_aggregator.rbs_definition_build_failed_diagnostics
+        # Issue #784 — last of the four, deliberately: it loses only the IMPLICIT HKT registrations a
+        # `type` alias would have contributed, never a class's own declared method surface, so it is the
+        # narrowest-consequence rung on the same ladder.
+        diagnostics += @diagnostic_aggregator.rbs_hkt_scan_failed_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_synthesized_namespace_diagnostics
         diagnostics += @diagnostic_aggregator.conforms_to_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
@@ -1428,7 +1432,7 @@ module Rigor
       # indexes, prepare-diagnostic snapshot, and the four end-of-pass snapshots) is reached through reader
       # procs so each collaborator observes the live ivar value at call time without a back-reference
       # cycle. The reporter accumulators and the {RunSnapshots} sink are shared mutable instances.
-      def build_collaborators # rubocop:disable Metrics/MethodLength
+      def build_collaborators # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
         @pre_passes = ProjectPrePasses.new(
           configuration: @configuration, cache_store: @cache_store, buffer: @buffer,
           plugin_requirer: @plugin_requirer, pool_mode: -> { pool_mode? }
@@ -1463,6 +1467,7 @@ module Rigor
           quarantined_signatures_snapshot: -> { @snapshots.quarantined_signatures },
           env_build_failure_snapshot: -> { @snapshots.env_build_failure },
           definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
+          hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },
           conformance_results_snapshot: -> { @snapshots.conformance_results }
         )
       end

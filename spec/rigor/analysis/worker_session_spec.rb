@@ -347,6 +347,38 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       expect(session.environment.rbs_extended_reporter).to equal(session.rbs_extended_reporter)
       expect(session.environment.boundary_cross_reporter).to equal(session.boundary_cross_reporter)
     end
+
+    # Issue #784 — the pool-drain half. Under the pool the PARENT never analyses a file, so its OWN
+    # Environment never demands `#hkt_registry` and its slot stays nil; draining it out of each worker's
+    # session is the only way `--workers=N` says what `--workers=0` says. `:rbs_build` never trips the
+    # guard (see `spec/support/internal_analyzer_error_guard.rb`), which is exactly this design's point —
+    # `guarded_session_analyze` is used here on purpose, not despite the raise.
+    it "drains the #784 hkt_scan_failure tuple its own Environment recorded" do
+      allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_raise(NameError, "simulated scan bug")
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "code.rb")
+        File.write(path, "JSON.parse(\"{}\")\n")
+        session = Dir.chdir(dir) do
+          described_class.new(configuration: Rigor::Configuration.new("paths" => [path]), cache_store: nil)
+        end
+
+        Dir.chdir(dir) { guarded_session_analyze(session, path) }
+
+        error_class, first_line, = session.drain_reporters[:hkt_scan_failure]
+        expect(error_class).to eq("NameError")
+        expect(first_line).to eq("simulated scan bug")
+      end
+    end
+
+    # The must-still-succeed twin: a session that never demands the registry drains nil, not a stale or
+    # placeholder tuple.
+    it "drains a nil hkt_scan_failure when the registry was never demanded" do
+      session = described_class.new(
+        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
+      )
+
+      expect(session.drain_reporters[:hkt_scan_failure]).to be_nil
+    end
   end
 
   describe "editor mode (buffer: BufferBinding)" do

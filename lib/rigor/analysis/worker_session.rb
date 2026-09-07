@@ -244,6 +244,10 @@ module Rigor
       # how you ran it" defect the diagnostic exists to end. Draining it out of the workers is what makes
       # the two paths say the same thing. The payload is `[String, String, String, Array<String>]` tuples —
       # Marshal-clean for the fork backend and shareable for the Ractor one.
+      #
+      # Issue #784 — `hkt_scan_failure` rides the same channel for the same reason: the PARENT's own
+      # Environment never demands `#hkt_registry` under the pool, so its slot is always nil, and draining it
+      # out of the workers is the only way `--workers=N` says what `--workers=0` says.
       def drain_reporters
         {
           rbs_extended: {
@@ -252,7 +256,8 @@ module Rigor
           },
           boundary_cross: @boundary_cross_reporter.entries,
           source_rbs_synthesis: @source_rbs_synthesis_reporter.entries,
-          definition_build_failures: @environment&.rbs_loader&.definition_build_failures || []
+          definition_build_failures: @environment&.rbs_loader&.definition_build_failures || [],
+          hkt_scan_failure: @environment&.hkt_scan_failure
         }
       end
 

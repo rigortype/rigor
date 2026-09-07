@@ -103,8 +103,19 @@ module Rigor
         frames = error.backtrace
         return nil if frames.nil? || frames.empty?
 
-        (frames.find { |f| f.include?("/lib/rigor/") } || frames.first)
-          .sub(%r{\A.*/(lib/rigor/)}, '\1')
+        relativize_frame(frames.find { |f| f.include?("/lib/rigor/") } || frames.first)
+      end
+
+      # The repo-relative half of {.crash_frame}, pulled out on its own so a second caller — the #784
+      # `rbs.coverage.hkt-scan-failed` diagnostic, which stores its raw frame across a `Marshal` boundary
+      # (the fork pool) rather than deriving it fresh from a live `Exception` — can relativize the frame it
+      # already has without re-deriving `.crash_frame`'s "which frame" choice. Nil-safe, and a no-op (`sub`
+      # never matches) on a frame with no `lib/rigor/` segment at all.
+      #
+      # @param frame [String, nil]
+      # @return [String, nil]
+      def relativize_frame(frame)
+        frame&.sub(%r{\A.*/(lib/rigor/)}, '\1')
       end
 
       # @param diagnostic [Rigor::Analysis::Diagnostic]

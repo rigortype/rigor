@@ -712,17 +712,7 @@ module Rigor
         end
 
         def merge_worker_reporters(drained)
-          rbs = drained.fetch(:rbs_extended)
-          rbs.fetch(:unresolved_payloads).each do |entry|
-            @rbs_extended_reporter.record_unresolved(
-              payload: entry.payload, source_location: entry.source_location
-            )
-          end
-          rbs.fetch(:lossy_projections).each do |entry|
-            @rbs_extended_reporter.record_lossy_projection(
-              head: entry.head, source_location: entry.source_location
-            )
-          end
+          merge_rbs_extended_reporter(drained.fetch(:rbs_extended))
           drained.fetch(:boundary_cross).each do |entry|
             @boundary_cross_reporter.record(
               class_name: entry.class_name,
@@ -746,6 +736,31 @@ module Rigor
         end
 
         private
+
+        # Replays one worker's three {RbsExtended::Reporter} streams into the run's own reporter.
+        #
+        # `hkt_directive_errors` (issue #785) is read with `Hash#[]`'s nil default rather than `fetch`,
+        # exactly as `source_rbs_synthesis` is, so an older drain shape simply records nothing. Every worker
+        # scans the same RBS env, so each hands over the same directive entries; the reporter's own
+        # `(message, path, line, column)` dedup is what collapses them back to the single row a
+        # `--workers=0` run prints.
+        def merge_rbs_extended_reporter(rbs)
+          rbs.fetch(:unresolved_payloads).each do |entry|
+            @rbs_extended_reporter.record_unresolved(
+              payload: entry.payload, source_location: entry.source_location
+            )
+          end
+          rbs.fetch(:lossy_projections).each do |entry|
+            @rbs_extended_reporter.record_lossy_projection(
+              head: entry.head, source_location: entry.source_location
+            )
+          end
+          Array(rbs[:hkt_directive_errors]).each do |entry|
+            @rbs_extended_reporter.record_hkt_error(
+              message: entry.message, path: entry.path, line: entry.line, column: entry.column
+            )
+          end
+        end
 
         # Issue #696 — accumulate the per-class `RBS::DefinitionBuilder` failures this run observed, deduped
         # by class name and kept in first-seen order.

@@ -49,10 +49,10 @@ SPEC_ANALYZER_GUARD_ROOT = File.expand_path("../..", __dir__)
 # `allow_plugin_crash: true`, which leaves the check-rule half armed.
 SPEC_ANALYZER_GUARD_ALLOWLIST = {
   "spec/rigor/analysis/worker_session_spec.rb" => {
-    475 => "the buffer half of the pair below: `target_ruby: \"3.0\"` is version-shaped but older than " \
+    492 => "the buffer half of the pair below: `target_ruby: \"3.0\"` is version-shaped but older than " \
            "Prism supports, so `Prism.parse` raises ArgumentError out of the buffer path and the example " \
            "asserts on the resulting `internal analyzer error` row.",
-    580 => "the non-buffer twin, pinning the whole rescue envelope (path, line, column, severity, " \
+    597 => "the non-buffer twin, pinning the whole rescue envelope (path, line, column, severity, " \
            "exception class, message). No `allow_*` flag can express \"expect the check-rule crash\" " \
            "without making the guard a no-op for this call, which is why these two are entries and the " \
            "two plugin-crash examples in the same file are not."

@@ -169,6 +169,8 @@ end
 
 The bundled `json::value` registration backs `JSON.parse` / `YAML.safe_load`'s return discrimination; see handbook chapter 12 for the worked authoring walkthrough.
 
+A directive the parser declines — an un-namespaced `uri=`, a non-positive `arity=`, a `variance=` list that does not match the arity, a missing `params=` or `body=`, an unparseable body, an unrecognised `bound=` — never aborts the scan and never fails the run. The constructor stays unregistered, every other directive in the file still applies, and an `App[<uri>, ...]` naming the missing constructor reads its bound. Because that degradation is otherwise indistinguishable from a signature that never carried the directive, the decline MUST be reported: exactly one `dynamic.rbs-extended.hkt-directive-invalid` `:info` diagnostic at the annotation's line, normative in [diagnostic-policy.md](diagnostic-policy.md) § `rbs_extended.*`.
+
 ## Flow effects and extension contributions
 
 This section is the canonical semantic schema for flow-effect bundles. Extension API documents (ADR-2 and onward) MUST reference this schema when describing how plugins package and return contributions.

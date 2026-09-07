@@ -82,10 +82,15 @@ module Rigor
       DISCARDS_FILE_ANALYSIS_REASON = :check_rule
 
       # The `:rbs_build` rules whose cause is Rigor, not the user's `sig/` (issue #784). Readable for the
-      # user — every rule fired — but NOT a valid measurement of Rigor itself: a harness that scores Rigor's
-      # behaviour (the ADR-69 kill oracles, `tool/mutation`'s fuzz crash detector) must treat one of these
-      # as a crash finding, the way it treats `:check_rule`, or a mutant that re-breaks the HKT scan (#776
-      # was one) scores as a measurement over a silently degraded universe.
+      # user — every rule fired — but NOT a valid measurement of Rigor itself, so a harness that scores
+      # Rigor's behaviour should treat one of these as a crash finding the way it treats `:check_rule`, or
+      # a mutant that re-breaks the HKT scan (#776 was one) scores as a measurement over a silently degraded
+      # universe. What consults it today: `tool/mutation`'s fuzz crash detector — on the severity-resolved
+      # stream, so a `severity_overrides: rbs: off` hides the row from it. What does NOT yet: the ADR-69
+      # kill oracle (`Protection::AnalysisGuard` reads `Result#crashed?`, which excludes every
+      # `:rbs_build` row), and both harnesses still reuse one Environment across mutants, which memoises
+      # the degraded registry after the first defect. Arming the oracle, inspecting the pre-severity row,
+      # and resetting the Environment are issue #790.
       ANALYZER_DEFECT_RULES = %w[
         rbs.coverage.hkt-scan-failed
       ].freeze
@@ -153,7 +158,8 @@ module Rigor
 
       # True when `diagnostic` reports a failure inside Rigor that left the run readable but invalid as a
       # measurement of Rigor — see {ANALYZER_DEFECT_RULES}. Orthogonal to {.discards_file_analysis?}: the
-      # user-facing tier reads the run, the Rigor-measuring tier refuses it.
+      # user-facing tier reads the run; the Rigor-measuring tier should refuse it (the mutation fuzz does,
+      # the ADR-69 kill oracle does not yet — #790).
       #
       # @param diagnostic [Rigor::Analysis::Diagnostic]
       def analyzer_defect?(diagnostic)

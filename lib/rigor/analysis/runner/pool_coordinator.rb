@@ -139,9 +139,19 @@ module Rigor
             record_hkt_scan_failure(hkt_scan_outcome(env))
             return []
           end
-          return dispatch_pool(files) if pool_mode?
+          # Issue #784 / #793 — `files` is what this run ANALYSES; `source_files` is what its environment
+          # is BUILT over, and the two are the same only on a full run. A narrowed run (`analyze_only`: an
+          # incremental closure, a `--verify-incremental` partition) used to build its environment over the
+          # subset, so plugin-synthesized virtual RBS from every excluded file was missing and the run
+          # scanned a different type universe than the full run it is compared against — a scan failure
+          # whose trigger lived in an excluded file's synthesized RBS fired on the full run and vanished on
+          # the subset. Every environment and worker this run builds now takes the whole project.
+          source_files = project_files || files
+          return dispatch_pool(files, source_files: source_files) if pool_mode?
 
-          analyze_files_sequentially(files, environment || resolve_sequential_environment(source_files: files))
+          analyze_files_sequentially(
+            files, environment || resolve_sequential_environment(source_files: source_files)
+          )
         end
 
         def analyze_files_sequentially(files, environment)
@@ -249,20 +259,24 @@ module Rigor
         # An effects run (ADR-103 WD13) is pinned for exactly the same reason — the Ractor messages carry
         # no side-table channel — and degrades the same way. The degrade is sound rather than merely safe:
         # the sequential fallback still collects, so the effect graph is complete either way.
-        def dispatch_pool(files)
+        # @param source_files [Array<String>] the file list every worker's / the fallback's environment is
+        #   built over — the whole project (issue #793), defaulting to `files` for direct callers.
+        def dispatch_pool(files, source_files: files)
           if @record_dependencies || @record_effects
-            return analyze_files_in_fork_pool(files) if Process.respond_to?(:fork)
+            return analyze_files_in_fork_pool(files, source_files: source_files) if Process.respond_to?(:fork)
 
             return analyze_files_sequentially_fallback(
-              files, reason: "incremental parallelism requires fork; recording sequentially"
+              files, reason: "incremental parallelism requires fork; recording sequentially",
+                     source_files: source_files
             )
           end
           case pool_backend
-          when :ractor then analyze_files_in_pool(files)
-          when :fork   then analyze_files_in_fork_pool(files)
+          when :ractor then analyze_files_in_pool(files, source_files: source_files)
+          when :fork   then analyze_files_in_fork_pool(files, source_files: source_files)
           else
             analyze_files_sequentially_fallback(
-              files, reason: "fork-based parallelism is unavailable on this platform"
+              files, reason: "fork-based parallelism is unavailable on this platform",
+                     source_files: source_files
             )
           end
         end
@@ -328,7 +342,7 @@ module Rigor
         # worker touches comes back as an internal analyzer error. What the code below fixes is the
         # failure MODE, not the backend: the run used to hang forever instead of saying anything. Reviving
         # the backend needs an upstream change, which is why `pool_backend` keeps `fork` as the default.
-        def analyze_files_in_pool(files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+        def analyze_files_in_pool(files, source_files: files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
           # Pre-warm class-level lazy memos on the MAIN Ractor. `Environment::ClassRegistry.default` is the
           # default kwarg threaded through `Environment.new` inside each worker session; lazy-initialising
           # it from a non-main Ractor would trip `Ractor::IsolationError`. Touching it here forces the
@@ -354,8 +368,9 @@ module Rigor
           explain = @explain
           # ADR-32 WD4 — the full project file list travels into every Ractor worker so each worker's
           # WorkerSession can invoke loaded plugins' source_rbs_synthesizers at env-build time. The list is
-          # a frozen Array<String>; cheaply shareable.
-          shareable_source_files = files.map { |path| path.to_s.dup.freeze }.freeze
+          # a frozen Array<String>; cheaply shareable. Issue #793 — it IS the full project now
+          # (`source_files`), not the analyzed subset this comment always described.
+          shareable_source_files = source_files.map { |path| path.to_s.dup.freeze }.freeze
 
           pool = Array.new(@workers) do
             Ractor.new(configuration, cache_root, blueprints, explain, shareable_source_files) do |configuration, cache_root, blueprints, explain, shareable_source_files| # rubocop:disable Layout/LineLength
@@ -427,7 +442,7 @@ module Rigor
           # it did. Re-analysed in process, exactly as the fork backend re-analyses a dead child's slice.
           degraded = files.reject { |path| results_by_path.key?(path) }
           unless degraded.empty?
-            environment = build_runner_environment(source_files: files)
+            environment = build_runner_environment(source_files: source_files)
             degraded.each { |path| results_by_path[path] = @analyze_file.call(path, environment) }
           end
 
@@ -447,7 +462,7 @@ module Rigor
         #
         # A child that exits non-zero (crash / unmarshalable payload) is degraded: the parent re-analyses
         # that slice in-process and prepends a `pool-degraded` warning.
-        def analyze_files_in_fork_pool(files) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+        def analyze_files_in_fork_pool(files, source_files: files) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
           Environment::ClassRegistry.default
 
           session = WorkerSession.new(
@@ -458,7 +473,7 @@ module Rigor
             synthetic_method_index: synthetic_method_index,
             project_patched_methods: project_patched_methods,
             project_scope_seed: project_scope_seed,
-            source_files: files,
+            source_files: source_files,
             record_dependencies: @record_dependencies
           )
           # Force the full RBS load on the parent so children copy-on-write inherit a warm Environment
@@ -595,8 +610,11 @@ module Rigor
         # (currently: `--no-cache` would force workers through `EnvironmentLoader.new`), degrade to
         # sequential analysis with a `:warning` `pool-degraded` diagnostic at run start. The actual
         # per-file analysis runs on the coordinator, identical to the default sequential path.
-        def analyze_files_sequentially_fallback(files, reason:)
-          environment = build_runner_environment
+        # @param source_files [Array<String>] issue #793 — the whole project, so this path's environment
+        #   carries the same plugin-synthesized RBS the pool workers' would. It used to build over `[]`,
+        #   i.e. with no synthesized RBS at all, even on a full run.
+        def analyze_files_sequentially_fallback(files, reason:, source_files: files)
+          environment = build_runner_environment(source_files: source_files)
           snapshot_effect_annotation_carrier(environment.rbs_loader)
           diagnostics = files.flat_map { |path| @analyze_file.call(path, environment) }
           loader = environment.rbs_loader

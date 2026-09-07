@@ -110,7 +110,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive(:dispatch_pool).and_return([:pool_result])
 
       expect(coordinator.analyze_files(["a.rb"])).to eq([:pool_result])
-      expect(coordinator).to have_received(:dispatch_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:dispatch_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "routes to the sequential path with the caller-supplied environment when pool mode is off" do
@@ -304,6 +304,26 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(snapshots.hkt_scan_failure).to eq(tuple)
     end
 
+    # Issue #793 — a NON-empty narrowed run must build its environment over the whole project too, or the
+    # plugin-synthesized RBS of every excluded file is missing and the run scans a different type universe
+    # than the full run it is compared against. `files` is what is analysed; `source_files:` is what the
+    # environment is built over.
+    it "builds a narrowed run's environment over the whole project, not the analyze set (#793)" do
+      resolved = instance_double(Rigor::Environment, rbs_loader: nil, hkt_registry: nil, hkt_scan_failure: nil)
+      allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
+      analyzed = []
+      coordinator = build_coordinator(analyze_file: lambda { |path, _env|
+        analyzed << path
+        []
+      })
+
+      coordinator.analyze_files(["a.rb"], project_files: ["a.rb", "b.rb"])
+
+      expect(analyzed).to eq(["a.rb"])
+      expect(Rigor::Environment).to have_received(:for_project).with(hash_including(source_files: ["a.rb",
+                                                                                                   "b.rb"])).once
+    end
+
     # The must-still-succeed twin: a project with NO files — even when `analyze_only` narrowed it to
     # `Set[]`, which a recheck over an empty project does — has nobody who could have demanded a registry,
     # and the coordinator must not build an environment just to ask. An empty project pays no env build
@@ -480,7 +500,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive(:analyze_files_in_fork_pool).and_return([:fork_result])
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:fork_result])
-      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "degrades a recording run to sequential when fork is unavailable, " \
@@ -492,7 +512,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:seq_result])
       expect(coordinator).to have_received(:analyze_files_sequentially_fallback).with(
-        ["a.rb"], reason: a_string_matching(/incremental parallelism requires fork/)
+        ["a.rb"], reason: a_string_matching(/incremental parallelism requires fork/), source_files: ["a.rb"]
       )
     end
 
@@ -501,7 +521,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive_messages(pool_backend: :ractor, analyze_files_in_pool: [:ractor_result])
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:ractor_result])
-      expect(coordinator).to have_received(:analyze_files_in_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:analyze_files_in_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "routes to the fork pool when pool_backend resolves to :fork" do
@@ -509,7 +529,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive_messages(pool_backend: :fork, analyze_files_in_fork_pool: [:fork_result])
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:fork_result])
-      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "degrades to sequential when pool_backend resolves to :sequential (no fork-capable backend)" do
@@ -519,7 +539,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:seq_result])
       expect(coordinator).to have_received(:analyze_files_sequentially_fallback).with(
-        ["a.rb"], reason: a_string_matching(/fork-based parallelism is unavailable/)
+        ["a.rb"], reason: a_string_matching(/fork-based parallelism is unavailable/), source_files: ["a.rb"]
       )
     end
   end

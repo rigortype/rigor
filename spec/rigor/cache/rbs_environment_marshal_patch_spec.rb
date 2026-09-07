@@ -82,8 +82,9 @@ RSpec.describe "RBS name Marshal hooks (rbs_environment_marshal_patch)" do
 
   # Issue #799 — the two `conforms-to` rows are positioned at the `%a{...}` the author wrote (there is no
   # Ruby `def` a missing interface method could be reported at), so an annotation's location is the one
-  # position in a cached environment that a diagnostic reads. Through `RBS::Location#_dump` it collapsed to `1:1`, which moved the row on a warm
-  # run and made `--verify-incremental` fail on any project carrying an unsatisfied directive.
+  # position in a cached environment that a diagnostic reads. Through `RBS::Location#_dump` it collapsed to
+  # `1:1`, which moved the row on a warm run and made `--verify-incremental` fail on any project carrying
+  # an unsatisfied directive.
   describe "RBS::AST::Annotation" do
     def annotations_in(source)
       buffer = RBS::Buffer.new(name: "fixture.rbs", content: source)

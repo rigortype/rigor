@@ -944,10 +944,10 @@ normalises rows by position, and only one side of the comparison
 runs against the cached environment), and a warm `--incremental`
 run moved the row on a tree that had not changed. Scoping the
 carry to annotations rather than doing it in `RBS::Location#_dump`
-is what keeps it free: positions on every node measured +2.9% on
-the environment blob, annotations number in the hundreds and
-their payload is a linkable object graph, so the measured delta
-is +1.4 KB on a ~10 MB blob.
+is what keeps it free: a Location hangs off every AST node, and
+carrying its position measured +2.9% on the environment blob,
+where the same carry on annotations alone — 18 of them in that
+env — measured +1.4 KB on ~10 MB.
 
 A blob written before the carry still loads — Marshal encodes an
 ivar dump and a `marshal_dump` payload differently, and only the

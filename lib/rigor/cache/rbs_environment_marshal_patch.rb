@@ -41,17 +41,17 @@ require_relative "annotation_location"
 #   only readers: {Rigor::RbsExtended::EnvelopeScanner} positions `effect.unknown-label` at an annotation
 #   too, but reaches it by parsing the project's own `.rbs` rather than the built env — refusing this very
 #   loss is one of the two reasons it does.) Cold the row is `sig/buffer.rbs:6:1`; through a `_dump`ed
-#   location it collapsed to `1:1`, which made
-#   `--verify-incremental` fail outright on any project carrying an unsatisfied directive (the replica
-#   normalises rows by position, and only one side of the comparison runs against the cached env) and made a
-#   warm `--incremental` run move a row on a tree that had not changed. The carry is scoped to annotations
-#   rather than done in `_dump` for the reason the paragraph above gives: positions on EVERY node measured
-#   +2.9% on Rigor's own env (9,941K to 10,229K) on top of the names, and no other node's position is read.
-#   Annotations number in the hundreds, their payload links their name String once per buffer instead of
-#   once per Location, and the measured blob delta is below the noise floor. `Cache::Store::FORMAT_VERSION`
-#   is bumped to 4 for the same reason it was bumped to 3: a pre-change blob still loads (Marshal encodes an
-#   ivar dump and a `marshal_dump` payload differently, and only the latter reaches `marshal_load`), so
-#   without the bump a stale blob would keep reporting the moved position indefinitely.
+#   location it collapsed to `1:1`, which made `--verify-incremental` fail outright on any project carrying
+#   an unsatisfied directive (the replica normalises rows by position, and only one side of the comparison
+#   runs against the cached env) and made a warm `--incremental` run move a row on a tree that had not
+#   changed. The carry is scoped to annotations rather than done in `_dump` for the reason the paragraph
+#   above gives: a Location hangs off every AST node, and carrying its position measured +2.9% on Rigor's
+#   own env (9,941K to 10,229K) on top of the names. An annotation is rare by comparison — 18 of them in
+#   that same env — so the same carry costs +1.4K there, which is the whole argument for scoping it here
+#   rather than widening `_dump`. `Cache::Store::FORMAT_VERSION` is bumped to 4 for the same reason it was
+#   bumped to 3: a pre-change blob still loads (Marshal encodes an ivar dump and a `marshal_dump` payload
+#   differently, and only the latter reaches `marshal_load`), so without the bump a stale blob would keep
+#   reporting the moved position indefinitely.
 #
 # Idempotent: the guard checks `method_defined?(:_dump)` so requiring this file twice (or against an upstream
 # rbs that adds Marshal hooks itself) is a no-op.
@@ -92,9 +92,6 @@ module RBS
     class Annotation
       # Carries the annotation's POSITION across the cache, not just its file. See the header's fourth
       # bullet for why this one AST node opts out of the position-dropping `RBS::Location#_dump` above.
-      #
-      # The payload is a linkable object graph (a `marshal_dump` Array, unlike `_dump`'s raw bytes), so the
-      # path String is written once per buffer rather than once per annotation.
       unless method_defined?(:marshal_dump)
         def marshal_dump
           [string, Rigor::Cache::AnnotationLocation.dump(location)]

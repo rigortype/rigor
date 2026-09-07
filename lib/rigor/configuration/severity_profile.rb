@@ -167,20 +167,20 @@ module Rigor
       # Resolves the configured severity for a diagnostic given the active profile and any per-rule
       # overrides.
       #
-      # @param rule [String, nil] canonical rule id (`call.undefined-method`).
-      # @param authored_severity [Symbol] severity the rule emitted the diagnostic with (`:error`, `:warning`,
-      #   `:info`).
-      # @param profile [Symbol] one of {VALID_PROFILES}; falls back to {DEFAULT_PROFILE} for unknown values.
-      # @param overrides [Hash{String => Symbol}] per-rule severity overrides from `.rigor.yml`'s
-      #   `severity_overrides:` map. Keys are canonical rule ids; values are {VALID_SEVERITIES} symbols.
-      #   Family-wildcard keys (`call`) match every rule under that prefix.
-      # @param bleeding_edge_overrides [Hash{String => Symbol}] the severity map imposed by the active ADR-50
-      #   § WD2 bleeding-edge features ({Rigor::BleedingEdge.severity_overrides_for}). Consulted *below* the
-      #   user's own `overrides` (so an explicit `severity_overrides:` entry, exact or family wildcard,
-      #   always wins) and *above* the profile table. Exact rule ids only — the overlay never carries family
-      #   wildcards. Empty while the overlay is unpopulated, so the default leaves resolution bit-for-bit
-      #   unchanged.
-      # @return [Symbol] the resolved severity. Returns `:off` to mean "drop the diagnostic entirely".
+      # @rbs rule: String? -- Canonical rule id (`call.undefined-method`).
+      # @rbs authored_severity: Symbol --
+      #   Severity the rule emitted the diagnostic with (`:error`, `:warning`, `:info`).
+      # @rbs profile: Symbol -- One of {VALID_PROFILES}; falls back to {DEFAULT_PROFILE} for unknown values.
+      # @rbs overrides: Hash[String, Symbol] --
+      #   Per-rule severity overrides from `.rigor.yml`'s `severity_overrides:` map. Keys are canonical rule ids;
+      #   values are {VALID_SEVERITIES} symbols. Family-wildcard keys (`call`) match every rule under that prefix.
+      # @rbs bleeding_edge_overrides: Hash[String, Symbol] --
+      #   The severity map imposed by the active ADR-50 § WD2 bleeding-edge features
+      #   ({Rigor::BleedingEdge.severity_overrides_for}). Consulted *below* the user's own `overrides` (so an explicit
+      #   `severity_overrides:` entry, exact or family wildcard, always wins) and *above* the profile table. Exact
+      #   rule ids only — the overlay never carries family wildcards. Empty while the overlay is unpopulated, so the
+      #   default leaves resolution bit-for-bit unchanged.
+      # @rbs return: Symbol -- The resolved severity. Returns `:off` to mean "drop the diagnostic entirely".
       def resolve(rule:, authored_severity:, profile: DEFAULT_PROFILE, overrides: {}, bleeding_edge_overrides: {})
         return authored_severity if rule.nil?
 

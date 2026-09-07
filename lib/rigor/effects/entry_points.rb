@@ -117,8 +117,6 @@ module Rigor
         # one message: the unregistered-preset error (#433) and the note `rigor effects update` prints
         # when `reach:` is empty (#436) have to give the same answer, and neither can hard-code a list
         # that moves with `plugins:`.
-        #
-        # @return [String]
         def availability
           if @presets.empty?
             return "no plugin in this project registers an entry-point preset — a preset is named by the " \

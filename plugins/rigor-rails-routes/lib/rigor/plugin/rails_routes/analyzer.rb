@@ -62,19 +62,10 @@ module Rigor
         ].freeze
 
         # @param path [String] file being analysed
-        # @param root [Prism::Node]
-        # @param helper_table [HelperTable]
-        # @return [Array<Diagnostic>]
         # The route-helper violations for a single call node (0..2), or `[]` when the node is not an
         # implicit `*_path` / `*_url` helper call, is shadowed by a same-file binding, or is in a
         # suppressed directory. ADR-37: the engine owns the walk; the same-file `shadowing` set is built
         # once as the node-rule file context.
-        #
-        # @param call_node [Prism::Node]
-        # @param helper_table [HelperTable]
-        # @param shadowing [Set<String>]
-        # @param path [String]
-        # @return [Array<Violation>]
         def violations_for(call_node:, helper_table:, shadowing:, path:)
           return [] unless call_node.is_a?(Prism::CallNode) && implicit_helper_call?(call_node)
 

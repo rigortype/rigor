@@ -116,11 +116,10 @@ module Rigor
       # single-level pass.
       DEFAULT_ROUNDS = 3
 
-      # @param files [Array<String>] project `.rb` paths to scan for call sites.
-      # @param environment [Rigor::Environment]
-      # @param target_ruby [String, nil] Prism parse target.
-      # @param max_rounds [Integer] the WD5 fixpoint cap (1 = single-level).
-      # @return [Hash{[String,Symbol,Symbol] => Hash{Symbol => Rigor::Type}}] frozen.
+      # @rbs files: Array[String] -- Project `.rb` paths to scan for call sites.
+      # @rbs target_ruby: String? -- Prism parse target.
+      # @rbs max_rounds: Integer -- The WD5 fixpoint cap (1 = single-level).
+      # @rbs return: Hash[[String, Symbol, Symbol], Hash[Symbol, Rigor::Type]] -- Frozen.
       def self.collect(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS, workers: 0)
         new(files: files, environment: environment, target_ruby: target_ruby,
             max_rounds: max_rounds, workers: workers).collect
@@ -330,7 +329,7 @@ module Rigor
           arg.is_a?(Prism::AssocSplatNode)
       end
 
-      # @return [[String, Symbol, Symbol, Prism::DefNode], nil]
+      # @rbs return: [String, Symbol, Symbol, Prism::DefNode]?
       def resolve_callee(call_node, scope, index)
         if call_node.receiver.nil?
           class_name, kind = implicit_self_target(scope)

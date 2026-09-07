@@ -487,7 +487,7 @@ RSpec.describe Rigor::CLI do
             def foo; end
 
             def bar
-              foo
+              "x"
             end
 
             def baz
@@ -531,9 +531,10 @@ RSpec.describe Rigor::CLI do
 
           # `a = foo`: foo's synthesized `-> void` recovers to `top` (was `Dynamic[top]` under the plugin-free env).
           expect(JSON.parse(foo_out)["type"]).to eq("top")
-          # `b = bar`: bar is un-annotated, so its synthesized skeleton is `() -> untyped` and it stays Dynamic —
-          # proving the flip at 14 is the annotation's synthesis, not an unrelated change.
-          expect(JSON.parse(bar_out)["type"]).to eq("Dynamic[top]")
+          # `b = bar`: bar is un-annotated. Upstream would emit `() -> untyped` and keep Dynamic;
+          # we drop that skeleton so body inference (`"x"`) stands — proving the flip at 14 is the
+          # annotation, not a file-wide untyped overlay.
+          expect(JSON.parse(bar_out)["type"]).to eq("\"x\"")
         end
       end
 

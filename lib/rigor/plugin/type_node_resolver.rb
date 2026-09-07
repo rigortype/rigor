@@ -28,11 +28,11 @@ module Rigor
     # Resolvers SHOULD be stateless and re-entrant; the registry builds the chain once per
     # `Analysis::Runner.run` and may consult any resolver multiple times for the same node.
     class TypeNodeResolver
-      # @param node [Rigor::TypeNode::Identifier, Rigor::TypeNode::Generic] the parser-emitted node the chain is
-      #   asking about.
-      # @param scope [Rigor::TypeNode::NameScope] companion value object (slice 3); slice 2 invocations MAY pass
-      #   `nil` because the chain doesn't exist yet.
-      # @return [Rigor::Type::Base, nil] resolved type, or `nil` to fall through.
+      # @rbs node: Rigor::TypeNode::Identifier | Rigor::TypeNode::Generic --
+      #   The parser-emitted node the chain is asking about.
+      # @rbs scope: Rigor::TypeNode::NameScope --
+      #   Companion value object (slice 3); slice 2 invocations MAY pass `nil` because the chain doesn't exist yet.
+      # @rbs return: Rigor::Type::Base? -- Resolved type, or `nil` to fall through.
       def resolve(node, scope) # rubocop:disable Lint/UnusedMethodArgument
         nil
       end

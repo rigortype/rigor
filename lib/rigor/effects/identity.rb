@@ -45,10 +45,9 @@ module Rigor
       # The effects identity as a hex digest — the form a store with no descriptor of its own (the ADR-46
       # incremental snapshot) carries alongside its payload, and compares verbatim on restore.
       #
-      # @param configuration [Rigor::Configuration]
-      # @param registry [Registry] the vocabulary whose version participates
-      # @param catalog [Catalog] the catalogue whose identity participates
-      # @return [String] hex SHA-256
+      # @rbs registry: Registry -- The vocabulary whose version participates
+      # @rbs catalog: Catalog -- The catalogue whose identity participates
+      # @rbs return: String -- Hex SHA-256
       def digest(configuration:, registry: Registry.default, catalog: Catalog.default, plugin_facts: nil)
         Digest::SHA256.hexdigest(
           [
@@ -66,8 +65,7 @@ module Rigor
       # the analyzed-path set — for free, so "the effects identity is the diagnostics identity plus three
       # things" is a property of the code rather than a claim about it.
       #
-      # @param base [Cache::Descriptor] the run's diagnostics key descriptor
-      # @return [Cache::Descriptor]
+      # @rbs base: Cache::Descriptor -- The run's diagnostics key descriptor
       def descriptor(base:, configuration:, registry: Registry.default, catalog: Catalog.default,
                      plugin_facts: nil)
         Cache::Descriptor.compose(

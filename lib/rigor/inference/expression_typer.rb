@@ -3558,7 +3558,7 @@ module Rigor
       # computation, so a block that both accumulates and mutates captured state keeps its write-back
       # regardless of which arm answers here.
       #
-      # @return [Rigor::Type, nil]
+      # @rbs return: Rigor::Type?
       def try_block_inject_fold(call_node, receiver, arg_types)
         return nil unless INJECT_METHODS.include?(call_node.name)
 
@@ -3577,7 +3577,7 @@ module Rigor
       # Splits the positional args into the optional seed. A Symbol final arg (`inject(seed, :*)`) is the
       # no-block Symbol form and never reaches here (the block guard already failed for it).
       #
-      # @return [Array(Rigor::Type, nil), Boolean] `[seed, has_seed]`
+      # @rbs return: [Rigor::Type, nil] | bool -- `[seed, has_seed]`
       def inject_seed(arg_types)
         case arg_types.size
         when 0 then [nil, false]
@@ -3637,7 +3637,7 @@ module Rigor
       # member is folded; without a seed the first member seeds the memo and the rest are folded. The
       # accumulator is carried as a `Constant` type (so the block body sees a value-pinned param).
       #
-      # @return [Array(Rigor::Type::Constant, nil), Array] `[acc, rest]`
+      # @rbs return: [Rigor::Type::Constant, nil] | Array[untyped] -- `[acc, rest]`
       def inject_constant_start(members, seed, has_seed)
         if has_seed
           return [nil, []] unless seed.is_a?(Type::Constant) && inject_foldable?(seed.value)

@@ -34,22 +34,16 @@ module Rigor
 
       attr_reader :pairs, :required_keys, :optional_keys, :read_only_keys, :extra_keys
 
-      # @param pairs [Hash{Symbol|String => Rigor::Type}] ordered map of
-      #   keys to declared types. Keys MUST be Symbol or String;
-      #   values MUST be Rigor::Type instances. The hash is duped and
-      #   frozen at construction; callers MUST NOT mutate the input
-      #   afterwards (mutation does not affect the carrier, but the
-      #   carrier is a value object).
-      # @param required_keys [Array<Symbol|String>, nil] keys that MUST
-      #   be present. When omitted, every non-optional key is required.
-      #   When supplied without optional_keys, every remaining known key
-      #   is treated as optional.
-      # @param optional_keys [Array<Symbol|String>, nil] keys that MAY
-      #   be absent. Optional absence is not a stored nil.
-      # @param read_only_keys [Array<Symbol|String>] entries that cannot
-      #   be written through this shape view.
-      # @param extra_keys [Symbol] :closed rejects keys outside pairs;
-      #   :open permits them.
+      # @rbs pairs: Hash[Symbol | String, Rigor::Type] --
+      #   Ordered map of keys to declared types. Keys MUST be Symbol or String; values MUST be Rigor::Type instances.
+      #   The hash is duped and frozen at construction; callers MUST NOT mutate the input afterwards (mutation does
+      #   not affect the carrier, but the carrier is a value object).
+      # @rbs required_keys: Array[Symbol | String]? --
+      #   Keys that MUST be present. When omitted, every non-optional key is required. When supplied without
+      #   optional_keys, every remaining known key is treated as optional.
+      # @rbs optional_keys: Array[Symbol | String]? -- Keys that MAY be absent. Optional absence is not a stored nil.
+      # @rbs read_only_keys: Array[Symbol | String] -- Entries that cannot be written through this shape view.
+      # @rbs extra_keys: Symbol -- :closed rejects keys outside pairs; :open permits them.
       def initialize(pairs = nil, **keywords)
         pairs, policy = split_constructor_args(pairs, keywords)
         validate_pairs!(pairs)

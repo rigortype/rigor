@@ -46,7 +46,7 @@ module Rigor
       LINE_ENUMERATION_CAP = 40
       private_constant :LINE_ENUMERATION_CAP
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         buffer = Options.resolve_buffer_binding(options, err: @err)

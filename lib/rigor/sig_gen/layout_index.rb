@@ -21,22 +21,19 @@ module Rigor
     # in multiple files for additive member contributions, but the writer only needs one canonical target per
     # class.
     class LayoutIndex
-      # @param signature_paths [Array<String, Pathname>, nil]
       #   the `.rigor.yml`-configured signature directories.
       #   When `nil` or empty, falls back to `<project_root>/sig`
       #   if it exists (matching `Environment.for_project`'s
       #   auto-detection convention).
-      # @param project_root [String, Pathname]
       def initialize(signature_paths:, project_root: Dir.pwd)
         @signature_paths = resolve_paths(signature_paths, project_root)
         @index = nil
       end
 
-      # @param class_name [String] fully-qualified Ruby class
-      #   name (e.g. `"Rigor::Type::Top"`).
-      # @return [Pathname, nil] absolute path of the sig file
-      #   that already declares this class, or `nil` when no
-      #   existing declaration is found.
+      # @rbs class_name: String -- Fully-qualified Ruby class name (e.g. `"Rigor::Type::Top"`).
+      # @rbs return: Pathname? --
+      #   Absolute path of the sig file that already declares this class, or `nil` when no existing declaration is
+      #   found.
       def file_for(class_name)
         index[class_name]
       end

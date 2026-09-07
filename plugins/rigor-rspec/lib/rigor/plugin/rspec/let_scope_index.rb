@@ -45,7 +45,6 @@ module Rigor
         # ADR-52 slice 5a — every `let` / `subject` name declared anywhere in the file, across all describe
         # scopes. Feeds the plugin's `dynamic_return file_methods:` gate: the engine only consults the rule
         # for a call whose name appears here; the precise line-scoped resolution stays in `let_block_at`.
-        # @return [Array<Symbol>]
         def let_names
           @records.flat_map { |rec| rec.lets.keys }.uniq
         end

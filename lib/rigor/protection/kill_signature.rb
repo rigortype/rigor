@@ -15,14 +15,12 @@ module Rigor
     module KillSignature
       module_function
 
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
-      # @return [Array] the comparison key.
+      # @rbs return: Array[untyped] -- The comparison key.
       def of(diagnostic)
         [diagnostic.rule, diagnostic.path, diagnostic.line, diagnostic.column, diagnostic.message]
       end
 
-      # @param diagnostics [Enumerable<Rigor::Analysis::Diagnostic>]
-      # @return [Set<Array>] the signature set of `diagnostics`.
+      # @rbs return: Set[Array[untyped]] -- The signature set of `diagnostics`.
       def signatures_of(diagnostics)
         diagnostics.to_set { |diagnostic| of(diagnostic) }
       end

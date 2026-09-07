@@ -145,27 +145,20 @@ module Rigor
       EMPTY_NESTING = [].freeze
       private_constant :EMPTY_NESTING
 
-      # @param scope [Rigor::Scope]
-      # @param tracer [Rigor::Inference::FallbackTracer, nil]
-      # @param on_enter [#call, nil] optional `(node, scope) ->` callable
-      #   invoked once at the start of every {#evaluate} call (the node
-      #   itself, *before* its handler runs). Threaded through every
-      #   recursive `sub_eval` so the tooling that builds a per-node
-      #   scope index (`Rigor::Inference::ScopeIndexer`) can record the
-      #   entry scope for every Prism node the evaluator visits without
-      #   the StatementEvaluator carrying any additional state itself.
-      # @param class_context [Array<ClassFrame>] lexical class scope used
-      #   by {#eval_def} to look up the method's RBS signature. Each
-      #   `ClassNode`/`ModuleNode` entry pushes a frame; `SingletonClassNode`
-      #   over `self` flips the innermost frame to singleton mode.
-      # @param converged_loop_recording [Boolean] when true (and an
-      #   `on_enter` recorder is installed), {#eval_loop} re-evaluates a
-      #   fixpoint-tracked loop body ONE extra time from the CONVERGED
-      #   bindings so the last-visit-wins per-node scope index reflects
-      #   the post-writeback state instead of the cap-N intermediate
-      #   assumption (`result *= i` annotating `1 | 2` rather than
-      #   `Integer`). Display-path only — `rigor check` leaves it off,
-      #   keeping its diagnostics and wall-clock unchanged.
+      # @rbs on_enter: untyped --
+      #   Optional `(node, scope) ->` callable invoked once at the start of every {#evaluate} call (the node itself,
+      #   *before* its handler runs). Threaded through every recursive `sub_eval` so the tooling that builds a
+      #   per-node scope index (`Rigor::Inference::ScopeIndexer`) can record the entry scope for every Prism node the
+      #   evaluator visits without the StatementEvaluator carrying any additional state itself.
+      # @rbs class_context: Array[ClassFrame] --
+      #   Lexical class scope used by {#eval_def} to look up the method's RBS signature. Each `ClassNode`/`ModuleNode`
+      #   entry pushes a frame; `SingletonClassNode` over `self` flips the innermost frame to singleton mode.
+      # @rbs converged_loop_recording: bool --
+      #   When true (and an `on_enter` recorder is installed), {#eval_loop} re-evaluates a fixpoint-tracked loop body
+      #   ONE extra time from the CONVERGED bindings so the last-visit-wins per-node scope index reflects the
+      #   post-writeback state instead of the cap-N intermediate assumption (`result *= i` annotating `1 | 2` rather
+      #   than `Integer`). Display-path only — `rigor check` leaves it off, keeping its diagnostics and wall-clock
+      #   unchanged.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze,
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false)
         @scope = scope
@@ -195,9 +188,6 @@ module Rigor
 
       # Evaluate `node` under the receiver scope. Returns `[type, scope']` where `type` is the value the node produces
       # and `scope'` is the scope observable after the node has run. The receiver scope is never mutated.
-      #
-      # @param node [Prism::Node]
-      # @return [Array(Rigor::Type, Rigor::Scope)]
       def evaluate(node)
         @on_enter&.call(node, @scope)
 

@@ -83,15 +83,18 @@ module Rigor
         # Loads the project's configured plugins, runs every `#prepare`, and returns the union of every
         # published `:reachability_roots` and `:reachability_references` fact.
         #
-        # @param configuration [Rigor::Configuration] the loaded project configuration.
-        # @param plugin_requirer [#call] how a plugin gem is brought into the process. The same seam
-        #   `Analysis::Runner` exposes, so a spec can register a plugin class without publishing a gem.
-        # @param cache_store [Rigor::Cache::Store, nil] when given, each plugin's `#prepare` producers read
-        #   and write the same ADR-60 record-and-validate slots they use under `rigor check`, instead of
-        #   recomputing from scratch — a routes parse or a factory discovery is a validated cache read on
-        #   every invocation after the first. Nil keeps the historical recompute-always behaviour.
-        # @return [Contribution] sorted and de-duplicated. Empty whenever the project declares no plugins, no
-        #   plugin contributes anything, or anything at all goes wrong.
+        # @rbs configuration: Rigor::Configuration -- The loaded project configuration.
+        # @rbs plugin_requirer: untyped --
+        #   How a plugin gem is brought into the process. The same seam `Analysis::Runner` exposes, so a spec can
+        #   register a plugin class without publishing a gem.
+        # @rbs cache_store: Rigor::Cache::Store? --
+        #   When given, each plugin's `#prepare` producers read and write the same ADR-60 record-and-validate slots
+        #   they use under `rigor check`, instead of recomputing from scratch — a routes parse or a factory discovery
+        #   is a validated cache read on every invocation after the first. Nil keeps the historical recompute-always
+        #   behaviour.
+        # @rbs return: Contribution --
+        #   Sorted and de-duplicated. Empty whenever the project declares no plugins, no plugin contributes anything,
+        #   or anything at all goes wrong.
         def collect(configuration:, plugin_requirer: ->(name) { require name }, cache_store: nil)
           return Contribution.empty if configuration.plugins.empty?
 

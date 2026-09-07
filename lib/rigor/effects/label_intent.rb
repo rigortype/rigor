@@ -37,11 +37,11 @@ module Rigor
 
       # Whether reporting `token` as an unknown label is justified.
       #
-      # @param token [String] the spelling as written.
-      # @param registry [Rigor::Effects::Registry, nil] the vocabulary AFTER plugin load; `nil` (no
-      #   vocabulary at all) makes every token unjudgeable and therefore silent.
-      # @param siblings [Array<String>] the other tokens of the same list / the same config value.
-      # @return [Boolean]
+      # @rbs token: String -- The spelling as written.
+      # @rbs registry: Rigor::Effects::Registry? --
+      #   The vocabulary AFTER plugin load; `nil` (no vocabulary at all) makes every token unjudgeable and therefore
+      #   silent.
+      # @rbs siblings: Array[String] -- The other tokens of the same list / the same config value.
       def evident?(token, registry, siblings: [])
         return false if registry.nil?
         return false unless Label.valid?(token)

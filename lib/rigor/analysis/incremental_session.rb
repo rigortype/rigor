@@ -42,28 +42,29 @@ module Rigor
         end
       end
 
-      # @param paths [Array<String>, nil] explicit analysis roots; nil (the default) uses the configuration's
-      #   `paths:`.
-      # @param environment [Rigor::Environment, nil] optional shared environment to thread into each internal
-      #   Runner. Long-lived callers and specs can use this to avoid rebuilding the same RBS universe for
-      #   every baseline / recheck / oracle run.
-      # @param cache_store [Rigor::Cache::Store, nil] ADR-85 WD1 — the persistent cache each internal Runner
-      #   exposes to the RBS-env and plugin-producer tiers. A cross-process `--incremental` recheck otherwise
-      #   rebuilt a fresh runner with no store, so every plugin `#prepare` producer (the ADR-9/#74/ADR-60 WD3
-      #   record-and-validate caches) recomputed per invocation — 86% of a Rails warm incremental. Threading
-      #   the store lets those producers serve from disk. `nil` (the default) preserves the pre-#85 behaviour
-      #   the specs assert; the whole-run ADR-45 result cache stays disabled on these runs
-      #   (`Runner#run_result_cacheable?` excludes `record_dependencies` / `analyze_only`).
-      # @param plugin_requirer [#call, nil] optional gem-require hook threaded into each internal Runner
-      #   (mirrors {Runner}'s parameter). nil (the default, and what the CLI passes) uses `Kernel.require`;
-      #   embedders and specs inject a fake so a test plugin registers without touching the real load path.
-      # @param workers [Integer] ADR-46 — the resolved fork-pool worker count threaded into every internal
-      #   analyzer, so a `--incremental` recheck's closure re-analysis parallelises exactly like the standard
-      #   `check` path (the recon's audit: `--workers` / `RIGOR_RACTOR_WORKERS` / `parallel.workers:` were
-      #   silently ignored because `build_runner` passed no `workers:`). 0 (the default, and what the specs and
-      #   `--verify-incremental` gate use) keeps the sequential recording path bit-for-bit unchanged. The fork
-      #   pool records each worker's cross-file reads and marshals them back (PoolCoordinator), so the
-      #   dependency graph a pooled recheck rebuilds equals the sequential one.
+      # @rbs paths: Array[String]? -- Explicit analysis roots; nil (the default) uses the configuration's `paths:`.
+      # @rbs environment: Rigor::Environment? --
+      #   Optional shared environment to thread into each internal Runner. Long-lived callers and specs can use this
+      #   to avoid rebuilding the same RBS universe for every baseline / recheck / oracle run.
+      # @rbs cache_store: Rigor::Cache::Store? --
+      #   ADR-85 WD1 — the persistent cache each internal Runner exposes to the RBS-env and plugin-producer tiers. A
+      #   cross-process `--incremental` recheck otherwise rebuilt a fresh runner with no store, so every plugin
+      #   `#prepare` producer (the ADR-9/#74/ADR-60 WD3 record-and-validate caches) recomputed per invocation — 86% of
+      #   a Rails warm incremental. Threading the store lets those producers serve from disk. `nil` (the default)
+      #   preserves the pre-#85 behaviour the specs assert; the whole-run ADR-45 result cache stays disabled on these
+      #   runs (`Runner#run_result_cacheable?` excludes `record_dependencies` / `analyze_only`).
+      # @rbs plugin_requirer: untyped --
+      #   Optional gem-require hook threaded into each internal Runner (mirrors {Runner}'s parameter). nil (the
+      #   default, and what the CLI passes) uses `Kernel.require`; embedders and specs inject a fake so a test plugin
+      #   registers without touching the real load path.
+      # @rbs workers: Integer --
+      #   ADR-46 — the resolved fork-pool worker count threaded into every internal analyzer, so a `--incremental`
+      #   recheck's closure re-analysis parallelises exactly like the standard `check` path (the recon's audit:
+      #   `--workers` / `RIGOR_RACTOR_WORKERS` / `parallel.workers:` were silently ignored because `build_runner`
+      #   passed no `workers:`). 0 (the default, and what the specs and `--verify-incremental` gate use) keeps the
+      #   sequential recording path bit-for-bit unchanged. The fork pool records each worker's cross-file reads and
+      #   marshals them back (PoolCoordinator), so the dependency graph a pooled recheck rebuilds equals the
+      #   sequential one.
       def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil,
                      workers: 0, buffer: nil)
         @configuration = configuration

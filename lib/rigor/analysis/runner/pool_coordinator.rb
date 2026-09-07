@@ -29,24 +29,14 @@ module Rigor
       # delegated back through an injected `analyze_file` callable so the CheckRules / recorder /
       # plugin-emission machinery stays on the {Runner}.
       class PoolCoordinator # rubocop:disable Metrics/ClassLength
-        # @param configuration [Rigor::Configuration]
-        # @param cache_store [Rigor::Cache::Store, nil]
-        # @param explain [Boolean]
-        # @param workers [Integer]
-        # @param collect_stats [Boolean]
-        # @param buffer [BufferBinding, nil]
-        # @param environment_override [Rigor::Environment, nil]
-        # @param rbs_extended_reporter [RbsExtended::Reporter]
-        # @param boundary_cross_reporter [DependencySourceInference::BoundaryCrossReporter]
-        # @param source_rbs_synthesis_reporter [Plugin::SourceRbsSynthesisReporter]
-        # @param snapshots [RunSnapshots] shared end-of-pass snapshot sink.
-        # @param plugin_registry [#call] reader for the current registry.
-        # @param dependency_source_index [#call] reader.
-        # @param synthetic_method_index [#call] reader.
-        # @param project_patched_methods [#call] reader.
-        # @param project_scope_seed [#call] reader for the cross-file pre-pass seed tables
-        #   (`Runner#project_scope_seed_tables`).
-        # @param analyze_file [#call] `(path, environment) -> diagnostics`.
+        # @rbs snapshots: RunSnapshots -- Shared end-of-pass snapshot sink.
+        # @rbs plugin_registry: untyped -- Reader for the current registry.
+        # @rbs dependency_source_index: untyped -- Reader.
+        # @rbs synthetic_method_index: untyped -- Reader.
+        # @rbs project_patched_methods: untyped -- Reader.
+        # @rbs project_scope_seed: untyped --
+        #   Reader for the cross-file pre-pass seed tables (`Runner#project_scope_seed_tables`).
+        # @rbs analyze_file: untyped -- `(path, environment) -> diagnostics`.
         def initialize(configuration:, cache_store:, explain:, workers:, collect_stats:, # rubocop:disable Metrics/ParameterLists
                        buffer:, environment_override:, rbs_extended_reporter:,
                        boundary_cross_reporter:, source_rbs_synthesis_reporter:,
@@ -521,9 +511,10 @@ module Rigor
           degraded
         end
 
-        # @return [Hash, nil] the child's `{results:, reporters:}` payload, or nil when the child exited
-        #   abnormally or wrote no readable payload. `Marshal.load` is safe here: the blob was written by
-        #   our own forked child to a temp file we created.
+        # @rbs return: Hash[untyped, untyped]? --
+        #   The child's `{results:, reporters:}` payload, or nil when the child exited abnormally or wrote no readable
+        #   payload. `Marshal.load` is safe here: the blob was written by our own forked child to a temp file we
+        #   created.
         def fork_worker_payload(status, out_path)
           return nil unless status.success? && File.exist?(out_path)
 

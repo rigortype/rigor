@@ -36,9 +36,9 @@ module Rigor
 
       module_function
 
-      # @param body [String] the page as it is stored.
-      # @param from [String] its absolute path, so relative targets resolve.
-      # @return [String] the page with every relative link turned into a `rigor docs` key.
+      # @rbs body: String -- The page as it is stored.
+      # @rbs from: String -- Its absolute path, so relative targets resolve.
+      # @rbs return: String -- The page with every relative link turned into a `rigor docs` key.
       def rewrite(body, from:)
         dir = File.dirname(from)
         body.gsub(MARKDOWN_LINK) do

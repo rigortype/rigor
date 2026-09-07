@@ -43,7 +43,7 @@ module Rigor
         rigor-rails-routes rigor-rails-i18n rigor-actioncable rigor-activestorage rigor-rails
       ].freeze
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         configuration = Configuration.load(options.fetch(:config))

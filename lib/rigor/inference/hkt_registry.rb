@@ -99,8 +99,6 @@ module Rigor
 
       attr_reader :registrations, :definitions
 
-      # @param registrations [Array<Registration>]
-      # @param definitions [Array<Definition>]
       def initialize(registrations: [], definitions: [])
         @registrations = registrations.to_h { |r| [r.uri, r] }.freeze
         @definitions = definitions.to_h { |d| [d.uri, d] }.freeze
@@ -123,8 +121,9 @@ module Rigor
         @definitions[uri]
       end
 
-      # @return [HktRegistry] a new registry whose entries are the union of this registry's and
-      #   `other`'s. On URI collisions `other`'s entries win (last-write-wins; OQ3 tentative).
+      # @rbs return: HktRegistry --
+      #   A new registry whose entries are the union of this registry's and `other`'s. On URI collisions `other`'s
+      #   entries win (last-write-wins; OQ3 tentative).
       def merge(other)
         raise ArgumentError, "merge target must be an HktRegistry, got #{other.class}" unless other.is_a?(HktRegistry)
 
@@ -152,14 +151,11 @@ module Rigor
       # collisions per {#merge}'s contract. Fail-soft on per-annotation parse errors (the reporter
       # records an `:info` entry; the other annotations still apply).
       #
-      # @param rbs_loader [Rigor::Environment::RbsLoader]
-      # @param base [HktRegistry] starting registry (typically the bundled
-      #   `Rigor::Builtins::HktBuiltins.registry`).
-      # @param name_scope [Rigor::Environment::NameScope, nil] threaded through to the bound
-      #   resolver for class-name lookups; safe to omit during scanning since hkt bounds are
-      #   typically `untyped` or stdlib classes.
-      # @param reporter [#record, nil] same fail-soft reporter contract the other RBS-extended
-      #   parsers use.
+      # @rbs base: HktRegistry -- Starting registry (typically the bundled `Rigor::Builtins::HktBuiltins.registry`).
+      # @rbs name_scope: Rigor::Environment::NameScope? --
+      #   Threaded through to the bound resolver for class-name lookups; safe to omit during scanning since hkt bounds
+      #   are typically `untyped` or stdlib classes.
+      # @rbs reporter: untyped -- Same fail-soft reporter contract the other RBS-extended parsers use.
 
       # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockLength
       def self.scan_rbs_loader(rbs_loader, base: EMPTY, name_scope: nil, reporter: nil)

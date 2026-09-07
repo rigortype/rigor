@@ -83,11 +83,7 @@ module Rigor
       # have already produced `scope_index` through
       # `Rigor::Inference::ScopeIndexer.index(root, default_scope:)`.
       #
-      # @param path [String] used to populate
-      #   `Diagnostic#path`; the rule does not open files.
-      # @param root [Prism::Node]
-      # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
-      # @return [Array<Rigor::Analysis::Diagnostic>]
+      # @rbs path: String -- Used to populate `Diagnostic#path`; the rule does not open files.
       #
       # ADR-53 B4 — when `node_collectors` is supplied, the converged
       # {Plugin::NodeRuleWalk} traversal has already populated the built-in
@@ -490,9 +486,8 @@ module Rigor
         /\A#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
       private_constant :UNKNOWN_SUPPRESSION_MARKER
 
-      # @return [Array<(Hash{Integer => Set}, Set)>] pair of
-      #   `(line_suppressions, file_suppressions)`. Line
-      #   suppressions are keyed by source line number; file
+      # @rbs return: Array[(Hash{Integer => Set}, Set)] --
+      #   Pair of `(line_suppressions, file_suppressions)`. Line suppressions are keyed by source line number; file
       #   suppressions apply to every line.
       def parse_suppression_comments(comments)
         line_suppressions = Hash.new { |h, k| h[k] = Set.new }
@@ -2880,13 +2875,7 @@ module Rigor
         def build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site = nil, class_name = nil)
           rendered_receiver = receiver_type.describe
           message = "undefined method `#{call_node.name}' for #{rendered_receiver}"
-          # ADR-17 — when the project itself defines this method on the
-          # receiver class somewhere in the file set, name the site and
-          # point at `pre_eval:`. Rigor does not apply project monkey-
-          # patches cross-file automatically, so the diagnostic still
-          # fires, but the enriched message makes it actionable (and
-          # `rigor triage` keys on the structured `project_definition_site`
-          # field to recommend `pre_eval:` with high confidence).
+          # See {#project_definition_site}.
           if definition_site
             def_owner = class_name || rendered_receiver
             message += "; the project defines `#{def_owner}##{call_node.name}' at " \

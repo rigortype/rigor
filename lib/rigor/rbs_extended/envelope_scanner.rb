@@ -47,10 +47,10 @@ module Rigor
 
       module_function
 
-      # @param sources [Array<Array(String, String)>] `[buffer name, RBS source]` pairs — the project's
-      #   `.rbs` files, plus the virtual entries rbs-inline and plugin `source_rbs` synthesis contribute.
-      # @param registry [Rigor::Effects::Registry] the vocabulary an unknown label is judged against.
-      # @return [Result]
+      # @rbs sources: Array[[String, String]] --
+      #   `[buffer name, RBS source]` pairs — the project's `.rbs` files, plus the virtual entries rbs-inline and
+      #   plugin `source_rbs` synthesis contribute.
+      # @rbs registry: Rigor::Effects::Registry -- The vocabulary an unknown label is judged against.
       #
       # The `ANNOTATION_HINT` routing test runs here, before any parse: a source with no honoured
       # payload can contribute neither an envelope nor an unresolved report, so a signature tree with
@@ -93,11 +93,10 @@ module Rigor
       # class discovery knows", which is a project fact; a gem's class-level tag would have to
       # distribute over a definition set this reader does not have.
       #
-      # @param loader [Rigor::Environment::RbsLoader] the run's loader; it owns the env walk
-      #   ({Rigor::Environment::RbsLoader#each_annotated_method_member}), so the environment itself never
-      #   leaves it.
-      # @param registry [Rigor::Effects::Registry]
-      # @return [Hash{String => Rigor::Effects::Envelope}] keyed `Class#m` / `Class.m`
+      # @rbs loader: Rigor::Environment::RbsLoader --
+      #   The run's loader; it owns the env walk ({Rigor::Environment::RbsLoader#each_annotated_method_member}), so
+      #   the environment itself never leaves it.
+      # @rbs return: Hash[String, Rigor::Effects::Envelope] -- Keyed `Class#m` / `Class.m`
       def from_loader(loader:, registry:)
         out = {}
         loader.each_annotated_method_member do |class_name, member|

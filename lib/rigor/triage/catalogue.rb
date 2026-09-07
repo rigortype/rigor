@@ -91,9 +91,7 @@ module Rigor
       INFO_GUARDED = %i[h5_systemic_cluster h6_genuine_bugs].freeze
       private_constant :INFO_GUARDED
 
-      # @param diagnostics [Array<Analysis::Diagnostic>]
-      # @param include_info [Boolean] let H5/H6 see `:info` diagnostics
-      # @return [Array<Hint>]
+      # @rbs include_info: bool -- Let H5/H6 see `:info` diagnostics
       def recognise(diagnostics, include_info: false)
         claimed = {}.compare_by_identity
         recognisers.filter_map do |recogniser|
@@ -121,7 +119,6 @@ module Rigor
            h5_systemic_cluster h6_genuine_bugs]
       end
 
-      # --- H1 — likely ActiveSupport core_ext --------------------
       def h1_activesupport(pool)
         matched = pool.select do |d|
           parsed = parse_undefined_method(d)
@@ -139,7 +136,6 @@ module Rigor
         ), matched]
       end
 
-      # --- H2K — known project monkey-patch (engine-proven) ------
       # ADR-17 / WD3 slice 4: the `call.undefined-method` rule sets `project_definition_site` when the project itself
       # defines the called method on the receiver class somewhere in the file set (a reopened core/stdlib/gem class the
       # dispatcher does not apply cross-file). That is direct evidence — not a spread heuristic — so this recogniser is
@@ -161,7 +157,6 @@ module Rigor
         ), matched]
       end
 
-      # --- H2 — likely a project monkey-patch / refinement -------
       def h2_monkey_patch(pool)
         groups = undefined_method_groups(pool).select do |(_method, _recv), diags|
           diags.map(&:path).uniq.size >= MONKEY_PATCH_MIN_FILES
@@ -179,7 +174,6 @@ module Rigor
         ), matched]
       end
 
-      # --- H3 — gem ships no RBS ---------------------------------
       def h3_gem_without_rbs(pool)
         notice = pool.find { |d| d.message.match?(/gem\(s\).*have no RBS available/) }
         return nil unless notice
@@ -194,7 +188,6 @@ module Rigor
         ), [notice]]
       end
 
-      # --- H4 — possible ActiveRecord relation misinference ------
       def h4_ar_relation(pool)
         matched = pool.select do |d|
           parsed = parse_undefined_method(d)
@@ -213,7 +206,6 @@ module Rigor
         ), matched]
       end
 
-      # --- H7 — unresolved toplevel implicit-self calls ----------
       # ADR-34: `call.unresolved-toplevel` fires on a toplevel implicit-self call (no receiver, outside any def / class
       # / module) that resolves against no visible contributor. The canonical opt-out is `pre_eval:` — the file is
       # usually a script relying on methods defined by a monkey-patch or a required helper Rigor did not walk. Grouped,
@@ -234,7 +226,6 @@ module Rigor
         ), matched]
       end
 
-      # --- H5 — systemic single-file cluster ---------------------
       def h5_systemic_cluster(pool)
         bucket = pool.group_by { |d| [d.path, rule_of(d)] }
                      .select { |_key, diags| diags.size >= SYSTEMIC_THRESHOLD }
@@ -251,7 +242,6 @@ module Rigor
         ), matched]
       end
 
-      # --- H6 — low-count scattered rules = likely genuine bugs --
       def h6_genuine_bugs(pool)
         small = pool.group_by { |d| rule_of(d) }
                     .select { |rule, diags| rule && diags.size.between?(1, GENUINE_BUG_MAX_COUNT) }

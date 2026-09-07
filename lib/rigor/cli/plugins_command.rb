@@ -62,7 +62,7 @@ module Rigor
     class PluginsCommand < Command # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor plugins [options]"
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         config_path = options.fetch(:config) || Configuration.discover

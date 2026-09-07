@@ -29,10 +29,6 @@
 #   # The WHOLE corpus — only after an engine-wide change whose full diff you intend to review.
 #   UPDATE_SNAPSHOTS=1 bundle exec rspec spec/integration/precision_snapshot_spec.rb
 #
-# The verifying run reports and pins the number of snapshots that contain no captured type. This is deliberately a
-# corpus-level count: adding a fixture without a local or an `assert_type` expression must not quietly enlarge the
-# gate's vacuous surface.
-#
 # Whatever the selection, READ the recorded types before committing them: a golden taken from a buggy run pins
 # the bug, in the one artifact whose purpose is to notice it.
 #
@@ -178,8 +174,6 @@ def snapshot_path(fixture_name)
   File.join(SNAPSHOTS_DIR, "#{safe}.yml")
 end
 
-# A snapshot with neither top-level locals nor fixture assertions pins no type. It remains useful as a fixture
-# execution check, but its vacuity is reported and counted so the precision gate cannot silently lose coverage.
 def vacuous_snapshot_warning(names)
   "\n#{names.size} snapshot(s) pinned no type at all: #{names.sort.join(', ')}.\n" \
     "This gate captures top-level locals and fixture-declared `assert_type` expressions, and those fixtures " \

@@ -55,7 +55,6 @@ module Rigor
         CONSTRAINT_KEYWORDS = %w[CONSTRAINT PRIMARY UNIQUE CHECK FOREIGN EXCLUDE LIKE PARTITION].freeze
 
         # @param source [String] contents of `db/structure.sql`
-        # @return [SchemaTable]
         def self.parse(source)
           new.parse(source)
         end

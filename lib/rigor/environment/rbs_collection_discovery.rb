@@ -37,20 +37,21 @@ module Rigor
       DEFAULT_COLLECTION_PATH = ".gem_rbs_collection"
       private_constant :DEFAULT_COLLECTION_PATH
 
-      # @param lockfile_path [String, Pathname, nil] explicit path to `rbs_collection.lock.yaml`. When `nil`,
-      #   falls back to `auto_detect` if `auto_detect:` is true.
-      # @param project_root [String] resolution base for relative `lockfile_path:` and the auto-detect
-      #   search.
-      # @param auto_detect [Boolean] when true and `lockfile_path:` is nil, look for
-      #   `<project_root>/rbs_collection.lock.yaml`.
-      # @param skip_gem_names [Array<String>, Set<String>] gem names rigor already loads from its bundled
-      #   stdlib (the merged `DEFAULT_LIBRARIES + libraries:` set). Entries whose `name` is in this set are
-      #   dropped regardless of `source.type` to avoid `RBS::DuplicatedDeclarationError` on
-      #   stdlib-extracted default gems. Defaults to empty.
-      # @return [Array<Pathname>] every `<collection_path>/<gem-name>/<gem-version>/` directory listed in the
-      #   lockfile whose entry has a non-skipped source type, whose `name` is not in `skip_gem_names:`, and
-      #   whose directory exists on disk. Returns `[]` when no lockfile is resolvable, when the YAML is
-      #   unreadable, or when the collection path doesn't exist.
+      # @rbs lockfile_path: (String | Pathname)? --
+      #   Explicit path to `rbs_collection.lock.yaml`. When `nil`, falls back to `auto_detect` if `auto_detect:` is
+      #   true.
+      # @rbs project_root: String -- Resolution base for relative `lockfile_path:` and the auto-detect search.
+      # @rbs auto_detect: bool --
+      #   When true and `lockfile_path:` is nil, look for `<project_root>/rbs_collection.lock.yaml`.
+      # @rbs skip_gem_names: Array[String>, Set<String] --
+      #   Gem names rigor already loads from its bundled stdlib (the merged `DEFAULT_LIBRARIES + libraries:` set).
+      #   Entries whose `name` is in this set are dropped regardless of `source.type` to avoid
+      #   `RBS::DuplicatedDeclarationError` on stdlib-extracted default gems. Defaults to empty.
+      # @rbs return: Array[Pathname] --
+      #   Every `<collection_path>/<gem-name>/<gem-version>/` directory listed in the lockfile whose entry has a
+      #   non-skipped source type, whose `name` is not in `skip_gem_names:`, and whose directory exists on disk.
+      #   Returns `[]` when no lockfile is resolvable, when the YAML is unreadable, or when the collection path
+      #   doesn't exist.
       def self.discover(lockfile_path:, project_root: Dir.pwd, auto_detect: true, skip_gem_names: [])
         resolved = resolve_lockfile_path(
           lockfile_path: lockfile_path,

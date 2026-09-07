@@ -34,10 +34,6 @@ module Rigor
         # The broadcast violations for a single call node, or `[]` when the node is not a
         # `broadcast_to` / `ActionCable.server.broadcast` call this plugin recognises. ADR-37: the
         # engine owns the walk.
-        #
-        # @param call_node [Prism::Node]
-        # @param channel_index [ChannelIndex]
-        # @return [Array<Violation>]
         def violations_for(call_node:, channel_index:)
           return [] unless call_node.is_a?(Prism::CallNode)
 

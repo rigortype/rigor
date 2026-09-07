@@ -45,10 +45,9 @@ module Rigor
         freeze
       end
 
-      # @param path [String]
-      # @return [Boolean] true when the absolute path falls inside any allowed read root. Symlinks are
-      #   resolved through `File.expand_path` only (no `realpath`); plugins with adversarial intent are out of
-      #   scope per ADR-2.
+      # @rbs return: bool --
+      #   True when the absolute path falls inside any allowed read root. Symlinks are resolved through
+      #   `File.expand_path` only (no `realpath`); plugins with adversarial intent are out of scope per ADR-2.
       def allow_read?(path)
         absolute = File.expand_path(path.to_s)
         @allowed_read_roots.any? { |root| inside?(absolute, root) }
@@ -58,9 +57,9 @@ module Rigor
         @network_policy != :disabled
       end
 
-      # @param url [String, URI]
-      # @return [Boolean] true when the URL scheme is `https` and the parsed hostname is in
-      #   `allowed_url_hosts`. Always `false` while `network_policy` is `:disabled`.
+      # @rbs return: bool --
+      #   True when the URL scheme is `https` and the parsed hostname is in `allowed_url_hosts`. Always `false` while
+      #   `network_policy` is `:disabled`.
       def allow_url?(url)
         return false if @network_policy == :disabled
         return false if @allowed_url_hosts.empty?

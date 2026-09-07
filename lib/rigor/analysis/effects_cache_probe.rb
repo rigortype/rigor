@@ -52,17 +52,16 @@ module Rigor
       # otherwise rebuild (the probe loaded the plugins to key the entry, so it already knows it).
       Served = Data.define(:table, :sources, :registry, :plugin_facts)
 
-      # @param configuration [Rigor::Configuration] with effects already enabled by the caller.
-      # @param cache_root [String, nil]
+      # @rbs configuration: Rigor::Configuration -- With effects already enabled by the caller.
       def initialize(configuration:, cache_root:)
         @configuration = configuration
         @cache_root = cache_root
       end
 
-      # @param paths [Array<String>] the analysed set — `configuration.paths` unioned with any path
-      #   arguments, exactly what {CLI::EffectsCommand#analyze} hands the runner, because the analysed
-      #   set is part of the diagnostics key.
-      # @return [Served, nil] nil to decline, on any failure whatsoever.
+      # @rbs paths: Array[String] --
+      #   The analysed set — `configuration.paths` unioned with any path arguments, exactly what
+      #   {CLI::EffectsCommand#analyze} hands the runner, because the analysed set is part of the diagnostics key.
+      # @rbs return: Served? -- Nil to decline, on any failure whatsoever.
       def serve(paths)
         return nil if @cache_root.nil? || !@configuration.effects_check?
 

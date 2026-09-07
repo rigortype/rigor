@@ -41,7 +41,7 @@ module Rigor
     class EffectsCommand < Command
       USAGE = "Usage: rigor effects [options] [paths]"
 
-      # @return [Integer] CLI exit status: 0 on success, 1 on `check` drift, 64 on a usage error.
+      # @rbs return: Integer -- CLI exit status: 0 on success, 1 on `check` drift, 64 on a usage error.
       def run
         verb = @argv.first
         return run_verb(verb) if EffectsSnapshotCommand::VERBS.include?(verb)
@@ -231,8 +231,9 @@ module Rigor
       # project does — still analyses it. Inside a project the argument is already under `paths:` and the
       # union is the configured set unchanged.
       #
-      # @return [Array(Rigor::Effects::EffectTable, Hash{String=>Array<String>})] the table, and which
-      #   file each unit was defined in — the map {EffectsReport} needs to answer a path argument.
+      # @rbs return: [Rigor::Effects::EffectTable, Hash[String, Array[String]]] --
+      #   The table, and which file each unit was defined in — the map {EffectsReport} needs to answer a path
+      #   argument.
       def analyze(configuration, scope)
         require_relative "../analysis/runner"
         runner = Analysis::Runner.new(

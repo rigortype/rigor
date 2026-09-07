@@ -70,8 +70,8 @@ module Rigor
       # call is what enabled YJIT (so the `?`-suffix predicate convention does
       # not apply; hence the Naming/PredicateMethod exemption).
       #
-      # @return [Boolean] true if this call enabled YJIT; false if it was a
-      #   no-op (unavailable / opted out / already enabled).
+      # @rbs return: bool --
+      #   True if this call enabled YJIT; false if it was a no-op (unavailable / opted out / already enabled).
       def enable_now # rubocop:disable Naming/PredicateMethod
         return false unless available?
         return false if disabled?
@@ -90,8 +90,8 @@ module Rigor
       # up front (unavailable / opted out / already enabled), so callers never
       # pay for a thread that could only no-op.
       #
-      # @param seconds [Numeric] the amortization deadline.
-      # @return [Thread, nil] the deadline thread, or nil when no-op up front.
+      # @rbs seconds: Numeric -- The amortization deadline.
+      # @rbs return: Thread? -- The deadline thread, or nil when no-op up front.
       def enable_after(seconds)
         return nil unless available?
         return nil if disabled?
@@ -143,10 +143,10 @@ module Rigor
       # Re-arming goes through {enable_after}, so the child records the same
       # absolute deadline it inherited and a grandchild fork carries it too.
       #
-      # @return [Thread, nil] the child's deadline thread; nil when YJIT was
-      #   enabled immediately, and nil when the call is a no-op up front
-      #   (unavailable / opted out / already enabled — a child forked after the
-      #   parent enabled inherits the enabled state and has nothing to do).
+      # @rbs return: Thread? --
+      #   The child's deadline thread; nil when YJIT was enabled immediately, and nil when the call is a no-op up
+      #   front (unavailable / opted out / already enabled — a child forked after the parent enabled inherits the
+      #   enabled state and has nothing to do).
       def rearm_after_fork
         return nil unless available?
         return nil if disabled?
@@ -166,8 +166,6 @@ module Rigor
 
       # The resolved {enable_after} deadline: {DEADLINE_ENV} when it parses to a
       # non-negative float, else {DEFAULT_DEADLINE_SECONDS}.
-      #
-      # @return [Numeric]
       def deadline_seconds
         raw = ENV.fetch(DEADLINE_ENV, nil)
         return DEFAULT_DEADLINE_SECONDS if raw.nil? || raw.empty?
@@ -176,12 +174,12 @@ module Rigor
         value && value >= 0 ? value : DEFAULT_DEADLINE_SECONDS
       end
 
-      # @return [Boolean] whether this Ruby exposes `RubyVM::YJIT.enable`.
+      # @rbs return: bool -- Whether this Ruby exposes `RubyVM::YJIT.enable`.
       def available?
         defined?(RubyVM::YJIT.enable) ? true : false
       end
 
-      # @return [Boolean] whether the opt-out env switch is set.
+      # @rbs return: bool -- Whether the opt-out env switch is set.
       def disabled?
         ENV[DISABLE_ENV] == "1"
       end

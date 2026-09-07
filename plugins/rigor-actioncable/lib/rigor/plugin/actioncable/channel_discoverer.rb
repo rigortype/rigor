@@ -43,7 +43,6 @@ module Rigor
           @base_classes = base_classes.to_set { |name| strip_root(name.to_s) }
         end
 
-        # @return [ChannelIndex]
         def discover
           entries = []
           ruby_files_under(@search_paths).each do |path|

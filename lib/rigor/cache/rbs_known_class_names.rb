@@ -18,9 +18,6 @@ module Rigor
     class RbsKnownClassNames < RbsCacheProducer
       PRODUCER_ID = "rbs.known_class_names"
 
-      # @param loader [Rigor::Environment::RbsLoader]
-      # @param store [Rigor::Cache::Store]
-      # @return [Set<String>]
       def self.compute(loader)
         names = Set.new
         loader.each_known_class_name { |name| names << name }

@@ -2,6 +2,12 @@
 target_ruby: "4.0"
 paths:
   - lib
-plugins: []
+# Types for lib/ live in sig/. Listing the plugin here skips ADR-93 auto-wire
+# (magic-comment-free) so `# @rbs` comments in lib/ are not a second type source.
+plugins:
+  - gem: rigor-rbs-inline
+    id: rbs-inline
+    config:
+      require_magic_comment: true
 cache:
   path: .rigor/cache

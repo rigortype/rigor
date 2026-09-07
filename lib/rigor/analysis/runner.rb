@@ -206,43 +206,44 @@ module Rigor
         end
       end
 
-      # @param configuration [Rigor::Configuration]
-      # @param explain [Boolean] surface fail-soft fallback events as `:info` diagnostics.
-      # @param cache_store [Rigor::Cache::Store, nil] the persistent cache the runner exposes to producers
-      #   (`RbsConstantTable` and successors). Pass `nil` to disable caching for this run; the CLI's
-      #   `--no-cache` flag wires `nil` through. v0.0.9 group A slice 1 introduces the surface; later
-      #   slices route real producers through it.
-      # @param workers [Integer] ADR-15 Phase 4b — when greater than zero, per-file analysis dispatches
-      #   across a pool of N workers. Default `0` keeps the sequential code path bit-for-bit unchanged.
-      #   Controlled via the `RIGOR_RACTOR_WORKERS` env var or `.rigor.yml` `parallel.workers:` (Phase 4c,
-      #   fully wired).
-      # @param collect_stats [Boolean] when true (default), `#run` builds a {RunStats} summary exposed via
-      #   `result.stats` — this forces the RBS env build at end-of-run so the `class_decl_paths` snapshot
-      #   has real source attribution. Set to false to skip the stats summary entirely; the CLI's
-      #   `--no-stats` threads `false` through to keep trivial-fixture runs from warming `.rigor/cache`.
-      # @param prebuilt [Rigor::Analysis::ProjectScan, nil] when supplied, the runner adopts the pre-built
-      #   plugin registry / dependency-source index / scanner outputs from the snapshot and skips the
-      #   per-call pre-passes that produce them. Used by long-lived integrations
-      #   (`Rigor::LanguageServer::ProjectContext`) to keep per-buffer requests fast — scanners walk the
-      #   project once per generation rather than once per request, and plugin `#prepare` runs once per
-      #   generation rather than once per request. Watched-file invalidation is the owner's responsibility;
-      #   the runner trusts the snapshot it was given.
-      # @param environment [Rigor::Environment, nil] opt-in Environment override. When supplied, sequential
-      #   mode uses the provided env instance in `#analyze_files` instead of building a fresh one via
-      #   `Environment.for_project`, and attaches the runner's per-run reporter pair onto the env's mutable
-      #   `Reporters` slot via `Environment#attach_reporters!`. Long-lived consumers (LSP `ProjectContext`)
-      #   pass a shared env so per-publish work doesn't repeat the `Environment.for_project` build (bundler
-      #   / lockfile / collection discovery, RbsLoader construction). Pool mode ignores the override — each
-      #   worker continues to build its own Environment.
-      # @param discovery_seed [Hash, nil] issue #260 — opt-in cross-file discovery tables, keyed by
-      #   {Scope::DiscoveryIndex} slot name, seeded onto every per-file scope through
-      #   `project_scope_seed_tables`. The ONE deliberate exception to "a `prebuilt:` runner carries no
-      #   discovery tables": {Protection::DiagnosticOracle} threads the table set Tier 2's site filter already
-      #   judges anchors against, so a site admitted because a sibling-file class resolved is also a site the
-      #   oracle can kill at. nil (the default) leaves the prebuilt/LSP contract byte-identical.
-      # @param no_tolerated_effects [Boolean] ADR-103 WD1 / #385 — `rigor check --no-tolerated-effects`.
-      #   Judges effect envelopes as if `effects.tolerated:` were empty. A judgment-time switch only: the
-      #   run, its collection and its cache identity are unchanged.
+      # @rbs explain: bool -- Surface fail-soft fallback events as `:info` diagnostics.
+      # @rbs cache_store: Rigor::Cache::Store? --
+      #   The persistent cache the runner exposes to producers (`RbsConstantTable` and successors). Pass `nil` to
+      #   disable caching for this run; the CLI's `--no-cache` flag wires `nil` through. v0.0.9 group A slice 1
+      #   introduces the surface; later slices route real producers through it.
+      # @rbs workers: Integer --
+      #   ADR-15 Phase 4b — when greater than zero, per-file analysis dispatches across a pool of N workers. Default
+      #   `0` keeps the sequential code path bit-for-bit unchanged. Controlled via the `RIGOR_RACTOR_WORKERS` env var
+      #   or `.rigor.yml` `parallel.workers:` (Phase 4c, fully wired).
+      # @rbs collect_stats: bool --
+      #   When true (default), `#run` builds a {RunStats} summary exposed via `result.stats` — this forces the RBS env
+      #   build at end-of-run so the `class_decl_paths` snapshot has real source attribution. Set to false to skip the
+      #   stats summary entirely; the CLI's `--no-stats` threads `false` through to keep trivial-fixture runs from
+      #   warming `.rigor/cache`.
+      # @rbs prebuilt: Rigor::Analysis::ProjectScan? --
+      #   When supplied, the runner adopts the pre-built plugin registry / dependency-source index / scanner outputs
+      #   from the snapshot and skips the per-call pre-passes that produce them. Used by long-lived integrations
+      #   (`Rigor::LanguageServer::ProjectContext`) to keep per-buffer requests fast — scanners walk the project once
+      #   per generation rather than once per request, and plugin `#prepare` runs once per generation rather than once
+      #   per request. Watched-file invalidation is the owner's responsibility; the runner trusts the snapshot it was
+      #   given.
+      # @rbs environment: Rigor::Environment? --
+      #   Opt-in Environment override. When supplied, sequential mode uses the provided env instance in
+      #   `#analyze_files` instead of building a fresh one via `Environment.for_project`, and attaches the runner's
+      #   per-run reporter pair onto the env's mutable `Reporters` slot via `Environment#attach_reporters!`.
+      #   Long-lived consumers (LSP `ProjectContext`) pass a shared env so per-publish work doesn't repeat the
+      #   `Environment.for_project` build (bundler / lockfile / collection discovery, RbsLoader construction). Pool
+      #   mode ignores the override — each worker continues to build its own Environment.
+      # @rbs discovery_seed: Hash[untyped, untyped]? --
+      #   Issue #260 — opt-in cross-file discovery tables, keyed by {Scope::DiscoveryIndex} slot name, seeded onto
+      #   every per-file scope through `project_scope_seed_tables`. The ONE deliberate exception to "a `prebuilt:`
+      #   runner carries no discovery tables": {Protection::DiagnosticOracle} threads the table set Tier 2's site
+      #   filter already judges anchors against, so a site admitted because a sibling-file class resolved is also a
+      #   site the oracle can kill at. nil (the default) leaves the prebuilt/LSP contract byte-identical.
+      # @rbs no_tolerated_effects: bool --
+      #   ADR-103 WD1 / #385 — `rigor check --no-tolerated-effects`. Judges effect envelopes as if
+      #   `effects.tolerated:` were empty. A judgment-time switch only: the run, its collection and its cache identity
+      #   are unchanged.
       def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
@@ -467,9 +468,8 @@ module Rigor
       # so the result matches a one-file disk run; only the cross-file project pre-pass is empty (there is
       # one file, and the per-file indexer self-discovers its own classes / defs).
       #
-      # @param source [String] Ruby source to analyze.
-      # @param path [String] logical path for diagnostic locations.
-      # @return [Result]
+      # @rbs source: String -- Ruby source to analyze.
+      # @rbs path: String -- Logical path for diagnostic locations.
       def run_source(source:, path: "(source).rb")
         @in_memory_sources = { path => source }
         run([path])
@@ -595,7 +595,8 @@ module Rigor
       # arg-flooring surface). Only meaningful right after a run populated the memo (baseline / recheck),
       # before the bucket rolls. Keys are held live here; the session Marshals them for the snapshot.
       #
-      # @return [Hash] `{ [path, "Class#method" | "Class.method"] => { keys:, returns:, effects: } }`.
+      # @rbs return: Hash[untyped, untyped] --
+      #   `{ [path, "Class#method" | "Class.method"] => { keys:, returns:, effects: } }`.
       def return_summaries
         memo = Inference::ExpressionTyper.harvest_return_memo
         return {} if memo.empty?
@@ -653,9 +654,11 @@ module Rigor
       # store) exactly as a real run's setup does, then re-drives each spec's def through the ADR-84 return
       # memo. Off any hot path — invoked only when declaration-stable changed pairs carry a persisted summary.
       #
-      # @param paths [Array<String>, nil] analysis roots (nil → the configuration's `paths:`).
-      # @param specs [Array<Hash>] each `{ class_name:, method_name:, singleton:, keys: [[receiver, args], …] }`.
-      # @return [Hash] `{ [class_name, method_name, singleton] => [return_descriptor_or_nil, …] }`.
+      # @rbs paths: Array[String]? -- Analysis roots (nil → the configuration's `paths:`).
+      # @rbs specs: Array[Hash[untyped, untyped]] --
+      #   Each `{ class_name:, method_name:, singleton:, keys: [[receiver, args], …] }`.
+      # @rbs return: Hash[untyped, untyped] --
+      #   `{ [class_name, method_name, singleton] => [return_descriptor_or_nil, …] }`.
       def evaluate_return_types(paths, specs)
         return {} if specs.empty?
 
@@ -776,7 +779,7 @@ module Rigor
       # fixpoint over them, which is the pre-split behaviour and the retry the fail-soft posture wants.
       # Only when neither entry answers does the run re-analyse.
       #
-      # @return [Boolean] whether this run was served.
+      # @rbs return: bool -- Whether this run was served.
       def served_from_effect_entries?(descriptor)
         summary = peek_effect_summary(descriptor)
         if summary
@@ -1341,8 +1344,9 @@ module Rigor
         3.0.0 3.1.0 3.2.0 3.3.0 3.4.0 3.5.0 4.0.0 4.1.0 4.2.0
       ].freeze
 
-      # @return [String, nil] the lowest `target_ruby` this Prism build accepts, or nil if none of the
-      #   ladder parses. Memoised per process (the value is constant for a given Prism).
+      # @rbs return: String? --
+      #   The lowest `target_ruby` this Prism build accepts, or nil if none of the ladder parses. Memoised per process
+      #   (the value is constant for a given Prism).
       def self.prism_supported_floor
         @prism_supported_floor ||= PRISM_VERSION_LADDER.find do |candidate|
           Prism.parse("nil", version: candidate)

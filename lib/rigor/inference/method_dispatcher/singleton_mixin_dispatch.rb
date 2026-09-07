@@ -31,8 +31,7 @@ module Rigor
 
         module_function
 
-        # @param context [CallContext]
-        # @return [Rigor::Type, nil] `Nominal[C]` for `C.instance`, or nil to decline.
+        # @rbs return: Rigor::Type? -- `Nominal[C]` for `C.instance`, or nil to decline.
         def try_dispatch(context)
           return nil unless context.method_name == SELECTOR
           return nil unless context.args.empty?

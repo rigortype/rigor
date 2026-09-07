@@ -117,8 +117,7 @@ module Rigor
 
       # --- private ------------------------------------------------------
 
-      # @param value [String] a non-empty string
-      # @return [Rigor::Type]
+      # @rbs value: String -- A non-empty string
       def self.classify_string(value)
         if Type::Refined.ruby_numeric_literal?(value)
           NUMERIC_STRING
@@ -133,8 +132,8 @@ module Rigor
       # Called ONLY with the names in {RUNTIME_STRING_CONSTANTS} — Rigor's own source — and only
       # while this file is being loaded. It is never handed a name from the analysed program.
       #
-      # @param name [String] a qualified constant path without a leading "::"
-      # @return [String, nil]
+      # @rbs name: String -- A qualified constant path without a leading "::"
+      # @rbs return: String?
       def self.runtime_string_value(name)
         mod = ::Object
         name.split("::").each do |part|
@@ -161,7 +160,7 @@ module Rigor
       end
       private_class_method :runtime_string_value
 
-      # @return [Hash{String => Rigor::Type}] frozen, built once at load time.
+      # @rbs return: Hash[String, Rigor::Type] -- Frozen, built once at load time.
       def self.build_runtime_string_refinements
         RUNTIME_STRING_CONSTANTS.each_with_object({}) do |name, table|
           value = runtime_string_value(name)
@@ -175,9 +174,8 @@ module Rigor
 
       # --- public API ---------------------------------------------------
 
-      # @param name [String] unqualified constant name (e.g. `"Math::PI"`,
-      #   `"RUBY_VERSION"`, `"Ruby::ENGINE"`)
-      # @return [Rigor::Type, nil] refined type, or nil to fall through
+      # @rbs name: String -- Unqualified constant name (e.g. `"Math::PI"`, `"RUBY_VERSION"`, `"Ruby::ENGINE"`)
+      # @rbs return: Rigor::Type? -- Refined type, or nil to fall through
       def self.lookup(name)
         FOLDED_CONSTANTS[name] || RUNTIME_STRING_REFINEMENTS[name]
       end

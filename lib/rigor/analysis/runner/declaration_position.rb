@@ -20,8 +20,7 @@ module Rigor
 
         module_function
 
-        # @param finding [#location]
-        # @return [Array(String, Integer)] `[path, line]`
+        # @rbs return: [String, Integer] -- `[path, line]`
         def of(finding)
           location = finding.location
           return [CONFIG_PATH, 1] if location.nil?

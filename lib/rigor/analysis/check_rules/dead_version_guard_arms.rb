@@ -30,9 +30,6 @@ module Rigor
       module DeadVersionGuardArms
         module_function
 
-        # @param diagnostics [Array<Rigor::Analysis::Diagnostic>]
-        # @param root [Prism::Node]
-        # @return [Array<Rigor::Analysis::Diagnostic>]
         def filter(diagnostics, root)
           # The scan is a whole-file walk, so it is paid only when there is something to drop. A file with
           # no diagnostics — the overwhelming majority — never walks.
@@ -44,8 +41,7 @@ module Rigor
           diagnostics.reject { |diagnostic| arms.any? { |arm| covers?(arm, diagnostic) } }
         end
 
-        # @param root [Prism::Node]
-        # @return [Array<Prism::Location>] the source ranges of every dead version-guard arm
+        # @rbs return: Array[Prism::Location] -- The source ranges of every dead version-guard arm
         def scan(root)
           arms = []
           collect(root, arms)

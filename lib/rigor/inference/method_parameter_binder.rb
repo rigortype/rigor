@@ -55,16 +55,16 @@ module Rigor
     end
 
     class MethodParameterBinder
-      # @param environment [Rigor::Environment]
-      # @param class_path [String, nil] the qualified name of the class the method is defined in
-      #   (e.g., `"Foo::Bar"`), or `nil` for a top-level `def` outside any class. When `nil` (or
-      #   when the class is unknown to RBS), every parameter falls back to `Dynamic[Top]`.
-      # @param singleton [Boolean] `true` when the def is a singleton method (either `def
-      #   self.foo` or a `def foo` inside `class << self`); routes the lookup through
-      #   `RbsLoader#singleton_method`.
-      # @param source_path [String, nil] the project-relative path of the file the method is
-      #   defined in. Used to match ADR-28 path-scoped protocol contracts; `nil` (the default
-      #   for synthetic / probe scopes) disables the contract tier.
+      # @rbs class_path: String? --
+      #   The qualified name of the class the method is defined in (e.g., `"Foo::Bar"`), or `nil` for a top-level
+      #   `def` outside any class. When `nil` (or when the class is unknown to RBS), every parameter falls back to
+      #   `Dynamic[Top]`.
+      # @rbs singleton: bool --
+      #   `true` when the def is a singleton method (either `def self.foo` or a `def foo` inside `class << self`);
+      #   routes the lookup through `RbsLoader#singleton_method`.
+      # @rbs source_path: String? --
+      #   The project-relative path of the file the method is defined in. Used to match ADR-28 path-scoped protocol
+      #   contracts; `nil` (the default for synthetic / probe scopes) disables the contract tier.
       def initialize(environment:, class_path:, singleton:, source_path: nil)
         @environment = environment
         @class_path = class_path
@@ -72,9 +72,9 @@ module Rigor
         @source_path = source_path
       end
 
-      # @param def_node [Prism::DefNode]
-      # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter name to bound type.
-      #   Anonymous parameters (`*` and `**` without a name) are skipped.
+      # @rbs return: Hash[Symbol, Rigor::Type] --
+      #   Ordered map from parameter name to bound type. Anonymous parameters (`*` and `**` without a name) are
+      #   skipped.
       def bind(def_node)
         slots = collect_slots(def_node.parameters)
         types = default_types_for(slots)

@@ -69,9 +69,8 @@ module Rigor
 
       # Resolves `Configuration#effects_envelopes` against a registry.
       #
-      # @param entries [Array<Hash>] the loaded, shape-validated entries
-      # @param registry [Registry] the vocabulary, project extensions included
-      # @return [Array<Entry>]
+      # @rbs entries: Array[Hash[untyped, untyped]] -- The loaded, shape-validated entries
+      # @rbs registry: Registry -- The vocabulary, project extensions included
       def build(entries:, registry:)
         entries.each_with_index.map do |entry, index|
           labels = Array(entry["effect"]).map(&:to_s)
@@ -86,11 +85,10 @@ module Rigor
 
       # The class-level envelopes the entries put on a project.
       #
-      # @param entries [Array<Entry>]
-      # @param class_names [Enumerable<String>] every class the run collected units for
-      # @param sources [Hash{String => Array<String>}] `Runner#effect_sources` — `{method key => [path]}`
-      # @param project_root [String] what `sources` paths are relativised against
-      # @return [Hash{String => Envelope}] one envelope per selected class, keyed by class name
+      # @rbs class_names: Enumerable[String] -- Every class the run collected units for
+      # @rbs sources: Hash[String, Array[String]] -- `Runner#effect_sources` — `{method key => [path]}`
+      # @rbs project_root: String -- What `sources` paths are relativised against
+      # @rbs return: Hash[String, Envelope] -- One envelope per selected class, keyed by class name
       def for_classes(entries:, class_names:, sources: {}, project_root: Dir.pwd)
         return NO_ENVELOPES if entries.empty?
 

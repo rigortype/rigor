@@ -29,7 +29,7 @@ module Rigor
         @root = root
       end
 
-      # @return [Hash] the presence-only state the recommendation routes on.
+      # @rbs return: Hash[untyped, untyped] -- The presence-only state the recommendation routes on.
       def to_h
         config = CONFIG_FILENAMES.find { |name| File.file?(File.join(@root, name)) }
         {
@@ -140,18 +140,19 @@ module Rigor
         rigor-ask
       ].freeze
 
-      # @param skills [Array<Hash>] discovered skills, each `{name:, path:}`.
-      # @param root [String] project root to probe (defaults to the cwd).
-      # @param deep [Boolean] opt into `--deep`: run a real `rigor check` and let its result pick the headline. Off by
-      #   default, and off is ADR-73 WD2's contract — see {SkillDeepProbe} for why the whole analysis path lives
-      #   behind this one flag and in its own file.
+      # @rbs skills: Array[Hash[untyped, untyped]] -- Discovered skills, each `{name:, path:}`.
+      # @rbs root: String -- Project root to probe (defaults to the cwd).
+      # @rbs deep: bool --
+      #   Opt into `--deep`: run a real `rigor check` and let its result pick the headline. Off by default, and off is
+      #   ADR-73 WD2's contract — see {SkillDeepProbe} for why the whole analysis path lives behind this one flag and
+      #   in its own file.
       def initialize(skills:, root: Dir.pwd, deep: false)
         @skills = skills
         @root = root
         @deep = deep
       end
 
-      # @return [String] the full describe report.
+      # @rbs return: String -- The full describe report.
       def render
         catalog = catalog_skills
         state = ProjectStateProbe.new(@root).to_h

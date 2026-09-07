@@ -88,9 +88,10 @@ module Rigor
       GEM_VERSION_PATH = "Gem::Version"
       private_constant :GEM_VERSION_PATH
 
-      # @param node [Prism::Node, nil] an `if` / `unless` predicate
-      # @return [Symbol, nil] `:truthy` / `:falsey` when the guard is decidable on the analyzer's Ruby,
-      #   otherwise nil (both arms stay live)
+      # @rbs node: Prism::Node? -- An `if` / `unless` predicate
+      # @rbs return: Symbol? --
+      #   `:truthy` / `:falsey` when the guard is decidable on the analyzer's Ruby, otherwise nil (both arms stay
+      #   live)
       def verdict(node)
         return nil unless node.is_a?(Prism::CallNode)
 
@@ -110,7 +111,7 @@ module Rigor
 
       # Reads one side of the comparison into `[kind, value]`, or nil when it is not readable.
       #
-      # @return [Array(Symbol, Object), nil]
+      # @rbs return: [Symbol, untyped]?
       def read_operand(node)
         case node
         when Prism::StringNode then [:literal_string, node.unescaped]
@@ -165,7 +166,7 @@ module Rigor
       # `const_get` would execute the target file inside the analyzer. `Module#autoload?` is what
       # separates the two ([#680](https://github.com/rigortype/rigor/issues/680)).
       #
-      # @return [String, nil] the constant's value when it is a non-empty String
+      # @rbs return: String? -- The constant's value when it is a non-empty String
       def runtime_value(path)
         mod = ::Object
         path.split("::").each do |part|

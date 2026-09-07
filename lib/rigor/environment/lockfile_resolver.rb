@@ -39,15 +39,13 @@ module Rigor
         end
       end
 
-      # @param lockfile_path [String, Pathname, nil] explicit path to the Gemfile.lock. When `nil`, falls
-      #   back to `auto_detect` if `auto_detect:` is true.
-      # @param project_root [String] resolution base for a relative `lockfile_path:` and the auto-detect
-      #   search.
-      # @param auto_detect [Boolean] when true and `lockfile_path:` is nil, look for
-      #   `<project_root>/Gemfile.lock`.
-      # @return [Hash{String => LockedGem}] frozen map of gem name → locked entry. Returns the empty frozen
-      #   hash when no lockfile is resolvable, when the file is unreadable, or when Bundler refuses to parse
-      #   it.
+      # @rbs lockfile_path: (String | Pathname)? --
+      #   Explicit path to the Gemfile.lock. When `nil`, falls back to `auto_detect` if `auto_detect:` is true.
+      # @rbs project_root: String -- Resolution base for a relative `lockfile_path:` and the auto-detect search.
+      # @rbs auto_detect: bool -- When true and `lockfile_path:` is nil, look for `<project_root>/Gemfile.lock`.
+      # @rbs return: Hash[String, LockedGem] --
+      #   Frozen map of gem name → locked entry. Returns the empty frozen hash when no lockfile is resolvable, when
+      #   the file is unreadable, or when Bundler refuses to parse it.
       def self.locked_gems(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
         resolved = resolve_lockfile_path(
           lockfile_path: lockfile_path,

@@ -45,7 +45,6 @@ module Rigor
         module_function
 
         # @param sig_call [Prism::CallNode] the `sig { ... }` / `sig do ... end` call.
-        # @return [ParseResult, ParseError]
         def parse(sig_call)
           return ParseError.new(reason: :no_block, node: sig_call) if sig_call.block.nil?
 

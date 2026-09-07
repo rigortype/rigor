@@ -20,9 +20,6 @@ module Rigor
     class RbsClassAncestorTable < RbsCacheProducer
       PRODUCER_ID = "rbs.class_ancestor_table"
 
-      # @param loader [Rigor::Environment::RbsLoader]
-      # @param store [Rigor::Cache::Store]
-      # @return [Hash{String => Array<String>}]
       def self.compute(loader)
         table = {}
         loader.each_known_class_name do |name|

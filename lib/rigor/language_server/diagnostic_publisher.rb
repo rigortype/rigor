@@ -30,18 +30,16 @@ module Rigor
         hint: 4
       }.freeze
 
-      # @param debouncer [Rigor::LanguageServer::Debouncer, nil]
       #   when present, `publish_for` schedules its work through
       #   the debouncer (cancels prior pending task for the same
       #   URI, fires after `debounce_seconds` quiet-time). Nil
       #   keeps the slice 4-7 synchronous behaviour — primarily
       #   useful for specs.
-      # @param debounce_seconds [Numeric] quiet-time before the
-      #   debounced publish fires. 0 with a debouncer means
-      #   "schedule on next-tick" (still async); without a
-      #   debouncer the value is unused.
-      # The single Debouncer key every save round shares (#246). Per-URI keys would let two saves start two
-      # concurrent rounds; one key means a burst collapses into the last one.
+      # @rbs debounce_seconds: Numeric --
+      #   Quiet-time before the debounced publish fires. 0 with a debouncer means "schedule on next-tick" (still
+      #   async); without a debouncer the value is unused. The single Debouncer key every save round shares (#246).
+      #   Per-URI keys would let two saves start two concurrent rounds; one key means a burst collapses into the last
+      #   one.
       PROJECT_ROUND_KEY = :__rigor_project_round__
 
       def initialize(writer:, buffer_table:, project_context:,
@@ -212,10 +210,11 @@ module Rigor
         notify(uri, diagnostics)
       end
 
-      # @return [Hash, nil] `{ uri:, path:, bytes: }` when `uri` is eligible for the batch, or nil to
-      #   exclude it. Mirrors `#run_and_notify`'s own guards: a buffer closed during the debounce window is
-      #   dropped silently (its didClose empty publish already cleared the markers); a desynchronised buffer
-      #   publishes an EMPTY set immediately (same as the single-buffer path) rather than joining the batch.
+      # @rbs return: Hash[untyped, untyped]? --
+      #   `{ uri:, path:, bytes: }` when `uri` is eligible for the batch, or nil to exclude it. Mirrors
+      #   `#run_and_notify`'s own guards: a buffer closed during the debounce window is dropped silently (its didClose
+      #   empty publish already cleared the markers); a desynchronised buffer publishes an EMPTY set immediately (same
+      #   as the single-buffer path) rather than joining the batch.
       def eligible_job(uri)
         entry = @buffer_table[uri]
         return nil if entry.nil?
@@ -320,10 +319,9 @@ module Rigor
         end
       end
 
-      # @return [Hash, nil] the LSP `Diagnostic` Hash, or nil to
-      #   skip diagnostics outside the buffer's own path (e.g.
-      #   `.rigor.yml`-anchored info diagnostics get filtered —
-      #   they belong to the project, not the buffer).
+      # @rbs return: Hash[untyped, untyped]? --
+      #   The LSP `Diagnostic` Hash, or nil to skip diagnostics outside the buffer's own path (e.g.
+      #   `.rigor.yml`-anchored info diagnostics get filtered — they belong to the project, not the buffer).
       def to_lsp_diagnostic(diagnostic, buffer_path)
         return nil if diagnostic.path != buffer_path
 

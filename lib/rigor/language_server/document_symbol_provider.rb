@@ -30,10 +30,9 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return [Array<Hash>, nil] LSP `DocumentSymbol[]` for the
-      #   buffer at `uri`. Returns nil when the URI isn't open or
-      #   doesn't parse cleanly enough to surface symbols — LSP
-      #   clients fall back to no-outline in that case.
+      # @rbs return: Array[Hash[untyped, untyped]]? --
+      #   LSP `DocumentSymbol[]` for the buffer at `uri`. Returns nil when the URI isn't open or doesn't parse cleanly
+      #   enough to surface symbols — LSP clients fall back to no-outline in that case.
       def provide(uri)
         path, entry = buffer_for(uri)
         return nil if entry.nil?

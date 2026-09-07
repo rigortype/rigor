@@ -21,10 +21,11 @@ module Rigor
     class EffectEntryPoints
       attr_reader :name, :globs, :why
 
-      # @param name [String, Symbol] the token `reach:` adopts. Must satisfy
-      #   {Rigor::Effects::EntryPoints::NAME_PATTERN}, checked at registration.
-      # @param globs [Array<String>] project-relative path globs
-      # @param why [String] what the preset stands for, for the plugin's README and `rigor effects`' help
+      # @rbs name: String | Symbol --
+      #   The token `reach:` adopts. Must satisfy {Rigor::Effects::EntryPoints::NAME_PATTERN}, checked at
+      #   registration.
+      # @rbs globs: Array[String] -- Project-relative path globs
+      # @rbs why: String -- What the preset stands for, for the plugin's README and `rigor effects`' help
       def initialize(name:, globs:, why: "")
         @name = name.to_s.dup.freeze
         @globs = Array(globs).map { |glob| glob.to_s.dup.freeze }.uniq.sort.freeze

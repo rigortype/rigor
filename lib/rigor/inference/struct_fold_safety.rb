@@ -55,10 +55,10 @@ module Rigor
           node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
       end
 
-      # @param root [Prism::Node, nil] the local-variable scope to scan.
-      # @param layout_lookup [#call] a `String -> Array[Symbol] | nil` resolver mapping a constant receiver name to its
-      #   struct member list.
-      # @return [Set<Symbol>] the fold-safe local names.
+      # @rbs root: Prism::Node? -- The local-variable scope to scan.
+      # @rbs layout_lookup: untyped --
+      #   A `String -> Array[Symbol] | nil` resolver mapping a constant receiver name to its struct member list.
+      # @rbs return: Set[Symbol] -- The fold-safe local names.
       def fold_safe_locals(root, layout_lookup)
         return EMPTY if root.nil?
 
@@ -208,10 +208,9 @@ module Rigor
       # Nested `def` / `class` / `module` bodies are skipped: their statements do not run during THIS body's
       # evaluation. Blocks are descended into — they share `self`.
       #
-      # @param body [Prism::Node, nil]
-      # @param member_names [Enumerable<Symbol>] the receiver carrier's member names.
-      # @yieldparam name [Symbol] an unrecognised self-call selector.
-      # @yieldreturn [Boolean] whether that sibling method is itself self-fold-safe.
+      # @rbs member_names: Enumerable[Symbol] --
+      #   The receiver carrier's member names. An unrecognised self-call selector. Whether that sibling method is
+      #   itself self-fold-safe.
       def self_fold_safe_body?(body, member_names, &sibling_pure)
         return false if body.nil?
 

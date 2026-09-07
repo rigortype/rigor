@@ -69,11 +69,9 @@ module Rigor
             :to_proc,
             # `#unbind` allocates a fresh `UnboundMethod` whose identity differs every call.
             :unbind,
-            # Identity-based equality and hashing.
             :hash,
             :==,
             :eql?,
-            # `initialize_copy` is blocklisted by convention.
             :initialize_copy
           ],
           "UnboundMethod" => Set[
@@ -81,11 +79,9 @@ module Rigor
             # the bound method (already classified `:block_dependent`).
             :bind,
             :bind_call,
-            # Identity-based equality and hashing.
             :hash,
             :==,
             :eql?,
-            # `initialize_copy` is blocklisted by convention.
             :initialize_copy
           ]
         }

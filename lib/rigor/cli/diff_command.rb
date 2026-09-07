@@ -26,7 +26,7 @@ module Rigor
     class DiffCommand < Command
       USAGE = "Usage: rigor diff [options] <baseline.json> [paths...]"
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
 

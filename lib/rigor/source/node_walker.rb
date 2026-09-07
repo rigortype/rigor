@@ -25,8 +25,7 @@ module Rigor
     module NodeWalker
       module_function
 
-      # @yieldparam node [Prism::Node]
-      # @return [Enumerator] when no block is given.
+      # @rbs return: Enumerator[untyped] -- When no block is given.
       def each(root, &)
         return to_enum(__method__, root) unless block_given?
 
@@ -48,9 +47,7 @@ module Rigor
       # block invocation MUST copy it (`Plugin::NodeContext` does). Used by the plugin engine to give
       # `node_rule` blocks their enclosing class / method / block context (ADR-37 slice 1d).
       #
-      # @yieldparam node [Prism::Node]
-      # @yieldparam ancestors [Array<Prism::Node>]
-      # @return [Enumerator] when no block is given.
+      # @rbs return: Enumerator[untyped] -- When no block is given.
       def each_with_ancestors(root, &)
         return to_enum(__method__, root) unless block_given?
 

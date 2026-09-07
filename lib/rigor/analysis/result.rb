@@ -7,9 +7,10 @@ module Rigor
     class Result
       attr_reader :diagnostics, :stats
 
-      # @param stats [Rigor::Analysis::RunStats, nil] end-of-run telemetry (target file count, RBS class
-      #   breakdown, wall + RSS) collected by the Runner. Nil when stats collection wasn't requested or wasn't
-      #   applicable (early-exit paths like `validate_target_ruby` failure).
+      # @rbs stats: Rigor::Analysis::RunStats? --
+      #   End-of-run telemetry (target file count, RBS class breakdown, wall + RSS) collected by the Runner. Nil when
+      #   stats collection wasn't requested or wasn't applicable (early-exit paths like `validate_target_ruby`
+      #   failure).
       def initialize(diagnostics: [], stats: nil)
         @diagnostics = diagnostics
         @stats = stats
@@ -43,8 +44,6 @@ module Rigor
 
       # The diagnostics {#crashed?} answers true for, so a caller can name what it saw rather than only that
       # it saw something.
-      #
-      # @return [Array<Rigor::Analysis::Diagnostic>]
       def crash_diagnostics
         diagnostics.select { |diagnostic| CrashSignature.discards_file_analysis?(diagnostic) }
       end

@@ -30,10 +30,10 @@ module Rigor
 
       module_function
 
-      # @param node  [Prism::Node, nil] the receiver expression.
-      # @param depth [Integer] recursion depth, internal.
-      # @return [Array<Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode>] every variable
-      #   read the expression can evaluate to; empty when it can evaluate to none.
+      # @rbs node: Prism::Node? -- The receiver expression.
+      # @rbs depth: Integer -- Recursion depth, internal.
+      # @rbs return: Array[Prism::LocalVariableReadNode | Prism::InstanceVariableReadNode] --
+      #   Every variable read the expression can evaluate to; empty when it can evaluate to none.
       def candidates(node, depth = 0)
         return [] if node.nil? || depth > WALK_DEPTH_CAP
 

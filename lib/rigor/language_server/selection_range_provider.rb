@@ -20,10 +20,9 @@ module Rigor
         @project_context = project_context
       end
 
-      # @param positions [Array<Hash>] LSP `Position[]` — each
-      #   `{ line:, character: }` 0-based.
-      # @return [Array<Hash>, nil] one `SelectionRange` per
-      #   position, or nil when the URI / buffer isn't resolvable.
+      # @rbs positions: Array[Hash[untyped, untyped]] -- LSP `Position[]` — each `{ line:, character: }` 0-based.
+      # @rbs return: Array[Hash[untyped, untyped]]? --
+      #   One `SelectionRange` per position, or nil when the URI / buffer isn't resolvable.
       def provide(uri, positions)
         path, entry = buffer_for(uri)
         return nil if entry.nil?

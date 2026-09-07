@@ -22,10 +22,11 @@ module Rigor
     module ForkMap
       module_function
 
-      # @param items [Array] work items (file paths, or `[path, ast]` pairs), in caller order.
-      # @param workers [Integer] resolved worker count (≤1, empty items, or no `fork` → sequential).
-      # @yield [Array] a contiguous slice of `items`; must return a **marshalable** object.
-      # @return [Array] the per-slice block results, in original slice order.
+      # @rbs items: Array[untyped] -- Work items (file paths, or `[path, ast]` pairs), in caller order.
+      # @rbs workers: Integer --
+      #   Resolved worker count (≤1, empty items, or no `fork` → sequential). A contiguous slice of `items`; must
+      #   return a **marshalable** object.
+      # @rbs return: Array[untyped] -- The per-slice block results, in original slice order.
       def call(items:, workers:, &block)
         worker_count = [workers, items.size].min
         return [block.call(items)] unless parallel?(worker_count) && !items.empty?
@@ -56,7 +57,7 @@ module Rigor
       # parent still has the directory open, and answering `nil` once it is gone degrades to `Dir.tmpdir`
       # instead of raising `Errno::ENOENT` somewhere far from here.
       #
-      # @return [String, nil]
+      # @rbs return: String?
       def child_scratch_dir
         return nil unless @child_scratch_dir && File.directory?(@child_scratch_dir)
 
@@ -120,9 +121,9 @@ module Rigor
         end
       end
 
-      # @return [Hash{value: Object}, nil] the child's payload wrapped so a legitimately-nil block result is
-      #   distinguishable from an abnormal exit. `Marshal.load` is safe: the blob was written by our own
-      #   forked child to a temp file we created.
+      # @rbs return: Hash{value: Object}? --
+      #   The child's payload wrapped so a legitimately-nil block result is distinguishable from an abnormal exit.
+      #   `Marshal.load` is safe: the blob was written by our own forked child to a temp file we created.
       def worker_payload(status, out_path)
         return nil unless status.success? && File.exist?(out_path)
 

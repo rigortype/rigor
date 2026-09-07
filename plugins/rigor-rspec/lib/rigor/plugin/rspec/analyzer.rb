@@ -20,9 +20,6 @@ module Rigor
 
         module_function
 
-        # @param path [String]
-        # @param root [Prism::Node]
-        # @return [Array<Diagnostic>]
         def diagnose(path:, root:)
           diagnostics = []
           ScopeWalker.collect_scopes(root).each do |outer|

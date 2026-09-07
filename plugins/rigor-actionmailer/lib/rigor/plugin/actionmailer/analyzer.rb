@@ -42,10 +42,6 @@ module Rigor
 
         # The mailer-call violations for a single call node (0..2), or `[]` when it is not a
         # `<Mailer>.action(...)` call on a known mailer. ADR-37: the engine owns the walk.
-        #
-        # @param call_node [Prism::Node]
-        # @param mailer_index [MailerIndex]
-        # @return [Array<Violation>]
         def violations_for(call_node:, mailer_index:)
           return [] unless call_node.is_a?(Prism::CallNode) && action_call_candidate?(call_node)
 

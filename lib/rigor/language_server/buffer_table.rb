@@ -51,7 +51,7 @@ module Rigor
       # computed from the stale text would be wrong. Consumers check {#desynchronized?} and decline to answer
       # rather than answering wrongly; the mark clears on the next `didOpen` or full-text change.
       #
-      # @return [Boolean] true when the changes were applied.
+      # @rbs return: bool -- True when the changes were applied.
       def apply_changes(uri:, changes:, version:)
         text = IncrementalSync.apply_all(@entries[uri]&.bytes, changes)
         @desynchronized.delete(uri)
@@ -63,13 +63,14 @@ module Rigor
         false
       end
 
-      # @return [Boolean] true when the last `didChange` for `uri` could not be applied, so the held text no
-      #   longer matches the editor's.
+      # @rbs return: bool --
+      #   True when the last `didChange` for `uri` could not be applied, so the held text no longer matches the
+      #   editor's.
       def desynchronized?(uri)
         @desynchronized.key?(uri)
       end
 
-      # @return [String, nil] why `uri` is desynchronised, for the log line; nil when it is in sync.
+      # @rbs return: String? -- Why `uri` is desynchronised, for the log line; nil when it is in sync.
       def desynchronization_reason(uri)
         @desynchronized[uri]
       end
@@ -91,9 +92,9 @@ module Rigor
         @dirty.delete(uri)
       end
 
-      # @return [Boolean] true when `uri` has unsaved changes. A buffer that is dirty may only be published
-      #   from an analysis that bound ITS bytes — see the publish-set invariant in
-      #   `docs/design/20260517-language-server.md`.
+      # @rbs return: bool --
+      #   True when `uri` has unsaved changes. A buffer that is dirty may only be published from an analysis that
+      #   bound ITS bytes — see the publish-set invariant in `docs/design/20260517-language-server.md`.
       def dirty?(uri)
         @dirty.key?(uri)
       end

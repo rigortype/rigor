@@ -40,16 +40,14 @@ module Rigor
       # one is a Rigor rendering DEFECT, not a property of the user's code, so the CLI reports them as such.
       UnrenderableMethod = Data.define(:path, :class_name, :method_name, :rbs, :error)
 
-      # @return [Array<UnrenderableMethod>] empty on a healthy run; read after {#run}.
+      # @rbs return: Array[UnrenderableMethod] -- Empty on a healthy run; read after {#run}.
       attr_reader :unrenderable, :unresolvable_superclasses
 
-      # @param configuration [Rigor::Configuration]
-      # @param paths [Array<String>] files / directories to scan.
-      # @param observations [Hash{[String, Symbol] => Array<Array<Rigor::Type>>}]
-      #   ADR-14 slice 3 — per-target-method arg-tuple observations
-      #   produced by {ObservationCollector}. An empty Hash (the default)
-      #   means "no observations available; emit `untyped` for every
-      #   parameter position" per ADR-5 clause 2.
+      # @rbs paths: Array[String] -- Files / directories to scan.
+      # @rbs observations: Hash[[String, Symbol], Array[Array[Rigor::Type]]] --
+      #   ADR-14 slice 3 — per-target-method arg-tuple observations produced by {ObservationCollector}. An empty Hash
+      #   (the default) means "no observations available; emit `untyped` for every parameter position" per ADR-5
+      #   clause 2.
       def initialize(configuration:, paths:, observations: {}, include_private: false)
         @configuration = configuration
         @paths = paths
@@ -80,7 +78,6 @@ module Rigor
         map.transform_values { |entries| entries.map { |entry| ObservedCall.from(entry) } }
       end
 
-      # @return [Array<MethodCandidate>]
       def run
         @environment = build_environment
         resolved = resolve_paths(@paths)

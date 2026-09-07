@@ -86,9 +86,9 @@ module Rigor
       # Compares `current` against `recorded`. `recorded` may be nil — no snapshot on disk at all, which
       # is drift with a routed message rather than an error.
       #
-      # @param undischarged [Hash] `{table name => {symbol => [label]}}` — the current side's labels that
-      #   survive per-origin discharge ({Snapshot.undischarged_index}). Optional; omitting it judges every
-      #   event by label.
+      # @rbs undischarged: Hash[untyped, untyped] --
+      #   `{table name => {symbol => [label]}}` — the current side's labels that survive per-origin discharge
+      #   ({Snapshot.undischarged_index}). Optional; omitting it judges every event by label.
       def self.compare(recorded:, current:, tolerated: [], gate: :symmetric, strict_tolerated: false,
                        undischarged: nil)
         new(recorded: recorded, current: current, tolerated: tolerated, gate: gate,

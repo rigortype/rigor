@@ -22,17 +22,17 @@ module Rigor
     # a tracer per visited node and discards the inferred type values.
     class CoverageScanner
       class Result < Data.define(:visits, :unrecognized, :events)
-        # @return [Integer] sum of all visits across node classes.
+        # @rbs return: Integer -- Sum of all visits across node classes.
         def visited_count
           visits.values.sum
         end
 
-        # @return [Integer] sum of directly-unrecognized counts across classes.
+        # @rbs return: Integer -- Sum of directly-unrecognized counts across classes.
         def unrecognized_count
           unrecognized.values.sum
         end
 
-        # @return [Float] unrecognized_count / visited_count, or 0.0 when empty.
+        # @rbs return: Float -- Unrecognized_count / visited_count, or 0.0 when empty.
         def unrecognized_ratio
           total = visited_count
           return 0.0 if total.zero?
@@ -41,13 +41,11 @@ module Rigor
         end
       end
 
-      # @param scope [Rigor::Scope] base scope used for every type_of call. Defaults to `Scope.empty`.
+      # @rbs scope: Rigor::Scope -- Base scope used for every type_of call. Defaults to `Scope.empty`.
       def initialize(scope: nil)
         @scope = scope || Scope.empty
       end
 
-      # @param root [Prism::Node]
-      # @return [Result]
       def scan(root)
         visits = Hash.new(0)
         unrecognized = Hash.new(0)

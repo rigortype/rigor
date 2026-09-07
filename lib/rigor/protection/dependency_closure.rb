@@ -24,14 +24,15 @@ module Rigor
     module DependencyClosure
       module_function
 
-      # @param paths [Array<String>] the measured file set, in caller order.
-      # @param configuration [Rigor::Configuration]
-      # @param environment [Rigor::Environment] built once by the caller.
-      # @param cache_store [Rigor::Cache::Store, nil] threaded to the recording run only (its RBS-env and
-      #   plugin-producer tiers); the per-mutant analyses stay `cache_store: nil` regardless.
-      # @param workers [Integer] fork-pool workers for the recording pass (the pool records per worker and
-      #   marshals the records back, so a pooled graph equals the sequential one).
-      # @return [Hash{String => Array<String>}] frozen `path => sorted dependents`, restricted to `paths`.
+      # @rbs paths: Array[String] -- The measured file set, in caller order.
+      # @rbs environment: Rigor::Environment -- Built once by the caller.
+      # @rbs cache_store: Rigor::Cache::Store? --
+      #   Threaded to the recording run only (its RBS-env and plugin-producer tiers); the per-mutant analyses stay
+      #   `cache_store: nil` regardless.
+      # @rbs workers: Integer --
+      #   Fork-pool workers for the recording pass (the pool records per worker and marshals the records back, so a
+      #   pooled graph equals the sequential one).
+      # @rbs return: Hash[String, Array[String]] -- Frozen `path => sorted dependents`, restricted to `paths`.
       def build(paths:, configuration:, environment:, cache_store: nil, workers: 0)
         runner = Analysis::Runner.new(
           configuration: configuration, environment: environment, cache_store: cache_store,
@@ -45,8 +46,6 @@ module Rigor
       # not being measured, so re-analysing it would report a diagnostic against a file the run never
       # baselined. Self-edges are dropped (the mutated file is the closure's own head), and each list is
       # sorted so a `--threshold` gate reads the same number whatever order the recording pass finished in.
-      #
-      # @return [Hash{String => Array<String>}]
       def index(dependents, paths)
         measured = Set.new(paths)
         paths.to_h do |path|

@@ -78,23 +78,22 @@ module Rigor
         LABELS_CONSEQUENCE = "the label is not registered"
         private_constant :LABELS_CONSEQUENCE
 
-        # @param configuration [Rigor::Configuration]
-        # @param rbs_loader [Rigor::Environment::RbsLoader, nil] the run's loader; nil disables the pass.
-        # @param effect_table [Rigor::Effects::EffectTable] the propagated graph.
-        # @param discovery [#call] forces and returns the cross-file discovery tables as
-        #   `[def_sources, singleton_def_sources, class_sources]`. Called only when a finding needs a
-        #   position — a judged-clean envelope never forces it.
-        # @param sources [Hash{String => String}] in-memory sources, for the buffer-backed run path.
-        # @param unit_sources [Hash{String => Array<String>}] `Runner#effect_sources` — where each effect
-        #   unit is defined, which is what an `effects.envelopes[].match:` path glob selects on. Its paths
-        #   are relativised against the working directory, which is the project root for every run that
-        #   reaches here (the same assumption `Snapshot.build` makes about `reach:`).
-        # @param ancestry [#call, nil] returns the run's as-written superclass table
-        #   (`FileCollection#superclasses`) — the nominal relation `effect.liskov-widened` reads. A
-        #   lambda, and called only once an envelope exists, because merging the run's collections is
-        #   not free.
-        # @param apply_tolerated [Boolean] false runs the judgment with an empty tolerated set
-        #   (`--no-tolerated-effects`).
+        # @rbs rbs_loader: Rigor::Environment::RbsLoader? -- The run's loader; nil disables the pass.
+        # @rbs effect_table: Rigor::Effects::EffectTable -- The propagated graph.
+        # @rbs discovery: untyped --
+        #   Forces and returns the cross-file discovery tables as `[def_sources, singleton_def_sources,
+        #   class_sources]`. Called only when a finding needs a position — a judged-clean envelope never forces it.
+        # @rbs sources: Hash[String, String] -- In-memory sources, for the buffer-backed run path.
+        # @rbs unit_sources: Hash[String, Array[String]] --
+        #   `Runner#effect_sources` — where each effect unit is defined, which is what an `effects.envelopes[].match:`
+        #   path glob selects on. Its paths are relativised against the working directory, which is the project root
+        #   for every run that reaches here (the same assumption `Snapshot.build` makes about `reach:`).
+        # @rbs ancestry: untyped --
+        #   Returns the run's as-written superclass table (`FileCollection#superclasses`) — the nominal relation
+        #   `effect.liskov-widened` reads. A lambda, and called only once an envelope exists, because merging the
+        #   run's collections is not free.
+        # @rbs apply_tolerated: bool --
+        #   False runs the judgment with an empty tolerated set (`--no-tolerated-effects`).
         def initialize(configuration:, rbs_loader:, effect_table:, discovery:, # rubocop:disable Metrics/ParameterLists
                        sources: nil, unit_sources: nil, ancestry: nil, apply_tolerated: true,
                        plugin_facts: nil)
@@ -109,8 +108,8 @@ module Rigor
           @apply_tolerated = apply_tolerated
         end
 
-        # @return [Array<Diagnostic>] one per (method, exceeding label) plus one per unrecognised
-        #   label, suppression already applied.
+        # @rbs return: Array[Diagnostic] --
+        #   One per (method, exceeding label) plus one per unrecognised label, suppression already applied.
         def diagnostics
           return NO_DIAGNOSTICS unless @configuration.effects_check?
 

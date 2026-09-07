@@ -89,17 +89,17 @@ module Rigor
       UNIDENTIFIED_ENGINE = "the engine's own source tree could not be digested"
 
       class << self
-        # @param configuration [Rigor::Configuration]
-        # @param roots [Array<String>] the analysis roots to look for a snapshot under, most-specific first
-        #   (the command's own path arguments, then the configured `paths:`).
-        # @param project_scan [Rigor::Analysis::ProjectScan] the prepared whole-project scan.
-        # @param sampling [Sampling]
-        # @param feature_ids [Array<String>] the ADOPTED bleeding-edge ids that change this measurement.
-        # @param seed_inputs [Array<String>, nil] the files the {DiscoverySeed} was built over when it is
-        #   active, nil when it is not. The CLI stays the only place that knows a feature id exists.
-        # @param bypass_reason [String, nil] a caller-side reason to run uncached (`--no-cache`, the closure
-        #   oracle). Reported verbatim.
-        # @return [MutationCache] enabled, or a disabled instance carrying `#reason`.
+        # @rbs roots: Array[String] --
+        #   The analysis roots to look for a snapshot under, most-specific first (the command's own path arguments,
+        #   then the configured `paths:`).
+        # @rbs project_scan: Rigor::Analysis::ProjectScan -- The prepared whole-project scan.
+        # @rbs feature_ids: Array[String] -- The ADOPTED bleeding-edge ids that change this measurement.
+        # @rbs seed_inputs: Array[String]? --
+        #   The files the {DiscoverySeed} was built over when it is active, nil when it is not. The CLI stays the only
+        #   place that knows a feature id exists.
+        # @rbs bypass_reason: String? --
+        #   A caller-side reason to run uncached (`--no-cache`, the closure oracle). Reported verbatim.
+        # @rbs return: MutationCache -- Enabled, or a disabled instance carrying `#reason`.
         def build(configuration:, roots:, project_scan:, sampling:, feature_ids:, seed_inputs: nil,
                   bypass_reason: nil)
           return disabled(bypass_reason) if bypass_reason
@@ -263,7 +263,7 @@ module Rigor
       end
 
       # The cached result for `path`, or nil on any miss (including "this cache is disabled").
-      # @return [MutationScanner::FileResult, nil]
+      # @rbs return: MutationScanner::FileResult?
       def fetch(path)
         return nil unless enabled?
         # A path the snapshot never analysed has no recorded `deps[A]`, which means "depends on every project

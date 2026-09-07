@@ -214,7 +214,7 @@ module Rigor
         # survives the call.
         CONSTANT_SELF_RETURNERS = %i[freeze itself dup clone].to_set.freeze
 
-        # @return [Rigor::Type::Constant, Rigor::Type::Union, Rigor::Type::IntegerRange, nil]
+        # @rbs return: (Rigor::Type::Constant | Rigor::Type::Union | Rigor::Type::IntegerRange)?
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name

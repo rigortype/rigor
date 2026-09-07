@@ -26,7 +26,7 @@ module Rigor
 
       LocatedEvent = Data.define(:file, :event)
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         paths = collect_paths(@argv, command_name: "type-scan")

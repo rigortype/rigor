@@ -26,10 +26,9 @@ module Rigor
 
       attr_reader :trinary, :mode, :reasons
 
-      # @param trinary [Rigor::Trinary]
-      # @param mode [Symbol] currently `:gradual` (default) or `:strict`.
-      # @param reasons [Array<String>, String, nil] textual reasons; a
-      #   single string is wrapped, `nil` becomes an empty array.
+      # @rbs mode: Symbol -- Currently `:gradual` (default) or `:strict`.
+      # @rbs reasons: (Array[String] | String)? --
+      #   Textual reasons; a single string is wrapped, `nil` becomes an empty array.
       def initialize(trinary, mode: :gradual, reasons: nil)
         raise ArgumentError, "trinary must be Rigor::Trinary, got #{trinary.class}" unless trinary.is_a?(Trinary)
         raise ArgumentError, "mode must be one of #{MODES.inspect}, got #{mode.inspect}" unless MODES.include?(mode)

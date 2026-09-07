@@ -12,8 +12,6 @@ module Rigor
     # slots, so factoring the construction here keeps the producers small and ensures invalidation behaves
     # identically across them.
     module RbsDescriptor
-      # @param loader [Rigor::Environment::RbsLoader]
-      # @return [Rigor::Cache::Descriptor]
       def self.build(loader)
         Descriptor.new(
           gems: [rbs_gem_entry],
@@ -44,9 +42,10 @@ module Rigor
         Descriptor::GemEntry.new(name: "rbs", requirement: ">= 0", locked: ::RBS::VERSION.to_s)
       end
 
-      # @param comparator [Symbol] `:digest` (default) for the env-cache KEY descriptor ({.build}), where the
-      #   value must be deterministic; `:stat` (ADR-87 WD1) for the validation-only run-dependency descriptor
-      #   ({RunDescriptor#files}), where the stat tier short-circuits the SHA-256 on an unmoved file.
+      # @rbs comparator: Symbol --
+      #   `:digest` (default) for the env-cache KEY descriptor ({.build}), where the value must be deterministic;
+      #   `:stat` (ADR-87 WD1) for the validation-only run-dependency descriptor ({RunDescriptor#files}), where the
+      #   stat tier short-circuits the SHA-256 on an unmoved file.
       def self.file_entries(loader, comparator: :digest)
         roots = loader.signature_paths +
                 Rigor::Environment::RbsLoader.vendored_gem_sig_paths +
@@ -65,8 +64,9 @@ module Rigor
         end
       end
 
-      # @param library_names [Array<String, Symbol>] the loader's merged library list (or, on the WD4 probe
-      #   path, `Environment::DEFAULT_LIBRARIES + config.libraries` reconstructed without a loader).
+      # @rbs library_names: Array[String | Symbol] --
+      #   The loader's merged library list (or, on the WD4 probe path, `Environment::DEFAULT_LIBRARIES +
+      #   config.libraries` reconstructed without a loader).
       def self.libraries_entry(library_names)
         sorted = library_names.map(&:to_s).sort
         Descriptor::ConfigEntry.new(

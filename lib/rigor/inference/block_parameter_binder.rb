@@ -34,18 +34,19 @@ module Rigor
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
     class BlockParameterBinder
-      # @param expected_param_types [Array<Rigor::Type>] positional block parameter types in order. Indices
-      #   the binder cannot fill from this array (because the array is shorter than the parameter list, or
-      #   because the slot is a kind we do not pull from the array) default to `Dynamic[Top]`.
+      # @rbs expected_param_types: Array[Rigor::Type] --
+      #   Positional block parameter types in order. Indices the binder cannot fill from this array (because the array
+      #   is shorter than the parameter list, or because the slot is a kind we do not pull from the array) default to
+      #   `Dynamic[Top]`.
       def initialize(expected_param_types: [])
         @expected_param_types = expected_param_types
       end
 
-      # @param block_node [Prism::BlockNode]
-      # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter name to bound type. Anonymous
-      #   parameters are skipped; MultiTargetNode destructuring slots delegate to {MultiTargetBinder} and
-      #   contribute every named local in declaration order. Numbered-parameter forms (`_1`, `_2`, ...) bind
-      #   `:_1`, `:_2`, ... up to the maximum the block body refers to.
+      # @rbs return: Hash[Symbol, Rigor::Type] --
+      #   Ordered map from parameter name to bound type. Anonymous parameters are skipped; MultiTargetNode
+      #   destructuring slots delegate to {MultiTargetBinder} and contribute every named local in declaration order.
+      #   Numbered-parameter forms (`_1`, `_2`, ...) bind `:_1`, `:_2`, ... up to the maximum the block body refers
+      #   to.
       def bind(block_node)
         params_root = block_node.parameters
         return {} if params_root.nil?

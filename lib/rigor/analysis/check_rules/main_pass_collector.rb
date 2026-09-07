@@ -25,8 +25,8 @@ module Rigor
           Prism::CallNode, Prism::DefNode, Prism::IfNode, Prism::UnlessNode
         ].freeze
 
-        # @param node_diagnostics [#call] maps a `Prism::Node` to the array of diagnostics the main pass emits
-        #   for it.
+        # @rbs node_diagnostics: untyped --
+        #   Maps a `Prism::Node` to the array of diagnostics the main pass emits for it.
         def initialize(node_diagnostics)
           @node_diagnostics = node_diagnostics
           @diagnostics = []

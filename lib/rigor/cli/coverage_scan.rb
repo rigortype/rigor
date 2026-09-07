@@ -21,9 +21,7 @@ module Rigor
     module CoverageScan
       module_function
 
-      # @param files [Array<String>] explicit `.rb` file paths to scan.
-      # @param configuration [Rigor::Configuration]
-      # @return [Rigor::CLI::CoverageReport]
+      # @rbs files: Array[String] -- Explicit `.rb` file paths to scan.
       #
       # Issue #513 — the environment is PLUGIN-AWARE (`LanguageServer::ProjectContext`, the same builder
       # `--protection` uses), not the bare RBS environment this path carried until 2026-09-01. Without the
@@ -57,8 +55,6 @@ module Rigor
       # the precision lens must mirror the walk it describes (`check` leaves the table empty unless
       # `parameter_inference:` is on, ADR-67 WD6a), while `--protection` seeds it unconditionally by ADR-67's own
       # wiring — it only ever reclassifies sites it already counted.
-      #
-      # @return [Rigor::Scope]
       def discovery_seeded_scope(files:, configuration:, environment:, parameter_inference:, workers: nil)
         base = Scope.empty(environment: environment)
         seed = Protection::DiscoverySeed.discovery_tables(files).dup

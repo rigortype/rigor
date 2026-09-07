@@ -68,7 +68,7 @@ module Rigor
         end
       end
 
-      # @return [Integer] number of currently-pending tasks.
+      # @rbs return: Integer -- Number of currently-pending tasks.
       def pending_size
         @mutex.synchronize { @tasks.size }
       end

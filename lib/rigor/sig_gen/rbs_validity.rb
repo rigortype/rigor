@@ -23,16 +23,16 @@ module Rigor
 
       module_function
 
-      # @param line [String] a rendered RBS method line, e.g. `def self.parse: (String) -> Integer`.
-      # @return [String, nil] the parse error's first line, or nil when the line is valid.
+      # @rbs line: String -- A rendered RBS method line, e.g. `def self.parse: (String) -> Integer`.
+      # @rbs return: String? -- The parse error's first line, or nil when the line is valid.
       def method_line_error(line)
         return nil if line.nil?
 
         source_error("class #{PROBE_CLASS}\n  #{line}\nend\n")
       end
 
-      # @param source [String] a complete `.rbs` file's text.
-      # @return [String, nil] the parse error's first line, or nil when the file is valid.
+      # @rbs source: String -- A complete `.rbs` file's text.
+      # @rbs return: String? -- The parse error's first line, or nil when the file is valid.
       def source_error(source)
         ::RBS::Parser.parse_signature(::RBS::Buffer.new(name: "(rigor sig-gen)", content: source))
         nil

@@ -58,7 +58,7 @@ module Rigor
         # Legacy single-collector walk — the oracle the shadow harness (`RIGOR_SHADOW_RULE_WALK=1`) compares
         # the shared {RuleWalk} traversal against. Tracks the lexical class / module prefix itself, exactly
         # as {RuleWalk} threads `qualified_prefix`.
-        # @return [Array<Result>] one entry per provably-shadowed rescue clause.
+        # @rbs return: Array[Result] -- One entry per provably-shadowed rescue clause.
         def collect(root)
           walk(root, [])
           @results.freeze

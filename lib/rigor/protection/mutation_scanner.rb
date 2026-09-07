@@ -87,30 +87,28 @@ module Rigor
         end
       end
 
-      # @param configuration [Rigor::Configuration]
-      # @param environment [Rigor::Environment] pre-built once by the caller
-      # @param project_scan [Rigor::Analysis::ProjectScan] pre-built once
-      # @param limit [Integer, nil] optional per-file mutation cap (sampled with
-      #   `seed`); nil analyses every type-relevant mutation (deterministic).
-      # @param seed [Integer] RNG seed for the optional sample.
-      # @param oracle [#baseline, #killed?, nil] the kill oracle (ADR-69 Seam 1);
-      #   defaults to the {DiagnosticOracle} (the ADR-62/63 behaviour).
-      # @param site_selector [:biteable, :all] which sites to mutate (ADR-69
-      #   Seam 2). `:biteable` (default) keeps only concrete-type sites Rigor can
-      #   bite; `:all` also mutates Dynamic-receiver dispatch sites — use only
-      #   with a {TestSuiteOracle} (the fused overlay), never the diagnostic path.
-      # @param base_scope [Rigor::Scope, nil] the scope site selection judges
-      #   anchor types against, built once by the caller (see
-      #   {Mutator#anchor_base_scope}). `nil` — the default — keeps the bare
-      #   single-file empty scope. A caller that seeds cross-file discovery
-      #   passes it here; this class stays free of {Rigor::Configuration} and of
+      # @rbs environment: Rigor::Environment -- Pre-built once by the caller
+      # @rbs project_scan: Rigor::Analysis::ProjectScan -- Pre-built once
+      # @rbs limit: Integer? --
+      #   Optional per-file mutation cap (sampled with `seed`); nil analyses every type-relevant mutation
+      #   (deterministic).
+      # @rbs seed: Integer -- RNG seed for the optional sample.
+      # @rbs oracle: untyped --
+      #   The kill oracle (ADR-69 Seam 1); defaults to the {DiagnosticOracle} (the ADR-62/63 behaviour).
+      # @rbs site_selector: :biteable | :all --
+      #   Which sites to mutate (ADR-69 Seam 2). `:biteable` (default) keeps only concrete-type sites Rigor can bite;
+      #   `:all` also mutates Dynamic-receiver dispatch sites — use only with a {TestSuiteOracle} (the fused overlay),
+      #   never the diagnostic path.
+      # @rbs base_scope: Rigor::Scope? --
+      #   The scope site selection judges anchor types against, built once by the caller (see
+      #   {Mutator#anchor_base_scope}). `nil` — the default — keeps the bare single-file empty scope. A caller that
+      #   seeds cross-file discovery passes it here; this class stays free of {Rigor::Configuration} and of
       #   bleeding-edge feature ids, which live one layer up in the CLI.
-      # @param discovery_seed [Hash, nil] issue #260 — the SAME cross-file table
-      #   set `base_scope` was built from, threaded to the default
-      #   {DiagnosticOracle} so an admitted cross-file site is one the oracle can
-      #   also kill at. Pass both or neither: a `base_scope` without it measures
-      #   sites no mutation can ever break. Ignored when `oracle` is supplied
-      #   (that caller owns its oracle's knowledge).
+      # @rbs discovery_seed: Hash[untyped, untyped]? --
+      #   Issue #260 — the SAME cross-file table set `base_scope` was built from, threaded to the default
+      #   {DiagnosticOracle} so an admitted cross-file site is one the oracle can also kill at. Pass both or neither:
+      #   a `base_scope` without it measures sites no mutation can ever break. Ignored when `oracle` is supplied (that
+      #   caller owns its oracle's knowledge).
       # rubocop:disable Metrics/ParameterLists -- every one is an independently-defaulted collaborator or knob;
       # bundling them into an options object would only move the list behind a name.
       def initialize(configuration:, environment:, project_scan:, limit: nil, seed: 1, oracle: nil,
@@ -127,9 +125,8 @@ module Rigor
         )
       end
 
-      # @param path [String] the file to measure (used as the in-memory bind path)
-      # @param source [String, nil] the file's source; read from disk when nil
-      # @return [FileResult]
+      # @rbs path: String -- The file to measure (used as the in-memory bind path)
+      # @rbs source: String? -- The file's source; read from disk when nil
       def scan_file(path, source: nil)
         source ||= File.read(path, encoding: Encoding::UTF_8)
         kept = kept_mutations(source, path)
@@ -156,8 +153,6 @@ module Rigor
       # mutant the type checker did **not** kill, asks `test_oracle` whether the project's test suite catches it.
       # The expensive suite run is paid only for type-survivors (the gradual short-circuit), so the cost is
       # proportional to the protection hole.
-      # @param test_oracle [TestSuiteOracle]
-      # @return [FusedFileResult]
       def scan_file_fused(path, test_oracle:, source: nil)
         source ||= File.read(path, encoding: Encoding::UTF_8)
         kept = kept_mutations(source, path)
@@ -183,7 +178,6 @@ module Rigor
               sites << fused_site(mut, :none)
             end
           when :harness_error then harness_errors += 1
-            # :invalid — a parse-broken mutant; not a measurement, skip it.
           end
         end
         FusedFileResult.new(path: path, type_killed: type_killed, test_killed: test_killed, sites: sites,

@@ -29,10 +29,9 @@ module Rigor
         @renderer = renderer
       end
 
-      # @return [Hash, nil] an LSP `Hover` payload or nil when no
-      #   expression sits at the queried position. Returning nil
-      #   maps to `result: null` per the LSP spec — clients
-      #   suppress the hover popup in that case.
+      # @rbs return: Hash[untyped, untyped]? --
+      #   An LSP `Hover` payload or nil when no expression sits at the queried position. Returning nil maps to
+      #   `result: null` per the LSP spec — clients suppress the hover popup in that case.
       def provide(uri:, line:, character:)
         path, entry = buffer_for(uri)
         return nil if entry.nil?

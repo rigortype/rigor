@@ -32,7 +32,7 @@ module Rigor
     # The class-length budget is relaxed (as on `Rigor::CLI` itself) because `check` aggregates several independent
     # concerns that are clearer read together than split across micro-classes.
     class CheckCommand < Command # rubocop:disable Metrics/ClassLength
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       #
       # Deferred YJIT enablement (Runtime::Jit) is armed by `CLI#dispatch` for every command, this
       # one included, before any analysis work runs.

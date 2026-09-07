@@ -51,9 +51,6 @@ module Rigor
 
     module_function
 
-    # @param class_name [String, Symbol]
-    # @param scope [Rigor::Scope]
-    # @return [Boolean]
     def class_known?(class_name, scope: Scope.empty)
       return true if scope.discovered_classes.key?(class_name.to_s)
 
@@ -92,27 +89,23 @@ module Rigor
       loader.project_declared_class?(class_name)
     end
 
-    # @return [Symbol] one of `:equal`, `:subclass`, `:superclass`,
-    #   `:disjoint`, `:unknown`.
+    # @rbs return: Symbol -- One of `:equal`, `:subclass`, `:superclass`, `:disjoint`, `:unknown`.
     def class_ordering(lhs, rhs, scope: Scope.empty)
       scope.environment.class_ordering(lhs, rhs)
     end
 
-    # Returns the `Rigor::Type::Nominal` for the class name, or nil when no source knows the
-    # class.
+    # nil when no source knows the class.
     def nominal_for_name(class_name, scope: Scope.empty)
       scope.environment.nominal_for_name(class_name)
     end
 
-    # Returns the `Rigor::Type::Singleton` for the class name's class object, or nil when no
-    # source knows the class.
+    # nil when no source knows the class.
     def singleton_for_name(class_name, scope: Scope.empty)
       scope.environment.singleton_for_name(class_name)
     end
 
-    # Returns the type of the named constant. Joins in-source constants (recorded by
-    # `ScopeIndexer`) and RBS-side constants. In-source wins on collision because the user's
-    # source is the authoritative declaration.
+    # Joins in-source constants (recorded by `ScopeIndexer`) and RBS-side constants.
+    # In-source wins on collision because the user's source is the authoritative declaration.
     #
     # This is the flat lookup keyed on the literal `constant_name`. Callers that need Ruby's
     # lexical constant resolution (walking the enclosing class path, and folding in registry
@@ -401,10 +394,8 @@ module Rigor
     end
     private_class_method :peeled_nesting
 
-    # Returns the RBS `RBS::Definition::Method` for the instance method, or nil when the
-    # class or method is not in RBS. The source-side discovered-method facts are reachable
-    # through {.discovered_method?}; a future slice will unify the two under a
-    # `MethodDefinition` carrier.
+    # nil when the class or method is not in RBS. Source-side facts are {.discovered_method?};
+    # unifying the two is a future slice.
     def instance_method_definition(class_name, method_name, scope: nil, environment: nil)
       loader = rbs_loader_for(scope, environment)
       return nil if loader.nil?
@@ -412,8 +403,6 @@ module Rigor
       loader.instance_method(class_name: class_name.to_s, method_name: method_name.to_sym)
     end
 
-    # Returns the RBS `RBS::Definition::Method` for the singleton (class-side) method, or
-    # nil.
     def singleton_method_definition(class_name, method_name, scope: nil, environment: nil)
       loader = rbs_loader_for(scope, environment)
       return nil if loader.nil?
@@ -421,10 +410,8 @@ module Rigor
       loader.singleton_method(class_name: class_name.to_s, method_name: method_name.to_sym)
     end
 
-    # Returns the full RBS instance-side class definition (`RBS::Definition`), used by
-    # callers that walk the method table or member list. Returns nil when the class is not
-    # in RBS or when the loader cannot build a definition (e.g. constant aliases, malformed
-    # signatures).
+    # nil when the class is not in RBS, or when the loader cannot build a definition
+    # (constant aliases, malformed signatures).
     def instance_definition(class_name, scope: nil, environment: nil)
       loader = rbs_loader_for(scope, environment)
       return nil if loader.nil?
@@ -434,7 +421,6 @@ module Rigor
       nil
     end
 
-    # Returns the full RBS singleton-side class definition.
     def singleton_definition(class_name, scope: nil, environment: nil)
       loader = rbs_loader_for(scope, environment)
       return nil if loader.nil?
@@ -444,9 +430,8 @@ module Rigor
       nil
     end
 
-    # Returns the RBS-declared type parameter names for the class (e.g. `[:A]` for
-    # `Array[A]`), or `[]` when the class is non-generic / not in RBS. Used by the dispatcher
-    # when binding generic method types to a concrete receiver.
+    # `[]` when the class is non-generic or not in RBS. The dispatcher uses this when binding
+    # generic method types to a concrete receiver.
     def class_type_param_names(class_name, scope: nil, environment: nil)
       loader = rbs_loader_for(scope, environment)
       return [] if loader.nil?
@@ -454,9 +439,7 @@ module Rigor
       loader.class_type_param_names(class_name.to_s)
     end
 
-    # Internal helper — resolves the RBS loader from either the `scope:` or the
-    # `environment:` kwarg, defaulting to the empty scope's environment when neither is
-    # given. Public methods document both spellings; the helper centralises the dispatch.
+    # Public methods take `scope:` or `environment:`; this is the one dispatch.
     def rbs_loader_for(scope, environment)
       return environment.rbs_loader if environment
       return scope.environment.rbs_loader if scope
@@ -465,16 +448,15 @@ module Rigor
     end
     private_class_method :rbs_loader_for
 
-    # @return [Boolean] true when the analyzed source contains a class / module declaration
-    #   for the given name. Does NOT consult the RBS loader (use {.class_known?} for the
-    #   union).
+    # @rbs return: bool --
+    #   True when the analyzed source contains a class / module declaration for the given name. Does NOT consult the
+    #   RBS loader (use {.class_known?} for the union).
     def discovered_class?(class_name, scope: Scope.empty)
       scope.discovered_classes.key?(class_name.to_s)
     end
 
-    # @param kind [:instance, :singleton]
-    # @return [Boolean] true when the ScopeIndexer recorded a `def` for the given method on
-    #   the given class with the matching kind.
+    # @rbs return: bool --
+    #   True when the ScopeIndexer recorded a `def` for the given method on the given class with the matching kind.
     #
     # ADR-46 — a MISS records a negative cross-file dependency, so a consumer whose analysis
     # turned on "the project does not define this method" is re-checked once a later edit

@@ -105,9 +105,9 @@ module Rigor
           to_h.hash
         end
 
-        # @return [String, nil] fully-qualified module name for the given trait symbol, or nil when the
-        #   registry doesn't know the symbol (caller emits a tier_b.unknown-trait provenance marker and falls
-        #   through).
+        # @rbs return: String? --
+        #   Fully-qualified module name for the given trait symbol, or nil when the registry doesn't know the symbol
+        #   (caller emits a tier_b.unknown-trait provenance marker and falls through).
         def module_for(symbol)
           modules_by_symbol[symbol.to_sym]
         end

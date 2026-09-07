@@ -33,7 +33,7 @@ module Rigor
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
       VALID_FORMATS = %w[text json].freeze
 
-      # @return [Integer] CLI exit status.
+      # @rbs return: Integer -- CLI exit status.
       def run
         options = parse_options
         return CLI::EXIT_USAGE if options.nil?
@@ -106,7 +106,7 @@ module Rigor
         )
       end
 
-      # @return [Integer] exit status — non-zero when a file the user asked to write could not be written.
+      # @rbs return: Integer -- Exit status — non-zero when a file the user asked to write could not be written.
       def dispatch_write(candidates, configuration, options)
         layout_index = SigGen::LayoutIndex.new(signature_paths: configuration.signature_paths)
         path_mapper = SigGen::PathMapper.new(configuration: configuration, layout_index: layout_index)

@@ -443,7 +443,6 @@ module Rigor
       private_constant :EMPTY_CATALOG_BUNDLE
 
       # @param root [String] directory or single file.
-      # @param catalog [Catalog]
       # @param sigil_by_path [Hash{String=>Symbol}] accumulator: harvested file → detected sigil level.
       # @param parse_errors_by_path [Hash{String=>Array<Hash>}] accumulator: file → `{kind:,line:,column:}` tuples.
       # @param extensions [Array<String>] file extensions to accept (e.g. `[".rb"]` for project source,

@@ -72,23 +72,15 @@ module Rigor
 
         module_function
 
-        # @param path [String]
-        # @param root [Prism::Node]
         # @param model_index [Hash{String => Hash}, nil] the `:model_index` fact value — the flat
         #   `class_name => { table:, columns:, associations:, ... }` Hash `rigor-activerecord` publishes
         #   (ADR-9's "the value is data, not objects" contract; see `Activerecord#index_to_published_hash`).
         #   When nil the analyzer falls silent.
-        # @return [Array<Diagnostic>]
         # The matcher violations for a single call node (0..1), or `[]` when it is not a shoulda matcher,
         # sits outside any `describe <ModelConst>` block, or the model is unknown. ADR-37: the engine owns
         # the walk; the model anchor comes from the node-rule `NodeContext` ancestors (the innermost
         # enclosing `describe`-with-constant — nested const describes override, `describe ".method"`
         # string blocks inherit), exactly as the former recursive anchor propagation did.
-        #
-        # @param matcher_call [Prism::Node]
-        # @param ancestors [Array<Prism::Node>]
-        # @param model_index [Hash{String => Hash}, nil]
-        # @return [Array<Violation>]
         def violations_for(matcher_call:, ancestors:, model_index:)
           return [] if model_index.nil?
           return [] unless matcher_invocation?(matcher_call)

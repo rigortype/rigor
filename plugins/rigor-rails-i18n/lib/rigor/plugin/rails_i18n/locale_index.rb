@@ -36,7 +36,6 @@ module Rigor
 
         attr_reader :entries, :locales
 
-        # @param entries [Array<Entry>]
         # @param locales [Array<String>] all locale names that contributed at least one key.
         def initialize(entries, locales:)
           @entries = entries.freeze

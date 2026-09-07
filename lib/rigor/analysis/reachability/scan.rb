@@ -70,15 +70,16 @@ module Rigor
           end
         end
 
-        # @param path [String] the file's path, as the report should render it.
-        # @param source [String] the file's bytes.
-        # @param target_ruby [String, nil] Prism version string, threaded from the project configuration.
-        # @return [Result, nil] nil when the file does not parse (a parse error is the analyzer's business, not
-        #   this scan's — it simply contributes nothing rather than half a file).
-        # A constant name is ASCII by construction, so a byte sequence that is not valid UTF-8 cannot be one.
-        # Dropping it is both correct and the only safe answer: carrying it forward crashed the whole run on
-        # the first `String#sub` downstream, which is how this surfaced — `rigor unused` on Rigor's own
-        # repository, which vendors a CRuby checkout containing deliberately ill-encoded encoding fixtures.
+        # @rbs path: String -- The file's path, as the report should render it.
+        # @rbs source: String -- The file's bytes.
+        # @rbs target_ruby: String? -- Prism version string, threaded from the project configuration.
+        # @rbs return: Result? --
+        #   Nil when the file does not parse (a parse error is the analyzer's business, not this scan's — it simply
+        #   contributes nothing rather than half a file). A constant name is ASCII by construction, so a byte sequence
+        #   that is not valid UTF-8 cannot be one. Dropping it is both correct and the only safe answer: carrying it
+        #   forward crashed the whole run on the first `String#sub` downstream, which is how this surfaced — `rigor
+        #   unused` on Rigor's own repository, which vendors a CRuby checkout containing deliberately ill-encoded
+        #   encoding fixtures.
         def self.usable_name(raw)
           return nil if raw.nil?
 

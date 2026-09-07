@@ -1096,8 +1096,10 @@ module Rigor
         # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slot
         # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
         # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
-        # `:internal_demand`, `:builder`, `:reflection`, `:instance_definitions_table`,
-        # `:singleton_definitions_table`.
+        # `:definition_build_deferred_count`, `:definition_build_deferred_first`,
+        # `:definition_build_summary_warned`, `:internal_demand`, `:internal_demand_status`, `:builder`,
+        # `:reflection`,
+        # `:instance_definitions_table`, `:singleton_definitions_table`.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
         # `@state[:env_loaded]`) to a constant `nil`.
@@ -1977,8 +1979,8 @@ module Rigor
       #
       # {#during_internal_demand} (issue #696) — these two walk EVERY known class, so a failure they hit is a
       # failure of the sig set, not of anything the run asked about, and it must not reach
-      # {#definition_build_failures}. The stderr banner is deliberately left armed here, byte-for-byte as
-      # before.
+      # {#definition_build_failures}. The stderr fallback stays armed, but {#during_internal_demand} folds
+      # every failure found by one outermost walk into one bounded summary (issue #718).
       def instance_definitions_table
         @state[:instance_definitions_table] ||= during_internal_demand do
           build_definitions_table { |name| build_instance_definition(name) }
@@ -2112,7 +2114,9 @@ module Rigor
       # review, second pass).
       #
       # Save-and-restore rather than a bare flag: `#prewarm` wraps a body whose members wrap themselves, and
-      # a nested demand must not un-mark its caller on the way out.
+      # a nested demand must not un-mark its caller on the way out. A successful outermost exit flushes the
+      # deferred stderr summary; an outermost exit that raises keeps the detailed fallback banner armed even
+      # when an earlier internal-demand episode already emitted the loader-instance summary.
       #
       # Per LOADER, not per thread. Nesting and a raise mid-demand are both handled, and the fork pool forks
       # after `#prewarm` returns, so no CLI path shares a loader across concurrent analyses. An in-process
@@ -2120,10 +2124,29 @@ module Rigor
       # silence another's reporting; not reachable today, and not worth a thread-local until it is.
       def during_internal_demand
         previous = @state[:internal_demand]
+        outermost = !previous
+        if outermost
+          @state[:definition_build_deferred_count] = 0
+          @state[:definition_build_deferred_first] = nil
+        end
         @state[:internal_demand] = true
-        yield
-      ensure
-        @state[:internal_demand] = previous
+        # `rescue`/`else` keeps the normal block result precise for the analyzer; the pending marker covers
+        # non-local exits (e.g. `throw`) that unwind through `ensure` without entering either branch.
+        @state[:internal_demand_status] = :pending if outermost
+        begin
+          result = yield
+          @state[:internal_demand_status] = :completed if outermost
+        rescue StandardError, ScriptError => e
+          @state[:internal_demand_status] = :aborted if outermost
+          warn_about_aborted_definition_build_failures if outermost
+          raise e
+        else
+          warn_about_deferred_definition_build_failures if outermost
+          result
+        ensure
+          @state[:internal_demand] = previous
+          warn_about_aborted_definition_build_failures if outermost && @state[:internal_demand_status] == :pending
+        end
       end
 
       # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
@@ -2136,21 +2159,33 @@ module Rigor
       # {#env}, because the whole env is built eagerly and every quarantine/collision is already known by
       # then. Definition builds are LAZY (ADR-54 WD1 — built on demand per class the FIRST time a caller asks,
       # long after {#env} has already run), so there is no later central checkpoint to fire from before the
-      # affected classes even exist. This warns inline at the rescue site instead, gated on
-      # `@state[:definition_build_warned]` (keyed by class name) so the instance and singleton sides — and
-      # any re-entry once the per-process `@instance_definition_cache` / `@singleton_definition_cache`
-      # memoize the failure — warn at most once per class name, cache-hit runs included (a definition build
-      # is per-process regardless of the RBS-env cache tier). `@state` is per-LOADER-INSTANCE, not
-      # process-global, so under the fork-based analysis pool each worker holds its own loader and its own
-      # `@state`: a class whose definition fails can print its warning once per worker that happens to touch
-      # it, i.e. more than once in a single `rigor check` run. Deduplicating that across processes is out of
-      # scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
+      # affected classes even exist. An ordinary demand therefore warns inline at the rescue site; Rigor's
+      # own internal demand defers until its outermost boundary and collapses the whole walk to one summary
+      # (issue #718). Both routes share `@state[:definition_build_warned]` (keyed by normalized class name),
+      # so the instance and singleton sides — and any re-entry once the per-loader-instance definition caches memoize
+      # the failure — count or warn at most once per class name, cache-hit runs included.
+      #
+      # `@state` is per LOADER INSTANCE, not process-global. A fork-pool prewarm finishes before the fork, so
+      # that loader instance emits its summary once in the parent and its dedupe state is inherited by the
+      # workers. A separate loader instance (for example, a parameter-inference pre-pass) has its own summary
+      # budget. A failure first reached by an ordinary demand can still warn once in each worker that reaches
+      # it; deduplicating that across processes is out of scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
       def warn_about_definition_build_failure(class_name, error)
         warned = (@state[:definition_build_warned] ||= {})
-        key = class_name.to_s
+        key = class_name.to_s.delete_prefix("::")
         return if warned[key]
 
         warned[key] = true
+        if @state[:internal_demand]
+          @state[:definition_build_deferred_count] = @state.fetch(:definition_build_deferred_count, 0) + 1
+          @state[:definition_build_deferred_first] ||= [class_name.to_s, error]
+          return
+        end
+
+        warn(definition_build_failure_warning(class_name, error))
+      end
+
+      def definition_build_failure_warning(class_name, error)
         first_line = error.message.to_s.lines.first.to_s.strip
         buffers = definition_build_conflict_buffers(error)
         collisions =
@@ -2163,11 +2198,40 @@ module Rigor
             lines << "    … and #{more} more" if more.positive?
             "\n  Colliding declaration(s):\n#{lines.join("\n")}"
           end
-        warn(
-          "rigor: RBS definition build failed for `#{class_name}`: #{error.class}: #{first_line}\n  " \
+        "rigor: RBS definition build failed for `#{class_name}`: #{error.class}: #{first_line}\n  " \
           "Rigor still treats the class as known, so calls into it now silently degrade to\n  " \
           "`Dynamic[top]` — real methods and typos alike — instead of resolving normally.#{collisions}"
+      end
+
+      def warn_about_deferred_definition_build_failures
+        return if @state[:definition_build_summary_warned]
+
+        count = @state[:definition_build_deferred_count]
+        return if count.nil? || count.zero?
+
+        @state[:definition_build_summary_warned] = true
+        first_class, first_error = @state[:definition_build_deferred_first]
+        affected = if count == 1
+                     "1 class affected"
+                   else
+                     more = count - 1
+                     noun = more == 1 ? "class" : "classes"
+                     "… and #{more} more #{noun} affected (#{count} total)"
+                   end
+        warn(
+          "#{definition_build_failure_warning(first_class, first_error)}\n  " \
+          "Internal whole-universe demand found #{affected}; the " \
+          "`rbs.coverage.definition-build-failed` diagnostic reports the classes the analysis demanded and " \
+          "the culprit member and signature files."
         )
+      end
+
+      def warn_about_aborted_definition_build_failures
+        count = @state[:definition_build_deferred_count]
+        return if count.nil? || count.zero?
+
+        first_class, first_error = @state[:definition_build_deferred_first]
+        warn(definition_build_failure_warning(first_class, first_error))
       end
 
       # The definition-build twin of {#env_build_conflict_buffers}: the declaration source file(s) named by a

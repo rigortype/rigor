@@ -1,0 +1,1 @@
+- **[rbs]** Duplicate RBS method declarations now produce a bounded warning when the same failure affects many classes, while coverage diagnostics retain the failed class and member details and analyses that stop early still report the failure. ([#718](https://github.com/rigortype/rigor/issues/718), [#768](https://github.com/rigortype/rigor/pull/768))

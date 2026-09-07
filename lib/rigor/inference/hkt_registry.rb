@@ -150,7 +150,9 @@ module Rigor
       # loaded RBS env, parse them via {Rigor::RbsExtended::HktDirectives}, and return a new
       # registry that is the union of `base` and every parsed entry. Last-write-wins on URI
       # collisions per {#merge}'s contract. Fail-soft on per-annotation parse errors (the reporter
-      # records an `:info` entry; the other annotations still apply).
+      # records an entry the run surfaces as one `dynamic.rbs-extended.hkt-directive-invalid` `:info`
+      # diagnostic; the other annotations still apply). That claim was false until issue #785: the
+      # production reporter has no `#record`, so every declined directive was dropped silently.
       #
       # @param rbs_loader [Rigor::Environment::RbsLoader]
       # @param base [HktRegistry] starting registry (typically the bundled
@@ -158,8 +160,9 @@ module Rigor
       # @param name_scope [Rigor::Environment::NameScope, nil] threaded through to the bound
       #   resolver for class-name lookups; safe to omit during scanning since hkt bounds are
       #   typically `untyped` or stdlib classes.
-      # @param reporter [#record, nil] same fail-soft reporter contract the other RBS-extended
-      #   parsers use.
+      # @param reporter [Rigor::RbsExtended::Reporter, #record, nil] same fail-soft reporter contract
+      #   the other RBS-extended parsers use; a collecting double that responds only to `#record` /
+      #   `#<<` still works (see {Rigor::RbsExtended::HktDirectives.record_hkt_error}).
 
       # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockLength
       def self.scan_rbs_loader(rbs_loader, base: EMPTY, name_scope: nil, reporter: nil)

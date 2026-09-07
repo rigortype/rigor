@@ -166,6 +166,68 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
     end
   end
 
+  # Issue #785 — the examples above all drive a collecting double that answers `#record`. The PRODUCTION
+  # reporter answers neither `#record` nor `#<<`, so every one of those failures was silently discarded in
+  # a real run. These pin the real class, which is the only shape the bug could hide in.
+  describe "against the production Rigor::RbsExtended::Reporter" do
+    let(:reporter) { Rigor::RbsExtended::Reporter.new }
+
+    it "records a declined hkt_register instead of dropping it" do
+      result = described_class.parse_register(
+        "rigor:v1:hkt_register: uri=broken arity=1 variance=out bound=untyped", reporter: reporter
+      )
+
+      expect(result).to be_nil
+      expect(reporter).not_to be_empty
+      expect(reporter.hkt_directive_errors.size).to eq(1)
+      expect(reporter.hkt_directive_errors.first.message).to include("namespaced")
+    end
+
+    it "records a declined hkt_define" do
+      described_class.parse_define("rigor:v1:hkt_define: uri=json::value body=K", reporter: reporter)
+
+      expect(reporter.hkt_directive_errors.map(&:message)).to include(a_string_including("params="))
+    end
+
+    it "positions the entry at the annotation's .rbs file, line and 1-based column" do
+      buffer = RBS::Buffer.new(name: "sig/overlay.rbs", content: "line one\nline two\n")
+      location = RBS::Location.new(buffer, 9, 13)
+
+      described_class.parse_register(
+        "rigor:v1:hkt_register: uri=json::value arity=0", reporter: reporter, source_location: location
+      )
+
+      entry = reporter.hkt_directive_errors.first
+      expect(entry.path).to eq("sig/overlay.rbs")
+      expect(entry.line).to eq(2)
+      expect(entry.column).to eq(1)
+    end
+
+    it "keeps the entry Marshal-clean and deeply frozen so it can cross the fork-pool drain channel" do
+      buffer = RBS::Buffer.new(name: "sig/overlay.rbs", content: "x\n")
+      described_class.parse_register(
+        "rigor:v1:hkt_register: uri=json::value arity=0", reporter: reporter,
+                                                          source_location: RBS::Location.new(buffer, 0, 1)
+      )
+      entry = reporter.hkt_directive_errors.first
+
+      expect(Marshal.load(Marshal.dump(entry))).to eq(entry)
+      expect(Ractor.shareable?(entry)).to be(true)
+    end
+
+    it "dedups the same declined directive recorded by two workers over separate RBS::Buffers" do
+      %w[a b].each do |content|
+        buffer = RBS::Buffer.new(name: "sig/overlay.rbs", content: "#{content}\n")
+        described_class.parse_register(
+          "rigor:v1:hkt_register: uri=json::value arity=0", reporter: reporter,
+                                                            source_location: RBS::Location.new(buffer, 0, 1)
+        )
+      end
+
+      expect(reporter.hkt_directive_errors.size).to eq(1)
+    end
+  end
+
   def collect_reporter
     Class.new do
       attr_reader :entries

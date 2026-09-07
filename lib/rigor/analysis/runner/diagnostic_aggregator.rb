@@ -692,10 +692,13 @@ module Rigor
         #   enable.
         # - `dynamic.shape.lossy-projection` for every shape-projection type function (`pick_of`, …) applied
         #   to a carrier that loses precision (anything other than `HashShape` / `Tuple`).
+        # - `dynamic.rbs-extended.hkt-directive-invalid` for every malformed ADR-20 `rigor:v1:hkt_register` /
+        #   `rigor:v1:hkt_define` the directive parser declined (issue #785).
         #
-        # Both are authored `:info`; the severity profile re-stamps them per project taste. Path / line /
+        # All three are authored `:info`; the severity profile re-stamps them per project taste. Path / line /
         # column come from the annotation's `RBS::Location` when available, falling back to
-        # `.rigor.yml`-style file-level attribution otherwise.
+        # `.rigor.yml`-style file-level attribution otherwise — the hkt stream carries that triple already
+        # flattened, because it crosses the pool drain channel (see {RbsExtended::Reporter::HktDirectiveEntry}).
         def rbs_extended_reporter_diagnostics
           return [] if @rbs_extended_reporter.empty?
 
@@ -719,7 +722,27 @@ module Rigor
             )
           end
 
-          unresolved + lossy
+          unresolved + lossy + hkt_directive_diagnostics
+        end
+
+        # Issue #785 — one row per declined HKT directive. The consequence sentence is the point: the parser
+        # is fail-soft, so nothing else in the run tells the author that the constructor they registered is
+        # not there and that every `App[…]` naming it silently reads its bound.
+        def hkt_directive_diagnostics
+          @rbs_extended_reporter.hkt_directive_errors.map do |entry|
+            path = entry.path.to_s
+            Diagnostic.new(
+              path: path.empty? ? ".rigor.yml" : path,
+              line: entry.line || 1,
+              column: entry.column || 1,
+              message: "`RBS::Extended` HKT directive was declined: #{entry.message}. The type " \
+                       "constructor stays unregistered, so an `App[...]` carrier naming it reads " \
+                       "its bound (`Dynamic[top]`) instead of the type function.",
+              severity: :info,
+              rule: "dynamic.rbs-extended.hkt-directive-invalid",
+              source_family: :builtin
+            )
+          end
         end
 
         # ADR-32 WD6 — drains the per-run {Plugin::SourceRbsSynthesisReporter} into

@@ -336,7 +336,24 @@ RSpec.describe Rigor::Analysis::WorkerSession do
 
       expect(drained[:rbs_extended][:unresolved_payloads]).to be_frozen
       expect(drained[:rbs_extended][:lossy_projections]).to be_frozen
+      expect(drained[:rbs_extended][:hkt_directive_errors]).to be_frozen
       expect(drained[:boundary_cross]).to be_frozen
+    end
+
+    # Issue #785 — the drain is the only way a pooled run learns about a declined HKT directive: the
+    # coordinator never analyses a file, so its own reporter never sees the registry scan.
+    it "drains the hkt-directive stream, Marshal-clean, so the fork backend can ship it home" do
+      session = described_class.new(
+        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
+      )
+      session.rbs_extended_reporter.record_hkt_error(
+        message: "arity must be a positive Integer, got nil", path: "sig/overlay.rbs", line: 4, column: 1
+      )
+
+      drained = session.drain_reporters[:rbs_extended][:hkt_directive_errors]
+
+      expect(drained.map(&:message)).to eq(["arity must be a positive Integer, got nil"])
+      expect(Marshal.load(Marshal.dump(drained))).to eq(drained)
     end
 
     it "threads the per-session reporters into Environment so the dispatcher writes into them" do

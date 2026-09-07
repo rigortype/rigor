@@ -95,10 +95,13 @@ states:
 
 The `sig.skipped.*` reasons are:
 
-- `sig.skipped.complex-shape` — the method has optional, rest,
-  keyword, block, or forwarding parameters. The MVP's
-  body-typing path only handles required positional
-  parameters; complex shapes need a future slice.
+- `sig.skipped.complex-shape` — reserved for a parameter
+  shape the renderer cannot spell. Every shape a `def` can
+  declare renders today (optional, rest, trailing, keyword,
+  keyword-rest, `...` forwarding, `&block`), so the
+  generator does not produce this reason; it stayed
+  reserved when the gate that used to fire it for every
+  such method was retired (#778).
 - `sig.skipped.untyped-return` — the method body's last
   expression types as `Dynamic[top]`. Emitting `untyped` as
   a tightening would be noise rather than help.
@@ -119,16 +122,25 @@ The `sig.skipped.*` reasons are:
 The three `sig.generated.*` identifiers
 (`sig.generated.new-file` / `new-method` / `tighter-return`)
 are emitted as JSON fields under `--format=json` so CI
-gating consumers can route them.
+gating consumers can route them. Every `skipped` row is part
+of the same payload, carrying its `sig.skipped.*` identifier
+as `skip_reason`, so a method missing from your `sig/` has
+its reason next to the rows that did emit. In text mode a
+one-line stderr summary counts the skipped methods per
+reason instead; stdout stays paste-clean.
 
 ## What method shapes the generator covers
 
 Slice-by-slice (each shipped via a CHANGELOG entry — this
 list is the current state):
 
-- **Plain instance `def foo`** with required positional
-  parameters. Both new-method and tighter-return paths
-  apply.
+- **Plain instance `def foo`** of any parameter shape:
+  required, optional, rest, trailing, keyword, keyword-rest,
+  `...` forwarding and `&block`. The parameter list mirrors
+  the runtime shape with `untyped` in every position (the
+  observed union under `--params=observed`), and a block
+  renders as `?{ (*untyped) -> untyped }`. Both new-method
+  and tighter-return paths apply.
 - **Singleton-side `def self.foo`** and
   `class << self; def foo; end`. Rendered as
   `def self.foo: ...`; matched against
@@ -143,10 +155,8 @@ list is the current state):
   are recognised as user-authored and never produce a
   duplicate `def` insertion.
 
-Method shapes the generator does **not** cover yet (and
-silently skips):
+Method shapes the generator does **not** cover yet:
 
-- Optional / rest / keyword / block / forwarding parameters.
 - `define_method(:name) { ... }`.
 - Methods whose body types as `Dynamic[top]` (the body
   inference cannot prove a useful return type).
@@ -303,9 +313,9 @@ inference, not a separate analysis.
 
 ## Limits today
 
-- Methods with optional / rest / keyword / block /
-  forwarding parameters silently skip
-  (`sig.skipped.complex-shape`).
+- A block parameter always renders as the lenient
+  `?{ (*untyped) -> untyped }`; a typed block signature
+  waits on the engine tracking yield shapes end-to-end.
 - `define_method` and `Data.define`-specific emission are
   deferred follow-ups (`Data.define`-derived readers come
   through if a method body exists).

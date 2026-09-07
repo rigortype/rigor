@@ -63,9 +63,80 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq(%(def two: (untyped, untyped) -> "constant"))
     end
 
-    it "skips defs with optional / keyword / block / rest params via sig.skipped.complex-shape" do
-      path = write_fixture("lib/complex.rb", <<~RUBY)
+    # #778 — every parameter shape a def can declare renders; the slice-1 gate that skipped them as
+    # `sig.skipped.complex-shape` is gone.
+    it "emits optional / keyword / rest / block / keyword-rest defs, mirroring the runtime shape" do
+      path = write_fixture("lib/complex.rb", <<~'RUBY')
         class Complex
+          def opt(a = 1); "<#{a}>"; end
+          def kw(a:); "<#{a}>"; end
+          def kw_opt(a: 1); "<#{a}>"; end
+          def rest(*a); "<#{a.size}>"; end
+          def blk(&b); "<#{b}>"; end
+          def kwrest(**o); "<#{o}>"; end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.filter_map(&:rbs)).to contain_exactly(
+        "def opt: (?untyped) -> String",
+        "def kw: (a: untyped) -> String",
+        "def kw_opt: (?a: untyped) -> String",
+        "def rest: (*untyped) -> String",
+        "def blk: () ?{ (*untyped) -> untyped } -> String",
+        "def kwrest: (**untyped) -> String"
+      )
+      expect(candidates.map(&:skip_reason)).not_to include(:complex_shape)
+    end
+
+    it "renders `...` forwarding, anonymous splats, trailing positionals and `**nil`" do
+      path = write_fixture("lib/shapes.rb", <<~'RUBY')
+        class Shapes
+          def fwd(...); "<#{other(...)}>"; end
+          def other(*); 1; end
+          def trailing(a, *r, b); "<#{a}#{b}>"; end
+          def no_kw(**nil); "x"; end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.filter_map(&:rbs)).to contain_exactly(
+        "def fwd: (*untyped, **untyped) ?{ (*untyped) -> untyped } -> String",
+        "def other: (*untyped) -> 1",
+        "def trailing: (untyped, *untyped, untyped) -> String",
+        %(def no_kw: () -> "x")
+      )
+    end
+
+    it "emits every method of issue #778's fixture, the ones `rigor annotate` types" do
+      path = write_fixture("lib/demo.rb", <<~'RUBY')
+        module Demo
+          def self.positional(text)           = "<#{text}>"
+          def self.optional(text = "x")       = "<#{text}>"
+          def self.keyword(name:)             = "<#{name}>"
+          def self.keyword_default(name: "x") = "<#{name}>"
+          def self.splat(*parts)              = "<#{parts.join}>"
+        end
+      RUBY
+
+      expect(generator(paths: [path]).run.filter_map(&:rbs)).to eq(
+        [
+          "def self.positional: (untyped) -> String",
+          "def self.optional: (?untyped) -> String",
+          "def self.keyword: (name: untyped) -> String",
+          "def self.keyword_default: (?name: untyped) -> String",
+          "def self.splat: (*untyped) -> String"
+        ]
+      )
+    end
+
+    # The body typer binds every parameter to `untyped`, so a def that returns one proves nothing about its
+    # return: that is the untyped-return skip, exactly as for a required positional, not a shape problem.
+    it "keeps a parameter-returning def of any shape on sig.skipped.untyped-return" do
+      path = write_fixture("lib/identity.rb", <<~RUBY)
+        class Identity
           def opt(a = 1); a; end
           def kw(a:); a; end
           def rest(*a); a; end
@@ -76,8 +147,33 @@ RSpec.describe Rigor::SigGen::Generator do
       candidates = generator(paths: [path]).run
 
       skipped = candidates.select { |c| c.classification == Rigor::SigGen::Classification::SKIPPED }
-      expect(skipped.map(&:skip_reason)).to all(eq(:complex_shape))
       expect(skipped.map(&:method_name)).to contain_exactly(:opt, :kw, :rest, :blk)
+      expect(skipped.map(&:skip_reason)).to all(eq(:untyped_return))
+    end
+
+    it "credits observations across the def's optional-arity window under --params=observed (#778)" do
+      path = write_fixture("lib/greeter.rb", <<~RUBY)
+        class Greeter
+          def greet(name = "x", punct: "!")
+            "hi"
+          end
+        end
+      RUBY
+      observations = {
+        ["Greeter", :greet] => [
+          Rigor::SigGen::ObservedCall.new(positional: []),
+          Rigor::SigGen::ObservedCall.new(positional: [Rigor::Type::Combinator.constant_of("Alice")],
+                                          keyword: { punct: Rigor::Type::Combinator.constant_of("?") }),
+          # Two positionals do not fit `(?name)`: a different overload, credited nowhere.
+          [Rigor::Type::Combinator.constant_of("Bob"), Rigor::Type::Combinator.constant_of("extra")]
+        ]
+      }
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+
+      candidate = described_class.new(configuration: config, paths: [path], observations: observations)
+                                 .run.find { |c| c.method_name == :greet }
+
+      expect(candidate.rbs).to eq(%(def greet: (?"Alice", ?punct: "?") -> "hi"))
     end
 
     it "skips defs whose inferred return collapses to untyped via sig.skipped.untyped-return" do

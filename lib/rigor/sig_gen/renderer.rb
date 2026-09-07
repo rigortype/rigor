@@ -14,7 +14,8 @@ module Rigor
     # - `:diff` — a unified-style diff comparing the existing RBS spelling (if any) against the inferred
     #   spelling. The MVP renders a minimal "- declared / + inferred" block; full per-file diffing arrives with
     #   slice 2's `--write` merge.
-    # - `:json` — machine-readable payload with the same classification table as `:print`.
+    # - `:json` — machine-readable payload with the same classification table as `:print`, plus every `skipped`
+    #   row with its `skip_reason` (#778).
     class Renderer
       def initialize(out:)
         @out = out
@@ -27,11 +28,10 @@ module Rigor
       #   {Classification} constants to include; an empty
       #   array means "all emittable classifications".
       def render(candidates:, mode:, format:, selection:)
-        filtered = filter(candidates, selection)
-
         case format
-        when "json" then render_json(filtered)
+        when "json" then render_json(filter(candidates, selection, with_skipped: true))
         when "text"
+          filtered = filter(candidates, selection)
           mode == :diff ? render_diff(filtered) : render_print(filtered)
         else
           raise ArgumentError, "unsupported format: #{format}"
@@ -40,9 +40,16 @@ module Rigor
 
       private
 
-      def filter(candidates, selection)
+      # The emittable rows the selection asks for. JSON also carries every `skipped` row whatever the selection:
+      # ADR-14 makes the JSON payload the surface where `sig.skipped.*` is reported, and a consumer asking why a
+      # method is missing from its `sig/` needs the reason next to the rows that did emit (#778 — the rows were
+      # built with their `skip_reason` and then dropped here). `equivalent` rows stay out: nothing to do,
+      # nothing to explain.
+      def filter(candidates, selection, with_skipped: false)
         active = selection.empty? ? Classification::EMITTABLE : selection
-        candidates.select { |c| active.include?(c.classification) }
+        candidates.select do |c|
+          active.include?(c.classification) || (with_skipped && c.classification == Classification::SKIPPED)
+        end
       end
 
       def render_print(candidates)

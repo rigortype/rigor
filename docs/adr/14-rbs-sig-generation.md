@@ -191,9 +191,11 @@ not diagnostics. The reserved identifiers are:
 - `sig.generated.new-file`
 - `sig.generated.new-method`
 - `sig.generated.tighter-return`
-- `sig.skipped.complex-shape` — body inference disqualified
-  the method (optional/rest/keyword/block parameters; see
-  `user_method_param_shape_simple?`).
+- `sig.skipped.complex-shape` — reserved for a parameter
+  shape the renderer cannot spell. Slice 1 produced it for
+  every optional / rest / keyword / block parameter; #778
+  retired that gate (revision history below), and no
+  shape a `def` can declare produces it now.
 - `sig.skipped.user-authored` — `--overwrite` not set and
   the existing RBS declaration is user-authored.
 - `sig.skipped.untyped-return` — inferred return is
@@ -517,9 +519,10 @@ independent of the packaging discussion.
   needs a type-parameter introduction step. Deferred
   until the lightweight-HKT exploration (project
   memory) lands a concrete surface.
-- **Block parameter signatures.** Today the generator
-  rejects any method with a block parameter (`params.block.nil?`
-  in `user_method_param_shape_simple?`). A future
+- **Block parameter signatures.** The generator renders
+  every block parameter as the maximally lenient
+  `?{ (*untyped) -> untyped }` (#778 retired the gate
+  that used to reject the whole method). A future
   slice could emit `() { (E) -> R } -> …` once the
   inference engine tracks block-yield shapes
   end-to-end.
@@ -624,3 +627,9 @@ applicable after review; `equivalent` classifications are no-ops.
 - 2026-07-17 — the policy's rationale and the tighter-return contradiction rule
   moved here from AGENTS.md, which keeps the rule alone (ADR-97: the contract
   loads into every session; the reasoning is a lookup).
+- 2026-09-08 — #778 retired the slice-1 `sig.skipped.complex-shape` gate. The
+  body typer binds every parameter to `untyped` when no RBS declares the method,
+  so the inferred return was already the clause-1 answer for every shape; every
+  shape a `def` declares now renders through the parameter renderer the
+  `initialize` stub introduced, and the JSON payload carries every skipped row
+  with its reason, as the "JSON-output fields" sentence above always claimed.

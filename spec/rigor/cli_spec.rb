@@ -1562,6 +1562,34 @@ RSpec.describe Rigor::CLI do
       )
     end
 
+    it "lists every skipped method in the JSON payload with its skip_reason (#778)" do
+      path = write_fixture("lib/widget.rb",
+                           "class Widget\n  def s\n    \"hi\"\n  end\n\n  def id(x = 1)\n    x\n  end\nend\n")
+
+      status, out, err = run_cli("sig-gen", "--format=json", path)
+      payload = JSON.parse(out)
+
+      expect(status).to eq(0)
+      expect(err).to eq("")
+      expect(payload["candidates"].map { |c| c.values_at("method", "classification", "skip_reason") })
+        .to contain_exactly(["s", "new_method", nil], ["id", "skipped", "sig.skipped.untyped-return"])
+    end
+
+    it "summarises the skipped methods on stderr in text mode and keeps stdout paste-clean (#778)" do
+      path = write_fixture("lib/widget.rb",
+                           "class Widget\n  def s\n    \"hi\"\n  end\n\n  def id(x = 1)\n    x\n  end\nend\n")
+
+      status, out, err = run_cli("sig-gen", path)
+
+      expect(status).to eq(0)
+      expect(out).to include(%(def s: () -> "hi"))
+      expect(out).not_to include("skipped")
+      expect(err).to eq(
+        "rigor sig-gen: skipped 1 method(s) it could not type or would not overwrite " \
+        "(sig.skipped.untyped-return: 1). Run with --format=json to see each one with its skip_reason.\n"
+      )
+    end
+
     it "rejects --params=observed-strict (reserved for the capability-role catalog)" do
       path = write_fixture("lib/widget.rb", "class Widget; def n; 1; end; end\n")
 
@@ -1704,6 +1732,37 @@ RSpec.describe Rigor::CLI do
         Dir.chdir(tmpdir) { run_cli("sig-gen", "--write", "--config=#{config}") }
 
         expect(File.read(File.join(tmpdir, "sig/widget.rbs"))).to include("def n: () -> Numeric")
+      end
+
+      # #778's acceptance loop: a sidecar for every parameter shape must leave the next `rigor check` clean on
+      # callers using every call shape, and a second sig-gen run must find nothing left to emit (#735's lesson:
+      # a `--write` that makes the next run worse is worse than no write).
+      it "writes every parameter shape, and the next check over callers of every call shape stays clean" do
+        write_fixture("lib/demo.rb", <<~'RUBY')
+          module Demo
+            def self.optional(text = "x")       = "<#{text}>"
+            def self.keyword(name:)             = "<#{name}>"
+            def self.keyword_default(name: "x") = "<#{name}>"
+            def self.splat(*parts)              = "<#{parts.join}>"
+          end
+        RUBY
+        write_fixture("lib/caller.rb", <<~RUBY)
+          class Caller
+            def run
+              [Demo.optional, Demo.optional("y"), Demo.keyword(name: "n"), Demo.keyword_default,
+               Demo.keyword_default(name: 1), Demo.splat, Demo.splat(1, 2, 3)].map(&:upcase)
+            end
+          end
+        RUBY
+        config = write_config
+
+        Dir.chdir(tmpdir) do
+          expect(run_cli("sig-gen", "--write", "--config=#{config}").first).to eq(0)
+          check_status, check_out, = run_cli("check", "--no-cache", "lib", "--config=#{config}")
+          expect(check_status).to eq(0)
+          expect(check_out).to include("No diagnostics")
+          expect(run_cli("sig-gen", "--config=#{config}")[1]).to eq("No candidates\n")
+        end
       end
 
       it "rewrites tighter-return declarations under --overwrite" do

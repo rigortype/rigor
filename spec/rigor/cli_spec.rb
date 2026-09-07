@@ -219,6 +219,10 @@ RSpec.describe Rigor::CLI do
         RBS
         File.write(File.join(dir, "widget.rb"), "class Widget\n  def name\n    \"widget\"\n  end\nend\n")
 
+        # Warm `.rigor/cache` first: the environment has to come BACK out of the store for this to be the
+        # comparison the issue reports, and a store memoises what it computed for the rest of its own life.
+        run_cli("check", "--no-stats", "--config", File.join(dir, ".rigor.yml"), dir)
+
         status, out, _err = run_cli(
           "check", "--verify-incremental", "--no-stats",
           "--config", File.join(dir, ".rigor.yml"), dir

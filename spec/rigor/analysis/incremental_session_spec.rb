@@ -2028,10 +2028,13 @@ end
       Dir.mktmpdir do |dir|
         config = project_signature_fixture(dir)
         cache_root = File.join(dir, ".rigor", "cache")
-        store = Rigor::Cache::Store.new(root: cache_root)
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
         fp = fingerprint(config, dir)
+        # A fresh `Store` per call, because a warm run is a second PROCESS: `Store#fetch_or_compute`
+        # memoises per instance, so a shared one would hand the second run the very environment object the
+        # first one built and never exercise the Marshal round trip the rows below are about (#799).
         incremental = lambda do
+          store = Rigor::Cache::Store.new(root: cache_root)
           guarded_run_incremental(described_class.new(configuration: config, paths: [dir], cache_store: store),
                                   snapshot: snapshot, fingerprint: fp)
         end

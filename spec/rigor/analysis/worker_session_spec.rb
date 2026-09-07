@@ -697,6 +697,36 @@ RSpec.describe Rigor::Analysis::WorkerSession do
     end
   end
 
+  # Issue #805 — Marshal cleanliness is a property of the WHOLE drain payload, not only of the stream that
+  # was written with the pool in mind. The reporter's two older streams carried the `RBS::Location` itself,
+  # and `Marshal.dump` on one raises `TypeError` ("no _dump_data is defined for class RBS::Location"), so a
+  # project whose `sig/` produced a single unresolved payload or lossy projection killed every fork worker
+  # HERE — after its files were analysed — and the run degraded to in-process re-analysis.
+  describe "#drain_reporters payload shape (issue #805)" do
+    it "ships all three RbsExtended::Reporter streams through the fork backend's Marshal channel" do
+      session = described_class.new(
+        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
+      )
+      buffer = RBS::Buffer.new(name: "sig/widget.rbs", content: "class Widget\nend\n")
+      path, line, column = Rigor::RbsExtended::Reporter.position_of(RBS::Location.new(buffer, 0, 5))
+      session.rbs_extended_reporter.record_unresolved(
+        payload: "rigor:v1:return: not-a-known-refinement", path: path, line: line, column: column
+      )
+      session.rbs_extended_reporter.record_lossy_projection(
+        head: "pick_of", path: path, line: line, column: column
+      )
+      session.rbs_extended_reporter.record_hkt_error(
+        message: "params= is required", path: path, line: line, column: column
+      )
+
+      drained = session.drain_reporters
+
+      expect(Marshal.load(Marshal.dump(drained))).to eq(drained)
+      expect(drained[:rbs_extended].values.map { |s| Ractor.shareable?(s) }).to eq([true, true, true])
+      expect(drained[:rbs_extended][:unresolved_payloads].first.line).to eq(1)
+    end
+  end
+
   # Per-file diagnostic comparison key. Severity is intentionally excluded from the key because the Runner re-stamps
   # severity via `apply_severity_profile` AFTER the per-file pass, whereas the WorkerSession returns raw (un-stamped)
   # per-file output — severity-profile application is the caller's responsibility. The remaining fields capture every

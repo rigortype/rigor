@@ -695,16 +695,16 @@ module Rigor
         # - `dynamic.rbs-extended.hkt-directive-invalid` for every malformed ADR-20 `rigor:v1:hkt_register` /
         #   `rigor:v1:hkt_define` the directive parser declined (issue #785).
         #
-        # All three are authored `:info`; the severity profile re-stamps them per project taste. Path / line /
-        # column come from the annotation's `RBS::Location` when available, falling back to
-        # `.rigor.yml`-style file-level attribution otherwise — the hkt stream carries that triple already
-        # flattened, because it crosses the pool drain channel (see {RbsExtended::Reporter::HktDirectiveEntry}).
+        # All three are authored `:info`; the severity profile re-stamps them per project taste. Every stream
+        # carries its `(path, line, column)` already flattened off the annotation's `RBS::Location`, because
+        # all three cross the pool drain channel (see {RbsExtended::Reporter}); an entry with no position
+        # falls back to `.rigor.yml`-style file-level attribution.
         def rbs_extended_reporter_diagnostics
           return [] if @rbs_extended_reporter.empty?
 
           unresolved = @rbs_extended_reporter.unresolved_payloads.map do |entry|
-            build_reporter_diagnostic(
-              entry.source_location,
+            build_positioned_reporter_diagnostic(
+              entry,
               rule: "dynamic.rbs-extended.unresolved",
               message: "`RBS::Extended` directive payload could not be resolved: " \
                        "#{entry.payload.inspect}. Check for typos or enable a plugin " \
@@ -713,8 +713,8 @@ module Rigor
           end
 
           lossy = @rbs_extended_reporter.lossy_projections.map do |entry|
-            build_reporter_diagnostic(
-              entry.source_location,
+            build_positioned_reporter_diagnostic(
+              entry,
               rule: "dynamic.shape.lossy-projection",
               message: "Shape projection `#{entry.head}` applied to a carrier without a " \
                        "literal shape; the projection degrades to the input type. Author " \
@@ -730,17 +730,12 @@ module Rigor
         # not there and that every `App[…]` naming it silently reads its bound.
         def hkt_directive_diagnostics
           @rbs_extended_reporter.hkt_directive_errors.map do |entry|
-            path = entry.path.to_s
-            Diagnostic.new(
-              path: path.empty? ? ".rigor.yml" : path,
-              line: entry.line || 1,
-              column: entry.column || 1,
+            build_positioned_reporter_diagnostic(
+              entry,
+              rule: "dynamic.rbs-extended.hkt-directive-invalid",
               message: "`RBS::Extended` HKT directive was declined: #{entry.message}. The type " \
                        "constructor stays unregistered, so an `App[...]` carrier naming it reads " \
-                       "its bound (`Dynamic[top]`) instead of the type function.",
-              severity: :info,
-              rule: "dynamic.rbs-extended.hkt-directive-invalid",
-              source_family: :builtin
+                       "its bound (`Dynamic[top]`) instead of the type function."
             )
           end
         end
@@ -820,6 +815,20 @@ module Rigor
           path, line, column = location_fields(source_location)
           Diagnostic.new(
             path: path, line: line, column: column,
+            message: message, severity: :info, rule: rule, source_family: :builtin
+          )
+        end
+
+        # The {RbsExtended::Reporter} form of the builder above: its three streams carry the position as
+        # `(path, line, column)` primitives rather than as the `RBS::Location` a conformance record holds,
+        # because they cross the pool drain channel (#785, #805). A missing component falls back exactly as
+        # {#location_fields} does for a missing location.
+        def build_positioned_reporter_diagnostic(entry, rule:, message:)
+          path = entry.path.to_s
+          Diagnostic.new(
+            path: path.empty? ? ".rigor.yml" : path,
+            line: entry.line || 1,
+            column: entry.column || 1,
             message: message, severity: :info, rule: rule, source_family: :builtin
           )
         end

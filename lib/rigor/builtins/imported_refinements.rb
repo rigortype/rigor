@@ -2,6 +2,7 @@
 
 require "strscan"
 
+require_relative "../rbs_extended/reporter"
 require_relative "../type"
 require_relative "../type_node"
 
@@ -558,11 +559,14 @@ module Rigor
           result
         end
 
-        # ADR-13 slice 3b — record one `dynamic.shape.lossy-projection` event per (head,
-        # source_location) pair when the projection actually degraded. The builders return
-        # the source carrier unchanged on non-HashShape / non-Tuple receivers (see
-        # `Type::Combinator.pick_of` / `omit_of` and the HashShape-only `partial_of` /
-        # `required_of` / `readonly_of`), so detection is "first arg was lossy".
+        # ADR-13 slice 3b — record one `dynamic.shape.lossy-projection` event per (head, position) pair when
+        # the projection actually degraded. The builders return the source carrier unchanged on
+        # non-HashShape / non-Tuple receivers (see `Type::Combinator.pick_of` / `omit_of` and the
+        # HashShape-only `partial_of` / `required_of` / `readonly_of`), so detection is "first arg was lossy".
+        #
+        # Issue #805 — the `RBS::Location` is flattened to `(path, line, column)` here, at record time: the
+        # entry is drained out of every fork-pool worker, and a location survives neither the drain's
+        # `Marshal.dump` nor its cross-worker dedup (see {Rigor::RbsExtended::Reporter}).
         def record_lossy_projection_if_applicable(node, args, result)
           return if @reporter.nil?
           return if result.nil?
@@ -570,10 +574,8 @@ module Rigor
           return if args.empty?
           return unless Type::Combinator.shape_projection_lossy?(args.first)
 
-          @reporter.record_lossy_projection(
-            head: node.head,
-            source_location: @source_location
-          )
+          path, line, column = RbsExtended::Reporter.position_of(@source_location)
+          @reporter.record_lossy_projection(head: node.head, path: path, line: line, column: column)
         end
 
         def try_parametric_int_builder(node)

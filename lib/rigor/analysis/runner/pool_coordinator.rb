@@ -115,14 +115,22 @@ module Rigor
         # sources. The env stays a LOCAL variable (not an ivar) so it goes GC-eligible when the method
         # returns — holding it as long-lived state added memory pressure that surfaced as a Bus Error
         # during the spec suite under Ruby 4.0 + rbs 4.0.2.
-        def analyze_files(files, environment: nil)
+        # @param subset [Boolean] issue #784 — true when the caller narrowed a project that HAS files down
+        #   to these (`Runner#analyze_only`: an incremental recheck's closure, a `--verify-incremental`
+        #   partition); false when `files` IS the whole project.
+        def analyze_files(files, environment: nil, subset: false)
           if files.empty?
-            # Issue #784 — an EMPTY analyze set (an incremental recheck whose closure is empty, the LSP's
-            # no-change round) still owes the run its HKT-scan row: the per-file cache never holds it
-            # (`IncrementalSession#per_file` drops `.rigor.yml` rows on the promise they are regenerated every
-            # run), so returning here without recording would flip a red project green. Only an environment
-            # that ALREADY exists is consulted — an override or nothing; never build one for this.
-            record_hkt_scan_failure(hkt_scan_outcome(environment || @environment_override))
+            # Issue #784 — an EMPTY analyze set still owes the run its HKT-scan row: the per-file cache never
+            # holds it (`IncrementalSession#per_file` drops `.rigor.yml` rows on the promise they are
+            # regenerated every run), so returning here without recording flips a red project green — and
+            # the shipping `--incremental` path reaches this branch with NO environment in hand on every
+            # warm recheck that changed nothing (`CheckCommand#run_incremental_check` builds its session
+            # without one). So: an environment already in hand is consulted; a SUBSET run of a project that
+            # has files resolves one (the same cache-served env load every non-empty recheck pays); a project
+            # with no files at all still builds nothing — there is no registry anyone could have demanded.
+            env = environment || @environment_override
+            env ||= resolve_sequential_environment(source_files: []) if subset
+            record_hkt_scan_failure(hkt_scan_outcome(env))
             return []
           end
           return dispatch_pool(files) if pool_mode?
@@ -691,7 +699,14 @@ module Rigor
         # "the classes the analysis demanded"; a Rigor-internal demand adds classes the user never asked
         # about and makes that list vary with configuration. The HKT scan is ONE build with ONE outcome —
         # the same tuple whoever demands it — so an extra demand cannot change what is reported, only
-        # guarantee it is observed. Memoised, so on a reused Environment this is a hash read.
+        # guarantee it is observed.
+        #
+        # What it costs, stated plainly because {#record_definition_build_failures}'s comment promises
+        # "nothing is forced here": the demand DOES force the RBS env build when the environment has not
+        # built it yet (the scan reads the loader). On every path that reaches this method that build is
+        # either already done (the loop demanded it) or the same cache-served load the run would have paid
+        # for one analysed file; it is never a from-scratch parse, and never a build on a project with no
+        # files (see {#analyze_files}). Memoised, so on a reused Environment this is a hash read.
         #
         # @param environment [Rigor::Environment, nil]
         # @return [Array, nil] the recorded tuple, or nil (no environment, or the scan built)

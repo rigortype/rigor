@@ -137,9 +137,11 @@ module Rigor
     end
 
     # Issue #784 — the `[error_class_name, first_message_line, raw_frame_or_nil]` tuple the seam in
-    # {#hkt_registry} recorded, or nil when the scan built (or was never demanded). Read by the pool
-    # coordinator AFTER the file loop, and drained out of each worker — the coordinator's own Environment
-    # never demands the registry, so its slot is always nil under the pool (the #696 lesson).
+    # {#hkt_registry} recorded, or nil when the scan built (or was never demanded). The run reads it only
+    # after demanding {#hkt_registry} itself — after the file loop on the sequential paths, at drain time
+    # in each pool worker (the coordinator never analyses a file under the pool, so the drain is how its
+    # snapshot learns the outcome: the #696 lesson), and from a resolved environment when the analyze set
+    # is empty — so the row never depends on which files happened to be analysed.
     #
     # @return [Array(String, String, String), Array(String, String, nil), nil]
     def hkt_scan_failure
@@ -149,12 +151,15 @@ module Rigor
     def record_hkt_scan_failure(error)
       frames = error.backtrace || []
       frame = frames.find { |f| f.include?("/lib/rigor/") } || frames.first
-      # `Class#name` is nil for an anonymous exception class; `inspect` still names it. Each String is
-      # frozen individually, not just the Array: the tuple crosses the fork boundary Marshal-clean and the
-      # drain channel's stated invariant ({Analysis::WorkerSession#drain_reporters}) is that its payload is
-      # also `Ractor.shareable?`, which a shallow freeze over `chomp`'s fresh String would not satisfy.
+      # `Class#name` is nil for an anonymous exception class; its nearest NAMED ancestor is the stable
+      # description (`inspect` embeds an object address, which would make the row's text differ across
+      # processes). Each String is frozen individually, not just the Array: the tuple crosses the fork
+      # boundary Marshal-clean and the drain channel's stated invariant
+      # ({Analysis::WorkerSession#drain_reporters}) is that its payload is also `Ractor.shareable?`, which a
+      # shallow freeze over `chomp`'s fresh String would not satisfy.
+      named = error.class.ancestors.find { |a| a.is_a?(Class) && a.name }
       @hkt_scan_failure.record([
-                                 (error.class.name || error.class.inspect).dup.freeze,
+                                 (error.class.name || "anonymous #{named&.name || 'Exception'}").dup.freeze,
                                  error.message.to_s.lines.first.to_s.chomp.freeze,
                                  frame&.dup&.freeze
                                ])

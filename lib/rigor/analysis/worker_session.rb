@@ -251,8 +251,10 @@ module Rigor
       def drain_reporters
         # Issue #784 — demand the registry once per worker before reading the slot, so a worker whose share
         # of files happened to contain no `Klass.method` call still reports the run's outcome (the same
-        # reason `PoolCoordinator#hkt_scan_outcome` demands it on the sequential path). `@environment` is
-        # built eagerly in the constructor, so this forces only the (memoised) scan, never an env build.
+        # reason `PoolCoordinator#hkt_scan_outcome` demands it on the sequential path). The Environment
+        # object is built in the constructor, but its RBS env is lazy: on a worker that analysed a file this
+        # is a memoised read; on one that demanded nothing it is the same cache-served env load that file
+        # would have paid. The fork backend never hands a worker an empty slice, so no idle worker pays it.
         @environment&.hkt_registry
         {
           rbs_extended: {

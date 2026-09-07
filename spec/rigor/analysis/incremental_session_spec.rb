@@ -1810,9 +1810,10 @@ end
   # makes ITSELF, so it survives every incremental path even when the analysed closure contains no
   # `Klass.method` call: `per_file` drops `.rigor.yml` rows from the cache on exactly that promise, and
   # before the run demanded on its own behalf these three paths each lost the row and turned a red project
-  # green. Every example builds its OWN Environment: stubbing the scan to raise memoises a degraded
-  # registry on whichever Environment demands it, and `shared_environment` must stay healthy for the rest
-  # of this file.
+  # green. Every session here is built the way `CheckCommand#run_incremental_check` builds it — with NO
+  # `environment:` — because the first cut of the fix passed only under an injected environment the CLI
+  # never supplies (the empty-closure recheck then had nothing to demand on). A side effect is that each
+  # run builds its own Environment, so the raising scan never touches `shared_environment`.
   describe "the hkt-scan-failed row across the incremental paths (issue #784)" do
     before do
       allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_raise(NameError, "simulated scan bug")
@@ -1822,8 +1823,9 @@ end
       diagnostics.select { |d| d.rule == "rbs.coverage.hkt-scan-failed" }
     end
 
+    # The CLI shape: no `environment:`, no `cache_store:`.
     def own_session(config, dir)
-      described_class.new(configuration: config, paths: [dir], environment: Rigor::Environment.for_project)
+      described_class.new(configuration: config, paths: [dir])
     end
 
     # `app.rb` demands the registry (a Singleton-receiver call); `notes.rb` never does.

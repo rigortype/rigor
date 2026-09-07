@@ -986,7 +986,11 @@ module Rigor
         # per-file cache, so it needs the full analyzed set to subtract the affected closure from.
         targets = target_files(expansion)
         @analyzed_files = targets
-        diagnostics += @pool_coordinator.analyze_files(targets, environment: environment)
+        # Issue #784 — `subset:` tells the coordinator an empty `targets` is a narrowed run over a project
+        # that has files (so it owes the run-level HKT row an environment) rather than a project with none.
+        diagnostics += @pool_coordinator.analyze_files(
+          targets, environment: environment, subset: !@analyze_only.nil?
+        )
         # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
         # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
         # contributes NO diagnostics and its result leaves through `#effect_table`, never through the

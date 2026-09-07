@@ -56,19 +56,24 @@ RSpec.describe "HKT scan-failure seam (issue #784)" do
 
   # Suppressible only the way its `rbs.coverage.*` siblings are (diagnostic-policy.md): a severity override
   # — exact id or the `rbs` family — removes it; `disable:` does not, because the row is not a check rule.
+  # `cache_store: nil` throughout: the shared ADR-45 run cache could serve one example's diagnostics to
+  # another whose config + source collide on the key, and an absence assertion would then pass vacuously.
   describe "suppressibility" do
     it "is removed by an exact severity_overrides: off" do
-      result = analyze(source, config: { "severity_overrides" => { "rbs.coverage.hkt-scan-failed" => "off" } })
+      result = analyze(source, cache_store: nil,
+                               config: { "severity_overrides" => { "rbs.coverage.hkt-scan-failed" => "off" } })
       expect(result.diagnostics.map(&:rule)).not_to include("rbs.coverage.hkt-scan-failed")
+      expect(result.diagnostics.map(&:rule)).to include("call.undefined-method") # the run still ran
     end
 
     it "is removed by the rbs family severity_overrides: off" do
-      result = analyze(source, config: { "severity_overrides" => { "rbs" => "off" } })
+      result = analyze(source, cache_store: nil, config: { "severity_overrides" => { "rbs" => "off" } })
       expect(result.diagnostics.map(&:rule)).not_to include("rbs.coverage.hkt-scan-failed")
+      expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
     end
 
     it "is NOT removed by disable:" do
-      result = analyze(source, config: { "disable" => ["rbs.coverage.hkt-scan-failed"] })
+      result = analyze(source, cache_store: nil, config: { "disable" => ["rbs.coverage.hkt-scan-failed"] })
       rows = result.diagnostics.select { |d| d.rule == "rbs.coverage.hkt-scan-failed" }
       expect(rows.size).to eq(1)
       expect(rows.first.severity).to eq(:error)

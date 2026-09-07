@@ -986,10 +986,11 @@ module Rigor
         # per-file cache, so it needs the full analyzed set to subtract the affected closure from.
         targets = target_files(expansion)
         @analyzed_files = targets
-        # Issue #784 — `subset:` tells the coordinator an empty `targets` is a narrowed run over a project
-        # that has files (so it owes the run-level HKT row an environment) rather than a project with none.
+        # Issue #784 — the whole project's file list rides along so an EMPTY `targets` (a narrowed run whose
+        # closure is empty) can still resolve the environment a full run would — same files, same
+        # synthesized RBS — to demand the HKT registry once, while a project with no files resolves nothing.
         diagnostics += @pool_coordinator.analyze_files(
-          targets, environment: environment, subset: !@analyze_only.nil?
+          targets, environment: environment, project_files: expansion.fetch(:files)
         )
         # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
         # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it

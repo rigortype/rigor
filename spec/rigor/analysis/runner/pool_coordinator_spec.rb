@@ -284,32 +284,35 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     end
 
     # The shipping `--incremental` shape: `CheckCommand#run_incremental_check` builds its session with no
-    # environment, so a warm recheck whose closure is empty reaches this branch with nothing in hand. It is a
-    # SUBSET of a project that has files, so the coordinator resolves an environment for the purpose — the
-    # same cache-served env load every non-empty recheck pays — and records the outcome. Without this the
-    # warm run went 0 diagnostics / exit 0 on a broken-scan project where the cold run was red.
-    it "resolves an environment for an empty SUBSET run with none in hand, and records the row (#784)" do
+    # environment, so a warm recheck whose closure is empty reaches this branch with nothing in hand. The
+    # project HAS files, so the coordinator resolves an environment for the purpose — over the project's
+    # own file list, so it carries the same plugin-synthesized RBS a full run would (an env built over `[]`
+    # scans a different universe) — and records the outcome. Without this the warm run went 0 diagnostics
+    # / exit 0 on a broken-scan project where the cold run was red.
+    it "resolves an environment over the project's files for an empty run with none in hand (#784)" do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       tuple = ["NameError", "simulated scan bug", nil]
       resolved = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: tuple)
       allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
 
-      result = build_coordinator(snapshots: snapshots).analyze_files([], subset: true)
+      result = build_coordinator(snapshots: snapshots).analyze_files([], project_files: ["a.rb", "b.rb"])
 
       expect(result).to eq([])
-      expect(Rigor::Environment).to have_received(:for_project).once
+      expect(Rigor::Environment).to have_received(:for_project).with(hash_including(source_files: ["a.rb",
+                                                                                                   "b.rb"])).once
       expect(resolved).to have_received(:hkt_registry).once
       expect(snapshots.hkt_scan_failure).to eq(tuple)
     end
 
-    # The must-still-succeed twin: a project with NO files is not a subset of anything, nobody could have
-    # demanded a registry, and the coordinator must not build an environment just to ask — an empty
-    # project pays no env build today, and that stays true.
-    it "never builds an environment when the whole project is empty (#784)" do
+    # The must-still-succeed twin: a project with NO files — even when `analyze_only` narrowed it to
+    # `Set[]`, which a recheck over an empty project does — has nobody who could have demanded a registry,
+    # and the coordinator must not build an environment just to ask. An empty project pays no env build
+    # today, and that stays true on every path.
+    it "never builds an environment when the project has no files (#784)" do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       allow(Rigor::Environment).to receive(:for_project).and_call_original
 
-      result = build_coordinator(snapshots: snapshots).analyze_files([], subset: false)
+      result = build_coordinator(snapshots: snapshots).analyze_files([], project_files: [])
 
       expect(result).to eq([])
       expect(snapshots.hkt_scan_failure).to be_nil

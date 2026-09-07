@@ -115,21 +115,27 @@ module Rigor
         # sources. The env stays a LOCAL variable (not an ivar) so it goes GC-eligible when the method
         # returns — holding it as long-lived state added memory pressure that surfaced as a Bus Error
         # during the spec suite under Ruby 4.0 + rbs 4.0.2.
-        # @param subset [Boolean] issue #784 — true when the caller narrowed a project that HAS files down
-        #   to these (`Runner#analyze_only`: an incremental recheck's closure, a `--verify-incremental`
-        #   partition); false when `files` IS the whole project.
-        def analyze_files(files, environment: nil, subset: false)
+        # @param project_files [Array<String>, nil] issue #784 — the WHOLE project's analyzed file set
+        #   (`expansion.fetch(:files)`), independent of any `analyze_only` narrowing of `files`. Read only
+        #   when `files` is empty, to decide whether anyone could have demanded the HKT registry at all.
+        def analyze_files(files, environment: nil, project_files: nil)
           if files.empty?
             # Issue #784 — an EMPTY analyze set still owes the run its HKT-scan row: the per-file cache never
             # holds it (`IncrementalSession#per_file` drops `.rigor.yml` rows on the promise they are
             # regenerated every run), so returning here without recording flips a red project green — and
             # the shipping `--incremental` path reaches this branch with NO environment in hand on every
             # warm recheck that changed nothing (`CheckCommand#run_incremental_check` builds its session
-            # without one). So: an environment already in hand is consulted; a SUBSET run of a project that
-            # has files resolves one (the same cache-served env load every non-empty recheck pays); a project
-            # with no files at all still builds nothing — there is no registry anyone could have demanded.
+            # without one). So: an environment already in hand is consulted; otherwise one is resolved over
+            # the project's OWN file list — not `[]`, which would drop every plugin-synthesized virtual RBS
+            # (`Environment.collect_virtual_rbs` short-circuits on an empty list) and scan a different type
+            # universe from the one a full run analyses — and only when the project HAS files: with none,
+            # nobody could have demanded a registry, and an empty project keeps paying no env build. Keyed
+            # on the project's files rather than on `analyze_only`, because a recheck over an EMPTY project
+            # narrows to `Set[]`, which is non-nil.
             env = environment || @environment_override
-            env ||= resolve_sequential_environment(source_files: []) if subset
+            if project_files && !project_files.empty?
+              env ||= resolve_sequential_environment(source_files: project_files)
+            end
             record_hkt_scan_failure(hkt_scan_outcome(env))
             return []
           end
@@ -704,9 +710,10 @@ module Rigor
         # What it costs, stated plainly because {#record_definition_build_failures}'s comment promises
         # "nothing is forced here": the demand DOES force the RBS env build when the environment has not
         # built it yet (the scan reads the loader). On every path that reaches this method that build is
-        # either already done (the loop demanded it) or the same cache-served load the run would have paid
-        # for one analysed file; it is never a from-scratch parse, and never a build on a project with no
-        # files (see {#analyze_files}). Memoised, so on a reused Environment this is a hash read.
+        # either already done (the loop demanded it) or the same load one analysed file would have paid:
+        # a Marshal load when a cache store exists, the parse a full run pays under `--no-cache`. Never a
+        # build on a project with no files (see {#analyze_files}). Memoised, so on a reused Environment
+        # this is a hash read.
         #
         # @param environment [Rigor::Environment, nil]
         # @return [Array, nil] the recorded tuple, or nil (no environment, or the scan built)

@@ -391,6 +391,29 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       end
     end
 
+    # Issue #791 — the drain's own demand is one of the run-owned demands that sit outside every rescue, so
+    # before the overlay merge moved inside the seam this raised `ArgumentError` out of `drain_reporters`
+    # and took the worker (and the run) down. It now drains the same channel with the `:overlay` stage.
+    it "drains the overlay-stage tuple instead of raising out of the drain (#791)" do
+      raising_registry = Class.new(Rigor::Plugin::Registry) do
+        def hkt_overlay_registry
+          raise ArgumentError, 'plugin "hktboom" raised while contributing HKT registrations: boom'
+        end
+      end.new
+      allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|
+        original.call(**kwargs, plugin_registry: raising_registry)
+      end
+      session = described_class.new(
+        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
+      )
+
+      error_class, first_line, _frame, stage = session.drain_reporters[:hkt_scan_failure]
+
+      expect(error_class).to eq("ArgumentError")
+      expect(first_line).to include("hktboom")
+      expect(stage).to eq(:overlay)
+    end
+
     # The must-still-succeed twin: the drain's own demand builds the registry, and a scan that BUILDS
     # drains nil — never a stale or placeholder tuple.
     it "drains a nil hkt_scan_failure when the scan builds" do

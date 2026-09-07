@@ -447,7 +447,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
 
     it "names the error class, the first message line, and the relativized raise-site frame" do
       failure = ["NameError", "simulated scan bug",
-                 "/opt/gems/rigor-9.9.9/lib/rigor/inference/hkt_registry.rb:12:in 'scan_rbs_loader'"]
+                 "/opt/gems/rigor-9.9.9/lib/rigor/inference/hkt_registry.rb:12:in 'scan_rbs_loader'", :scan]
 
       diagnostic = build_aggregator(hkt_scan_failure_snapshot: failure).rbs_hkt_scan_failed_diagnostics.first
 
@@ -456,18 +456,39 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(diagnostic.path).to eq(".rigor.yml")
       expect(diagnostic.line).to eq(1)
       expect(diagnostic.column).to eq(1)
+      expect(diagnostic.message).to start_with("The implicit HKT scan over RBS `type` aliases raised")
       expect(diagnostic.message).to include("NameError")
       expect(diagnostic.message).to include("simulated scan bug")
       expect(diagnostic.message).to include(" at lib/rigor/inference/hkt_registry.rb:12:in 'scan_rbs_loader'")
     end
 
     it "omits the ` at ` frame clause when the tuple carries no frame" do
-      failure = ["NameError", "simulated scan bug", nil]
+      failure = ["NameError", "simulated scan bug", nil, :scan]
 
       diagnostic = build_aggregator(hkt_scan_failure_snapshot: failure).rbs_hkt_scan_failed_diagnostics.first
 
       expect(diagnostic.message).to include("simulated scan bug")
       expect(diagnostic.message).not_to include(" at ")
+    end
+
+    # Issue #791 — the same slot, the same rule id, a different stage: the plugin-manifest aggregation, not
+    # the `type`-alias scan. The scan wording would send the reader to a `.rbs` that is not the problem, so
+    # the row must say which build failed and which registry the run fell back to.
+    it "words the overlay stage for the plugin, not for the user's `.rbs`" do
+      failure = ["ArgumentError", 'plugin "hktboom" raised while contributing HKT registrations: boom',
+                 "/opt/gems/rigor-9.9.9/lib/rigor/plugin/registry.rb:330:in 'hkt_overlay_registry'", :overlay]
+
+      diagnostic = build_aggregator(hkt_scan_failure_snapshot: failure).rbs_hkt_scan_failed_diagnostics.first
+
+      expect(diagnostic.rule).to eq("rbs.coverage.hkt-scan-failed")
+      expect(diagnostic.severity).to eq(:error)
+      expect(diagnostic.path).to eq(".rigor.yml")
+      expect(diagnostic.message).to start_with("Building the plugin HKT overlay raised")
+      expect(diagnostic.message).to include('plugin "hktboom"')
+      expect(diagnostic.message).to include(" at lib/rigor/plugin/registry.rb:330:in 'hkt_overlay_registry'")
+      # The `.rbs` scan still ran on top of the bundled registrations — the row must not blame signatures.
+      expect(diagnostic.message).to include("your own `.rbs` overlay")
+      expect(diagnostic.message).not_to include("The implicit HKT scan over RBS `type` aliases raised")
     end
   end
 

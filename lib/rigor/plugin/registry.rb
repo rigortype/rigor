@@ -316,9 +316,25 @@ module Rigor
       # determined by the user's `plugins:` list); user `.rbs` overlays merge on top of this overlay last.
       # Returns `Inference::HktRegistry::EMPTY` when no plugin contributes HKT entries so callers can skip the
       # merge.
+      #
+      # Issue #791 — a plugin's contribution is read inside a per-plugin rescue that re-raises the SAME
+      # exception class with the plugin named, and with the original backtrace, so the
+      # `rbs.coverage.hkt-scan-failed` row this ends up on says WHICH plugin to remove instead of only that
+      # "the plugin overlay" failed. `Exception#exception(message)` clones rather than re-constructing, so
+      # an exception class with a non-standard `initialize` survives the re-raise; `cause` is set to the
+      # original automatically. The aggregation itself (a duplicate URI across two plugins, say) is not
+      # attributable to one plugin and raises unnamed — the stage still is, which is what the row needs.
       def hkt_overlay_registry
-        registrations = plugins.flat_map { |plugin| plugin.manifest.hkt_registrations }
-        definitions = plugins.flat_map { |plugin| plugin.manifest.hkt_definitions }
+        registrations = []
+        definitions = []
+        plugins.each do |plugin|
+          manifest = plugin.manifest
+          registrations.concat(manifest.hkt_registrations)
+          definitions.concat(manifest.hkt_definitions)
+        rescue StandardError => e
+          raise e, "plugin #{safe_plugin_id(plugin).inspect} raised while contributing HKT " \
+                   "registrations: #{e.message}", e.backtrace
+        end
         return Inference::HktRegistry::EMPTY if registrations.empty? && definitions.empty?
 
         Inference::HktRegistry.new(registrations: registrations, definitions: definitions)
@@ -454,6 +470,13 @@ module Rigor
         plugin.protocol_contracts || []
       rescue StandardError
         []
+      end
+
+      # Issue #791 — the id to name in the HKT-overlay failure message, derived through {#safe_manifest}
+      # because a raising manifest read is one of the shapes that gets here. Mirrors `Runner#safe_plugin_id`
+      # (the `:plugin_loader` envelope's own naming) so both failure surfaces name a plugin the same way.
+      def safe_plugin_id(plugin)
+        safe_manifest(plugin)&.id || plugin.class.to_s
       end
     end
 

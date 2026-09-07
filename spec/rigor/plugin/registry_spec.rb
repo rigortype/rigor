@@ -423,5 +423,33 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(overlay.registration(:"plugin::box")).to eq(registration)
       expect(overlay.definition(:"plugin::box")).to eq(definition)
     end
+
+    # Issue #791 — this build runs plugin-authored code, and `Environment#hkt_registry` records whatever it
+    # raises on the seam that feeds the `rbs.coverage.hkt-scan-failed` row. The row can only say WHICH
+    # plugin to remove if the message carries the id, so the per-plugin rescue re-raises the same class
+    # with the plugin named and the original backtrace kept.
+    it "names the plugin whose contribution raised, keeping the exception class" do
+      raising_plugin = plugin_class.new(services: services)
+      registry = described_class.new(plugins: [raising_plugin])
+      # Stubbed after construction so the registry compiles its aggregates off the real manifest; the
+      # manifest itself is frozen, which is why the raise is staged through a double.
+      manifest = instance_double(Rigor::Plugin::Manifest, id: "hktboom")
+      allow(manifest).to receive(:hkt_registrations).and_raise(ArgumentError, "malformed hkt_registrations entry")
+      allow(raising_plugin).to receive(:manifest).and_return(manifest)
+
+      expect { registry.hkt_overlay_registry }
+        .to raise_error(ArgumentError,
+                        'plugin "hktboom" raised while contributing HKT registrations: ' \
+                        "malformed hkt_registrations entry")
+    end
+
+    it "falls back to the plugin class when the manifest read is what raised" do
+      raising_plugin = plugin_class.new(services: services)
+      registry = described_class.new(plugins: [raising_plugin])
+      allow(raising_plugin).to receive(:manifest).and_raise(NoMethodError, "no manifest")
+
+      expect { registry.hkt_overlay_registry }
+        .to raise_error(NoMethodError, /raised while contributing HKT registrations: no manifest/)
+    end
   end
 end

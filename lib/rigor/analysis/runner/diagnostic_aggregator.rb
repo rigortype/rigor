@@ -41,8 +41,9 @@ module Rigor
         #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
         #   conflicting_buffer_names]` tuples. Empty for a healthy sig set.
         # @param hkt_scan_failure_snapshot [#call] issue #784 — reader returning the `[error_class_name,
-        #   first_message_line, raw_frame_or_nil]` tuple the RBS-overlay HKT scan raised, or nil when the
-        #   scan built (or was never demanded).
+        #   first_message_line, raw_frame_or_nil, stage]` tuple whichever stage of the HKT-registry build
+        #   raised, or nil when both built (or were never demanded). `stage` is `:scan` (the RBS `type`-alias
+        #   scan) or `:overlay` (the plugin-manifest aggregation, #791), and picks the row's wording.
         # @param conformance_results_snapshot [#call] reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
@@ -389,14 +390,18 @@ module Rigor
           [build_rbs_definition_build_failed_diagnostic(failures)]
         end
 
-        # Issue #784 — the fourth rung, narrowest consequence: the implicit HKT scan over RBS `type`
-        # aliases (ADR-20 WD2's `%a{rigor:v1:hkt_register / hkt_define}` overlay AND any recursive `type`
-        # alias in the project's own `.rbs` or an installed `rbs collection`) raised instead of building.
-        # Analysis proceeds over the PRE-scan registry — bundled builtins (`json::value`, …) plus any plugin
-        # overlay — so a `type` alias that would have registered as a type constructor reads its bound
-        # (`Dynamic[top]`) instead. Everything else this run reports is unaffected: no class loses its
-        # method surface, no signature file is skipped, the environment builds. That is why this sits LAST
-        # on the ladder, after its two `rbs.coverage.*` siblings above.
+        # Issue #784 — the fourth rung, narrowest consequence: one of the two builds behind
+        # `Environment#hkt_registry` raised instead of building. The `:scan` stage is the implicit HKT scan
+        # over RBS `type` aliases (ADR-20 WD2's `%a{rigor:v1:hkt_register / hkt_define}` overlay AND any
+        # recursive `type` alias in the project's own `.rbs` or an installed `rbs collection`); analysis
+        # proceeds over the PRE-scan registry — bundled builtins (`json::value`, …) plus the plugin overlay
+        # — so a `type` alias that would have registered as a type constructor reads its bound
+        # (`Dynamic[top]`) instead. The `:overlay` stage (#791) is the plugin-manifest aggregation, which
+        # sat ABOVE the seam until the run-owned demands made a raise there abort the run; it degrades one
+        # step further in and one step narrower — the plugin entries are dropped, the `.rbs` scan still
+        # runs. Either way everything else this run reports is unaffected: no class loses its method
+        # surface, no signature file is skipped, the environment builds. That is why this sits LAST on the
+        # ladder, after its two `rbs.coverage.*` siblings above.
         def rbs_hkt_scan_failed_diagnostics
           failure = hkt_scan_failure_snapshot
           return [] if failure.nil?
@@ -594,24 +599,44 @@ module Rigor
         # whole-file replacement — so a consumer gating on {CrashSignature.discards_file_analysis?} must
         # keep reading this run's diagnostics rather than refuse it as a crash.
         def build_rbs_hkt_scan_failed_diagnostic(failure)
-          error_class, first_line, frame = failure
+          error_class, first_line, frame, stage = failure
           relative_frame = CrashSignature.relativize_frame(frame)
           frame_clause = relative_frame ? " at #{relative_frame}" : ""
+          raised = "(#{error_class}): #{first_line}#{frame_clause}."
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,
             column: 1,
-            message: "The implicit HKT scan over RBS `type` aliases raised (#{error_class}): " \
-                     "#{first_line}#{frame_clause}. Rigor fell back to the bundled and plugin HKT " \
-                     "registrations, so a recursive `type` alias in your `.rbs` or an installed " \
-                     "`rbs collection` no longer registers as a type constructor and reads its bound " \
-                     "(`Dynamic[top]`) instead — this run is quieter than it should be, not cleaner. " \
-                     "This is an analyzer defect, not a problem with your signatures; please report it " \
-                     "with the message above.",
+            message: stage == :overlay ? hkt_overlay_failed_message(raised) : hkt_scan_failed_message(raised),
             severity: :error,
             rule: "rbs.coverage.hkt-scan-failed",
             source_family: :builtin
           )
+        end
+
+        def hkt_scan_failed_message(raised)
+          "The implicit HKT scan over RBS `type` aliases raised #{raised} Rigor fell back to the bundled " \
+            "and plugin HKT registrations, so a recursive `type` alias in your `.rbs` or an installed " \
+            "`rbs collection` no longer registers as a type constructor and reads its bound " \
+            "(`Dynamic[top]`) instead — this run is quieter than it should be, not cleaner. " \
+            "This is an analyzer defect, not a problem with your signatures; please report it " \
+            "with the message above."
+        end
+
+        # Issue #791 — the overlay stage of the same build, worded for the plugin it came from. The scan
+        # wording would send a user to their `.rbs` for a defect that is not there: what failed is the
+        # aggregation of the loaded plugins' manifest-declared HKT entries, and the message names the
+        # plugin whenever the raise was attributable to one (`Plugin::Registry#hkt_overlay_registry` puts
+        # the id in the message it re-raises). The degradation is narrower than the scan's, so the fallback
+        # sentence differs too: only the plugin entries are missing, and the user's own `.rbs` scan still
+        # ran on top of the bundled registrations.
+        def hkt_overlay_failed_message(raised)
+          "Building the plugin HKT overlay raised #{raised} Rigor skipped every plugin-declared HKT " \
+            "registration and analysed with the bundled ones plus your own `.rbs` overlay, so a type " \
+            "constructor a plugin declares reads its bound (`Dynamic[top]`) instead — this run is " \
+            "quieter than it should be, not cleaner. This is a defect in the named plugin or in Rigor, " \
+            "not a problem with your signatures; report it with the message above, or remove the plugin " \
+            "from `plugins:` to analyse without it."
         end
 
         # The absolute path is what the loader records; the user thinks in project-relative terms.

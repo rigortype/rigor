@@ -16,6 +16,7 @@ require_relative "../effects/envelope_index"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
+require_relative "crash_signature"
 require_relative "dependency_recorder"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
@@ -228,7 +229,7 @@ module Rigor
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]
       rescue StandardError => e
-        [analyzer_error(path, "internal analyzer error: #{e.class}: #{e.message}")]
+        [analyzer_error(path, CrashSignature.check_rule_message(e))]
       end
       private :analyze_body
 

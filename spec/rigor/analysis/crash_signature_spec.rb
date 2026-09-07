@@ -42,12 +42,13 @@ RSpec.describe Rigor::Analysis::CrashSignature do
       expect(described_class.reason(plugin_crash)).to eq(:plugin)
     end
 
-    it "classifies both RBS build-failure rules" do
+    it "classifies every RBS build-failure rule, the #784 HKT-scan rung included" do
+      expect(described_class::RBS_BUILD_FAILURE_RULES).to include("rbs.coverage.hkt-scan-failed")
       reasons = described_class::RBS_BUILD_FAILURE_RULES.map do |rule|
         described_class.reason(diagnostic(message: "…", severity: :warning, rule: rule))
       end
 
-      expect(reasons).to eq(%i[rbs_build rbs_build])
+      expect(reasons).to all(eq(:rbs_build))
     end
 
     it "leaves an ordinary rule diagnostic unclassified" do
@@ -91,7 +92,8 @@ RSpec.describe Rigor::Analysis::CrashSignature do
         described_class.discards_file_analysis?(diagnostic(message: "…", severity: :warning, rule: rule))
       end
 
-      expect(failures).to eq([false, false])
+      expect(failures.size).to eq(described_class::RBS_BUILD_FAILURE_RULES.size)
+      expect(failures).to all(be(false))
     end
   end
 
@@ -99,6 +101,43 @@ RSpec.describe Rigor::Analysis::CrashSignature do
     it "names the shape and the position, so a raise says which crash it saw and where" do
       expect(described_class.describe(check_rule_crash))
         .to eq("check_rule at app.rb:1: internal analyzer error: RuntimeError: boom")
+    end
+  end
+
+  describe ".check_rule_message" do
+    it "keeps the prefix .reason matches on, and appends a repo-relative crash frame" do
+      error = RuntimeError.new("boom")
+      error.set_backtrace(["/opt/gems/rigor-9.9.9/lib/rigor/inference/method_dispatcher.rb:12:in 'resolve'"])
+
+      message = described_class.check_rule_message(error)
+
+      expect(message).to start_with("internal analyzer error: RuntimeError: boom")
+      expect(message).to end_with("(lib/rigor/inference/method_dispatcher.rb:12:in 'resolve')")
+      expect(described_class.reason(diagnostic(message: message))).to eq(:check_rule)
+    end
+
+    it "omits the frame when the exception carries no backtrace" do
+      expect(described_class.check_rule_message(RuntimeError.new("boom")))
+        .to eq("internal analyzer error: RuntimeError: boom")
+    end
+  end
+
+  describe ".crash_frame" do
+    it "prefers the first lib/rigor frame over a deeper dependency frame" do
+      error = RuntimeError.new("x")
+      error.set_backtrace([
+                            "/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'",
+                            "/checkout/lib/rigor/environment/rbs_loader.rb:900:in 'block in build'"
+                          ])
+
+      expect(described_class.crash_frame(error)).to eq("lib/rigor/environment/rbs_loader.rb:900:in 'block in build'")
+    end
+
+    it "falls back to the raw top frame when nothing is in lib/rigor" do
+      error = RuntimeError.new("x")
+      error.set_backtrace(["/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'"])
+
+      expect(described_class.crash_frame(error)).to eq("/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'")
     end
   end
 

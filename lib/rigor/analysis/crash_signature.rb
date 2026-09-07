@@ -63,10 +63,11 @@ module Rigor
       PLUGIN_SOURCE_FAMILY = :plugin_loader
       PLUGIN_RULE = "runtime-error"
 
-      # The `rbs.coverage.*` rules that mean declared types went missing from this run — an env-wide
-      # collapse and its per-class sibling (#696). Ordered widest consequence last, the way the two rows sit
-      # in `docs/type-specification/diagnostic-policy.md`.
+      # The `rbs.coverage.*` rules that mean declared types went missing from this run — the implicit-HKT
+      # scan over `type` aliases (#784), a per-class definition build (#696), and the env-wide collapse.
+      # Ordered widest consequence last, the way the rows sit in `docs/type-specification/diagnostic-policy.md`.
       RBS_BUILD_FAILURE_RULES = %w[
+        rbs.coverage.hkt-scan-failed
         rbs.coverage.definition-build-failed
         rbs.coverage.environment-build-failed
       ].freeze
@@ -76,6 +77,35 @@ module Rigor
       DISCARDS_FILE_ANALYSIS_REASON = :check_rule
 
       module_function
+
+      # The message `Runner#analyze_file_body` / `WorkerSession#analyze_body` fold a raised `StandardError`
+      # into. Built here, not at either rescue site, so the two twins cannot drift (issue #665) — and so
+      # the appended crash frame is derived identically on the sequential and pooled paths. Keeps the
+      # {CHECK_RULE_MESSAGE_PREFIX} prefix every consumer matches on; the frame is a trailing hint.
+      #
+      # @param error [StandardError]
+      # @return [String]
+      def check_rule_message(error)
+        base = "#{CHECK_RULE_MESSAGE_PREFIX}: #{error.class}: #{error.message}"
+        frame = crash_frame(error)
+        frame ? "#{base} (#{frame})" : base
+      end
+
+      # The first `lib/rigor/` backtrace frame — the raise site, path made repo-relative so it reads the
+      # same whether Rigor runs from a checkout or an installed gem. A LOCATION, not an attribution: a
+      # bundled or third-party plugin also lives under `lib/rigor/<plugin>/`, so a frame here says where
+      # the raise was, never whose defect it is. Falls back to the raw top frame when the crash is entirely
+      # inside a dependency, and to nil when there is no backtrace at all.
+      #
+      # @param error [Exception]
+      # @return [String, nil]
+      def crash_frame(error)
+        frames = error.backtrace
+        return nil if frames.nil? || frames.empty?
+
+        (frames.find { |f| f.include?("/lib/rigor/") } || frames.first)
+          .sub(%r{\A.*/(lib/rigor/)}, '\1')
+      end
 
       # @param diagnostic [Rigor::Analysis::Diagnostic]
       # @return [Symbol, nil] `:check_rule`, `:plugin`, `:rbs_build`, or nil for an ordinary diagnostic.

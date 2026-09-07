@@ -8,6 +8,7 @@ require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
 require_relative "environment/reporters"
 require_relative "environment/hkt_registry_holder"
+require_relative "environment/failure_slot"
 require_relative "environment/constant_type_cache_holder"
 require_relative "environment/missing_gem_constant_index"
 require_relative "environment/bundle_sig_discovery"
@@ -88,6 +89,9 @@ module Rigor
       # --no-stats` from doing the RBS env build at all.
       @hkt_registry_base = hkt_registry || Inference::HktRegistry::EMPTY
       @hkt_registry_holder = HktRegistryHolder.new
+      # Issue #784 — where the RBS-overlay HKT scan records a raise, so it surfaces once for the run
+      # instead of once per file (see {#hkt_registry}).
+      @hkt_scan_failure = FailureSlot.new
       @constant_type_cache = ConstantTypeCacheHolder.new
       # ADR-82 WD9 — `[gem_name, version]` pairs for the locked gems with no resolvable RBS. The
       # root-constant ownership index over them is built lazily (first unresolved constant read) so runs
@@ -111,13 +115,43 @@ module Rigor
                               else
                                 @hkt_registry_base
                               end
-        Inference::HktRegistry.scan_rbs_loader(
-          @rbs_loader,
-          base: with_plugin_overlay,
-          reporter: rbs_extended_reporter
-        )
+        begin
+          Inference::HktRegistry.scan_rbs_loader(
+            @rbs_loader,
+            base: with_plugin_overlay,
+            reporter: rbs_extended_reporter
+          )
+        rescue StandardError => e
+          # Issue #784 — the seam. This build is shared and memoised, and it is first demanded from inside
+          # a file's analysis, so a raise here would otherwise land in every file's `analyze_body` rescue
+          # and turn the whole run into N identical `internal analyzer error` rows (issue #776). Record it
+          # and degrade to the pre-scan registry: analysis proceeds, HKT inference from RBS `type` aliases
+          # reads its bound (`Dynamic[top]`, ADR-20 WD2), and the run surfaces ONE
+          # `rbs.coverage.hkt-scan-failed` row. Not a silent skip — the row is `:error` and names the
+          # exception and raise site — and the same shape as `RbsLoader#record_env_build_failure`.
+          # Memoising the degraded registry is what keeps the scan from being re-attempted per file.
+          record_hkt_scan_failure(e)
+          with_plugin_overlay
+        end
       end
     end
+
+    # Issue #784 — the `[error_class_name, first_message_line, raw_frame_or_nil]` tuple the seam in
+    # {#hkt_registry} recorded, or nil when the scan built (or was never demanded). Read by the pool
+    # coordinator AFTER the file loop, and drained out of each worker — the coordinator's own Environment
+    # never demands the registry, so its slot is always nil under the pool (the #696 lesson).
+    #
+    # @return [Array(String, String, String), Array(String, String, nil), nil]
+    def hkt_scan_failure
+      @hkt_scan_failure.value
+    end
+
+    def record_hkt_scan_failure(error)
+      frames = error.backtrace || []
+      frame = frames.find { |f| f.include?("/lib/rigor/") } || frames.first
+      @hkt_scan_failure.record([error.class.name, error.message.to_s.lines.first.to_s.chomp, frame])
+    end
+    private :record_hkt_scan_failure
 
     # ADR-82 WD9 — the gem name owning `root_constant_name`, when that gem is locked in the project's
     # Gemfile.lock, ships no resolvable RBS, and its entry file declares the constant at top level. Nil for

@@ -29,6 +29,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/project_patched_scanner"
 require_relative "../inference/method_dispatcher/file_folding"
+require_relative "crash_signature"
 require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_recorder"
@@ -1876,7 +1877,7 @@ module Rigor
             path: path,
             line: 1,
             column: 1,
-            message: "internal analyzer error: #{e.class}: #{e.message}",
+            message: CrashSignature.check_rule_message(e),
             severity: :error
           )
         ]

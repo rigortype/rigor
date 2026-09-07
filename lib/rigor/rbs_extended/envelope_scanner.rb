@@ -22,14 +22,15 @@ module Rigor
     #
     # ## Why it parses rather than reading the built environment
     #
-    # {ConformanceChecker}, the obvious model, walks `RbsLoader`'s built env. An envelope cannot: the
+    # {ConformanceChecker}, the obvious model, walks `RbsLoader`'s built env. An envelope did not: the
     # diagnostic has to name **where the bound was written** (`sig/foo.rbs:12`), and the ADR-54 env
-    # cache dumps every `RBS::Location` to a zero-range `<cached>` sentinel, so a warm run would lose
-    # both the position and the only evidence of which file a declaration came from. Parsing the
-    # project's own signature sources is a few milliseconds over a tree Rigor already globs, it is
-    # identical warm and cold, and it enforces ADR-103 WD6's trust rule structurally: a `%a{pure}` in
-    # rbs core or in a gem's shipped RBS is never read, so it cannot bound a project method that
-    # happens to share its key.
+    # cache reduced every `RBS::Location` to a zero-range `<cached>` sentinel, so a warm run lost both
+    # the position and the only evidence of which file a declaration came from. That particular loss is
+    # closed now — #696 restored the buffer name, #799 an annotation's position — so what still decides
+    # it is the rest: parsing the project's own signature sources is a few milliseconds over a tree
+    # Rigor already globs, it is identical warm and cold, and it enforces ADR-103 WD6's trust rule
+    # structurally: a `%a{pure}` in rbs core or in a gem's shipped RBS is never read, so it cannot bound
+    # a project method that happens to share its key.
     #
     # Malformed payloads and `pure`-versus-`effect` contradictions are recorded on a {Reporter} the
     # scanner owns and ride out on {Result#unresolved}. They surface no diagnostic in this slice:

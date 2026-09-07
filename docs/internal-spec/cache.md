@@ -924,14 +924,20 @@ zero-range sentinel rather than crashing.
 `RBS::AST::Annotation` defines its own `marshal_dump` /
 `marshal_load` (issue #799) which carry
 `[string, [name, start_line, start_column, end_line, end_column]]`,
-reconstructed through `Rigor::Cache::AnnotationLocation` — a
-content-less `RBS::Buffer` subclass that answers `pos_to_loc`
-from the carried pairs, which is all `RBS::Location`'s C-level
-`start_line` and siblings consult. Two diagnostics are positioned
-at the `%a{…}` the author wrote rather than at any Ruby `def` —
-`rbs_extended.unsatisfied-conformance` and `effect.unknown-label`
-— so an annotation's position is the one position in a cached
-environment that a diagnostic reads. Without the carry it
+reconstructed through `Rigor::Cache::AnnotationLocation`, whose
+nested `Buffer` is a content-less `RBS::Buffer` subclass that
+answers `pos_to_loc` from the carried pairs — all that
+`RBS::Location`'s C-level `start_line` and siblings consult.
+The two `conforms-to` rows,
+`rbs_extended.unsatisfied-conformance` and
+`dynamic.rbs-extended.unresolved`, are positioned at the `%a{…}`
+the author wrote rather than at any Ruby `def`, so an
+annotation's position is the one position in a cached environment
+that a diagnostic reads. (`effect.unknown-label` is positioned at
+an annotation too, but `EnvelopeScanner` reaches it by parsing
+the project's own `.rbs` rather than the built environment —
+refusing this loss is one of the two reasons it does.) Without
+the carry it
 collapsed to `1:1`: `rigor check --verify-incremental` FAILED on
 every project with an unsatisfied `conforms-to` (the replica
 normalises rows by position, and only one side of the comparison

@@ -34,10 +34,14 @@ require_relative "annotation_location"
 #   is therefore bumped to 3: `PAYLOAD_ABI_VERSION` already rebuilds across a release, and the bump closes
 #   the same-version window too.
 # - `RBS::AST::Annotation` carries its own `marshal_dump` / `marshal_load`, which keep the annotation's
-#   POSITION as well as its file (issue #799). "Nothing reads positions" was never quite true: a
-#   `%a{rigor:v1:conforms-to _Iface}` that is not satisfied is reported AT the directive, and so is an
-#   `effect.unknown-label`, so both read `start_line` / `start_column` off an annotation's location. Cold
-#   that is `sig/buffer.rbs:6:1`; through a `_dump`ed location it collapsed to `1:1`, which made
+#   POSITION as well as its file (issue #799). "Nothing reads positions" was never quite true: the two
+#   `conforms-to` rows — `rbs_extended.unsatisfied-conformance` and `dynamic.rbs-extended.unresolved` —
+#   are reported AT the directive, because there is no Ruby `def` a missing interface method could be
+#   reported at, so both read `start_line` / `start_column` off an annotation's location. (They are the
+#   only readers: {Rigor::RbsExtended::EnvelopeScanner} positions `effect.unknown-label` at an annotation
+#   too, but reaches it by parsing the project's own `.rbs` rather than the built env — refusing this very
+#   loss is one of the two reasons it does.) Cold the row is `sig/buffer.rbs:6:1`; through a `_dump`ed
+#   location it collapsed to `1:1`, which made
 #   `--verify-incremental` fail outright on any project carrying an unsatisfied directive (the replica
 #   normalises rows by position, and only one side of the comparison runs against the cached env) and made a
 #   warm `--incremental` run move a row on a tree that had not changed. The carry is scoped to annotations

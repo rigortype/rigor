@@ -289,7 +289,11 @@ RSpec.describe Rigor::Environment do
         it "degrades to the pre-scan registry, records the raise, and does not re-attempt the scan" do
           allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader)
             .and_raise(NameError, "simulated scan bug")
-          env = described_class.default
+          # A FRESH environment, never `described_class.default`: that one is a process-wide `@default ||=`
+          # singleton whose registry holder is loaded by whichever earlier example demanded it, so the stub
+          # never fires when this example runs late in a worker — and when it runs first, the degraded
+          # registry and first-write-wins failure slot would poison every later `.default` user.
+          env = described_class.for_project(signature_paths: [])
 
           registry = env.hkt_registry
 

@@ -33,6 +33,12 @@ module Rigor
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
       VALID_FORMATS = %w[text json].freeze
 
+      # The skip reasons {#report_skipped} counts. The two left out each have a detailed report of their own
+      # ({#report_unrenderable}, {#report_unresolvable_superclasses}), so a method never shows up in two tallies.
+      SUMMARISED_SKIP_REASONS = (SigGen::Classification::SKIP_DIAGNOSTIC_IDS.keys -
+                                 %i[unrenderable_rbs unresolvable_superclass]).freeze
+      private_constant :SUMMARISED_SKIP_REASONS
+
       # @return [Integer] CLI exit status.
       def run
         options = parse_options
@@ -54,12 +60,35 @@ module Rigor
                    dispatch_print_or_diff(candidates, mode, options)
                    0
                  end
+        report_skipped(candidates, options)
         report_unrenderable(generator.unrenderable)
         report_unresolvable_superclasses(generator.unresolvable_superclasses)
         status
       end
 
       private
+
+      # Issue #778 — one stderr line per run saying how many methods the generator declined and why, so a
+      # method missing from the output is never a silent absence. Text mode only: under `--format=json` every
+      # skipped row is already in the payload with its `skip_reason`, and stderr stays clean for the consumer.
+      # Per-method lines would be noise at project scale; the JSON payload is where each one is named.
+      def report_skipped(candidates, options)
+        return unless options.fetch(:format) == "text"
+
+        counts = candidates.each_with_object(Hash.new(0)) do |candidate, acc|
+          next unless candidate.classification == SigGen::Classification::SKIPPED
+          next unless SUMMARISED_SKIP_REASONS.include?(candidate.skip_reason)
+
+          acc[candidate.skip_reason] += 1
+        end
+        return if counts.empty?
+
+        breakdown = counts.map { |reason, n| "#{SigGen::Classification::SKIP_DIAGNOSTIC_IDS.fetch(reason)}: #{n}" }
+        @err.puts(
+          "rigor sig-gen: skipped #{counts.values.sum} method(s) it could not type or would not overwrite " \
+          "(#{breakdown.join(', ')}). Run with --format=json to see each one with its skip_reason."
+        )
+      end
 
       # A method whose rendered RBS does not parse is a Rigor rendering defect, not a fact about the user's
       # code — the generator skipped it (so the rest of the signatures are still usable and still valid), but

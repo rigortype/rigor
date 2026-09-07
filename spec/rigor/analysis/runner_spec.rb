@@ -5713,6 +5713,46 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
     end
+
+    # Issue #795 — `Runner#evaluate_return_types` (the ADR-89 WD2 return-type re-evaluation probe
+    # `IncrementalSession` calls to decide whether a changed def's dependents can be skipped) is reached
+    # with `@buffer` set whenever the caller session is itself in editor mode. Its setup used to resolve
+    # `target_files(expansion)` as `source_files:`, which under `buffer:` narrows to the buffer's single
+    # logical path (single-file scope, slice 5) — dropping every OTHER project file's plugin-synthesized
+    # virtual RBS from the probe's environment. `single-file scope` is right for what gets PER-FILE
+    # ANALYZED; it is wrong for what the probe's environment is BUILT over, which must match the full
+    # project the same way the per-file analysis environment already does (#793).
+    it "resolves the return-type probe's environment over the whole project, not the buffer's single path" do
+      Dir.mktmpdir("rigor-buffer-return-probe-") do |tmpdir|
+        Dir.chdir(tmpdir) do
+          FileUtils.mkdir_p("lib")
+          logical = File.join("lib", "foo.rb")
+          other = File.join("lib", "bar.rb")
+          File.write(logical, "class Foo\n  def self.value\n    1\n  end\nend\n")
+          File.write(other, "class Bar\nend\n")
+          physical = File.join(tmpdir, "buffer.rb")
+          File.write(physical, File.read(logical))
+
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          binding = Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: physical)
+          runner = described_class.new(configuration: configuration, cache_store: nil, buffer: binding)
+
+          captured_source_files = nil
+          allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|
+            captured_source_files = kwargs[:source_files]
+            original.call(**kwargs)
+          end
+
+          # `evaluate_return_types_setup`, called directly with an empty `specs:` — the wrapping
+          # `#evaluate_return_types` short-circuits on an empty list before running any setup at all, and
+          # what this example pins is the setup's environment resolution, not a real spec's re-evaluation.
+          runner.send(:evaluate_return_types_setup, nil, [])
+
+          expect(captured_source_files).not_to be_nil
+          expect(captured_source_files.sort).to eq([logical, other].sort)
+        end
+      end
+    end
   end
 
   describe "ProjectScan pre-pass caching (LSP / editor warm-path slice)" do

@@ -159,6 +159,75 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
     end
   end
 
+  # Issue #798 — `PoolCoordinator#analyze_files_in_fork_pool` never called
+  # `#snapshot_project_signature_state`, so the project-signature state (`synthesized-namespace`,
+  # `quarantined-signature`, `definition-build-failed`) — which has no per-file producer, only a snapshot
+  # read off the run's OWN environment — had no producer at all under `--workers N`. The two slots the fork
+  # pool DID cover through a separate stats-only helper (`quarantined-signature`,
+  # `environment-build-failed`) were also gated on `@collect_stats`, so a `--workers N --no-stats` run
+  # reported LESS than the sequential path over the identical project (observed: `rigor check` reported
+  # `quarantined-signature` + `synthesized-namespace`; `--workers=2` reported `quarantined-signature` only;
+  # `--workers=2 --no-stats` reported neither).
+  describe "project-signature state through the fork pool (issue #798)" do
+    # `data-contrast:` is a record key `rbs` rejects, so `broken.rbs` is quarantined; the qualified
+    # declaration with no enclosing `module Acme` is the namespace the loader has to synthesize; `DupDemo`
+    # is declared twice (once under a `conforms-to` directive so the conformance scan — itself run INSIDE
+    # `#snapshot_project_signature_state` — demands its instance definition and so triggers the build
+    # failure even though no analysed `.rb` file ever names the class).
+    def write_signature_state_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "a.rb"), "x = 1\n")
+      File.write(File.join(dir, "sig", "broken.rbs"), "class Broken\n  def h: () -> { data-contrast: Integer }\nend\n")
+      File.write(File.join(dir, "sig", "widget.rbs"), "class Acme::Widget\n  def size: () -> Integer\nend\n")
+      File.write(File.join(dir, "sig", "dup.rbs"), <<~RBS)
+        interface _Reads
+          def read: () -> String
+        end
+
+        %a{rigor:v1:conforms-to _Reads}
+        class DupDemo
+          def read: () -> String
+        end
+      RBS
+      File.write(File.join(dir, "sig", "dup2.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+      { "signature_paths" => [File.join(dir, "sig")] }
+    end
+
+    # `[quarantined-signature, synthesized-namespace, definition-build-failed]` counts — mirrors
+    # `incremental_session_spec.rb`'s `project_signature_counts` helper for the same fixture shape.
+    def signature_state_counts(diagnostics)
+      %w[rbs.coverage.quarantined-signature rbs.coverage.synthesized-namespace
+         rbs.coverage.definition-build-failed].map { |rule| diagnostics.count { |d| d.qualified_rule == rule } }
+    end
+
+    it "reports the same quarantined/synthesized/definition-build rows as the sequential path" do
+      Dir.mktmpdir do |dir|
+        config = write_signature_state_fixture(dir)
+        paths = [File.join(dir, "a.rb")]
+        sequential = run_check(dir, paths, config: config, cache_store: nil)
+        pool = run_check(dir, paths, config: config, cache_store: nil, workers: 2)
+
+        # Guards the fixture itself: a vacuous 0/0/0 on both sides would pass the equality below for the
+        # wrong reason.
+        expect(signature_state_counts(sequential)).to eq([1, 1, 1])
+        expect(signature_state_counts(pool)).to eq(signature_state_counts(sequential))
+      end
+    end
+
+    it "reports the same rows under --no-stats (collect_stats: false), on both the sequential and " \
+       "pooled paths" do
+      Dir.mktmpdir do |dir|
+        config = write_signature_state_fixture(dir)
+        paths = [File.join(dir, "a.rb")]
+        sequential = run_check(dir, paths, config: config, cache_store: nil, collect_stats: false)
+        pool = run_check(dir, paths, config: config, cache_store: nil, workers: 2, collect_stats: false)
+
+        expect(signature_state_counts(sequential)).to eq([1, 1, 1])
+        expect(signature_state_counts(pool)).to eq([1, 1, 1])
+      end
+    end
+  end
+
   # ADR-46 — the fork pool must MARSHAL each worker's cross-file dependency records back, or a pooled
   # `--incremental` recheck would leave the dependency graph un-refreshed and serve stale diagnostics on the
   # next round. Runs `record_dependencies: true` sequentially and pooled and asserts the recorded edges match.

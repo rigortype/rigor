@@ -89,8 +89,9 @@ module Rigor
       # --no-stats` from doing the RBS env build at all.
       @hkt_registry_base = hkt_registry || Inference::HktRegistry::EMPTY
       @hkt_registry_holder = HktRegistryHolder.new
-      # Issue #784 — where the RBS-overlay HKT scan records a raise, so it surfaces once for the run
-      # instead of once per file (see {#hkt_registry}).
+      # Issue #784 — where either stage of the HKT-registry build (the plugin overlay, #791; the RBS
+      # `type`-alias scan) records a raise, so it surfaces once for the run instead of once per file — or,
+      # for the overlay, instead of aborting the run outright (see {#hkt_registry}).
       @hkt_scan_failure = FailureSlot.new
       @constant_type_cache = ConstantTypeCacheHolder.new
       # ADR-82 WD9 — `[gem_name, version]` pairs for the locked gems with no resolvable RBS. The
@@ -108,17 +109,18 @@ module Rigor
     # beat plugin entries, which beat the bundled JSON_VALUE. Memoised; single-threaded use only (under the
     # Ractor pool path each worker has its own Environment so cross-worker mutation is impossible; the LSP
     # single-publish-at-a-time invariant serialises here).
+    #
+    # BOTH stages are guarded (#784, #791): whichever raises is recorded on {#hkt_scan_failure} with the
+    # stage that failed and the other stage still runs, so this getter never raises into its callers —
+    # neither into a file's `analyze_body` rescue nor out of the run-owned demands, which have no rescue
+    # above them at all.
     def hkt_registry
       @hkt_registry_holder.fetch do
-        with_plugin_overlay = if @plugin_registry.respond_to?(:hkt_overlay_registry)
-                                @hkt_registry_base.merge(@plugin_registry.hkt_overlay_registry)
-                              else
-                                @hkt_registry_base
-                              end
+        pre_scan = pre_scan_hkt_registry
         begin
           Inference::HktRegistry.scan_rbs_loader(
             @rbs_loader,
-            base: with_plugin_overlay,
+            base: pre_scan,
             reporter: rbs_extended_reporter
           )
         rescue StandardError => e
@@ -130,25 +132,52 @@ module Rigor
           # `rbs.coverage.hkt-scan-failed` row. Not a silent skip — the row is `:error` and names the
           # exception and raise site — and the same shape as `RbsLoader#record_env_build_failure`.
           # Memoising the degraded registry is what keeps the scan from being re-attempted per file.
-          record_hkt_scan_failure(e)
-          with_plugin_overlay
+          record_hkt_registry_failure(e, stage: :scan)
+          pre_scan
         end
       end
     end
 
-    # Issue #784 — the `[error_class_name, first_message_line, raw_frame_or_nil]` tuple the seam in
-    # {#hkt_registry} recorded, or nil when the scan built (or was never demanded). The run reads it only
-    # after demanding {#hkt_registry} itself — after the file loop on the sequential paths, at drain time
-    # in each pool worker (the coordinator never analyses a file under the pool, so the drain is how its
-    # snapshot learns the outcome: the #696 lesson), and from a resolved environment when the analyze set
-    # is empty — so the row never depends on which files happened to be analysed.
+    # Issue #791 — the OTHER build behind {#hkt_registry}, and the reason the seam covers two stages
+    # rather than one. Aggregating the loaded plugins' manifest-declared HKT entries runs plugin-authored
+    # code (`Plugin::Registry#hkt_overlay_registry` reads each manifest); before this it sat one line ABOVE
+    # the #784 rescue, so a raise there escaped {#hkt_registry} entirely. Post-#788 that is not a per-file
+    # crash storm but an uncaught abort: {HktRegistryHolder#fetch} memoises only on success, so the raise
+    # is re-attempted at every demand, and the run-owned demands (`Runner::PoolCoordinator#hkt_scan_outcome`
+    # after the file loop, `Analysis::WorkerSession#drain_reporters`) sit outside any rescue.
     #
-    # @return [Array(String, String, String), Array(String, String, nil), nil]
+    # The degradation is narrower than the scan's: only the plugin overlay is dropped, and the RBS scan
+    # still runs on top of the bundled base, so a user's own `.rbs` HKT registrations survive a plugin
+    # defect. First-write-wins on the slot means a run whose overlay AND scan both raise reports the
+    # overlay — the actionable one, since the plugin is what a user can remove.
+    #
+    # @return [Rigor::Inference::HktRegistry] the registry the RBS scan is layered on top of.
+    def pre_scan_hkt_registry
+      return @hkt_registry_base unless @plugin_registry.respond_to?(:hkt_overlay_registry)
+
+      @hkt_registry_base.merge(@plugin_registry.hkt_overlay_registry)
+    rescue StandardError => e
+      record_hkt_registry_failure(e, stage: :overlay)
+      @hkt_registry_base
+    end
+    private :pre_scan_hkt_registry
+
+    # Issue #784 — the `[error_class_name, first_message_line, raw_frame_or_nil, stage]` tuple the seam in
+    # {#hkt_registry} recorded, or nil when both stages built (or were never demanded). `stage` is `:scan`
+    # for the RBS `type`-alias scan and `:overlay` for the plugin-manifest aggregation (#791); it decides
+    # the row's wording, because "the implicit HKT scan over RBS `type` aliases raised" would point a user
+    # at their own `.rbs` for a plugin's defect. The run reads the tuple only after demanding
+    # {#hkt_registry} itself — after the file loop on the sequential paths, at drain time in each pool
+    # worker (the coordinator never analyses a file under the pool, so the drain is how its snapshot learns
+    # the outcome: the #696 lesson), and from a resolved environment when the analyze set is empty — so the
+    # row never depends on which files happened to be analysed.
+    #
+    # @return [Array(String, String, String, Symbol), Array(String, String, nil, Symbol), nil]
     def hkt_scan_failure
       @hkt_scan_failure.value
     end
 
-    def record_hkt_scan_failure(error)
+    def record_hkt_registry_failure(error, stage:)
       frames = error.backtrace || []
       frame = frames.find { |f| f.include?("/lib/rigor/") } || frames.first
       # `Class#name` is nil for an anonymous exception class; its nearest NAMED ancestor is the stable
@@ -161,10 +190,11 @@ module Rigor
       @hkt_scan_failure.record([
                                  (error.class.name || "anonymous #{named&.name || 'Exception'}").dup.freeze,
                                  error.message.to_s.lines.first.to_s.chomp.freeze,
-                                 frame&.dup&.freeze
+                                 frame&.dup&.freeze,
+                                 stage
                                ])
     end
-    private :record_hkt_scan_failure
+    private :record_hkt_registry_failure
 
     # ADR-82 WD9 — the gem name owning `root_constant_name`, when that gem is locked in the project's
     # Gemfile.lock, ships no resolvable RBS, and its entry file declares the constant at top level. Nil for

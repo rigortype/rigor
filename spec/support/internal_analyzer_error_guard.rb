@@ -94,10 +94,15 @@ module InternalAnalyzerErrorGuard
   # failure and `allow_plugin_crash:` is the opt-out.
   #
   # `CrashSignature` also classifies a third shape, `:rbs_build` (`rbs.coverage.definition-build-failed` /
-  # `rbs.coverage.environment-build-failed`, issue #696). It is deliberately NOT armed here either: the
-  # analysis ran to completion, `spec/integration/environment_build_failed_spec.rb` produces one on purpose,
-  # and how many other fixtures collide with Rigor's bundled RBS has not been measured. Arming it is its own
-  # change, with that measurement in front of it.
+  # `rbs.coverage.environment-build-failed`, issue #696, and `rbs.coverage.hkt-scan-failed`, issue #784).
+  # It is deliberately NOT armed here either: the analysis ran to completion,
+  # `spec/integration/environment_build_failed_spec.rb` and `spec/integration/hkt_scan_failure_seam_spec.rb`
+  # each produce one on purpose, and how many other fixtures collide with Rigor's bundled RBS has not been
+  # measured. Arming it is its own change, with that measurement in front of it. The #784 rung is the one
+  # `:rbs_build` row whose cause is Rigor rather than the user's `sig/` ({CrashSignature.analyzer_defect?});
+  # a harness that measures RIGOR (the kill oracles, the mutation fuzz) is the tier that should refuse it
+  # (the fuzz does; the oracle's arming is #790) — this guard measures whether a SPEC's assertion ran, and
+  # it did.
   def self.crash?(diagnostic, allow_plugin_crash: false)
     case Rigor::Analysis::CrashSignature.reason(diagnostic)
     when :check_rule then true

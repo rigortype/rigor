@@ -42,12 +42,13 @@ RSpec.describe Rigor::Analysis::CrashSignature do
       expect(described_class.reason(plugin_crash)).to eq(:plugin)
     end
 
-    it "classifies both RBS build-failure rules" do
+    it "classifies every RBS build-failure rule, the #784 HKT-scan rung included" do
+      expect(described_class::RBS_BUILD_FAILURE_RULES).to include("rbs.coverage.hkt-scan-failed")
       reasons = described_class::RBS_BUILD_FAILURE_RULES.map do |rule|
         described_class.reason(diagnostic(message: "…", severity: :warning, rule: rule))
       end
 
-      expect(reasons).to eq(%i[rbs_build rbs_build])
+      expect(reasons).to all(eq(:rbs_build))
     end
 
     it "leaves an ordinary rule diagnostic unclassified" do
@@ -91,7 +92,29 @@ RSpec.describe Rigor::Analysis::CrashSignature do
         described_class.discards_file_analysis?(diagnostic(message: "…", severity: :warning, rule: rule))
       end
 
-      expect(failures).to eq([false, false])
+      expect(failures.size).to eq(described_class::RBS_BUILD_FAILURE_RULES.size)
+      expect(failures).to all(be(false))
+    end
+  end
+
+  # Issue #784 — the one `:rbs_build` row whose cause is Rigor. Readable for the user (every rule fired),
+  # but a harness that measures Rigor itself must refuse it as a crash finding.
+  describe ".analyzer_defect?" do
+    it "singles out the HKT-scan rung and no other shape" do
+      hkt = diagnostic(message: "…", severity: :error, rule: "rbs.coverage.hkt-scan-failed")
+
+      expect(described_class.analyzer_defect?(hkt)).to be(true)
+      expect(described_class.reason(hkt)).to eq(:rbs_build)
+      expect(described_class.discards_file_analysis?(hkt)).to be(false)
+
+      user_caused = described_class::RBS_BUILD_FAILURE_RULES - described_class::ANALYZER_DEFECT_RULES
+      expect(user_caused).not_to be_empty
+      user_caused.each do |rule|
+        row = diagnostic(message: "…", severity: :warning, rule: rule)
+        expect(described_class.analyzer_defect?(row)).to be(false)
+      end
+      expect(described_class.analyzer_defect?(check_rule_crash)).to be(false)
+      expect(described_class.analyzer_defect?(plugin_crash)).to be(false)
     end
   end
 
@@ -99,6 +122,43 @@ RSpec.describe Rigor::Analysis::CrashSignature do
     it "names the shape and the position, so a raise says which crash it saw and where" do
       expect(described_class.describe(check_rule_crash))
         .to eq("check_rule at app.rb:1: internal analyzer error: RuntimeError: boom")
+    end
+  end
+
+  describe ".check_rule_message" do
+    it "keeps the prefix .reason matches on, and appends a repo-relative crash frame" do
+      error = RuntimeError.new("boom")
+      error.set_backtrace(["/opt/gems/rigor-9.9.9/lib/rigor/inference/method_dispatcher.rb:12:in 'resolve'"])
+
+      message = described_class.check_rule_message(error)
+
+      expect(message).to start_with("internal analyzer error: RuntimeError: boom")
+      expect(message).to end_with("(lib/rigor/inference/method_dispatcher.rb:12:in 'resolve')")
+      expect(described_class.reason(diagnostic(message: message))).to eq(:check_rule)
+    end
+
+    it "omits the frame when the exception carries no backtrace" do
+      expect(described_class.check_rule_message(RuntimeError.new("boom")))
+        .to eq("internal analyzer error: RuntimeError: boom")
+    end
+  end
+
+  describe ".crash_frame" do
+    it "prefers the first lib/rigor frame over a deeper dependency frame" do
+      error = RuntimeError.new("x")
+      error.set_backtrace([
+                            "/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'",
+                            "/checkout/lib/rigor/environment/rbs_loader.rb:900:in 'block in build'"
+                          ])
+
+      expect(described_class.crash_frame(error)).to eq("lib/rigor/environment/rbs_loader.rb:900:in 'block in build'")
+    end
+
+    it "falls back to the raw top frame when nothing is in lib/rigor" do
+      error = RuntimeError.new("x")
+      error.set_backtrace(["/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'"])
+
+      expect(described_class.crash_frame(error)).to eq("/gems/rbs-4.2.0/lib/rbs/environment.rb:71:in 'resolve'")
     end
   end
 

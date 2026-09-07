@@ -17,7 +17,8 @@ module Rigor
       class RunSnapshots
         attr_accessor :class_decl_paths, :signature_paths,
                       :synthesized_namespaces, :quarantined_signatures, :conformance_results,
-                      :env_build_failure, :definition_build_failures, :effect_annotation_carrier
+                      :env_build_failure, :definition_build_failures, :hkt_scan_failure,
+                      :effect_annotation_carrier
 
         # Constructor defaults match the {Runner} constructor: the pre-seed values `build_run_stats` /
         # `pre_file_diagnostics` read before the first analysis path runs are frozen empties. The
@@ -25,7 +26,9 @@ module Rigor
         # `[error_class, first_line, buffer_names]` tuple or nothing. Its per-class sibling
         # `definition_build_failures` (#696) holds a LIST, because a collapsed universe fails many classes,
         # and is accumulated ACROSS pool workers rather than assigned once — see
-        # {PoolCoordinator#merge_worker_reporters}.
+        # {PoolCoordinator#merge_worker_reporters}. `hkt_scan_failure` (#784) is nil-or-tuple like
+        # `env_build_failure`, not a list like `definition_build_failures`: the scan is ONE build over the
+        # whole `signature_paths:` overlay, not a per-class one, so it has exactly one outcome per run.
         def initialize
           @class_decl_paths = {}.freeze
           @signature_paths = [].freeze
@@ -34,6 +37,7 @@ module Rigor
           @conformance_results = [].freeze
           @env_build_failure = nil
           @definition_build_failures = [].freeze
+          @hkt_scan_failure = nil
           @effect_annotation_carrier = [].freeze
         end
 
@@ -47,6 +51,7 @@ module Rigor
           @conformance_results = []
           @env_build_failure = nil
           @definition_build_failures = []
+          @hkt_scan_failure = nil
           @effect_annotation_carrier = [].freeze
         end
       end

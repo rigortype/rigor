@@ -1805,4 +1805,310 @@ end
       end
     end
   end
+
+  # #788 rounds 5–6 — a narrowed run now builds its environment over the whole project (#793), so every
+  # run-level row that is POSITIONED at a project file is regenerated for files the run did not analyse:
+  # `effect.annotations-unchecked` at the first annotated file, `source-rbs-annotation-not-honoured` at the
+  # annotated source. The per-file cache must therefore hold only what per-file analysis produced
+  # (`Runner#per_file_diagnostics`), or a recheck serves the cached copy beside the fresh one and
+  # `--verify-incremental` goes red — and an empty-closure recheck must fill the effect-annotation carrier
+  # itself, or the inline-only residual goes 1 → 0 on every warm nothing-changed run. Both fixtures use the
+  # bundled rbs-inline plugin, the shipping ADR-93 shape.
+  describe "run-level rows positioned at project files across incremental paths (#788)" do
+    rbs_inline_lib = File.expand_path("../../../plugins/rigor-rbs-inline/lib", __dir__)
+    $LOAD_PATH.unshift(rbs_inline_lib) unless $LOAD_PATH.include?(rbs_inline_lib)
+    require "rigor-rbs-inline"
+
+    after { Rigor::Plugin.unregister! }
+
+    let(:requirer) { ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) } }
+
+    def inline_config(dir)
+      Rigor::Configuration.new(
+        "paths" => [dir],
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    end
+
+    def inline_session(config, dir, cache_store: nil)
+      described_class.new(configuration: config, paths: [dir], cache_store: cache_store, plugin_requirer: requirer)
+    end
+
+    def rows(diagnostics, rule)
+      diagnostics.select { |d| d.qualified_rule == rule }.map { |d| [File.basename(d.path), d.line] }
+    end
+
+    # `# @rbs module-self:` is an annotation rbs-inline synthesizes RBS for but Rigor does not honour, so
+    # the synthesis reporter records one `source-rbs-annotation-not-honoured` at b_provider.rb — a run-level
+    # row at a project file. A subset run over a_consumer.rb alone must report it exactly once, and match
+    # the full-run oracle.
+    it "keeps one source-rbs-annotation-not-honoured on a subset run and a recheck, matching the full run" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a_consumer.rb"), "x = 1\n")
+        File.write(File.join(dir, "b_provider.rb"), <<~RUBY)
+          # rbs_inline: enabled
+          # @rbs module-self: Comparable
+          module Sortable
+            # @rbs () -> Integer
+            def rank = 1
+          end
+        RUBY
+        config = inline_config(dir)
+        rule = "source-rbs-annotation-not-honoured"
+
+        session = inline_session(config, dir)
+        expect(rows(guarded_baseline(session), rule)).to eq([["b_provider.rb", 1]])
+
+        subset = session.analyzed_files.select { |p| File.basename(p) == "a_consumer.rb" }
+        merged = guarded_reanalyze_subset(session, subset)
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil,
+                                                       plugin_requirer: requirer)).diagnostics
+        expect(rows(merged, rule)).to eq([["b_provider.rb", 1]])
+        expect(rows(full, rule)).to eq([["b_provider.rb", 1]])
+
+        File.write(File.join(dir, "a_consumer.rb"), "x = 2\n")
+        expect(rows(guarded_recheck(session).diagnostics, rule)).to eq([["b_provider.rb", 1]])
+      end
+    end
+
+    # An inline `# @rbs %a{pure}` with no `effects:` block is the ADR-103 WD13 residual: one
+    # `effect.annotations-unchecked` at b_provider.rb, produced once per run off the environment. A warm
+    # `--incremental` run that changed nothing has an empty closure, so nothing per-file could carry it —
+    # the empty path must fill the carrier from the environment it resolves.
+    it "keeps one effect.annotations-unchecked on a warm nothing-changed run_incremental" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a_consumer.rb"), "x = 1\n")
+        File.write(File.join(dir, "b_provider.rb"), <<~RUBY)
+          # rbs_inline: enabled
+          class Provider
+            # @rbs %a{pure}
+            # @rbs return: Integer
+            def n
+              1
+            end
+          end
+        RUBY
+        config = inline_config(dir)
+        rule = "effect.annotations-unchecked"
+        cache_root = File.join(dir, ".rigor", "cache")
+        store = Rigor::Cache::Store.new(root: cache_root)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        fp = fingerprint(config, dir)
+
+        cold, warm1 = guarded_run_incremental(inline_session(config, dir, cache_store: store),
+                                              snapshot: snapshot, fingerprint: fp)
+        expect(warm1).to be(false)
+        expect(rows(cold, rule).size).to eq(1)
+
+        warm, warm2 = guarded_run_incremental(inline_session(config, dir, cache_store: store),
+                                              snapshot: snapshot, fingerprint: fp)
+        expect(warm2).to be(true)
+        expect(rows(warm, rule)).to eq(rows(cold, rule))
+      end
+    end
+
+    def stamped(diagnostics)
+      diagnostics.reject { |d| d.rule.to_s.start_with?("rbs.coverage") }
+                 .map { |d| [File.basename(d.path), d.line, d.rule, d.severity] }.sort
+    end
+
+    # Round 7 (Opus review, P1) — the per-file cache serves reused files WITHOUT re-stamping, so what it holds
+    # must already be the severity-resolved stream. Caching the raw `analyze_files` return resurrected a rule
+    # the profile resolves to `:off` on every reused file — on the DEFAULT configuration, where the balanced
+    # profile ships `static.value-use.void` off (ADR-100) — and served the authored `:error` where an
+    # override re-stamps `call.undefined-method` to `:warning`. Baseline, recheck and the full run must agree
+    # row for row, severity included; `b.rb` is the reused file on the recheck.
+    it "serves reused files severity-resolved: an :off rule stays off and an override's severity holds" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig", "void_box.rbs"), "class VoidBox\n  def log: (String) -> void\nend\n")
+        File.write(File.join(dir, "a.rb"), "x = 1\n")
+        File.write(File.join(dir, "b.rb"), <<~RUBY)
+          l = VoidBox.new
+          assigned = l.log("assign")
+          puts assigned
+          s = "hi"
+          s.no_such_method_at_all
+        RUBY
+        config = Rigor::Configuration.new(
+          "paths" => [dir], "signature_paths" => [File.join(dir, "sig")],
+          "severity_overrides" => { "call.undefined-method" => "warning" }
+        )
+
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        baseline = stamped(guarded_baseline(session))
+        expect(baseline).to eq([["b.rb", 5, "call.undefined-method", :warning]])
+
+        File.write(File.join(dir, "a.rb"), "x = 2\n")
+        recheck = guarded_recheck(session)
+        expect(recheck.reused.map { |p| File.basename(p) }).to eq(["b.rb"])
+        expect(stamped(recheck.diagnostics)).to eq(baseline)
+
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+        expect(stamped(full)).to eq(baseline)
+      end
+    end
+
+    # The `--verify-incremental` shape of the same defect: a partition that reuses `b.rb` from the cache
+    # served the `:off` row the full-run oracle never prints, and the gate went red on a correct tree.
+    it "keeps a --verify-incremental partition equal to the full run under an :off override" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "x = 1\n")
+        File.write(File.join(dir, "b.rb"), "s = \"hi\"\ns.no_such_method_at_all\n")
+        config = Rigor::Configuration.new(
+          "paths" => [dir], "severity_overrides" => { "call.undefined-method" => "off" }
+        )
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        guarded_baseline(session)
+
+        subset = session.analyzed_files.select { |p| File.basename(p) == "a.rb" }
+        merged = stamped(guarded_reanalyze_subset(session, subset))
+        full = stamped(guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics)
+
+        expect(full).to be_empty
+        expect(merged).to eq(full)
+      end
+    end
+
+    # Round 9 (user's reviewer, P1) — the `.rigor.yml`-positioned project-signature rows have no per-file
+    # producer at all, so on an empty closure the coordinator's empty branch is their ONLY source. It used to
+    # snapshot just the carrier and the HKT outcome: on the shipping `--incremental` path a quarantined
+    # `signature_paths:` file was reported cold and vanished on the warm run that changed nothing, and so did
+    # a synthesized namespace. Cold, warm, a no-edit recheck and the full run must agree.
+    # `data-contrast:` is a record key `rbs` rejects, so `broken.rbs` is quarantined; the qualified
+    # declaration with no enclosing `module Acme` is the namespace the loader synthesizes; `DupDemo#read`
+    # declared twice fails the definition build, and the `conforms-to` annotation is what DEMANDS that
+    # build on a run whose only Ruby file never names the class — the conformance scan's demand, which the
+    # empty path must read after the scan (round 11; the row went 1 → 0 warm under
+    # `reject-unparseable-signatures`, where it is an `:error`).
+    def project_signature_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "a.rb"), "x = 1\n")
+      File.write(File.join(dir, "sig", "broken.rbs"), "class Broken\n  def h: () -> { data-contrast: Integer }\nend\n")
+      File.write(File.join(dir, "sig", "widget.rbs"), "class Acme::Widget\n  def size: () -> Integer\nend\n")
+      File.write(File.join(dir, "sig", "dup.rbs"), <<~RBS)
+        interface _Reads
+          def read: () -> String
+        end
+
+        %a{rigor:v1:conforms-to _Reads}
+        class DupDemo
+          def read: () -> String
+        end
+      RBS
+      File.write(File.join(dir, "sig", "dup2.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+      Rigor::Configuration.new("paths" => [dir], "signature_paths" => [File.join(dir, "sig")])
+    end
+
+    # `[quarantined-signature, synthesized-namespace, definition-build-failed]` counts.
+    def project_signature_counts(diagnostics)
+      %w[rbs.coverage.quarantined-signature rbs.coverage.synthesized-namespace
+         rbs.coverage.definition-build-failed].map { |rule| diagnostics.count { |d| d.qualified_rule == rule } }
+    end
+
+    it "keeps the project-signature rows across a warm nothing-changed run and an empty-closure recheck" do
+      Dir.mktmpdir do |dir|
+        config = project_signature_fixture(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        store = Rigor::Cache::Store.new(root: cache_root)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        fp = fingerprint(config, dir)
+        incremental = lambda do
+          guarded_run_incremental(described_class.new(configuration: config, paths: [dir], cache_store: store),
+                                  snapshot: snapshot, fingerprint: fp)
+        end
+
+        cold, warm1 = incremental.call
+        warm, warm2 = incremental.call
+        expect([warm1, warm2]).to eq([false, true])
+        expect([project_signature_counts(cold), project_signature_counts(warm)]).to eq([[1, 1, 1], [1, 1, 1]])
+
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        guarded_baseline(session)
+        expect(project_signature_counts(guarded_recheck(session).diagnostics)).to eq([1, 1, 1])
+
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+        expect(project_signature_counts(full)).to eq([1, 1, 1])
+      end
+    end
+  end
+
+  # Issue #784 — the `rbs.coverage.hkt-scan-failed` row is regenerated by every run from a demand the run
+  # makes ITSELF, so it survives every incremental path even when the analysed closure contains no
+  # `Klass.method` call: the per-file cache holds only `Runner#per_file_diagnostics`, so no run-level row is
+  # ever served from it, and before the run demanded on its own behalf these three paths each lost the row
+  # and turned a red project
+  # green. Every session here is built the way `CheckCommand#run_incremental_check` builds it — with NO
+  # `environment:` — because the first cut of the fix passed only under an injected environment the CLI
+  # never supplies (the empty-closure recheck then had nothing to demand on). A side effect is that each
+  # run builds its own Environment, so the raising scan never touches `shared_environment`.
+  describe "the hkt-scan-failed row across the incremental paths (issue #784)" do
+    before do
+      allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_raise(NameError, "simulated scan bug")
+    end
+
+    def hkt_rows(diagnostics)
+      diagnostics.select { |d| d.rule == "rbs.coverage.hkt-scan-failed" }
+    end
+
+    # The CLI shape: no `environment:`, no `cache_store:`.
+    def own_session(config, dir)
+      described_class.new(configuration: config, paths: [dir])
+    end
+
+    # `app.rb` demands the registry (a Singleton-receiver call); `notes.rb` never does.
+    def write_fixture(dir)
+      File.write(File.join(dir, "app.rb"), "JSON.parse(\"{}\")\n")
+      File.write(File.join(dir, "notes.rb"), "x = 1\n")
+    end
+
+    it "keeps the row on a warm run_incremental whose changed closure never demands the registry" do
+      Dir.mktmpdir do |dir|
+        write_fixture(dir)
+        config = configuration(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, dir)
+
+        d1, warm1 = guarded_run_incremental(own_session(config, dir), snapshot: snapshot, fingerprint: fp)
+        expect(warm1).to be(false)
+        expect(hkt_rows(d1).size).to eq(1)
+
+        File.write(File.join(dir, "notes.rb"), "x = 2\n")
+        d2, warm2 = guarded_run_incremental(own_session(config, dir), snapshot: snapshot, fingerprint: fp)
+        expect(warm2).to be(true)
+        expect(hkt_rows(d2).size).to eq(1)
+      end
+    end
+
+    # The `--verify-incremental` shape: a fresh Runner over a partition that misses every demanding file
+    # must still carry the row, and carry the SAME row the full-run oracle does.
+    it "regenerates the row on a subset run whose files never demand the registry" do
+      Dir.mktmpdir do |dir|
+        write_fixture(dir)
+        config = configuration(dir)
+        subset = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil,
+                                                         analyze_only: Set[File.join(dir, "notes.rb")]))
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil))
+
+        expect(hkt_rows(subset.diagnostics).size).to eq(1)
+        expect(hkt_rows(full.diagnostics).size).to eq(1)
+        expect(hkt_rows(subset.diagnostics).map(&:message)).to eq(hkt_rows(full.diagnostics).map(&:message))
+      end
+    end
+
+    it "regenerates the row on an empty-closure recheck" do
+      Dir.mktmpdir do |dir|
+        write_fixture(dir)
+        config = configuration(dir)
+        session = own_session(config, dir)
+        guarded_baseline(session)
+
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to be_empty
+        expect(hkt_rows(recheck.diagnostics).size).to eq(1)
+      end
+    end
+  end
 end

@@ -52,6 +52,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
                        quarantined_signatures_snapshot: [],
                        env_build_failure_snapshot: nil,
                        definition_build_failures_snapshot: [],
+                       hkt_scan_failure_snapshot: nil,
                        conformance_results_snapshot: nil)
     described_class.new(
       configuration: configuration,
@@ -67,6 +68,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       quarantined_signatures_snapshot: -> { quarantined_signatures_snapshot },
       env_build_failure_snapshot: -> { env_build_failure_snapshot },
       definition_build_failures_snapshot: -> { definition_build_failures_snapshot },
+      hkt_scan_failure_snapshot: -> { hkt_scan_failure_snapshot },
       conformance_results_snapshot: -> { conformance_results_snapshot }
     )
   end
@@ -434,6 +436,38 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     it "is silent when every definition built" do
       expect(build_aggregator(definition_build_failures_snapshot: []).rbs_definition_build_failed_diagnostics)
         .to eq([])
+    end
+  end
+
+  # Issue #784 — the fourth, narrowest rung: the implicit HKT scan over RBS `type` aliases raised.
+  describe "rbs_hkt_scan_failed_diagnostics" do
+    it "is silent when the scan built (or was never demanded)" do
+      expect(build_aggregator(hkt_scan_failure_snapshot: nil).rbs_hkt_scan_failed_diagnostics).to eq([])
+    end
+
+    it "names the error class, the first message line, and the relativized raise-site frame" do
+      failure = ["NameError", "simulated scan bug",
+                 "/opt/gems/rigor-9.9.9/lib/rigor/inference/hkt_registry.rb:12:in 'scan_rbs_loader'"]
+
+      diagnostic = build_aggregator(hkt_scan_failure_snapshot: failure).rbs_hkt_scan_failed_diagnostics.first
+
+      expect(diagnostic.rule).to eq("rbs.coverage.hkt-scan-failed")
+      expect(diagnostic.severity).to eq(:error)
+      expect(diagnostic.path).to eq(".rigor.yml")
+      expect(diagnostic.line).to eq(1)
+      expect(diagnostic.column).to eq(1)
+      expect(diagnostic.message).to include("NameError")
+      expect(diagnostic.message).to include("simulated scan bug")
+      expect(diagnostic.message).to include(" at lib/rigor/inference/hkt_registry.rb:12:in 'scan_rbs_loader'")
+    end
+
+    it "omits the ` at ` frame clause when the tuple carries no frame" do
+      failure = ["NameError", "simulated scan bug", nil]
+
+      diagnostic = build_aggregator(hkt_scan_failure_snapshot: failure).rbs_hkt_scan_failed_diagnostics.first
+
+      expect(diagnostic.message).to include("simulated scan bug")
+      expect(diagnostic.message).not_to include(" at ")
     end
   end
 

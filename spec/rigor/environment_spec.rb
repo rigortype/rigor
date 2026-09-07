@@ -274,6 +274,39 @@ RSpec.describe Rigor::Environment do
           expect(env.hkt_registry).to be_registered(:"json::value")
         end
       end
+
+      # Issue #784 — the seam. `#hkt_registry` is a shared, memoised build first demanded from inside a
+      # file's analysis; before this seam existed a raise there landed in every file's `analyze_body`
+      # rescue instead of surfacing once for the run (issue #776).
+      describe "the #784 scan-failure seam" do
+        it "is nil on a healthy environment (the scan built)" do
+          env = described_class.for_project(signature_paths: [])
+          env.hkt_registry
+
+          expect(env.hkt_scan_failure).to be_nil
+        end
+
+        it "degrades to the pre-scan registry, records the raise, and does not re-attempt the scan" do
+          allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader)
+            .and_raise(NameError, "simulated scan bug")
+          env = described_class.default
+
+          registry = env.hkt_registry
+
+          # Analysis proceeds over the pre-scan registry: the bundled builtin survives even though the
+          # overlay scan on top of it raised.
+          expect(registry).to be_registered(:"json::value")
+          expect(env.hkt_scan_failure).to be_an(Array)
+          error_class, first_line, frame = env.hkt_scan_failure
+          expect(error_class).to eq("NameError")
+          expect(first_line).to eq("simulated scan bug")
+          expect(frame).to be_a(String).or(be_nil)
+
+          # Memoised: the degraded registry is what keeps a second demand from re-attempting the scan.
+          env.hkt_registry
+          expect(Rigor::Inference::HktRegistry).to have_received(:scan_rbs_loader).once
+        end
+      end
     end
 
     describe "DEFAULT_LIBRARIES (Slice A stdlib expansion)" do

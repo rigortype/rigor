@@ -16,6 +16,7 @@ require_relative "../effects/envelope_index"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
+require_relative "crash_signature"
 require_relative "dependency_recorder"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
@@ -228,7 +229,7 @@ module Rigor
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]
       rescue StandardError => e
-        [analyzer_error(path, "internal analyzer error: #{e.class}: #{e.message}")]
+        [analyzer_error(path, CrashSignature.check_rule_message(e))]
       end
       private :analyze_body
 
@@ -243,7 +244,18 @@ module Rigor
       # how you ran it" defect the diagnostic exists to end. Draining it out of the workers is what makes
       # the two paths say the same thing. The payload is `[String, String, String, Array<String>]` tuples —
       # Marshal-clean for the fork backend and shareable for the Ractor one.
+      #
+      # Issue #784 — `hkt_scan_failure` rides the same channel for the same reason: the PARENT's own
+      # Environment never demands `#hkt_registry` under the pool, so its slot is always nil, and draining it
+      # out of the workers is the only way `--workers=N` says what `--workers=0` says.
       def drain_reporters
+        # Issue #784 — demand the registry once per worker before reading the slot, so a worker whose share
+        # of files happened to contain no `Klass.method` call still reports the run's outcome (the same
+        # reason `PoolCoordinator#hkt_scan_outcome` demands it on the sequential path). The Environment
+        # object is built in the constructor, but its RBS env is lazy: on a worker that analysed a file this
+        # is a memoised read; on one that demanded nothing it is the same cache-served env load that file
+        # would have paid. The fork backend never hands a worker an empty slice, so no idle worker pays it.
+        @environment&.hkt_registry
         {
           rbs_extended: {
             unresolved_payloads: @rbs_extended_reporter.unresolved_payloads,
@@ -251,7 +263,8 @@ module Rigor
           },
           boundary_cross: @boundary_cross_reporter.entries,
           source_rbs_synthesis: @source_rbs_synthesis_reporter.entries,
-          definition_build_failures: @environment&.rbs_loader&.definition_build_failures || []
+          definition_build_failures: @environment&.rbs_loader&.definition_build_failures || [],
+          hkt_scan_failure: @environment&.hkt_scan_failure
         }
       end
 

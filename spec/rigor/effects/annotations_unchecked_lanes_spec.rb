@@ -22,11 +22,13 @@ require "rigor-rbs-inline"
 # a `--no-cache` / `--workers N` run reported the `.rbs` spelling and stayed silent about the inline
 # one — while a default run reported both. The lane, not the annotation, decided.
 #
-# The boundary that remains is a run that analyses NO file (a warm `--incremental` null recheck; the
-# engine-free warm-cache probe, which an rbs-inline project can never reach because its key omits the
-# `rbs.virtual_rbs` entry and so misses). Those have no environment to take the stratum from, and
-# building one to find an `:info` is the cost ADR-103 WD13 refused. The last case below pins it, so
-# the boundary is a decision rather than a drift.
+# A run that analyses NO file (a warm `--incremental` null recheck) used to be the one boundary that
+# stayed: it built no environment, and building one to find an `:info` was the cost ADR-103 WD13
+# refused, so only the `.rbs` lane — a glob — was visible there. #784 retired the premise: the empty
+# path now resolves an environment for the `rbs.coverage.hkt-scan-failed` outcome whenever the project
+# has files, so the inline stratum is read off it at no added cost (#788), and the last case below pins
+# the lanes co-equal there too. (The engine-free warm-cache probe stays `.rbs`-only by construction —
+# an rbs-inline project never reaches it, because its key omits the `rbs.virtual_rbs` entry and misses.)
 RSpec.describe "effect.annotations-unchecked across the two annotation lanes" do
   def rule
     "effect.annotations-unchecked"
@@ -160,16 +162,21 @@ RSpec.describe "effect.annotations-unchecked across the two annotation lanes" do
     end
   end
 
-  describe "the one boundary that stays" do
-    # A run with no files to analyse builds no environment, and the pass will not build one for an
-    # `:info` (ADR-103 WD13). The `.rbs` stratum is a glob and survives; the inline stratum cannot.
-    # Stated as a spec so the asymmetry is a documented decision and not a silent regression.
-    it "reports the `.rbs` lane and not the inline lane when the run analyses nothing" do
+  describe "the boundary that used to stay" do
+    # A run with no files to analyse once built no environment, so the `.rbs` stratum (a glob) survived
+    # and the inline stratum could not. `PoolCoordinator#analyze_files`'s empty branch now resolves an
+    # environment over the project's files for the HKT-scan outcome (#784) and snapshots the
+    # effect-annotation carrier off it (#788) — the same carrier the non-empty path fills — so the
+    # residual pass reads both lanes here as well. Pinned so the co-equality is a decision, not a drift,
+    # and so the warm nothing-changed `--incremental` run keeps its one inline row now that the per-file
+    # cache never serves it.
+    it "reports both lanes when the run analyses nothing" do
       rbs = findings_for(:rbs, analyze_only: [])
       inline = findings_for(:inline, analyze_only: [])
 
       expect(rbs.size).to eq(1)
-      expect(inline).to be_empty
+      expect(inline.size).to eq(1)
+      expect([inline.first.path, inline.first.line]).to eq(["lib/demo.rb", 3])
     end
   end
 end

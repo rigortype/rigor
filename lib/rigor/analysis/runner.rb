@@ -29,6 +29,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/project_patched_scanner"
 require_relative "../inference/method_dispatcher/file_folding"
+require_relative "crash_signature"
 require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_recorder"
@@ -64,7 +65,14 @@ module Rigor
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
                   :rbs_extended_reporter, :boundary_cross_reporter,
-                  :analyzed_files, :unresolved_self_calls, :seed_bundles
+                  :analyzed_files, :unresolved_self_calls, :seed_bundles,
+                  # #788 rounds 6–7 — the rows per-file analysis produced this run, severity-resolved exactly
+                  # as the run's stream is and sliced to this run's targets (a pool backend folds `.rigor.yml`
+                  # prepare / degraded rows into `analyze_files`'s return). `IncrementalSession` caches ONLY
+                  # this and serves reused files from it without re-stamping: a run-level row is regenerated
+                  # every run wherever it is positioned, and slicing the run's full stream by path cached the
+                  # file-positioned ones (`effect.annotations-unchecked`, `source-rbs-*`).
+                  :per_file_diagnostics
 
       # ADR-46 — the per-file cross-file read records this run captured (empty unless
       # `record_dependencies: true`). Sequential analysis records into `@file_dependencies` via
@@ -302,6 +310,7 @@ module Rigor
         # See `self_undefined_rule_active?`.
         @self_undefined_rule_active = nil
         @analyzed_files = [].freeze
+        @per_file_diagnostics = [].freeze
         # In-memory source map for `#run_source` — `{ logical_path => source String }`. When set,
         # `parse_source` reads bytes from here instead of disk and `expand_paths` accepts the (possibly
         # non-existent) logical path. nil on a normal disk-backed run.
@@ -426,6 +435,9 @@ module Rigor
         # Per-run reset of the environment the cacheable path resolves, reused by the envelope pass so a
         # run never builds two.
         @run_environment = nil
+        # #788 — the per-file reader is assigned only on the analysis (miss) path; reset it here so a run the
+        # ADR-45 result cache serves does not answer with the previous run's rows.
+        @per_file_diagnostics = [].freeze
         # ADR-84 WD2 — roll the return-memo bucket: a fresh frozen token per run makes every per-file scope
         # of THIS run share one memo bucket while entries from any earlier run in this process (stale after
         # an edit) become unreachable.
@@ -985,7 +997,17 @@ module Rigor
         # per-file cache, so it needs the full analyzed set to subtract the affected closure from.
         targets = target_files(expansion)
         @analyzed_files = targets
-        diagnostics += @pool_coordinator.analyze_files(targets, environment: environment)
+        # Issue #784 — the whole project's file list rides along so an EMPTY `targets` (a narrowed run whose
+        # closure is empty) can still resolve the environment a full run would — same files, same
+        # synthesized RBS — to demand the HKT registry once, while a project with no files resolves nothing.
+        # #788 rounds 6–7 — the per-file stream is kept apart from the run-level streams appended below,
+        # because `IncrementalSession` must cache ONLY what per-file analysis produced (#per_file_diagnostics),
+        # and the reader is exposed SEVERITY-RESOLVED and sliced to this run's targets. The cache serves a
+        # reused file without re-stamping, so a raw row would resurrect a rule the profile resolves to `:off`
+        # (`static.value-use.void` ships off on the default profile) and serve the authored severity where an
+        # override re-stamps it; and a pool backend folds `.rigor.yml`-positioned prepare / pool-degraded rows
+        # into the same return, which the slice drops. The run's own stream is stamped once, at the end.
+        diagnostics += analyze_targets(targets, environment: environment, project_files: expansion.fetch(:files))
         # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
         # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
         # contributes NO diagnostics and its result leaves through `#effect_table`, never through the
@@ -993,16 +1015,35 @@ module Rigor
         close_effect_graph
         diagnostics += @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_environment_build_failed_diagnostics
-        # Issue #696 — after its env-wide twin and before the synthesized-namespace notice: the three
+        # Issue #696 — after its env-wide twin and before the synthesized-namespace notice: the four
         # `rbs.coverage.*` build conditions surface widest-consequence first, and their relative order is
         # the diagnostic output contract.
         diagnostics += @diagnostic_aggregator.rbs_definition_build_failed_diagnostics
+        # Issue #784 — last of the four, deliberately: it loses only the IMPLICIT HKT registrations a
+        # `type` alias would have contributed, never a class's own declared method surface, so it is the
+        # narrowest-consequence rung on the same ladder.
+        diagnostics += @diagnostic_aggregator.rbs_hkt_scan_failed_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_synthesized_namespace_diagnostics
         diagnostics += @diagnostic_aggregator.conforms_to_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
         diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
         diagnostics + @diagnostic_aggregator.source_rbs_synthesis_diagnostics
       end
+
+      # #788 round 7 — runs per-file analysis over `targets` and exposes what it produced as
+      # `#per_file_diagnostics`: the `analyze_files` return, stamped with the same severity profile the run's
+      # own stream gets (`SeverityStamp` drops `:off` rows and re-stamps overrides, and the per-file cache never
+      # re-stamps), sliced to the rows positioned at the targets. Returns the RAW return for the run's stream,
+      # which is stamped once, at the end of `#run_analysis`.
+      def analyze_targets(targets, environment:, project_files:)
+        raw = @pool_coordinator.analyze_files(targets, environment: environment, project_files: project_files)
+        analysed = targets.to_set
+        @per_file_diagnostics = @diagnostic_aggregator.apply_severity_profile(raw)
+                                                      .select { |diagnostic| analysed.include?(diagnostic.path) }
+                                                      .freeze
+        raw
+      end
+      private :analyze_targets
 
       # ADR-67 WD6a — the check-walk parameter-inference pre-pass. Populates `@project_param_inferred_types`
       # (read by `project_scope_seed_tables`) with the call-site union of every undeclared parameter, running
@@ -1427,7 +1468,7 @@ module Rigor
       # indexes, prepare-diagnostic snapshot, and the four end-of-pass snapshots) is reached through reader
       # procs so each collaborator observes the live ivar value at call time without a back-reference
       # cycle. The reporter accumulators and the {RunSnapshots} sink are shared mutable instances.
-      def build_collaborators # rubocop:disable Metrics/MethodLength
+      def build_collaborators # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
         @pre_passes = ProjectPrePasses.new(
           configuration: @configuration, cache_store: @cache_store, buffer: @buffer,
           plugin_requirer: @plugin_requirer, pool_mode: -> { pool_mode? }
@@ -1462,6 +1503,7 @@ module Rigor
           quarantined_signatures_snapshot: -> { @snapshots.quarantined_signatures },
           env_build_failure_snapshot: -> { @snapshots.env_build_failure },
           definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
+          hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },
           conformance_results_snapshot: -> { @snapshots.conformance_results }
         )
       end
@@ -1876,7 +1918,7 @@ module Rigor
             path: path,
             line: 1,
             column: 1,
-            message: "internal analyzer error: #{e.class}: #{e.message}",
+            message: CrashSignature.check_rule_message(e),
             severity: :error
           )
         ]

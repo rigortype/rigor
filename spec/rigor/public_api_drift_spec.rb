@@ -162,6 +162,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     constant_for_name(req:name)
     dependency_source_index()
     hkt_registry()
+    hkt_scan_failure()
     missing_rbs_gem_owner(req:root_constant_name)
     name_scope()
     nominal_for_name(req:name)

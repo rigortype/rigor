@@ -110,7 +110,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive(:dispatch_pool).and_return([:pool_result])
 
       expect(coordinator.analyze_files(["a.rb"])).to eq([:pool_result])
-      expect(coordinator).to have_received(:dispatch_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:dispatch_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "routes to the sequential path with the caller-supplied environment when pool mode is off" do
@@ -142,7 +142,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         [Rigor::Analysis::Diagnostic.new(path: path, line: 1, column: 1, message: "m", severity: :info, rule: "r")]
       end
       coordinator = build_coordinator(analyze_file: analyze_file)
-      environment = instance_double(Rigor::Environment, rbs_loader: nil)
+      environment = instance_double(Rigor::Environment, rbs_loader: nil, hkt_registry: nil, hkt_scan_failure: nil)
 
       result = coordinator.analyze_files_sequentially(%w[a.rb b.rb], environment)
 
@@ -157,7 +157,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"],
                                        virtual_rbs: [], definition_build_failures: []
       )
-      environment = instance_double(Rigor::Environment, rbs_loader: loader)
+      environment = instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
 
       coordinator.analyze_files_sequentially(["a.rb"], environment)
 
@@ -174,7 +174,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"],
                                        virtual_rbs: [], definition_build_failures: []
       )
-      environment = instance_double(Rigor::Environment, rbs_loader: loader)
+      environment = instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
 
       coordinator.analyze_files_sequentially(["a.rb"], environment)
 
@@ -197,7 +197,9 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         definition_build_failures: []
       )
 
-      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+      coordinator.analyze_files_sequentially(
+        ["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
+      )
 
       expect(snapshots.effect_annotation_carrier.map(&:first)).to eq(["virtual:x:memo.rb"])
     end
@@ -212,7 +214,9 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       )
       loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [])
 
-      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+      coordinator.analyze_files_sequentially(
+        ["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
+      )
 
       expect(snapshots.effect_annotation_carrier).to eq([])
     end
@@ -235,9 +239,163 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       end
       coordinator = build_coordinator(snapshots: snapshots, analyze_file: analyze_file)
 
-      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+      coordinator.analyze_files_sequentially(
+        ["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
+      )
 
       expect(snapshots.definition_build_failures).to eq([failure])
+    end
+
+    # Issue #784 — the seam in `Environment#hkt_registry` is demand-driven, and a subset run (a
+    # `--verify-incremental` partition, an incremental closure) can contain no file that demands it. The
+    # RUN must demand it once itself, or the row silently depends on which files happened to be analysed.
+    # The `analyze_file` callable here never touches the environment, so only the coordinator's own demand
+    # can populate the slot; an implementation that merely reads it after the loop gets nil and fails.
+    it "demands the HKT registry itself after the loop, so the row does not depend on the files (#784)" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      tuple = ["NameError", "simulated scan bug", "lib/rigor/inference/hkt_registry.rb:1:in 'scan'"]
+      demanded = false
+      environment = instance_double(Rigor::Environment, rbs_loader: nil)
+      allow(environment).to receive(:hkt_registry) { demanded = true }
+      allow(environment).to receive(:hkt_scan_failure) { demanded ? tuple : nil }
+      coordinator = build_coordinator(snapshots: snapshots)
+
+      coordinator.analyze_files_sequentially(["a.rb"], environment)
+
+      expect(environment).to have_received(:hkt_registry).once
+      expect(snapshots.hkt_scan_failure).to eq(tuple)
+    end
+
+    # Issue #784 — an EMPTY analyze set (an incremental recheck whose closure is empty) returns before the
+    # per-file loop, but still owes the run its row: `IncrementalSession` caches only what per-file analysis
+    # produced (`Runner#per_file_diagnostics`), so every run-level row is regenerated by every run. Only an
+    # environment that already exists is consulted — the override, or the one the caller resolved.
+    it "records the row from an already-resolved environment even when the analyze set is empty (#784)" do
+      tuple = ["NameError", "simulated scan bug", nil]
+      environment = instance_double(Rigor::Environment, rbs_loader: nil, hkt_registry: nil, hkt_scan_failure: tuple)
+
+      via_override = Rigor::Analysis::Runner::RunSnapshots.new
+      build_coordinator(snapshots: via_override, environment_override: environment).analyze_files([])
+      expect(via_override.hkt_scan_failure).to eq(tuple)
+
+      via_argument = Rigor::Analysis::Runner::RunSnapshots.new
+      build_coordinator(snapshots: via_argument).analyze_files([], environment: environment)
+      expect(via_argument.hkt_scan_failure).to eq(tuple)
+    end
+
+    # The shipping `--incremental` shape: `CheckCommand#run_incremental_check` builds its session with no
+    # environment, so a warm recheck whose closure is empty reaches this branch with nothing in hand. The
+    # project HAS files, so the coordinator resolves an environment for the purpose — over the project's
+    # own file list, so it carries the same plugin-synthesized RBS a full run would (an env built over `[]`
+    # scans a different universe) — and records the outcome. Without this the warm run went 0 diagnostics
+    # / exit 0 on a broken-scan project where the cold run was red.
+    it "resolves an environment over the project's files for an empty run with none in hand (#784)" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      tuple = ["NameError", "simulated scan bug", nil]
+      resolved = instance_double(Rigor::Environment, rbs_loader: nil, hkt_registry: nil, hkt_scan_failure: tuple)
+      allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
+
+      result = build_coordinator(snapshots: snapshots).analyze_files([], project_files: ["a.rb", "b.rb"])
+
+      expect(result).to eq([])
+      expect(Rigor::Environment).to have_received(:for_project).with(hash_including(source_files: ["a.rb",
+                                                                                                   "b.rb"])).once
+      expect(resolved).to have_received(:hkt_registry).once
+      expect(snapshots.hkt_scan_failure).to eq(tuple)
+    end
+
+    # #788 round 6 — the residual pass reads the effect-annotation carrier the coordinator snapshots off
+    # the environment; only the non-empty path used to fill it. Now that run-level rows are never served
+    # from the per-file cache, an empty-closure recheck must fill it from the environment it resolves, or
+    # an inline-only `effect.annotations-unchecked` goes 1 → 0 on every warm nothing-changed run.
+    it "snapshots the effect-annotation carrier from the environment an empty run resolves (#788)" do
+      annotated = ["lib/demo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"]
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [],
+                                                              virtual_rbs: [["lib/plain.rb", "class P\nend\n"],
+                                                                            annotated])
+      resolved = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: nil, rbs_loader: loader)
+      allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+
+      build_coordinator(snapshots: snapshots).analyze_files([], project_files: ["a.rb"])
+
+      expect(snapshots.effect_annotation_carrier).to eq([annotated])
+    end
+
+    # Round 9 (user's reviewer, P1) — the same branch owes the run its project-signature state: with the
+    # per-file cache holding only per-file rows, `synthesized-namespace`, `quarantined-signature`,
+    # `environment-build-failed` and the conformance rows have no other producer on a warm recheck that
+    # changed nothing, and an `:error`-level quarantine row went 1 → 0 on the second `--incremental` run.
+    # The conformance scan demands the definition of every `conforms-to` class, so the definition-build
+    # failures are read AFTER it (the sequential path's order): the loader here reports one only once the
+    # scan has run.
+    it "snapshots the project-signature state from the environment an empty run resolves (#788)" do
+      failures = []
+      loader = instance_double(Rigor::Environment::RbsLoader, virtual_rbs: [], synthesized_namespaces: [:ns],
+                                                              quarantined_signatures: [:quarantined],
+                                                              env_build_failure: :build_failure)
+      allow(loader).to receive(:definition_build_failures) { failures }
+      resolved = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: nil, rbs_loader: loader)
+      allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
+      allow(Rigor::RbsExtended::ConformanceChecker).to receive(:scan).with(loader) do
+        failures << ["DupDemo", :duplicated_member]
+        [:conformance]
+      end
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("signature_paths" => ["sig"]))
+
+      build_coordinator(configuration: configuration, snapshots: snapshots).analyze_files([], project_files: ["a.rb"])
+
+      expect([snapshots.synthesized_namespaces, snapshots.quarantined_signatures, snapshots.env_build_failure,
+              snapshots.conformance_results]).to eq([[:ns], [:quarantined], :build_failure, [:conformance]])
+      expect(snapshots.definition_build_failures).to eq([["DupDemo", :duplicated_member]])
+    end
+
+    it "snapshots empty project-signature state on an empty run over a project with no files" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("signature_paths" => ["sig"]))
+      allow(Rigor::Environment).to receive(:for_project)
+
+      build_coordinator(configuration: configuration, snapshots: snapshots).analyze_files([], project_files: [])
+
+      expect(Rigor::Environment).not_to have_received(:for_project)
+      expect([snapshots.synthesized_namespaces, snapshots.quarantined_signatures, snapshots.env_build_failure,
+              snapshots.conformance_results]).to eq([[], [], nil, []])
+    end
+
+    # Issue #793 — a NON-empty narrowed run must build its environment over the whole project too, or the
+    # plugin-synthesized RBS of every excluded file is missing and the run scans a different type universe
+    # than the full run it is compared against. `files` is what is analysed; `source_files:` is what the
+    # environment is built over.
+    it "builds a narrowed run's environment over the whole project, not the analyze set (#793)" do
+      resolved = instance_double(Rigor::Environment, rbs_loader: nil, hkt_registry: nil, hkt_scan_failure: nil)
+      allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
+      analyzed = []
+      coordinator = build_coordinator(analyze_file: lambda { |path, _env|
+        analyzed << path
+        []
+      })
+
+      coordinator.analyze_files(["a.rb"], project_files: ["a.rb", "b.rb"])
+
+      expect(analyzed).to eq(["a.rb"])
+      expect(Rigor::Environment).to have_received(:for_project).with(hash_including(source_files: ["a.rb",
+                                                                                                   "b.rb"])).once
+    end
+
+    # The must-still-succeed twin: a project with NO files — even when `analyze_only` narrowed it to
+    # `Set[]`, which a recheck over an empty project does — has nobody who could have demanded a registry,
+    # and the coordinator must not build an environment just to ask. An empty project pays no env build
+    # today, and that stays true on every path.
+    it "never builds an environment when the project has no files (#784)" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      allow(Rigor::Environment).to receive(:for_project).and_call_original
+
+      result = build_coordinator(snapshots: snapshots).analyze_files([], project_files: [])
+
+      expect(result).to eq([])
+      expect(snapshots.hkt_scan_failure).to be_nil
+      expect(Rigor::Environment).not_to have_received(:for_project)
     end
 
     # The must-still-succeed twin: a healthy loader leaves the slot at its inert default, so the diagnostic
@@ -247,7 +405,9 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       coordinator = build_coordinator(snapshots: snapshots)
       loader = instance_double(Rigor::Environment::RbsLoader, virtual_rbs: [], definition_build_failures: [])
 
-      coordinator.analyze_files_sequentially(["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader))
+      coordinator.analyze_files_sequentially(
+        ["a.rb"], instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
+      )
 
       expect(snapshots.definition_build_failures).to eq([])
     end
@@ -269,7 +429,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       )
       coordinator = build_coordinator(snapshots: snapshots, analyze_file: ->(_path, _env) { [] })
       allow(coordinator).to receive(:build_runner_environment)
-        .and_return(instance_double(Rigor::Environment, rbs_loader: loader))
+        .and_return(instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil))
 
       coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "no fork")
 
@@ -287,7 +447,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       )
       coordinator = build_coordinator(snapshots: snapshots, analyze_file: ->(_path, _env) { [] })
       allow(coordinator).to receive(:build_runner_environment)
-        .and_return(instance_double(Rigor::Environment, rbs_loader: loader))
+        .and_return(instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil))
 
       diagnostics = coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "no fork")
 
@@ -399,7 +559,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive(:analyze_files_in_fork_pool).and_return([:fork_result])
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:fork_result])
-      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "degrades a recording run to sequential when fork is unavailable, " \
@@ -411,7 +571,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:seq_result])
       expect(coordinator).to have_received(:analyze_files_sequentially_fallback).with(
-        ["a.rb"], reason: a_string_matching(/incremental parallelism requires fork/)
+        ["a.rb"], reason: a_string_matching(/incremental parallelism requires fork/), source_files: ["a.rb"]
       )
     end
 
@@ -420,7 +580,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive_messages(pool_backend: :ractor, analyze_files_in_pool: [:ractor_result])
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:ractor_result])
-      expect(coordinator).to have_received(:analyze_files_in_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:analyze_files_in_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "routes to the fork pool when pool_backend resolves to :fork" do
@@ -428,7 +588,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(coordinator).to receive_messages(pool_backend: :fork, analyze_files_in_fork_pool: [:fork_result])
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:fork_result])
-      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"])
+      expect(coordinator).to have_received(:analyze_files_in_fork_pool).with(["a.rb"], source_files: ["a.rb"])
     end
 
     it "degrades to sequential when pool_backend resolves to :sequential (no fork-capable backend)" do
@@ -438,8 +598,61 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect(coordinator.dispatch_pool(["a.rb"])).to eq([:seq_result])
       expect(coordinator).to have_received(:analyze_files_sequentially_fallback).with(
-        ["a.rb"], reason: a_string_matching(/fork-based parallelism is unavailable/)
+        ["a.rb"], reason: a_string_matching(/fork-based parallelism is unavailable/), source_files: ["a.rb"]
       )
+    end
+  end
+
+  describe "#analyze_files_in_pool without a cache store" do
+    # #788 round 5 — the one fallback exit that lives INSIDE the Ractor backend (not in `dispatch_pool`)
+    # was missed when `source_files:` was threaded everywhere else, so a narrowed Ractor-backend run with
+    # no store built its fallback environment over the narrowed set again (#793).
+    it "threads source_files to the sequential fallback it degrades to" do
+      coordinator = build_coordinator(workers: 2, cache_store: nil)
+      allow(coordinator).to receive(:analyze_files_sequentially_fallback).and_return([:seq_result])
+
+      expect(coordinator.analyze_files_in_pool(["a.rb"], source_files: ["a.rb", "b.rb"])).to eq([:seq_result])
+      expect(coordinator).to have_received(:analyze_files_sequentially_fallback).with(
+        ["a.rb"], reason: a_string_matching(/requires a cache_store/), source_files: ["a.rb", "b.rb"]
+      )
+    end
+  end
+
+  # Round 9 (user's reviewer, P2) — a Ractor worker that died never sends `:done`, so nothing drains its
+  # HKT outcome, and the in-process re-analysis of its files runs on a LOCAL environment with no session to
+  # drain. The helper must finalize that environment itself — the definition-build failures the re-analysis
+  # demanded, and the HKT outcome demanded once more by the run — or a rescued scan failure vanishes with
+  # the worker. Tested on the helper: the Ractor backend cannot run under the current rbs.
+  describe "#reanalyze_degraded_in_process (private)" do
+    it "finalizes the degraded in-process environment (definition failures + HKT outcome)" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      tuple = ["NameError", "simulated scan bug", nil]
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [])
+      local = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: tuple, rbs_loader: loader)
+      analyzed = []
+      coordinator = build_coordinator(snapshots: snapshots, analyze_file: lambda { |path, env|
+        analyzed << [path, env]
+        [:"row_#{path}"]
+      })
+      allow(coordinator).to receive(:build_runner_environment).with(source_files: ["a.rb", "b.rb"]).and_return(local)
+      results = {}
+
+      coordinator.send(:reanalyze_degraded_in_process, ["b.rb"], results, source_files: ["a.rb", "b.rb"])
+
+      expect(analyzed).to eq([["b.rb", local]])
+      expect(results).to eq({ "b.rb" => [:"row_b.rb"] })
+      expect(local).to have_received(:hkt_registry).once
+      expect(loader).to have_received(:definition_build_failures)
+      expect(snapshots.hkt_scan_failure).to eq(tuple)
+    end
+
+    it "builds nothing when no worker's files were left unreported" do
+      coordinator = build_coordinator
+      allow(coordinator).to receive(:build_runner_environment)
+
+      coordinator.send(:reanalyze_degraded_in_process, [], {}, source_files: ["a.rb"])
+
+      expect(coordinator).not_to have_received(:build_runner_environment)
     end
   end
 
@@ -506,6 +719,43 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
           rbs_extended: { unresolved_payloads: [], lossy_projections: [] }, boundary_cross: []
         )
       end.not_to raise_error
+    end
+
+    # Issue #784 — first-wins, unlike `definition_build_failures`'s accumulate-and-dedup above: the scan is
+    # ONE build over the SAME `signature_paths:` overlay every worker was handed, so every worker that
+    # demands it observes the identical tuple, and `||=` records it once rather than accumulating a list
+    # of duplicates.
+    it "records the first worker's hkt_scan_failure tuple, and a later drain does not overwrite it" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      coordinator = build_coordinator(snapshots: snapshots)
+      first = ["NameError", "simulated scan bug", "lib/rigor/inference/hkt_registry.rb:1"]
+      second = ["NameError", "a different message entirely", "lib/rigor/inference/hkt_registry.rb:1"]
+
+      coordinator.merge_worker_reporters(
+        rbs_extended: { unresolved_payloads: [], lossy_projections: [] }, boundary_cross: [],
+        hkt_scan_failure: first
+      )
+      coordinator.merge_worker_reporters(
+        rbs_extended: { unresolved_payloads: [], lossy_projections: [] }, boundary_cross: [],
+        hkt_scan_failure: second
+      )
+
+      expect(snapshots.hkt_scan_failure).to eq(first)
+    end
+
+    # The must-still-succeed twin, and the non-vacuity check for the example above: a drain hash that omits
+    # the key (any pre-#784 producer, or simply nothing to report) must merge cleanly and leave the slot at
+    # its inert default, exactly as `definition_build_failures` does.
+    it "tolerates a drain hash with no hkt_scan_failure key, leaving the slot nil" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      coordinator = build_coordinator(snapshots: snapshots)
+
+      expect do
+        coordinator.merge_worker_reporters(
+          rbs_extended: { unresolved_payloads: [], lossy_projections: [] }, boundary_cross: []
+        )
+      end.not_to raise_error
+      expect(snapshots.hkt_scan_failure).to be_nil
     end
   end
 
@@ -905,7 +1155,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         []
       end
       coordinator = build_coordinator(analyze_file: analyze_file)
-      built = instance_double(Rigor::Environment, rbs_loader: nil)
+      built = instance_double(Rigor::Environment, rbs_loader: nil, hkt_registry: nil, hkt_scan_failure: nil)
       allow(coordinator).to receive(:build_runner_environment).and_return(built)
 
       diagnostics = coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "no cache_store")
@@ -927,7 +1177,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
                                        quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 1, []],
                                        definition_build_failures: []
       )
-      built = instance_double(Rigor::Environment, rbs_loader: loader)
+      built = instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
       allow(coordinator).to receive(:build_runner_environment).and_return(built)
 
       coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "x")
@@ -942,7 +1192,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       coordinator = build_coordinator(snapshots: snapshots, analyze_file: ->(_p, _e) { [] })
       loader = instance_double(Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [],
                                                               virtual_rbs: [], definition_build_failures: [])
-      built = instance_double(Rigor::Environment, rbs_loader: loader)
+      built = instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
       allow(coordinator).to receive(:build_runner_environment).and_return(built)
 
       coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "x")

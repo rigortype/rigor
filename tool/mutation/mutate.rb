@@ -39,6 +39,7 @@ require "timeout"
 
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "rigor"
+require "rigor/analysis/crash_signature" # the one definition of "this run is not a measurement" (#784)
 require "rigor/language_server"        # ProjectContext lives here (editor-mode session)
 require "rigor/protection/mutator"     # the type-visible mutator, productized into lib (ADR-63)
 
@@ -384,7 +385,12 @@ module RigorMutation
       return [] unless Prism.parse(mutant).success?
 
       diags = Timeout.timeout(@timeout) { analyse(config, ctx, mutant, path).diagnostics }
-      crashes = diags.select { |d| d.message.to_s.start_with?(CRASH_PREFIX) }
+      # Issue #784 — a mutant that breaks a shared analyzer build (the HKT scan; #776 was one) no longer
+      # surfaces as a per-file `internal analyzer error` row but as one readable `rbs.coverage.*` row that
+      # `CrashSignature.analyzer_defect?` singles out. To the fuzz it is the same finding: Rigor broke.
+      crashes = diags.select do |d|
+        d.message.to_s.start_with?(CRASH_PREFIX) || Rigor::Analysis::CrashSignature.analyzer_defect?(d)
+      end
       return crashes.map { |d| finding(:crash, path, mut, d.message) } unless crashes.empty?
       return [] unless @repeat
 
@@ -439,9 +445,13 @@ module RigorMutation
       end
     end
 
-    # "internal analyzer error: SomeError: msg" → "SomeError"
+    # "internal analyzer error: SomeError: msg" → "SomeError"; the #784 seam row instead reads
+    # "… raised (SomeError): msg" → "SomeError".
     def crash_class(message)
-      message.to_s.sub(CRASH_PREFIX, "").strip.split(":").first&.strip || "?"
+      text = message.to_s
+      return text.sub(CRASH_PREFIX, "").strip.split(":").first&.strip || "?" if text.start_with?(CRASH_PREFIX)
+
+      text[/raised \(([^)]+)\)/, 1] || "?"
     end
   end
 

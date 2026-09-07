@@ -115,11 +115,62 @@ module Rigor
         # sources. The env stays a LOCAL variable (not an ivar) so it goes GC-eligible when the method
         # returns — holding it as long-lived state added memory pressure that surfaced as a Bus Error
         # during the spec suite under Ruby 4.0 + rbs 4.0.2.
-        def analyze_files(files, environment: nil)
-          return [] if files.empty?
-          return dispatch_pool(files) if pool_mode?
+        # @param project_files [Array<String>, nil] issue #784 — the WHOLE project's analyzed file set
+        #   (`expansion.fetch(:files)`), independent of any `analyze_only` narrowing of `files`. Read only
+        #   when `files` is empty, to decide whether anyone could have demanded the HKT registry at all.
+        def analyze_files(files, environment: nil, project_files: nil)
+          if files.empty?
+            # Issue #784 — an EMPTY analyze set still owes the run its HKT-scan row: the per-file cache never
+            # holds it (`IncrementalSession` caches only `Runner#per_file_diagnostics`, so every run-level row
+            # is regenerated every run), so returning here without recording flips a red project green — and
+            # the shipping `--incremental` path reaches this branch with NO environment in hand on every
+            # warm recheck that changed nothing (`CheckCommand#run_incremental_check` builds its session
+            # without one). So: an environment already in hand is consulted; otherwise one is resolved over
+            # the project's OWN file list — not `[]`, which would drop every plugin-synthesized virtual RBS
+            # (`Environment.collect_virtual_rbs` short-circuits on an empty list) and scan a different type
+            # universe from the one a full run analyses — and only when the project HAS files: with none,
+            # nobody could have demanded a registry, and an empty project keeps paying no env build. Keyed
+            # on the project's files rather than on `analyze_only`, because a recheck over an EMPTY project
+            # narrows to `Set[]`, which is non-nil.
+            env = environment || @environment_override
+            if project_files && !project_files.empty?
+              env ||= resolve_sequential_environment(source_files: project_files)
+            end
+            # #788 rounds 6 and 9 — everything the run owes from its environment that no per-file analysis
+            # produces is taken here, the way `analyze_files_sequentially` takes it: the project-signature
+            # state (`synthesized-namespace`, `quarantined-signature`, `environment-build-failed`, the
+            # conformance results), the effect-annotation carrier the residual pass reads, and the HKT-scan
+            # outcome. Now that run-level rows are never served from the per-file cache, this branch is the
+            # only producer on a warm recheck that changed nothing — leaving any of them out turned a red
+            # project green on its second `--incremental` run (the inline-only `effect.annotations-unchecked`
+            # went 1 → 0; a quarantined `signature_paths:` file went 1 → 0; a `conforms-to` class whose
+            # definition build fails went 1 → 0). Same ORDER as the sequential path, because the order is
+            # the contract: the conformance scan inside the signature-state snapshot demands the definition
+            # of every `rigor:v1:conforms-to` class — a user-authored, invocation-independent demand that
+            # #696 counts — so the definition-build failures are read AFTER it and BEFORE the HKT demand,
+            # exactly where `analyze_files_sequentially` reads them relative to its own. What this branch
+            # cannot regenerate is the part of that set the per-file ANALYSIS demanded (#796). This also
+            # retires the #441 "`.rbs` lane only when the run analyses nothing" boundary: its cost premise
+            # (no environment on this path) stopped holding the moment the branch above resolved one.
+            snapshot_project_signature_state(env)
+            snapshot_effect_annotation_carrier(env&.rbs_loader)
+            record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
+            record_hkt_scan_failure(hkt_scan_outcome(env))
+            return []
+          end
+          # Issue #784 / #793 — `files` is what this run ANALYSES; `source_files` is what its environment
+          # is BUILT over, and the two are the same only on a full run. A narrowed run (`analyze_only`: an
+          # incremental closure, a `--verify-incremental` partition) used to build its environment over the
+          # subset, so plugin-synthesized virtual RBS from every excluded file was missing and the run
+          # scanned a different type universe than the full run it is compared against — a scan failure
+          # whose trigger lived in an excluded file's synthesized RBS fired on the full run and vanished on
+          # the subset. Every environment and worker this run builds now takes the whole project.
+          source_files = project_files || files
+          return dispatch_pool(files, source_files: source_files) if pool_mode?
 
-          analyze_files_sequentially(files, environment || resolve_sequential_environment(source_files: files))
+          analyze_files_sequentially(
+            files, environment || resolve_sequential_environment(source_files: source_files)
+          )
         end
 
         def analyze_files_sequentially(files, environment)
@@ -130,6 +181,13 @@ module Rigor
           # first demand), so a snapshot taken beside the ones above — which run BEFORE `files.flat_map` —
           # would read an empty list on every run, including the ones this diagnostic exists for.
           record_definition_build_failures(environment&.rbs_loader&.definition_build_failures)
+          # Issue #784 — same timing contract, same reason: the HKT scan is first demanded from inside a
+          # file's analysis (the dispatcher's Singleton-receiver tier), so a snapshot taken any earlier
+          # would read nil on every run. And demanded HERE once more by the run itself, because a subset
+          # run (`--verify-incremental`'s partition, an incremental recheck's closure) may contain no file
+          # that demands it — the row must not depend on which files were analysed. See {#hkt_scan_outcome}
+          # for why a Rigor-owned demand is sound here where #696 forbids it.
+          record_hkt_scan_failure(hkt_scan_outcome(environment))
           if @collect_stats
             loader = environment.rbs_loader
             @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
@@ -156,7 +214,8 @@ module Rigor
             return
           end
 
-          loader = environment.rbs_loader
+          # nil-safe: the empty-closure path reaches here with no environment when the project has no files.
+          loader = environment&.rbs_loader
           @snapshots.synthesized_namespaces = loader&.synthesized_namespaces || []
           @snapshots.quarantined_signatures = loader&.quarantined_signatures || []
           @snapshots.env_build_failure = loader&.env_build_failure
@@ -220,20 +279,24 @@ module Rigor
         # An effects run (ADR-103 WD13) is pinned for exactly the same reason — the Ractor messages carry
         # no side-table channel — and degrades the same way. The degrade is sound rather than merely safe:
         # the sequential fallback still collects, so the effect graph is complete either way.
-        def dispatch_pool(files)
+        # @param source_files [Array<String>] the file list every worker's / the fallback's environment is
+        #   built over — the whole project (issue #793), defaulting to `files` for direct callers.
+        def dispatch_pool(files, source_files: files)
           if @record_dependencies || @record_effects
-            return analyze_files_in_fork_pool(files) if Process.respond_to?(:fork)
+            return analyze_files_in_fork_pool(files, source_files: source_files) if Process.respond_to?(:fork)
 
             return analyze_files_sequentially_fallback(
-              files, reason: "incremental parallelism requires fork; recording sequentially"
+              files, reason: "incremental parallelism requires fork; recording sequentially",
+                     source_files: source_files
             )
           end
           case pool_backend
-          when :ractor then analyze_files_in_pool(files)
-          when :fork   then analyze_files_in_fork_pool(files)
+          when :ractor then analyze_files_in_pool(files, source_files: source_files)
+          when :fork   then analyze_files_in_fork_pool(files, source_files: source_files)
           else
             analyze_files_sequentially_fallback(
-              files, reason: "fork-based parallelism is unavailable on this platform"
+              files, reason: "fork-based parallelism is unavailable on this platform",
+                     source_files: source_files
             )
           end
         end
@@ -299,7 +362,7 @@ module Rigor
         # worker touches comes back as an internal analyzer error. What the code below fixes is the
         # failure MODE, not the backend: the run used to hang forever instead of saying anything. Reviving
         # the backend needs an upstream change, which is why `pool_backend` keeps `fork` as the default.
-        def analyze_files_in_pool(files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+        def analyze_files_in_pool(files, source_files: files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
           # Pre-warm class-level lazy memos on the MAIN Ractor. `Environment::ClassRegistry.default` is the
           # default kwarg threaded through `Environment.new` inside each worker session; lazy-initialising
           # it from a non-main Ractor would trip `Ractor::IsolationError`. Touching it here forces the
@@ -314,7 +377,8 @@ module Rigor
           # constants.
           if @cache_store.nil?
             return analyze_files_sequentially_fallback(
-              files, reason: "pool mode requires a cache_store (--no-cache disables pool)"
+              files, reason: "pool mode requires a cache_store (--no-cache disables pool)",
+                     source_files: source_files
             )
           end
           prewarm_rbs_cache_for_pool
@@ -325,8 +389,9 @@ module Rigor
           explain = @explain
           # ADR-32 WD4 — the full project file list travels into every Ractor worker so each worker's
           # WorkerSession can invoke loaded plugins' source_rbs_synthesizers at env-build time. The list is
-          # a frozen Array<String>; cheaply shareable.
-          shareable_source_files = files.map { |path| path.to_s.dup.freeze }.freeze
+          # a frozen Array<String>; cheaply shareable. Issue #793 — it IS the full project now
+          # (`source_files`), not the analyzed subset this comment always described.
+          shareable_source_files = source_files.map { |path| path.to_s.dup.freeze }.freeze
 
           pool = Array.new(@workers) do
             Ractor.new(configuration, cache_root, blueprints, explain, shareable_source_files) do |configuration, cache_root, blueprints, explain, shareable_source_files| # rubocop:disable Layout/LineLength
@@ -397,13 +462,26 @@ module Rigor
           # The files no worker reported — every file of a worker that died, and any file in flight when
           # it did. Re-analysed in process, exactly as the fork backend re-analyses a dead child's slice.
           degraded = files.reject { |path| results_by_path.key?(path) }
-          unless degraded.empty?
-            environment = build_runner_environment(source_files: files)
-            degraded.each { |path| results_by_path[path] = @analyze_file.call(path, environment) }
-          end
+          reanalyze_degraded_in_process(degraded, results_by_path, source_files: source_files)
 
           diagnostics = Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
           degraded.empty? ? diagnostics : diagnostics.unshift(pool_degraded_diagnostic(degraded.size, "ractor"))
+        end
+
+        # The Ractor backend's degrade: the files of a worker that died are re-analysed on a LOCAL
+        # environment built over the whole project. That worker never sent `:done`, so nothing drains its
+        # reporters — and the local environment has no session to drain either — so the run-level state
+        # this analysis produced is taken here, exactly as the sequential fallback takes it: the
+        # definition-build failures the re-analysis demanded (#696) and the HKT-scan outcome, demanded
+        # once more by the run itself (#784 — a rescued scan failure otherwise vanished with the worker).
+        # The fork backend needs none of this: it re-analyses on the parent {WorkerSession} and drains it.
+        def reanalyze_degraded_in_process(degraded, results_by_path, source_files:)
+          return if degraded.empty?
+
+          environment = build_runner_environment(source_files: source_files)
+          degraded.each { |path| results_by_path[path] = @analyze_file.call(path, environment) }
+          record_definition_build_failures(environment.rbs_loader&.definition_build_failures)
+          record_hkt_scan_failure(hkt_scan_outcome(environment))
         end
 
         # ADR-15 Amendment (2026-05-20) — fork-based worker pool, the active backend for `workers > 0`.
@@ -418,7 +496,7 @@ module Rigor
         #
         # A child that exits non-zero (crash / unmarshalable payload) is degraded: the parent re-analyses
         # that slice in-process and prepends a `pool-degraded` warning.
-        def analyze_files_in_fork_pool(files) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+        def analyze_files_in_fork_pool(files, source_files: files) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
           Environment::ClassRegistry.default
 
           session = WorkerSession.new(
@@ -429,7 +507,7 @@ module Rigor
             synthetic_method_index: synthetic_method_index,
             project_patched_methods: project_patched_methods,
             project_scope_seed: project_scope_seed,
-            source_files: files,
+            source_files: source_files,
             record_dependencies: @record_dependencies
           )
           # Force the full RBS load on the parent so children copy-on-write inherit a warm Environment
@@ -566,8 +644,11 @@ module Rigor
         # (currently: `--no-cache` would force workers through `EnvironmentLoader.new`), degrade to
         # sequential analysis with a `:warning` `pool-degraded` diagnostic at run start. The actual
         # per-file analysis runs on the coordinator, identical to the default sequential path.
-        def analyze_files_sequentially_fallback(files, reason:)
-          environment = build_runner_environment
+        # @param source_files [Array<String>] issue #793 — the whole project, so this path's environment
+        #   carries the same plugin-synthesized RBS the pool workers' would. It used to build over `[]`,
+        #   i.e. with no synthesized RBS at all, even on a full run.
+        def analyze_files_sequentially_fallback(files, reason:, source_files: files)
+          environment = build_runner_environment(source_files: source_files)
           snapshot_effect_annotation_carrier(environment.rbs_loader)
           diagnostics = files.flat_map { |path| @analyze_file.call(path, environment) }
           loader = environment.rbs_loader
@@ -576,6 +657,10 @@ module Rigor
           # `fork` is unavailable (Windows) and on `--incremental` / effects runs without it: a run that
           # degraded to sequential must not also report less than a sequential run would.
           record_definition_build_failures(loader&.definition_build_failures)
+          # Issue #784 — same reasoning: this path's Environment IS the one that reached the scan, so it
+          # must snapshot the slot too, or a run that degraded to sequential would report less than a
+          # sequential run would. Demanded once by the run as well, for the reason at the sequential site.
+          record_hkt_scan_failure(hkt_scan_outcome(environment))
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
           @snapshots.quarantined_signatures =
@@ -619,6 +704,9 @@ module Rigor
           end
           # Issue #696. Fetched with a default so an older drain stays compatible, exactly as the line above.
           record_definition_build_failures(drained[:definition_build_failures])
+          # Issue #784. `Hash#[]` is already a nil default, exactly as `env_build_failure` is snapshotted
+          # elsewhere — an older drain shape simply has no key and records nothing.
+          record_hkt_scan_failure(drained[:hkt_scan_failure])
         end
 
         private
@@ -644,6 +732,48 @@ module Rigor
 
           @snapshots.definition_build_failures =
             (@snapshots.definition_build_failures + failures).uniq(&:first).freeze
+        end
+
+        # Issue #784 — first-wins, unlike {#record_definition_build_failures}'s accumulate-and-dedup. That
+        # method accumulates because each pool WORKER owns its own loader and its own per-class memo, so a
+        # collapsed class can genuinely be observed by only some workers and the run's set is the union.
+        # The HKT scan has no such per-worker variation: `Environment#hkt_registry` builds from the SAME
+        # `signature_paths:` overlay every worker was handed, so every worker that demands it either all
+        # raise identically or all succeed — there is only ever one tuple to record, and `||=` is correct
+        # (and cheap) rather than an accumulate-and-dedup this slot never needs.
+        def record_hkt_scan_failure(tuple)
+          @snapshots.hkt_scan_failure ||= tuple
+        end
+
+        # Issue #784 — demand the registry once on behalf of the run, then read the slot. The seam in
+        # {Environment#hkt_registry} is demand-driven, and nothing guarantees any analysed file demands it:
+        # a `--verify-incremental` partition or an incremental closure can miss every `Klass.method` call,
+        # and then the slot is nil after the loop and the run says nothing — while `--incremental` has also
+        # dropped the row from its per-file cache. Demanding here makes the outcome a property of the RUN,
+        # not of which files happened to be in it.
+        #
+        # This is sound where #696's "a demand that is Rigor's own MUST NOT contribute" is not, and the
+        # difference is the shape of what is recorded. #696 reports a per-class LIST whose membership is
+        # "the classes the analysis demanded"; a Rigor-internal demand adds classes the user never asked
+        # about and makes that list vary with configuration. The HKT scan is ONE build with ONE outcome —
+        # the same tuple whoever demands it — so an extra demand cannot change what is reported, only
+        # guarantee it is observed.
+        #
+        # What it costs, stated plainly because {#record_definition_build_failures}'s comment promises
+        # "nothing is forced here": the demand DOES force the RBS env build when the environment has not
+        # built it yet (the scan reads the loader). On every path that reaches this method that build is
+        # either already done (the loop demanded it) or the same load one analysed file would have paid:
+        # a Marshal load when a cache store exists, the parse a full run pays under `--no-cache`. Never a
+        # build on a project with no files (see {#analyze_files}). Memoised, so on a reused Environment
+        # this is a hash read.
+        #
+        # @param environment [Rigor::Environment, nil]
+        # @return [Array, nil] the recorded tuple, or nil (no environment, or the scan built)
+        def hkt_scan_outcome(environment)
+          return nil if environment.nil?
+
+          environment.hkt_registry
+          environment.hkt_scan_failure
         end
 
         # True when the project declares its own `signature_paths:` (the only place the

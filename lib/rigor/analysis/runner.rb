@@ -435,6 +435,9 @@ module Rigor
         # Per-run reset of the environment the cacheable path resolves, reused by the envelope pass so a
         # run never builds two.
         @run_environment = nil
+        # #788 — the per-file reader is assigned only on the analysis (miss) path; reset it here so a run the
+        # ADR-45 result cache serves does not answer with the previous run's rows.
+        @per_file_diagnostics = [].freeze
         # ADR-84 WD2 — roll the return-memo bucket: a fresh frozen token per run makes every per-file scope
         # of THIS run share one memo bucket while entries from any earlier run in this process (stale after
         # an edit) become unreachable.
@@ -1040,6 +1043,7 @@ module Rigor
                                                       .freeze
         raw
       end
+      private :analyze_targets
 
       # ADR-67 WD6a — the check-walk parameter-inference pre-pass. Populates `@project_param_inferred_types`
       # (read by `project_scope_seed_tables`) with the call-site union of every undeclared parameter, running

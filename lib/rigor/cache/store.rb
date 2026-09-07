@@ -38,7 +38,14 @@ module Rigor
       # `PAYLOAD_ABI_VERSION` already rebuilds across a RELEASE, so the exposure is a same-version tree; this
       # closes that window too, because "the same project reports differently depending on how you ran it" is
       # the defect the diagnostic exists to end and a stale blob reintroduces it.
-      FORMAT_VERSION = 3
+      #
+      # v4 (issue #799): `RBS::AST::Annotation` now carries its own `marshal_dump` / `marshal_load`, which
+      # keep the annotation's POSITION as well as its file, so `rbs_extended.unsatisfied-conformance` points
+      # at the `%a{rigor:v1:conforms-to …}` line warm as well as cold. A pre-change blob loads perfectly well
+      # — Marshal encodes an ivar dump and a `marshal_dump` payload differently, and only the latter reaches
+      # `marshal_load` — which is exactly the problem: without a bump it would keep reporting the row at
+      # `1:1` forever, and `--verify-incremental` would keep failing on that project.
+      FORMAT_VERSION = 4
 
       # Payload ABI version. Store values are mostly Marshal blobs of Rigor/RBS objects, so a Rigor release
       # upgrade is an ABI boundary even when the byte layout and descriptor schema are unchanged. Folding the

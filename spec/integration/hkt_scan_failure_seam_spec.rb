@@ -27,19 +27,26 @@ RSpec.describe "HKT scan-failure seam (issue #784)" do
   # (`Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES`), and consulting it is what demands
   # `environment.hkt_registry` at all — an ordinary receiverless call (`1.to_s`, a local `def`, …) never
   # reaches that tier, so the scan is never demanded and this spec would be vacuous against one.
-  let(:source) { "JSON.parse(\"{}\")\n" }
+  # A real finding rides alongside, so the spec can tell "the seam surfaced one row" apart from "every
+  # other diagnostic vanished" — the #776 shape this exists to rule out.
+  let(:source) { "JSON.parse(\"{}\")\n\"x\".lenght\n" }
 
   it "does not raise AnalyzerCrashed — the row is :rbs_build, not :check_rule" do
     expect { analyze(source) }.not_to raise_error
   end
 
-  it "surfaces exactly one rbs.coverage.hkt-scan-failed :error row, and no internal-analyzer-error row" do
+  it "surfaces exactly one rbs.coverage.hkt-scan-failed :error row, keeps the file's real diagnostics, " \
+     "and emits no internal-analyzer-error row" do
     result = analyze(source)
+
+    expect(Rigor::Inference::HktRegistry).to have_received(:scan_rbs_loader).at_least(:once)
 
     matching = result.diagnostics.select { |d| d.rule == "rbs.coverage.hkt-scan-failed" }
     expect(matching.size).to eq(1)
     expect(matching.first.severity).to eq(:error)
     expect(matching.first.message).to include("NameError", "simulated scan bug")
+
+    expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
 
     expect(result.diagnostics.map(&:message))
       .to satisfy("no diagnostic starting with the check-rule prefix") do |messages|

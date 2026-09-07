@@ -42,9 +42,14 @@ module Rigor
     #   prepare row is appended to every sequential run, it would refuse every run for the life of the
     #   process.
     # - `:rbs_build` — the analysis ran to completion and every rule fired, over a type universe missing one
-    #   class (`rbs.coverage.definition-build-failed`) or all of them
-    #   (`rbs.coverage.environment-build-failed`). A degradation the user causes and the diagnostic itself
-    #   reports; a project can sit on it for a release while it fixes its `sig/`.
+    #   class (`rbs.coverage.definition-build-failed`), all of them
+    #   (`rbs.coverage.environment-build-failed`), or only the implicit HKT registrations `type` aliases
+    #   would have contributed (`rbs.coverage.hkt-scan-failed`, issue #784). The first two are degradations
+    #   the user causes and the diagnostic itself reports; a project can sit on one for a release while it
+    #   fixes its `sig/`. The third is NOT the user's: post-#783 the scan raising is an analyzer defect. It
+    #   still belongs here rather than under `:check_rule`, because the question this classification
+    #   answers is "may a consumer still read the run's diagnostics?" — and it may: every rule fired. What
+    #   differs is whether the run is a valid measurement OF RIGOR, which is {.analyzer_defect?}'s question.
     #
     # The two consumer tiers therefore differ on purpose. The ADR-69 kill oracles arm `:check_rule` only:
     # refusing a run they could still have measured is the same "manufactures work" error as scoring an
@@ -75,6 +80,15 @@ module Rigor
       # The one reason that means a file's whole diagnostic list was replaced by a crash row. `:plugin` and
       # `:rbs_build` both leave a readable run behind — see the class doc.
       DISCARDS_FILE_ANALYSIS_REASON = :check_rule
+
+      # The `:rbs_build` rules whose cause is Rigor, not the user's `sig/` (issue #784). Readable for the
+      # user — every rule fired — but NOT a valid measurement of Rigor itself: a harness that scores Rigor's
+      # behaviour (the ADR-69 kill oracles, `tool/mutation`'s fuzz crash detector) must treat one of these
+      # as a crash finding, the way it treats `:check_rule`, or a mutant that re-breaks the HKT scan (#776
+      # was one) scores as a measurement over a silently degraded universe.
+      ANALYZER_DEFECT_RULES = %w[
+        rbs.coverage.hkt-scan-failed
+      ].freeze
 
       module_function
 
@@ -135,6 +149,15 @@ module Rigor
       # @param diagnostic [Rigor::Analysis::Diagnostic]
       def discards_file_analysis?(diagnostic)
         reason(diagnostic) == DISCARDS_FILE_ANALYSIS_REASON
+      end
+
+      # True when `diagnostic` reports a failure inside Rigor that left the run readable but invalid as a
+      # measurement of Rigor — see {ANALYZER_DEFECT_RULES}. Orthogonal to {.discards_file_analysis?}: the
+      # user-facing tier reads the run, the Rigor-measuring tier refuses it.
+      #
+      # @param diagnostic [Rigor::Analysis::Diagnostic]
+      def analyzer_defect?(diagnostic)
+        ANALYZER_DEFECT_RULES.include?(diagnostic.rule)
       end
 
       # A one-line "<reason> at <path>:<line>: <message>" for a failure message, so whoever reads the raise

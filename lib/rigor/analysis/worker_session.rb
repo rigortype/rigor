@@ -249,6 +249,11 @@ module Rigor
       # Environment never demands `#hkt_registry` under the pool, so its slot is always nil, and draining it
       # out of the workers is the only way `--workers=N` says what `--workers=0` says.
       def drain_reporters
+        # Issue #784 — demand the registry once per worker before reading the slot, so a worker whose share
+        # of files happened to contain no `Klass.method` call still reports the run's outcome (the same
+        # reason `PoolCoordinator#hkt_scan_outcome` demands it on the sequential path). `@environment` is
+        # built eagerly in the constructor, so this forces only the (memoised) scan, never an env build.
+        @environment&.hkt_registry
         {
           rbs_extended: {
             unresolved_payloads: @rbs_extended_reporter.unresolved_payloads,

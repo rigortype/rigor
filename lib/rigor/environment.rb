@@ -149,7 +149,15 @@ module Rigor
     def record_hkt_scan_failure(error)
       frames = error.backtrace || []
       frame = frames.find { |f| f.include?("/lib/rigor/") } || frames.first
-      @hkt_scan_failure.record([error.class.name, error.message.to_s.lines.first.to_s.chomp, frame])
+      # `Class#name` is nil for an anonymous exception class; `inspect` still names it. Each String is
+      # frozen individually, not just the Array: the tuple crosses the fork boundary Marshal-clean and the
+      # drain channel's stated invariant ({Analysis::WorkerSession#drain_reporters}) is that its payload is
+      # also `Ractor.shareable?`, which a shallow freeze over `chomp`'s fresh String would not satisfy.
+      @hkt_scan_failure.record([
+                                 (error.class.name || error.class.inspect).dup.freeze,
+                                 error.message.to_s.lines.first.to_s.chomp.freeze,
+                                 frame&.dup&.freeze
+                               ])
     end
     private :record_hkt_scan_failure
 

@@ -97,6 +97,27 @@ RSpec.describe Rigor::Analysis::CrashSignature do
     end
   end
 
+  # Issue #784 — the one `:rbs_build` row whose cause is Rigor. Readable for the user (every rule fired),
+  # but a harness that measures Rigor itself must refuse it as a crash finding.
+  describe ".analyzer_defect?" do
+    it "singles out the HKT-scan rung and no other shape" do
+      hkt = diagnostic(message: "…", severity: :error, rule: "rbs.coverage.hkt-scan-failed")
+
+      expect(described_class.analyzer_defect?(hkt)).to be(true)
+      expect(described_class.reason(hkt)).to eq(:rbs_build)
+      expect(described_class.discards_file_analysis?(hkt)).to be(false)
+
+      user_caused = described_class::RBS_BUILD_FAILURE_RULES - described_class::ANALYZER_DEFECT_RULES
+      expect(user_caused).not_to be_empty
+      user_caused.each do |rule|
+        row = diagnostic(message: "…", severity: :warning, rule: rule)
+        expect(described_class.analyzer_defect?(row)).to be(false)
+      end
+      expect(described_class.analyzer_defect?(check_rule_crash)).to be(false)
+      expect(described_class.analyzer_defect?(plugin_crash)).to be(false)
+    end
+  end
+
   describe ".describe" do
     it "names the shape and the position, so a raise says which crash it saw and where" do
       expect(described_class.describe(check_rule_crash))

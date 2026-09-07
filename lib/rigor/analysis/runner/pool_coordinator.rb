@@ -116,7 +116,15 @@ module Rigor
         # returns — holding it as long-lived state added memory pressure that surfaced as a Bus Error
         # during the spec suite under Ruby 4.0 + rbs 4.0.2.
         def analyze_files(files, environment: nil)
-          return [] if files.empty?
+          if files.empty?
+            # Issue #784 — an EMPTY analyze set (an incremental recheck whose closure is empty, the LSP's
+            # no-change round) still owes the run its HKT-scan row: the per-file cache never holds it
+            # (`IncrementalSession#per_file` drops `.rigor.yml` rows on the promise they are regenerated every
+            # run), so returning here without recording would flip a red project green. Only an environment
+            # that ALREADY exists is consulted — an override or nothing; never build one for this.
+            record_hkt_scan_failure(hkt_scan_outcome(environment || @environment_override))
+            return []
+          end
           return dispatch_pool(files) if pool_mode?
 
           analyze_files_sequentially(files, environment || resolve_sequential_environment(source_files: files))
@@ -132,8 +140,11 @@ module Rigor
           record_definition_build_failures(environment&.rbs_loader&.definition_build_failures)
           # Issue #784 — same timing contract, same reason: the HKT scan is first demanded from inside a
           # file's analysis (the dispatcher's Singleton-receiver tier), so a snapshot taken any earlier
-          # would read nil on every run.
-          record_hkt_scan_failure(environment&.hkt_scan_failure)
+          # would read nil on every run. And demanded HERE once more by the run itself, because a subset
+          # run (`--verify-incremental`'s partition, an incremental recheck's closure) may contain no file
+          # that demands it — the row must not depend on which files were analysed. See {#hkt_scan_outcome}
+          # for why a Rigor-owned demand is sound here where #696 forbids it.
+          record_hkt_scan_failure(hkt_scan_outcome(environment))
           if @collect_stats
             loader = environment.rbs_loader
             @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
@@ -582,8 +593,8 @@ module Rigor
           record_definition_build_failures(loader&.definition_build_failures)
           # Issue #784 — same reasoning: this path's Environment IS the one that reached the scan, so it
           # must snapshot the slot too, or a run that degraded to sequential would report less than a
-          # sequential run would.
-          record_hkt_scan_failure(environment.hkt_scan_failure)
+          # sequential run would. Demanded once by the run as well, for the reason at the sequential site.
+          record_hkt_scan_failure(hkt_scan_outcome(environment))
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
           @snapshots.quarantined_signatures =
@@ -666,6 +677,29 @@ module Rigor
         # (and cheap) rather than an accumulate-and-dedup this slot never needs.
         def record_hkt_scan_failure(tuple)
           @snapshots.hkt_scan_failure ||= tuple
+        end
+
+        # Issue #784 — demand the registry once on behalf of the run, then read the slot. The seam in
+        # {Environment#hkt_registry} is demand-driven, and nothing guarantees any analysed file demands it:
+        # a `--verify-incremental` partition or an incremental closure can miss every `Klass.method` call,
+        # and then the slot is nil after the loop and the run says nothing — while `--incremental` has also
+        # dropped the row from its per-file cache. Demanding here makes the outcome a property of the RUN,
+        # not of which files happened to be in it.
+        #
+        # This is sound where #696's "a demand that is Rigor's own MUST NOT contribute" is not, and the
+        # difference is the shape of what is recorded. #696 reports a per-class LIST whose membership is
+        # "the classes the analysis demanded"; a Rigor-internal demand adds classes the user never asked
+        # about and makes that list vary with configuration. The HKT scan is ONE build with ONE outcome —
+        # the same tuple whoever demands it — so an extra demand cannot change what is reported, only
+        # guarantee it is observed. Memoised, so on a reused Environment this is a hash read.
+        #
+        # @param environment [Rigor::Environment, nil]
+        # @return [Array, nil] the recorded tuple, or nil (no environment, or the scan built)
+        def hkt_scan_outcome(environment)
+          return nil if environment.nil?
+
+          environment.hkt_registry
+          environment.hkt_scan_failure
         end
 
         # True when the project declares its own `signature_paths:` (the only place the

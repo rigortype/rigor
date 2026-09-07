@@ -204,7 +204,9 @@ module Rigor
             # unknown keyword aborted this shared, memoised build and turned every file into an
             # `internal analyzer error`. An exception that still reaches this point is an analyzer
             # bug and MUST propagate rather than silently dropping the alias, matching
-            # RbsLoader#each_known_class_name's fail-soft contract.
+            # RbsLoader#each_known_class_name's fail-soft contract. It propagates to the seam in
+            # `Environment#hkt_registry` (issue #784), which records it and degrades to the pre-scan
+            # registry so it surfaces once per run instead of reaching every file's analysis.
             translator = HktSugarTranslator.new(uri: uri, params_set: params_set)
             body_tree = translator.translate(decl.type)
 

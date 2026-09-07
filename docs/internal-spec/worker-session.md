@@ -85,6 +85,21 @@ every known class, so what it discovers must not reach the diagnostic
 either, or the same project reports differently on a cold cache than on a
 warm one.
 
+Every value in the `#drain_reporters` payload MUST be Marshal-clean and
+`Ractor.shareable?` — the fork backend ships it home with `Marshal.dump`,
+and a raise there kills the worker AFTER its files were analysed, which
+the coordinator can only absorb by re-analysing that share in-process and
+reporting `pool-degraded`. Source positions therefore travel as
+`(path, line, column)` primitives and never as an `RBS::Location`, which
+is a C-extension object with no `_dump`; the `RbsExtended::Reporter`'s
+record methods take the triple, so no caller can put a location into an
+entry ([#785](https://github.com/rigortype/rigor/issues/785),
+[#805](https://github.com/rigortype/rigor/issues/805)). The dedup wants
+the same shape independently: a coordinator that merged
+location-carrying entries would print one row per worker, because an
+`RBS::Location` compares equal only against a location over the same
+`RBS::Buffer` object and each worker parses its own.
+
 Plugin `#prepare` runs **once at construction** so each worker is warm
 before its first `#analyze` call; any raise from `prepare` is captured into
 `#prepare_diagnostics` for the runner to surface alongside the per-file

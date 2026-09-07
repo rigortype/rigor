@@ -248,6 +248,13 @@ module Rigor
       # Issue #784 — `hkt_scan_failure` rides the same channel for the same reason: the PARENT's own
       # Environment never demands `#hkt_registry` under the pool, so its slot is always nil, and draining it
       # out of the workers is the only way `--workers=N` says what `--workers=0` says.
+      #
+      # Issue #805 — the Marshal-clean requirement binds every stream here, not just the ones written for it.
+      # The `RbsExtended::Reporter`'s unresolved / lossy-projection entries used to carry the `RBS::Location`
+      # itself, and `Marshal.dump` on one raises `TypeError` (a C-extension object with no `_dump`), so a
+      # project whose `sig/` produced a single such event killed each worker HERE — after its files were
+      # analysed — and the run degraded to in-process re-analysis with a `pool-degraded` row. All three
+      # streams now carry `(path, line, column)` primitives.
       def drain_reporters
         # Issue #784 — demand the registry once per worker before reading the slot, so a worker whose share
         # of files happened to contain no `Klass.method` call still reports the run's outcome (the same

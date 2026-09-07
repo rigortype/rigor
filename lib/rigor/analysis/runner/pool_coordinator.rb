@@ -740,19 +740,23 @@ module Rigor
         # Replays one worker's three {RbsExtended::Reporter} streams into the run's own reporter.
         #
         # `hkt_directive_errors` (issue #785) is read with `Hash#[]`'s nil default rather than `fetch`,
-        # exactly as `source_rbs_synthesis` is, so an older drain shape simply records nothing. Every worker
-        # scans the same RBS env, so each hands over the same directive entries; the reporter's own
-        # `(message, path, line, column)` dedup is what collapses them back to the single row a
-        # `--workers=0` run prints.
+        # exactly as `source_rbs_synthesis` is, so an older drain shape simply records nothing.
+        #
+        # All three streams replay by their `(path, line, column)` primitives (#785 for the hkt stream, #805
+        # for its two elders). Every worker reads the same `.rbs`, so each hands over the same entries, and
+        # only a primitive-keyed dedup collapses them back to the single row a `--workers=0` run prints — an
+        # `RBS::Location` compares equal only against a location over the same `RBS::Buffer` object, so a
+        # location-keyed one would print N copies at `--workers=N`. The entries could not reach here carrying
+        # a location anyway: the drain Marshals its payload and an `RBS::Location` has no `_dump`.
         def merge_rbs_extended_reporter(rbs)
           rbs.fetch(:unresolved_payloads).each do |entry|
             @rbs_extended_reporter.record_unresolved(
-              payload: entry.payload, source_location: entry.source_location
+              payload: entry.payload, path: entry.path, line: entry.line, column: entry.column
             )
           end
           rbs.fetch(:lossy_projections).each do |entry|
             @rbs_extended_reporter.record_lossy_projection(
-              head: entry.head, source_location: entry.source_location
+              head: entry.head, path: entry.path, line: entry.line, column: entry.column
             )
           end
           Array(rbs[:hkt_directive_errors]).each do |entry|

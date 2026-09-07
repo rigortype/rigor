@@ -600,8 +600,8 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
   describe "rbs_extended_reporter_diagnostics" do
     it "drains unresolved-payload and lossy-projection events into distinct diagnostic rules" do
       reporter = Rigor::RbsExtended::Reporter.new
-      reporter.record_unresolved(payload: "rigor:v1:wat", source_location: nil)
-      reporter.record_lossy_projection(head: "pick_of", source_location: nil)
+      reporter.record_unresolved(payload: "rigor:v1:wat")
+      reporter.record_lossy_projection(head: "pick_of")
 
       diagnostics = build_aggregator(rbs_extended_reporter: reporter).rbs_extended_reporter_diagnostics
 
@@ -610,6 +610,29 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(unresolved.message).to include("rigor:v1:wat")
       expect(lossy.message).to include("pick_of")
       expect(diagnostics.map(&:severity).uniq).to eq([:info])
+    end
+
+    # Issue #805 — the two older streams are positioned from the entry's own `(path, line, column)` triple
+    # too, not from an `RBS::Location` the entry carries. Reading a location here is what forced the entries
+    # to hold one, which is what killed every fork worker at drain time.
+    it "positions the unresolved and lossy-projection rows from the entry's own primitives" do
+      reporter = Rigor::RbsExtended::Reporter.new
+      reporter.record_unresolved(payload: "rigor:v1:wat", path: "sig/widget.rbs", line: 2, column: 3)
+      reporter.record_lossy_projection(head: "pick_of", path: "sig/other.rbs", line: 9, column: 5)
+
+      diagnostics = build_aggregator(rbs_extended_reporter: reporter).rbs_extended_reporter_diagnostics
+
+      expect(diagnostics.map { |d| [d.path, d.line, d.column] })
+        .to eq([["sig/widget.rbs", 2, 3], ["sig/other.rbs", 9, 5]])
+    end
+
+    it "falls back to .rigor.yml:1:1 for an unresolved payload with no position" do
+      reporter = Rigor::RbsExtended::Reporter.new
+      reporter.record_unresolved(payload: "rigor:v1:wat")
+
+      diagnostic = build_aggregator(rbs_extended_reporter: reporter).rbs_extended_reporter_diagnostics.first
+
+      expect([diagnostic.path, diagnostic.line, diagnostic.column]).to eq([".rigor.yml", 1, 1])
     end
 
     # Issue #785 — the third stream. Positioned from the entry's own `(path, line, column)` triple rather

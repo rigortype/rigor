@@ -561,7 +561,7 @@ RSpec.describe Rigor::Environment do
           Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
       )
 
-      env.rbs_extended_reporter.record_unresolved(payload: "foo", source_location: nil)
+      env.rbs_extended_reporter.record_unresolved(payload: "foo")
 
       expect(fresh.unresolved_payloads.size).to eq(1)
     end

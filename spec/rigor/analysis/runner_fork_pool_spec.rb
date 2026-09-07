@@ -228,6 +228,51 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
     end
   end
 
+  # Issue #805 — `WorkerSession#drain_reporters` ships the reporter home with `Marshal.dump`, and the
+  # `RbsExtended::Reporter`'s unresolved / lossy-projection entries used to carry the `RBS::Location`
+  # itself, which is a C-extension object with no `_dump`. Any project whose `sig/` produced even one such
+  # event therefore killed every worker at drain time — after its files were analysed — and the run
+  # degraded to in-process re-analysis: correct diagnostics, no parallelism, plus a `pool-degraded` warning
+  # the project could do nothing about. Observed on `%a{rigor:v1:return: <unknown refinement>}`.
+  describe "an unresolvable RBS::Extended payload through the fork pool (issue #805)" do
+    # Four callers so more than one worker reads the same annotation: the coordinator's merge has to
+    # collapse their copies on the entry's primitives, or `--workers=N` prints N rows where `--workers=0`
+    # prints one.
+    def write_unresolved_directive_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "sig", "widget.rbs"), <<~RBS)
+        class Widget
+          %a{rigor:v1:return: not-a-known-refinement}
+          def label: () -> String
+        end
+      RBS
+      paths = Array.new(4) do |i|
+        path = File.join(dir, "caller_#{i}.rb")
+        File.write(path, "class Caller#{i}\n  def go\n    Widget.new.label\n  end\nend\n")
+        path
+      end
+      [paths, { "signature_paths" => [File.join(dir, "sig")] }]
+    end
+
+    def unresolved_rows(diagnostics)
+      diagnostics.count { |d| d.rule == "dynamic.rbs-extended.unresolved" }
+    end
+
+    it "keeps the pool intact and reports the one row the sequential run reports" do
+      Dir.mktmpdir do |dir|
+        paths, config = write_unresolved_directive_fixture(dir)
+        sequential = run_check(dir, paths, config: config, cache_store: nil)
+        pool = run_check(dir, paths, config: config, cache_store: nil, workers: 4)
+
+        # Guards the fixture itself: a payload that RESOLVES would make every assertion below vacuous.
+        expect(unresolved_rows(sequential)).to eq(1)
+        expect(pool.map(&:rule)).not_to include("pool-degraded")
+        expect(unresolved_rows(pool)).to eq(1)
+        expect(diag_keys(pool)).to eq(diag_keys(sequential))
+      end
+    end
+  end
+
   # ADR-46 — the fork pool must MARSHAL each worker's cross-file dependency records back, or a pooled
   # `--incremental` recheck would leave the dependency graph un-refreshed and serve stale diagnostics on the
   # next round. Runs `record_dependencies: true` sequentially and pooled and asserts the recorded edges match.

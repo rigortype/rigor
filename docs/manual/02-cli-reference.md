@@ -475,6 +475,13 @@ exits `1`: you asked for a write and did not get one. Such a skip
 is a bug in Rigor's RBS rendering, not in your code — please
 report it.
 
+A method the generator declined for any other reason (a body
+that proves only `untyped`, a user-authored declaration it will
+not overwrite) is never a silent absence: under `--format=json`
+it is a `skipped` row of the `candidates` array with its
+`sig.skipped.*` identifier in `skip_reason`, and in text mode a
+one-line stderr summary counts the skipped methods per reason.
+
 ## `rigor lsp`
 
 Run the Language Server over stdio. See

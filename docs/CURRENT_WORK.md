@@ -18,10 +18,10 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 **v0.3.8 is published** (`Rigor::VERSION` is `0.3.8`, `[Unreleased]` empty as of 2026-09-09).
-Post-cut fragments ride under `changelog.d/`: #830 and #844 landed (`changed/`, `added/`); #848
-adds `fixed/` once it lands. The next cut happens only when the user invokes `/rigor-release-prep`.
+Post-cut fragments ride under `changelog.d/` (#830, #844, #846, #848 among them). The next cut
+happens only when the user invokes `/rigor-release-prep`.
 
-## The #610 reopen (2026-09-09) — PR #848, Draft, awaiting the user's word
+## The #610 reopen (2026-09-09) — landed
 
 `rigor-activerecord`'s `Relation[Elem]` against `rbs collection install`'s non-generic `Relation`.
 #770 (0.3.8) added the stand-down but threaded `deferred_signature_paths:` through the loader's own
@@ -29,8 +29,8 @@ adds `fixed/` once it lands. The next cut happens only when the user invokes `/r
 CLI default — never passed it, so the stand-down ran under `--no-cache` and on no real run. The
 gate stayed green because its loader held no store (#696's lesson in its other shape).
 
-- [#848](https://github.com/rigortype/rigor/pull/848) — **open, Draft, do not `gh pr ready` or
-  merge without the user's word.** CI green on head `0a0ba3e1`, rbs 3.x/4.x jobs included. Fixes:
+- [#848](https://github.com/rigortype/rigor/pull/848) — **merged 2026-09-09 on the user's word**
+  (merge `c63a77ac`, master run green, rbs 3.x/4.x jobs included); #610 closed by it. Fixes:
   the producer forwards the deferred list (new public reader, `sig-gen gap` marker #160); the env
   key gains an env-only `rbs.deferred_signature_paths` slot (NOT in the shared run-key entries —
   the boot-slim probe cannot rebuild a plugin-derived slot); a stood-down file is no longer reported
@@ -62,29 +62,32 @@ Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated
 
 - [#830](https://github.com/rigortype/rigor/pull/830) (slice 1) and
   [#844](https://github.com/rigortype/rigor/pull/844) (slice 2, `Type::FloatRange`) — **merged**.
-- [#846](https://github.com/rigortype/rigor/pull/846) — slice 3 (truthy-edge Float comparison
-  narrowing, [#831](https://github.com/rigortype/rigor/issues/831)): **open, Draft, not this
-  session's PR — hands off unless its session hands the lane over.**
+- [#846](https://github.com/rigortype/rigor/pull/846) — slice 3's truthy-edge Float comparison
+  narrowing: **merged 2026-09-08** (another session's). [#831](https://github.com/rigortype/rigor/issues/831)
+  is still open — check what of slice 3 (`nan?` / `finite?` narrowing, Float folds, the
+  `dynamic.rbs-extended.deprecated-form` diagnostic) #846 left before sizing it.
 - Engine gaps filed while probing, all `ready-for-agent`: [#833](https://github.com/rigortype/rigor/issues/833)
   (a Range literal argument matches the first `Range[T]` overload whatever its endpoints),
   [#834](https://github.com/rigortype/rigor/issues/834) (`n.clamp(1..9)` has no fold),
   [#842](https://github.com/rigortype/rigor/issues/842) (an `IntegerRange` receiver never reaches RBS
   dispatch; `FloatRange` ships with the arm IntegerRange lacks).
 - The sig provenance gate (#835) pins per-file residue counts in `spec/rigor/sig_gen/provenance_spec.rb`;
-  a new hand-written declaration goes red — mark it (`# sig-gen gap: #NNN — why`, #837 for a literal
-  return, #160 for a shape sig-gen does not emit) or move the pin with the reason in the commit body.
+  a new hand-written declaration goes red — mark it (`# sig-gen gap: #NNN — why`; #160 for a shape
+  sig-gen does not emit) or move the pin with the reason in the commit body. A literal return over a
+  declared nominal no longer needs a marker: sig-gen refuses that tightening since #850
+  ([ADR-110](adr/110-inherited-declaration-precedence.md)), which closed #837.
 
 ## The types-and-comments line (2026-09-08 → 09, landed)
 
 **A type Rigor did not produce or check is never written down** — typeless YARD doc tags gated by
 `spec/docs/type_shaped_comments_spec.rb`; ADR-107 / ADR-108; the `rigor-type-oracle` skill;
 `make check --fail-on=warning`. Inline `#:` / `# @rbs` are checked type sources, not banned (#843);
-a declared `void` is authored intent (#845). Open, all `ready-for-human`:
-[#837](https://github.com/rigortype/rigor/issues/837), [#839](https://github.com/rigortype/rigor/issues/839),
+a declared `void` is authored intent (#845); a declared nominal is never tightened to the body's
+literal (#850, ADR-110). Open, both `ready-for-human`: [#839](https://github.com/rigortype/rigor/issues/839),
 [#841](https://github.com/rigortype/rigor/issues/841). `make steep-check` has 11 pre-existing problems.
 
 ## How to enter
 
-1. `gh pr view 848` — if the user has said to land it and the head run is green, `gh pr ready 848`
-   then `gh pr merge 848 --merge`, and watch the master merge run; otherwise leave it Draft.
-2. #849 next in this line, forked from post-merge master. #846 belongs to another session.
+1. Nothing of this session's is open: #848 and its handoff are on master, #610 is closed.
+2. Next: [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`), or #831's
+   remainder after checking #846's diff. Fork from current master.

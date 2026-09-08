@@ -76,6 +76,19 @@ Chained query methods keep the element type, and iteration
 scope invoked on a typed relation (`User.where(...).published`)
 never surfaces a false `call.undefined-method`.
 
+If the project also installs `activerecord` through
+`rbs collection install`, the collection declares
+`ActiveRecord::Relation` without a type parameter while the
+plugin declares `ActiveRecord::Relation[Elem]`, and RBS cannot
+hold both. The plugin's declaration stands down: relation call
+sites still type as `ActiveRecord::Relation[Model]`, but calls
+into a relation resolve against the collection's declaration,
+so the plugin's element typing (`.first` as `Model?`, for
+example) is unavailable, and the run reports one
+`rbs.coverage.plugin-signature-stood-down` info row naming both
+files. Nothing is broken; the plugin's typing returns only when
+the collection stops declaring the class.
+
 `User.table_name` types as `String`, and as the exact string
 only when your source says the name: a literal
 `self.table_name = "people"` on the class or on an STI ancestor,

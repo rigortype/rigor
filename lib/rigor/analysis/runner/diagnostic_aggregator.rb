@@ -31,6 +31,10 @@ module Rigor
         # @param synthesized_namespaces_snapshot — reader.
         # @param quarantined_signatures_snapshot — reader returning the `signature_paths:` files skipped
         #   because they do not parse (`[path, first_error_line]` pairs).
+        # @param signature_standdowns_snapshot — reader returning the plugin-contributed signature files
+        #   that stood down against a colliding generic arity (#610), as
+        #   `[path, class_name, existing_arity, incoming_arity, existing_file]` tuples. Defaults to none so
+        #   a caller that snapshots nothing of the kind need not say so.
         # @param env_build_failure_snapshot — reader returning the total RBS env-build failure tuple
         #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
         # @param definition_build_failures_snapshot — issue #696 — reader returning the per-class
@@ -47,7 +51,7 @@ module Rigor
                        pre_eval_diagnostics_from_scanner:, synthesized_namespaces_snapshot:,
                        quarantined_signatures_snapshot:, env_build_failure_snapshot:,
                        definition_build_failures_snapshot:, hkt_scan_failure_snapshot:,
-                       conformance_results_snapshot:)
+                       conformance_results_snapshot:, signature_standdowns_snapshot: -> { [] })
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -59,6 +63,7 @@ module Rigor
           @pre_eval_diagnostics_from_scanner_reader = pre_eval_diagnostics_from_scanner
           @synthesized_namespaces_snapshot_reader = synthesized_namespaces_snapshot
           @quarantined_signatures_snapshot_reader = quarantined_signatures_snapshot
+          @signature_standdowns_snapshot_reader = signature_standdowns_snapshot
           @env_build_failure_snapshot_reader = env_build_failure_snapshot
           @definition_build_failures_snapshot_reader = definition_build_failures_snapshot
           @hkt_scan_failure_snapshot_reader = hkt_scan_failure_snapshot
@@ -412,6 +417,26 @@ module Rigor
           [build_rbs_synthesized_namespace_diagnostic(synthesized)]
         end
 
+        # Issue #610 — the outcome that AVOIDED `rbs.coverage.definition-build-failed`'s rung: a signature
+        # file a loaded plugin contributes re-declared a class another loaded source (typically an `rbs
+        # collection install`) already declares at a DIFFERENT generic arity, so the plugin's file stood
+        # down rather than fail the class's definition build. One `:info` per file: the user is told what
+        # typing they are not getting and why, and — unlike the quarantine row this file used to be
+        # misreported as — is not sent to remove a declaration the plugin owns.
+        def rbs_plugin_signature_stood_down_diagnostics
+          standdowns = signature_standdowns_snapshot
+          return [] if standdowns.nil? || standdowns.empty?
+
+          standdowns.map { |entry| build_rbs_plugin_signature_stood_down_diagnostic(entry) }
+        end
+
+        # The two `:info` notices that close the `rbs.coverage.*` ladder, in this order: the namespace
+        # synthesis first, then the stand-down (#610) — the outcome that AVOIDED a definition-build failure
+        # and so the quietest row on it. One method so the runner's assembly reads them as one slot.
+        def rbs_coverage_notice_diagnostics
+          rbs_synthesized_namespace_diagnostics + rbs_plugin_signature_stood_down_diagnostics
+        end
+
         # Maps the per-run `rigor:v1:conforms-to` scan results into diagnostics (spec: `rbs-extended.md` §
         # "Explicit conformance directive"). A class that declares `conforms-to _Interface` but is missing
         # a required interface method surfaces as `rbs_extended.unsatisfied-conformance`; an unresolvable
@@ -540,12 +565,25 @@ module Rigor
                      "#{first_failure_clause(failures.first)}#{conflicting_files_clause(files, sample_size)} " \
                      "Rigor still treats each class as KNOWN, so calls into it — real methods and typos " \
                      "alike — silently read `Dynamic[top]` instead of resolving, and this run is quieter " \
-                     "than it should be rather than cleaner. Two signature sources declare the same " \
-                     "member; remove the duplicate declaration (`rbs validate`) to restore type coverage.",
+                     "than it should be rather than cleaner. #{definition_build_advice(failures.first)}",
             severity: :warning,
             rule: "rbs.coverage.definition-build-failed",
             source_family: :builtin
           )
+        end
+
+        # The closing advice follows the FIRST failure's error class: `GenericParameterMismatchError` is two
+        # declarations of one CLASS at different generic arity (#610), and "remove the duplicate member"
+        # sends its reader after a member that does not exist.
+        def definition_build_advice(failure)
+          _, error_class, = failure
+          if error_class.to_s.end_with?("GenericParameterMismatchError")
+            "Two signature sources declare the class with a different number of type parameters; make " \
+              "the declarations agree (`rbs validate`) to restore type coverage."
+          else
+            "Two signature sources declare the same member; remove the duplicate declaration " \
+              "(`rbs validate`) to restore type coverage."
+          end
         end
 
         # `[class_name, error_class, member, buffers]`. The member is nil for the error classes that carry no
@@ -659,6 +697,42 @@ module Rigor
             rule: "rbs.coverage.synthesized-namespace",
             source_family: :builtin
           )
+        end
+
+        def build_rbs_plugin_signature_stood_down_diagnostic(entry)
+          path, class_name, existing_arity, incoming_arity, existing_file = entry
+          displaced_by = displacing_source_phrase(existing_file)
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) declares " \
+                     "`#{class_name.to_s.delete_prefix('::')}` with #{type_parameter_phrase(incoming_arity)}, " \
+                     "but #{displaced_by} already declares it with #{type_parameter_phrase(existing_arity)}. " \
+                     "Two declarations of one class at different generic arity fail its definition build, so " \
+                     "the plugin's file stood down: calls into the class resolve against the other " \
+                     "declaration, and the plugin's element typing for it is unavailable while both are " \
+                     "loaded. Expected when a bundled plugin and an `rbs collection install` both declare " \
+                     "the class; nothing to fix unless you want the plugin's typing back, which needs the " \
+                     "other source to stop declaring the class.",
+            severity: :info,
+            rule: "rbs.coverage.plugin-signature-stood-down",
+            source_family: :builtin
+          )
+        end
+
+        def displacing_source_phrase(existing_file)
+          return "another loaded signature source" if existing_file.nil?
+
+          "`#{relative_signature_path(existing_file.to_s)}`"
+        end
+
+        def type_parameter_phrase(arity)
+          case arity
+          when nil, 0 then "no type parameters"
+          when 1 then "1 type parameter"
+          else "#{arity} type parameters"
+          end
         end
 
         def build_rbs_coverage_missing_diagnostic(missing)
@@ -883,6 +957,10 @@ module Rigor
 
         def quarantined_signatures_snapshot
           @quarantined_signatures_snapshot_reader.call
+        end
+
+        def signature_standdowns_snapshot
+          @signature_standdowns_snapshot_reader.call
         end
 
         def env_build_failure_snapshot

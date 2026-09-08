@@ -16,7 +16,7 @@ module Rigor
         Descriptor.new(
           gems: [rbs_gem_entry],
           files: file_entries(loader),
-          configs: config_entries(loader)
+          configs: config_entries(loader) + env_only_config_entries(loader)
         )
       end
 
@@ -25,7 +25,8 @@ module Rigor
       # MISS, by the dependency descriptor ({Runner#run_dependency_descriptor}). So a warm HIT never digests
       # the (large, vendored) RBS tree. {RunDescriptor} is NOT a {Descriptor} — it is never composed, hashed,
       # or `==`'d, only its three readers are consulted — so deferring `files` costs no soundness, and `gems`
-      # / `configs` are byte-identical to {.build} (the key is unchanged).
+      # / `configs` match {.build}'s shared slots (the key is unchanged; the one slot the env key adds on
+      # top, {.env_only_config_entries}, is never read here).
       def self.build_run(loader)
         RunDescriptor.new(loader: loader, gems: [rbs_gem_entry], configs: config_entries(loader))
       end
@@ -35,6 +36,33 @@ module Rigor
       def self.config_entries(loader)
         [libraries_entry(loader.libraries), virtual_rbs_entry(loader)].compact
       end
+
+      # Issue #610 — the slots only the env-cache KEY reads, on top of {.config_entries}. Which of the
+      # loader's `signature_paths:` are DEFERRED (a bundled plugin's `sig/`, loaded last and allowed to
+      # stand down against a colliding generic arity) changes the env built from byte-identical files, so
+      # the partition belongs in the key: moving a plugin's `sig/` between `plugins:` and an explicit
+      # `signature_paths:` entry changes no file, and an env cached before the producer honoured the
+      # partition must read as a miss once. Kept OUT of {.config_entries} deliberately — the run-result
+      # key already digests the whole resolved configuration (`RunCacheKey`), and its boot-slimming probe
+      # reconstructs {.config_entries} without loading a plugin, so an entry there that it cannot rebuild
+      # would turn the warm fast lane into a permanent miss on every project that enables a bundled plugin.
+      def self.env_only_config_entries(loader)
+        [deferred_signature_paths_entry(loader)].compact
+      end
+
+      def self.deferred_signature_paths_entry(loader)
+        return nil unless loader.respond_to?(:deferred_signature_paths)
+
+        deferred = Array(loader.deferred_signature_paths).map(&:to_s).sort
+        return nil if deferred.empty?
+
+        Descriptor::ConfigEntry.new(
+          key: "rbs.deferred_signature_paths",
+          value_hash: Digest::SHA256.hexdigest(deferred.join("\n"))
+        )
+      end
+
+      private_class_method :deferred_signature_paths_entry
 
       # Public (ADR-87 WD4) so the boot-slimming run-cache probe reconstructs the identical `gems` +
       # `rbs.libraries` key slots the runner writes, from the config-derived library list, without a loader.

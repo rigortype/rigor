@@ -386,7 +386,7 @@ module Rigor
         end
 
         # Issue #610 — which deferred (plugin-contributed) files stood down, as
-        # `[absolute_path, class_name, existing_arity, incoming_arity]`, sorted. DERIVED from a built env
+        # `[absolute_path, class_name, existing_arity, incoming_arity, existing_file]`, sorted. DERIVED from a built env
         # rather than recorded during the build, for {RbsLoader#quarantined_signatures}' reason: a cache HIT
         # never runs the build, and a condition only the build knew would silently disappear on the second
         # run. Re-asking the same question of the FINAL env gives the same answer — the file's declaration is
@@ -403,19 +403,38 @@ module Rigor
           end
         end
 
-        # The first `[class_name, existing_arity, incoming_arity]` where `decls` would re-declare a class the
-        # env already has with a DIFFERENT number of type parameters, or nil when they agree everywhere.
-        # Equal arity is not a conflict: RBS reopens the class, which is the ordinary and supported case, so
-        # the stand-down must not fire on it.
+        # The first `[class_name, existing_arity, incoming_arity, existing_file]` where `decls` would
+        # re-declare a class the env already has with a DIFFERENT number of type parameters, or nil when
+        # they agree everywhere. Equal arity is not a conflict: RBS reopens the class, which is the ordinary
+        # and supported case, so the stand-down must not fire on it.
+        #
+        # The existing arity is read off the entry's FIRST declaration, never through `entry.type_params`:
+        # rbs 4.x's `ClassEntry#type_params` validates every declaration against the first before answering
+        # and raises `GenericParameterMismatchError` on an entry that already disagrees with itself (rbs
+        # 3.x's does not), so the derived reader ({.deferred_standdowns}) raised on exactly the env it exists
+        # to describe — one a user's own two sources collided, or one the cache served from before the
+        # producer passed the deferred list. The first declaration is also the one rbs compares against.
+        # `existing_file` is that declaration's buffer name — the source that displaced the plugin's — or
+        # nil when it has none or carries only the cached-position sentinel.
         def generic_arity_conflict(env, decls)
           each_declared_class(decls) do |name, arity|
             entry = env.class_decls[::RBS::TypeName.parse(name)]
-            next if entry.nil? || !entry.respond_to?(:type_params)
+            next if entry.nil?
 
-            existing = entry.type_params&.size
-            return [name, existing, arity] if existing && existing != arity
+            first = entry_declarations(entry).first
+            existing = first.respond_to?(:type_params) ? first.type_params&.size : nil
+            return [name, existing, arity, declaration_buffer_name(first)] if existing && existing != arity
           end
           nil
+        end
+
+        def declaration_buffer_name(decl)
+          location = decl.respond_to?(:location) ? decl.location : nil
+          buffer = location&.buffer
+          name = buffer.nil? ? nil : buffer.name.to_s
+          return nil if name.nil? || name.empty? || name == CACHED_LOCATION_BUFFER_NAME
+
+          name
         end
 
         # Yields `[absolute_class_name, type_param_count]` for every class declared anywhere in `decls`,
@@ -1255,7 +1274,7 @@ module Rigor
         end
       end
 
-      attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs
+      attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs, :deferred_signature_paths
 
       # @param libraries — stdlib library names to load on top of core (e.g.,
       #   `["pathname", "json"]`). Empty by default. Each entry MUST correspond to a directory under the
@@ -1272,6 +1291,10 @@ module Rigor
       #   synthesised from project source by a plugin's `Manifest#source_rbs_synthesizer`. Merged into the
       #   env after `signature_paths:` and the vendored stubs. Pass `[]` (the default) when no
       #   synthesizer-emitting plugin is loaded.
+      # @param deferred_signature_paths — the subset of `signature_paths:` a bundled plugin
+      #   contributed (issue #610): loaded last and allowed to stand down against a colliding generic
+      #   arity. Read back by the env-cache producer, which rebuilds the env from the loader's readers on
+      #   a miss — a list it cannot read is a stand-down that runs only on a `--no-cache` build.
       def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [],
                      deferred_signature_paths: [])
         @libraries = libraries.map(&:to_s).freeze
@@ -1325,17 +1348,24 @@ module Rigor
             @state[:env], @signature_paths
           )
           parse_paths = parse_quarantined.to_set { |path, _note| path }
+          # Issue #610 — a deferred file that STOOD DOWN is absent from the env by design, which is exactly
+          # what the collision derivation reads as "quarantined". Derived from the same env, so a cache HIT
+          # excludes it too; {#signature_standdowns} is where it is reported instead.
+          stood_down = self.class.deferred_standdowns(@state[:env], @deferred_signature_paths).to_set(&:first)
           (
             parse_quarantined +
-            collision_quarantined.reject { |entry| parse_paths.include?(entry[0]) }
+            collision_quarantined.reject do |entry|
+              parse_paths.include?(entry[0]) || stood_down.include?(entry[0])
+            end
           ).freeze
         end
       end
 
       # Issue #610 — plugin-contributed signature files that stood down against a colliding generic arity,
-      # as `[absolute_path, class_name, existing_arity, incoming_arity]`. Empty whenever no plugin sig
-      # collides, which is every project that has not run `rbs collection install` for a gem a bundled
-      # plugin also declares.
+      # as `[absolute_path, class_name, existing_arity, incoming_arity, existing_file]`. Empty whenever no
+      # plugin sig collides, which is every project that has not run `rbs collection install` for a gem a
+      # bundled plugin also declares. Reported as `rbs.coverage.plugin-signature-stood-down` (`:info`); the
+      # same file MUST NOT also appear in {#quarantined_signatures}.
       def signature_standdowns
         @state[:signature_standdowns] ||= self.class.deferred_standdowns(env, @deferred_signature_paths).freeze
       end

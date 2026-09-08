@@ -16,7 +16,7 @@ module Rigor
       # back-reference cycle.
       class RunSnapshots
         attr_accessor :class_decl_paths, :signature_paths,
-                      :synthesized_namespaces, :quarantined_signatures, :conformance_results,
+                      :synthesized_namespaces, :quarantined_signatures, :signature_standdowns, :conformance_results,
                       :env_build_failure, :definition_build_failures, :hkt_scan_failure,
                       :effect_annotation_carrier
 
@@ -29,11 +29,15 @@ module Rigor
         # {PoolCoordinator#merge_worker_reporters}. `hkt_scan_failure` (#784) is nil-or-tuple like
         # `env_build_failure`, not a list like `definition_build_failures`: the scan is ONE build over the
         # whole `signature_paths:` overlay, not a per-class one, so it has exactly one outcome per run.
+        # `signature_standdowns` (#610) is the quarantine slot's twin for the plugin-contributed files that
+        # stood down against a colliding generic arity: a list, assigned once from the loader as
+        # `quarantined_signatures` is, and derived from the final env so a cache HIT carries it too.
         def initialize
           @class_decl_paths = {}.freeze
           @signature_paths = [].freeze
           @synthesized_namespaces = [].freeze
           @quarantined_signatures = [].freeze
+          @signature_standdowns = [].freeze
           @conformance_results = [].freeze
           @env_build_failure = nil
           @definition_build_failures = [].freeze
@@ -48,6 +52,7 @@ module Rigor
           @signature_paths = []
           @synthesized_namespaces = []
           @quarantined_signatures = []
+          @signature_standdowns = []
           @conformance_results = []
           @env_build_failure = nil
           @definition_build_failures = []

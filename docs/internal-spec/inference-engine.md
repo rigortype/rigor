@@ -190,6 +190,7 @@ The RBS-backed tier MUST resolve receiver types to a `(class_name, kind)` pair w
 - `Type::Constant[v]` resolves to `(v.class.name, :instance)`.
 - `Type::Nominal[name]` resolves to `(name, :instance)`.
 - `Type::Singleton[name]` (Slice 4 phase 2b) resolves to `(name, :singleton)`. The dispatcher MUST consult `RbsLoader#singleton_method` rather than `instance_method` for this kind, so `Foo.bar` correctly looks up the class methods of `Foo`.
+- `Type::FloatRange` (ADR-109 WD4) resolves to `("Float", :instance)`, and `Type::IntegerRange` (issue #842) resolves to `("Integer", :instance)`: a bounded numeric carrier is its unbounded class for every method the fold tiers above this one do not already own.
 - `Type::Dynamic[T]` recurses into `T`'s static facet using the same rules.
 - `Type::Top` and `Type::Bot` produce no descriptor; the dispatcher MUST return `nil`.
 

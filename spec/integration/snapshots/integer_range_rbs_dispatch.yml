@@ -1,0 +1,12 @@
+---
+locals:
+  "n": non-negative-int
+assertions:
+  '1': non-negative-int
+  '2': positive-int
+  '3': positive-int
+  '4': Integer[1..9]
+  '5': decimal-int-string
+  '6': Array[Integer]
+  '7': Float
+  '8': Float

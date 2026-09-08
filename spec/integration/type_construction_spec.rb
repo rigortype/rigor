@@ -1049,6 +1049,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/integer_range_rbs_dispatch.rb — issue #842 IntegerRange reaches RBS dispatch" do
+    let(:harness) { harness_for("integer_range_rbs_dispatch") }
+
+    it "resolves RBS-only methods on a bounded Integer without disturbing the fold tiers" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/container_size.rb — Array/String/Hash#size tightened to non_negative_int" do
     let(:harness) { harness_for("container_size") }
 

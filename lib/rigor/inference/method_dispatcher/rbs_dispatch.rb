@@ -246,8 +246,11 @@ module Rigor
               receiver_descriptor(receiver.base)
             when Type::FloatRange
               # ADR-109 WD4 — a bounded Float is a Float for every method the fold tiers do not own.
-              # (`IntegerRange` has no arm here yet: #842.)
               ["Float", :instance, []]
+            when Type::IntegerRange
+              # #842 — a bounded Integer is an Integer for every method the fold tiers
+              # (ConstantFolding, ShapeDispatch#dispatch_integer_range) do not own.
+              ["Integer", :instance, []]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end

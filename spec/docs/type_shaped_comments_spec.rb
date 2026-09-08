@@ -74,6 +74,11 @@ RSpec.describe "type-shaped comments (Rigor's own tree)" do
         expect(violations_for(:r1_type_shaped_tag, source)).to be_empty
       end
 
+      it "does not flag a shape sketch after @return, which has no name slot" do
+        source = "# @return `{ [path, name] => row }` keyed by pair\ndef foo; end\n"
+        expect(violations_for(:r1_type_shaped_tag, source)).to be_empty
+      end
+
       it "does not flag @!attribute's [r]/[w] access-mode marker" do
         source = "# @!attribute [r] name\nclass Foo; end\n"
         expect(violations_for(:r1_type_shaped_tag, source)).to be_empty

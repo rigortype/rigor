@@ -37,18 +37,23 @@ module TypeShapedCommentScanner
   # that slot left empty in Rigor's own tree: `@param name description`, `@return description`,
   # `@raise ExceptionClass description`. `@!attribute` is a different tag (its `[r]`/`[w]` is an
   # access mode, not a type slot) and is intentionally absent from this list.
-  YARD_TYPE_TAGS = %w[param return yieldparam yieldreturn option raise].freeze
+  NAME_SLOT_TAGS = %w[param yieldparam option].freeze
+  TYPE_FIRST_TAGS = %w[return yieldreturn raise].freeze
+  YARD_TYPE_TAGS = (NAME_SLOT_TAGS + TYPE_FIRST_TAGS).freeze
 
-  # R1 (type-shaped tag) — matches a `[` in either of the two positions YARD's own grammar defines
-  # as a type slot: directly after the tag (`@return [T]`, `@param [T] name`, `@raise [X]`), or after
-  # exactly one following name token (`@param name [T]`, `@option opts [T] :key`). A `[` anywhere
-  # else — later prose, a `{Foo#bar}` cross-reference, `@!attribute [r]`'s access-mode marker, `@see`
-  # — never reaches either position, so none of those match. This is deliberate: AGENTS.md weighs
-  # false positives heavily, and a bracket three words into a description is not a type annotation.
+  # R1 (type-shaped tag) — matches a `[` in a position YARD's own grammar defines as a type slot:
+  # directly after any of the tags (`@return [T]`, `@param [T] name`, `@raise [X]`), or, only for the
+  # tags that take a name, after exactly one name token (`@param name [T]`, `@option opts [T] :key`).
+  # `@return` and its siblings have no name slot, so a bracket after their first word is description
+  # (`@return `{ [path, name] => row }``), not a type. A `[` anywhere else — later prose, a `{Foo#bar}`
+  # cross-reference, `@!attribute [r]`'s access-mode marker, `@see` — never reaches a slot, so none of
+  # those match. This is deliberate: AGENTS.md weighs false positives heavily, and a bracket three words
+  # into a description is not a type annotation.
   TAG_BRACKET_RE = /
-    \A@(?:#{YARD_TYPE_TAGS.join('|')})\b
-    [ \t]*
-    (?: \[ | \S+[ \t]+\[ )
+    \A@(?:
+        (?:#{NAME_SLOT_TAGS.join('|')})\b[ \t]*(?: \[ | \S+[ \t]+\[ )
+      | (?:#{TYPE_FIRST_TAGS.join('|')})\b[ \t]*\[
+    )
   /x
 
   # R2 (inline rbs annotation) — mirrors the coarse, deliberately false-positive-safe heuristic

@@ -16,11 +16,8 @@ module Rigor
       def self.fetch: (loader: untyped, store: untyped) -> untyped
 
       # The generation cap this producer declares to `Cache::Store#evict!`
-      # (issue #151). `rigor sig-gen` infers the literal `2` from the base
-      # body; the contract is the wider `Integer`, since a subclass may
-      # override it.
-      # sig-gen gap: #837 — the body is the literal `2`, so sig-gen proposes `2`; the cap is a knob,
-      # not a constant. P2 of the 2026-09-08 provenance audit.
+      # (issue #151). The base body answers `2`; the contract is the wider
+      # `Integer`, since the cap is a knob a subclass may turn.
       def self.generation_cap: () -> Integer
     end
   end

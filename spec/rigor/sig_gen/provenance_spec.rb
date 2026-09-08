@@ -6,13 +6,14 @@
 # generated (clause 1 — `rigor sig-gen` proves it from the body), a PARAMETER type is authored intent
 # (clause 2 keeps it lenient and inference never derives one), and anything else hand-written is a gap
 # `sig-gen` could not close, which ADR-14's contradiction rule says must be RECORDED rather than
-# assumed. A declared `void` return joins the authored-intent half (#836): it says the return value is
-# not part of the contract, and no synthesis produces one, since a type built from a body is always the
-# type of the body's last expression. `spec/support/sig_provenance_auditor.rb` carries the classifier
-# and the marker convention:
+# assumed. A declared `void` return joins the authored-intent half (#836), and so does a declared type
+# the body proves as a literal (#837): each says the return the author means is not the one the body
+# happens to expose, and no synthesis produces either, since a type built from a body is always the type
+# of the body's last expression. `spec/support/sig_provenance_auditor.rb` carries the classifier and the
+# marker convention:
 #
-#     # sig-gen gap: #837 — every sibling type class declares `String`.
-#     def describe: (?Symbol verbosity) -> String
+#     # sig-gen gap: #825 — sig-gen types the body `untyped`, so the return is hand-written.
+#     def resolve: (String name) -> Type::t
 #
 # == Two mechanisms, and why not one
 #
@@ -23,9 +24,10 @@
 # § Implementation Guidelines puts above worst-case static reading. So:
 #
 # 1. HARD RULE on `tighter_return`. `sig-gen` proposes a narrower return than the declaration; ADR-14
-#    says apply it or record why not, and there are 5 — the seeding audit's 15 less the seven the
-#    #836 fix stopped proposing and the three #838 applied — so a marker on each remaining one is
-#    affordable. A sixth fails on arrival.
+#    says apply it or record why not, and there are 0 — the seeding audit's 15 less the seven #836
+#    stopped proposing, the six #837 did (its own five, plus the `Reflection.class_ordering` row #838
+#    had filed as applicable), and the three #838 applied — so a marker on each is affordable. The first
+#    fails on arrival.
 # 2. RATCHET on the residue. Per-file unmarked-residue counts are an exact snapshot below. A new
 #    hand-written declaration raises its file's count and goes red; marking it subtracts from the
 #    count. Closing an engine gap lowers a count and the gate says so, so slack cannot accumulate.
@@ -53,7 +55,13 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # whenever an engine fix or a marker earns it. Files absent from the map must carry zero residue.
 # Seeded 2026-09-08 from the audit note's table at 671; 669 since #836 — `RbsLoader.reset_default!`
 # and `CheckRules.shadow_verify_converged_collectors` are `-> void` declarations that used to land in
-# `declared_divergent` and are now return intent.
+# `declared_divergent` and are now return intent; 677 once ADR-109 slice 2 added the `Type::FloatRange`
+# carrier; 683 since #837. That fix retires five markers whose rows
+# are `declared_divergent` rather than `tighter_return` now that no literal is proposed for them
+# (`cache.rbs` +1, `trinary.rbs` +1, `type.rbs` +3), and a sixth — `Type::FloatRange#describe`, seeded by
+# ADR-109 slice 2 against a proposal the fix prevents — came out with them (`type.rbs` +1). The ratchet
+# counts them like every other declared lenience the generator protects; `Configuration.discover`'s
+# `String?` has always sat in this bucket for the same reason.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 51,
@@ -63,7 +71,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs" => 1,
   "sig/rigor/analysis/fact_store.rbs" => 17,
   "sig/rigor/ast.rbs" => 1,
-  "sig/rigor/cache.rbs" => 1,
+  "sig/rigor/cache.rbs" => 2,
   "sig/rigor/cli/diff_command.rbs" => 1,
   "sig/rigor/cli/explain_command.rbs" => 1,
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
@@ -86,8 +94,8 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/scope.rbs" => 111,
   "sig/rigor/source.rbs" => 9,
   "sig/rigor/testing.rbs" => 4,
-  "sig/rigor/trinary.rbs" => 4,
-  "sig/rigor/type.rbs" => 217
+  "sig/rigor/trinary.rbs" => 5,
+  "sig/rigor/type.rbs" => 221
 }.freeze
 
 module SigProvenanceSpecHelpers
@@ -169,26 +177,26 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
     end
 
     it "calls a declaration sig-gen would narrow `tighter_return`" do
-      rows = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n",
-                           rbs: "class Widget\n  def n: () -> Integer\nend\n")
+      rows = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n",
+                           rbs: "class Widget\n  def n: () -> Numeric\nend\n")
       row = rows.find { |r| r.declaration.method_name == "n" }
       expect(row.classification).to eq(SigProvenanceAuditor::TIGHTER_RETURN)
       expect(row).not_to be_marked
     end
 
     it "reads the gap marker off the member's RBS comment" do
-      rbs = "class Widget\n  # sig-gen gap: #837 — the literal is not the contract.\n  " \
-            "def n: () -> Integer\nend\n"
-      row = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n", rbs: rbs)
+      rbs = "class Widget\n  # sig-gen gap: #837 — the wider declaration is deliberate.\n  " \
+            "def n: () -> Numeric\nend\n"
+      row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
             .find { |r| r.declaration.method_name == "n" }
       expect(row).to be_marked
       expect(row.declaration.marker).to eq("837")
     end
 
     it "rejects #TBD — a placeholder points at no engine work, and every gap now has an issue" do
-      rbs = "class Widget\n  # sig-gen gap: #TBD — the literal is not the contract.\n  " \
-            "def n: () -> Integer\nend\n"
-      row = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n", rbs: rbs)
+      rbs = "class Widget\n  # sig-gen gap: #TBD — the wider declaration is deliberate.\n  " \
+            "def n: () -> Numeric\nend\n"
+      row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
             .find { |r| r.declaration.method_name == "n" }
       expect(row).not_to be_marked
       expect(row.classification).to eq(SigProvenanceAuditor::TIGHTER_RETURN)
@@ -196,8 +204,8 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
 
     it "does not read a marker out of an unrelated comment" do
       rbs = "class Widget\n  # A plain doc comment mentioning sig-gen and #825.\n  " \
-            "def n: () -> Integer\nend\n"
-      row = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n", rbs: rbs)
+            "def n: () -> Numeric\nend\n"
+      row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
             .find { |r| r.declaration.method_name == "n" }
       expect(row).not_to be_marked
       expect(row.classification).to eq(SigProvenanceAuditor::TIGHTER_RETURN)

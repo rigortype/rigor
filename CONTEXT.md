@@ -34,6 +34,11 @@ define *behaviour*.
   (`docs/type-specification/control-flow-analysis.md`).
 - **folding** — evaluating an expression to a value-precise carrier at analysis time
   (`[1,2].first → Constant[1]`).
+- **type-shaped comment** — a type written where Rigor never checks it: a YARD `[Type]` slot, a
+  type in a doc sentence, or `#:` / `# @rbs` inside Rigor's own tree. Forbidden here
+  ([ADR-107](docs/adr/107-checked-types-and-typeless-comments.md), gated by
+  `spec/docs/type_shaped_comments_spec.rb`); in an adopting project `#:` / `# @rbs` are type
+  *sources* ([ADR-93](docs/adr/93-default-rbs-inline-ingestion.md)), not comments.
 - **erasure** — the conservative mapping of a carrier to spellable RBS
   (`docs/type-specification/rbs-erasure.md`).
 - **dispatch tier** — one stage of method-call resolution; the dispatcher's tier ordering is

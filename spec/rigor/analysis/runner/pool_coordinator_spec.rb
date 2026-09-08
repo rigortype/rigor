@@ -1186,16 +1186,20 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(Rigor::Environment).to receive(:for_project).and_return(warm_env)
       allow(loader).to receive(:prewarm)
 
-      coordinator.send(:prewarm_rbs_cache_for_pool)
+      coordinator.send(:prewarm_rbs_cache_for_pool, source_files: ["a.rb", "b.rb"])
 
       expect(loader).to have_received(:prewarm)
+      # An EXACT keyword list on purpose: it pins that the run's three reporter accumulators are not handed
+      # to this build (the example two below says why they must not be).
       expect(Rigor::Environment).to have_received(:for_project).with(
         libraries: ["set"], signature_paths: configuration.signature_paths, cache_store: cache_store,
+        plugin_registry: Rigor::Plugin::Registry::EMPTY,
         bundler_bundle_path: configuration.bundler_bundle_path,
         bundler_auto_detect: configuration.bundler_auto_detect,
         bundler_lockfile: configuration.bundler_lockfile,
         rbs_collection_lockfile: configuration.rbs_collection_lockfile,
-        rbs_collection_auto_detect: configuration.rbs_collection_auto_detect
+        rbs_collection_auto_detect: configuration.rbs_collection_auto_detect,
+        source_files: ["a.rb", "b.rb"]
       )
     end
 
@@ -1204,7 +1208,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       warm_env = instance_double(Rigor::Environment, rbs_loader: nil)
       allow(Rigor::Environment).to receive(:for_project).and_return(warm_env)
 
-      expect { coordinator.send(:prewarm_rbs_cache_for_pool) }.not_to raise_error
+      expect { coordinator.send(:prewarm_rbs_cache_for_pool, source_files: []) }.not_to raise_error
     end
 
     # Issue #798 — the Ractor pool's coordinator body used to discard this environment right after
@@ -1218,7 +1222,56 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(Rigor::Environment).to receive(:for_project).and_return(warm_env)
       allow(loader).to receive(:prewarm)
 
-      expect(coordinator.send(:prewarm_rbs_cache_for_pool)).to equal(warm_env)
+      expect(coordinator.send(:prewarm_rbs_cache_for_pool, source_files: [])).to equal(warm_env)
+    end
+
+    # The environment is built the way each Ractor worker builds its own — with the loaded plugin registry
+    # over the WHOLE project (#793) — and WITHOUT the run's reporter accumulators. Both halves are what
+    # makes the carrier snapshot in `#analyze_files_in_pool` mean something: `Environment.for_project`
+    # collects plugin-synthesized virtual RBS only when handed both a registry and a file list (it used to
+    # get neither, so the loader's `virtual_rbs` read empty on every project), and an environment BUILD
+    # writes synthesizer failures to the `source_rbs_synthesis` reporter, which every worker's drain
+    # already replays into the coordinator's accumulator without dedup — a reporter here would count each
+    # entry twice.
+    it "builds over the whole project with the plugin registry and withholds the run's reporters" do
+      registry = instance_double(Rigor::Plugin::Registry)
+      coordinator = build_coordinator(plugin_registry: registry)
+      loader = instance_double(Rigor::Environment::RbsLoader, prewarm: nil)
+      warm_env = instance_double(Rigor::Environment, rbs_loader: loader)
+      allow(Rigor::Environment).to receive(:for_project).and_return(warm_env)
+
+      coordinator.send(:prewarm_rbs_cache_for_pool, source_files: ["lib/a.rb", "lib/b.rb"])
+
+      expect(Rigor::Environment).to have_received(:for_project).with(
+        hash_including(plugin_registry: registry, source_files: ["lib/a.rb", "lib/b.rb"])
+      )
+      expect(Rigor::Environment).to have_received(:for_project).with(
+        hash_excluding(:rbs_extended_reporter, :boundary_cross_reporter, :source_rbs_synthesis_reporter)
+      )
+    end
+
+    # `Environment.for_project` un-stubbed, so this pins the chain the carrier depends on rather than a
+    # keyword list: a plugin-synthesized buffer is on the built environment's loader, where
+    # `#snapshot_effect_annotation_carrier` reads it. No RBS environment is demanded (the loader is lazy
+    # and `cache_store: nil` makes `#prewarm` a no-op), and the paths deliberately do not exist, so the
+    # synthesizer is invoked directly rather than through the cache-store memo.
+    it "carries the plugin-synthesized virtual RBS the rbs-inline lane is read from" do
+      annotated = "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"
+      plugin_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "synth", version: "0.0.1",
+                 source_rbs_synthesizer: ->(path) { annotated if path.end_with?("memo.rb") })
+      end
+      services = Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection, type: Rigor::Type::Combinator, configuration: Rigor::Configuration.new
+      )
+      registry = Rigor::Plugin::Registry.new(plugins: [plugin_class.new(services: services)])
+      coordinator = build_coordinator(plugin_registry: registry)
+
+      warm_env = coordinator.send(:prewarm_rbs_cache_for_pool, source_files: ["plain.rb", "memo.rb"])
+
+      expect(warm_env.rbs_loader.virtual_rbs).to eq([["virtual:synth:memo.rb", annotated]])
+      expect(Rigor::Effects::SignatureSources.annotated_carrier(warm_env.rbs_loader.virtual_rbs))
+        .to eq([["virtual:synth:memo.rb", annotated]])
     end
   end
 
@@ -1236,7 +1289,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       cache_store = instance_double(Rigor::Cache::Store, root: "/tmp/rigor-798-cache-root-stub")
       coordinator = build_coordinator(workers: 0, cache_store: cache_store, snapshots: snapshots)
       failure = ["Acme", "RBS::DuplicatedMethodDefinitionError", "::Acme#label", ["sig/acme.rbs"]]
-      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [failure])
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [failure], virtual_rbs: [])
       warm_env = instance_double(Rigor::Environment, rbs_loader: loader)
       allow(coordinator).to receive(:prewarm_rbs_cache_for_pool).and_return(warm_env)
       allow(coordinator).to receive(:snapshot_project_signature_state)
@@ -1246,6 +1299,36 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(result).to eq([])
       expect(coordinator).to have_received(:snapshot_project_signature_state).with(warm_env)
       expect(snapshots.definition_build_failures).to eq([failure])
+    end
+  end
+
+  # The inline stratum of `effect.annotations-unchecked` had the same shape of gap on this backend as #798:
+  # every other analysis path snapshots the effect-annotation carrier, and this one never did, so an effect
+  # annotation living only in an rbs-inline comment had no producer under `RIGOR_POOL_BACKEND=ractor` — on
+  # a healthy run, with no worker lost. Same harness as the #798 example above: `workers: 0` reaches the
+  # coordinator's own pre-dispatch reads and spawns no Ractor. The prewarm is handed the WHOLE project
+  # (`source_files:`), never the analyze set — the buffer that carries the annotation may belong to a file
+  # this run does not analyse.
+  describe "#analyze_files_in_pool effect-annotation carrier" do
+    it "carries the first effect-annotated virtual buffer off the cache-prewarm environment, built over " \
+       "the whole project, before any worker is dispatched" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      cache_store = instance_double(Rigor::Cache::Store, root: "/tmp/rigor-ractor-carrier-cache-root-stub")
+      coordinator = build_coordinator(workers: 0, cache_store: cache_store, snapshots: snapshots)
+      loader = instance_double(
+        Rigor::Environment::RbsLoader,
+        virtual_rbs: [["virtual:x:plain.rb", "class Plain\nend\n"],
+                      ["virtual:x:memo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"]],
+        definition_build_failures: []
+      )
+      warm_env = instance_double(Rigor::Environment, rbs_loader: loader)
+      allow(coordinator).to receive(:prewarm_rbs_cache_for_pool).and_return(warm_env)
+      allow(coordinator).to receive(:snapshot_project_signature_state)
+
+      coordinator.analyze_files_in_pool([], source_files: ["plain.rb", "memo.rb"])
+
+      expect(coordinator).to have_received(:prewarm_rbs_cache_for_pool).with(source_files: ["plain.rb", "memo.rb"])
+      expect(snapshots.effect_annotation_carrier.map(&:first)).to eq(["virtual:x:memo.rb"])
     end
   end
 

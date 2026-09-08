@@ -936,7 +936,7 @@ module Rigor
         def resolve_class(name)
           return nil unless name.is_a?(::String)
 
-          parts = name.delete_prefix("::").split("::")
+          parts = class_name_parts(name)
           return nil if parts.empty?
 
           mod = ::Object
@@ -950,7 +950,18 @@ module Rigor
         rescue ::StandardError, ::ScriptError, ::SystemExit
           nil
         end
+
+        # #775 — the split of a class name is a pure function of the string, and the subtype check asks it
+        # twice per Nominal-vs-Nominal comparison (~370k times on the lib self-check) for the same few
+        # hundred names. Only the split is memoised; the constant walk above still runs every time, so a
+        # class loaded (or a spec constant removed) after the first ask is answered by the live tree.
+        def class_name_parts(name)
+          CLASS_NAME_PARTS[name] ||= name.delete_prefix("::").split("::").freeze
+        end
       end
+
+      CLASS_NAME_PARTS = {}
+      private_constant :CLASS_NAME_PARTS
     end
   end
 end

@@ -136,8 +136,10 @@ module Rigor
 
       private
 
+      # Allocates only when there is a prefix to strip (see `Environment#normalize_class_name`).
       def normalize_name(name)
-        name.to_s.delete_prefix("::")
+        name = name.to_s
+        name.start_with?("::") ? name.delete_prefix("::") : name
       end
     end
   end

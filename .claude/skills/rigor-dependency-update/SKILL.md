@@ -135,13 +135,16 @@ in `git status` (`vendor/bundle` stays untracked).
 ## Push and open the PR
 
 ```sh
-git push -u origin <branch>
-gh pr create --base master --title "Update dependencies: bundled gems + Nix Flake dev environment" \
+git push origin HEAD:refs/heads/<branch>
+gh pr create --draft --base master --title "Update dependencies: bundled gems + Nix Flake dev environment" \
   --body "<the two commits, per-layer>"
 ```
 
 The PR's `ci.yml` gate re-runs the full suite on a clean checkout (its own
-`bundle install`), which is the authoritative cross-environment check.
+`bundle install`), which is the authoritative cross-environment check. The PR
+is created `--draft` and goes Ready (`gh pr ready <pr>`) only once an APPROVE
+is recorded on GitHub, CI is green, and no stop instruction stands
+(`AGENTS.md` § "Commit and PR Etiquette").
 
 ## Stays untouched (out of scope here)
 

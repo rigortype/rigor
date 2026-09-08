@@ -132,17 +132,20 @@ narrow a contract that is deliberately wide.
 everything, so `Generator#tighter?` reports every `void`-declared method whose body happens to return
 a typed value as a tightening. `void` is not a wide type the author would like narrowed — it is the
 statement that the return value is not part of the contract, which is why `sig-gen` already spells
-`initialize` as `-> void` unconditionally. Proposed issue **P1** below.
+`initialize` as `-> void` unconditionally. Filed as **P1**,
+[#836](https://github.com/rigortype/rigor/issues/836).
 
 **Five pin a literal onto a contract shared with siblings.** `Top#describe` really does return
 `"top"`, but `describe` is the polymorphic surface every type class implements, and every sibling
 declares `String`; the same for `Trinary#to_s` and `BoundMethod#erase_to_rbs`.
 `Generator#computed_literal_tightening?` exists for exactly this hazard but fires only when the body's
-last expression is *not* a direct literal — here it is one, so the guard passes. Proposed issue **P2**.
+last expression is *not* a direct literal — here it is one, so the guard passes. Filed as **P2**,
+[#837](https://github.com/rigortype/rigor/issues/837).
 
 **Three are genuinely applicable** and were still left declared, with a marker, rather than applied:
 changing a declaration is a `sig/` edit that has to clear the precision gate and Steep, and the
-provenance gate landing is not the commit to do it in. Proposed issue **P3**.
+provenance gate landing is not the commit to do it in. Filed as **P3**,
+[#838](https://github.com/rigortype/rigor/issues/838).
 
 ## Where the 679 residue declarations come from
 
@@ -220,7 +223,7 @@ puts above worst-case static reading. So G3 lands as two mechanisms:
 The marker is a line in the member's own RBS comment:
 
 ```rbs
-# sig-gen gap: #825 — `void` is not a wide return to narrow; see P1.
+# sig-gen gap: #836 — `void` is not a wide return to narrow; see P1.
 def register: (Module class_object) -> void
 ```
 
@@ -229,41 +232,48 @@ in the `.rbs` file and both spellings satisfy that, but the comment stays out of
 directive namespace `Rigor::RbsExtended` owns and ADR-20 / ADR-103 keep extending, carries no version
 token, is read by no engine path (an unrecognised `%a{}` is silently ignored today, but "silently
 ignored" is a property that can change), and reads as prose. RBS binds it to the member, so the gate
-reads it off the AST rather than by scanning lines. `#TBD` is accepted while a gap has no issue filed.
+reads it off the AST rather than by scanning lines. The number must resolve to a filed issue — it is
+the pointer to the engine work that would let the generator answer, and a placeholder points at
+nothing, so the gate does not accept one.
 
-## Proposed issues
+## The follow-up issues
 
-Not filed — this branch files no issues. Each marker seeded below points at `#TBD` until one exists.
+Filed from this section, and each of the fifteen markers in `sig/` names the one for its category:
+seven point at #836, five at #837, three at #838.
 
-**P1 — `sig-gen` proposes a value tightening for a method declared `void`.** `RbsTypeTranslator` maps
-`void` to `Type::Top`, `Top.accepts` is total, so `Generator#tighter?` is true for every `void`
-method whose body returns something typed. Seven of the fifteen `tighter_return`s in Rigor's own
-`sig/` are this, and an adopting project running `sig-gen --diff` over a hand-written `sig/` sees it
-on every mutator. Fix: `compare_against_declared` should treat a declared `void` as "the return is
-not part of the contract" and classify `equivalent`, the same way `initialize` is already spelled
-`-> void` unconditionally. Evidence: the seven rows in the table above. Area: `area:sig-gen`.
+**P1 — [#836](https://github.com/rigortype/rigor/issues/836) — `sig-gen` proposes a value tightening
+for a method declared `void`.** `RbsTypeTranslator` maps `void` to `Type::Top`, `Top.accepts` is
+total, so `Generator#tighter?` is true for every `void` method whose body returns something typed.
+Seven of the fifteen `tighter_return`s in Rigor's own `sig/` are this, and an adopting project
+running `sig-gen --diff` over a hand-written `sig/` sees it on every mutator. Fix:
+`compare_against_declared` should treat a declared `void` as "the return is not part of the contract"
+and classify `equivalent`, the same way `initialize` is already spelled `-> void` unconditionally.
+Evidence: the seven rows in the table above. Area: `area:sig-gen`.
 
-**P2 — `sig-gen` proposes a literal return for a method whose siblings declare the wide type.**
-`computed_literal_tightening?` refuses a `Constant` tightening when the body's last expression is not
-a direct literal; when it *is* one (`def describe(_v = :short) = "top"`) the guard passes and `"top"`
-is proposed for a method every sibling type class declares as `String`. Pinning it would break the
-polymorphic surface. Fix: refuse the tightening when an ancestor or a sibling implementation of the
-same method carries a wider declaration — the inverse of the [#744](https://github.com/rigortype/rigor/issues/744)
-guard, which already reasons about overrides in the other direction. Evidence: the five rows above.
-Area: `area:sig-gen`.
+**P2 — [#837](https://github.com/rigortype/rigor/issues/837) — `sig-gen` proposes a literal return
+for a method whose siblings declare the wide type.** `computed_literal_tightening?` refuses a
+`Constant` tightening when the body's last expression is not a direct literal; when it *is* one
+(`def describe(_v = :short) = "top"`) the guard passes and `"top"` is proposed for a method every
+sibling type class declares as `String`. Pinning it would break the polymorphic surface. Fix: refuse
+the tightening when an ancestor or a sibling implementation of the same method carries a wider
+declaration — the inverse of the [#744](https://github.com/rigortype/rigor/issues/744) guard, which
+already reasons about overrides in the other direction. Evidence: the five rows above. Area:
+`area:sig-gen`.
 
-**P3 — apply the three tightenings `sig-gen` is right about.** `Reflection.class_ordering` →
+**P3 — [#838](https://github.com/rigortype/rigor/issues/838) — apply the three tightenings `sig-gen`
+is right about.** `Reflection.class_ordering` →
 `:disjoint | :equal | :subclass | :superclass | :unknown`, and both `Scope#*_through_ancestors` →
 `[untyped, String] | [nil, nil]`. Each is a `sig/` edit that has to clear
 `rigor coverage --threshold 0.58 lib` and `make steep-check`, so it is its own change. Area:
 `area:sig-gen`.
 
-**P4 — nothing checks that a declaration in `sig/` describes a method that exists.** Nine did not
-(above). `make check` and `make steep-check` compare the implementation against `sig/`; the converse
-direction — a declaration whose `def` was deleted or renamed — is unchecked, and a stale declaration
-is worse than a missing one because RBS resolves calls through it. The provenance gate now reports
-these as `no_source`, mixed in with 218 legitimate ones; a dedicated check that distinguishes them
-would be sharper. Area: `area:self-testing`.
+**P4 — [#839](https://github.com/rigortype/rigor/issues/839) — nothing checks that a declaration in
+`sig/` describes a method that exists.** Nine did not (above). `make check` and `make steep-check`
+compare the implementation against `sig/`; the converse direction — a declaration whose `def` was
+deleted or renamed — is unchecked, and a stale declaration is worse than a missing one because RBS
+resolves calls through it. The provenance gate now reports these as `no_source`, mixed in with 218
+legitimate ones; a dedicated check that distinguishes them would be sharper. Area:
+`area:self-testing`.
 
 ## What this does not measure
 

@@ -23,7 +23,8 @@
 # namespace `Rigor::RbsExtended` owns and ADR-20 / ADR-103 keep extending, carries no version
 # token, is read by no engine path, and reads as prose. RBS binds it to the member
 # (`RBS::AST::Members::MethodDefinition#comment`), so the marker is read off the AST rather than by
-# scanning lines. `#TBD` is accepted while a gap has no issue filed yet.
+# scanning lines. The number must be a filed issue: it is the pointer to the engine work that would
+# let the generator answer, and a placeholder points at nothing, so `#TBD` is not a marker.
 #
 # == What the classifier can and cannot see
 #
@@ -32,7 +33,9 @@
 # `module_function` in Ruby disagree about which kind a module function is. Everything else that
 # separates the two — a method reached through a mixin or a superclass, a member `Data.define`
 # generates, a `def` in a class `sig-gen` cannot name — lands in `:no_source`, which is residue by
-# construction rather than a bug: the point of counting it is that it should shrink.
+# construction rather than a bug: the point of counting it is that it should shrink. It also holds
+# the declarations whose `def` was deleted or renamed, which nothing in the tree checks and which
+# this classifier cannot separate from the legitimate rows; issue #839 tracks the sharper check.
 require "rbs"
 require "rigor"
 require "rigor/sig_gen"
@@ -65,7 +68,7 @@ class SigProvenanceAuditor
   EARNED = [GENERATED, PARAMETER_INTENT].freeze
   RESIDUE = [DECLARED_DIVERGENT, UNTRANSLATABLE, UNRENDERABLE, UNMATCHED, NO_SOURCE].freeze
 
-  MARKER_PATTERN = /sig-gen gap:\s*#(?<issue>\d+|TBD)\b/
+  MARKER_PATTERN = /sig-gen gap:\s*#(?<issue>\d+)\b/
 
   Declaration = Struct.new(:path, :line, :class_name, :method_name, :kind, :typed_params, :return_rbs,
                            :marker, keyword_init: true) do

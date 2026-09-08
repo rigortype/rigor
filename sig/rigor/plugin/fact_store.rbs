@@ -3,7 +3,7 @@ class Rigor::Plugin::FactStore
   def publish: (plugin_id: untyped, name: untyped, value: untyped) -> nil
   def read: (plugin_id: untyped, name: untyped) -> untyped
   def published?: (plugin_id: untyped, name: untyped) -> bool
-  # sig-gen gap: #TBD — `void` reads as `top`, so the iterator's `Array` return looks tighter. P1.
+  # sig-gen gap: #836 — `void` reads as `top`, so the iterator's `Array` return looks tighter. P1.
   def each_fact: () { (untyped) -> void } -> void
 end
 

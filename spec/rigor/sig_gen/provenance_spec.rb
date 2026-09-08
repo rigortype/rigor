@@ -153,13 +153,22 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       expect(row).not_to be_marked
     end
 
-    it "reads the gap marker off the member's RBS comment, and accepts #TBD" do
-      rbs = "class Widget\n  # sig-gen gap: #TBD — the literal is not the contract.\n  " \
+    it "reads the gap marker off the member's RBS comment" do
+      rbs = "class Widget\n  # sig-gen gap: #837 — the literal is not the contract.\n  " \
             "def n: () -> Integer\nend\n"
       row = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n", rbs: rbs)
             .find { |r| r.declaration.method_name == "n" }
       expect(row).to be_marked
-      expect(row.declaration.marker).to eq("TBD")
+      expect(row.declaration.marker).to eq("837")
+    end
+
+    it "rejects #TBD — a placeholder points at no engine work, and every gap now has an issue" do
+      rbs = "class Widget\n  # sig-gen gap: #TBD — the literal is not the contract.\n  " \
+            "def n: () -> Integer\nend\n"
+      row = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n", rbs: rbs)
+            .find { |r| r.declaration.method_name == "n" }
+      expect(row).not_to be_marked
+      expect(row.classification).to eq(SigProvenanceAuditor::TIGHTER_RETURN)
     end
 
     it "does not read a marker out of an unrelated comment" do
@@ -250,7 +259,8 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
           "sig-gen proposes a narrower return than each declaration says. Per ADR-14 either apply " \
           "the tightening, or record why it stays with a marker in the member's RBS comment:\n  " \
           "# sig-gen gap: #NNN — why sig-gen's proposal is not the contract\n" \
-          "`#TBD` is accepted while the engine gap has no issue filed."
+          "#NNN must be a filed issue: it is the pointer to the engine work that would let the " \
+          "generator answer, so a placeholder does not count as a marker."
       }
     end
 

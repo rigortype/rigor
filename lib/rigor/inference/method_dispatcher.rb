@@ -335,9 +335,13 @@ module Rigor
           [receiver_type.class_name, :instance]
         when Type::Singleton, Type::StructClass, Type::DataClass
           [receiver_type.class_name, :singleton]
-        else [nil, nil]
+        else NO_DISCOVERED_LOOKUP
         end
       end
+
+      # The shared "no discovered-method key" pair; callers destructure it (#775).
+      NO_DISCOVERED_LOOKUP = [nil, nil].freeze
+      private_constant :NO_DISCOVERED_LOOKUP
 
       # ADR-5 robustness — returns `Dynamic[Top]` when the receiver is an instance or singleton
       # of a type Rigor synthesized (a missing-namespace module or a referenced-type stub). The

@@ -56,11 +56,11 @@ Two things the next session should not rediscover:
 - Union display order follows the spelling: `Integer[..4] | Integer[11..]` sorts the beginless
   half first. Regenerate a precision snapshot with `UPDATE_SNAPSHOTS=<name>`, never by hand.
 
-## Other open work (verified open on 2026-09-09)
+## The types-and-comments follow-ups (closed)
 
-[#823](https://github.com/rigortype/rigor/issues/823), [#824](https://github.com/rigortype/rigor/issues/824),
-[#825](https://github.com/rigortype/rigor/issues/825) from the types-and-comments session; #832,
-#835 and #840 from sibling sessions merged on 2026-09-09.
+#823, #824 and #825 were closed on 2026-09-08 by sibling sessions: #840 (unannotated siblings),
+#832 (`sig/` wins over an inline annotation) and #835 (the `sig/` provenance gate), all merged.
+Nothing from that line is open.
 
 ## How to enter
 

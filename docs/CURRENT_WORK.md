@@ -53,9 +53,11 @@ Two things the next session should not rediscover:
 - Union display order changed with the spelling: `Integer[..4] | Integer[11..]` now sorts the
   left half first (`[.` precedes `[1`). Regenerate a precision snapshot with `UPDATE_SNAPSHOTS=<name>`
   rather than editing the YAML by hand.
-- An engine gap noted while probing, not scoped: `n.clamp(1..9)` types `Dynamic[top]` while
-  `n.clamp(1, 9)` folds to `Integer[1..9]`, and `rand(0.0...1.0)` picks the `Range[Integer]`
-  overload and types `Integer?`. Both are recorded in #831's slice-3 notes.
+- Two engine gaps noticed while probing are filed, both `ready-for-agent`:
+  [#833](https://github.com/rigortype/rigor/issues/833) (a Range literal argument matches the first
+  `Range[T]` overload whatever its endpoints, so `rand(0.0...1.0)` types `Integer?`) and
+  [#834](https://github.com/rigortype/rigor/issues/834) (`n.clamp(1..9)` types `Dynamic[top]` while
+  `n.clamp(1, 9)` folds to `Integer[1..9]`).
 
 ## The 2026-09-08 types-and-comments session (landed)
 

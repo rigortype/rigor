@@ -35,13 +35,19 @@
 # instance / singleton kinds treated as interchangeable, because `def self?.x` in RBS and
 # `module_function` in Ruby disagree about which kind a module function is. Everything else that
 # separates the two — a method reached through a mixin or a superclass, a member `Data.define`
-# generates, a `def` in a class `sig-gen` cannot name — lands in `:no_source`, which is residue by
-# construction rather than a bug: the point of counting it is that it should shrink. It also holds
-# the declarations whose `def` was deleted or renamed, which nothing in the tree checks and which
-# this classifier cannot separate from the legitimate rows; issue #839 tracks the sharper check.
+# generates, a `def` in a class `sig-gen` cannot name — is residue by construction rather than a bug:
+# the point of counting it is that it should shrink.
+#
+# Issue #839 splits that population by asking a second and a third source of truth ({SigSourceIndex}):
+# Rigor's own cross-file recognition, then reflection over the loaded tree. A declaration neither can
+# find describes code that does not exist, and `:no_source` now means exactly that — the audit found
+# nine such declarations sitting in `sig/`, which nothing in the tree checked, because `make check`
+# and `make steep-check` both ask whether the implementation matches `sig/` and never the converse.
 require "rbs"
 require "rigor"
 require "rigor/sig_gen"
+require_relative "sig_provenance_report"
+require_relative "sig_source_index"
 
 class SigProvenanceAuditor
   # A declaration whose return is what `sig-gen` proves. Earned.
@@ -68,14 +74,27 @@ class SigProvenanceAuditor
   UNRENDERABLE = :unrenderable
   # `sig-gen` found the `def` but the RBS environment did not resolve it to this declaration.
   UNMATCHED = :unmatched_declaration
-  # No `def` `sig-gen` can attribute to this declaration.
+  # No `def`, but Rigor's own recognition finds the method on the declaring class: an `attr_*`, a
+  # `define_method`, an `alias`, a `Data` / `Struct` member, or a `def` `sig-gen` declines to emit.
+  SYNTHETIC = :synthetic_source
+  # No `def` on the class, but the project declares the method on an ancestor it also declares.
+  INHERITED = :inherited_source
+  # Nothing static explains it and reflection over the loaded tree does: a method a class macro or a
+  # generated ancestor defines at load.
+  RUNTIME_DEFINED = :runtime_defined
+  # Nothing finds the method — not `sig-gen`, not the project index, not the runtime. The declaration
+  # describes code that does not exist (#839); ADR-107 G3 fails on one.
   NO_SOURCE = :no_source
   # Constants, type aliases, interfaces, `include`/`alias` members, class and module headers. No
   # return type to generate, so the provenance rule has nothing to say about them.
   NON_METHOD = :non_method
 
   EARNED = [GENERATED, PARAMETER_INTENT, RETURN_INTENT].freeze
-  RESIDUE = [DECLARED_DIVERGENT, UNTRANSLATABLE, UNRENDERABLE, UNMATCHED, NO_SOURCE].freeze
+  # The three #839 states are residue, not earned: knowing that a declared method EXISTS says nothing
+  # about where its type came from, and the type is what ADR-107 § Decision asks about. Splitting them
+  # out of `:no_source` therefore leaves every per-file residue pin exactly where it was.
+  RESIDUE = [DECLARED_DIVERGENT, UNTRANSLATABLE, UNRENDERABLE, UNMATCHED, SYNTHETIC, INHERITED,
+             RUNTIME_DEFINED, NO_SOURCE].freeze
 
   MARKER_PATTERN = /sig-gen gap:\s*#(?<issue>\d+)\b/
 
@@ -104,8 +123,12 @@ class SigProvenanceAuditor
     #   pays the ~14 s generator pass once.
     # @param configuration — overrides the configuration discovered under `root`; a fixture tree
     #   has no `.rigor.yml` and needs `signature_paths` pointed at its own `sig/`.
-    def audit(root:, candidates: nil, configuration: nil)
-      classify(declarations(root: root), candidates || generate(root: root, configuration: configuration))
+    # @param runtime — let the #839 tiers require `root`'s own `lib/` and reflect over it. Off by
+    #   default: requiring a tree runs its code, and a fixture tree's `lib/` is written by the
+    #   example auditing it.
+    def audit(root:, candidates: nil, configuration: nil, runtime: false)
+      classify(declarations(root: root), candidates || generate(root: root, configuration: configuration),
+               sources: SigSourceIndex.build(root: root, runtime: runtime))
     end
 
     # Every member of every `.rbs` under `sig/`, in file then source order.
@@ -125,9 +148,9 @@ class SigProvenanceAuditor
       end
     end
 
-    def classify(declarations, candidates)
+    def classify(declarations, candidates, sources: SigSourceIndex::NONE)
       index = index_candidates(candidates)
-      declarations.map { |decl| classify_one(decl, index) }
+      declarations.map { |decl| classify_one(decl, index, sources) }
     end
 
     # `{ "sig/rigor/type.rbs" => 187 }` — unmarked residue per file, the number ADR-107 G3 keeps
@@ -136,35 +159,14 @@ class SigProvenanceAuditor
       rows.select(&:residue?).each_with_object(Hash.new(0)) { |row, acc| acc[row.declaration.path] += 1 }
     end
 
-    # Prints the audit tables. The entry point `docs/notes/20260908-sig-provenance-audit.md` cites.
-    def report(root: Dir.pwd, out: $stdout)
-      rows = audit(root: root)
-      out.puts("| classification | n |\n| --- | --- |")
-      rows.group_by(&:classification).sort_by { |_, v| -v.size }
-          .each { |k, v| out.puts("| `#{k}` | #{v.size} |") }
-      report_per_file(rows, out)
-      out.puts("\n### tighter-return (a marker is required on every one)\n")
-      rows.select { |r| r.classification == TIGHTER_RETURN }.each { |r| out.puts("- #{r}") }
+    # Prints the audit tables. The entry point `docs/notes/20260908-sig-provenance-audit.md` and
+    # `docs/notes/20260909-sig-no-source-audit.md` cite. `runtime: true` — a report of the repository's
+    # own `sig/` wants the #839 tiers, and the audit is what the two notes are made of.
+    def report(root: Dir.pwd, out: $stdout, runtime: true)
+      SigProvenanceReport.render(audit(root: root, runtime: runtime), out: out)
     end
 
     private
-
-    REPORT_COLUMNS = ([TIGHTER_RETURN] + RESIDUE).freeze
-    private_constant :REPORT_COLUMNS
-
-    def report_per_file(rows, out)
-      out.puts("\n| file | #{REPORT_COLUMNS.map { |r| "`#{r}`" }.join(' | ')} | earned | residue |")
-      out.puts("| --- |#{' --- |' * (REPORT_COLUMNS.size + 2)}")
-      rows.reject { |r| r.classification == NON_METHOD }.group_by { |r| r.declaration.path }.sort
-          .each { |path, file_rows| out.puts(report_row(path, file_rows)) }
-    end
-
-    def report_row(path, rows)
-      by = rows.group_by(&:classification)
-      cells = REPORT_COLUMNS.map { |state| by.fetch(state, []).size }
-      earned = EARNED.sum { |state| by.fetch(state, []).size }
-      "| `#{path}` | #{cells.join(' | ')} | #{earned} | #{rows.count(&:residue?)} |"
-    end
 
     def index_candidates(candidates)
       candidates.each_with_object({}) do |candidate, acc|
@@ -175,11 +177,17 @@ class SigProvenanceAuditor
       end
     end
 
-    def classify_one(decl, index)
+    # `SigSourceIndex`'s vocabulary, mapped onto the audit's. Kept as a table so a new tier there is
+    # one row here rather than a branch.
+    MISSING_SOURCE = { SigSourceIndex::SYNTHETIC => SYNTHETIC, SigSourceIndex::INHERITED => INHERITED,
+                       SigSourceIndex::RUNTIME => RUNTIME_DEFINED }.freeze
+    private_constant :MISSING_SOURCE
+
+    def classify_one(decl, index, sources)
       return Row.new(declaration: decl, classification: NON_METHOD) if decl.kind.nil?
 
       candidate = index[[decl.class_name, decl.method_name]]
-      return Row.new(declaration: decl, classification: NO_SOURCE) if candidate.nil?
+      return classify_unattributed(decl, sources) if candidate.nil?
 
       case candidate.classification
       when Rigor::SigGen::Classification::EQUIVALENT then classify_equivalent(decl, candidate)
@@ -192,6 +200,15 @@ class SigProvenanceAuditor
                 detail: Rigor::SigGen::Classification::SKIP_DIAGNOSTIC_IDS[candidate.skip_reason])
       else classify_new_method(decl, candidate)
       end
+    end
+
+    # Issue #839 — `sig-gen` attributed no `def` to this declaration. Ask the project index, then the
+    # runtime; only a declaration none of the three can find is stale.
+    def classify_unattributed(decl, sources)
+      found, detail = sources.explain(decl.class_name, decl.method_name)
+      return Row.new(declaration: decl, classification: NO_SOURCE) if found.nil?
+
+      Row.new(declaration: decl, classification: MISSING_SOURCE.fetch(found), detail: detail)
     end
 
     # `sig-gen` never compares an `initialize` against an existing declaration: it emits a

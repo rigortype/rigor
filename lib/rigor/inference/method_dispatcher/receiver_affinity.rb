@@ -21,10 +21,13 @@ module Rigor
         module_function
 
         def reorder(overloads, self_type:, environment:)
-          return overloads if environment.nil?
+          return overloads if environment.nil? || overloads.size <= 1
 
           self_class_name = self_type_class_name(self_type)
           return overloads if self_class_name.nil?
+          # A list with no affinity arm behind a non-affinity arm is already in order -- the common case,
+          # answered without the partition's three arrays (#775).
+          return overloads unless out_of_order?(overloads, self_class_name, environment)
 
           affinity, other = overloads.partition do |mt|
             overload_param_classes_in_ancestry?(mt, self_class_name, environment)
@@ -41,6 +44,19 @@ module Rigor
             end
           end
 
+          # True when some affinity arm follows a non-affinity arm, i.e. the stable partition would move it.
+          def out_of_order?(overloads, self_class_name, environment)
+            other_seen = false
+            overloads.each do |mt|
+              if overload_param_classes_in_ancestry?(mt, self_class_name, environment)
+                return true if other_seen
+              else
+                other_seen = true
+              end
+            end
+            false
+          end
+
           # `RBS::Types::UntypedFunction` (a `(?)` method type, e.g. core's `Proc#call`) declares no
           # parameters and exposes none of the per-arity accessors. It has no param classes to compare
           # against the receiver, so it carries no affinity either way.
@@ -48,10 +64,15 @@ module Rigor
             fun = method_type.type
             return false unless fun.respond_to?(:required_positionals)
 
-            params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals
-            return false if params.empty?
+            required = fun.required_positionals
+            optional = fun.optional_positionals
+            trailing = fun.trailing_positionals
+            return false if required.empty? && optional.empty? && trailing.empty?
 
-            params.all? { |param| param_class_in_ancestry?(param.type, self_class_name, environment) }
+            # The three lists are checked in place rather than concatenated (#775).
+            required.all? { |param| param_class_in_ancestry?(param.type, self_class_name, environment) } &&
+              optional.all? { |param| param_class_in_ancestry?(param.type, self_class_name, environment) } &&
+              trailing.all? { |param| param_class_in_ancestry?(param.type, self_class_name, environment) }
           end
 
           # Walks Optional and Union one level so `(Numeric?)` and `(Integer | Float)` still classify when

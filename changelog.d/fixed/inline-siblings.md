@@ -1,0 +1,1 @@
+- **[rigor-rbs-inline]** An unannotated method or `attr_reader` in a file that carries an rbs-inline annotation is now typed from its body instead of losing its inferred type to the `untyped` signature the reader generates for it, while the class keeps its full method surface, its `new` arity and its cross-file references. ([#840](https://github.com/rigortype/rigor/pull/840))

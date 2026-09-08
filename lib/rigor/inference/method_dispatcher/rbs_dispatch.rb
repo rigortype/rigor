@@ -180,6 +180,14 @@ module Rigor
             method_definition = lookup_method(environment, class_name, kind, method_name, scope)
             return nil unless method_definition
             return nil if public_only && method_private?(method_definition)
+            # Issue #823 — a declaration that states the member's presence and parameters but not its
+            # return (`%a{rigor:v1:inferred-return}`, written by `rigor-rbs-inline` on every type slot it
+            # DEFAULTED). Declining here is the whole mechanism: this tier's product IS the return type, so
+            # withholding it routes the call down the same tiers an undeclared method takes and the body
+            # gets typed. Everything the declaration DOES say survives, because the rules that read it —
+            # `call.undefined-method`, `call.wrong-arity`, argument-type checking — look the method up in
+            # the environment themselves rather than reading this tier's answer.
+            return nil if RbsExtended.inferred_return?(method_definition)
 
             type_vars = build_type_vars(environment, class_name, receiver_args)
             translate_return_type(

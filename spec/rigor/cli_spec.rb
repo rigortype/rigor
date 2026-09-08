@@ -565,9 +565,10 @@ RSpec.describe Rigor::CLI do
 
           # `a = foo`: foo's synthesized `-> void` recovers to `top` (was `Dynamic[top]` under the plugin-free env).
           expect(JSON.parse(foo_out)["type"]).to eq("top")
-          # `b = bar`: bar is un-annotated, so its synthesized skeleton is `() -> untyped` and it stays Dynamic —
-          # proving the flip at 14 is the annotation's synthesis, not an unrelated change.
-          expect(JSON.parse(bar_out)["type"]).to eq("Dynamic[top]")
+          # `b = bar`: bar is un-annotated. Its skeleton return carries the inferred-return mark (#823), so the
+          # body types it — `foo`'s `void` reads as `top` — instead of an `untyped` shadow; the plugin-free run
+          # below still reads `Dynamic[top]`, which is what shows the flip comes from the synthesis.
+          expect(JSON.parse(bar_out)["type"]).to eq("top")
         end
       end
 

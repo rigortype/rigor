@@ -61,7 +61,31 @@ module Rigor
 
         COMMENT_LINE = /\A\s*#/
 
-        private_constant :ECHOED_ANNOTATION, :DECLARATION_LINE, :COMMENT_LINE
+        # The RBS annotation the synthesizer writes on every member whose type upstream DEFAULTED rather
+        # than read off an annotation (issue #823). Its meaning is normative in
+        # `docs/type-specification/rbs-extended.md`: the declaration states the member's presence and its
+        # parameters, and says nothing about what it returns, so the engine infers the return from the body
+        # instead of adopting the placeholder. `Rigor::RbsExtended.inferred_return?` is the reader.
+        INFERRED_RETURN_ANNOTATION = "rigor:v1:inferred-return"
+
+        # The stand-in type handed to upstream's `Writer#default_type`, and the whole reason this plugin can
+        # tell a defaulted type from an authored one. `RBS::Inline::Writer` substitutes `default_type`
+        # wherever the author wrote nothing — `return_type || default_type` in `RubyDef#method_overloads`,
+        # `attribute_type || default_type` in `RubyAttr#rbs` — and leaves an authored type alone. Rendering
+        # with a distinctive stand-in therefore makes "the author did not write this" a fact in the output
+        # rather than a guess about it: a member whose return renders as this name was defaulted, and one
+        # that renders `untyped` was WRITTEN `untyped` by its author (`#: (String) -> untyped`), which is a
+        # real contract and stays one.
+        #
+        # `default_type` is upstream's own public accessor for exactly this substitution, and `Writer.write`
+        # yields the writer to configure it, so nothing here reaches into upstream internals. The stand-in
+        # never survives into the contributed RBS — {#mark_inferred_returns} rewrites every occurrence back
+        # to `untyped` — which is not cosmetic: an undeclared type alias makes `RBS::DefinitionBuilder` raise
+        # `NoTypeFoundError` for the whole class, the same failure ADR-93 WD4's Finding 5 measured on
+        # `#:nodoc:`.
+        DEFAULTED_TYPE_NAME = :rigor__inline_defaulted
+
+        private_constant :ECHOED_ANNOTATION, :DECLARATION_LINE, :COMMENT_LINE, :DEFAULTED_TYPE_NAME
 
         # @param require_magic_comment — when `false` (the default since ADR-93 WD1), the magic
         #   comment is not required and the file is processed only if it actually carries an annotation — see
@@ -95,7 +119,8 @@ module Rigor
           return nil if parsed.nil?
 
           uses, decls, rbs_decls = parsed
-          rendered = reattach_declaration_annotations(::RBS::Inline::Writer.write(uses, decls, rbs_decls))
+          rendered = mark_inferred_returns(render_with_defaulted_marker(uses, decls, rbs_decls))
+          rendered = reattach_declaration_annotations(rendered)
           return nil if rendered.nil? || rendered.strip.empty?
 
           notices = unhonoured_annotations(result)
@@ -108,6 +133,106 @@ module Rigor
         end
 
         private
+
+        # Upstream's writer, told to substitute {DEFAULTED_TYPE_NAME} instead of `untyped` wherever the
+        # author wrote no type. See that constant for why the distinction is worth a stand-in.
+        def render_with_defaulted_marker(uses, decls, rbs_decls)
+          marker = ::RBS::Types::Alias.new(
+            name: ::RBS::TypeName.new(namespace: ::RBS::Namespace.empty, name: DEFAULTED_TYPE_NAME),
+            args: [],
+            location: nil
+          )
+          ::RBS::Inline::Writer.write(uses, decls, rbs_decls) { |writer| writer.default_type = marker }
+        end
+
+        # Issue #823 — the sibling rule. ADR-93 WD1 gates synthesis on a file that carries an annotation;
+        # inside such a file upstream emits a full `def f: (untyped x) -> untyped` skeleton for every
+        # unannotated `def`, and Rigor trusts an accepted signature over body inference. So one `# @rbs`
+        # anywhere in a file used to retype every OTHER method in it to `untyped` — the same mechanism
+        # ADR-93 WD1 measured project-wide before the file gate landed (mail 26 → 42 diagnostics), just
+        # scoped to the annotated file. An annotation on one method must not change the typing of its
+        # siblings in either direction.
+        #
+        # The skeleton is kept — that is what PR #779's member-level drop got wrong, because a partially
+        # declared class reads to RBS as a fully declared one (32 `call.undefined-method` and 12
+        # `call.wrong-arity` on `new`, and 44 classes to `Dynamic[top]` behind cross-file references that
+        # stopped resolving). What changes is what the skeleton CLAIMS: a defaulted type slot is rewritten
+        # back to `untyped` and its member is annotated {INFERRED_RETURN_ANNOTATION}, so the declaration
+        # keeps the class's full method surface, `new`'s arity and every cross-file name, and states nothing
+        # about the return. The engine reads the annotation in `RbsDispatch` and falls through to the same
+        # body-inference tier an undeclared method takes.
+        #
+        # Two properties make the rewrite safe rather than clever:
+        #
+        # - the stand-in is a token this plugin injected, so replacing it is exact — it can only appear
+        #   where upstream substituted it (a comment echoing the same word would merely read `untyped`);
+        # - the lines to annotate come from `RBS::Parser` reading the writer's own output, not from a
+        #   pattern over it, and the replacement is length-preserving per line, so the parser's line numbers
+        #   still address the same members after it.
+        #
+        # Marking is best-effort and the rewrite is not: if the probe parse is skipped or fails, the file
+        # still ships with today's `untyped` skeleton rather than an unresolvable alias (see
+        # {DEFAULTED_TYPE_NAME}). That asymmetry is why the encoding guard is shaped the way it is. Invalid
+        # UTF-8 does not reach here today — the RDoc-directive scan above raises on it first, and {#call}'s
+        # rescue routes the file to WD6 — but the guarded parse is the one `RbsLoader.add_virtual_rbs`
+        # documents as HANG-prone on pre-4.1 rbs lexers, and a hang escapes every rescue there is. So the
+        # probe is skipped for a byte sequence it could hang on, while the substitution runs over bytes and
+        # therefore always completes.
+        def mark_inferred_returns(rendered)
+          return rendered if rendered.nil? || !rendered.b.include?(DEFAULTED_TYPE_NAME.to_s)
+
+          marked_lines = rendered.valid_encoding? ? defaulted_member_lines(rendered) : Set.new
+          scrubbed = rendered.b.gsub(DEFAULTED_TYPE_NAME.to_s, "untyped").force_encoding(rendered.encoding)
+          return scrubbed if marked_lines.empty?
+
+          scrubbed.lines.each_with_index.flat_map do |line, index|
+            next line unless marked_lines.include?(index + 1)
+
+            ["#{line[/\A[ \t]*/]}%a{#{INFERRED_RETURN_ANNOTATION}}\n", line]
+          end.join
+        end
+
+        # The 1-based line of every member in `rendered` whose return type (or, for an attribute, whose
+        # type) is the defaulted stand-in. A member's `location.start_line` is the line its `def` /
+        # `attr_*` keyword sits on, which is where the annotation has to go.
+        def defaulted_member_lines(rendered)
+          buffer = ::RBS::Buffer.new(name: "(rigor: inline defaulted-type probe)", content: rendered)
+          _, _directives, decls = ::RBS::Parser.parse_signature(buffer)
+          collect_defaulted_member_lines(decls, Set.new)
+        rescue ::StandardError
+          # The writer's own output failing to parse is a condition the loader already handles (ADR-32 WD6
+          # fail-soft drops the entry). Declining to mark here keeps that the only failure.
+          Set.new
+        end
+
+        def collect_defaulted_member_lines(nodes, lines)
+          nodes.each do |node|
+            next unless node.respond_to?(:members)
+
+            node.members.each do |member|
+              line = defaulted_member_line(member)
+              lines << line if line
+            end
+            collect_defaulted_member_lines(node.members.grep(::RBS::AST::Declarations::Base), lines)
+          end
+          lines
+        end
+
+        def defaulted_member_line(member)
+          case member
+          when ::RBS::AST::Members::MethodDefinition
+            return nil unless member.overloads.any? { |o| defaulted_type?(o.method_type.type.return_type) }
+          when ::RBS::AST::Members::Attribute
+            return nil unless defaulted_type?(member.type)
+          else
+            return nil
+          end
+          member.location&.start_line
+        end
+
+        def defaulted_type?(type)
+          type.is_a?(::RBS::Types::Alias) && type.name.name == DEFAULTED_TYPE_NAME
+        end
 
         # Re-attaches a class- or module-level `%a{…}` that upstream's writer dropped (#452).
         #

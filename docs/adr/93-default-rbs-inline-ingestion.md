@@ -10,6 +10,11 @@ state (conforming wherever `rbs-inline` is present; the standalone residual carr
 **Amended 2026-07-19** — WD5 (below) closes the engine↔plugin version-skew hazard
 [#194](https://github.com/rigortype/rigor/issues/194) surfaced in WD2's gem-name require:
 bundled-plugin resolution anchors to the engine.
+**Amended 2026-09-08** — WD6 (below) closes
+[#823](https://github.com/rigortype/rigor/issues/823): WD1's file gate stopped the `untyped`
+skeletons at the file boundary but not inside an annotated file, where they still displaced every
+unannotated sibling's inferred type. A defaulted type slot now carries
+`%a{rigor:v1:inferred-return}` and the dispatcher declines it.
 
 Grounding: [`docs/notes/20260716-dspec-formal-spec-substrate-evaluation.md`](../notes/20260716-dspec-formal-spec-substrate-evaluation.md)
 § "第四の事例" — the adjudication, with the timeline and the upstream `disabled`-handling
@@ -279,3 +284,59 @@ Acceptance: loader specs cover anchored-hit, fallback-on-absence, and the widene
 contract; the #194 reproduction (`ruby -I lib` with a stale installed `rigortype`) stops loading
 the stale copy; the corpus is untouched (resolution changes which identical-version file loads in
 every healthy install, and only rescues the skewed one).
+
+## Addendum — WD6: the file gate is not a member gate (2026-09-08)
+
+[#823](https://github.com/rigortype/rigor/issues/823) is WD1's finding one scope down. WD1 stopped
+upstream's `-> untyped` skeletons from displacing inference *project-wide* by gating synthesis on a
+file that carries an annotation. Inside such a file the mechanism was untouched: upstream still emits
+a full `def f: (untyped x) -> untyped` for every unannotated `def`, and Rigor still trusts an accepted
+signature over body inference, so one `# @rbs` retyped every other method in its file to `untyped`.
+The binding clause does not permit that in either direction — an annotation is a contract for the
+member it is written on, and says nothing about its siblings (`overview.md` § "Inline annotation
+handling", amended with this).
+
+**Decision: keep the skeleton and change what it claims.** A type slot upstream *defaulted* is
+rewritten back to `untyped` and its member is annotated `%a{rigor:v1:inferred-return}`
+(`rbs-extended.md`); `MethodDispatcher::RbsDispatch` declines a marked member, so the call takes the
+same body-inference tier a method with no signature takes. Everything the declaration does state
+survives — the class keeps its full method surface, `new` keeps the arity of an unannotated
+`initialize`, cross-file references keep resolving, and the parameter list still governs arity and
+argument-type checking, because the rules that read those look the method up in the environment
+rather than reading the dispatcher's answer.
+
+Three notes on the shape, each of which was the alternative:
+
+- **Not a member-level drop.** [PR #779](https://github.com/rigortype/rigor/pull/779) removed the
+  unannotated members instead, and a partially declared class reads to RBS as a fully declared one:
+  measured on this repo's own `lib/` (775 `# @rbs` lines over 234 files), 32 `call.undefined-method`
+  and 12 `call.wrong-arity` on `new`, plus 44 classes to `Dynamic[top]` behind one
+  `rbs.coverage.definition-build-failed` where an annotation-free class produced no declaration at all
+  and cross-file names stopped resolving. Keeping the declaration is the fix's precondition.
+- **Marked at synthesis, not inferred from shape.** The engine could have keyed on provenance instead
+  — a `virtual:rbs-inline:` buffer plus an all-`untyped` method type — with no plugin change. That
+  answer is a guess about authorship, and it is wrong for the one author who states `#: () -> untyped`
+  deliberately; it would also silently rot the day upstream changes its default. Which slots upstream
+  defaulted is a fact only the synthesizer has, and upstream hands it over through its own public
+  `Writer#default_type` accessor: rendering with a distinctive stand-in makes "the author wrote
+  nothing here" observable in the output. The stand-in is rewritten to `untyped` before the RBS is
+  contributed — an undeclared type alias raises `NoTypeFoundError` for the whole class, which is
+  WD4's Finding 5 all over again.
+- **The unit is the type slot, not the member.** `# @rbs times: Integer` with no return annotation
+  declares a parameter and defaults a return; the parameter binds and the return is inferred. That is
+  the same rule, applied where the author actually stopped writing.
+
+Measurement (ADR-57 protocol). **herb**, the WD4 corpus, as its `.rigor.dist.yml` configures it:
+byte-identical, 8 diagnostics before and after. That arm is close to vacuous on its own — herb ships
+a hand-written `sig/` covering the same code, so 13 of its inline contributions quarantine on the
+collision and the mechanism barely runs. The discriminating arm is herb's `lib/` with no `sig/`
+alongside it, where the inline lane is the only signature source: 29 of 42 files contribute RBS, and
+**314 of their 474 declared members are marked inferred** — every one a member that used to impose
+`-> untyped` on its callers. Diagnostics over that tree move **30 → 31**. The single delta is a
+`flow.always-truthy-condition` on `herb/dev/runner.rb`, adjudicated as a **pre-existing engine
+imprecision** rather than an artifact of this change: `ops.all? { next false unless o; true }` folds to
+`Constant[true]` because the `next false` arm does not reach the block's return type, and the same
+warning reproduces on a five-line plain-Ruby file with no plugin, no annotation and no synthesis at
+all. herb's `-> untyped` skeleton was masking a diagnostic Rigor already emits for everyone else,
+which is WD4's Finding 2 with a different root; it routes to its own issue, and unlike WD1a's
+`Regexp.last_match` this change does not create the exposure class.

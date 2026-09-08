@@ -193,6 +193,11 @@ RSpec.describe "type-shaped comments (Rigor's own tree)" do
         expect(violations_for(:r5_missing_delimiter, source)).to be_empty
       end
 
+      it "accepts a bare name with nothing after it, since there is nothing to delimit" do
+        source = "# @raise AnalyzerCrashed\ndef foo; end\n"
+        expect(violations_for(:r5_missing_delimiter, source)).to be_empty
+      end
+
       it "checks @raise's exception class the same way, and leaves @return alone" do
         source = "# @raise ArgumentError when amount is zero\n# @return the balance\ndef foo; end\n"
         excerpts = violations_for(:r5_missing_delimiter, source).map(&:excerpt)
@@ -212,6 +217,9 @@ RSpec.describe "type-shaped comments (Rigor's own tree)" do
       expect(scanned).not_to be_empty
       expect(scanned.grep(%r{/lib/})).not_to be_empty
       expect(scanned.grep(%r{plugins/.*/lib/})).not_to be_empty
+      expect(scanned.grep(%r{/spec/})).not_to be_empty
+      expect(scanned.grep(%r{/fixtures/})).to be_empty
+      expect(scanned.grep(%r{/vendor/})).to be_empty
     end
 
     # EXPECTED RED on this branch (see file header) — the corpus fix is separate work.

@@ -160,6 +160,8 @@ restates a name, a type, or a signature. Why:
 [ADR-107](docs/adr/107-checked-types-and-typeless-comments.md); the agent-facing form Rigor ships to
 adopting projects: [ADR-108](docs/adr/108-type-provenance-for-agents.md).
 
+## RBS Authorship
+
 **Prefer `rigor sig-gen` over hand-written or AI-authored RBS here** — a gap that pushes you toward
 freehand RBS is information about where inference still has work, and **the gap is the more valuable
 signal**. Propose `sig-gen --print` / `--diff` first; land a hand-edit only once the user has reviewed

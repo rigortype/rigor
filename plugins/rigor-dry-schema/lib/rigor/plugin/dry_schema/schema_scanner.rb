@@ -40,11 +40,11 @@ module Rigor
 
         module_function
 
-        # @param paths [Array<String>] absolute paths to `.rb` files the project's `paths:` resolves to.
-        # @param type_aliases [Hash{String => String}] the ADR-9 `:dry_type_aliases` fact published by
+        # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param type_aliases — the ADR-9 `:dry_type_aliases` fact published by
         #   `rigor-dry-types` when loaded. Used to resolve `value(Types::Email)` references to their
         #   underlying class. Empty when the plugin isn't loaded.
-        # @return [Hash{String => Hash{Symbol => Hash{Symbol => String}}}] frozen per-schema typed-key
+        # @return frozen per-schema typed-key
         #   table. Empty when no recognisable schema declaration is found.
         def scan(paths:, type_aliases: {})
           table = {}

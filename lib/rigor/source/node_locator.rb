@@ -22,25 +22,19 @@ module Rigor
       class OutOfRangeError < StandardError; end
 
       class << self
-        # @param source [String]
-        # @param root [Prism::Node]
-        # @param line [Integer] 1-indexed line number
-        # @param column [Integer] 1-indexed column number (byte index within the line)
-        # @return [Prism::Node, nil]
+        # @param line — 1-indexed line number
+        # @param column — 1-indexed column number (byte index within the line)
         def at_position(source:, root:, line:, column:)
           new(source: source, root: root).at_position(line: line, column: column)
         end
 
-        # @param root [Prism::Node]
-        # @param offset [Integer] 0-indexed byte offset
-        # @return [Prism::Node, nil]
+        # @param offset — 0-indexed byte offset
         def at_offset(root:, offset:)
           new(source: nil, root: root).at_offset(offset)
         end
       end
 
-      # @param source [String, nil] used by `#at_position`; may be omitted when only `#at_offset` is needed.
-      # @param root [Prism::Node]
+      # @param source — used by `#at_position`; may be omitted when only `#at_offset` is needed.
       def initialize(source:, root:)
         @source = source
         @root = root
@@ -48,7 +42,7 @@ module Rigor
 
       # Resolve a `(line, column)` pair (1-indexed) to the deepest enclosing node.
       #
-      # @raise [OutOfRangeError] if the line or column falls outside the source buffer.
+      # @raise OutOfRangeError — if the line or column falls outside the source buffer.
       def at_position(line:, column:)
         offset = position_to_offset(line, column)
         at_offset(offset)

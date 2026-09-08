@@ -49,9 +49,6 @@ module Rigor
       #
       # Fail-soft by construction, like every parser that calls it: a location that raises while being read
       # costs the entry its position, never the run.
-      #
-      # @param source_location [RBS::Location, nil]
-      # @return [Array(String, nil, Integer, nil, Integer, nil)]
       def self.position_of(source_location)
         return [nil, nil, nil] if source_location.nil?
 
@@ -71,12 +68,12 @@ module Rigor
         @mutex = Mutex.new
       end
 
-      # @return [Array<UnresolvedEntry>] frozen snapshot of the accumulated unresolved-payload events.
+      # @return frozen snapshot of the accumulated unresolved-payload events.
       def unresolved_payloads
         @mutex.synchronize { @unresolved_payloads.dup.freeze }
       end
 
-      # @return [Array<LossyProjectionEntry>] frozen snapshot of the accumulated lossy-projection events.
+      # @return frozen snapshot of the accumulated lossy-projection events.
       def lossy_projections
         @mutex.synchronize { @lossy_projections.dup.freeze }
       end
@@ -109,7 +106,7 @@ module Rigor
         end
       end
 
-      # @return [Array<HktDirectiveEntry>] frozen snapshot of the accumulated hkt-directive failures.
+      # @return frozen snapshot of the accumulated hkt-directive failures.
       def hkt_directive_errors
         @mutex.synchronize { @hkt_directive_errors.dup.freeze }
       end

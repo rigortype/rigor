@@ -51,7 +51,7 @@ module Rigor
           @schedule_paths = schedule_paths
         end
 
-        # @return [Array<String>] the class names named by a `class:` key in a schedule entry, sorted and
+        # @return the class names named by a `class:` key in a schedule entry, sorted and
         #   unique. NOT yet intersected with the discovered workers — the caller does that.
         def worker_names
           names = Set.new

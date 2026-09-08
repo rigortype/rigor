@@ -66,8 +66,8 @@ module Rigor
 
         module_function
 
-        # @param skip [Array<Symbol>] controller names the project omits via `skip_controllers :name, ...`.
-        # @return [Array<HelperTable::Entry>] flattened entries.
+        # @param skip — controller names the project omits via `skip_controllers :name, ...`.
+        # @return flattened entries.
         def generate(skip: [])
           skip_set = skip.to_set(&:to_sym)
           CONTROLLER_HELPERS.flat_map do |controller, rows|

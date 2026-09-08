@@ -52,7 +52,7 @@ module Rigor
       HANDBOOK_ROOT = File.join(DOCS_ROOT, "handbook")
       LLMS_INDEX = File.join(DOCS_ROOT, "llms.txt")
 
-      # @return [Integer] CLI exit status.
+      # @return CLI exit status.
       def run
         case @argv.first
         when nil
@@ -136,7 +136,7 @@ module Rigor
       # Resolve a query to a single doc. Exact relative-path and prefixed-basename aliases are unique; a short
       # (prefix-stripped) name is accepted only when one category owns it.
       #
-      # @return [Hash, Integer] the doc entry, or an error exit status
+      # @return the doc entry, or an error exit status
       #   after the error has been written to `@err`.
       def resolve_doc(query)
         # A key printed by a rendered page may carry the section it pointed at; resolve the page and say

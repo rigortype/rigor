@@ -30,8 +30,8 @@ module Rigor
 
         module_function
 
-        # @param contents [String] raw file contents.
-        # @return [Symbol] one of {VALID_LEVELS}; defaults to {DEFAULT_LEVEL} for sigil-less or
+        # @param contents — raw file contents.
+        # @return one of {VALID_LEVELS}; defaults to {DEFAULT_LEVEL} for sigil-less or
         #   malformed-sigil files.
         def detect(contents)
           return DEFAULT_LEVEL if contents.nil? || contents.empty?
@@ -52,14 +52,13 @@ module Rigor
           DEFAULT_LEVEL
         end
 
-        # @param level [Symbol]
-        # @return [Boolean] true when `# typed: ignore`. The harvest pipeline calls this to short-circuit
+        # @return true when `# typed: ignore`. The harvest pipeline calls this to short-circuit
         #   walking the file's AST.
         def ignored?(level)
           level == :ignore
         end
 
-        # @return [Boolean] true when `level` is at or above the `# typed: true` mark. Used by the
+        # @return true when `level` is at or above the `# typed: true` mark. Used by the
         #   `enforce_sigil` config gate (default `true`): with the gate on, only files marked `:true` /
         #   `:strict` / `:strong` contribute their sigs to the catalog. The `:false` (and sigil-less)
         #   levels still get walked (so RBI files outside the project can be loaded regardless), but their

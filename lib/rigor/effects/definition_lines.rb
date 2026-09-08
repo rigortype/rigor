@@ -30,9 +30,9 @@ module Rigor
       NO_LINES = {}.freeze
       private_constant :NO_LINES
 
-      # @param key [String] an effect unit key — `Tracer::Loud#emit`, `Net::HTTP.get`.
-      # @param path [String] the file the key was traced to.
-      # @return [Integer, nil] the `def`'s line, or nil when this file does not spell that key with a
+      # @param key — an effect unit key — `Tracer::Loud#emit`, `Net::HTTP.get`.
+      # @param path — the file the key was traced to.
+      # @return the `def`'s line, or nil when this file does not spell that key with a
       #   `def` — an unreadable file, a syntax error, and a synthesized method all land here.
       def for(key:, path:)
         index_for(path)[key]

@@ -18,7 +18,7 @@ module Rigor
     # for every `Prism::CallNode` whose receiver types as a `Type::Nominal`. The {Generator} consumes the
     # resulting map to render `--params=observed` RBS:
     #
-    # @return [Hash{[class_name, method_name] => Array<Array<Rigor::Type>>}]
+    # @return => Array<Array<Rigor::Type>>}]
     #
     # ADR-5 clause 2 compliance: the observed union is the MOST PERMISSIVE parameter contract the existing
     # callers prove sufficient — by construction it accepts every type any caller has already passed. The
@@ -32,10 +32,9 @@ module Rigor
     #   the collector cannot attribute them to a specific class.
     # - Zero-argument calls give no observation; methods are matched by `(class_name, method_name)` only.
     class ObservationCollector # rubocop:disable Metrics/ClassLength
-      # @param configuration [Rigor::Configuration]
-      # @param paths [Array<String>] observe paths (files /
+      # @param paths — observe paths (files /
       #   directories).
-      # @param source_paths [Array<String>] source-tree paths
+      # @param source_paths — source-tree paths
       #   (defaults to `configuration.paths`) pre-walked to
       #   register every project-defined class so that calls
       #   like `Foo.new.bar(x)` in the observe tree resolve

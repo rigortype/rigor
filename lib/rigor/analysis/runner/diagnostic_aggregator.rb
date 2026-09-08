@@ -22,29 +22,25 @@ module Rigor
       # end-of-pass snapshots) is read through injected reader procs so this collaborator never calls back
       # into the {Runner} and the read happens at the exact point in the run the original inline read did.
       class DiagnosticAggregator # rubocop:disable Metrics/ClassLength
-        # @param configuration [Rigor::Configuration]
-        # @param rbs_extended_reporter [RbsExtended::Reporter]
-        # @param boundary_cross_reporter [DependencySourceInference::BoundaryCrossReporter]
-        # @param source_rbs_synthesis_reporter [Plugin::SourceRbsSynthesisReporter]
-        # @param plugin_registry [#call] reader returning the current {Plugin::Registry} (varies per run).
-        # @param dependency_source_index [#call] reader returning the current
+        # @param plugin_registry — reader returning the current {Plugin::Registry} (varies per run).
+        # @param dependency_source_index — reader returning the current
         #   {DependencySourceInference::Index}.
-        # @param pool_mode [#call] reader returning the pool-mode flag.
-        # @param cached_plugin_prepare_diagnostics [#call] reader returning the prepare-diagnostic snapshot.
-        # @param pre_eval_diagnostics_from_scanner [#call] reader returning the pre-eval scanner diagnostics.
-        # @param synthesized_namespaces_snapshot [#call] reader.
-        # @param quarantined_signatures_snapshot [#call] reader returning the `signature_paths:` files skipped
+        # @param pool_mode — reader returning the pool-mode flag.
+        # @param cached_plugin_prepare_diagnostics — reader returning the prepare-diagnostic snapshot.
+        # @param pre_eval_diagnostics_from_scanner — reader returning the pre-eval scanner diagnostics.
+        # @param synthesized_namespaces_snapshot — reader.
+        # @param quarantined_signatures_snapshot — reader returning the `signature_paths:` files skipped
         #   because they do not parse (`[path, first_error_line]` pairs).
-        # @param env_build_failure_snapshot [#call] reader returning the total RBS env-build failure tuple
+        # @param env_build_failure_snapshot — reader returning the total RBS env-build failure tuple
         #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
-        # @param definition_build_failures_snapshot [#call] issue #696 — reader returning the per-class
+        # @param definition_build_failures_snapshot — issue #696 — reader returning the per-class
         #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
         #   conflicting_buffer_names]` tuples. Empty for a healthy sig set.
-        # @param hkt_scan_failure_snapshot [#call] issue #784 — reader returning the `[error_class_name,
+        # @param hkt_scan_failure_snapshot — issue #784 — reader returning the `[error_class_name,
         #   first_message_line, raw_frame_or_nil, stage]` tuple whichever stage of the HKT-registry build
         #   raised, or nil when both built (or were never demanded). `stage` is `:scan` (the RBS `type`-alias
         #   scan) or `:overlay` (the plugin-manifest aggregation, #791), and picks the row's wording.
-        # @param conformance_results_snapshot [#call] reader.
+        # @param conformance_results_snapshot — reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
                        pool_mode:, cached_plugin_prepare_diagnostics:,

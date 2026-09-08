@@ -29,24 +29,14 @@ module Rigor
       # delegated back through an injected `analyze_file` callable so the CheckRules / recorder /
       # plugin-emission machinery stays on the {Runner}.
       class PoolCoordinator # rubocop:disable Metrics/ClassLength
-        # @param configuration [Rigor::Configuration]
-        # @param cache_store [Rigor::Cache::Store, nil]
-        # @param explain [Boolean]
-        # @param workers [Integer]
-        # @param collect_stats [Boolean]
-        # @param buffer [BufferBinding, nil]
-        # @param environment_override [Rigor::Environment, nil]
-        # @param rbs_extended_reporter [RbsExtended::Reporter]
-        # @param boundary_cross_reporter [DependencySourceInference::BoundaryCrossReporter]
-        # @param source_rbs_synthesis_reporter [Plugin::SourceRbsSynthesisReporter]
-        # @param snapshots [RunSnapshots] shared end-of-pass snapshot sink.
-        # @param plugin_registry [#call] reader for the current registry.
-        # @param dependency_source_index [#call] reader.
-        # @param synthetic_method_index [#call] reader.
-        # @param project_patched_methods [#call] reader.
-        # @param project_scope_seed [#call] reader for the cross-file pre-pass seed tables
+        # @param snapshots — shared end-of-pass snapshot sink.
+        # @param plugin_registry — reader for the current registry.
+        # @param dependency_source_index — reader.
+        # @param synthetic_method_index — reader.
+        # @param project_patched_methods — reader.
+        # @param project_scope_seed — reader for the cross-file pre-pass seed tables
         #   (`Runner#project_scope_seed_tables`).
-        # @param analyze_file [#call] `(path, environment) -> diagnostics`.
+        # @param analyze_file — `(path, environment) -> diagnostics`.
         def initialize(configuration:, cache_store:, explain:, workers:, collect_stats:, # rubocop:disable Metrics/ParameterLists
                        buffer:, environment_override:, rbs_extended_reporter:,
                        boundary_cross_reporter:, source_rbs_synthesis_reporter:,
@@ -115,7 +105,7 @@ module Rigor
         # sources. The env stays a LOCAL variable (not an ivar) so it goes GC-eligible when the method
         # returns — holding it as long-lived state added memory pressure that surfaced as a Bus Error
         # during the spec suite under Ruby 4.0 + rbs 4.0.2.
-        # @param project_files [Array<String>, nil] issue #784 — the WHOLE project's analyzed file set
+        # @param project_files — issue #784 — the WHOLE project's analyzed file set
         #   (`expansion.fetch(:files)`), independent of any `analyze_only` narrowing of `files`. Read only
         #   when `files` is empty, to decide whether anyone could have demanded the HKT registry at all.
         def analyze_files(files, environment: nil, project_files: nil)
@@ -279,7 +269,7 @@ module Rigor
         # An effects run (ADR-103 WD13) is pinned for exactly the same reason — the Ractor messages carry
         # no side-table channel — and degrades the same way. The degrade is sound rather than merely safe:
         # the sequential fallback still collects, so the effect graph is complete either way.
-        # @param source_files [Array<String>] the file list every worker's / the fallback's environment is
+        # @param source_files — the file list every worker's / the fallback's environment is
         #   built over — the whole project (issue #793), defaulting to `files` for direct callers.
         def dispatch_pool(files, source_files: files)
           if @record_dependencies || @record_effects
@@ -640,7 +630,7 @@ module Rigor
           degraded
         end
 
-        # @return [Hash, nil] the child's `{results:, reporters:}` payload, or nil when the child exited
+        # @return the child's `{results:, reporters:}` payload, or nil when the child exited
         #   abnormally or wrote no readable payload. `Marshal.load` is safe here: the blob was written by
         #   our own forked child to a temp file we created.
         def fork_worker_payload(status, out_path)
@@ -692,7 +682,7 @@ module Rigor
         # than by which reads happen to be made. The dispatch-only per-run state (the dependency-source
         # index, the synthetic-method / project-patched indexes) is withheld for the same reason: nothing
         # here dispatches.
-        # @param source_files [Array<String>] the WHOLE project's file list, never the analyzed subset.
+        # @param source_files — the WHOLE project's file list, never the analyzed subset.
         def prewarm_rbs_cache_for_pool(source_files:)
           warm_env = Environment.for_project(
             libraries: @configuration.libraries,
@@ -714,7 +704,7 @@ module Rigor
         # (currently: `--no-cache` would force workers through `EnvironmentLoader.new`), degrade to
         # sequential analysis with a `:warning` `pool-degraded` diagnostic at run start. The actual
         # per-file analysis runs on the coordinator, identical to the default sequential path.
-        # @param source_files [Array<String>] issue #793 — the whole project, so this path's environment
+        # @param source_files — issue #793 — the whole project, so this path's environment
         #   carries the same plugin-synthesized RBS the pool workers' would. It used to build over `[]`,
         #   i.e. with no synthesized RBS at all, even on a full run.
         def analyze_files_sequentially_fallback(files, reason:, source_files: files)
@@ -856,8 +846,7 @@ module Rigor
         # build on a project with no files (see {#analyze_files}). Memoised, so on a reused Environment
         # this is a hash read.
         #
-        # @param environment [Rigor::Environment, nil]
-        # @return [Array, nil] the recorded tuple, or nil (no environment, or the scan built)
+        # @return the recorded tuple, or nil (no environment, or the scan built)
         def hkt_scan_outcome(environment)
           return nil if environment.nil?
 

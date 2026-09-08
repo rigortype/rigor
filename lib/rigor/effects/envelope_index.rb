@@ -56,15 +56,13 @@ module Rigor
 
       # Reads every stratum this index serves, once per process.
       #
-      # @param configuration [Rigor::Configuration]
-      # @param plugin_facts [Rigor::Effects::PluginFacts, nil] the loaded plugins' effect contributions
+      # @param plugin_facts — the loaded plugins' effect contributions
       #   (#387); their `effect_labels:` join the vocabulary an annotation is read against, so a gem's
       #   `%a{rigor:v1:effect rails.activejob.enqueue}` resolves rather than reading as unknown.
-      # @param environment [Rigor::Environment, nil] the run's environment. Its loader supplies the
+      # @param environment — the run's environment. Its loader supplies the
       #   rbs-inline / plugin `virtual_rbs` buffers and the built RBS environment the accepted stratum is
       #   read from; without one, both are simply absent (the fail-quiet direction — a missing `≤` bound
       #   costs precision, never a finding).
-      # @return [EnvelopeIndex]
       def self.build(configuration:, environment: nil, plugin_facts: nil)
         # Required here rather than at the top of the file: the reader pulls in the whole
         # `RbsExtended` surface, and this build runs only under an `effects:` block.
@@ -122,10 +120,9 @@ module Rigor
 
       # The envelope bounding `owner`'s `selector`, or nil.
       #
-      # @param owner [String] the receiver's static class name, as the typer projected it
-      # @param singleton [Boolean] whether the call is `Owner.selector` rather than `Owner#selector`
-      # @param selector [String]
-      # @return [Envelope, nil] never a ⊤ envelope: a bound that bounds nothing is not a bound, and
+      # @param owner — the receiver's static class name, as the typer projected it
+      # @param singleton — whether the call is `Owner.selector` rather than `Owner#selector`
+      # @return never a ⊤ envelope: a bound that bounds nothing is not a bound, and
       #   importing it would both add nothing and discharge a taint on the strength of a typo.
       def [](owner, singleton, selector)
         return nil if owner.nil? || empty?

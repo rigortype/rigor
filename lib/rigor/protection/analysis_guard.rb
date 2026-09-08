@@ -43,10 +43,10 @@ module Rigor
       # {Analysis::Result#crashed?} — the same predicate the spec-side guard reads, off the same
       # {Analysis::CrashSignature} table. Hands back the diagnostics, which is all a kill comparison wants.
       #
-      # @param result [Rigor::Analysis::Result] one analysis run.
-      # @param context [String] which oracle call produced it, so the raise points at the right seam.
-      # @return [Array<Rigor::Analysis::Diagnostic>] the run's diagnostics, when the run was healthy.
-      # @raise [AnalyzerCrashed]
+      # @param result — one analysis run.
+      # @param context — which oracle call produced it, so the raise points at the right seam.
+      # @return the run's diagnostics, when the run was healthy.
+      # @raise AnalyzerCrashed —
       def checked(result, context:)
         return result.diagnostics unless result.crashed?
 

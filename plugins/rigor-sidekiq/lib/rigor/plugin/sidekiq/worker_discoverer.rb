@@ -33,7 +33,6 @@ module Rigor
           @marker_modules = marker_modules.to_set { |name| strip_root(name.to_s) }
         end
 
-        # @return [WorkerIndex]
         def discover
           candidates = []
           ruby_files_under(@search_paths).each do |path|

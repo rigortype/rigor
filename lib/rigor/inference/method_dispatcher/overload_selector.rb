@@ -64,21 +64,20 @@ module Rigor
         }.freeze
         private_constant :ALIAS_STRICT_NOMINALS
 
-        # @param method_definition [RBS::Definition::Method]
-        # @param arg_types [Array<Rigor::Type>] caller-provided types in positional order. Empty when
+        # @param arg_types — caller-provided types in positional order. Empty when
         #   there are no arguments.
-        # @param self_type [Rigor::Type] substitute for `Bases::Self`.
-        # @param instance_type [Rigor::Type] substitute for `Bases::Instance`.
-        # @param type_vars [Hash{Symbol => Rigor::Type}] substitution map for class-level type variables
+        # @param self_type — substitute for `Bases::Self`.
+        # @param instance_type — substitute for `Bases::Instance`.
+        # @param type_vars — substitution map for class-level type variables
         #   (Slice 4 phase 2d). The selector threads it through to {RbsTypeTranslator} so parameter types
         #   like `::Array[Elem]` substitute Elem before the accepts check, instead of degrading the param
         #   to `Array[Dynamic[Top]]`.
-        # @param block_required [Boolean] when `true`, only overloads that declare a block clause are
+        # @param block_required — when `true`, only overloads that declare a block clause are
         #   considered (Slice 6 phase C sub-phase 1). The fallback also prefers a block-bearing overload
         #   over `method_types.first`. When `false` (the Slice 4 phase 2c default) the selector behaves
         #   exactly as before: `find` over arity-compatible overloads, falling back to the first
         #   declaration.
-        # @return [RBS::MethodType, nil] the chosen overload, or nil when the definition has no method
+        # @return the chosen overload, or nil when the definition has no method
         #   types at all.
         def select(method_definition, **) = select_candidates(method_definition, **).first
 
@@ -91,7 +90,7 @@ module Rigor
         # alias-resolved, typed-gradual, arity fallback) still yields exactly one candidate, so `select`
         # keeps its historical single answer.
         #
-        # @return [Array<RBS::MethodType>] matching overloads; empty when the definition declares none.
+        # @return matching overloads; empty when the definition declares none.
         def select_candidates(method_definition, arg_types:, self_type:, instance_type:, type_vars: {},
                               block_required: false, environment: nil)
           overloads = method_definition.method_types

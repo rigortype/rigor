@@ -145,6 +145,21 @@ flow is the `rigor-release-prep` skill.
   [ADR-28](docs/adr/28-path-scoped-protocol-contracts.md)'s path-scoped behavioural contract. Check
   [`CONTEXT.md`](CONTEXT.md) before using either.
 
+## Types and Comments
+
+**A type that Rigor did not produce or check is not written down.** To learn a type, ask Rigor
+(`rigor type-of`, `rigor annotate`, `rigor sig-gen --print`), never the surrounding code or a comment.
+Types live in `sig/` (checked by `make check`) or are inferred. In `.rb` files a comment never carries
+a type: doc tags are typeless YARD with an em dash after the name token (`@param name — description`,
+`@raise ExceptionClass — description`, `@return description`), and `#:` / `# @rbs` never appear under `lib/`, `plugins/*/lib`,
+or `examples/*/lib` — the product default ([ADR-93](docs/adr/93-default-rbs-inline-ingestion.md))
+would ingest them as live contracts. Gate: `spec/docs/type_shaped_comments_spec.rb`. A comment states
+what the next lines and the signature do not — why (an ADR, an issue, a false-positive bound, a
+declined alternative), a constraint the type system cannot express, what `nil` means — and never
+restates a name, a type, or a signature. Why:
+[ADR-107](docs/adr/107-checked-types-and-typeless-comments.md); the agent-facing form Rigor ships to
+adopting projects: [ADR-108](docs/adr/108-type-provenance-for-agents.md).
+
 ## RBS Authorship
 
 **Prefer `rigor sig-gen` over hand-written or AI-authored RBS here** — a gap that pushes you toward
@@ -153,7 +168,8 @@ signal**. Propose `sig-gen --print` / `--diff` first; land a hand-edit only once
 that alternative. Correcting existing `.rbs` is fine when authorised, and reading it always is.
 Rationale, the contradiction rule, and the full policy: [ADR-14](docs/adr/14-rbs-sig-generation.md).
 
-Outside this repository, treat AI-authored RBS normally.
+Outside this repository, the shipped `rigor-type-oracle` skill carries the same rule for projects that
+adopt it; where it is not adopted, treat AI-authored RBS normally.
 
 ## Repository Layout
 

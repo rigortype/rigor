@@ -23,7 +23,6 @@ module Rigor
           @frozen_after_build = false
         end
 
-        # @param signature [MethodSignature]
         def record(signature)
           raise "Catalog already finalised" if @frozen_after_build
 
@@ -31,10 +30,9 @@ module Rigor
           @entries[key] = signature
         end
 
-        # @param class_name [String] the class / module that carries the mixin (`class Post; include Foo;
+        # @param class_name — the class / module that carries the mixin (`class Post; include Foo;
         #   end` records under `"Post"`).
-        # @param kind [:include, :extend]
-        # @param module_name [String] the textual name of the mixed-in module as it appeared at the
+        # @param module_name — the textual name of the mixed-in module as it appeared at the
         #   include / extend site (`"Foo"`, `"Foo::Bar"`, `"::Foo"`).
         def record_mixin(class_name:, kind:, module_name:)
           raise "Catalog already finalised" if @frozen_after_build
@@ -55,13 +53,11 @@ module Rigor
           freeze
         end
 
-        # @return [MethodSignature, nil]
         def lookup(class_name:, method_name:, kind:)
           @entries[key_for(class_name, method_name, kind)]
         end
 
-        # @param class_name [String]
-        # @return [Hash{Symbol => Array<String>}] frozen mapping `{ include: [...], extend: [...] }`.
+        # @return frozen mapping `{ include: [...], extend: [...] }`.
         #   Returns {EMPTY_MIXINS} when no mixins were recorded.
         def mixins_for(class_name)
           @mixins[class_name] || EMPTY_MIXINS
@@ -77,8 +73,6 @@ module Rigor
         # static assertion vocabulary), and the precise `(class, kind)` lookup stays in the rule block.
         # Computed fresh per call — the plugin memoises the resolved set, and `freeze!` freezes the
         # catalog itself so a lazy memo ivar here would raise.
-        #
-        # @return [Array<Symbol>]
         def method_names
           @entries.keys.map { |key| key[1] }.uniq
         end

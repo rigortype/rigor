@@ -25,7 +25,7 @@ module Rigor
       module IteratorDispatch
         module_function
 
-        # @return [Array<Rigor::Type>, nil] block-param types, or
+        # @return block-param types, or
         #   nil to fall through to the next tier.
         def block_param_types(context)
           receiver = context.receiver

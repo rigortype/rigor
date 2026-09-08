@@ -58,8 +58,7 @@ module Rigor
                   "every run of the project."
         private_constant :MESSAGE
 
-        # @param configuration [Rigor::Configuration]
-        # @param virtual_rbs [Array<Array(String, String)>, nil] `[buffer name, RBS source]` pairs the
+        # @param virtual_rbs — `[buffer name, RBS source]` pairs the
         #   run ALREADY resolved; never a loader built for this pass. Empty / nil simply drops the
         #   virtual-RBS stratum.
         def initialize(configuration:, virtual_rbs: nil)
@@ -67,7 +66,7 @@ module Rigor
           @virtual_rbs = virtual_rbs
         end
 
-        # @return [Array<Diagnostic>] zero or one.
+        # @return zero or one.
         def diagnostics
           return NO_DIAGNOSTICS if @configuration.effects_enabled?
           return NO_DIAGNOSTICS if @configuration.disabled_rules.include?(RULE)

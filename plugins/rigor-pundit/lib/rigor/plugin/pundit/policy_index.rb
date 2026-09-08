@@ -35,7 +35,6 @@ module Rigor
           freeze
         end
 
-        # @return [Entry, nil]
         def find(policy_class_name)
           @by_name[policy_class_name.to_s]
         end

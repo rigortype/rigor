@@ -70,11 +70,11 @@ module Rigor
 
         module_function
 
-        # @param resource [String, Symbol] the `devise_for` argument — typically `:users`. Used as both the
+        # @param resource — the `devise_for` argument — typically `:users`. Used as both the
         #   helper-name segment (`new_user_session_path`) and to derive the resource path.
-        # @param skip [Array<Symbol>] controllers the project disables via `devise_for :users, skip:
+        # @param skip — controllers the project disables via `devise_for :users, skip:
         #   [:registrations]`.
-        # @return [Array<HelperTable::Entry>] one entry per generated `_path` helper. The caller is
+        # @return one entry per generated `_path` helper. The caller is
         #   expected to pair `_url` variants the same way `RoutesParser` does for other entries.
         def generate(resource:, skip: [])
           resource_segment = singularize(resource.to_s)

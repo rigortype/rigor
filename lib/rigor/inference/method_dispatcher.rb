@@ -54,19 +54,18 @@ module Rigor
     module MethodDispatcher # rubocop:disable Metrics/ModuleLength
       module_function
 
-      # @param receiver_type [Rigor::Type, nil] type of the receiver expression, or
+      # @param receiver_type — type of the receiver expression, or
       #   `nil` for an implicit-self call.
-      # @param method_name [Symbol]
-      # @param arg_types [Array<Rigor::Type>] positional argument types.
-      # @param block_type [Rigor::Type, nil] inferred return type of the
+      # @param arg_types — positional argument types.
+      # @param block_type — inferred return type of the
       #   accompanying `do ... end` / `{ ... }` block (Slice 6 phase C
       #   sub-phase 2). When non-nil, the dispatcher prefers an
       #   overload that declares a block, and binds the method's
       #   block-return type variable to `block_type` so a return type
       #   like `Array[U]` resolves to `Array[block_type]`.
-      # @param environment [Rigor::Environment, nil] required for
+      # @param environment — required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
-      # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
+      # @return inferred result type, or `nil` for "no rule".
       def dispatch(receiver_type:, method_name:, arg_types:,
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)
@@ -1354,12 +1353,6 @@ module Rigor
       # method definition, or selected overload does not provide statically declared block
       # parameter types. Callers MUST treat the empty array as "no information"; the binder
       # falls back to `Dynamic[Top]` for every parameter slot in that case.
-      #
-      # @param receiver_type [Rigor::Type, nil]
-      # @param method_name [Symbol]
-      # @param arg_types [Array<Rigor::Type>]
-      # @param environment [Rigor::Environment, nil]
-      # @return [Array<Rigor::Type>]
       def expected_block_param_types(receiver_type:, method_name:, arg_types:, environment: nil)
         return [] if receiver_type.nil?
 

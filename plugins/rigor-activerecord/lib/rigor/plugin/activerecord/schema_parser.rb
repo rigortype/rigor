@@ -45,8 +45,7 @@ module Rigor
           unique_constraint foreign_key primary_keys
         ].freeze
 
-        # @param source [String] contents of `db/schema.rb`
-        # @return [SchemaTable]
+        # @param source — contents of `db/schema.rb`
         def self.parse(source)
           tree = Prism.parse(source).value
           new.parse(tree)

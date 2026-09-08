@@ -16,12 +16,12 @@ module Rigor
         @value = nil
       end
 
-      # @param value [Array] a Marshal-clean tuple — the fork pool ships it back from the worker.
+      # @param value — a Marshal-clean tuple — the fork pool ships it back from the worker.
       def record(value)
         @value = value.freeze if @value.nil?
       end
 
-      # @return [Array, nil] the recorded tuple, or nil when the build never failed.
+      # @return the recorded tuple, or nil when the build never failed.
       attr_reader :value
     end
   end

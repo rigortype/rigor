@@ -25,10 +25,6 @@ module Rigor
 
         # The job-call violations for a single call node (0..2), or `[]` when the node is not a
         # `<Job>.perform_*` entry call on a known job. ADR-37: the engine owns the walk.
-        #
-        # @param call_node [Prism::Node]
-        # @param job_index [JobIndex]
-        # @return [Array<Violation>]
         def violations_for(call_node:, job_index:)
           return [] unless call_node.is_a?(Prism::CallNode) && entry_call?(call_node)
 

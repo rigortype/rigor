@@ -39,8 +39,6 @@ module Rigor
         # never `"::WelcomeWorker"`; see {WorkerDiscoverer}), while a QUERY may legitimately arrive rooted:
         # `::WelcomeWorker.perform_async(1)` renders its receiver as `"::WelcomeWorker"`. The root marker is
         # dropped here, once, so no caller needs a `find(name) || find("::#{name}")` retry (#621).
-        #
-        # @return [Entry, nil]
         def find(class_name)
           @by_name[strip_leading_namespace(class_name.to_s)]
         end

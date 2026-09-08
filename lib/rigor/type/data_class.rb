@@ -24,8 +24,8 @@ module Rigor
     class DataClass
       attr_reader :members, :class_name
 
-      # @param members [Array<Symbol>] ordered member names.
-      # @param class_name [String, nil] the bound class name, or nil for
+      # @param members — ordered member names.
+      # @param class_name — the bound class name, or nil for
       #   the anonymous `Data.define(...)` result.
       def initialize(members, class_name = nil)
         unless members.is_a?(Array) && members.all?(Symbol)

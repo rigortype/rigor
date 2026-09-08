@@ -106,8 +106,6 @@ module Rigor
       # e.g. `node.body`). Pure and re-entrant; `break` / `next` / `return` in the block behave exactly as they
       # would with `compact_child_nodes.each`. Walkers holding a known `Prism::Node` call `#rigor_each_child`
       # directly; this wrapper is the nil-tolerant entry.
-      #
-      # @yieldparam child [Prism::Node]
       def each_child(node, &)
         node.rigor_each_child(&) if node.is_a?(Prism::Node)
       end

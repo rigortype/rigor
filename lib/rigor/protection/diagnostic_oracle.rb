@@ -17,7 +17,7 @@ module Rigor
     # disk write). Passing `prebuilt:` disables the run-result cache (whose key digests the *disk* file), so a
     # mutant is never served a stale clean hit.
     class DiagnosticOracle
-      # @param discovery_seed [Hash, nil] issue #260 — the cross-file discovery tables (see {DiscoverySeed})
+      # @param discovery_seed — issue #260 — the cross-file discovery tables (see {DiscoverySeed})
       #   the per-mutant analysis is seeded with, threaded through to `Runner.new(discovery_seed:)`. Without
       #   it the runner's `prebuilt:` path carries frozen-empty discovery tables, so a receiver whose class is
       #   declared in a *sibling* file reads `Dynamic` and NO mutation at that site can produce a diagnostic —

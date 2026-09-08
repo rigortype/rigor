@@ -91,22 +91,10 @@ module Rigor
           RAILS_SHIPPED_KEY_PREFIXES.any? { |prefix| key_str.start_with?(prefix) }
         end
 
-        # @param path [String]
-        # @param root [Prism::Node]
-        # @param locale_index [LocaleIndex]
-        # @param configured_locales [Array<String>]
-        # @return [Array<Diagnostic>]
         # The translation violations for a single call node, or `[]` when it is not a recognised `t` /
         # `translate` call with a literal key. ADR-37: the engine owns the walk; `action` (the enclosing
         # method, for lazy `t('.key')` expansion) comes from the node-rule `NodeContext`, and
         # `controller_scope` from the file path.
-        #
-        # @param call_node [Prism::Node]
-        # @param locale_index [LocaleIndex]
-        # @param configured_locales [Array<String>]
-        # @param controller_scope [String, nil]
-        # @param action [String, nil]
-        # @return [Array<Violation>]
         def violations_for(call_node:, locale_index:, configured_locales:, controller_scope:, action:)
           return [] unless call_node.is_a?(Prism::CallNode) && translate_call_candidate?(call_node)
 

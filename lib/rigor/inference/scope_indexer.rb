@@ -50,17 +50,17 @@ module Rigor
 
       # Build the scope index for a Prism program subtree.
       #
-      # @param root [Prism::Node] usually a `Prism::ProgramNode`, but any
+      # @param root — usually a `Prism::ProgramNode`, but any
       #   subtree the caller wants the indexer to walk works.
-      # @param default_scope [Rigor::Scope] the scope used for the root,
+      # @param default_scope — the scope used for the root,
       #   and the fallback returned for any Prism node not contained in
       #   `root`'s subtree.
-      # @param converged_loop_recording [Boolean] display-path flag —
+      # @param converged_loop_recording — display-path flag —
       #   when true the evaluator re-records fixpoint-tracked loop
       #   bodies from their CONVERGED bindings so per-line probes
       #   (`rigor annotate`) reflect the post-writeback state, not the
       #   cap-N intermediate constants. Off for the check path.
-      # @return [Hash{Prism::Node => Rigor::Scope}] identity-comparing
+      # @return identity-comparing
       #   table whose default value is `default_scope`.
       def index(root, default_scope:, converged_loop_recording: false) # rubocop:disable Metrics/AbcSize
         # Slice A-declarations. Build the declaration overrides first so every scope handed to the StatementEvaluator
@@ -1476,7 +1476,7 @@ module Rigor
       # is a known in-place mutator (`MutationWidening`'s tables) or a plain attribute/index writer
       # (`name=` / `[]=`). Non-mutating reads never register, so `VERSION`-style constants keep their fold.
       #
-      # @return [Hash{Symbol => Object}] `:constants` — a Set of candidate qualified names (each mutation
+      # @return `:constants` — a Set of candidate qualified names (each mutation
       #   contributes every lexical-resolution candidate, `A::B::C` outward to bare `C`, mirroring how the
       #   reads resolve); `:cvars` — `{class_name => Set[Symbol]}`.
       def collect_literal_receiver_mutations(root)
@@ -2450,7 +2450,7 @@ module Rigor
       # the enclosing cref — `[]` for the first spelling, `["Admin"]` for the second. A class reopened under two
       # spellings keeps the LAST one walked, matching how `superclasses` itself merges.
       #
-      # @return [Array(Hash{String=>String}, Hash{String=>Array[String]})] `[superclasses, header_nestings]`
+      # @return })] `[superclasses, header_nestings]`
       def build_superclass_tables(root, source_path = nil)
         accumulator = { superclasses: {}, header_nestings: {} }
         walk_class_superclasses(root, [], accumulator, source_path)
@@ -3190,9 +3190,7 @@ module Rigor
       # `Singleton[Object]` fallback anyway. The residual leak is `Class`-only (`M.new`, `M.superclass`), which mistypes
       # only code that raises `NoMethodError` at runtime.
       #
-      # @param paths [Array<String>] project file paths.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      # @return [Hash{String => Rigor::Type::Singleton}]
+      # @param paths — project file paths.
       def discovered_classes_for_paths(paths, buffer: nil)
         accumulator = {}
         paths.each do |path|
@@ -3220,9 +3218,8 @@ module Rigor
       # monkey-patch on a core/stdlib/gem class is called cross-file (ADR-17). First write wins, matching `def_nodes`'
       # own merge order.
       #
-      # @param paths [Array<String>] project file paths.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      # @return [Hash{Symbol => Hash}]
+      # @param paths — project file paths.
+      # @return
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
@@ -3246,7 +3243,7 @@ module Rigor
       # all of them (recon §2 dedup). A per-file live index (built + folded, exactly as
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
       # reads their parameter structure from.
-      # @return [Hash{Symbol => Object}] `{ def_index:, code_fingerprints:, declaration_signatures: }`.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
@@ -3436,9 +3433,8 @@ module Rigor
       # rescue's real target) contributes nothing to either table. The subset-scoped callers
       # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
       #
-      # @param paths [Array<String>] project file paths.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      # @return [Hash{Symbol => Object}] `{ classes: Hash, def_index: Hash }`.
+      # @param paths — project file paths.
+      # @return `{ classes: Hash, def_index: Hash }`.
       def discovered_project_index_for_paths(paths, buffer: nil)
         classes = {}
         acc = new_def_index_accumulator
@@ -3468,10 +3464,9 @@ module Rigor
       # lazily. On a cold run (`seed_bundles` empty) every file is re-walked, so the index is entirely live —
       # identical to {#discovered_project_index_for_paths} — while the bundles are built for the next run.
       #
-      # @param paths [Array<String>] project file paths, in canonical order.
-      # @param seed_bundles [Hash{String => Hash}] the prior run's per-file bundles, keyed by logical path.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      # @return [Hash{Symbol => Object}] `{ classes:, def_index:, bundles: }`.
+      # @param paths — project file paths, in canonical order.
+      # @param seed_bundles — the prior run's per-file bundles, keyed by logical path.
+      # @return `{ classes:, def_index:, bundles: }`.
       def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil)
         classes = {}
         acc = new_def_index_accumulator
@@ -3983,7 +3978,7 @@ module Rigor
       # fold time) so the fold stays order-independent, which is what lets the ADR-85 incremental path re-fold
       # a changed file's contribution in place.
       #
-      # @return [Array(Hash, Hash)] `[{name => Type}, {name => Set[path]}]`.
+      # @return `[{name => Type}, {name => Set[path]}]`.
       def finalize_constant_writes(writes)
         values = {}
         sources = {}

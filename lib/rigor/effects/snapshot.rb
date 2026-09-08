@@ -117,12 +117,12 @@ module Rigor
       class << self
         # Builds the snapshot a run's effect table describes.
         #
-        # @param table [EffectTable] the propagated graph
-        # @param configuration [Rigor::Configuration] supplies the reach globs and the digested block
-        # @param sources [Hash{String=>Array<String>}] `Runner#effect_sources` — where each unit is defined
-        # @param full [Boolean] keep the rows {#omit?} drops
-        # @param registry [Registry] the vocabulary whose version the header carries
-        # @param project_root [String] what `sources` paths are relativised against for glob matching
+        # @param table — the propagated graph
+        # @param configuration — supplies the reach globs and the digested block
+        # @param sources — `Runner#effect_sources` — where each unit is defined
+        # @param full — keep the rows {#omit?} drops
+        # @param registry — the vocabulary whose version the header carries
+        # @param project_root — what `sources` paths are relativised against for glob matching
         def build(table:, configuration:, sources: {}, full: false, registry: Registry.default,
                   project_root: Dir.pwd)
           globs = expand_reach(configuration.effects_snapshot_reach)
@@ -146,10 +146,10 @@ module Rigor
         # It is built beside the snapshot and never inside it: the file stays flat and undischarged, and
         # this index exists only for the duration of one comparison ({SnapshotDiff}).
         #
-        # @param snapshot [Snapshot] the current side, already built
-        # @param table [EffectTable] the run that produced it
-        # @param discharge [Discharge] the policy
-        # @return [Hash, nil] nil when the policy discharges nothing, which is the common case
+        # @param snapshot — the current side, already built
+        # @param table — the run that produced it
+        # @param discharge — the policy
+        # @return nil when the policy discharges nothing, which is the common case
         def undischarged_index(snapshot:, table:, discharge:)
           return nil if discharge.inert?
 

@@ -186,7 +186,7 @@ module Rigor
           itself: :shape_self
         }.freeze
 
-        # @return [Rigor::Type, nil] the precise element/value type, or `nil` to defer to the next
+        # @return the precise element/value type, or `nil` to defer to the next
         #   dispatcher tier.
         # Per-carrier dispatch table. Adding a new carrier here is a one-row change; the helper methods
         # stay private. Anonymous Type subclasses are not expected.

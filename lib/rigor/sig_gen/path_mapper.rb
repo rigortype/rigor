@@ -21,9 +21,8 @@ module Rigor
     # When the source path is not under any configured source root (e.g. files supplied directly on the CLI
     # from outside `lib/`), the full relative path is preserved under the sig root.
     class PathMapper
-      # @param configuration [Rigor::Configuration]
-      # @param project_root [String, Pathname] (defaults to `Dir.pwd`)
-      # @param layout_index [LayoutIndex, nil] optional class
+      # @param project_root — (defaults to `Dir.pwd`)
+      # @param layout_index — optional class
       #   → existing sig file index; routes the target to the
       #   consolidated file when the class is already declared.
       def initialize(configuration:, project_root: Dir.pwd, layout_index: nil)
@@ -32,12 +31,11 @@ module Rigor
         @layout_index = layout_index
       end
 
-      # @param source_path [String]
-      # @param class_name [String, nil] fully-qualified Ruby
+      # @param class_name — fully-qualified Ruby
       #   class name. When supplied and matched by the
       #   `LayoutIndex`, the consolidated sig file's path is
       #   returned instead of the 1:1 mirror.
-      # @return [Pathname] absolute path of the target `.rbs`
+      # @return absolute path of the target `.rbs`
       #   file for the candidate.
       def target_for(source_path, class_name: nil)
         existing = existing_target_for(class_name)

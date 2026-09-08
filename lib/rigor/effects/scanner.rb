@@ -184,7 +184,7 @@ module Rigor
       # per unit (ADR-103 WD13): a unit the scanner cannot finish is recorded as non-exhaustive with
       # `collector-error` and its siblings are unaffected.
       #
-      # @return [UnitScan, nil] the finished scan, or nil when the unit failed soft
+      # @return the finished scan, or nil when the unit failed soft
       def add_unit(class_name, method_name, singleton, body, parameters)
         key = "#{class_name}#{singleton ? '.' : '#'}#{method_name}"
         names = parameter_names(parameters)

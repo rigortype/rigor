@@ -9,11 +9,11 @@ module Rigor
     # consistency, normalization, or erasure.
     #
     # @!attribute class_name
-    #   @return [String] the receiver class whose method declared `-> void`.
+    #   @return the receiver class whose method declared `-> void`.
     # @!attribute method_name
-    #   @return [Symbol] the method whose return was recovered.
+    #   @return the method whose return was recovered.
     # @!attribute kind
-    #   @return [Symbol] `:instance` or `:singleton`.
+    #   @return `:instance` or `:singleton`.
     VoidOrigin = Data.define(:class_name, :method_name, :kind) do
       # A human-facing `Class#method` / `Class.method` label for the diagnostic message.
       def label

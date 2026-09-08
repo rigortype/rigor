@@ -42,8 +42,6 @@ module Rigor
         # `"Admin::AccountsController"` — never `"::AccountsController"`; see {ControllerDiscoverer}),
         # while a QUERY may legitimately arrive rooted. The root marker is dropped at every lookup entry
         # point, once, so no caller needs a `find(name) || find("::#{name}")` retry (#621).
-        #
-        # @return [Entry, nil]
         def find(class_name)
           @entries[strip_leading_namespace(class_name)]
         end
@@ -84,7 +82,7 @@ module Rigor
           methods.uniq.freeze
         end
 
-        # @return [Boolean] true when the class has at least one include OR parent class we couldn't
+        # @return true when the class has at least one include OR parent class we couldn't
         #   resolve in the index (typically a gem-shipped concern such as Devise's
         #   `Devise::Controllers::Helpers`, or a gem-shipped parent controller such as
         #   `Devise::ConfirmationsController` or `Doorkeeper::AuthorizedApplicationsController`). Phase

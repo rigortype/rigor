@@ -22,9 +22,6 @@ module Rigor
     class RbsEnvironment < RbsCacheProducer
       PRODUCER_ID = "rbs.environment"
 
-      # @param loader [Rigor::Environment::RbsLoader]
-      # @param store [Rigor::Cache::Store]
-      # @return [::RBS::Environment]
       def self.compute(loader)
         Rigor::Environment::RbsLoader.build_env_for(
           libraries: loader.libraries,

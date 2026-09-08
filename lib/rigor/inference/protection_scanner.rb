@@ -37,8 +37,7 @@ module Rigor
         @scope = scope || Scope.empty
       end
 
-      # @param root [Prism::Node] the parsed AST
-      # @return [FileResult]
+      # @param root — the parsed AST
       def scan(root)
         index = ScopeIndexer.index(root, default_scope: @scope)
         protected_count = 0

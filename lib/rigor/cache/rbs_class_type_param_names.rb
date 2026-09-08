@@ -20,9 +20,6 @@ module Rigor
     class RbsClassTypeParamNames < RbsCacheProducer
       PRODUCER_ID = "rbs.class_type_param_names"
 
-      # @param loader [Rigor::Environment::RbsLoader]
-      # @param store [Rigor::Cache::Store]
-      # @return [Hash{String => Array<Symbol>}]
       def self.compute(loader)
         table = {}
         loader.each_known_class_name do |name|

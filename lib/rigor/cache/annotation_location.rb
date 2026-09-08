@@ -41,8 +41,7 @@ module Rigor
 
       module_function
 
-      # @param location [RBS::Location, nil]
-      # @return [Array, nil] `[name, start_line, start_column, end_line, end_column]`, or nil when there is
+      # @return `[name, start_line, start_column, end_line, end_column]`, or nil when there is
       #   no location to carry. Fail-soft: a location whose buffer cannot answer is dumped as nil rather
       #   than failing the whole environment's dump.
       def dump(location)
@@ -55,8 +54,7 @@ module Rigor
         nil
       end
 
-      # @param payload [Array, nil] what {dump} produced.
-      # @return [RBS::Location, nil]
+      # @param payload — what {dump} produced.
       def load(payload)
         return nil if payload.nil?
 

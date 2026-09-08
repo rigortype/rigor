@@ -37,12 +37,12 @@ module Rigor
     module MissingGemConstantIndex
       module_function
 
-      # @param gems [Enumerable<Array(String, String)>] `[gem_name, version]` pairs (the `:missing` rows of
+      # @param gems — `[gem_name, version]` pairs (the `:missing` rows of
       #   {RbsCoverageReport}).
-      # @param bundle_path [String, Pathname, nil] the target's resolved bundler install root, or nil.
-      # @param spec_resolver [#call] `(name, version) -> String?` fallback dir resolver. Injectable for
+      # @param bundle_path — the target's resolved bundler install root, or nil.
+      # @param spec_resolver — `(name, version) -> String?` fallback dir resolver. Injectable for
       #   specs; the default is the RubyGems-metadata lookup (no code load).
-      # @return [Hash{String => String}] frozen `root constant name => gem name`. On a collision (two gems
+      # @return frozen `root constant name => gem name`. On a collision (two gems
       #   declaring the same top-level constant) the first gem wins — the CAUSE recorded downstream
       #   (external gem without RBS) is true under either owner.
       def build(gems, bundle_path: nil, spec_resolver: method(:installed_gem_dir))

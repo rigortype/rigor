@@ -40,9 +40,6 @@ module Rigor
         # The matcher violation for a single CallNode, or nil when the node is not a
         # `have_http_status(<int|symbol>)` matcher or its argument is statically valid. ADR-37: the engine
         # owns the walk, so this is per-node logic — no traversal here.
-        #
-        # @param call_node [Prism::Node]
-        # @return [Violation, nil]
         def violation_for(call_node)
           return nil unless call_to_matcher?(call_node)
 

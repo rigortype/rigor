@@ -26,12 +26,12 @@ module Rigor
 
       module_function
 
-      # @param names [Array<Symbol>] the outer locals the body can rebind.
-      # @param seed_bindings [Hash{Symbol=>Type}] pre-state binding per name.
-      # @param widen [#call] value-pinned widener (Constant -> Nominal).
-      # @param evaluate_body [#call] `bindings -> exit_bindings` — evaluates the body once from `bindings`
+      # @param names — the outer locals the body can rebind.
+      # @param seed_bindings — pre-state binding per name.
+      # @param widen — value-pinned widener (Constant -> Nominal).
+      # @param evaluate_body — `bindings -> exit_bindings` — evaluates the body once from `bindings`
       #   (the per-name current assumption) and returns the per-name exit binding it produced.
-      # @return [Hash{Symbol=>Type}] the continuation binding per name.
+      # @return the continuation binding per name.
       def converge(names:, seed_bindings:, widen:, evaluate_body:)
         return {} if names.empty?
 

@@ -42,8 +42,6 @@ module Rigor
         # `"::WelcomeJob"`; see {JobDiscoverer}), while a QUERY may legitimately arrive rooted:
         # `::WelcomeJob.perform_later(1)` renders its receiver as `"::WelcomeJob"`. The root marker is
         # dropped here, once, so no caller needs a `find(name) || find("::#{name}")` retry (#621).
-        #
-        # @return [Entry, nil]
         def find(class_name)
           @by_name[strip_leading_namespace(class_name.to_s)]
         end

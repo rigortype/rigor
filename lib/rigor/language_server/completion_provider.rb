@@ -42,7 +42,7 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return [Array<Hash>, nil] LSP `CompletionItem[]` or nil
+      # @return LSP `CompletionItem[]` or nil
       #   when the cursor isn't at a position the provider can
       #   enumerate completions for. Returning nil maps to
       #   `result: null` per the LSP spec — clients treat it as

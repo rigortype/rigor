@@ -61,7 +61,7 @@ module Rigor
 
         module_function
 
-        # @param adapter [String, nil] the adapter the project declares, or nil when it declares none
+        # @param adapter — the adapter the project declares, or nil when it declares none
         #   (or more than one, across environments)
         def attributions(adapter)
           labels = (TRANSPORTS[adapter] || ["io"]) + MEANING

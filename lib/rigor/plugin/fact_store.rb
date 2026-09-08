@@ -42,9 +42,9 @@ module Rigor
       # Writes a `(plugin_id, name) -> value` triple. Idempotent if the same value is published twice (`==`);
       # raises {Conflict} if the values differ.
       #
-      # @param plugin_id [String] producing plugin's manifest id.
-      # @param name [Symbol, String] fact name (canonicalised to Symbol for lookup).
-      # @param value [Object] frozen-shape value object the producer chose to publish. The value is stored
+      # @param plugin_id — producing plugin's manifest id.
+      # @param name — fact name (canonicalised to Symbol for lookup).
+      # @param value — frozen-shape value object the producer chose to publish. The value is stored
       #   as-is.
       def publish(plugin_id:, name:, value:)
         plugin_id = plugin_id.to_s
@@ -60,19 +60,19 @@ module Rigor
         nil
       end
 
-      # @return [Object, nil] the published value, or `nil` when no fact is registered. Reads do NOT establish
+      # @return the published value, or `nil` when no fact is registered. Reads do NOT establish
       #   a dependency — `manifest(consumes:)` (slice 4) is the dependency declaration mechanism.
       def read(plugin_id:, name:)
         fact = @mutex.synchronize { @facts[[plugin_id.to_s, name.to_sym]] }
         fact&.value
       end
 
-      # @return [Boolean] whether a fact is registered.
+      # @return whether a fact is registered.
       def published?(plugin_id:, name:)
         @mutex.synchronize { @facts.key?([plugin_id.to_s, name.to_sym]) }
       end
 
-      # @yield [Fact] every published fact in publication order.
+      # @yield every published fact in publication order.
       def each_fact(&)
         snapshot = @mutex.synchronize { @facts.values }
         snapshot.each(&)

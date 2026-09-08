@@ -99,8 +99,6 @@ module Rigor
 
       attr_reader :registrations, :definitions
 
-      # @param registrations [Array<Registration>]
-      # @param definitions [Array<Definition>]
       def initialize(registrations: [], definitions: [])
         @registrations = registrations.to_h { |r| [r.uri, r] }.freeze
         @definitions = definitions.to_h { |d| [d.uri, d] }.freeze
@@ -123,7 +121,7 @@ module Rigor
         @definitions[uri]
       end
 
-      # @return [HktRegistry] a new registry whose entries are the union of this registry's and
+      # @return a new registry whose entries are the union of this registry's and
       #   `other`'s. On URI collisions `other`'s entries win (last-write-wins; OQ3 tentative).
       def merge(other)
         raise ArgumentError, "merge target must be an HktRegistry, got #{other.class}" unless other.is_a?(HktRegistry)
@@ -154,13 +152,12 @@ module Rigor
       # diagnostic; the other annotations still apply). That claim was false until issue #785: the
       # production reporter has no `#record`, so every declined directive was dropped silently.
       #
-      # @param rbs_loader [Rigor::Environment::RbsLoader]
-      # @param base [HktRegistry] starting registry (typically the bundled
+      # @param base — starting registry (typically the bundled
       #   `Rigor::Builtins::HktBuiltins.registry`).
-      # @param name_scope [Rigor::Environment::NameScope, nil] threaded through to the bound
+      # @param name_scope — threaded through to the bound
       #   resolver for class-name lookups; safe to omit during scanning since hkt bounds are
       #   typically `untyped` or stdlib classes.
-      # @param reporter [Rigor::RbsExtended::Reporter, #record, nil] same fail-soft reporter contract
+      # @param reporter — same fail-soft reporter contract
       #   the other RBS-extended parsers use; a collecting double that responds only to `#record` /
       #   `#<<` still works (see {Rigor::RbsExtended::HktDirectives.record_hkt_error}).
 

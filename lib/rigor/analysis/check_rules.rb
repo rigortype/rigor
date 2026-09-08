@@ -83,11 +83,8 @@ module Rigor
       # have already produced `scope_index` through
       # `Rigor::Inference::ScopeIndexer.index(root, default_scope:)`.
       #
-      # @param path [String] used to populate
+      # @param path — used to populate
       #   `Diagnostic#path`; the rule does not open files.
-      # @param root [Prism::Node]
-      # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
-      # @return [Array<Rigor::Analysis::Diagnostic>]
       #
       # ADR-53 B4 — when `node_collectors` is supplied, the converged
       # {Plugin::NodeRuleWalk} traversal has already populated the built-in
@@ -490,7 +487,7 @@ module Rigor
         /\A#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
       private_constant :UNKNOWN_SUPPRESSION_MARKER
 
-      # @return [Array<(Hash{Integer => Set}, Set)>] pair of
+      # @return pair of
       #   `(line_suppressions, file_suppressions)`. Line
       #   suppressions are keyed by source line number; file
       #   suppressions apply to every line.

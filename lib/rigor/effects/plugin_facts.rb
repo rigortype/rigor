@@ -77,11 +77,10 @@ module Rigor
         @empty ||= new(contributions: [], superclasses: NO_ROWS, includes: NO_ROWS)
       end
 
-      # @param plugin_registry [Rigor::Plugin::Registry, nil]
-      # @param superclasses [Hash{String=>String,Array<String>}] the project's as-written superclass table
+      # @param superclasses — the project's as-written superclass table
       #   (`Scope::DiscoveryIndex#discovered_superclasses`). Empty is legal and simply means no row matches
       #   through inheritance.
-      # @param includes [Hash{String=>Array<String>}] the project's as-written include / prepend table
+      # @param includes — the project's as-written include / prepend table
       #   (`Scope::DiscoveryIndex#discovered_includes`), for the frameworks whose contract is a module
       #   rather than a base class (#456).
       def self.build(plugin_registry, superclasses: NO_ROWS, includes: NO_ROWS)
@@ -144,9 +143,8 @@ module Rigor
 
       # The row colouring `owner`'s `selector`, found on `owner` itself or on a project ancestor of it.
       #
-      # @param owner [String, nil] the receiver's class name as the syntax or the typer named it
-      # @param singleton [Boolean] whether the call is `Owner.selector`
-      # @return [Row, nil]
+      # @param owner — the receiver's class name as the syntax or the typer named it
+      # @param singleton — whether the call is `Owner.selector`
       def class_row(owner, singleton, selector)
         return nil if owner.nil? || @class_rows.empty?
 

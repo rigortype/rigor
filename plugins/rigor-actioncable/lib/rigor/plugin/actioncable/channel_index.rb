@@ -39,8 +39,6 @@ module Rigor
         # `"::ChatChannel"`; see {ChannelDiscoverer}), while a QUERY may legitimately arrive rooted:
         # `::ChatChannel.broadcast_to(...)` renders its receiver as `"::ChatChannel"`. The root marker is
         # dropped here, once, so no caller needs a `find(name) || find("::#{name}")` retry (#621).
-        #
-        # @return [Entry, nil]
         def find(class_name)
           @by_name[strip_leading_namespace(class_name.to_s)]
         end

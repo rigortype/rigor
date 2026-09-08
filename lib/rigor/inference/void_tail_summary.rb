@@ -75,10 +75,8 @@ module Rigor
       # consult; the memo persists across consults for the run. The memo is probed before the visited
       # set is allocated so the common post-warmup hit path allocates nothing.
       #
-      # @param def_node [Prism::DefNode]
-      # @param owner [String] the qualified receiver class the `def` belongs to.
-      # @param kind [Symbol] `:instance` or `:singleton`.
-      # @return [Inference::VoidOrigin, nil]
+      # @param owner — the qualified receiver class the `def` belongs to.
+      # @param kind — `:instance` or `:singleton`.
       def origin_for(def_node, owner, kind)
         return nil if def_node.nil?
 

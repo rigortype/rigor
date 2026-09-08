@@ -50,7 +50,7 @@ module Rigor
 
         module_function
 
-        # @return [Result, nil]
+        # @return
         #   - `Result(dimension: <dim>, error: nil)` — recognised, well-typed.
         #   - `Result(dimension: nil, error: msg)` — recognised, dimensional mismatch.
         #   - `nil` — unrecognised; the analyzer should stay silent.

@@ -18,7 +18,7 @@ module Rigor
     class ExplainCommand < Command
       USAGE = "Usage: rigor explain [options] [<rule>]"
 
-      # @return [Integer] CLI exit status.
+      # @return CLI exit status.
       def run
         options = parse_options
 

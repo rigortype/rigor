@@ -87,7 +87,7 @@ module Rigor
       # the enclosing method contains. A non-literal name has no key to file the block under, so it stays
       # contained in the enclosing method and this returns nil.
       #
-      # @return [Array, nil] `[name, singleton, body, parameters]`
+      # @return `[name, singleton, body, parameters]`
       def self.define_method_unit(node)
         return nil unless node.name == :define_method && node.receiver.nil?
 
@@ -100,17 +100,17 @@ module Rigor
         [first.unescaped, false, block.body, block.parameters]
       end
 
-      # @param singleton [Boolean] whether the unit's `self` is the class object (`def self.x`,
+      # @param singleton — whether the unit's `self` is the class object (`def self.x`,
       #   `class << self`) — the axis that separates `mutate.self` from `mutate.static` on an ivar write
-      # @param block_parameter [String, nil] the unit's `&blk` parameter name, if any; a call on it is
+      # @param block_parameter — the unit's `&blk` parameter name, if any; a call on it is
       #   forwarding, not an opaque callable
-      # @param calls [Hash] node-identity table of {Collector::CallRecord}s
-      # @param attribution [Attribution] the project's `effects.attribution:` table
-      # @param envelopes [EnvelopeIndex] the envelopes a call site may import as a `≤` bound (#386)
-      # @param plugin_facts [PluginFacts] the loaded plugins' `effect_attributions:` (#387)
-      # @param owner_class [String, nil] the class this unit is defined on — the carrier an
+      # @param calls — node-identity table of {Collector::CallRecord}s
+      # @param attribution — the project's `effects.attribution:` table
+      # @param envelopes — the envelopes a call site may import as a `≤` bound (#386)
+      # @param plugin_facts — the loaded plugins' `effect_attributions:` (#387)
+      # @param owner_class — the class this unit is defined on — the carrier an
       #   implicit-self call's envelope is looked up under, since the syntax spells `Kernel#name`
-      # @param method_name [String, nil] this unit's own selector — what a `super` in its body names as
+      # @param method_name — this unit's own selector — what a `super` in its body names as
       #   the target the propagator resolves above `owner_class` (#446). With no name to state, a `super`
       #   taints instead.
       def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
@@ -283,7 +283,7 @@ module Rigor
       # Three receiver shapes, tried nearest-syntax first — a written receiver path (`Rails.cache.read`),
       # a receiver rooted at implicit self inside a framework class (`session[:x] = 1`), and the receiver's
       # class through the project's inheritance chain (`user.save`).
-      # @return [PluginFacts::Row, nil] the row that claimed this call, for {#visit_call} to read as a bound
+      # @return the row that claimed this call, for {#visit_call} to read as a bound
       def attribute_plugin(node, record)
         return nil unless @plugin_facts.attributions?
 

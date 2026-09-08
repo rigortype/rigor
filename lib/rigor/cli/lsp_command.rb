@@ -15,7 +15,7 @@ module Rigor
     class LspCommand < Command
       USAGE = "Usage: rigor lsp [options]"
 
-      # @return [Integer] CLI exit status.
+      # @return CLI exit status.
       def run
         options = parse_options
         return CLI::EXIT_USAGE if options == :usage_error

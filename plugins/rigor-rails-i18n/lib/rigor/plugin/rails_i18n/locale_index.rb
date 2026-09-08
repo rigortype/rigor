@@ -36,8 +36,7 @@ module Rigor
 
         attr_reader :entries, :locales
 
-        # @param entries [Array<Entry>]
-        # @param locales [Array<String>] all locale names that contributed at least one key.
+        # @param locales — all locale names that contributed at least one key.
         def initialize(entries, locales:)
           @entries = entries.freeze
           @locales = locales.dup.freeze
@@ -45,7 +44,6 @@ module Rigor
           freeze
         end
 
-        # @return [Entry, nil]
         def find(dotted_key)
           @by_key[dotted_key.to_s]
         end

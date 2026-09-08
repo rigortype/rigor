@@ -51,7 +51,7 @@ module Rigor
           @recurring_paths = recurring_paths
         end
 
-        # @return [Array<String>] the class names named by a `class:` key in a recurring-task entry, sorted
+        # @return the class names named by a `class:` key in a recurring-task entry, sorted
         #   and unique. NOT yet intersected with the discovered jobs — the caller does that.
         def job_names
           names = Set.new

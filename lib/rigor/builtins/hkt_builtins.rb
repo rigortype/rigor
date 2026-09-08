@@ -118,7 +118,7 @@ module Rigor
         )
       end
 
-      # @return [Rigor::Inference::HktRegistry] frozen registry
+      # @return frozen registry
       #   pre-seeded with all bundled HKT registrations +
       #   bodies. Allocated fresh each call rather than
       #   memoised — memoisation through a module-level
@@ -242,7 +242,7 @@ module Rigor
         ["CSV", :parse_line, :singleton] => CSV_ROW_SPEC
       }.freeze
 
-      # @return [Rigor::Type, nil] the reduced HKT type for
+      # @return the reduced HKT type for
       #   the given (class_name, method_name, kind) triple,
       #   or `nil` when no built-in override is registered.
       #   When `arg_types` is supplied AND the entry carries a

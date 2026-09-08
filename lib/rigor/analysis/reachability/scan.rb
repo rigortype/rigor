@@ -70,11 +70,6 @@ module Rigor
           end
         end
 
-        # @param path [String] the file's path, as the report should render it.
-        # @param source [String] the file's bytes.
-        # @param target_ruby [String, nil] Prism version string, threaded from the project configuration.
-        # @return [Result, nil] nil when the file does not parse (a parse error is the analyzer's business, not
-        #   this scan's — it simply contributes nothing rather than half a file).
         # A constant name is ASCII by construction, so a byte sequence that is not valid UTF-8 cannot be one.
         # Dropping it is both correct and the only safe answer: carrying it forward crashed the whole run on
         # the first `String#sub` downstream, which is how this surfaced — `rigor unused` on Rigor's own
@@ -86,6 +81,11 @@ module Rigor
           name.valid_encoding? ? name : nil
         end
 
+        # @param path — the file's path, as the report should render it.
+        # @param source — the file's bytes.
+        # @param target_ruby — Prism version string, threaded from the project configuration.
+        # @return nil when the file does not parse (a parse error is the analyzer's business, not
+        #   this scan's — it simply contributes nothing rather than half a file).
         def self.call(path:, source:, target_ruby: nil)
           parsed = if target_ruby
                      Prism.parse(source, filepath: path,

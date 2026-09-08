@@ -28,11 +28,6 @@ module Rigor
         # The violations for a single entry call (`FactoryBot.create(...)` etc.), or `[]` when the node
         # is not an entry call or its first argument is not a literal factory name. ADR-37: the engine
         # owns the walk.
-        #
-        # @param call_node [Prism::Node]
-        # @param factory_index [FactoryIndex]
-        # @param model_index [Hash, nil]
-        # @return [Array<Violation>]
         def violations_for(call_node:, factory_index:, model_index: nil)
           return [] unless entry_call?(call_node)
 

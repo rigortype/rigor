@@ -35,11 +35,9 @@ module Rigor
           :pre_eval_diagnostics_from_scanner
         )
 
-        # @param configuration [Rigor::Configuration]
-        # @param cache_store [Rigor::Cache::Store, nil]
-        # @param buffer [BufferBinding, nil]
-        # @param plugin_requirer [#call, nil]
-        # @param pool_mode [#call] reader returning the pool-mode flag.
+        # @param plugin_requirer — how a plugin gem is brought into the process, called with the gem name; nil
+        #   lets `Plugin::Loader` apply its own default.
+        # @param pool_mode — reader returning the pool-mode flag.
         def initialize(configuration:, cache_store:, buffer:, plugin_requirer:, pool_mode:)
           @configuration = configuration
           @cache_store = cache_store

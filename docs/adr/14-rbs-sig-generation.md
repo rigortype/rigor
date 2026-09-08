@@ -617,6 +617,24 @@ a contradiction signal: do not apply it, and surface the discrepancy as a
 follow-up for the engine. New methods with no existing RBS remain freely
 applicable after review; `equivalent` classifications are no-ops.
 
+**2026-09-09 — a declared `void` is exempt from the rule, because there is no
+contradiction to weigh.** `void` says the return value is not part of the
+method's contract, and nothing on the synthesis side can produce it: a type
+built from a body is always the type of the body's last expression, so `void`
+lives only on the checking side, against a return the author declared (the
+project book's appendix a1 § a1-2, "`void` — a value is returned but don't look
+at it", makes the synthesis-vs-checking split explicitly; the engine's own
+statement of the widening is `docs/type-specification/special-types.md`
+§ `void`, which records that RBS `void` translates to `top`). That puts a `void`
+return where ADR-107 puts a parameter type — authored intent no inference
+derives — so proposing the body's value for it is a category error, not a false
+positive to tune. `compare_against_declared` therefore classifies a
+`void`-declared method `equivalent` without comparing anything, carrying `void`
+itself as the declared spelling, and neither `--write` nor `--overwrite` can
+replace one ([#836](https://github.com/rigortype/rigor/issues/836)). Before the
+fix, `top` accepting every value made every `void` mutator whose body returns a
+typed value read as a tightening — seven of the fifteen in Rigor's own `sig/`.
+
 ## Revision history
 
 - 2026-05-12 — initial draft.
@@ -633,3 +651,7 @@ applicable after review; `equivalent` classifications are no-ops.
   shape a `def` declares now renders through the parameter renderer the
   `initialize` stub introduced, and the JSON payload carries every skipped row
   with its reason, as the "JSON-output fields" sentence above always claimed.
+- 2026-09-09 — #836 exempted a declared `void` return from the contradiction
+  rule: it is authored intent no synthesis produces, so the generator compares
+  nothing and classifies `equivalent`. See the dated paragraph in § "The
+  inference-vs-RBS contradiction rule".

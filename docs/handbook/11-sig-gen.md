@@ -144,13 +144,20 @@ The convention Rigor uses on its own `sig/` is a line in the
 member's RBS comment:
 
 ```rbs
-class Registry
-  # sig-gen gap: #1234 — `void` says the return is not part
-  # of the contract; sig-gen reads it as `top` and proposes
-  # the body's `Registry`.
-  def register: (Module class_object) -> void
+class Bot
+  # sig-gen gap: #1234 — every sibling type declares
+  # `String`; sig-gen proposes the literal "bot", which
+  # would pin one implementation of a shared surface.
+  def describe: () -> String
 end
 ```
+
+A `void` return needs no marker. `sig-gen` never proposes a
+value for one: `void` says the return is not part of the
+contract, and no inference synthesizes it, so a `void`
+declaration is authored intent the way a parameter type is
+([ADR-14](../adr/14-rbs-sig-generation.md) § "The
+inference-vs-RBS contradiction rule").
 
 A comment rather than a `%a{…}` annotation, for three
 reasons: it stays out of the `rigor:v1:` directive namespace

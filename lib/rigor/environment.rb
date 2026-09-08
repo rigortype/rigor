@@ -677,8 +677,11 @@ module Rigor
       rbs_loader.class_known?(name)
     end
 
+    # Allocates only when there is a prefix to strip: `String#delete_prefix` copies unconditionally, and
+    # this runs once per class-registry / hierarchy probe (~320k times on the lib self-check).
     def normalize_class_name(name)
-      name.to_s.delete_prefix("::")
+      name = name.to_s
+      name.start_with?("::") ? name.delete_prefix("::") : name
     end
 
     # ADR-13 slice 3b — composes the per-run plugin-supplied {Rigor::TypeNode::ResolverChain} into a single

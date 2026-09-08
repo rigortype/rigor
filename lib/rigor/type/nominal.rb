@@ -25,13 +25,19 @@ module Rigor
     class Nominal
       attr_reader :class_name, :type_args
 
-      def initialize(class_name, type_args = [])
+      # The shared empty argument list. The raw form `Nominal["Array"]` is by far the most constructed
+      # type (~600k on the lib self-check); a fresh `[]` default plus its defensive `dup` cost two
+      # allocations per construction for an array nobody can observe.
+      EMPTY_TYPE_ARGS = [].freeze
+
+      def initialize(class_name, type_args = EMPTY_TYPE_ARGS)
         raise ArgumentError, "class_name must be a String, got #{class_name.class}" unless class_name.is_a?(String)
         raise ArgumentError, "class_name must not be empty" if class_name.empty?
         raise ArgumentError, "type_args must be an Array, got #{type_args.class}" unless type_args.is_a?(Array)
 
         @class_name = class_name.freeze
-        @type_args = type_args.dup.freeze
+        # A frozen array is already immutable, so sharing it is unobservable; only a mutable one is copied.
+        @type_args = type_args.frozen? ? type_args : type_args.dup.freeze
         freeze
       end
 

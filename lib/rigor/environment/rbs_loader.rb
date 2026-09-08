@@ -1553,17 +1553,28 @@ module Rigor
       # process) through {Cache::RbsClassTypeParamNames.fetch} and answers point lookups from it. Cold runs
       # build the table once and persist it; warm runs (and a separate loader sharing the same Store) skip
       # the env walk entirely.
+      #
+      # #775 — memoised per class name and answered as a frozen list. `RBS::Definition#type_params` is not
+      # an accessor: it re-derives the names through the entry's type-param declarations (a substitution
+      # per call), and generic dispatch asks for the receiver class's names on every call (~110k times on
+      # the lib self-check, the largest remaining rbs-side allocation). The env is immutable for the
+      # loader's lifetime, so the answer never changes; every consumer only reads it.
       def class_type_param_names(class_name)
-        if cache_store
-          key = class_name.to_s.delete_prefix("::")
-          return type_param_names_table.fetch(key, []).dup
-        end
+        memo = (@state[:type_param_names] ||= {})
+        key = class_name.to_s
+        return memo[key] if memo.key?(key)
 
-        definition = instance_definition(class_name)
-        return [] unless definition
-
-        definition.type_params.dup
+        memo[key] =
+          if cache_store
+            type_param_names_table.fetch(key.delete_prefix("::"), NO_TYPE_PARAMS).freeze
+          else
+            definition = instance_definition(class_name)
+            definition ? definition.type_params.freeze : NO_TYPE_PARAMS
+          end
       end
+
+      NO_TYPE_PARAMS = [].freeze
+      private_constant :NO_TYPE_PARAMS
 
       def class_ordering(lhs, rhs)
         @hierarchy.class_ordering(lhs, rhs)

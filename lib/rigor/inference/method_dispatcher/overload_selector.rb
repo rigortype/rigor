@@ -108,17 +108,14 @@ module Rigor
           # an arbitrary sibling-class arm that only wins by overload-list position.
           overloads = ReceiverAffinity.reorder(overloads, self_type: self_type, environment: environment)
 
-          alias_expander = environment&.rbs_loader
-          passes = lambda do |require_block|
-            run_selection_passes(
-              overloads,
-              { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
-                type_vars: type_vars, block_required: require_block, param_overrides: param_overrides,
-                alias_expander: alias_expander }
-            )
-          end
+          # One keyword bundle for the pass pipeline (see `run_selection_passes`); a block retry rebuilds it
+          # with the block flag cleared. Built once and passed positionally -- the previous lambda plus a
+          # `**shared` splat per pass allocated three objects per selection (#775).
+          shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
+                     type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
+                     alias_expander: environment&.rbs_loader }
 
-          matches = passes.call(block_required)
+          matches = run_selection_passes(overloads, shared)
           return matches unless matches.empty?
 
           # A block at the call site that no block-declaring overload matched: Ruby ignores a block handed
@@ -127,7 +124,7 @@ module Rigor
           # `define_command(:x) do … end` against `def define_command: (Symbol) -> Symbol`) degraded to
           # `Dynamic[Top]` — and on a self-send suppressed the whole method's return type.
           if block_required
-            matches = passes.call(false)
+            matches = run_selection_passes(overloads, shared.merge(block_required: false))
             return matches unless matches.empty?
           end
 
@@ -165,7 +162,7 @@ module Rigor
           # `shared` is the caller-assembled keyword bundle for `find_matching_overload` — hash-shaped
           # because the pass pipeline forwards it twice and RuboCop's parameter-list budget is real.
           def run_selection_passes(overloads, shared)
-            strict = find_matching_overload(overloads, **shared, strict: true)
+            strict = find_matching_overload(overloads, shared, strict: true)
             return strict unless strict.empty?
 
             alias_hit = find_matching_overload_via_aliases(
@@ -177,33 +174,37 @@ module Rigor
             # match keeps its historical single-winner contract. With a `Dynamic[Top]` argument in play the
             # matches are indistinguishable by types — position alone would pick — so ALL of them come back
             # and the dispatch layer unions their returns (#521).
-            matches = find_matching_overload(overloads, **shared, strict: false)
+            matches = find_matching_overload(overloads, shared, strict: false)
             return matches.first(1) unless shared[:arg_types].any? { |t| untyped_arg?(t) }
 
             matches
           end
 
-          # rubocop:disable-next Metrics/ParameterLists
-          def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
-                                     param_overrides:, strict:, alias_expander: nil)
-            return [] if strict && arg_types.any? { |t| untyped_arg?(t) }
+          # The shared "no overload matched" answer; every consumer only reads the list.
+          NO_MATCH = [].freeze
+          private_constant :NO_MATCH
 
-            predicate = lambda do |method_type|
-              next false unless engages_block_shape?(method_type, block_required)
-              next false if strict && !strictly_typed_params?(method_type, arg_types.size)
+          # `shared` is the keyword bundle `select_candidates` assembled (arg_types, self_type, instance_type,
+          # type_vars, block_required, param_overrides, alias_expander).
+          def find_matching_overload(overloads, shared, strict:)
+            arg_types = shared[:arg_types]
+            return NO_MATCH if strict && arg_types.any? { |t| untyped_arg?(t) }
 
-              matches?(
-                method_type, arg_types,
-                self_type: self_type, instance_type: instance_type,
-                type_vars: type_vars, param_overrides: param_overrides,
-                alias_expander: alias_expander
-              )
-            end
+            block_required = shared[:block_required]
             # Strict keeps its historical first-match short-circuit (a dispatch hot path); the gradual
             # pass needs the full candidate list for the #521 union.
-            return [overloads.find(&predicate)].compact if strict
+            if strict
+              found = overloads.find do |method_type|
+                engages_block_shape?(method_type, block_required) &&
+                  strictly_typed_params?(method_type, arg_types.size) &&
+                  matches?(method_type, shared)
+              end
+              return found ? [found] : NO_MATCH
+            end
 
-            overloads.select(&predicate)
+            overloads.select do |method_type|
+              engages_block_shape?(method_type, block_required) && matches?(method_type, shared)
+            end
           end
 
           # Whether the overload's block clause is compatible with the call site's block shape: a
@@ -243,8 +244,17 @@ module Rigor
               params = positional_params_for(fun, arg_types.size)
               next false unless params.size == arg_types.size
 
-              params.zip(arg_types).all? { |param, arg| alias_param_accepts?(param.type, arg) }
+              each_param_accepts?(params, arg_types) { |param, arg| alias_param_accepts?(param.type, arg) }
             end
+          end
+
+          # `params.zip(arg_types).all? { |param, arg| ... }` without the pair arrays: a formal beyond the
+          # actuals meets `nil`, exactly as `zip` pads. Selection zips once per overload per pass, so the
+          # pairs were a top allocation site of dispatch (#775). The counter is a captured local, so the
+          # walk allocates nothing (a Range or an Enumerator would be one object per overload per pass).
+          def each_param_accepts?(params, arg_types)
+            index = -1
+            params.all? { |param| yield(param, arg_types[index += 1]) }
           end
 
           # Checks the param's RBS type against an arg using alias-strict-arm matching. Optional / Union
@@ -317,23 +327,24 @@ module Rigor
             end
           end
 
-          def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:, param_overrides:,
-                       alias_expander: nil)
+          # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
+          def matches?(method_type, shared)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
 
+            arg_types = shared[:arg_types]
             fun = method_type.type
             return false unless arity_compatible?(fun, arg_types.size)
 
             params = positional_params_for(fun, arg_types.size)
-            params.zip(arg_types).all? do |param, arg|
+            each_param_accepts?(params, arg_types) do |param, arg|
               accepts_param?(
                 param,
                 arg,
-                self_type: self_type,
-                instance_type: instance_type,
-                type_vars: type_vars,
-                param_overrides: param_overrides,
-                alias_expander: alias_expander
+                self_type: shared[:self_type],
+                instance_type: shared[:instance_type],
+                type_vars: shared[:type_vars],
+                param_overrides: shared[:param_overrides],
+                alias_expander: shared[:alias_expander]
               )
             end
           end
@@ -376,8 +387,12 @@ module Rigor
             rest = fun.rest_positionals
             trailing = fun.trailing_positionals
 
+            optional_needed = [actual_count - required.size - trailing.size, 0].max
+            # Nothing to append: the declaration's own list is the answer, read-only (the common
+            # required-positionals-only overload -- no copy, #775).
+            return required if optional_needed.zero? && trailing.empty? && (rest.nil? || actual_count <= required.size)
+
             head = required.dup
-            optional_needed = [actual_count - head.size - trailing.size, 0].max
             head.concat(optional.first(optional_needed))
 
             absorbed_by_rest = actual_count - head.size - trailing.size

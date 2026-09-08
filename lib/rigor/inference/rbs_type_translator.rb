@@ -100,6 +100,21 @@ module Rigor
       ALIAS_EXPANSION_LIMIT = 8
       private_constant :ALIAS_EXPANSION_LIMIT
 
+      # #775 — `TypeName#relative!` allocates a TypeName and a Namespace and `#to_s` joins the path: four
+      # objects per class-instance translation, ~380k of them on the lib self-check, for the same few
+      # hundred names. rbs compares a TypeName by namespace + name, so a value-keyed memo answers every
+      # repeat with one frozen String.
+      @relative_names = {}
+
+      # #775 — the translated form of a CLOSED alias expansion, keyed by the expansion. Closed means no
+      # `self`, `instance` or type variable anywhere inside, so the caller's context cannot change the
+      # answer; at expansion depth 0 the budget cannot either. rbs compares types by value, so the memo
+      # is per distinct expansion, not per loader (a re-parsed identical alias hits), and the weak keys
+      # let an entry go with the loader whose memo held the expansion. `Rigor::Type::t` on the self-check
+      # is a 21-member union that was re-translated ~13k times, each time re-normalising the union from
+      # scratch; every repeat now shares one Union.
+      @closed_alias_translations = ObjectSpace::WeakKeyMap.new
+
       class << self
         # @param rbs_type [RBS::Types::Bases::Base, RBS::Types::ClassInstance, ...]
         # @param self_type [Rigor::Type, nil] substitute for `Bases::Self`.
@@ -180,9 +195,15 @@ module Rigor
         # `Nominal["Array", [Nominal["Integer"]]]`. Variables inside the args participate in
         # substitution through the same `type_vars:` map.
         def translate_class_instance(rbs_type, context)
-          name = rbs_type.name.relative!.to_s
+          name = relative_name(rbs_type.name)
+          return Type::Combinator.nominal_of(name) if rbs_type.args.empty?
+
           translated_args = rbs_type.args.map { |arg| translate_in(arg, context) }
           Type::Combinator.nominal_of(name, type_args: translated_args)
+        end
+
+        def relative_name(type_name)
+          @relative_names[type_name] ||= type_name.relative!.to_s.freeze
         end
 
         # Preserves tuple precision through the boundary. Each positional element type is translated
@@ -218,8 +239,7 @@ module Rigor
         # `singleton(Foo)` is the type of the constant `Foo` itself (the class object). With the
         # dedicated Singleton type, we map directly to `Singleton[Foo]`.
         def translate_class_singleton(rbs_type, _context)
-          name = rbs_type.name.relative!.to_s
-          Type::Combinator.singleton_of(name)
+          Type::Combinator.singleton_of(relative_name(rbs_type.name))
         end
 
         # #529 — sees through a type alias instead of reading `untyped`. `expand_type_alias` resolves
@@ -232,8 +252,27 @@ module Rigor
 
           expanded = expander.expand_type_alias(rbs_type)
           return Type::Combinator.untyped if expanded.nil?
+          # A nested expansion is translated under its parent's budget, and `rigor trace` records every
+          # union merge as it happens, so neither consults the memo.
+          return translate_in(expanded, context.deeper) unless context.alias_depth.zero? && !FlowTracer.active?
 
-          translate_in(expanded, context.deeper)
+          cached = @closed_alias_translations[expanded]
+          return cached if cached
+
+          translated = translate_in(expanded, context.deeper)
+          @closed_alias_translations[expanded] = translated if closed_type?(expanded)
+          translated
+        end
+
+        # True when nothing in `rbs_type`'s tree reads the translation context: no `self`, no `instance`,
+        # no type variable. Every rbs type answers `each_type` (the leaves through `EmptyEachType`).
+        def closed_type?(rbs_type)
+          case rbs_type
+          when RBS::Types::Bases::Self, RBS::Types::Bases::Instance, RBS::Types::Variable then return false
+          end
+
+          rbs_type.each_type { |inner| return false unless closed_type?(inner) }
+          true
         end
 
         # #529 — `A & B` reads as its first member that carries static evidence. Every value of the

@@ -18,9 +18,14 @@ module Rigor
       ].freeze
 
       class Target < Data.define(:kind, :name)
+        # #775 — a target is an immutable value keyed by its name, and the local target is built on every
+        # binding (`Scope#with_local` invalidates through it) and every local-fact read: ~350k times on
+        # the lib self-check for a few thousand distinct names. One shared instance per name.
         def self.local(name)
-          new(kind: :local, name: name.to_sym)
+          name = name.to_sym
+          @local_targets[name] ||= new(kind: :local, name: name)
         end
+        @local_targets = {}
 
         def initialize(kind:, name:)
           super(kind: kind.to_sym, name: name)

@@ -331,14 +331,19 @@ module Rigor
           # disagree -- in both cases free variables in the method's return type degrade to `Dynamic[Top]`
           # per the translator's contract.
           def build_type_vars(environment, class_name, receiver_args)
-            return {} if receiver_args.empty?
+            return NO_TYPE_VARS if receiver_args.empty?
 
             param_names = Rigor::Reflection.class_type_param_names(class_name, environment: environment)
-            return {} if param_names.empty?
-            return {} if param_names.size != receiver_args.size
+            return NO_TYPE_VARS if param_names.empty?
+            return NO_TYPE_VARS if param_names.size != receiver_args.size
 
             param_names.zip(receiver_args).to_h
           end
+
+          # The shared empty substitution map: most receivers carry no type arguments, and the translator
+          # only ever reads the map (#775).
+          NO_TYPE_VARS = {}.freeze
+          private_constant :NO_TYPE_VARS
 
           # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,

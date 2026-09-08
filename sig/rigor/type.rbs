@@ -116,6 +116,7 @@ module Rigor
     end
 
     class Nominal
+      EMPTY_TYPE_ARGS: Array[Type::t]
       attr_reader class_name: String
       attr_reader type_args: Array[Type::t]
       def initialize: (String class_name, ?Array[Type::t] type_args) -> void

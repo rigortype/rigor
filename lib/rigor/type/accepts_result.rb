@@ -42,17 +42,36 @@ module Rigor
 
       class << self
         def yes(mode: :gradual, reasons: nil)
-          new(Trinary.yes, mode: mode, reasons: reasons)
+          literal_result(Trinary.yes, mode, reasons)
         end
 
         def no(mode: :gradual, reasons: nil)
-          new(Trinary.no, mode: mode, reasons: reasons)
+          literal_result(Trinary.no, mode, reasons)
         end
 
         def maybe(mode: :gradual, reasons: nil)
-          new(Trinary.maybe, mode: mode, reasons: reasons)
+          literal_result(Trinary.maybe, mode, reasons)
+        end
+
+        private
+
+        # #775 — a result is an immutable value, so one instance serves every site that asks for the same
+        # verdict with the same literal reason (`"structural equality"`, `"exact name match"`, ...): the
+        # acceptance rules answer ~360k times on the lib self-check, most of them through a handful of
+        # such literals, and each answer cost the result plus its reasons array. A reason built at the
+        # site (an unfrozen interpolated String) or a reason list still builds a fresh result.
+        def literal_result(trinary, mode, reasons)
+          literal = reasons.nil? || (reasons.is_a?(String) && reasons.frozen?)
+          return new(trinary, mode: mode, reasons: reasons) unless literal
+
+          by_mode = (@literal_results[trinary] ||= {})
+          by_reason = (by_mode[mode] ||= {})
+          by_reason[reasons] ||= new(trinary, mode: mode, reasons: reasons)
         end
       end
+
+      # `Trinary` verdict => mode => literal reason (or nil) => the shared result.
+      @literal_results = {}
 
       def yes?
         trinary.yes?

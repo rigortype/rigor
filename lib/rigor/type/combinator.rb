@@ -60,7 +60,7 @@ module Rigor
       # list of Rigor::Type values that carry the receiver's generic instantiation (`Array[Integer]` is
       # `Nominal["Array", [Nominal["Integer"]]]`). Omitting the keyword produces the raw form
       # `Nominal["Array"]`, which is structurally distinct from any applied form.
-      def nominal_of(class_name_or_object, type_args: [])
+      def nominal_of(class_name_or_object, type_args: Nominal::EMPTY_TYPE_ARGS)
         Nominal.new(resolve_class_name(class_name_or_object), type_args)
       end
 
@@ -68,8 +68,16 @@ module Rigor
         Singleton.new(resolve_class_name(class_name_or_object))
       end
 
+      # #775 — `nil`, `true` and `false` are interned: a Constant is an immutable value, and these three
+      # are built on every optional translation, nil check and predicate fold (~200k of the ~210k Constant
+      # constructions on the lib self-check), so one shared instance each is unobservable and free.
       def constant_of(value)
-        Constant.new(value)
+        case value
+        when nil then NIL_CONSTANT
+        when true then TRUE_CONSTANT
+        when false then FALSE_CONSTANT
+        else Constant.new(value)
+        end
       end
 
       # Widens every value-pinned (`Constant`) constituent of `type` to its nominal base (`Constant[1]` ->
@@ -382,6 +390,13 @@ module Rigor
       # Normalized union. Flattens nested Unions, deduplicates structurally equal members, drops Bot, and
       # collapses 0/1-member results.
       def union(*types)
+        # #775 — the same carrier on both sides of a join is already its own union. With the closed-alias
+        # translation memo every `Rigor::Type::t` reader shares one 21-member Union, so a control-flow join of
+        # an untouched binding would otherwise re-flatten and re-unique 42 members to rebuild an equal object.
+        # `rigor trace` still sees the merge (the tracer records degenerate merges).
+        first = types.first
+        return first if types.size == 2 && first.equal?(types[1]) && !Inference::FlowTracer.active?
+
         result = collapse_union(normalized_union_members(types))
         if Inference::BudgetTrace.enabled? && result.is_a?(Union)
           Inference::BudgetTrace.observe(Inference::BudgetTrace::UNION_ARITY, result.members.size)
@@ -795,7 +810,7 @@ module Rigor
 
         def unique_members(types)
           types.each_with_object([]) do |type, unique|
-            unique << type unless unique.any? { |member| member == type }
+            unique << type unless unique.any? { |member| member.equal?(type) || member == type }
           end
         end
 
@@ -864,6 +879,11 @@ module Rigor
 
       # Eager-allocated at load time; see `untyped` method comment above.
       @untyped = Dynamic.new(Top.instance)
+
+      NIL_CONSTANT = Constant.new(nil)
+      TRUE_CONSTANT = Constant.new(true)
+      FALSE_CONSTANT = Constant.new(false)
+      private_constant :NIL_CONSTANT, :TRUE_CONSTANT, :FALSE_CONSTANT
     end
   end
 end

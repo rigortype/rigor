@@ -1452,10 +1452,13 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(second).not_to have_received(:instance_definition)
     end
 
-    it "returns a fresh Array on each call so callers cannot mutate the cached payload" do
+    # #775 — the answer is memoised per class name and shared, so it is frozen: a caller that tries to
+    # mutate it raises instead of corrupting the cached payload, and the next call still reads the table.
+    it "answers a frozen list so callers cannot mutate the cached payload" do
       cached = described_class.new(cache_store: cache_store)
       a = cached.class_type_param_names("Array")
-      a << :Mutated
+      expect(a).to be_frozen
+      expect { a << :Mutated }.to raise_error(FrozenError)
       expect(cached.class_type_param_names("Array")).to eq([RbsCoreTypeParams.array_element])
     end
   end

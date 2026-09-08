@@ -2562,15 +2562,22 @@ module Rigor
       ].freeze
       private_constant :INDEX_WRITE_NODES
 
+      # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
+      # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh
+      # `[nil, nil]` per decline was one of the largest allocation sites in the evaluator.
+      NO_CONTENT_MUTATION = [nil, nil].freeze
+      private_constant :NO_CONTENT_MUTATION
+
       # `[receiver_name, node]` when `node` is a content mutation whose receiver is a local variable satisfying `accept`
-      # (depth predicate), else `[nil, nil]`. Covers `[]=`-style CallNode mutators and the index-write node forms.
+      # (depth predicate), else the frozen `[nil, nil]`. Covers `[]=`-style CallNode mutators and the index-write node
+      # forms.
       def content_mutation_target(node)
         is_call_mutator = node.is_a?(Prism::CallNode) && ContentJoin::CONTENT_ADDERS.include?(node.name)
-        return [nil, nil] unless is_call_mutator || index_write?(node)
+        return NO_CONTENT_MUTATION unless is_call_mutator || index_write?(node)
 
         receiver = node.receiver
-        return [nil, nil] unless receiver.is_a?(Prism::LocalVariableReadNode)
-        return [nil, nil] unless yield(receiver)
+        return NO_CONTENT_MUTATION unless receiver.is_a?(Prism::LocalVariableReadNode)
+        return NO_CONTENT_MUTATION unless yield(receiver)
 
         [receiver.name, node]
       end

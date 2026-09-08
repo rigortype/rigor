@@ -120,7 +120,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-104 | [Boot-slim probe for the effects surfaces](104-effects-boot-slim-probe.md) | Accepted (implemented for the report and the snapshot verbs, with #482's entry split) |
 | ADR-105 | [PR landing flow: sequential merges and changelog fragments](105-pr-landing-flow.md) | Accepted (changelog.d/ mechanism + gate landed with the ADR; norm in AGENTS.md) |
 | ADR-106 | [Migrating the spec suite to minitest](106-minitest-migration.md) | Accepted (declined — the suite stays on RSpec; re-evaluation triggers recorded) |
-| ADR-107 | [Checked types and typeless comments in Rigor's own tree](107-checked-types-and-typeless-comments.md) | Accepted (corpus rewrite + contract + G1 gate in #822; G2 #812 and G3 #825 open) |
+| ADR-107 | [Checked types and typeless comments in Rigor's own tree](107-checked-types-and-typeless-comments.md) | Accepted (corpus rewrite + contract + G1 gate in #822; G2 `--fail-on=warning` in #827; G3 #825 open) |
 | ADR-108 | [Type provenance for agents: the `rigor-type-oracle` skill and the adopting project's contract](108-type-provenance-for-agents.md) | Accepted (skill, `rigor-project-init` contract paragraph, and catalogue wiring landed in #826; ADR-107 is the repo-side twin) |
 
 ## Adding a New ADR

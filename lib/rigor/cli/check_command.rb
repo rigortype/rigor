@@ -32,14 +32,21 @@ module Rigor
     # The class-length budget is relaxed (as on `Rigor::CLI` itself) because `check` aggregates several independent
     # concerns that are clearer read together than split across micro-classes.
     class CheckCommand < Command # rubocop:disable Metrics/ClassLength
+      # Issue #812 — `--fail-on=SEVERITY` raises the exit-status bar above the default (`:error`-only).
+      # Orders the three severities a diagnostic can carry once it survives {SeverityStamp} (`:off` rows are
+      # dropped upstream and never reach a `Result`, so they are not a member here).
+      FAIL_ON_RANK = { info: 0, warning: 1, error: 2 }.freeze
+
       # @return CLI exit status.
       #
       # Deferred YJIT enablement (Runtime::Jit) is armed by `CLI#dispatch` for every command, this
       # one included, before any analysis work runs.
-      def run # rubocop:disable Metrics/AbcSize
+      def run # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
         # ADR-87 WD4 — parse options + resolve config WITHOUT the inference engine, so the run-cache hit probe
         # can run first. The heavy engine (`load_check_dependencies`) loads only on a miss / non-cacheable run.
         options = parse_check_options
+        return CLI::EXIT_USAGE unless valid_fail_on_option?(options)
+
         buffer = Options.resolve_buffer_binding(options, err: @err)
         return CLI::EXIT_USAGE if buffer == :usage_error
 
@@ -68,7 +75,8 @@ module Rigor
         result = apply_baseline_filter(raw_result, configuration, options)
 
         coverage = compute_coverage(runner, configuration, options)
-        write_result(result, options.fetch(:format), coverage: coverage, config_warnings: config_warnings)
+        write_result(result, options.fetch(:format), coverage: coverage, config_warnings: config_warnings,
+                                                     fail_on: options.fetch(:fail_on))
         emit_ci_detected_output(result, options)
         write_run_stats(result.stats) if result.stats
         write_trace_appendices
@@ -77,10 +85,33 @@ module Rigor
 
         exit_code = result.success? ? 0 : 1
         exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
+        exit_code = 1 if fail_on_violation?(result.diagnostics, options)
         exit_code
       end
 
       private
+
+      # True when `diagnostics` (already baseline-filtered and severity-resolved — the same list
+      # `Result#success?` reads) carries a row at or above the `--fail-on` threshold. With the default
+      # `:error` threshold this is exactly `!diagnostics.any?(&:error?)`, i.e. a no-op over the existing exit
+      # code — `--fail-on` only ever makes a run *stricter*, never masks an `:error` the old exit code caught.
+      def fail_on_violation?(diagnostics, options)
+        threshold = FAIL_ON_RANK.fetch(options.fetch(:fail_on))
+        diagnostics.any? { |diagnostic| FAIL_ON_RANK.fetch(diagnostic.severity, FAIL_ON_RANK[:error]) >= threshold }
+      end
+
+      # True when `options[:fail_on]` (an arbitrary user-typed Symbol at this point — parsing only lower-cases
+      # and interns it, see `parse_check_options`) is one of {FAIL_ON_RANK}'s keys; writes a usage note to
+      # `@err` and returns false otherwise. Validated as a plain post-parse check rather than raised from
+      # inside the `opts.on` block: OptionParser rescues a `ParseError` raised from a switch's own block and
+      # rebuilds it as a generic `"invalid argument: --fail-on=<value>"`, discarding any custom message — this
+      # way the usage note actually names the accepted values.
+      def valid_fail_on_option?(options)
+        return true if FAIL_ON_RANK.key?(options.fetch(:fail_on))
+
+        @err.puts("rigor: invalid --fail-on value: #{options.fetch(:fail_on)} (expected error, warning, or info)")
+        false
+      end
 
       # ADR-87 WD4 — attempt the boot-slimming run-cache hit. Returns the cached {Analysis::Result} (severity
       # profile applied, no stats — matching a cache-served `Runner#run`) on a hit, or nil to fall through to
@@ -129,11 +160,13 @@ module Rigor
       # gate reads the same diagnostics the full path would.
       def finalize_cache_hit(raw_result, configuration, options, config_warnings)
         result = apply_baseline_filter(raw_result, configuration, options)
-        write_result(result, options.fetch(:format), config_warnings: config_warnings)
+        write_result(result, options.fetch(:format), config_warnings: config_warnings,
+                                                     fail_on: options.fetch(:fail_on))
         emit_ci_detected_output(result, options)
 
         exit_code = result.success? ? 0 : 1
         exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
+        exit_code = 1 if fail_on_violation?(result.diagnostics, options)
         exit_code
       end
 
@@ -233,8 +266,8 @@ module Rigor
 
         result = apply_baseline_filter(Analysis::Result.new(diagnostics: diagnostics, stats: nil), configuration,
                                        options)
-        write_result(result, options.fetch(:format))
-        result.success? ? 0 : 1
+        write_result(result, options.fetch(:format), fail_on: options.fetch(:fail_on))
+        !result.success? || fail_on_violation?(result.diagnostics, options) ? 1 : 0
       end
 
       # Editor mode option B (#146) — `--incremental` plus an editor buffer. The whole project is in scope with
@@ -260,8 +293,8 @@ module Rigor
         filtered = apply_baseline_filter(
           Analysis::Result.new(diagnostics: result.diagnostics, stats: nil), configuration, options
         )
-        write_result(filtered, options.fetch(:format))
-        filtered.success? ? 0 : 1
+        write_result(filtered, options.fetch(:format), fail_on: options.fetch(:fail_on))
+        !filtered.success? || fail_on_violation?(filtered.diagnostics, options) ? 1 : 0
       end
 
       # ADR-88 WD1 — a one-line stderr note when the plugin fact surface (an ADR-9 fact, an ADR-60 producer
@@ -439,6 +472,10 @@ module Rigor
           baseline: :unset,
           # ADR-22 slice 5 — `--baseline-strict` CI gate: fail the run on any baseline drift, in either direction.
           baseline_strict: false,
+          # Issue #812 — `--fail-on=SEVERITY` raises the exit-status bar: the run exits non-zero when a
+          # diagnostic AT OR ABOVE this severity survives baseline filtering and severity resolution, not only
+          # on `:error` (today's default and behaviour). See `FAIL_ON_RANK`.
+          fail_on: :error,
           # ADR-32 WD10 carry-over — `--treat-all-as-inline-rbs` forces the `rigor-rbs-inline` plugin into the loaded
           # plugin set with `require_magic_comment: false` so a single ad-hoc `rigor check` invocation treats every
           # analysed file as inline-RBS without the user editing `.rigor.yml`. Intended for single-file / ad-hoc CI use;
@@ -507,6 +544,12 @@ module Rigor
           opts.on("--baseline-strict",
                   "fail the run on any baseline drift (CI gate)") do
             options[:baseline_strict] = true
+          end
+          opts.on("--fail-on=SEVERITY",
+                  "exit non-zero on a diagnostic at or above SEVERITY: error (default), warning, or info") do |value|
+            # Validated post-parse (`valid_fail_on_option?`, called from `run`) rather than here — see its
+            # comment for why an unrecognised value is not raised from inside this block.
+            options[:fail_on] = value.to_s.downcase.to_sym
           end
           opts.on("--treat-all-as-inline-rbs",
                   "force-load rigor-rbs-inline with require_magic_comment: false") do
@@ -841,10 +884,15 @@ module Rigor
         format == "text" ? @out : @err
       end
 
-      def write_result(result, format, coverage: nil, config_warnings: [])
+      def write_result(result, format, coverage: nil, config_warnings: [], fail_on: :error)
         case format
         when "json"
           payload = enrich_json(result.to_h)
+          # Issue #812 — the exit code can be stricter than `payload["success"]` (which stays the `:error`-only
+          # reading `Result#success?` always gave, per the other consumers already reading it); a JSON
+          # consumer that wants to know WHY a run exited non-zero reads this alongside it rather than
+          # re-deriving `--fail-on`'s value from the invocation.
+          payload["fail_on"] = fail_on.to_s
           payload["coverage"] = coverage_payload(coverage) if coverage
           payload["config_warnings"] = config_warnings.map(&:to_h) unless config_warnings.empty?
           @out.puts(JSON.pretty_generate(payload))

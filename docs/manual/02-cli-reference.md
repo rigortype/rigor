@@ -45,6 +45,7 @@ the `paths:` list from the configuration file.
 | `--baseline=PATH` | Load a baseline file, overriding config. |
 | `--no-baseline` | Ignore any configured baseline. |
 | `--baseline-strict` | Fail the run on any baseline drift — a CI gate. |
+| `--fail-on=SEVERITY` | Exit non-zero when a diagnostic at or above `SEVERITY` (`error`, the default; `warning`; or `info`) survives baseline filtering — raises the exit-status bar above the default `:error`-only reading for CI gates that want it, without changing `--format json`'s `success` / `error_count` fields. |
 | `--treat-all-as-inline-rbs` | Force-load `rigor-rbs-inline` with `require_magic_comment: false`, so every analysed file is treated as inline-RBS without the `# rbs_inline: enabled` comment (ADR-32). |
 | `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
 | `--no-bleeding-edge` | Ignore any configured `bleeding_edge:` selection for this run (adopt none). |
@@ -52,7 +53,9 @@ the `paths:` list from the configuration file.
 | `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. Alone, only the buffer's own file produces diagnostics; add `--incremental` for whole-project scope (see below). |
 
 Exit `0` when no error-severity diagnostics remain, `1` when
-any are reported, `64` on a usage error.
+any are reported, `64` on a usage error. `--fail-on` raises that
+bar to `warning` or `info` for callers (CI gates, `make check`)
+that want the stricter reading.
 
 ### Editor mode scope
 
@@ -1126,8 +1129,8 @@ diagnostics about Rigor's own inference cutoffs and memory — see
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success — no error-severity diagnostics. |
-| `1` | Diagnostics found, or a per-command failure (parse error, missing file, new diagnostics on `diff`, effect drift on `effects check`). |
+| `0` | Success — no diagnostic at or above the exit threshold (`error` by default; `rigor check --fail-on=SEVERITY` lowers it to `warning` or `info`). |
+| `1` | Diagnostics found at or above the threshold, or a per-command failure (parse error, missing file, new diagnostics on `diff`, effect drift on `effects check`). |
 | `64` | Usage error — unknown command, bad flag, malformed argument, or a value in `.rigor.yml` the loader cannot proceed on. |
 
 `rigor triage` is the exception: it is advisory and always

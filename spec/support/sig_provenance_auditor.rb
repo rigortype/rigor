@@ -80,7 +80,7 @@ class SigProvenanceAuditor
     def residue? = RESIDUE.include?(classification) && !marked?
 
     def to_s
-      "#{declaration}#{" — #{detail}" if detail} [#{classification}]"
+      "#{declaration} — #{classification}#{" (#{detail})" if detail}"
     end
   end
 
@@ -98,7 +98,7 @@ class SigProvenanceAuditor
 
     # Every member of every `.rbs` under `sig/`, in file then source order.
     def declarations(root:)
-      Dir.glob(File.join(root, "sig/**/*.rbs")).sort.flat_map do |file|
+      Dir.glob(File.join(root, "sig/**/*.rbs")).flat_map do |file|
         read_signature(file, file.delete_prefix("#{root}/"))
       end
     end

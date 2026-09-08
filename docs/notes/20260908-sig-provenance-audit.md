@@ -29,9 +29,10 @@ The classifier parses every `.rbs` under `sig/` with `RBS::Parser.parse_signatur
 Ruby reflection over a fully-required `lib/` — reflection is a measurement instrument here, not part
 of the gate.
 
-Runtime, warm, 12-core M3 Max: **13.6 s user / 19.0 s wall** for the whole audit, of which the
-generator pass is ~14 s. That is the reason the gate lives in `spec/rigor/sig_gen/provenance_spec.rb`
-and not in `spec/docs/` — `make docs-check` is meant to be the cheap gate.
+Runtime, 12-core M3 Max: **13.6 s user / 19.0 s wall** for the command above end to end; the
+generator pass alone is **~10 s** in a warm process. That is the reason the gate lives in
+`spec/rigor/sig_gen/provenance_spec.rb` and not in `spec/docs/`: `make docs-check` is 1.2 s of load
+plus 5.4 s of examples today, and hanging a 10 s pass off it would nearly triple the cheap gate.
 
 ## Classifications
 

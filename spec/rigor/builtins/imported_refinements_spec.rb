@@ -129,6 +129,15 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         .to eq(Rigor::Type::Combinator.integer_range(-3, 7))
     end
 
+    it "declines int<min, max> with reversed bounds instead of raising" do
+      # `Type::IntegerRange` raises on `min > max`; the builder declines first so the payload is
+      # reported as `dynamic.rbs-extended.unresolved` rather than crashing the file's analysis.
+      expect(described_class.parse("int<10, 1>")).to be_nil
+      expect(described_class.parse("int<0, -1>")).to be_nil
+      expect(described_class.parse("int<5, 5>"))
+        .to eq(Rigor::Type::Combinator.integer_range(5, 5))
+    end
+
     it "returns nil for arity mismatches in parameterised forms" do
       expect(described_class.parse("non-empty-array[Integer, String]")).to be_nil
       expect(described_class.parse("non-empty-hash[Symbol]")).to be_nil

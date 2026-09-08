@@ -1,0 +1,22 @@
+---
+locals:
+  m: Float?
+  "n": non-negative-int
+  x: Float
+assertions:
+  '1': Float[0.0..]
+  '2': Float
+  '3': Float[...1.0]
+  '4': Float[..1.0]
+  '5': Float[0.0..1.0]
+  '6': Float[...1.0]
+  '7': Float[0.0..1.0]
+  '8': Float
+  '9': Float
+  '10': non-nan-float
+  '11': finite-float
+  '12': Float
+  '13': non-negative-int
+  '14': non-negative-int
+  '15': Float[0.0..]
+  '16': Float[0.0...1.0]

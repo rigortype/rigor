@@ -219,6 +219,54 @@ module Rigor
         narrow_integer_comparison_dispatch(type, comparator, bound)
       end
 
+      # Float-comparison fragment of `type` against a numeric literal `bound` (ADR-109 WD5). This
+      # is a TRUTHY-EDGE rule only: `x > c` is false for NaN, so the set that satisfies it is the
+      # range `Float[c..]`, but the set that fails it is that range's complement PLUS NaN, which no
+      # range spells. Callers apply it to the truthy edge and keep the entry type on the falsy edge.
+      # `x > c` narrows to the closed envelope `Float[c..]` rather than the exact `(c, ∞]` (one
+      # double wider; the exact form is deferred until a rule demands the removed point), `x < c`
+      # to the exact `Float[...c]`. Hooks in:
+      # - `Constant<Float>` is preserved when it satisfies the comparison, otherwise collapsed to
+      #   `Bot` (a NaN constant satisfies nothing);
+      # - `FloatRange` becomes its intersection with the half-line, `Bot` when empty;
+      # - `Nominal[Float]` becomes the half-line itself;
+      # - `Union` narrows each member independently; Integer-rooted and other carriers flow
+      #   through unchanged (the Integer rule above owns them).
+      def narrow_float_comparison(type, comparator, bound)
+        return type unless (bound.is_a?(Integer) || bound.is_a?(Float)) && %i[< <= > >=].include?(comparator)
+
+        bound = bound.to_f
+        return type if bound.nan? || bound.infinite?
+
+        narrow_float_comparison_dispatch(type, comparator, bound)
+      end
+
+      # The truthy edge of a numeric comparison: the Integer rule for Integer-rooted members, then
+      # the Float rule for Float-rooted ones. Never apply this to a falsy edge (see
+      # {.narrow_float_comparison}).
+      def narrow_numeric_comparison_truthy(type, comparator, bound)
+        narrow_float_comparison(narrow_integer_comparison(type, comparator, bound), comparator, bound)
+      end
+
+      # Intersects the Float-rooted members of `type` with `range` (a `FloatRange`), leaving every
+      # other member unchanged. `x.nan?` narrows its FALSY edge with `non_nan_float`; `x.finite?`
+      # narrows its TRUTHY edge with `finite_float`; the other edge of each keeps the entry type
+      # (NaN is truthy for `nan?` and nothing else is known there; `!finite?` admits NaN and ±∞).
+      def narrow_float_to_range(type, range)
+        case type
+        when Type::Constant
+          type.value.is_a?(Float) && !range.covers?(type.value) ? Type::Combinator.bot : type
+        when Type::FloatRange
+          intersect_float_bounds(type, range.min, range.max, range.exclude_end?)
+        when Type::Nominal
+          float_nominal?(type) ? range : type
+        when Type::Union
+          Type::Combinator.union(*type.members.map { |m| narrow_float_to_range(m, range) })
+        else
+          type
+        end
+      end
+
       # Equality fragment of `type` against an Integer `value`. `Constant<Integer>` is preserved
       # when it equals `value`, otherwise collapses to `Bot`. `IntegerRange` covers? `value`
       # narrows to `Constant[value]`; an out-of-range comparison collapses to `Bot`.
@@ -988,7 +1036,7 @@ module Rigor
 
         def simple_dispatch_name?(name)
           %i[nil? ! is_a? kind_of? instance_of? == != === =~ match? key? has_key? empty? any?
-             none? respond_to?].include?(name)
+             none? respond_to? nan? finite?].include?(name)
         end
 
         def dispatch_call_simple(node, scope, name)
@@ -1003,6 +1051,7 @@ module Rigor
           when :key?, :has_key? then analyse_key_presence_predicate(node, scope)
           when :empty?, :any?, :none? then analyse_array_emptiness_predicate(node, scope, name)
           when :respond_to? then analyse_respond_to_predicate(node, scope)
+          when :nan?, :finite? then analyse_float_class_predicate(node, scope, name)
           end
         end
 
@@ -1545,17 +1594,39 @@ module Rigor
           return nil unless node.arguments.arguments.size == 2
 
           low, high = node.arguments.arguments
-          return nil unless low.is_a?(Prism::IntegerNode) && high.is_a?(Prism::IntegerNode)
+          return nil unless numeric_literal_node?(low) && numeric_literal_node?(high)
 
           local_name = node.receiver.name
           current = scope.local(local_name)
           return nil if current.nil?
 
-          truthy = narrow_integer_comparison(
-            narrow_integer_comparison(current, :>=, low.value),
+          # Truthy edge only, for Integer and Float members alike (ADR-109 WD5): a Float literal
+          # bound leaves the Integer members untouched, and vice versa.
+          truthy = narrow_numeric_comparison_truthy(
+            narrow_numeric_comparison_truthy(current, :>=, low.value),
             :<=, high.value
           )
           [scope.with_local(local_name, truthy), scope]
+        end
+
+        # `x.nan?` / `x.finite?` (ADR-109 WD5). `nan?` narrows the FALSY edge to the non-NaN Floats
+        # and leaves the truthy edge alone (NaN is not a carrier); `finite?` narrows the TRUTHY
+        # edge to the finite Floats and leaves the falsy edge alone (it admits NaN and ±∞). A
+        # non-Float member is untouched on both edges.
+        def analyse_float_class_predicate(node, scope, predicate)
+          return nil unless argument_free?(node)
+          return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
+
+          local_name = node.receiver.name
+          current = scope.local(local_name)
+          return nil if current.nil?
+
+          case predicate
+          when :nan?
+            [scope, scope.with_local(local_name, narrow_float_to_range(current, Type::Combinator.non_nan_float))]
+          when :finite?
+            [scope.with_local(local_name, narrow_float_to_range(current, Type::Combinator.finite_float)), scope]
+          end
         end
 
         # Helper for {.narrow_integer_not_equal}. Only adjusts when the value sits exactly on
@@ -1622,18 +1693,94 @@ module Rigor
           current = scope.local(local_name)
           return nil if current.nil?
 
-          truthy = narrow_integer_comparison(current, normalised_op, bound)
+          # ADR-109 WD5 — the Float rule runs on the truthy edge only: the falsy edge of `x > c`
+          # admits NaN, so its Float-rooted members keep the entry type (the Integer rule below
+          # leaves them untouched by construction).
+          truthy = narrow_numeric_comparison_truthy(current, normalised_op, bound)
           falsey = narrow_integer_comparison(current, INVERT_COMPARISON_OP[normalised_op], bound)
           [scope.with_local(local_name, truthy), scope.with_local(local_name, falsey)]
         end
 
+        # An Integer or Float literal. Prism folds a leading minus into the literal, so `-1.5` is one
+        # `FloatNode`.
+        def numeric_literal_node?(node)
+          node.is_a?(Prism::IntegerNode) || node.is_a?(Prism::FloatNode)
+        end
+
         def comparison_local_literal(left, right, comparator)
-          if left.is_a?(Prism::LocalVariableReadNode) && right.is_a?(Prism::IntegerNode)
+          if left.is_a?(Prism::LocalVariableReadNode) && numeric_literal_node?(right)
             return [left.name, comparator, right.value]
           end
-          return nil unless right.is_a?(Prism::LocalVariableReadNode) && left.is_a?(Prism::IntegerNode)
+          return nil unless right.is_a?(Prism::LocalVariableReadNode) && numeric_literal_node?(left)
 
           [right.name, REVERSE_COMPARISON_OP[comparator], left.value]
+        end
+
+        def narrow_float_comparison_dispatch(type, comparator, bound)
+          case type
+          when Type::Constant
+            # A non-Float constant belongs to another rule and is never dropped here. The test is
+            # the positive comparison, negated once: NaN fails every comparison, which is Ruby's
+            # answer too, and rewriting `!(v < c)` as `v >= c` would silently let NaN through.
+            return type unless type.value.is_a?(Float)
+
+            float_constant_satisfies?(type.value, comparator, bound) ? type : Type::Combinator.bot
+          when Type::FloatRange
+            lo, hi, hi_exclusive = float_comparison_half_line(comparator, bound)
+            intersect_float_bounds(type, lo, hi, hi_exclusive)
+          when Type::Nominal
+            return type unless float_nominal?(type)
+
+            lo, hi, hi_exclusive = float_comparison_half_line(comparator, bound)
+            intersect_float_bounds(Type::Combinator.non_nan_float, lo, hi, hi_exclusive)
+          when Type::Union
+            Type::Combinator.union(
+              *type.members.map { |m| narrow_float_comparison_dispatch(m, comparator, bound) }
+            )
+          else
+            type
+          end
+        end
+
+        def float_nominal?(nominal)
+          nominal.class_name == "Float" && nominal.type_args.empty?
+        end
+
+        def float_constant_satisfies?(value, comparator, bound)
+          case comparator
+          when :<  then value < bound
+          when :<= then value <= bound
+          when :>  then value > bound
+          when :>= then value >= bound
+          end
+        end
+
+        # `[lo, hi]` with `hi` exclusive or not: `x < c` is `[-∞, c)`, `x <= c` is `[-∞, c]`, and both
+        # `x > c` and `x >= c` are the closed envelope `[c, ∞]` (WD5).
+        def float_comparison_half_line(comparator, bound)
+          case comparator
+          when :<  then [-Float::INFINITY, bound, true]
+          when :<= then [-Float::INFINITY, bound, false]
+          else          [bound, Float::INFINITY, false]
+          end
+        end
+
+        # Intersects `range` with `[lo, hi]` (`hi` exclusive when `hi_exclusive`), keeping whichever
+        # upper bound is tighter on the canonical closed form together with its own exclusivity, so
+        # `Float[0.0...1.0] ∩ [-∞, 2.0]` still displays `Float[0.0...1.0]`. Empty is `Bot`.
+        def intersect_float_bounds(range, lower, upper, upper_exclusive)
+          new_min = [range.min, lower].max
+          half_canonical_max = upper_exclusive ? upper.prev_float : upper
+          if half_canonical_max < range.canonical_max
+            new_max = upper
+            exclusive = upper_exclusive
+          else
+            new_max = range.max
+            exclusive = range.exclude_end?
+          end
+          return Type::Combinator.bot if new_min > (exclusive ? new_max.prev_float : new_max)
+
+          Type::Combinator.float_range(new_min, new_max, exclude_end: exclusive)
         end
 
         def narrow_integer_equal_dispatch(type, value)

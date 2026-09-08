@@ -5,10 +5,10 @@ Status: **Accepted, 2026-09-08 — slice 1 landed with this ADR in
 ADR-1's decision for `Integer`: the carrier displays `Integer[1..10]` / `Integer[0..]` /
 `Integer[..-1]`, the `%a{rigor:v1:…}` grammar accepts the same spelling, and `int<a, b>` stays
 accepted as a deprecated input alias that nothing prints any more. Slice 2 adds the `Float[R]`
-carrier (`Type::FloatRange`) with `non-nan-float` / `finite-float`, reachable through annotations
-only. Slice 3 (Float comparison narrowing and folds) and the deprecation diagnostic are designed in
-§ WD3 and § WD5, tracked in [#831](https://github.com/rigortype/rigor/issues/831), and not built;
-the narrowing rule carries a *Reserved (as of this writing)* marker in the spec. Archetype: deliberative.
+carrier (`Type::FloatRange`) with `non-nan-float` / `finite-float`. Slice 3 (landed 2026-09-09)
+adds the truthy-edge comparison narrowing of § WD5, `nan?` / `finite?`, and the union absorption
+that keeps a post-guard join to one set. Float folds and the `int<a, b>` deprecation diagnostic
+(§ WD3) remain in [#831](https://github.com/rigortype/rigor/issues/831). Archetype: deliberative.
 Stakes: mid — the annotation grammar is public surface ([ADR-50](50-release-engineering-and-stability-strategy.md)
 WD1) so the old input form gets a deprecation window; the display is not contract; the Float
 part touches the soundness envelope through NaN and is fixed here at design level only.

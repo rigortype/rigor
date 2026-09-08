@@ -88,7 +88,7 @@ Ruby equality is method dispatch. A syntactic comparison such as `foo == "foo"` 
 - **equality facts for known built-in domains** whose dispatch target is stable, such as finite `String`, `Symbol`, `Integer`, `true`, `false`, and `nil` alternatives already present in the receiver domain;
 - **comparison facts contributed by RBS or plugins** for trusted predicate and equality methods;
 - **unknown equality methods**, which SHOULD produce at most a relational fact unless the analyzer has enough method information to refine the value type;
-- **floating-point comparisons**, which MUST NOT produce literal narrowing by default because `NaN`, signed zero, infinities, and coercion make exhaustiveness and equality reasoning easy to misstate.
+- **floating-point comparisons**, which MUST NOT produce literal narrowing by default because `NaN`, signed zero, infinities, and coercion make exhaustiveness and equality reasoning easy to misstate. A relational comparison (`<`, `<=`, `>`, `>=`, `between?`) of a `Float`-typed local against a numeric literal MAY narrow its **truthy** edge to the `Float` range the comparison implies (`x > c` → `Float[c..]`, `x < c` → `Float[...c]`; [ADR-109](../adr/109-ruby-native-range-notation.md) WD5) and MUST keep the entry type on the falsy edge, because `!(x > c)` is also true of `NaN`. `x.nan?` MAY narrow only its falsy edge (to `non-nan-float`) and `x.finite?` only its truthy edge (to `finite-float`).
 
 Equality narrowing MUST NOT introduce a positive domain from the compared value alone. If `foo` is raw `untyped`, `foo == "foo"` keeps `foo` as `Dynamic[top]` with a dynamic-origin relational fact unless Rigor also knows that the dispatched equality method has a trusted narrowing effect. If `foo` is already known to be `"foo" | "bar"`, the same comparison MAY narrow the true branch to `"foo"` and the false branch to `"bar"`.
 
@@ -105,7 +105,7 @@ The initial trusted equality surface is intentionally narrow:
 
 - `equal?` produces an identity fact bound to the observed reference. The fact is invalidated by reassignment, alias-escaping mutation, unknown calls, or plugin-declared effects.
 - Built-in literal-domain equality is trusted only for finite literal sets of `String`, `Symbol`, `Integer`, booleans, and `nil`, and only when the receiver dispatch target is known and the receiver domain is already compatible.
-- `Float` literal narrowing is refused by default. Relational facts MAY still be kept for diagnostics.
+- `Float` literal (equality) narrowing is refused by default. Relational comparisons narrow the truthy edge to a `Float` range as above; relational facts MAY still be kept for diagnostics.
 - `Range`, `Regexp`, `Module`, `Class`, and `===`-based case behavior MUST NOT produce general value-narrowing facts on their own. They require specific narrowing rules or RBS/plugin effects before they can refine value domains.
 - User-defined `==`, `eql?`, and `===` are promoted from relational facts to value facts only through explicit RBS metadata, `RBS::Extended` flow effects, or plugin-declared true-edge and false-edge facts together with any required stability or purity assumptions.
 

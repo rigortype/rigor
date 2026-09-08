@@ -1871,4 +1871,123 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
     end
   end
+
+  describe "Float comparison narrowing (ADR-109 WD5)" do
+    let(:float_nominal) { Rigor::Type::Combinator.nominal_of("Float") }
+    let(:float_scope) { scope.with_local(:x, float_nominal) }
+
+    def float_range(min, max, exclude_end: false)
+      Rigor::Type::Combinator.float_range(min, max, exclude_end: exclude_end)
+    end
+
+    describe ".narrow_float_comparison" do
+      it "narrows Nominal[Float] to the half-line on each operator" do
+        expect(described_class.narrow_float_comparison(float_nominal, :>, 0.0)).to eq(float_range(0.0, Float::INFINITY))
+        expect(described_class.narrow_float_comparison(float_nominal, :>=, 0.0)).to eq(float_range(0.0, Float::INFINITY))
+        expect(described_class.narrow_float_comparison(float_nominal, :<, 1.0))
+          .to eq(float_range(-Float::INFINITY, 1.0, exclude_end: true))
+        expect(described_class.narrow_float_comparison(float_nominal, :<=, 1.0))
+          .to eq(float_range(-Float::INFINITY, 1.0))
+      end
+
+      it "accepts an Integer literal bound and reads it as a double" do
+        expect(described_class.narrow_float_comparison(float_nominal, :>, 0)).to eq(float_range(0.0, Float::INFINITY))
+      end
+
+      it "intersects a FloatRange, keeping the tighter end and its exclusivity" do
+        unit = float_range(0.0, 1.0)
+        expect(described_class.narrow_float_comparison(unit, :>, 0.5)).to eq(float_range(0.5, 1.0))
+        expect(described_class.narrow_float_comparison(unit, :<, 0.5)).to eq(float_range(0.0, 0.5, exclude_end: true))
+        expect(described_class.narrow_float_comparison(unit, :<, 2.0)).to eq(unit)
+        half_open = float_range(0.0, 1.0, exclude_end: true)
+        expect(described_class.narrow_float_comparison(half_open, :<=, 1.0)).to eq(half_open)
+        expect(described_class.narrow_float_comparison(half_open, :<=, 1.5)).to eq(half_open)
+      end
+
+      it "collapses an empty intersection to Bot" do
+        expect(described_class.narrow_float_comparison(float_range(0.0, 1.0), :>, 2.0)).to be_a(Rigor::Type::Bot)
+        expect(described_class.narrow_float_comparison(float_range(0.0, 1.0), :<, 0.0)).to be_a(Rigor::Type::Bot)
+      end
+
+      it "keeps a Float constant that satisfies the comparison and drops one that does not" do
+        half = Rigor::Type::Combinator.constant_of(0.5)
+        expect(described_class.narrow_float_comparison(half, :>, 0.0)).to eq(half)
+        expect(described_class.narrow_float_comparison(half, :>, 1.0)).to be_a(Rigor::Type::Bot)
+        expect(described_class.narrow_float_comparison(Rigor::Type::Combinator.constant_of(Float::NAN), :>, 0.0))
+          .to be_a(Rigor::Type::Bot)
+      end
+
+      it "leaves Integer-rooted members, nil, and other carriers untouched" do
+        int = Rigor::Type::Combinator.nominal_of("Integer")
+        expect(described_class.narrow_float_comparison(int, :>, 0.5)).to eq(int)
+        expect(described_class.narrow_float_comparison(Rigor::Type::Combinator.positive_int, :>, 0.5))
+          .to eq(Rigor::Type::Combinator.positive_int)
+        expect(described_class.narrow_float_comparison(Rigor::Type::Combinator.nominal_of("String"), :>, 0.5))
+          .to eq(Rigor::Type::Combinator.nominal_of("String"))
+        union = Rigor::Type::Combinator.union(float_nominal, Rigor::Type::Combinator.constant_of(nil))
+        expect(described_class.narrow_float_comparison(union, :>, 0.0))
+          .to eq(Rigor::Type::Combinator.union(float_range(0.0, Float::INFINITY), Rigor::Type::Combinator.constant_of(nil)))
+      end
+
+      it "declines an infinite or NaN bound and a non-ordering comparator" do
+        expect(described_class.narrow_float_comparison(float_nominal, :>, Float::INFINITY)).to eq(float_nominal)
+        expect(described_class.narrow_float_comparison(float_nominal, :>, Float::NAN)).to eq(float_nominal)
+        expect(described_class.narrow_float_comparison(float_nominal, :==, 1.0)).to eq(float_nominal)
+      end
+    end
+
+    describe "predicate_scopes" do
+      it "narrows the truthy edge of `x > 0.0` and keeps the entry type on the falsy edge" do
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("x > 0.0"), float_scope)
+        expect(truthy.local(:x)).to eq(float_range(0.0, Float::INFINITY))
+        expect(falsey.local(:x)).to eq(float_nominal)
+      end
+
+      it "transposes a literal on the left" do
+        truthy, _falsey = described_class.predicate_scopes(parse_predicate("1.0 > x"), float_scope)
+        expect(truthy.local(:x)).to eq(float_range(-Float::INFINITY, 1.0, exclude_end: true))
+      end
+
+      it "narrows `x.between?(0.0, 1.0)` on the truthy edge only" do
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("x.between?(0.0, 1.0)"), float_scope)
+        expect(truthy.local(:x)).to eq(float_range(0.0, 1.0))
+        expect(falsey.local(:x)).to eq(float_nominal)
+      end
+
+      it "narrows the falsy edge of `x.nan?` to non-nan-float and keeps the truthy edge" do
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("x.nan?"), float_scope)
+        expect(truthy.local(:x)).to eq(float_nominal)
+        expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.non_nan_float)
+      end
+
+      it "narrows the truthy edge of `x.finite?` to finite-float and keeps the falsy edge" do
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("x.finite?"), float_scope)
+        expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.finite_float)
+        expect(falsey.local(:x)).to eq(float_nominal)
+      end
+
+      it "intersects `finite?` with an existing range and drops a non-finite constant on that edge" do
+        bounded = scope.with_local(:x, float_range(0.0, Float::INFINITY))
+        truthy, = described_class.predicate_scopes(parse_predicate("x.finite?"), bounded)
+        expect(truthy.local(:x)).to eq(float_range(0.0, Float::MAX))
+        inf = scope.with_local(:x, Rigor::Type::Combinator.constant_of(Float::INFINITY))
+        truthy, = described_class.predicate_scopes(parse_predicate("x.finite?"), inf)
+        expect(truthy.local(:x)).to be_a(Rigor::Type::Bot)
+      end
+
+      it "leaves an Integer local alone under a Float bound on both edges" do
+        int_scope = scope.with_local(:x, Rigor::Type::Combinator.non_negative_int)
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("x > 0.5"), int_scope)
+        expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.non_negative_int)
+        expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.non_negative_int)
+      end
+
+      it "still narrows an Integer local under an Integer bound on both edges" do
+        int_scope = scope.with_local(:x, Rigor::Type::Combinator.nominal_of("Integer"))
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("x > 0"), int_scope)
+        expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.positive_int)
+        expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.non_positive_int)
+      end
+    end
+  end
 end

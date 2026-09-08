@@ -180,6 +180,33 @@ if n.between?(1, 9)
 end
 ```
 
+## Float comparisons
+
+A `Float` narrows on the *true* edge only. `x > 0.0` is false for
+`NaN`, so the values that pass are a range, `Float[0.0..]`, but the
+values that fail are everything else *plus* `NaN`, which no range
+spells, so the else branch keeps `Float`:
+
+```ruby
+x = Float(input)
+if x > 0.0
+  # x: Float[0.0..]
+else
+  # x: Float
+end
+if x < 1.0
+  # x: Float[...1.0]   (Ruby's exclusive end)
+end
+if x.between?(0.0, 1.0)
+  # x: Float[0.0..1.0]
+end
+```
+
+`x.nan?` narrows its *false* edge to `non-nan-float`, and
+`x.finite?` its *true* edge to `finite-float`. The range is the
+one Ruby's `Range#cover?` would accept, so `Float[0.0..]` contains
+`Float::INFINITY` and never `Float::NAN`.
+
 ## Predicate methods on refinements
 
 Rigor recognises a small set of "type-carrier predicate

@@ -56,11 +56,21 @@ Two things the next session should not rediscover:
 - Union display order follows the spelling: `Integer[..4] | Integer[11..]` sorts the beginless
   half first. Regenerate a precision snapshot with `UPDATE_SNAPSHOTS=<name>`, never by hand.
 
-## The types-and-comments follow-ups (closed)
+## The types-and-comments line (2026-09-08 → 09, all landed)
 
-#823, #824 and #825 were closed on 2026-09-08 by sibling sessions: #840 (unannotated siblings),
-#832 (`sig/` wins over an inline annotation) and #835 (the `sig/` provenance gate), all merged.
-Nothing from that line is open.
+Rule: **a type Rigor did not produce or check is never written down** — typeless YARD doc tags
+(`@param name — description`) gated by `spec/docs/type_shaped_comments_spec.rb` over lib/, plugins/,
+examples/, spec/, tool/; ADR-107 / ADR-108; the `rigor-type-oracle` skill; `make check --fail-on=warning`
+(#822, #826, #827, #829). Follow-ups closed: #823 (an unannotated sibling is declared but inferred,
+#840), #824 (`sig/` wins over an inline annotation, #832), #825 (the `sig/` provenance gate, #835).
+Corrected on 2026-09-09: inline `#:` / `# @rbs` are **not** banned — checked type sources, written
+where they say what the name and the code do not (`void`, `:asc | :desc` over `Symbol`); the nominal
+class restated on every method is the noise to avoid (#843: ADR-107 amended, gate R2 withdrawn,
+`static.value-use.void` enabled in the self-check). A declared `void` is authored intent: sig-gen no
+longer proposes against it and the provenance gate counts it as earned (#845, closing #836). Open:
+[#837](https://github.com/rigortype/rigor/issues/837), [#838](https://github.com/rigortype/rigor/issues/838)
+(`ready-for-agent`), [#839](https://github.com/rigortype/rigor/issues/839),
+[#841](https://github.com/rigortype/rigor/issues/841). `make steep-check` has 11 pre-existing problems.
 
 ## How to enter
 

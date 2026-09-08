@@ -17,9 +17,9 @@ power = 1
 1.upto(6) { power *= 2 }
 assert_type("Integer", power)
 
-# `upto` flows the bounded-int refinement (`int<1, 6>`) into the block
+# `upto` flows the bounded-int refinement (`Integer[1..6]`) into the block
 # param, so `fact *= i` multiplies the running fixpoint assumption
-# (`1 | int<1, 6>`) by a refinement. The mixed `Constant | IntegerRange`
+# (`1 | Integer[1..6]`) by a refinement. The mixed `Constant | IntegerRange`
 # union must fold as the bounding interval (not bail to `Dynamic[top]`),
 # otherwise the accumulator never converges below the cap floor.
 fact = 1

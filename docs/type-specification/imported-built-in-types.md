@@ -17,7 +17,7 @@ These names are authored in `.rbs` as comment extensions (`%a{rigor:v1:…}`) an
 - Type functions avoid `-` because `-` is also the difference operator in Rigor's type syntax; `int_mask[1, 2, 4]` is less ambiguous than `int-mask[1, 2, 4]`.
 - Compatibility aliases MUST NOT be accepted unless they solve a concrete migration or readability problem.
 - RBS names remain canonical when they already express the concept. `bot` is the bottom type; `never`, `noreturn`, `never-return`, `never-returns`, `no-return`, `Never`, and `NoReturn` MUST NOT be added as initial aliases.
-- Bounded integer ranges use the reserved refinement name `int<min, max>`, such as `int<1, 10>` (erases to `Integer`). It is parsed through `Builtins::ImportedRefinements` and displayed by the `IntegerRange` carrier; it is a Rigor-reserved refinement name, not generic-bracket syntax applied to an arbitrary type.
+- Bounded numeric ranges are spelled as the class followed by a Ruby range literal in square brackets, `Integer[1..10]`, and denote exactly the values that literal covers: `Integer[R]` is `{ x | x.is_a?(Integer) && R.cover?(x) }` ([ADR-109](../adr/109-ruby-native-range-notation.md)). Every Ruby spelling of the literal is accepted (`1..10`, `1...10`, `1..`, `..10`, `nil..nil`); an exclusive end canonicalises to the closed form (`Integer[1...10]` displays as `Integer[1..9]`), the unbounded range displays as `Integer`, and an empty range (`Integer[5..1]`, `Integer[1...1]`) MUST decline as an unresolvable payload rather than resolve to `bot`. The form is parsed through `Builtins::ImportedRefinements` and displayed by the `IntegerRange` carrier; it is the range refinement of a numeric class, not generic-bracket syntax applied to an arbitrary type (`Integer[Foo]` keeps its RBS meaning). The PHPStan-style `int<min, max>` is accepted as a deprecated input alias for one deprecation window and MUST NOT be displayed.
 
 ## Initial scalar refinements
 
@@ -42,7 +42,7 @@ These names are authored in `.rbs` as comment extensions (`%a{rigor:v1:…}`) an
 | `non-positive-int` | `Integer` less than or equal to `0` | `Integer` |
 | `non-negative-int` | `Integer` greater than or equal to `0` | `Integer` |
 | `non-zero-int` | `Integer` except `0` | `Integer` |
-| `int<min, max>` | `Integer` within the inclusive bounded range `min..max` | `Integer` |
+| `Integer[1..10]` | `Integer` covered by the Ruby range literal (`positive-int` is `Integer[1..]`, `non-positive-int` is `Integer[..0]`) | `Integer` |
 
 The canonical lowercase string name is `lowercase-string`; `lower-string` MUST NOT be accepted as a separate alias unless a concrete usability problem appears.
 
@@ -52,7 +52,8 @@ Integer refinements are deliberately `Integer` refinements, **not** sign refinem
 
 Non-integer numeric refinements have separate rules:
 
-- `Float` literal equality and exhaustiveness narrowing are refused by default. `NaN`, infinities, signed zero, and coercion-sensitive comparisons make literal partitions easy to misstate. Rigor MAY retain relational facts from float comparisons, and a future `finite-float` or non-`NaN` proof MAY unlock narrower float-specific refinements.
+- `Float` literal equality and exhaustiveness narrowing are refused by default. `NaN`, infinities, signed zero, and coercion-sensitive comparisons make literal partitions easy to misstate. Rigor MAY retain relational facts from float comparisons.
+- `Float` ranges — **Reserved (as of this writing)**, designed in [ADR-109](../adr/109-ruby-native-range-notation.md) WD4–WD5 and not implemented. The form is `Float[R]` with the same `cover?` definition, so `Float[0.0...1.0]` is half-open, `Float[0.0..]` is closed at `+Infinity`, `Float[0.0...Float::INFINITY]` is finite and non-negative, and no bounded range contains `NaN`; `Float[nil..nil]` is `Float` itself because `(nil..nil).cover?(Float::NAN)` is true. Two names are reserved as aliases of ranges, not as a separate NaN-ness refinement: `non-nan-float` is `Float[-Float::INFINITY..]` and `finite-float` is `Float[-Float::MAX..Float::MAX]`. Comparison narrowing, when it lands, MUST narrow the truthy edge only (`x > c` to the closed `Float[c..]`, `x < c` to `Float[...c]`) and MUST keep the falsy edge's entry type, because `!(x > c)` admits `NaN`. `Float::NAN` MUST NOT become a `Constant` carrier.
 - `Rational` is exact and ordered, but it is not an `Integer`. Future sign or range facts for `Rational` MUST be Rational-specific and MUST NOT reuse `*-int` names.
 - `Complex` does not have a total ordering in Ruby, so positive, negative, and interval refinements MUST NOT apply to `Complex`. Facts about zero-ness, real parts, imaginary parts, or magnitude need explicit predicates or plugin/RBS effects.
 - Mixed numeric operations and comparisons follow Ruby method dispatch and `coerce`, not subtype promotion. Refinements MUST NOT automatically cross from `Integer` to `Float`, `Rational`, or another `Numeric` class. When a mixed operation is known, the result type follows the Ruby/RBS operator signature or a trusted plugin fact; otherwise Rigor keeps a relational or dynamic-origin fact and widens conservatively.

@@ -3510,7 +3510,7 @@ module Rigor
       # `Constant<a..b>`        → [Constant[a], …, Constant[b]]
       # everything else         → nil
       #
-      # Note: `Type::IntegerRange` is the bounded-Integer carrier (`int<a, b>` represents "an Integer between
+      # Note: `Type::IntegerRange` is the bounded-Integer carrier (`Integer[a..b]` represents "an Integer between
       # a and b"), not a Range value. Calls like `.map` / `.find` on an `IntegerRange` receiver would resolve
       # to `Integer#map` / `Integer#find` — neither exists — so IntegerRange does NOT participate in this
       # fold.
@@ -3550,7 +3550,7 @@ module Rigor
       #
       # Part 1 (soundness): the accumulator of a block-form fold must reach a fixpoint over an unknown
       # number of iterations — the RBS tier's generic `(S) { (S, E) -> S } -> S` binds `S` from a SINGLE
-      # block pass (acc=seed, elem=element-join), so `(1..5).inject(1) { |a, i| a * i }` types `int<1, 5>`
+      # block pass (acc=seed, elem=element-join), so `(1..5).inject(1) { |a, i| a * i }` types `Integer[1..5]`
       # while the runtime is 120 (out of range — unsound). We iterate the accumulator type to a capped
       # fixpoint (ADR-55/56 `BodyFixpoint`) so the multiply converges to `Integer`, never a value-bounded
       # interval the runtime escapes.

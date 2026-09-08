@@ -8,10 +8,11 @@ require_relative "plain_lattice"
 module Rigor
   module Type
     # A bounded integer range carrier. Each bound is either an `Integer` or one of the symbolic
-    # infinities `:neg_infinity` / `:pos_infinity`. Inspired by PHPStan's `int<min, max>` family — the
-    # named aliases `positive-int` (1..), `non-negative-int` (0..), `negative-int` (..-1),
-    # `non-positive-int` (..0) all surface through this single carrier and are recovered in `describe`
-    # for human-friendly output.
+    # infinities `:neg_infinity` / `:pos_infinity`. Displayed with the Ruby range literal that
+    # `Range#cover?` would accept the same integers for (`Integer[1..10]`, `Integer[0..]`,
+    # `Integer[..-1]`; ADR-109). The named aliases `positive-int` (1..), `non-negative-int` (0..),
+    # `negative-int` (..-1), `non-positive-int` (..0) all surface through this single carrier and are
+    # recovered in `describe` for human-friendly output.
     #
     # Constraints on construction:
     # - both bounds must be either `Integer` or one of the two infinity sentinels;
@@ -76,8 +77,10 @@ module Rigor
         Float::INFINITY
       end
 
+      # The universal range reads as the class it erases to: a range with no bound carries no fact
+      # a Rubyist would spell.
       ALIAS_NAMES = Ractor.make_shareable({
-                                            [NEG_INFINITY, POS_INFINITY] => "int",
+                                            [NEG_INFINITY, POS_INFINITY] => "Integer",
                                             [1, POS_INFINITY] => "positive-int",
                                             [0, POS_INFINITY] => "non-negative-int",
                                             [NEG_INFINITY, -1] => "negative-int",
@@ -88,11 +91,13 @@ module Rigor
         ALIAS_NAMES[[min, max]] || generic_description
       end
 
+      # Always the closed form: for integers `a...b` and `a..b-1` are the same set, and the closed
+      # spelling is the one the grammar reads back without a canonicalisation step.
       def generic_description
-        return "int<#{min}, max>" if max == POS_INFINITY
-        return "int<min, #{max}>" if min == NEG_INFINITY
+        return "Integer[#{min}..]" if max == POS_INFINITY
+        return "Integer[..#{max}]" if min == NEG_INFINITY
 
-        "int<#{min}, #{max}>"
+        "Integer[#{min}..#{max}]"
       end
 
       def erase_to_rbs

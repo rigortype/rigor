@@ -1070,7 +1070,7 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/parameterised_refinement/ — RBS::Extended parameterised return payload" do
     let(:harness) { harness_for("parameterised_refinement") }
 
-    it "self-asserts non-empty-array[T], non-empty-hash[K, V], and int<a, b> return overrides" do
+    it "self-asserts non-empty-array[T], non-empty-hash[K, V], and Integer[a..b] return overrides" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end
@@ -1103,7 +1103,7 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
-  describe "fixtures/assert_negation_integer_range/ — RBS::Extended assert against ~int<a, b>" do
+  describe "fixtures/assert_negation_integer_range/ — RBS::Extended assert against ~Integer[a..b]" do
     let(:harness) { harness_for("assert_negation_integer_range") }
 
     it "narrows Integer to the union of the two open complement halves" do

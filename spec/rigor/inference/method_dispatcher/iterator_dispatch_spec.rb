@@ -16,7 +16,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
   end
 
   describe ".times" do
-    it "binds `n.times` to int<0, n-1> for a Constant<Integer> receiver" do
+    it "binds `n.times` to Integer[0..n-1] for a Constant<Integer> receiver" do
       expect(block_params(constant_of(5), :times)).to eq([integer_range(0, 4)])
     end
 
@@ -32,7 +32,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
       expect(block_params(positive_int, :times)).to eq([non_negative_int])
     end
 
-    it "binds a finite range like int<5, 10>.times to int<0, upper-1>" do
+    it "binds a finite range like Integer[5..10].times to Integer[0..upper-1]" do
       expect(block_params(integer_range(5, 10), :times)).to eq([integer_range(0, 9)])
     end
 
@@ -52,7 +52,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
   end
 
   describe ".upto" do
-    it "binds 3.upto(7) to int<3, 7>" do
+    it "binds 3.upto(7) to Integer[3..7]" do
       expect(block_params(constant_of(3), :upto, [constant_of(7)])).to eq([integer_range(3, 7)])
     end
 
@@ -61,7 +61,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
     end
 
     it "uses the receiver lower and arg upper for ranges" do
-      # int<-2, 2>.upto(int<3, 5>) -> [int<-2, 5>]
+      # Integer[-2..2].upto(Integer[3..5]) -> [Integer[-2..5]]
       result = block_params(integer_range(-2, 2), :upto, [integer_range(3, 5)])
       expect(result).to eq([integer_range(-2, 5)])
     end
@@ -83,7 +83,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
   end
 
   describe ".downto" do
-    it "binds 7.downto(3) to int<3, 7>" do
+    it "binds 7.downto(3) to Integer[3..7]" do
       expect(block_params(constant_of(7), :downto, [constant_of(3)])).to eq([integer_range(3, 7)])
     end
 

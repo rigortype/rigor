@@ -74,12 +74,12 @@ assert_type("Integer", huge)
 #
 # Part 1 fixed an UNSOUND single-pass accumulator fold (the RBS generic
 # `(S) { (S, E) -> S } -> S` bound `S` from one block pass, so
-# `(1..5).inject(1) { |a, i| a * i }` typed `int<1, 5>` against a runtime
+# `(1..5).inject(1) { |a, i| a * i }` typed `Integer[1..5]` against a runtime
 # of 120 — out of range). Part 2 threads the running constant through
 # per-element block evaluation over a fully-constant receiver.
 
 # Block-form factorial: per-element constant threading folds the exact
-# value (was the unsound `int<1, 5>`).
+# value (was the unsound `Integer[1..5]`).
 block_fact = (1..5).inject(1) { |acc, i| acc * i }
 assert_type("120", block_fact)
 

@@ -1027,7 +1027,7 @@ module Rigor
           # about it instead of bailing. `Type::Refined` carries string-family
           # refinements (`lowercase-string`, …) over an explicit `.base`;
           # `Type::IntegerRange` carries the bounded-int refinements
-          # (`non-negative-int`, `positive-int`, `int<1,5>`), every one an
+          # (`non-negative-int`, `positive-int`, `Integer[1..5]`), every one an
           # Integer; `Type::Difference` (`A - B`) carries the non-empty /
           # non-zero refinements (`non-empty-string` = `String - ""`,
           # `non-empty-array` = `Array - []`, `non-zero-int` = `Integer - 0`)

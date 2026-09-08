@@ -136,10 +136,11 @@ module Rigor
     end
 
     # The right-hand side accepts either a Capitalised class name (with optional `~` negation, optional `::`
-    # prefix, qualified names) OR a kebab-case refinement payload routed through
-    # `Builtins::ImportedRefinements::Parser` (bare names, `name[T]`, `name<min, max>`). The two arms share the
-    # same overall directive shape; the parser detects which form matched by looking at the `class_name` vs
-    # `refinement` capture groups.
+    # prefix, qualified names) OR a refinement payload routed through
+    # `Builtins::ImportedRefinements::Parser` (bare kebab-case names, `name[T]`, the numeric range form
+    # `Integer[1..10]`, and the deprecated `name<min, max>`). The two arms share the same overall directive
+    # shape; the parser detects which form matched by looking at the `class_name` vs `refinement` capture
+    # groups. A class head followed by a bracketed range literal is a refinement (ADR-109), not a class name.
     PREDICATE_DIRECTIVE_PATTERN = /
       \A
       rigor:v1:(?<directive>predicate-if-(?:true|false))
@@ -150,7 +151,7 @@ module Rigor
       (?:
         (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
         |
-        (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?)
+        (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?|[A-Z][A-Za-z0-9_]*\[[^\]]*\.\.[^\]]*\])
       )
       \s*
       \z
@@ -223,7 +224,7 @@ module Rigor
       (?:
         (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
         |
-        (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?)
+        (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?|[A-Z][A-Za-z0-9_]*\[[^\]]*\.\.[^\]]*\])
       )
       \s*
       \z
@@ -361,7 +362,8 @@ module Rigor
 
     # The trailing payload supports the full refinement grammar in `Builtins::ImportedRefinements::Parser` — bare
     # kebab-case names plus parameterised forms like `non-empty-array[Integer]`, `non-empty-hash[Symbol,
-    # Integer]`, and `int<5, 10>`. The directive head is consumed by the regex; the rest is forwarded to the
+    # Integer]`, `Integer[5..10]`, and the deprecated `int<5, 10>`. The directive head is consumed by the regex;
+    # the rest is forwarded to the
     # refinement parser. Anything the parser cannot resolve falls back to nil so the call site keeps the
     # RBS-declared return type.
     RETURN_DIRECTIVE_PATTERN = /
@@ -458,7 +460,7 @@ module Rigor
 
     # Returned for `rigor:v1:param: <name> <refinement>`. The parameter name is a Ruby identifier (Symbol); the
     # type is any `Rigor::Type` the refinement parser resolves (bare kebab-case name, parameterised form, or
-    # `int<...>` range — the same grammar the `return:` directive accepts).
+    # `Integer[a..b]` range, or the deprecated `int<a, b>` — the same grammar the `return:` directive accepts).
     ParamOverride = Data.define(:param_name, :type)
 
     # Reads every `rigor:v1:param: <name> <refinement>` directive off `RBS::Definition::Method#annotations` and

@@ -18,7 +18,7 @@ A vanilla checker asks "what class is this?"; Rigor asks "what subset of values 
 
 ```ruby
 n   = 1 + 2        # Constant<3>            — a single proven value
-len = ARGV.size    # int<0, max>            — a bounded range (a.k.a. non-negative-int)
+len = ARGV.size    # Integer[0..]            — a bounded range (a.k.a. non-negative-int)
 s   = id.downcase  # lowercase-string       — a refinement: String restricted by a predicate
 row = [1, "a"]     # Tuple[Constant<1>, Constant<"a">]    — per-position array shape
 cfg = {port: 8080} # HashShape{port: Constant<8080>}      — per-key hash shape
@@ -26,7 +26,7 @@ tag = choose_color # Constant<:red> | Constant<:blue>     — a finite union
 x   = gets         # String | nil; Dynamic[top] when nothing can be proved
 ```
 
-Angle brackets hold a concrete value or bound (`Constant<3>`, `int<0, max>`); square brackets hold type parameters, as in RBS (`Tuple[…]`, `Dynamic[top]`). (This is the handbook's display convention. The engine's own `#describe` prints a `Constant` as its bare value — `3`, `"hi"` — and the analyzer-internal specs under `docs/internal-spec/` render every carrier with square brackets, e.g. `Constant[3]`.) Every carrier **erases to its base RBS class** at the boundary (`Constant<3>` → `Integer`), so adopting Rigor is strictly additive. The full walkthrough is [handbook chapter 2 — Everyday types](handbook/02-everyday-types.md).
+Angle brackets hold a concrete value (`Constant<3>`); square brackets hold type parameters, as in RBS (`Tuple[…]`, `Dynamic[top]`), or, after a numeric class, the Ruby range literal that bounds its values (`Integer[0..]`, [ADR-109](adr/109-ruby-native-range-notation.md)). (This is the handbook's display convention. The engine's own `#describe` prints a `Constant` as its bare value — `3`, `"hi"` — and the analyzer-internal specs under `docs/internal-spec/` render every carrier with square brackets, e.g. `Constant[3]`.) Every carrier **erases to its base RBS class** at the boundary (`Constant<3>` → `Integer`), so adopting Rigor is strictly additive. The full walkthrough is [handbook chapter 2 — Everyday types](handbook/02-everyday-types.md).
 
 ## Main features
 

@@ -53,7 +53,7 @@ is the closest match of any peer.
 | `numeric-string` | `numeric-string` | Identical. |
 | `lowercase-string` | `lowercase-string` | Identical. |
 | `class-string` | `Singleton[T]` | Equivalent shape. |
-| `int<1, 9>` | `int<1, 9>` | **Identical syntax.** |
+| `int<1, 9>` | `Integer[1..9]` | Same carrier; Rigor spells the bound as the Ruby range literal `Range#cover?` reads (`Integer[1..]`, `Integer[..9]`). |
 | `positive-int` | `positive-int` | Identical. |
 | `negative-int` | `negative-int` | Identical. |
 | `non-zero-int` | `non-zero-int` | Identical. |

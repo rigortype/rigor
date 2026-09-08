@@ -274,7 +274,7 @@ by narrowing.
 | --- | --- | --- |
 | `non-empty-string` | `struct NonEmptyString(String)` newtype | Rigor produces it from `unless s.empty?`, no wrapper. |
 | `positive-int` | `struct PositiveInt(u32)` newtype | Rigor narrows from `n > 0`. |
-| `int<1, 9>` | newtype + range check, or const generics gymnastics | Rigor's range carrier handles arbitrary bounds directly. |
+| `Integer[1..9]` | newtype + range check, or const generics gymnastics | Rigor's range carrier handles arbitrary bounds directly. |
 | `numeric-string` | newtype wrapping validated parse | No type-level analogue. |
 | `non-empty-array[T]` | newtype over `Vec<T>` | Rigor produces it from `unless arr.empty?`. |
 

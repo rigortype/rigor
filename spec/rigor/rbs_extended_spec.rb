@@ -244,9 +244,27 @@ RSpec.describe Rigor::RbsExtended do
       )
     end
 
-    it "parses int<min, max> parameterised payloads" do
+    it "parses Integer[a..b] range payloads" do
+      override = described_class.parse_param_annotation("rigor:v1:param: idx Integer[5..10]")
+      expect(override.type).to eq(Rigor::Type::Combinator.integer_range(5, 10))
+    end
+
+    it "still parses the deprecated int<min, max> alias" do
       override = described_class.parse_param_annotation("rigor:v1:param: idx int<5, 10>")
       expect(override.type).to eq(Rigor::Type::Combinator.integer_range(5, 10))
+    end
+
+    it "routes a negated Integer[a..b] assert through the refinement arm" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert n is ~Integer[5..10]")
+      expect(effect.class_name).to be_nil
+      expect(effect.refinement_type).to eq(Rigor::Type::Combinator.integer_range(5, 10))
+      expect(effect.negative?).to be(true)
+    end
+
+    it "routes a positive Integer[a..] predicate through the refinement arm" do
+      effect = described_class.parse_predicate_annotation("rigor:v1:predicate-if-true n is Integer[1..]")
+      expect(effect.class_name).to be_nil
+      expect(effect.refinement_type).to eq(Rigor::Type::Combinator.positive_int)
     end
 
     it "returns nil for non-`param:` directives" do

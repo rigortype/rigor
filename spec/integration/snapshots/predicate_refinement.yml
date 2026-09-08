@@ -1,7 +1,7 @@
 ---
 locals:
   d: decimal-int-string
-  di: int
+  di: Integer
   h: hex-int-string
   "n": numeric-string
   o: octal-int-string
@@ -22,7 +22,7 @@ assertions:
   '11': decimal-int-string
   '12': decimal-int-string
   '13': decimal-int-string
-  '14': int
+  '14': Integer
   '15': octal-int-string
   '16': octal-int-string
   '17': octal-int-string

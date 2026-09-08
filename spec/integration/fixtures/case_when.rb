@@ -19,16 +19,16 @@ assert_type(":large | :small | :zero", label)
 m = rand(100)
 case m
 when 1..10
-  assert_type("int<1, 10>", m)
+  assert_type("Integer[1..10]", m)
 when 11..20
-  assert_type("int<11, 20>", m)
+  assert_type("Integer[11..20]", m)
 end
 
 # Exclusive end shifts the upper bound by one.
 k = rand(100)
 case k
 when 0...10
-  assert_type("int<0, 9>", k)
+  assert_type("Integer[0..9]", k)
 end
 
 # Endless / beginless ranges produce half-line bounds. Wrap in
@@ -37,7 +37,7 @@ end
 j = rand(100)
 case j
 when (100..)
-  assert_type("int<100, max>", j)
+  assert_type("Integer[100..]", j)
 when (..-1)
   assert_type("negative-int", j)
 end

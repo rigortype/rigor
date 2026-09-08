@@ -1,4 +1,4 @@
 ---
 locals: {}
 assertions:
-  '1': int<11, max> | int<min, 4>
+  '1': Integer[..4] | Integer[11..]

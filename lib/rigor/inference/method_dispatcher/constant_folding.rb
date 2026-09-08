@@ -343,7 +343,7 @@ module Rigor
             return type.members.map(&:value) if type.members.all?(Type::Constant)
 
             # A union that mixes `Constant<Integer>` and `IntegerRange` members (e.g. an accumulator's
-            # running fixpoint assumption `1 | int<1, 6>`) folds as the bounding interval. The
+            # running fixpoint assumption `1 | Integer[1..6]`) folds as the bounding interval. The
             # range-arithmetic path (`try_fold_binary_range`) then keeps the result an `IntegerRange`
             # instead of bailing to Dynamic.
             union_integer_bounds(type)
@@ -869,8 +869,8 @@ module Rigor
         # could not reach.
         #
         # v0.0.6 — IntegerRange-shaped receivers participate in `Comparable#between?` and
-        # `Comparable#clamp` folds. `int<a,b>.between?(min, max)` decides three-valued via the receiver's
-        # bounds against scalar args; `int<a,b>.clamp` narrows the receiver's bounds against the bracket.
+        # `Comparable#clamp` folds. `Integer[a..b].between?(min, max)` decides three-valued via the receiver's
+        # bounds against scalar args; `Integer[a..b].clamp` narrows the receiver's bounds against the bracket.
         # Other ternary methods over IntegerRange operands still decline.
         def try_fold_ternary(receiver_set, method_name, arg_sets)
           return try_fold_ternary_range(receiver_set, method_name, arg_sets) if receiver_set.is_a?(Type::IntegerRange)
@@ -903,7 +903,7 @@ module Rigor
           v.is_a?(Integer) ? v : nil
         end
 
-        # `int<a,b>.between?(min, max)`:
+        # `Integer[a..b].between?(min, max)`:
         # - Constant[true] when [a,b] ⊆ [min,max] (and finite).
         # - Constant[false] when [a,b] ∩ [min,max] is empty.
         # - bool union otherwise.
@@ -915,7 +915,7 @@ module Rigor
           bool_union
         end
 
-        # `int<a,b>.clamp(min, max)`:
+        # `Integer[a..b].clamp(min, max)`:
         # - new_lower = max(a, min), new_upper = min(b, max).
         # - When new_lower > new_upper the bracket excluded the range entirely; the call still returns one
         #   of the bracket bounds at runtime, but Rigor is strictly less precise here than Ruby — decline
@@ -1111,8 +1111,8 @@ module Rigor
         end
 
         # Range % Range. Only the `(any range) % (positive constant n)` and `(any range) % (negative
-        # constant n)` cases are folded precisely — the former narrows to `int<0, n-1>`, the latter to
-        # `int<n+1, 0>`. Other shapes fall back to nil.
+        # constant n)` cases are folded precisely — the former narrows to `Integer[0..n-1]`, the latter to
+        # `Integer[n+1..0]`. Other shapes fall back to nil.
         def range_modulo(_left, right)
           return nil unless right.finite? && right.min == right.max
 

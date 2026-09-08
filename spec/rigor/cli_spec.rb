@@ -2252,7 +2252,7 @@ RSpec.describe Rigor::CLI do
       lines = out.lines
       # The header line's widest node is the BlockParametersNode — a non-expression whose evaluation falls back to
       # `Dynamic[top]`. The annotation must instead show the bound parameter type(s).
-      expect(lines[1]).to include("1.upto(5) do |i|").and include("#=> int<1, 5>")
+      expect(lines[1]).to include("1.upto(5) do |i|").and include("#=> Integer[1..5]")
       expect(lines[5]).to include("each do |k, v|").and include("#=> [:x, 1]")
       expect(out).not_to include("Dynamic")
     end

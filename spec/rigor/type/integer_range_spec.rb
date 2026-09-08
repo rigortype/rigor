@@ -36,8 +36,8 @@ RSpec.describe Rigor::Type::IntegerRange do
   end
 
   describe "describe (named aliases)" do
-    it "renders the universal range as 'int'" do
-      expect(Rigor::Type::Combinator.universal_int.describe).to eq("int")
+    it "renders the universal range as the class it erases to" do
+      expect(Rigor::Type::Combinator.universal_int.describe).to eq("Integer")
     end
 
     it "renders 1.. as positive-int" do
@@ -56,15 +56,15 @@ RSpec.describe Rigor::Type::IntegerRange do
       expect(Rigor::Type::Combinator.non_positive_int.describe).to eq("non-positive-int")
     end
 
-    it "renders int<a, b> for finite custom ranges" do
-      expect(Rigor::Type::Combinator.integer_range(0, 100).describe).to eq("int<0, 100>")
+    it "renders Integer[a..b] for finite custom ranges" do
+      expect(Rigor::Type::Combinator.integer_range(0, 100).describe).to eq("Integer[0..100]")
     end
 
-    it "renders int<a, max> and int<min, b> for half-open ranges" do
+    it "renders Integer[a..] and Integer[..b] for half-open ranges" do
       expect(Rigor::Type::Combinator.integer_range(5, described_class::POS_INFINITY).describe)
-        .to eq("int<5, max>")
+        .to eq("Integer[5..]")
       expect(Rigor::Type::Combinator.integer_range(described_class::NEG_INFINITY, 7).describe)
-        .to eq("int<min, 7>")
+        .to eq("Integer[..7]")
     end
   end
 
@@ -183,7 +183,7 @@ RSpec.describe Rigor::Type::IntegerRange do
 
   describe "#inspect" do
     it "wraps the described range" do
-      expect(described_class.new(0, 10).inspect).to eq("#<Rigor::Type::IntegerRange int<0, 10>>")
+      expect(described_class.new(0, 10).inspect).to eq("#<Rigor::Type::IntegerRange Integer[0..10]>")
     end
   end
 end

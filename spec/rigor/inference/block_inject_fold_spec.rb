@@ -5,7 +5,7 @@ require "spec_helper"
 # Block-form `inject` / `reduce` return-type fold.
 #
 # Part 1 (soundness): the RBS generic `(S) { (S, E) -> S } -> S` binds `S` from a SINGLE block pass (acc=seed,
-# elem=element-join), so a multiplying accumulator over `(1..5)` typed `int<1, 5>` against a runtime of 120 — an
+# elem=element-join), so a multiplying accumulator over `(1..5)` typed `Integer[1..5]` against a runtime of 120 — an
 # interval the runtime escapes. The accumulator now reaches a capped fixpoint, converging to the nominal carrier.
 #
 # Part 2 (precision): a fully-constant finite receiver threads the running constant through per-element block evaluation
@@ -22,10 +22,10 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
 
   describe "Part 1 — soundness (no value-bounded interval the runtime escapes)" do
     it "the multiplying accumulator over a constant range never types a value interval" do
-      # Regression: this exact shape typed `int<1, 5>` (runtime 120) — the single-pass accumulator bug. The folded
+      # Regression: this exact shape typed `Integer[1..5]` (runtime 120) — the single-pass accumulator bug. The folded
       # answer (Part 2) is the exact value; what MUST never reappear is the unsound interval.
       message = dumped_type("dump_type((1..5).inject(1) { |acc, i| acc * i })")
-      expect(message).not_to include("int<1, 5>")
+      expect(message).not_to include("Integer[1..5]")
       expect(message).to include("120")
     end
 
@@ -42,7 +42,7 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
         dump_type((1..m).inject(1) { |acc, i| acc * i })
       RUBY
       expect(message).to include("Integer")
-      expect(message).not_to match(/int<\d+, \d+>/)
+      expect(message).not_to match(/Integer\[\d+\.\.\d+\]/)
     end
 
     it "an unknown-receiver no-seed sum converges to the element carrier" do

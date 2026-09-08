@@ -23,6 +23,6 @@ end
 
 # Constant Range receiver: precise integer-range element.
 (5..7).each_with_index do |i, idx|
-  assert_type("int<5, 7>", i)
+  assert_type("Integer[5..7]", i)
   assert_type("non-negative-int", idx)
 end

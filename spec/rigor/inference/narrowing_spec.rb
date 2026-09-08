@@ -933,7 +933,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
 
       it "collapses a single-point intersection to Constant" do
-        # int<-1, 1> & (>= 1) = int<1, 1> -> Constant[1]
+        # Integer[-1..1] & (>= 1) = Integer[1..1] -> Constant[1]
         range = Rigor::Type::Combinator.integer_range(-1, 1)
         expect(described_class.narrow_integer_comparison(range, :>=, 1))
           .to eq(Rigor::Type::Combinator.constant_of(1))
@@ -1012,12 +1012,12 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "drops the value at a range endpoint via not_equal" do
-      # int<0, 10> != 0  → int<1, 10>
+      # Integer[0..10] != 0  → Integer[1..10]
       range = Rigor::Type::Combinator.integer_range(0, 10)
       expect(described_class.narrow_integer_not_equal(range, 0))
         .to eq(Rigor::Type::Combinator.integer_range(1, 10))
 
-      # int<-5, 0> != 0  → int<-5, -1>
+      # Integer[-5..0] != 0  → Integer[-5..-1]
       range2 = Rigor::Type::Combinator.integer_range(-5, 0)
       expect(described_class.narrow_integer_not_equal(range2, 0))
         .to eq(Rigor::Type::Combinator.integer_range(-5, -1))
@@ -1029,7 +1029,7 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "preserves a range that straddles the value (two-piece domain)" do
-      # int<-5, 5> != 0 cannot be expressed precisely as a single range.
+      # Integer[-5..5] != 0 cannot be expressed precisely as a single range.
       range = Rigor::Type::Combinator.integer_range(-5, 5)
       expect(described_class.narrow_integer_not_equal(range, 0)).to eq(range)
     end
@@ -1094,7 +1094,7 @@ RSpec.describe Rigor::Inference::Narrowing do
 
     it "drops impossible truthy edges via covers? on a finite range" do
       base = scope.with_local(:x, Rigor::Type::Combinator.integer_range(1, 10))
-      # x.zero? on int<1, 10> -> truthy = Bot
+      # x.zero? on Integer[1..10] -> truthy = Bot
       truthy, falsey = described_class.predicate_scopes(parse_predicate("x.zero?"), base)
       expect(truthy.local(:x)).to be_a(Rigor::Type::Bot)
       expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.integer_range(1, 10))
@@ -1111,7 +1111,7 @@ RSpec.describe Rigor::Inference::Narrowing do
   describe "between? predicate narrowing" do
     let(:integer_nominal_scope) { scope.with_local(:x, integer_nominal) }
 
-    it "narrows the truthy edge to int<a, b> for `x.between?(a, b)`" do
+    it "narrows the truthy edge to Integer[a..b] for `x.between?(a, b)`" do
       truthy, falsey = described_class.predicate_scopes(
         parse_predicate("x.between?(0, 100)"), integer_nominal_scope
       )
@@ -1192,7 +1192,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       body
     end
 
-    it "narrows `case n when 1..10` to int<1, 10>" do
+    it "narrows `case n when 1..10` to Integer[1..10]" do
       case_node = parse_case_of_n(<<~RUBY)
         case n
         when 1..10 then n
@@ -1202,7 +1202,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(body.local(:n)).to eq(Rigor::Type::Combinator.integer_range(1, 10))
     end
 
-    it "narrows exclusive `case n when 1...10` to int<1, 9>" do
+    it "narrows exclusive `case n when 1...10` to Integer[1..9]" do
       case_node = parse_case_of_n(<<~RUBY)
         case n
         when 1...10 then n
@@ -1212,7 +1212,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(body.local(:n)).to eq(Rigor::Type::Combinator.integer_range(1, 9))
     end
 
-    it "narrows endless `(100..)` to int<100, max>" do
+    it "narrows endless `(100..)` to Integer[100..]" do
       case_node = parse_case_of_n(<<~RUBY)
         case n
         when (100..) then n
@@ -1451,7 +1451,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
 
       it "splits a finite range complement into two open halves over Nominal[Integer]" do
-        # ~int<5, 10> within Integer = int<min, 4> | int<11, max>
+        # ~Integer[5..10] within Integer = Integer[..4] | Integer[11..]
         result = described_class.narrow_not_refinement(nominal("Integer"), integer_range(5, 10))
         expect(result).to be_a(Rigor::Type::Union)
         expect(result.members).to contain_exactly(
@@ -1461,7 +1461,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
 
       it "drops the right half when the range extends to +∞ (positive-int)" do
-        # ~positive-int (= int<1, +∞>) within Integer = int<-∞, 0> = non-positive-int
+        # ~positive-int (= Integer[1..]) within Integer = Integer[..0] = non-positive-int
         result = described_class.narrow_not_refinement(nominal("Integer"), positive_int)
         expect(result).to eq(integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 0))
       end
@@ -1476,14 +1476,15 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
 
       it "narrows an existing IntegerRange to its meet with the complement halves" do
-        # current = int<0, 20>, refinement = int<5, 10> ~int<5, 10> ∩ int<0, 20> = int<0, 4> | int<11, 20>
+        # current = Integer[0..20], refinement = Integer[5..10]
+        # ~Integer[5..10] ∩ Integer[0..20] = Integer[0..4] | Integer[11..20]
         result = described_class.narrow_not_refinement(integer_range(0, 20), integer_range(5, 10))
         expect(result).to be_a(Rigor::Type::Union)
         expect(result.members).to contain_exactly(integer_range(0, 4), integer_range(11, 20))
       end
 
       it "drops a Constant[Integer] outside both complement halves" do
-        # current = Constant[7], refinement = int<5, 10>; 7 is in [5,10] so its complement against [5,10] is empty —
+        # current = Constant[7], refinement = Integer[5..10]; 7 is in [5,10] so its complement against [5,10] is empty —
         # return current_type unchanged.
         result = described_class.narrow_not_refinement(constant_of(7), integer_range(5, 10))
         expect(result).to eq(constant_of(7))

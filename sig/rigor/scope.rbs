@@ -142,7 +142,6 @@ module Rigor
     # than independently optional. Applying it is P3 of the 2026-09-08 provenance audit.
     def user_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> [untyped?, String?]
     def discovered_method_through_ancestors?: (String | Symbol? class_name, String | Symbol method_name, Symbol kind, ?name_memo: Hash[untyped, untyped]) -> bool
-    # sig-gen gap: #836 — `void` reads as `top`, so the queue's `Array | nil` looks tighter. P1.
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
     def ancestor_name_candidates: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 

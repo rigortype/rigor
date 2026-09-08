@@ -1,15 +1,18 @@
 # frozen_string_literal: true
 
-# ADR-107 gate G3 (issue #825) — every declaration in `sig/` earns its place in one of three ways.
+# ADR-107 gate G3 (issue #825) — every declaration in `sig/` earns its place in one of four ways.
 #
 # ADR-107 § Decision gives `sig/` a provenance rule that follows ADR-5's asymmetry: a RETURN type is
 # generated (clause 1 — `rigor sig-gen` proves it from the body), a PARAMETER type is authored intent
 # (clause 2 keeps it lenient and inference never derives one), and anything else hand-written is a gap
 # `sig-gen` could not close, which ADR-14's contradiction rule says must be RECORDED rather than
-# assumed. `spec/support/sig_provenance_auditor.rb` carries the classifier and the marker convention:
+# assumed. A declared `void` return joins the authored-intent half (#836): it says the return value is
+# not part of the contract, and no synthesis produces one, since a type built from a body is always the
+# type of the body's last expression. `spec/support/sig_provenance_auditor.rb` carries the classifier
+# and the marker convention:
 #
-#     # sig-gen gap: #825 — `void` is not a wide return to narrow.
-#     def register: (Module class_object) -> void
+#     # sig-gen gap: #837 — every sibling type class declares `String`.
+#     def describe: (?Symbol verbosity) -> String
 #
 # == Two mechanisms, and why not one
 #
@@ -20,8 +23,8 @@
 # § Implementation Guidelines puts above worst-case static reading. So:
 #
 # 1. HARD RULE on `tighter_return`. `sig-gen` proposes a narrower return than the declaration; ADR-14
-#    says apply it or record why not, and there are 15, so a marker on each is affordable. A
-#    sixteenth fails on arrival.
+#    says apply it or record why not, and there are 8 — the seeding audit's 15 less the seven the
+#    #836 fix stopped proposing — so a marker on each is affordable. A ninth fails on arrival.
 # 2. RATCHET on the residue. Per-file unmarked-residue counts are an exact snapshot below. A new
 #    hand-written declaration raises its file's count and goes red; marking it subtracts from the
 #    count. Closing an engine gap lowers a count and the gate says so, so slack cannot accumulate.
@@ -47,7 +50,9 @@ SIG_PROVENANCE_LISTING_CAP = 200
 
 # Unmarked residue per file, exact. Raise a number only with the reason in the commit body; lower one
 # whenever an engine fix or a marker earns it. Files absent from the map must carry zero residue.
-# Seeded 2026-09-08 from the audit note's table; total 671.
+# Seeded 2026-09-08 from the audit note's table at 671; 669 since #836 — `RbsLoader.reset_default!`
+# and `CheckRules.shadow_verify_converged_collectors` are `-> void` declarations that used to land in
+# `declared_divergent` and are now return intent.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 51,
@@ -55,14 +60,14 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/analysis/check_rules/always_truthy_condition_collector.rbs" => 1,
   "sig/rigor/analysis/check_rules/dead_assignment_collector.rbs" => 1,
   "sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs" => 1,
-  "sig/rigor/analysis/fact_store.rbs" => 18,
+  "sig/rigor/analysis/fact_store.rbs" => 17,
   "sig/rigor/ast.rbs" => 1,
   "sig/rigor/cache.rbs" => 1,
   "sig/rigor/cli/diff_command.rbs" => 1,
   "sig/rigor/cli/explain_command.rbs" => 1,
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
   "sig/rigor/cli/type_scan_command.rbs" => 1,
-  "sig/rigor/environment.rbs" => 43,
+  "sig/rigor/environment.rbs" => 42,
   "sig/rigor/inference.rbs" => 95,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
@@ -142,7 +147,24 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
     it "calls a constructor stub earned — sig-gen always spells `initialize` as `-> void`" do
       rows = classifications_for(ruby: "class Widget\n  def initialize(x)\n    @x = x\n  end\nend\n",
                                  rbs: "class Widget\n  def initialize: (Integer x) -> void\nend\n")
-      expect(rows).to eq([SigProvenanceAuditor::PARAMETER_INTENT])
+      expect(rows).to eq([SigProvenanceAuditor::RETURN_INTENT])
+    end
+
+    it "calls any `-> void` declaration `return_intent`, not only a constructor's (#836)" do
+      # `void` says the return is not part of the contract, so there is nothing for sig-gen to prove
+      # and nothing to record: the declaration is earned without a marker.
+      rows = classifications_for(ruby: "class Widget\n  def register(x)\n    @x = [x]\n  end\nend\n",
+                                 rbs: "class Widget\n  def register: (untyped x) -> void\nend\n")
+      expect(rows).to eq([SigProvenanceAuditor::RETURN_INTENT])
+    end
+
+    it "counts `return_intent` as earned, so it is neither residue nor a marker case" do
+      row = audit_fixture(ruby: "class Widget\n  def register(x)\n    @x = [x]\n  end\nend\n",
+                          rbs: "class Widget\n  def register: (untyped x) -> void\nend\n")
+            .find { |r| r.declaration.method_name == "register" }
+
+      expect(SigProvenanceAuditor::EARNED).to include(row.classification)
+      expect(row).not_to be_residue
     end
 
     it "calls a declaration sig-gen would narrow `tighter_return`" do

@@ -25,15 +25,26 @@ module Rigor
 
       def initialize
         @entries = []
+        @seen = {}
       end
 
+      # Identical entries are collapsed. Each becomes one `:info` row, and two rows saying the same thing
+      # about the same file carry nothing the first does not: the synthesizer's own per-file notices are
+      # already `uniq`, but a worker pool re-runs the whole env build in EVERY worker over the same project
+      # file list and then drains each worker's stream into this one reporter, so without the dedup a
+      # `--workers N` run printed N copies of a row a `--workers=0` run printed once. The same collapse the
+      # {RbsExtended::Reporter} drain documents, for the same reason.
       def record(plugin_id:, path:, message:, kind: :failed)
-        @entries << Entry.new(
+        entry = Entry.new(
           plugin_id: plugin_id.to_s.dup.freeze,
           path: path.to_s.dup.freeze,
           message: message.to_s.dup.freeze,
           kind: kind
         )
+        return nil if @seen.key?(entry)
+
+        @seen[entry] = true
+        @entries << entry
         nil
       end
 

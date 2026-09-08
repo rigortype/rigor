@@ -743,6 +743,23 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(coordinator_reporter.entries.map(&:plugin_id)).to eq(["rigor-x"])
     end
 
+    # Issue #824 — the drain used to replay every entry as WD6's default `:failed`, so under `--workers N`
+    # a WD12 "parsed but not honoured" row came back as `source-rbs-synthesis-failed`: a different rule id,
+    # and a message telling the user the file contributed nothing when all but one annotation bound.
+    it "preserves an entry's kind, so a WD12 row does not replay as a synthesis failure" do
+      worker_reporter = Rigor::Plugin::SourceRbsSynthesisReporter.new
+      worker_reporter.record(plugin_id: "rbs-inline", path: "a.rb", message: "dropped", kind: :not_honoured)
+      coordinator_reporter = Rigor::Plugin::SourceRbsSynthesisReporter.new
+      coordinator = build_coordinator(source_rbs_synthesis_reporter: coordinator_reporter)
+
+      coordinator.merge_worker_reporters(
+        rbs_extended: { unresolved_payloads: [], lossy_projections: [] },
+        boundary_cross: [], source_rbs_synthesis: worker_reporter.entries
+      )
+
+      expect(coordinator_reporter.entries.map(&:kind)).to eq([:not_honoured])
+    end
+
     # Mutant: dropping the `Array(...)` around `drained[:source_rbs_synthesis]` turns a missing key into a
     # `NoMethodError` (`nil.each`) instead of treating it as empty. A drain hash that omits the key (any
     # pre-ADR-32-WD6 producer, or simply a drain with nothing to report) must still merge cleanly.

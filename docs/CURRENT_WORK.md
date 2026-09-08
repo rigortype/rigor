@@ -17,16 +17,11 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**v0.3.8 is on `master` and not published.** The release PR (`release/0.3.8`, `Bump up version to
-0.3.8`) merged on 2026-09-08. `Rigor::VERSION` is `0.3.8`; the sealed section is in `CHANGELOG.md`;
-`changelog.d/` holds only its README. There is no `v0.3.8` tag, no RubyGems push, and no GitHub
-Release: the environment that prepared the release has no RubyGems credentials, so publishing is
-the user's step (ADR-50 § WD5; it tags, pushes, and publishes):
-
-```sh
-git switch master && git pull
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake release
-```
+**v0.3.8 is published.** The release PR (`release/0.3.8`, `Bump up version to 0.3.8`) merged on
+2026-09-08; the user ran `rake release` from `master`: tag `v0.3.8` at `ffb456b0`, the GitHub Release,
+and `rigortype 0.3.8` on RubyGems all exist. `Rigor::VERSION` is `0.3.8`; `changelog.d/` holds only its
+README; `[Unreleased]` is empty. The next cut happens only when the user invokes `/rigor-release-prep`
+explicitly — a release date or goal mentioned in a task is not that invocation (ADR-50 § WD5).
 
 ## What v0.3.8 fixed (the 2026-09-07 triage batch)
 

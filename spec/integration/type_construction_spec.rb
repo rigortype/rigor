@@ -1667,6 +1667,27 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/block_next_arm_contribution.rb — issue #841 block `next`-arm inference" do
+      let(:harness) { harness_for("block_next_arm_contribution") }
+
+      # Every `next value` that leaves the block joins the fall-through tail in block-return inference, typed
+      # in the scope that reaches it; a nested block / lambda / loop retargets its own `next`, and an arm the
+      # analysis proves dead contributes nothing. A predicate block with a falsey arm infers `bool`, not
+      # `Constant[true]`.
+      it "joins `next` arms into the inferred block value type" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # The reported symptom: `BlockFolding` folded `all?` to `Constant[true]` off the tail alone, and the
+      # surrounding condition then read as a flow constant on a program that can answer false. The fixture's
+      # `all_true?` control keeps a genuine fold alive, so an empty set here is not vacuous.
+      it "fires no flow.always-truthy-condition on the predicate with a falsey arm" do
+        flow_constants = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        expect(flow_constants).to be_empty
+      end
+    end
+
     describe "fixtures/overridable_method_no_fold.rb — ADR-57 N5 overridable-method adoption gate" do
       let(:harness) { harness_for("overridable_method_no_fold") }
 

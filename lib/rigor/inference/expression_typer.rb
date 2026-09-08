@@ -3168,11 +3168,85 @@ module Rigor
       # — which threads scope statement by statement through `StatementEvaluator` — held `42` for the very
       # same node. {#threaded_block_body_type} closes that gap by reusing the main pass's evaluator; a decline
       # keeps the tail-only answer verbatim.
+      #
+      # Issue #841: the fall-through tail is only ONE of the block's exits. Every `next value` that leaves this
+      # block makes `value` the block's result for that invocation, so the arms join into the value type the
+      # same way {#evaluate_body_with_returns} joins a method's early `return`s with its tail. Without the
+      # join, `ops.all? { |o| next false unless o; true }` read as `Constant[true]` and
+      # {MethodDispatcher::BlockFolding} folded the call to always-truthy on a program that really can answer
+      # false — a warning on correct code.
       def type_block_body(block_node, block_scope)
         body = block_node.body
         return Type::Combinator.constant_of(nil) if body.nil?
 
+        arms = block_level_next_arms(body)
+        return block_body_type_joining_nexts(body, block_scope, arms) if arms
+
         threaded_block_body_type(body, block_scope) || block_scope.type_of(body)
+      end
+
+      # Evaluates the body once under a `next` sink and joins the arms that leave THIS block with the
+      # fall-through tail the same evaluation produced. Both halves come from one `StatementEvaluator` run, so
+      # each arm is typed in the scope that actually reaches it — a `next y` after `y = "s"` contributes
+      # `"s"`, not the entry scope's stale binding.
+      #
+      # This run ignores the {#block_body_threading_suppressed?} flag that gates the precision fold: that flag
+      # bounds the cost of an OPTIONAL widening, while skipping the join re-opens a false-positive class. It
+      # still SETS the flag for the duration, so nothing folds below it and the cost stays one evaluation per
+      # block-level `next` — a shape that is a small minority of blocks.
+      #
+      # A failure falls back to the tail-only answer rather than propagating, for the same reason
+      # {#threaded_block_body_type} does: the enclosing `block_return_type_for` rescue would otherwise report
+      # "no block" to the dispatcher, a far larger regression than a wide block return.
+      def block_body_type_joining_nexts(body, block_scope, arms)
+        (fall_through, _exit_scope), collected = StatementEvaluator.with_next_sink do
+          without_block_body_threading { block_scope.evaluate(body) }
+        end
+        joined = collected.filter_map { |node, type| type if arms.key?(node) }
+        joined.empty? ? fall_through : Type::Combinator.union(fall_through, *joined)
+      rescue StandardError
+        block_scope.type_of(body)
+      end
+
+      # The identity-keyed set of `next` nodes whose value is THIS block's value — reachable from the body
+      # without crossing a {JUMP_BOUNDARY_NODES} construct that retargets them — or nil for "do not join".
+      #
+      # nil covers the two declines. A body with no block-level `next` keeps today's path exactly, and pays
+      # only the allocation-free scan that answers so. A body that ALSO carries a block-level `break` keeps it
+      # too: `break value` is the yielding CALL's value rather than the block's, so a body that can reach one
+      # cannot have its value derived from the block at all, and joining the `next` arms would dress a still
+      # incomplete answer as a complete one. Handling `break` is its own change.
+      def block_level_next_arms(body)
+        return nil unless block_level_jump?(body, Prism::NextNode)
+        return nil if block_level_jump?(body, Prism::BreakNode)
+
+        found = {}.compare_by_identity
+        collect_block_level_nexts(body, found)
+        found
+      end
+
+      # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it.
+      # Allocation-free and early-exiting: this is the scan every block body pays, and the overwhelming
+      # majority of them answer false on it.
+      def block_level_jump?(node, klass)
+        return false if node.nil?
+        return true if node.is_a?(klass)
+
+        node.rigor_each_child do |child|
+          next if JUMP_BOUNDARY_NODES.include?(child.class)
+
+          return true if block_level_jump?(child, klass)
+        end
+        false
+      end
+
+      def collect_block_level_nexts(node, found)
+        found[node] = true if node.is_a?(Prism::NextNode)
+        node.rigor_each_child do |child|
+          next if JUMP_BOUNDARY_NODES.include?(child.class)
+
+          collect_block_level_nexts(child, found)
+        end
       end
 
       # Re-typing the whole body would be wrong to do unconditionally: this path runs for EVERY block-bearing
@@ -3263,18 +3337,22 @@ module Rigor
       private_constant :VARIABLE_READ_NODES
 
       # A `next` / `break` that leaves THIS block carries a value the fold cannot see: `evaluate(body).first`
-      # is the fall-through value only, and no next-value join into the block return exists (`type_of_jump`
-      # types both as `Bot`). So `m.synchronize do next 5 if flag; v = 42; v end` really can answer 5 at
-      # runtime, and threading would type it `42`. Both forms escape with a value — `next v` is the block's
-      # value for that yield, `break v` is the yielding CALL's value — so both must decline.
+      # is the fall-through value only. So `m.synchronize do break 5 if flag; v = 42; v end` really can answer
+      # 5 at runtime, and threading would type it `42`.
+      #
+      # `break` is the live decline: its value belongs to the yielding CALL, and nothing joins it. `next` is
+      # joined into the block's value type since issue #841, so {#type_block_body} routes a body carrying one
+      # past this scan entirely and the entry below never fires — it is kept because the question this
+      # predicate answers ("can this prefix escape with a value the fall-through misses?") is the caller's
+      # premise, not the caller's filter restated.
       JUMP_NODES = Set[Prism::NextNode, Prism::BreakNode].freeze
       private_constant :JUMP_NODES
 
       # Constructs that RETARGET a `next` / `break` nested inside them, so a jump below one of these says
-      # nothing about our block's value and must not trigger the decline. A nested `BlockNode` / `LambdaNode`
-      # is the jump's own block (`do xs.each { next 1 }; v = 42; v end` threads soundly — the inner `next`
-      # ends the inner iteration); a loop consumes both forms (`while … next 5 … end` continues the loop);
-      # a `DefNode` body is a different method entirely.
+      # nothing about our block's value — it neither triggers the decline nor joins as an arm. A nested
+      # `BlockNode` / `LambdaNode` is the jump's own block (`do xs.each { next 1 }; v = 42; v end` threads
+      # soundly — the inner `next` ends the inner iteration); a loop consumes both forms (`while … next 5 …
+      # end` continues the loop); a `DefNode` body is a different method entirely.
       JUMP_BOUNDARY_NODES = Set[
         Prism::BlockNode, Prism::LambdaNode, Prism::DefNode,
         Prism::WhileNode, Prism::UntilNode, Prism::ForNode

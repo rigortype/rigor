@@ -108,6 +108,7 @@ module Rigor
         Prism::CallNode => :eval_call,
         Prism::BlockNode => :eval_block,
         Prism::ReturnNode => :eval_return,
+        Prism::NextNode => :eval_next,
         Prism::BreakNode => :eval_break,
         Prism::MatchWriteNode => :eval_match_write
       }.freeze
@@ -120,6 +121,18 @@ module Rigor
       # DSL-block walk, or inside a nested `def` barrier (whose returns belong to the inner method).
       RETURN_SINK_KEY = :rigor_return_sink
       private_constant :RETURN_SINK_KEY
+
+      # Thread-local sink (an Array of `[NextNode, Type]`) collecting the value each `next` carries out of the block it
+      # leaves, so `ExpressionTyper#type_block_body` can join those arms into the block's value type. Issue #841: the
+      # block-return pass modelled only the fall-through tail, so `ops.all? { |o| next false unless o; true }` read as
+      # `Constant[true]` and folded the call to always-truthy — the same defect `RETURN_SINK_KEY` fixes one level up for
+      # a method's early `return`. The flow value of a `next` stays `Bot`.
+      #
+      # The sink also collects `next`s from nested blocks / loops / defs evaluated under the same installation (they do
+      # not install their own), so the consumer filters by node identity against a statically computed
+      # directly-targeting set, exactly as the break sink does. nil means "not collecting".
+      NEXT_SINK_KEY = :rigor_next_sink
+      private_constant :NEXT_SINK_KEY
 
       # Thread-local sink (an Array of `[BreakNode, Scope]`) collecting the scope at each `break` reached while
       # evaluating a loop body, so `eval_loop` / `eval_for` can join a `break`-path binding (`flag = true; break`) into
@@ -187,6 +200,22 @@ module Rigor
           result = yield
         ensure
           Thread.current[RETURN_SINK_KEY] = previous
+        end
+        [result, sink]
+      end
+
+      # Runs `block` with a fresh `next` sink installed, then yields the collected `[NextNode, Type]` pairs to the
+      # caller. Stacks like the return sink, and for the same reason: a block body evaluated inside another block body's
+      # evaluation must not spill its arms into the outer collection. Used by `ExpressionTyper#type_block_body` to join
+      # the `next` arms into the block's value type.
+      def self.with_next_sink
+        previous = Thread.current[NEXT_SINK_KEY]
+        sink = []
+        Thread.current[NEXT_SINK_KEY] = sink
+        begin
+          result = yield
+        ensure
+          Thread.current[NEXT_SINK_KEY] = previous
         end
         [result, sink]
       end
@@ -3015,7 +3044,22 @@ module Rigor
       # inferred.
       def eval_return(node)
         sink = Thread.current[RETURN_SINK_KEY]
-        record_return_value(node, sink) if sink
+        sink << jump_value_type(node) if sink
+        [Type::Combinator.bot, scope]
+      end
+
+      # `next value` ends the current block invocation and makes `value` that invocation's result. Structurally the same
+      # story as {#eval_return} one level down: the control-transfer value is `Bot`, and the escaping value is recorded
+      # into the active `next` sink so `ExpressionTyper#type_block_body` joins it with the body's fall-through tail
+      # (issue #841). The node itself is recorded alongside the type because the sink also collects `next`s belonging to
+      # a nested block / loop / def; the consumer filters by identity.
+      #
+      # A `next` on a provably dead branch is never reached by the evaluator at all (`eval_if` / `eval_unless` skip the
+      # dead arm), so the join is flow-sensitive for free: `[1, 2].map { |x| next nil if x.nil?; x.to_s }` keeps its
+      # exact per-element answer.
+      def eval_next(node)
+        sink = Thread.current[NEXT_SINK_KEY]
+        sink << [node, jump_value_type(node)] if sink
         [Type::Combinator.bot, scope]
       end
 
@@ -3030,20 +3074,16 @@ module Rigor
         [Type::Combinator.bot, scope]
       end
 
-      def record_return_value(node, sink)
+      # The value a `return` / `next` carries out of the construct it leaves. A bare jump carries nil; a single argument
+      # carries its own type; `return a, b, c` (and `next a, b, c`) packs the array `[a, b, c]` at runtime, so the
+      # corresponding Tuple is contributed element-by-element. The argument is evaluated under the entry scope and the
+      # resulting scope discarded — control leaves here, so nothing the argument binds is observable downstream.
+      def jump_value_type(node)
         args = node.arguments&.arguments || []
-        # `return` with no argument returns nil; `return a` records the argument's type; `return a, b, c` packs a Tuple
-        # — in Ruby a multi-value return yields the array `[a, b, c]`, so the inferred return contributes the
-        # corresponding Tuple element-by-element.
-        if args.empty?
-          sink << Type::Combinator.constant_of(nil)
-        elsif args.size == 1
-          type, = sub_eval(args.first, scope)
-          sink << type
-        else
-          element_types = args.map { |arg| sub_eval(arg, scope).first }
-          sink << Type::Combinator.tuple_of(*element_types)
-        end
+        return Type::Combinator.constant_of(nil) if args.empty?
+        return sub_eval(args.first, scope).first if args.size == 1
+
+        Type::Combinator.tuple_of(*args.map { |arg| sub_eval(arg, scope).first })
       end
 
       def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting)

@@ -134,15 +134,16 @@ RSpec.describe "block-return scope threading", type: :runner do
   end
 
   # PR #584 review — a `next` / `break` in a statement BEFORE the tail leaves the block carrying a value the
-  # fold never sees: `evaluate(body).first` is the fall-through value only, and no next-value join into the
-  # block return exists (`type_of_jump` types both as `Bot`). Threading such a body reports the fall-through
-  # as if it were the whole answer, which is the one way this change could invent a false positive rather
-  # than merely widen. The fold declines instead, which is master's answer for every shape here.
+  # fold never sees: `evaluate(body).first` is the fall-through value only. Threading such a body reports the
+  # fall-through as if it were the whole answer, which is the one way this change could invent a false
+  # positive rather than merely widen. The fold declined instead, which was master's answer for every shape
+  # here. Issue #841 answered the `next` half properly — the arms now JOIN — so only `break` still declines.
   describe "a prefix that can jump out of the block" do
-    it "declines on a value-carrying `next` before the tail" do
-      # THE BLOCKER. `next 5` makes the block's value 5 for that yield, and `Mutex#synchronize` is
-      # `[X] () { () -> X } -> X`, so the CALL answers 5. Typing it `42` would be unsound.
-      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+    it "joins a value-carrying `next` before the tail into the block's value" do
+      # WAS THE BLOCKER, now the fix. `next 5` makes the block's value 5 for that yield, and
+      # `Mutex#synchronize` is `[X] () { () -> X } -> X`, so the CALL answers 5 or 42. Typing it `42` was
+      # unsound and the fold declined to `Dynamic[top]`; the join says both.
+      expect(dumped_type(<<~RUBY)).to eq("42 | 5")
         m = Mutex.new
         flag = [true, false].sample
         dump_type(m.synchronize do
@@ -311,12 +312,11 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
-    it "still declines on a value-carrying `next` ahead of the mutation" do
-      # The jump-decline scan is unchanged: a `next 5` ahead of the `push` still makes the fold decline, and
-      # the decline answers what master answered — the entry literal. That answer is no better than it was
-      # (the runtime value is `[1]` or `5`), but the fold's contract is to never invent a NEW answer under a
-      # jump it cannot join.
-      expect(dumped_type(<<~RUBY)).to eq("[]")
+    it "joins a value-carrying `next` ahead of the mutation with the widened tail" do
+      # The two mechanisms compose. Before issue #841 the jump made the fold decline and the tail kept the
+      # entry literal `[]` — no better than the runtime value (`[1]` or `5`). The join runs the same threaded
+      # evaluation, so the mutated tail widens AND the escaping arm is there.
+      expect(dumped_type(<<~RUBY)).to eq("5 | Array[Dynamic[top] | Integer]")
         m = Mutex.new
         flag = [true, false].sample
         outer = []

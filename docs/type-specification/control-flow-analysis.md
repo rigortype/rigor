@@ -5,6 +5,7 @@ Rigor performs flow-sensitive type analysis in the style of PHPStan, TypeScript,
 This document defines:
 
 - the structure of edge-aware scopes;
+- how a non-local exit contributes to the value of the construct it leaves;
 - supported narrowing sources;
 - Ruby equality semantics for narrowing;
 - fact stability, invalidation, and mutation effects;
@@ -55,6 +56,16 @@ def impossible_after_or(foo)
   end
 end
 ```
+
+## Non-local exits
+
+A `return`, `next`, or `break` produces no value at its own position; its type is `bot`, which absorbs under union so a branch join collapses to the arms that can complete. The value it carries out belongs to the construct it leaves, and the inferred value of that construct MUST be the union of its fall-through result with every such arm the analysis reaches:
+
+- `return value` leaves the enclosing method and joins that method's inferred return type. A nested `def` or lambda is a barrier — those returns belong to the inner definition — while a `return` written inside a block still exits the enclosing method and still joins there.
+- `next value` ends the current block invocation and makes `value` that invocation's result, so it joins the **block's** value type. A bare `next` contributes `nil`. A nested block, lambda, `def`, or loop retargets a `next` written under it, and such a `next` MUST NOT join the outer block's value.
+- `break value` terminates the yielding **call** and is that call's value, not the block's. It MUST NOT join the block's value type.
+
+An arm on a branch the analysis has proved unreachable is never taken and contributes nothing. Dropping a *reachable* arm reports the fall-through as if it were the whole answer, which reads as precision the program does not have: `ops.all? { |o| next false unless o; true }` types as `true`, the predicate folds to a constant, and correct code is warned about ([#841](https://github.com/rigortype/rigor/issues/841)).
 
 ## Supported narrowing sources
 

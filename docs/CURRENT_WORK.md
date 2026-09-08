@@ -59,17 +59,27 @@ Two things the next session should not rediscover:
   [#834](https://github.com/rigortype/rigor/issues/834) (`n.clamp(1..9)` types `Dynamic[top]` while
   `n.clamp(1, 9)` folds to `Integer[1..9]`).
 
-## The 2026-09-08 types-and-comments session (landed)
+## The 2026-09-08 types-and-comments session (landed, two waves)
 
-**A type Rigor did not produce or check is never written down**, for Rigor's own tree and for what
-Rigor ships to agents: [#822](https://github.com/rigortype/rigor/pull/822) (typeless YARD tags,
-`AGENTS.md` § "Types and Comments", gate `spec/docs/type_shaped_comments_spec.rb`, ADR-107),
-[#826](https://github.com/rigortype/rigor/pull/826) (`skills/rigor-type-oracle/`, ADR-108),
-[#827](https://github.com/rigortype/rigor/pull/827) (`rigor check --fail-on=SEVERITY`; the gates run
-with `--fail-on=warning`). Open follow-ups, all still open on 2026-09-08:
-[#823](https://github.com/rigortype/rigor/issues/823) (an annotated method's unannotated siblings),
-[#824](https://github.com/rigortype/rigor/issues/824) (`sig/` vs inline precedence),
-[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance gate, ADR-107 G3).
+Rule: **a type Rigor did not produce or check is never written down.** Wave one — [#822](https://github.com/rigortype/rigor/pull/822)
+(1,121 YARD type slots emptied, doc tags `@param name — description`, `AGENTS.md` § "Types and
+Comments", gate `spec/docs/type_shaped_comments_spec.rb` R1–R5, ADR-107), [#826](https://github.com/rigortype/rigor/pull/826)
+(`skills/rigor-type-oracle/`, the `AGENTS.md` fragment `rigor-project-init` installs, ADR-108),
+[#827](https://github.com/rigortype/rigor/pull/827) (`rigor check --fail-on=SEVERITY`; the self-check runs with
+`--fail-on=warning`). Wave two — [#829](https://github.com/rigortype/rigor/pull/829) (the dialect and the gate
+cover `spec/` and `tool/`), [#832](https://github.com/rigortype/rigor/pull/832) (`sig/` wins over an inline
+annotation of the same member, one `:info` per collision; ADR-32 WD13), [#840](https://github.com/rigortype/rigor/pull/840)
+(an unannotated sibling in an annotated file is declared but typed by inference, via
+`%a{rigor:v1:inferred-return}`; ADR-93 WD6), [#835](https://github.com/rigortype/rigor/pull/835) (the `sig/`
+provenance gate `spec/rigor/sig_gen/provenance_spec.rb`: residue pin 671 + `tighter_return` must carry a
+`# sig-gen gap: #NNN` marker; nine stale declarations deleted). Master CI green after every merge.
+
+Open, from the audits: [#836](https://github.com/rigortype/rigor/issues/836) (sig-gen tightens a `void`),
+[#837](https://github.com/rigortype/rigor/issues/837) (literal onto a polymorphic contract),
+[#838](https://github.com/rigortype/rigor/issues/838) (apply three genuine tightenings — `ready-for-agent`),
+[#839](https://github.com/rigortype/rigor/issues/839) (`sig/` declarations with no method),
+[#841](https://github.com/rigortype/rigor/issues/841) (`all?` block join drops `next` arms; a false positive).
+Known and untouched: `make steep-check` reports 11 pre-existing problems in three `lib/` files with no `sig/`.
 
 ## How to enter
 

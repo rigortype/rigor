@@ -3,6 +3,7 @@
 require "spec_helper"
 require "rigor/cache/rbs_descriptor"
 require "rigor/environment/rbs_loader"
+require "tmpdir"
 
 RSpec.describe Rigor::Cache::RbsDescriptor do
   let(:loader) { Rigor::Environment::RbsLoader.new }
@@ -41,6 +42,29 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
       second = run.files
       expect(first).to equal(second)
       expect(described_class).to have_received(:file_entries).once
+    end
+  end
+
+  # Issue #610 — which `signature_paths:` are DEFERRED (a bundled plugin's `sig/`, allowed to stand down
+  # against a colliding generic arity) changes the env built from byte-identical files, so the env-cache
+  # KEY carries the partition. The run-result key does not need it — it digests the whole configuration —
+  # and its boot-slimming probe cannot rebuild a plugin-derived slot, so the shared `config_entries` stay
+  # byte-identical between the two loaders.
+  describe "the deferred partition" do
+    it "changes the env-cache key and leaves the run key's shared slots alone" do
+      Dir.mktmpdir do |dir|
+        sig_dir = File.join(dir, "plugin_sig")
+        Dir.mkdir(sig_dir)
+        File.write(File.join(sig_dir, "relation.rbs"), "class Relation[Elem]\nend\n")
+        eager = Rigor::Environment::RbsLoader.new(signature_paths: [sig_dir])
+        deferred = Rigor::Environment::RbsLoader.new(signature_paths: [sig_dir], deferred_signature_paths: [sig_dir])
+
+        expect(described_class.build(deferred)).not_to eq(described_class.build(eager))
+        expect(described_class.build(deferred).configs.map(&:key)).to include("rbs.deferred_signature_paths")
+        expect(described_class.build(eager).configs.map(&:key)).not_to include("rbs.deferred_signature_paths")
+        expect(described_class.config_entries(deferred)).to eq(described_class.config_entries(eager))
+        expect(described_class.build_run(deferred).configs).to eq(described_class.build_run(eager).configs)
+      end
     end
   end
 end

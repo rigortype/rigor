@@ -461,18 +461,42 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       snapshots.synthesized_namespaces = ["stale"]
       snapshots.quarantined_signatures = ["stale"]
+      snapshots.signature_standdowns = ["stale"]
       snapshots.conformance_results = ["stale"]
       snapshots.env_build_failure = [StandardError, 1, []]
       coordinator = build_coordinator(snapshots: snapshots)
-      # Never touched: the no-signature_paths branch returns before reading the loader at all.
+      # Never touched: the no-signature_paths branch returns before reading the loader at all, and the
+      # #610 stand-down slot asks the (empty) plugin registry, never the environment.
       environment = instance_double(Rigor::Environment)
 
       coordinator.snapshot_project_signature_state(environment)
 
       expect(snapshots.synthesized_namespaces).to eq([])
       expect(snapshots.quarantined_signatures).to eq([])
+      expect(snapshots.signature_standdowns).to eq([])
       expect(snapshots.conformance_results).to eq([])
       expect(snapshots.env_build_failure).to be_nil
+    end
+
+    # Issue #610 — the stand-down slot is gated on a loaded plugin contributing signatures, not on the
+    # project's own `signature_paths:`: the source a plugin's `sig/` stands down against is typically an
+    # `rbs collection install` the configuration never lists.
+    it "reads the plugin-signature stand-downs off the loader when a plugin contributes signatures, " \
+       "even with no project signature_paths" do
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      standdown = ["/plugins/rigor-activerecord/sig/active_record/relation.rbs", "::ActiveRecord::Relation", 0, 1, nil]
+      registry = instance_double(Rigor::Plugin::Registry, signature_paths: ["/plugins/rigor-activerecord/sig"])
+      loader = instance_double(
+        Rigor::Environment::RbsLoader,
+        deferred_signature_paths: [Pathname("/plugins/rigor-activerecord/sig")], signature_standdowns: [standdown]
+      )
+      coordinator = build_coordinator(snapshots: snapshots, plugin_registry: registry)
+      environment = instance_double(Rigor::Environment, rbs_loader: loader)
+
+      coordinator.snapshot_project_signature_state(environment)
+
+      expect(snapshots.signature_standdowns).to eq([standdown])
+      expect(snapshots.quarantined_signatures).to eq([])
     end
 
     it "reads namespaces, quarantines, the env-build failure, and the conformance scan off the loader " \

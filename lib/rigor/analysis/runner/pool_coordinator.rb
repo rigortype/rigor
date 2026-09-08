@@ -196,6 +196,13 @@ module Rigor
         # `.rigor/cache` on a bare `--no-stats` run. The loader has already memoised each answer, so reading
         # them here is free.
         def snapshot_project_signature_state(environment)
+          # Issue #610 — NOT behind the `signature_paths:` gate below: the source a bundled plugin's `sig/`
+          # stands down against is typically an `rbs collection install` the configuration never lists
+          # there. Gated instead on a loaded plugin contributing signatures at all — the registry answers
+          # that without touching the env, and it is exactly the set the loader defers — so a project with
+          # no such plugin reads nothing off its loader here, as before.
+          @snapshots.signature_standdowns =
+            plugin_signature_paths? ? signature_standdowns_for(environment&.rbs_loader) : []
           unless project_signature_paths?
             @snapshots.synthesized_namespaces = []
             @snapshots.quarantined_signatures = []
@@ -723,6 +730,7 @@ module Rigor
           record_hkt_scan_failure(hkt_scan_outcome(environment))
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
+          @snapshots.signature_standdowns = plugin_signature_paths? ? signature_standdowns_for(loader) : []
           @snapshots.quarantined_signatures =
             project_signature_paths? ? (loader&.quarantined_signatures || []) : []
           @snapshots.env_build_failure = project_signature_paths? ? loader&.env_build_failure : nil
@@ -865,6 +873,21 @@ module Rigor
         def project_signature_paths?
           paths = @configuration.signature_paths
           !(paths.nil? || paths.empty?)
+        end
+
+        # Issue #610 — see {#snapshot_project_signature_state}. The registry's `signature_paths` is what
+        # `Environment.for_project` defers, so this is the loader-free form of "is anything deferred?".
+        def plugin_signature_paths?
+          registry = plugin_registry
+          registry.respond_to?(:signature_paths) && !registry.signature_paths.empty?
+        end
+
+        # Empty for a loader with nothing deferred, without touching its env.
+        def signature_standdowns_for(loader)
+          return [] if loader.nil? || !loader.respond_to?(:deferred_signature_paths)
+          return [] if loader.deferred_signature_paths.empty?
+
+          loader.signature_standdowns
         end
 
         def plugin_registry

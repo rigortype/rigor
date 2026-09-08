@@ -22,11 +22,18 @@ module Rigor
     class RbsEnvironment < RbsCacheProducer
       PRODUCER_ID = "rbs.environment"
 
+      # Issue #610 — the deferred (plugin-contributed) subset rides through too. This is the build path every
+      # cached run takes: a cache store is the CLI default and only `--no-cache` reaches the loader's own
+      # `build_env`, so a list threaded through the loader but not through here ran the arity stand-down on
+      # no real `rigor check` at all — 0.3.8 shipped exactly that, behind a green gate built over a
+      # store-less loader. Any input `build_env_for` takes MUST be passed from here as well.
       def self.compute(loader)
         Rigor::Environment::RbsLoader.build_env_for(
           libraries: loader.libraries,
           signature_paths: loader.signature_paths,
-          virtual_rbs: loader.respond_to?(:virtual_rbs) ? loader.virtual_rbs : []
+          virtual_rbs: loader.respond_to?(:virtual_rbs) ? loader.virtual_rbs : [],
+          deferred_signature_paths:
+            loader.respond_to?(:deferred_signature_paths) ? loader.deferred_signature_paths : []
         )
       end
 

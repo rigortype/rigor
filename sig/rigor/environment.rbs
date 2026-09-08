@@ -53,6 +53,8 @@ module Rigor
       attr_reader libraries: Array[String]
       attr_reader signature_paths: Array[String | _ToPath]
       attr_reader cache_store: untyped?
+      # sig-gen gap: #160 — sig-gen emits no `attr_reader` for the loader's readers; typed as the initializer stores it.
+      attr_reader deferred_signature_paths: Array[Pathname]
 
       def self.default: () -> RbsLoader
       def self.reset_default!: () -> void

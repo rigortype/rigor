@@ -50,6 +50,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
                        pre_eval_diagnostics_from_scanner: [],
                        synthesized_namespaces_snapshot: nil,
                        quarantined_signatures_snapshot: [],
+                       signature_standdowns_snapshot: [],
                        env_build_failure_snapshot: nil,
                        definition_build_failures_snapshot: [],
                        hkt_scan_failure_snapshot: nil,
@@ -66,6 +67,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       pre_eval_diagnostics_from_scanner: -> { pre_eval_diagnostics_from_scanner },
       synthesized_namespaces_snapshot: -> { synthesized_namespaces_snapshot },
       quarantined_signatures_snapshot: -> { quarantined_signatures_snapshot },
+      signature_standdowns_snapshot: -> { signature_standdowns_snapshot },
       env_build_failure_snapshot: -> { env_build_failure_snapshot },
       definition_build_failures_snapshot: -> { definition_build_failures_snapshot },
       hkt_scan_failure_snapshot: -> { hkt_scan_failure_snapshot },
@@ -814,6 +816,66 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(result.method_name).to eq("to_s")
       expect(result.receiver_type).to eq("String")
       expect(result.project_definition_site).to eq("a.rb:3")
+    end
+  end
+
+  # Issue #610 — the row for a plugin-contributed signature file that stood down against a colliding
+  # generic arity. `:info`, because it reports the degradation Rigor CHOSE over a definition-build failure.
+  describe "rbs_plugin_signature_stood_down_diagnostics" do
+    it "emits one :info per file, naming the file, the class, both arities and the displacing source" do
+      plugin_file = File.join(Dir.pwd, "plugins/rigor-activerecord/sig/active_record/relation.rbs")
+      other = File.join(Dir.pwd, ".gem_rbs_collection/activerecord/8.0/activerecord.rbs")
+      rows = build_aggregator(
+        signature_standdowns_snapshot: [[plugin_file, "::ActiveRecord::Relation", 0, 1, other]]
+      ).rbs_plugin_signature_stood_down_diagnostics
+
+      expect(rows.size).to eq(1)
+      row = rows.first
+      expect(row.rule).to eq("rbs.coverage.plugin-signature-stood-down")
+      expect(row.severity).to eq(:info)
+      expect(row.path).to eq(".rigor.yml")
+      expect(row.message).to include(
+        "`plugins/rigor-activerecord/sig/active_record/relation.rbs` (a signature file a plugin contributes) " \
+        "declares `ActiveRecord::Relation` with 1 type parameter, but " \
+        "`.gem_rbs_collection/activerecord/8.0/activerecord.rbs` already declares it with no type parameters."
+      )
+      expect(row.message).not_to include(Dir.pwd)
+    end
+
+    it "names 'another loaded signature source' when the displacing declaration carries no file" do
+      rows = build_aggregator(
+        signature_standdowns_snapshot: [["sig/relation.rbs", "::Store::Relation", 2, 1, nil]]
+      ).rbs_plugin_signature_stood_down_diagnostics
+
+      expect(rows.first.message)
+        .to include("another loaded signature source already declares it with 2 type parameters")
+    end
+
+    it "is silent when nothing stood down" do
+      expect(build_aggregator(signature_standdowns_snapshot: []).rbs_plugin_signature_stood_down_diagnostics).to eq([])
+    end
+  end
+
+  # Issue #610 — `GenericParameterMismatchError` is two declarations of one CLASS at different arity; the
+  # generic "remove the duplicate member" advice sends its reader after a member that does not exist.
+  describe "rbs_definition_build_failed_diagnostics advice" do
+    it "speaks of generic arity when the first failure is a GenericParameterMismatchError" do
+      failures = [["ActiveRecord::Relation", "RBS::GenericParameterMismatchError", "::ActiveRecord::Relation", []]]
+      message = build_aggregator(
+        definition_build_failures_snapshot: failures
+      ).rbs_definition_build_failed_diagnostics.first.message
+
+      expect(message).to include("declare the class with a different number of type parameters")
+      expect(message).not_to include("remove the duplicate declaration")
+    end
+
+    it "keeps the duplicate-member advice for a DuplicatedMethodDefinitionError" do
+      failures = [["Acme", "RBS::DuplicatedMethodDefinitionError", "::Acme#label", []]]
+      message = build_aggregator(
+        definition_build_failures_snapshot: failures
+      ).rbs_definition_build_failed_diagnostics.first.message
+
+      expect(message).to include("remove the duplicate declaration")
     end
   end
 end

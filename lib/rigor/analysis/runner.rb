@@ -1038,7 +1038,9 @@ module Rigor
         # `type` alias would have contributed, never a class's own declared method surface, so it is the
         # narrowest-consequence rung on the same ladder.
         diagnostics += @diagnostic_aggregator.rbs_hkt_scan_failed_diagnostics
-        diagnostics += @diagnostic_aggregator.rbs_synthesized_namespace_diagnostics
+        # The synthesized-namespace notice, then (#610) the plugin-signature stand-down: the outcome that
+        # AVOIDED a definition-build failure, so the quietest row on that ladder.
+        diagnostics += @diagnostic_aggregator.rbs_coverage_notice_diagnostics
         diagnostics += @diagnostic_aggregator.conforms_to_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
         diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
@@ -1516,6 +1518,7 @@ module Rigor
           pre_eval_diagnostics_from_scanner: -> { @pre_eval_diagnostics_from_scanner },
           synthesized_namespaces_snapshot: -> { @snapshots.synthesized_namespaces },
           quarantined_signatures_snapshot: -> { @snapshots.quarantined_signatures },
+          signature_standdowns_snapshot: -> { @snapshots.signature_standdowns },
           env_build_failure_snapshot: -> { @snapshots.env_build_failure },
           definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
           hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },

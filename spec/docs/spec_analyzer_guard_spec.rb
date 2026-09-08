@@ -94,7 +94,7 @@ module SpecAnalyzerGuardScan # rubocop:disable Metrics/ModuleLength -- standalon
   Offense = Struct.new(:line, :source)
 
   class << self
-    # @return [Array<Offense>] every unguarded run site, in source order.
+    # @return every unguarded run site, in source order.
     def offenses(source)
       root = Prism.parse(source).value
       analyzer_locals = collect_analyzer_locals(root)

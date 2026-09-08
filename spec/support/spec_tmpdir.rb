@@ -46,8 +46,8 @@ module SpecTmpdir
 
     # A temp directory whose lifetime is the whole spec process. Released by {.release_registered!}.
     #
-    # @param prefix [String] `Dir.mktmpdir` prefix, kept descriptive so a residue report names its owner.
-    # @return [String] the directory path.
+    # @param prefix — `Dir.mktmpdir` prefix, kept descriptive so a residue report names its owner.
+    # @return the directory path.
     def suite_lifetime(prefix)
       dir = Dir.mktmpdir(prefix)
       registry << dir
@@ -62,7 +62,7 @@ module SpecTmpdir
 
     # What is still inside {ROOT}. Empty is the contract; a non-empty answer names the leaking prefixes.
     #
-    # @return [Array<String>] basenames.
+    # @return basenames.
     def residue
       return [] unless File.directory?(ROOT)
 

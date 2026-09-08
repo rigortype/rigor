@@ -37,13 +37,11 @@
 # `guarded_run_buffer_recheck` close that the same way the two helpers above do: at the call site,
 # before the spec's own comparison runs.
 module GuardedAnalysis
-  # @param runner [Rigor::Analysis::Runner]
-  # @param paths [Array<String>, nil] forwarded to `Runner#run` when given; omitted (so the
+  # @param paths — forwarded to `Runner#run` when given; omitted (so the
   #   configuration's own `paths` apply) when nil, which is the dominant call shape.
-  # @param allow_plugin_crash [Boolean] see {InternalAnalyzerErrorGuard.check!} — only for the examples
+  # @param allow_plugin_crash — see {InternalAnalyzerErrorGuard.check!} — only for the examples
   #   that deliberately crash a plugin to assert the runner's isolation envelope.
-  # @return [Rigor::Analysis::Result]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_run(runner, paths = nil, allow_plugin_crash: false)
     result = paths.nil? ? runner.run : runner.run(paths)
     InternalAnalyzerErrorGuard.check!(
@@ -51,8 +49,7 @@ module GuardedAnalysis
     )
   end
 
-  # @return [Rigor::Analysis::Result]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_run_source(runner, source:, path: "(source).rb")
     result = runner.run_source(source: source, path: path)
     InternalAnalyzerErrorGuard.check!(result, context: guarded_analysis_context("guarded_run_source"))
@@ -61,9 +58,7 @@ module GuardedAnalysis
   # `WorkerSession#analyze(path)` — the per-file entry the pool workers drive, which returns
   # `Array<Diagnostic>` rather than a `Result`, so it needs the Array-shaped guard.
   #
-  # @param session [Rigor::Analysis::WorkerSession]
-  # @return [Array<Rigor::Analysis::Diagnostic>]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_session_analyze(session, path, allow_plugin_crash: false)
     InternalAnalyzerErrorGuard.check_diagnostics!(
       session.analyze(path),
@@ -75,9 +70,7 @@ module GuardedAnalysis
   # `WorkerSession`. `#baseline` returns `Array<Diagnostic>` directly (mirrors `WorkerSession#analyze`,
   # hence the Array-shaped guard).
   #
-  # @param session [Rigor::Analysis::IncrementalSession]
-  # @return [Array<Rigor::Analysis::Diagnostic>]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_baseline(session)
     InternalAnalyzerErrorGuard.check_diagnostics!(
       session.baseline, context: guarded_analysis_context("guarded_baseline")
@@ -88,9 +81,7 @@ module GuardedAnalysis
   # :removed, :affected, :reused)`), not a bare Array, so the guard checks its `#diagnostics` field and
   # hands back the whole struct — every call site reads `changed` / `affected` / `reused` off it too.
   #
-  # @param session [Rigor::Analysis::IncrementalSession]
-  # @return [Rigor::Analysis::IncrementalSession::Recheck]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_recheck(session)
     result = session.recheck
     InternalAnalyzerErrorGuard.check_diagnostics!(
@@ -102,10 +93,7 @@ module GuardedAnalysis
   # `IncrementalSession#reanalyze_subset` — the verification engine (`--verify-incremental`). Returns
   # `Array<Diagnostic>` directly (the merged diagnostics), so the guard checks the returned array.
   #
-  # @param session [Rigor::Analysis::IncrementalSession]
-  # @param subset [Enumerable<String>]
-  # @return [Array<Rigor::Analysis::Diagnostic>]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_reanalyze_subset(session, subset)
     InternalAnalyzerErrorGuard.check_diagnostics!(
       session.reanalyze_subset(subset), context: guarded_analysis_context("guarded_reanalyze_subset")
@@ -115,9 +103,7 @@ module GuardedAnalysis
   # `IncrementalSession#run_incremental` — the `--incremental` CLI engine — returns `[diagnostics,
   # warm]`. Guards the diagnostics half and hands back the same tuple.
   #
-  # @param session [Rigor::Analysis::IncrementalSession]
-  # @return [Array(Array<Rigor::Analysis::Diagnostic>, Boolean)]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_run_incremental(session, snapshot:, fingerprint:, persist: true)
     diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint, persist: persist)
     InternalAnalyzerErrorGuard.check_diagnostics!(
@@ -130,9 +116,7 @@ module GuardedAnalysis
   # snapshot could not be reused, a legitimate decline (nothing ran) rather than a crash, so the guard
   # applies only to a non-nil `Recheck`.
   #
-  # @param session [Rigor::Analysis::IncrementalSession]
-  # @return [Rigor::Analysis::IncrementalSession::Recheck, nil]
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed]
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
   def guarded_run_buffer_recheck(session, snapshot:, fingerprint:)
     result = session.run_buffer_recheck(snapshot: snapshot, fingerprint: fingerprint)
     return result if result.nil?

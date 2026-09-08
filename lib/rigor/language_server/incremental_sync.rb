@@ -64,7 +64,7 @@ module Rigor
       # companion to `range` and is accepted-but-ignored: it is redundant with `range`, historically ambiguous
       # about its units, and `range` is the authoritative field.
       #
-      # @raise UnappliableChange —
+      # @raise UnappliableChange
       def apply(text, change)
         raise UnappliableChange, "contentChanges entry must be a Hash, got #{change.class}" unless change.is_a?(Hash)
 

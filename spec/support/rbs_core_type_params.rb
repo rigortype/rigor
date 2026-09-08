@@ -9,13 +9,13 @@
 module RbsCoreTypeParams
   RENAMED_IN = Gem::Version.new("4.1.0")
 
-  # @return [Boolean] true on the rbs line that carries the renamed parameters.
+  # @return true on the rbs line that carries the renamed parameters.
   def self.renamed?
     Gem::Version.new(::RBS::VERSION) >= RENAMED_IN
   end
 
   # `Array`'s single element type parameter.
-  # @return [Symbol] `:E` on rbs >= 4.1, `:Elem` before it.
+  # @return `:E` on rbs >= 4.1, `:Elem` before it.
   def self.array_element
     renamed? ? :E : :Elem
   end

@@ -85,8 +85,8 @@ RSpec.describe "effect.annotations-unchecked across the two annotation lanes" do
     { "paths" => ["lib"], "plugins" => ["rigor-rbs-inline"] }
   end
 
-  # @param lane [Symbol] `:rbs` or `:inline`
-  # @return [Array<Rigor::Analysis::Diagnostic>] the rule's findings for one run of that lane.
+  # @param lane — `:rbs` or `:inline`
+  # @return the rule's findings for one run of that lane.
   def findings_for(lane, cached: false, **runner_kwargs)
     Dir.mktmpdir("rigor-441-#{lane}-") do |dir|
       data = lane == :rbs ? build_rbs_lane(dir) : build_inline_lane(dir)

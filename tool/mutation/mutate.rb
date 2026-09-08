@@ -80,7 +80,7 @@ module RigorMutation
       @type_filter = type_filter
     end
 
-    # @return [Result, nil] nil when the file yields no (type-relevant) mutants.
+    # @return nil when the file yields no (type-relevant) mutants.
     def run_file(path, seed:, limit:)
       # Force UTF-8: the Flake shell's default external encoding can be
       # US-ASCII, making byte-splicing a non-ASCII file raise an encoding error.

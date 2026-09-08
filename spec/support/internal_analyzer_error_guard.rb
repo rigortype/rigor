@@ -48,16 +48,15 @@ module InternalAnalyzerErrorGuard
   # swallow, or count as a pass, a fire this guard did not intend it to catch.
   class AnalyzerCrashed < StandardError; end
 
-  # @param result [Rigor::Analysis::Result]
-  # @param context [String] the calling helper's name, prefixed onto the raised message so a failure points
+  # @param context — the calling helper's name, prefixed onto the raised message so a failure points
   #   straight at which harness entry point saw the crash.
-  # @param allow_plugin_crash [Boolean] for the handful of examples whose SUBJECT is the runner's own
+  # @param allow_plugin_crash — for the handful of examples whose SUBJECT is the runner's own
   #   plugin-isolation envelope (`runner_spec.rb`'s "isolates plugin exceptions …" / "isolates a #prepare
   #   raise …"): there the `:plugin_loader` / `"runtime-error"` diagnostic is what the example asserts on, so
   #   raising on it would make the behaviour untestable. The CHECK-RULE half stays armed regardless — a rule
   #   crashing in one of those runs would still hide the answer, and no spec has a reason to want that.
-  # @return [Rigor::Analysis::Result] `result`, unchanged, when no diagnostic matches {.crash?}.
-  # @raise [AnalyzerCrashed]
+  # @return `result`, unchanged, when no diagnostic matches {.crash?}.
+  # @raise AnalyzerCrashed
   def self.check!(result, context:, allow_plugin_crash: false)
     check_diagnostics!(result.diagnostics, context: context, allow_plugin_crash: allow_plugin_crash)
     result
@@ -69,9 +68,8 @@ module InternalAnalyzerErrorGuard
   # `worker_session_spec`'s Runner-vs-session equivalence examples stayed vacuous under #674 — a crashed
   # rule makes BOTH sides one identical diagnostic, so `eq` holds (issue #674 review).
   #
-  # @param diagnostics [Array<Rigor::Analysis::Diagnostic>]
-  # @return [Array<Rigor::Analysis::Diagnostic>] `diagnostics`, unchanged, when none matches {.crash?}.
-  # @raise [AnalyzerCrashed]
+  # @return `diagnostics`, unchanged, when none matches {.crash?}.
+  # @raise AnalyzerCrashed
   def self.check_diagnostics!(diagnostics, context:, allow_plugin_crash: false)
     culprit = diagnostics.find { |d| crash?(d, allow_plugin_crash: allow_plugin_crash) }
     return diagnostics if culprit.nil?

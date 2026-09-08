@@ -30,16 +30,18 @@ and a docs sweep sided with the code. ADR-109 restores the decision and defines
 
 - [#830](https://github.com/rigortype/rigor/pull/830) — **merged 2026-09-09** on the user's word,
   master CI green. Slice 1: `Integer[1..10]` display + grammar, `int<a, b>` a deprecated input alias.
-- [#844](https://github.com/rigortype/rigor/pull/844) — **open, Draft, do not merge without the
-  user's word.** Slice 2: `Type::FloatRange`, `Float[0.0...1.0]` grammar, `non-nan-float` /
-  `finite-float`, acceptance, RBS dispatch as `Float`, fixture `float_range_annotation/`. `make verify`
-  / `make docs-check` / the sig provenance gate green locally on head `a5364d8f`; the `sig/rigor/type.rbs`
-  residue pin moved 209 → 217 (reason in the commit body). Watch the HEAD run by id.
-- [#831](https://github.com/rigortype/rigor/issues/831) — slice 3: truthy-edge Float comparison
-  narrowing (`x > c` → `Float[c..]`, `x < c` → `Float[...c]`, falsy edge keeps the entry type),
-  `nan?` / `finite?` narrowing, Float folds, and the `dynamic.rbs-extended.deprecated-form`
-  diagnostic. Start from `Narrowing#narrow_integer_comparison` for the shape and from
-  `RANGE_HEAD_BUILDERS["Float"]` in `lib/rigor/builtins/imported_refinements.rb` for the carrier.
+- [#844](https://github.com/rigortype/rigor/pull/844) — **merged 2026-09-09** on the user's word,
+  master CI green. Slice 2: `Type::FloatRange`, `Float[0.0...1.0]` grammar, `non-nan-float` /
+  `finite-float`, acceptance, RBS dispatch as `Float`; the `sig/rigor/type.rbs` residue pin moved
+  209 → 217 (reason in the commit body).
+- [#846](https://github.com/rigortype/rigor/pull/846) — **open, Draft, do not merge without the
+  user's word.** Slice 3: truthy-edge Float comparison narrowing (`x > c` → `Float[c..]`, `x < c` →
+  `Float[...c]`, `between?`, falsy edge keeps the entry type), `nan?` / `finite?`, and union
+  absorption (`Float` absorbs a `FloatRange` member) so a post-guard join names one set. Fixture
+  `float_comparison_narrowing.rb`. `make verify` / `make docs-check` green locally on head `044c824a`.
+- [#831](https://github.com/rigortype/rigor/issues/831) — what remains of ADR-109: Float folds
+  (`abs`, `Math.sqrt`, `rand(range)`, `clamp(range)`) and the `dynamic.rbs-extended.deprecated-form`
+  diagnostic for the `int<a, b>` alias (rule catalogue + taxonomy gate + manual rule list).
 - Engine gaps filed while probing, all `ready-for-agent`: [#833](https://github.com/rigortype/rigor/issues/833)
   (a Range literal argument matches the first `Range[T]` overload whatever its endpoints, so
   `rand(0.0...1.0)` types `Integer?`), [#834](https://github.com/rigortype/rigor/issues/834)
@@ -74,6 +76,7 @@ longer proposes against it and the provenance gate counts it as earned (#845, cl
 
 ## How to enter
 
-1. `gh pr view 844` — if the user has said to land it and the head run is green, `gh pr ready 844`
-   then `gh pr merge 844 --merge`; otherwise leave it Draft.
-2. Next in the line is #831 slice 3, forked from post-merge master.
+1. `gh pr view 846` — if the user has said to land it and the head run is green, `gh pr ready 846`
+   then `gh pr merge 846 --merge`; otherwise leave it Draft.
+2. Next in the line is the rest of #831 (folds, then the deprecation diagnostic), forked from
+   post-merge master.

@@ -23,8 +23,9 @@
 # § Implementation Guidelines puts above worst-case static reading. So:
 #
 # 1. HARD RULE on `tighter_return`. `sig-gen` proposes a narrower return than the declaration; ADR-14
-#    says apply it or record why not, and there are 8 — the seeding audit's 15 less the seven the
-#    #836 fix stopped proposing — so a marker on each is affordable. A ninth fails on arrival.
+#    says apply it or record why not, and there are 5 — the seeding audit's 15 less the seven the
+#    #836 fix stopped proposing and the three #838 applied — so a marker on each remaining one is
+#    affordable. A sixth fails on arrival.
 # 2. RATCHET on the residue. Per-file unmarked-residue counts are an exact snapshot below. A new
 #    hand-written declaration raises its file's count and goes red; marking it subtracts from the
 #    count. Closing an engine gap lowers a count and the gate says so, so slack cannot accumulate.

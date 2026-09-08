@@ -16,11 +16,15 @@ module Rigor
     #   diagnostics.
     # - `#hkt_directive_errors` — malformed `rigor:v1:hkt_register` / `rigor:v1:hkt_define` directives the
     #   ADR-20 parser declined. Surface as `dynamic.rbs-extended.hkt-directive-invalid` `:info` diagnostics.
+    # - `#deprecated_forms` — payload spellings the grammar still accepts for one deprecation window but no
+    #   longer displays (ADR-109 WD3: the PHPStan-style `int<a, b>`). Surface as
+    #   `dynamic.rbs-extended.deprecated-form` `:info` diagnostics naming the replacement.
     #
     # Mutable through the run; consumed once by {Rigor::Analysis::Runner} at end-of-run. Each event is
     # deduplicated by its whole entry — `(payload, path, line, column)` for unresolved, `(head, path, line,
-    # column)` for lossy-projection, `(message, path, line, column)` for an hkt directive — so a single
-    # annotation read from many call sites yields one diagnostic.
+    # column)` for lossy-projection, `(message, path, line, column)` for an hkt directive, `(payload,
+    # replacement, path, line, column)` for a deprecated form — so a single annotation read from many call
+    # sites yields one diagnostic.
     #
     # The reporter is intentionally thread-safe via a coarse `Mutex` because the inference engine may read the
     # same method definition from multiple files in parallel; the critical sections are short (Array#include? +
@@ -41,6 +45,7 @@ module Rigor
       UnresolvedEntry = Data.define(:payload, :path, :line, :column)
       LossyProjectionEntry = Data.define(:head, :path, :line, :column)
       HktDirectiveEntry = Data.define(:message, :path, :line, :column)
+      DeprecatedFormEntry = Data.define(:payload, :replacement, :path, :line, :column)
 
       # Flattens an `RBS::Location` (or anything answering the same readers) to the `(path, line, column)`
       # triple every entry carries. `column` is 1-based, since `RBS::Location#start_column` is 0-based and
@@ -65,6 +70,7 @@ module Rigor
         @unresolved_payloads = []
         @lossy_projections = []
         @hkt_directive_errors = []
+        @deprecated_forms = []
         @mutex = Mutex.new
       end
 
@@ -129,11 +135,33 @@ module Rigor
         end
       end
 
+      # @return frozen snapshot of the accumulated deprecated-form events.
+      def deprecated_forms
+        @mutex.synchronize { @deprecated_forms.dup.freeze }
+      end
+
+      # Records a `dynamic.rbs-extended.deprecated-form` event (ADR-109 WD3): `payload` is the spelling the
+      # author wrote (`int<5, 10>`), `replacement` the spelling the same type displays as (`Integer[5..10]`),
+      # so the row can say exactly what to write instead. The position triple is read exactly as
+      # {#record_unresolved}'s is, and every String is frozen for the pool drain.
+      def record_deprecated_form(payload:, replacement:, path: nil, line: nil, column: nil)
+        entry = DeprecatedFormEntry.new(
+          payload: frozen_text(payload), replacement: frozen_text(replacement),
+          path: frozen_text(path), line: line, column: column
+        )
+        @mutex.synchronize do
+          return if @deprecated_forms.include?(entry)
+
+          @deprecated_forms << entry
+        end
+      end
+
       # True when no events have accumulated. Used by callers that want to skip the diagnostic-emission pass
       # entirely on the common no-event path.
       def empty?
         @mutex.synchronize do
-          @unresolved_payloads.empty? && @lossy_projections.empty? && @hkt_directive_errors.empty?
+          @unresolved_payloads.empty? && @lossy_projections.empty? && @hkt_directive_errors.empty? &&
+            @deprecated_forms.empty?
         end
       end
 

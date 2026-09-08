@@ -60,6 +60,43 @@ RSpec.describe Rigor::RbsExtended::Reporter do
   # halves of this describe: the drain's `Marshal.dump` raised `TypeError` on the location (killing the
   # worker), and the coordinator's merge could not collapse two workers' copies of one row, because an
   # `RBS::Location` compares equal only against a location over the SAME `RBS::Buffer` object.
+  # ADR-109 WD3 — the deprecation window for the angle-bracket integer range is a stream of its own, so
+  # a run can name the replacement spelling once per annotation.
+  describe "#record_deprecated_form / #deprecated_forms" do
+    it "accumulates (payload, replacement, position) tuples in insertion order" do
+      reporter.record_deprecated_form(payload: "int<5, 10>", replacement: "Integer[5..10]")
+      reporter.record_deprecated_form(payload: "int<0, 1>", replacement: "Integer[0..1]")
+
+      expect(reporter.deprecated_forms.map(&:payload)).to eq(["int<5, 10>", "int<0, 1>"])
+      expect(reporter.deprecated_forms.map(&:replacement)).to eq(["Integer[5..10]", "Integer[0..1]"])
+    end
+
+    it "deduplicates entries by (payload, replacement, path, line, column)" do
+      2.times do
+        reporter.record_deprecated_form(payload: "int<5, 10>", replacement: "Integer[5..10]", path: "sig/a.rbs",
+                                        line: 2, column: 3)
+      end
+
+      expect(reporter.deprecated_forms.size).to eq(1)
+    end
+
+    it "keeps the entry Marshal-clean and deeply frozen, as the pool drain requires" do
+      path, line, column = described_class.position_of(location)
+      reporter.record_deprecated_form(payload: +"int<5, 10>", replacement: +"Integer[5..10]",
+                                      path: path, line: line, column: column)
+      entry = reporter.deprecated_forms.first
+
+      expect(Marshal.load(Marshal.dump(entry))).to eq(entry)
+      expect(Ractor.shareable?(entry)).to be(true)
+    end
+
+    it "counts towards #empty?" do
+      expect(reporter).to be_empty
+      reporter.record_deprecated_form(payload: "int<5, 10>", replacement: "Integer[5..10]")
+      expect(reporter).not_to be_empty
+    end
+  end
+
   describe "position primitives (issue #805)" do
     it "flattens an RBS::Location to (path, 1-based line, 1-based column)" do
       expect(described_class.position_of(location(start_pos: 6))).to eq(["sig/widget.rbs", 1, 7])

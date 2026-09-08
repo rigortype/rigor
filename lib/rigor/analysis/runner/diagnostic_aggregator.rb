@@ -792,7 +792,22 @@ module Rigor
             )
           end
 
-          unresolved + lossy + hkt_directive_diagnostics
+          unresolved + lossy + hkt_directive_diagnostics + deprecated_form_diagnostics
+        end
+
+        # ADR-109 WD3 — one row per annotation still written in a spelling the grammar accepts but no
+        # longer displays. The row names the replacement because the deprecation window exists for exactly
+        # this edit, and it stays `:info`: the annotation resolved, the run is as green as it was.
+        def deprecated_form_diagnostics
+          @rbs_extended_reporter.deprecated_forms.map do |entry|
+            build_positioned_reporter_diagnostic(
+              entry,
+              rule: "dynamic.rbs-extended.deprecated-form",
+              message: "`#{entry.payload}` is a deprecated spelling; write `#{entry.replacement}`. The " \
+                       "angle-bracket integer range is accepted for one deprecation window and removed " \
+                       "at the next compatibility break (ADR-109)."
+            )
+          end
         end
 
         # Issue #785 — one row per declined HKT directive. The consequence sentence is the point: the parser

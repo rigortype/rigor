@@ -270,7 +270,10 @@ module Rigor
             # `hkt_scan_failure` does: the directives are read by the registry scan, and under the pool the
             # PARENT never demands that scan, so a diagnostic wired off the parent's reporter would appear
             # at `--workers=0` and vanish at `--workers=N`. The demand above is what fills this.
-            hkt_directive_errors: @rbs_extended_reporter.hkt_directive_errors
+            hkt_directive_errors: @rbs_extended_reporter.hkt_directive_errors,
+            # ADR-109 WD3 — the deprecated-form stream rides the same channel: the payload is read where
+            # the annotated method is dispatched, which under the pool is only ever inside a worker.
+            deprecated_forms: @rbs_extended_reporter.deprecated_forms
           },
           boundary_cross: @boundary_cross_reporter.entries,
           source_rbs_synthesis: @source_rbs_synthesis_reporter.entries,

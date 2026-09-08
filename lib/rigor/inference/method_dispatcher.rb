@@ -24,6 +24,7 @@ require_relative "method_dispatcher/array_to_h_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/shellwords_folding"
 require_relative "method_dispatcher/math_folding"
+require_relative "method_dispatcher/random_folding"
 require_relative "method_dispatcher/time_folding"
 require_relative "method_dispatcher/regexp_folding"
 require_relative "method_dispatcher/cgi_folding"
@@ -762,6 +763,7 @@ module Rigor
         "File" => FileFolding,
         "Shellwords" => ShellwordsFolding,
         "Math" => MathFolding,
+        "Random" => RandomFolding,
         "Time" => TimeFolding,
         "Regexp" => RegexpFolding,
         "CGI" => CGIFolding,

@@ -1,0 +1,28 @@
+---
+locals:
+  "n": non-negative-int
+  u: Float[0.0...1.0]
+  x: Float
+assertions:
+  '1': Float[0.0...1.0]
+  '2': Integer[1..6]
+  '3': Float[1.0..2.0]
+  '4': Float
+  '5': Integer
+  '6': 'false'
+  '7': 'true'
+  '8': Float[0.0...1.0]
+  '9': Float[-0.9999999999999999..0.0]
+  '10': '0'
+  '11': Integer[0..1]
+  '12': Float[0.0...1.0]
+  '13': Float[0.25..0.75]
+  '14': 'true'
+  '15': Float[0.0..]
+  '16': Float[1.0..]
+  '17': Integer[1..9]
+  '18': positive-int
+  '19': Float[0.0..]
+  '20': Float[0.0..]
+  '21': Float
+  '22': Float

@@ -120,4 +120,50 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MathFolding do
       expect(fold(:no_such_function, c(1.0))).to be_nil
     end
   end
+
+  describe "bounded arguments (ADR-109)" do
+    def math_singleton = Rigor::Type::Combinator.singleton_of("Math")
+
+    def float_range(min, max, exclude_end: false)
+      Rigor::Type::Combinator.float_range(min, max, exclude_end: exclude_end)
+    end
+
+    def integer_range(min, max) = Rigor::Type::Combinator.integer_range(min, max)
+
+    def fold(method_name, *arg_types)
+      described_class.try_dispatch(cc(receiver: math_singleton, method_name: method_name, args: arg_types))
+    end
+
+    it "maps a monotone function over the bounds of a Float range" do
+      expect(fold(:sqrt, float_range(0.0, 4.0))).to eq(float_range(0.0, 2.0))
+      expect(fold(:sqrt, float_range(0.0, Float::INFINITY))).to eq(float_range(0.0, Float::INFINITY))
+      expect(fold(:exp, float_range(-Float::INFINITY, 0.0))).to eq(float_range(0.0, 1.0))
+      expect(fold(:log, float_range(1.0, Math::E))).to eq(float_range(0.0, 1.0))
+      expect(fold(:atan, Rigor::Type::Combinator.non_nan_float)).to eq(float_range(-Math::PI / 2, Math::PI / 2))
+    end
+
+    it "reads an exclusive end as its canonical closed bound" do
+      expect(fold(:sqrt, float_range(0.0, 4.0, exclude_end: true))).to eq(float_range(0.0, Math.sqrt(4.0.prev_float)))
+    end
+
+    it "maps a monotone function over an Integer range" do
+      expect(fold(:sqrt, Rigor::Type::Combinator.non_negative_int)).to eq(float_range(0.0, Float::INFINITY))
+      expect(fold(:sqrt, integer_range(4, 9))).to eq(float_range(2.0, 3.0))
+      expect(fold(:log2, integer_range(1, 8))).to eq(float_range(0.0, 3.0))
+    end
+
+    it "declines a bound below the function's domain, which raises at run time" do
+      expect(fold(:sqrt, float_range(-1.0, 4.0))).to be_nil
+      expect(fold(:sqrt, Rigor::Type::Combinator.nominal_of("Integer"))).to be_nil
+      expect(fold(:log, Rigor::Type::Combinator.negative_int)).to be_nil
+      expect(fold(:log1p, float_range(-2.0, 0.0))).to be_nil
+      expect(fold(:log1p, float_range(-1.0, 0.0))).to eq(float_range(-Float::INFINITY, 0.0))
+    end
+
+    it "declines the functions that are not monotone" do
+      expect(fold(:sin, float_range(0.0, 1.0))).to be_nil
+      expect(fold(:cos, integer_range(0, 1))).to be_nil
+      expect(fold(:gamma, float_range(1.0, 2.0))).to be_nil
+    end
+  end
 end

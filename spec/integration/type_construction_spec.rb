@@ -1040,6 +1040,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/float_folds.rb — ADR-109 bounded Float folds (rand, Math, abs, clamp)" do
+    let(:harness) { harness_for("float_folds") }
+
+    it "folds each call to the closed envelope of what Ruby returns and declines the ones that can raise" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/container_size.rb — Array/String/Hash#size tightened to non_negative_int" do
     let(:harness) { harness_for("container_size") }
 

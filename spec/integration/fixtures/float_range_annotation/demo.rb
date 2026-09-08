@@ -21,11 +21,11 @@ assert_type("Float[0.0..1.0]", u)
 assert_type("non-nan-float", r.safe)
 assert_type("Float[0.0...Float::INFINITY]", r.magnitude)
 
-# No Float folds exist yet, so a method on the bounded receiver resolves through `Float`'s RBS: the
-# carrier is a Float for every method the fold tiers do not own.
-assert_type("Integer", u.round)
+# A bounded Float folds what its bounds decide (`round`, `nan?`); every other method resolves
+# through `Float`'s RBS: the carrier is a Float for what the fold tiers do not own.
+assert_type("Integer[0..1]", u.round)
 assert_type("Float", u + 1.0)
-assert_type("bool", u.nan?)
+assert_type("false", u.nan?)
 
 # `Float[0.0..1.0]` is-a `Float`, and is contained in itself; a `Float` is not contained in it (it may
 # be NaN or lie outside), an Integer is not a Float, and `1.5` lies outside the range.

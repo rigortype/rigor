@@ -1556,4 +1556,122 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold("hello", :frozen?)).to be_nil
     end
   end
+
+  describe "FloatRange folds (ADR-109)" do
+    def float_range(min, max, exclude_end: false)
+      Rigor::Type::Combinator.float_range(min, max, exclude_end: exclude_end)
+    end
+
+    def integer_range(min, max) = Rigor::Type::Combinator.integer_range(min, max)
+    def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+    def bool = Rigor::Type::Combinator.union(constant_of(true), constant_of(false))
+
+    def fold_types(receiver, method_name, args = [])
+      described_class.try_dispatch(cc(receiver: receiver, method_name: method_name, args: args))
+    end
+
+    describe "unary" do
+      it "folds abs / magnitude to the non-negative image" do
+        expect(fold_types(float_range(-2.0, 1.0), :abs)).to eq(float_range(0.0, 2.0))
+        expect(fold_types(float_range(-3.0, -1.0), :magnitude)).to eq(float_range(1.0, 3.0))
+        expect(fold_types(float_range(0.5, 1.0), :abs)).to eq(float_range(0.5, 1.0))
+        expect(fold_types(Rigor::Type::Combinator.non_nan_float, :abs)).to eq(float_range(0.0, Float::INFINITY))
+      end
+
+      it "negates on the canonical closed bounds, dropping an exclusive end" do
+        below_one = 1.0.prev_float
+        expect(fold_types(float_range(0.0, 1.0, exclude_end: true), :-@)).to eq(float_range(-below_one, 0.0))
+        expect(fold_types(float_range(0.0, 1.0), :+@)).to eq(float_range(0.0, 1.0))
+        expect(fold_types(float_range(0.0, 1.0), :to_f)).to eq(float_range(0.0, 1.0))
+      end
+
+      it "decides nan? and finite? from the bounds" do
+        expect(fold_types(float_range(0.0, 1.0), :nan?)).to eq(constant_of(false))
+        expect(fold_types(float_range(0.0, 1.0), :finite?)).to eq(constant_of(true))
+        expect(fold_types(Rigor::Type::Combinator.finite_float, :finite?)).to eq(constant_of(true))
+        expect(fold_types(float_range(0.0, Float::INFINITY), :finite?)).to eq(bool)
+        expect(fold_types(float_range(Float::INFINITY, Float::INFINITY), :finite?)).to eq(constant_of(false))
+      end
+
+      it "decides zero? / positive? / negative? where the bounds allow" do
+        expect(fold_types(float_range(0.5, 1.0), :zero?)).to eq(constant_of(false))
+        expect(fold_types(float_range(-1.0, 1.0), :zero?)).to eq(bool)
+        expect(fold_types(float_range(0.5, 1.0), :positive?)).to eq(constant_of(true))
+        expect(fold_types(float_range(-1.0, 0.0), :positive?)).to eq(constant_of(false))
+        expect(fold_types(float_range(-1.0, -0.5), :negative?)).to eq(constant_of(true))
+        expect(fold_types(float_range(0.0, 1.0), :negative?)).to eq(constant_of(false))
+        expect(fold_types(float_range(-1.0, 1.0), :negative?)).to eq(bool)
+      end
+
+      it "maps floor / ceil / round / truncate / to_i onto an Integer range for finite bounds" do
+        expect(fold_types(float_range(0.5, 2.5), :floor)).to eq(integer_range(0, 2))
+        expect(fold_types(float_range(0.5, 2.5), :ceil)).to eq(integer_range(1, 3))
+        expect(fold_types(float_range(0.5, 2.5), :round)).to eq(integer_range(1, 3))
+        expect(fold_types(float_range(-2.5, 2.5), :truncate)).to eq(integer_range(-2, 2))
+        expect(fold_types(float_range(0.0, 1.0, exclude_end: true), :to_i)).to eq(constant_of(0))
+      end
+
+      it "declines the integer conversions on an infinite bound, which raises at run time" do
+        expect(fold_types(float_range(0.0, Float::INFINITY), :floor)).to be_nil
+        expect(fold_types(Rigor::Type::Combinator.non_nan_float, :round)).to be_nil
+      end
+
+      it "declines methods it does not model" do
+        expect(fold_types(float_range(0.0, 1.0), :next_float)).to be_nil
+        expect(fold_types(float_range(0.0, 1.0), :to_s)).to be_nil
+      end
+    end
+
+    describe "between? and clamp" do
+      it "decides between? three-valued over the bracket" do
+        expect(fold_types(float_range(0.2, 0.8), :between?, [constant_of(0.0), constant_of(1.0)]))
+          .to eq(constant_of(true))
+        expect(fold_types(float_range(2.0, 3.0), :between?, [constant_of(0.0), constant_of(1.0)]))
+          .to eq(constant_of(false))
+        expect(fold_types(float_range(0.5, 3.0), :between?, [constant_of(0), constant_of(1)])).to eq(bool)
+      end
+
+      it "narrows clamp(lo, hi) to the bracket, keeping the receiver's tighter end" do
+        expect(fold_types(float_range(-1.0, 5.0), :clamp, [constant_of(0.0), constant_of(1.0)]))
+          .to eq(float_range(0.0, 1.0))
+        expect(fold_types(float_range(0.0, 0.5, exclude_end: true), :clamp, [constant_of(0.0), constant_of(1.0)]))
+          .to eq(float_range(0.0, 0.5, exclude_end: true))
+        expect(fold_types(float_range(0.0, 5.0), :clamp, [constant_of(1), constant_of(2)])).to eq(float_range(1.0, 2.0))
+      end
+
+      it "declines clamp when the bracket lies wholly outside the receiver, and on a reversed bracket" do
+        expect(fold_types(float_range(10.0, 20.0), :clamp, [constant_of(0.0), constant_of(5.0)])).to be_nil
+        expect(fold_types(float_range(0.0, 1.0), :clamp, [constant_of(2.0), constant_of(1.0)])).to be_nil
+      end
+    end
+
+    describe "clamp(range) (#834)" do
+      it "folds a closed bracket on a FloatRange and on an IntegerRange receiver" do
+        expect(fold_types(float_range(-1.0, 5.0), :clamp, [constant_of(0.0..1.0)])).to eq(float_range(0.0, 1.0))
+        expect(fold_types(integer_range(3, 7), :clamp, [constant_of(4..6)])).to eq(integer_range(4, 6))
+        expect(fold_types(Rigor::Type::Combinator.non_negative_int, :clamp, [constant_of(1..9)]))
+          .to eq(integer_range(1, 9))
+      end
+
+      it "keeps the receiver's bound on an open side" do
+        expect(fold_types(integer_range(3, 7), :clamp, [constant_of(5..)])).to eq(integer_range(5, 7))
+        expect(fold_types(integer_range(3, 7), :clamp, [constant_of(..5)])).to eq(integer_range(3, 5))
+        expect(fold_types(float_range(0.0, 2.0), :clamp, [constant_of(1.0..)])).to eq(float_range(1.0, 2.0))
+      end
+
+      it "declines an exclusive end, which raises at run time, and a mismatched endpoint class" do
+        expect(fold_types(integer_range(3, 7), :clamp, [constant_of(4...6)])).to be_nil
+        expect(fold_types(float_range(0.0, 1.0), :clamp, [constant_of(0.0...0.5)])).to be_nil
+        expect(fold_types(integer_range(3, 7), :clamp, [constant_of(0.5..6.5)])).to be_nil
+      end
+    end
+
+    describe "arithmetic" do
+      it "declines Float-range arithmetic for now" do
+        expect(fold_types(float_range(0.0, 1.0), :+, [constant_of(1.0)])).to be_nil
+        expect(fold_types(constant_of(2.0), :*, [float_range(0.0, 1.0)])).to be_nil
+        expect(fold_types(integer_range(1, 2), :+, [float_range(0.0, 1.0)])).to be_nil
+      end
+    end
+  end
 end

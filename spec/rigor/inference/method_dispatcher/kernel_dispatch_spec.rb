@@ -308,4 +308,34 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(fmt(:format)).to be_nil
     end
   end
+
+  describe "Kernel#rand (ADR-109 / #833)" do
+    def receiver = Rigor::Type::Combinator.nominal_of("Object")
+    def c(value) = Rigor::Type::Combinator.constant_of(value)
+
+    def float_range(min, max, exclude_end: false)
+      Rigor::Type::Combinator.float_range(min, max, exclude_end: exclude_end)
+    end
+
+    def integer_range(min, max) = Rigor::Type::Combinator.integer_range(min, max)
+
+    def rand_fold(*arg_types)
+      described_class.try_dispatch(cc(receiver: receiver, method_name: :rand, args: arg_types))
+    end
+
+    it "folds a literal range and declines an empty or unbounded one (nil / Errno::EDOM at run time)" do
+      expect(rand_fold(c(1..6))).to eq(integer_range(1, 6))
+      expect(rand_fold(c(0.0...1.0))).to eq(float_range(0.0, 1.0, exclude_end: true))
+      expect(rand_fold(c(5..1))).to be_nil
+      expect(rand_fold(c(1..))).to be_nil
+    end
+
+    it "leaves the bare, Integer-max and Float-max forms to the RBS tier" do
+      expect(rand_fold).to be_nil
+      expect(rand_fold(c(6))).to be_nil
+      expect(rand_fold(c(1.5))).to be_nil
+      expect(rand_fold(Rigor::Type::Combinator.nominal_of("Integer"))).to be_nil
+      expect(rand_fold(c(1..6), c(2..3))).to be_nil
+    end
+  end
 end

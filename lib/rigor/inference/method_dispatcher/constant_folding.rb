@@ -347,7 +347,9 @@ module Rigor
             # range-arithmetic path (`try_fold_binary_range`) then keeps the result an `IntegerRange`
             # instead of bailing to Dynamic.
             union_integer_bounds(type)
-          when Type::IntegerRange then type
+          # ADR-109 — a bounded Float folds through its own arms (`try_fold_unary_float_range`,
+          # `try_fold_ternary_float_range`, `try_fold_clamp_range`); every other arm declines it.
+          when Type::IntegerRange, Type::FloatRange then type
           end
         end
 
@@ -389,17 +391,66 @@ module Rigor
           case set
           when Array              then try_fold_unary_set(set, method_name)
           when Type::IntegerRange then try_fold_unary_range(set, method_name)
+          when Type::FloatRange   then try_fold_unary_float_range(set, method_name)
           end
         end
 
         def try_fold_binary(left, method_name, right)
           return try_fold_divmod(left, right) if method_name == :divmod
+          return try_fold_clamp_range(left, right) if method_name == :clamp && bounded_range?(left)
+          # ADR-109 — no Float-range arithmetic yet; a bounded Float on either side declines here.
+          return nil if left.is_a?(Type::FloatRange) || right.is_a?(Type::FloatRange)
 
           if left.is_a?(Type::IntegerRange) || right.is_a?(Type::IntegerRange)
             try_fold_binary_range(left, method_name, right)
           else
             try_fold_binary_set(left, method_name, right)
           end
+        end
+
+        def bounded_range?(type)
+          type.is_a?(Type::IntegerRange) || type.is_a?(Type::FloatRange)
+        end
+
+        # #834 — `clamp(range)` on a bounded receiver, the one-argument twin of `range_clamp` /
+        # `float_range_clamp`. An exclusive end raises at run time (`cannot clamp with an exclusive
+        # range`), so it declines rather than folding a call that does not return; a missing end keeps
+        # the receiver's own bound on that side. The bracket's endpoints must be literals of the
+        # receiver's class.
+        def try_fold_clamp_range(receiver, right)
+          bracket = clamp_bracket(right)
+          return nil if bracket.nil?
+
+          lower, upper = bracket
+          case receiver
+          when Type::IntegerRange
+            return nil unless clamp_endpoints_are?(Integer, lower, upper)
+
+            range_clamp(receiver, lower || receiver.lower, upper || receiver.upper)
+          when Type::FloatRange
+            return nil unless clamp_endpoints_are?(Numeric, lower, upper)
+
+            float_range_clamp(receiver, lower, upper)
+          end
+        end
+
+        # `[lower, upper]` of a single literal, closed, non-reversed `Range` argument (either side may be
+        # `nil` for an open range); `nil` for any other shape.
+        def clamp_bracket(right)
+          return nil unless right.is_a?(Array) && right.size == 1 && right.first.is_a?(Range)
+
+          bracket = right.first
+          return nil if bracket.exclude_end? && !bracket.end.nil?
+
+          lower = bracket.begin
+          upper = bracket.end
+          return nil if lower && upper && lower > upper
+
+          [lower, upper]
+        end
+
+        def clamp_endpoints_are?(klass, lower, upper)
+          (lower.nil? || lower.is_a?(klass)) && (upper.nil? || upper.is_a?(klass))
         end
 
         # `Integer#divmod` and `Float#divmod` return a 2-element array `[quotient, remainder]`. We project
@@ -874,9 +925,63 @@ module Rigor
         # Other ternary methods over IntegerRange operands still decline.
         def try_fold_ternary(receiver_set, method_name, arg_sets)
           return try_fold_ternary_range(receiver_set, method_name, arg_sets) if receiver_set.is_a?(Type::IntegerRange)
-          return nil if arg_sets.any?(Type::IntegerRange)
+          if receiver_set.is_a?(Type::FloatRange)
+            return try_fold_ternary_float_range(receiver_set, method_name, arg_sets)
+          end
+          return nil if arg_sets.any? { |s| bounded_range?(s) }
 
           try_fold_ternary_set(receiver_set, method_name, arg_sets)
+        end
+
+        # ADR-109 — receiver `FloatRange` + two scalar numeric args: `between?` decides three-valued
+        # over the bracket, `clamp` narrows to the bracket (NaN never inhabits the receiver, so the
+        # comparison that would raise on NaN cannot).
+        def try_fold_ternary_float_range(range, method_name, arg_sets)
+          return nil unless arg_sets.all?(Array)
+
+          min_arg = single_real_arg(arg_sets[0])
+          max_arg = single_real_arg(arg_sets[1])
+          return nil if min_arg.nil? || max_arg.nil?
+          return nil if min_arg > max_arg
+
+          case method_name
+          when :between? then float_range_between(range, min_arg, max_arg)
+          when :clamp then float_range_clamp(range, min_arg, max_arg)
+          end
+        end
+
+        def single_real_arg(values)
+          return nil unless values.is_a?(Array) && values.size == 1
+
+          v = values.first
+          return nil unless v.is_a?(Integer) || (v.is_a?(Float) && !v.nan?)
+
+          v
+        end
+
+        def float_range_between(range, min_arg, max_arg)
+          return Type::Combinator.constant_of(false) if range.canonical_max < min_arg || range.min > max_arg
+          return Type::Combinator.constant_of(true) if range.min >= min_arg && range.canonical_max <= max_arg
+
+          bool_union
+        end
+
+        # `Float[a..b].clamp(lo, hi)` (either bound may be `nil` for the one-argument `clamp(lo..)` /
+        # `clamp(..hi)` forms). Keeps the receiver's own end, exclusivity included, where it is the
+        # tighter one. When the bracket lies wholly outside the receiver every value snaps to one bound
+        # and the result is a point Rigor would have to invent, so it declines like the Integer twin.
+        def float_range_clamp(range, min_arg, max_arg)
+          new_min = min_arg.nil? ? range.min : [range.min, min_arg.to_f].max
+          if max_arg.nil? || max_arg.to_f >= range.canonical_max
+            new_max = range.max
+            exclusive = range.exclude_end?
+          else
+            new_max = max_arg.to_f
+            exclusive = false
+          end
+          return nil if new_min > (exclusive ? new_max.prev_float : new_max)
+
+          Type::Combinator.float_range(new_min, new_max, exclude_end: exclusive)
         end
 
         # Receiver IntegerRange + two scalar `Constant<Integer>` args — the only IntegerRange-aware ternary
@@ -1218,6 +1323,99 @@ module Rigor
           bit_length: :range_unary_bit_length
         }.freeze
         private_constant :UNARY_RANGE_DIRECT
+
+        # ADR-109 — unary folds over a bounded Float. No bounded range contains NaN, so the predicates
+        # that exist to detect it are decided outright, and the monotone conversions map the two bounds.
+        # An exclusive end is dropped where negation would turn it into an exclusive begin, a shape
+        # Ruby's literal cannot spell: the result is the closed envelope, a superset.
+        FLOAT_RANGE_UNARY = {
+          abs: :float_range_abs,
+          magnitude: :float_range_abs,
+          "-@": :float_range_negate,
+          "+@": :float_range_identity,
+          to_f: :float_range_identity,
+          nan?: :float_range_never_nan,
+          finite?: :float_range_finite,
+          zero?: :float_range_zero,
+          positive?: :float_range_positive,
+          negative?: :float_range_negative,
+          floor: :float_range_to_integer,
+          ceil: :float_range_to_integer,
+          round: :float_range_to_integer,
+          truncate: :float_range_to_integer,
+          to_i: :float_range_to_integer
+        }.freeze
+        private_constant :FLOAT_RANGE_UNARY
+
+        def try_fold_unary_float_range(range, method_name)
+          handler = FLOAT_RANGE_UNARY[method_name]
+          return nil if handler.nil?
+
+          send(handler, range, method_name)
+        end
+
+        def float_range_abs(range, _method_name)
+          lower = range.min
+          upper = range.canonical_max
+          return range if lower >= 0.0
+          return Type::Combinator.float_range(-upper, -lower) if upper <= 0.0
+
+          Type::Combinator.float_range(0.0, [-lower, upper].max)
+        end
+
+        def float_range_negate(range, _method_name)
+          Type::Combinator.float_range(-range.canonical_max, -range.min)
+        end
+
+        def float_range_identity(range, _method_name)
+          range
+        end
+
+        def float_range_never_nan(_range, _method_name)
+          Type::Combinator.constant_of(false)
+        end
+
+        def float_range_finite(range, _method_name)
+          lower = range.min
+          upper = range.canonical_max
+          return Type::Combinator.constant_of(true) if lower.finite? && upper.finite?
+          return Type::Combinator.constant_of(false) if lower == upper
+
+          bool_union
+        end
+
+        def float_range_zero(range, _method_name)
+          return Type::Combinator.constant_of(false) unless range.covers?(0.0)
+          return Type::Combinator.constant_of(true) if range.min.zero? && range.canonical_max.zero?
+
+          bool_union
+        end
+
+        # `Float#positive?` is `self > 0`, `negative?` is `self < 0`.
+        def float_range_positive(range, _method_name)
+          return Type::Combinator.constant_of(true) if range.min > 0.0
+          return Type::Combinator.constant_of(false) if range.canonical_max <= 0.0
+
+          bool_union
+        end
+
+        def float_range_negative(range, _method_name)
+          return Type::Combinator.constant_of(true) if range.canonical_max < 0.0
+          return Type::Combinator.constant_of(false) if range.min >= 0.0
+
+          bool_union
+        end
+
+        # `floor` / `ceil` / `round` / `truncate` / `to_i` are monotone, so the image of the range is the
+        # integer range between the images of its bounds. An infinite bound raises `FloatDomainError` at
+        # run time for the value that reaches it, so the fold declines and the RBS `Integer` stands.
+        def float_range_to_integer(range, method_name)
+          lower = range.min
+          upper = range.canonical_max
+          return nil if lower.infinite? || upper.infinite?
+
+          build_integer_range(lower.public_send(method_name), upper.public_send(method_name))
+        end
 
         def try_fold_unary_range(range, method_name)
           return range_unary_predicate(range, method_name) if RANGE_UNARY_PREDICATES.include?(method_name)

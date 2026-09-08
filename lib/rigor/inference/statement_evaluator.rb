@@ -144,6 +144,19 @@ module Rigor
       BREAK_SINK_KEY = :rigor_break_sink
       private_constant :BREAK_SINK_KEY
 
+      # Thread-local sink (an Array of `[BreakNode, Type]`) collecting the value each `break` carries out of the
+      # construct it leaves. Issue #853: `break value` terminates the yielding CALL and is that call's value, so —
+      # unlike `next`, which {NEXT_SINK_KEY} joins into the block — these arms are consumed one level up, by
+      # `ExpressionTyper#call_dispatch_type_for`. Without them `ops.all? { |o| break false unless o; true }` folded to
+      # `Constant[true]` and warned about a program that really can answer false.
+      #
+      # Separate from {BREAK_SINK_KEY}, which records SCOPES for the loop-continuation join: the two consumers want
+      # different things from the same node, and a loop body evaluated under a call's collection must keep feeding its
+      # own sink. Both are filtered by node identity against a statically computed directly-targeting set, so a `break`
+      # that belongs to an inner loop or block never reaches the wrong consumer. nil means "not collecting".
+      BREAK_VALUE_SINK_KEY = :rigor_break_value_sink
+      private_constant :BREAK_VALUE_SINK_KEY
+
       # Lexical class frame: the `name:` field is the qualified class name as it would render in Ruby (e.g.,
       # `"Foo::Bar"`); the `singleton:` field is `true` for `class << self` frames so nested defs resolve to
       # singleton-method RBS lookups.
@@ -216,6 +229,22 @@ module Rigor
           result = yield
         ensure
           Thread.current[NEXT_SINK_KEY] = previous
+        end
+        [result, sink]
+      end
+
+      # Runs `block` with a fresh `break`-value sink installed, then yields the collected `[BreakNode, Type]` pairs to
+      # the caller. Stacks like the other sinks: a block body evaluated inside another block body's evaluation must not
+      # spill its arms into the outer collection. Used by `ExpressionTyper#call_dispatch_type_for` to union the `break`
+      # arms into the yielding call's type (issue #853).
+      def self.with_break_value_sink
+        previous = Thread.current[BREAK_VALUE_SINK_KEY]
+        sink = []
+        Thread.current[BREAK_VALUE_SINK_KEY] = sink
+        begin
+          result = yield
+        ensure
+          Thread.current[BREAK_VALUE_SINK_KEY] = previous
         end
         [result, sink]
       end
@@ -3068,14 +3097,20 @@ module Rigor
       # would drop (`flag = true; break` -> `flag` is `false | true` after the loop). nil sink = a `break` not inside an
       # inferred loop body (a block targeting a method, or top-level) — left to the existing escaping-block / no-op
       # handling.
+      #
+      # Issue #853: the value it carries out belongs to the yielding CALL, so it is recorded into the separate
+      # break-value sink for `ExpressionTyper#call_dispatch_type_for` to union in. Both sinks are optional and
+      # independent — a loop body collects scopes while an enclosing call collects values from the same walk.
       def eval_break(node)
         sink = Thread.current[BREAK_SINK_KEY]
         sink << [node, scope] if sink
+        value_sink = Thread.current[BREAK_VALUE_SINK_KEY]
+        value_sink << [node, jump_value_type(node)] if value_sink
         [Type::Combinator.bot, scope]
       end
 
-      # The value a `return` / `next` carries out of the construct it leaves. A bare jump carries nil; a single argument
-      # carries its own type; `return a, b, c` (and `next a, b, c`) packs the array `[a, b, c]` at runtime, so the
+      # The value a `return` / `next` / `break` carries out of the construct it leaves. A bare jump carries nil; a
+      # single argument carries its own type; `return a, b, c` (and `next` / `break` alike) packs `[a, b, c]`, so the
       # corresponding Tuple is contributed element-by-element. The argument is evaluated under the entry scope and the
       # resulting scope discarded — control leaves here, so nothing the argument binds is observable downstream.
       def jump_value_type(node)

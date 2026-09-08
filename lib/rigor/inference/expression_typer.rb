@@ -1427,7 +1427,22 @@ module Rigor
       # `receiver_override` substitutes the receiver type for the whole pipeline (folds, dispatch, the
       # inference tiers) without re-reading the receiver node — the safe-navigation path (#518) dispatches
       # on the nil-stripped fragment, and the optional-receiver retry (#519) re-runs the pipeline on it.
+      # Issue #853: `break value` terminates the yielding CALL and is that call's value, so the answer every
+      # tier below produces — an RBS return, a precision fold, an inter-procedural inference — describes only
+      # the path where the block never breaks. The call's value is that result unioned with every `break` arm
+      # the block can reach. Modelling it here rather than inside each fold is what keeps the folds honest:
+      # `ops.all? { |o| break false unless o; true }` still folds the no-break path to `Constant[true]`, and
+      # the union with the `false` arm makes the call `bool` — no `flow.always-truthy-condition` on a program
+      # that really can answer false.
       def call_dispatch_type_for(node, receiver_override: nil)
+        result = call_result_type_for(node, receiver_override: receiver_override)
+        arms = call_break_arm_types(node, receiver_override: receiver_override)
+        return result if arms.empty?
+
+        Type::Combinator.union(result, *arms)
+      end
+
+      def call_result_type_for(node, receiver_override: nil)
         narrowed = indexed_narrowing_for(node)
         return narrowed if narrowed
 
@@ -3172,20 +3187,85 @@ module Rigor
         nil
       end
 
+      EMPTY_BREAK_ARMS = [].freeze
+      private_constant :EMPTY_BREAK_ARMS
+
+      # The types the `break`s that terminate THIS call carry out of it, for {#call_dispatch_type_for} to union
+      # with the result the dispatch tiers computed (issue #853).
+      #
+      # The syntactic scan runs first and answers "none" for every call whose block cannot reach a block-level
+      # `break` — nearly all of them — so only that small minority pays the body evaluation. A `break` under a
+      # nested block, lambda, `def`, or loop targets THAT construct instead; {JUMP_BOUNDARY_NODES} stops the
+      # scan there, and the identity filter drops the ones the sink still collects because the nested
+      # construct is walked under the same installation. `break` with no argument carries nil, so the call
+      # becomes optional — which is what Ruby does.
+      #
+      # A failure yields no arms rather than propagating, matching {#block_return_type_for}: a call typed
+      # without its break arms is the pre-#853 answer, while a raise here would take out the whole call.
+      def call_break_arm_types(node, receiver_override: nil)
+        block_node = node.block
+        return EMPTY_BREAK_ARMS unless block_node.is_a?(Prism::BlockNode)
+
+        body = block_node.body
+        return EMPTY_BREAK_ARMS if body.nil? || !block_level_jump?(body, Prism::BreakNode)
+
+        collect_break_arm_types(node, block_node, body, receiver_override)
+      rescue StandardError
+        EMPTY_BREAK_ARMS
+      end
+
+      # Evaluates the block body once under a `break`-value sink, in the same entry scope the block-return pass
+      # uses, so each arm is typed in the scope that actually reaches it — a `break v` after `v = "s"`
+      # contributes `"s"`, not the entry binding — and an arm on a branch the analysis proved dead is never
+      # reached at all.
+      def collect_break_arm_types(call_node, block_node, body, receiver_override)
+        targets = block_level_jump_nodes(body, Prism::BreakNode)
+        receiver = receiver_override || call_receiver_type_for(call_node)
+        return EMPTY_BREAK_ARMS if receiver.nil?
+
+        narrowed_self = MacroBlockSelfType.narrow_self_type_for(
+          scope: scope, call_node: call_node, receiver_type: receiver
+        )
+        block_scope = block_entry_scope(
+          block_node, break_arm_param_types(call_node, receiver), narrowed_self_type: narrowed_self
+        )
+        _result, collected = StatementEvaluator.with_break_value_sink do
+          without_block_body_threading { block_scope.evaluate(body) }
+        end
+        collected.filter_map { |jump, type| type if targets.key?(jump) }
+      end
+
+      def break_arm_param_types(call_node, receiver)
+        MethodDispatcher.expected_block_param_types(
+          receiver_type: receiver,
+          method_name: call_node.name,
+          arg_types: call_arg_types(call_node),
+          environment: scope.environment
+        )
+      end
+
       def block_return_for(block_arg, expected, narrowed_self_type: nil)
         case block_arg
         when Prism::BlockNode
-          bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_arg)
-          # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
-          # yielding method's business, so the return-typing pass must see the same unmodelled-self mark.
-          block_scope = bindings.reduce(scope.entering_opaque_block) do |acc, (name, type)|
-            acc.with_local(name, type)
-          end
-          block_scope = block_scope.with_self_type(narrowed_self_type) if narrowed_self_type
-          type_block_body(block_arg, block_scope)
+          type_block_body(block_arg, block_entry_scope(block_arg, expected, narrowed_self_type: narrowed_self_type))
         when Prism::BlockArgumentNode
           symbol_block_return_type(block_arg, expected)
         end
+      end
+
+      # The scope a block body is typed under: the surrounding scope plus the parameter bindings the receiving
+      # method's signature implies.
+      #
+      # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
+      # yielding method's business, so the return-typing pass must see the same unmodelled-self mark.
+      def block_entry_scope(block_node, expected, narrowed_self_type: nil)
+        bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
+        block_scope = bindings.reduce(scope.entering_opaque_block) do |acc, (name, type)|
+          acc.with_local(name, type)
+        end
+        return block_scope unless narrowed_self_type
+
+        block_scope.with_self_type(narrowed_self_type)
       end
 
       # `&:symbol` desugars to a one-arg Proc that dispatches `symbol` against its argument. When the param
@@ -3263,18 +3343,16 @@ module Rigor
       # The identity-keyed set of `next` nodes whose value is THIS block's value — reachable from the body
       # without crossing a {JUMP_BOUNDARY_NODES} construct that retargets them — or nil for "do not join".
       #
-      # nil covers the two declines. A body with no block-level `next` keeps today's path exactly, and pays
-      # only the allocation-free scan that answers so. A body that ALSO carries a block-level `break` keeps it
-      # too: `break value` is the yielding CALL's value rather than the block's, so a body that can reach one
-      # cannot have its value derived from the block at all, and joining the `next` arms would dress a still
-      # incomplete answer as a complete one. Handling `break` is its own change.
+      # nil means "do not join": a body with no block-level `next` keeps today's path exactly, and pays only
+      # the allocation-free scan that answers so. A co-resident block-level `break` used to decline here as
+      # well, because its value was dropped and joining the `next` arms would have dressed a still-incomplete
+      # answer as a complete one; since issue #853 the `break` arms are unioned into the yielding call
+      # ({#call_break_arm_types}), so the two exits are modelled at their own levels and neither blocks the
+      # other.
       def block_level_next_arms(body)
         return nil unless block_level_jump?(body, Prism::NextNode)
-        return nil if block_level_jump?(body, Prism::BreakNode)
 
-        found = {}.compare_by_identity
-        collect_block_level_nexts(body, found)
-        found
+        block_level_jump_nodes(body, Prism::NextNode)
       end
 
       # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it.
@@ -3292,12 +3370,22 @@ module Rigor
         false
       end
 
-      def collect_block_level_nexts(node, found)
-        found[node] = true if node.is_a?(Prism::NextNode)
+      # The identity-keyed set of `klass` jumps that target THIS block — every one {#block_level_jump?} would
+      # answer true for, rather than the first. The sinks in `StatementEvaluator` also collect jumps from
+      # nested blocks / loops / defs evaluated under the same installation, so the consumer filters against
+      # this set by node identity.
+      def block_level_jump_nodes(body, klass)
+        found = {}.compare_by_identity
+        collect_block_level_jumps(body, klass, found)
+        found
+      end
+
+      def collect_block_level_jumps(node, klass, found)
+        found[node] = true if node.is_a?(klass)
         node.rigor_each_child do |child|
           next if JUMP_BOUNDARY_NODES.include?(child.class)
 
-          collect_block_level_nexts(child, found)
+          collect_block_level_jumps(child, klass, found)
         end
       end
 
@@ -3389,14 +3477,19 @@ module Rigor
       private_constant :VARIABLE_READ_NODES
 
       # A `next` / `break` that leaves THIS block carries a value the fold cannot see: `evaluate(body).first`
-      # is the fall-through value only. So `m.synchronize do break 5 if flag; v = 42; v end` really can answer
-      # 5 at runtime, and threading would type it `42`.
+      # is the fall-through value only.
       #
-      # `break` is the live decline: its value belongs to the yielding CALL, and nothing joins it. `next` is
-      # joined into the block's value type since issue #841, so {#type_block_body} routes a body carrying one
-      # past this scan entirely and the entry below never fires — it is kept because the question this
-      # predicate answers ("can this prefix escape with a value the fall-through misses?") is the caller's
-      # premise, not the caller's filter restated.
+      # The `next` entry no longer fires: {#type_block_body} routes such a body past this scan entirely, since
+      # issue #841 joins those arms into the block's value. It is kept because the question this predicate
+      # answers ("can this prefix escape with a value the fall-through misses?") is the caller's premise
+      # rather than the caller's filter restated.
+      #
+      # The `break` entry still fires, and since issue #853 it is conservative rather than load-bearing: the
+      # arms are unioned into the CALL ({#call_break_arm_types}), so the missing value is no longer missing.
+      # What the decline still costs is the threaded tail — `m.synchronize do break 5 if flag; v = 42; v end`
+      # answers `5 | Dynamic[top]` where threading would reach `5 | 42`. Lifting it widens no answer and
+      # invents no fact, but it moves the type of every block that carries a `break`, so it is left to a
+      # change that can measure that.
       JUMP_NODES = Set[Prism::NextNode, Prism::BreakNode].freeze
       private_constant :JUMP_NODES
 

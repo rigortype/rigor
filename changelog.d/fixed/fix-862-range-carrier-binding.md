@@ -1,0 +1,1 @@
+- **[inference]** A `Range` argument built from computed endpoints now types its element too, so `Integer(ARGV[0]).clamp(1..ARGV.size)` keeps its `Integer` type instead of going untyped the way only literal-endpoint ranges avoided ([#866](https://github.com/rigortype/rigor/pull/866))

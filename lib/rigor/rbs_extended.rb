@@ -92,6 +92,15 @@ module Rigor
       end
     end
 
+    # The shared empty answers of the per-method readers. Dispatch consults the three readers on every RBS
+    # method it resolves (~150k each on the lib self-check) and nearly every method carries no `rigor:v1:`
+    # annotation, so a fresh `[]` / `{}` per decline was pure allocation. Callers never mutate a reader's
+    # result (`read_flow_contribution` selects into fresh arrays; the override map is documented read-only).
+    NO_DIRECTIVES = [].freeze
+    private_constant :NO_DIRECTIVES
+    NO_OVERRIDES = {}.freeze
+    private_constant :NO_OVERRIDES
+
     module_function
 
     # Reads RBS::Extended predicate effects off `RBS::Definition::Method#annotations`. Returns the effects in
@@ -105,10 +114,10 @@ module Rigor
     #   pre-slice-3b behaviour — no plugin resolvers consulted
     #   and no diagnostics accumulated.
     def read_predicate_effects(method_def, environment: nil)
-      return [] if method_def.nil?
+      return NO_DIRECTIVES if method_def.nil?
 
       annotations = method_def.annotations
-      return [] if annotations.nil? || annotations.empty?
+      return NO_DIRECTIVES if annotations.nil? || annotations.empty?
 
       name_scope = environment&.name_scope
       reporter = environment&.rbs_extended_reporter
@@ -183,10 +192,10 @@ module Rigor
     #
     # See {.read_predicate_effects} for the `environment:` keyword contract.
     def read_assert_effects(method_def, environment: nil)
-      return [] if method_def.nil?
+      return NO_DIRECTIVES if method_def.nil?
 
       annotations = method_def.annotations
-      return [] if annotations.nil? || annotations.empty?
+      return NO_DIRECTIVES if annotations.nil? || annotations.empty?
 
       name_scope = environment&.name_scope
       reporter = environment&.rbs_extended_reporter
@@ -469,10 +478,10 @@ module Rigor
     # argument-check purposes; passing a too-wide `Nominal[String]` argument is flagged as an argument-type
     # mismatch at the call site.
     def read_param_type_overrides(method_def, environment: nil)
-      return [] if method_def.nil?
+      return NO_DIRECTIVES if method_def.nil?
 
       annotations = method_def.annotations
-      return [] if annotations.nil? || annotations.empty?
+      return NO_DIRECTIVES if annotations.nil? || annotations.empty?
 
       name_scope = environment&.name_scope
       reporter = environment&.rbs_extended_reporter
@@ -491,9 +500,10 @@ module Rigor
     # frozen Hash<Symbol, Rigor::Type>; missing keys mean "use the RBS-declared type". Callers MUST treat the
     # hash as read-only.
     def param_type_override_map(method_def, environment: nil)
-      read_param_type_overrides(method_def, environment: environment)
-        .to_h { |o| [o.param_name, o.type] }
-        .freeze
+      overrides = read_param_type_overrides(method_def, environment: environment)
+      return NO_OVERRIDES if overrides.empty?
+
+      overrides.to_h { |o| [o.param_name, o.type] }.freeze
     end
 
     # The `is` glue word is optional so authors can write either `param: id is non-empty-string` (consistent with

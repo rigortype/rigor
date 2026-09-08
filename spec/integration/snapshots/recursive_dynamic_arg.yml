@@ -3,4 +3,4 @@ locals:
   f: Dynamic[top]
   x: Integer
 assertions:
-  '1': 1 | Dynamic[top]
+  '1': 1 | Integer

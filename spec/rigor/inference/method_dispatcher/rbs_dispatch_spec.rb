@@ -198,6 +198,35 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
     end
 
+    # Issue #842 — an IntegerRange receiver used to have no arm in `receiver_descriptor`, so anything
+    # the fold tiers did not own fell soft to Dynamic[top] instead of reaching RBS.
+    describe "IntegerRange receiver (issue #842)" do
+      let(:non_negative_int) { Rigor::Type::Combinator.non_negative_int }
+
+      it "resolves #digits to Array[Integer]" do
+        type = dispatch(non_negative_int, :digits)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        expect(type.type_args).to eq([Rigor::Type::Combinator.nominal_of(Integer)])
+      end
+
+      it "resolves #fdiv(2) to Float" do
+        type = dispatch(non_negative_int, :fdiv, [Rigor::Type::Combinator.constant_of(2)])
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Float")
+      end
+
+      it "resolves #to_f to Float" do
+        type = dispatch(non_negative_int, :to_f)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Float")
+      end
+
+      it "still declines an undefined method" do
+        expect(dispatch(non_negative_int, :frobnicate)).to be_nil
+      end
+    end
+
     # Issue #303 — method-level `[T]` bound from an argument position. The signatures live in a virtual
     # RBS buffer so the shapes under test are stated here rather than borrowed from whatever core RBS
     # happens to spell today.

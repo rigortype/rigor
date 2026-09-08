@@ -1,0 +1,1 @@
+- **[inference]** A bounded Integer receiver (`n = ARGV.size`) now resolves `digits`, `fdiv`, `to_f` and any other method the fold tiers do not already own, instead of losing precision to `Dynamic[top]` while the same receiver was already reported for calling an undefined method. ([#858](https://github.com/rigortype/rigor/pull/858))

@@ -39,6 +39,9 @@ module Rigor
     # - Tighter-return detection compares the RBS-erased spellings only when the existing declared return
     #   strictly accepts the inferred one (acceptance check under the engine's current `:gradual` mode; ADR-14
     #   reserves the eventual `:strict` mode).
+    # - A declared `void` return is never compared as a value type. It is the author's statement that the
+    #   return is not part of the contract, which no inference can synthesize, so the method classifies
+    #   `equivalent` carrying `void` itself as the declared spelling (#836; see {#declares_void?}).
     class Generator # rubocop:disable Metrics/ClassLength
       # Methods the generator rendered into RBS that `rbs` itself rejects. Populated by {#build_candidate}; each
       # one is a Rigor rendering DEFECT, not a property of the user's code, so the CLI reports them as such.
@@ -834,7 +837,14 @@ module Rigor
         )
       end
 
+      # The RBS spelling carried for a `void`-declared method, so `--diff` shows the author's own word rather
+      # than the `top` the translator would erase it to.
+      VOID_RETURN_RBS = "void"
+      private_constant :VOID_RETURN_RBS
+
       def compare_against_declared(path, def_node, class_name, kind, inferred, method_def)
+        return equivalent(path, def_node, class_name, kind, inferred, VOID_RETURN_RBS) if declares_void?(method_def)
+
         declared = build_declared_return(method_def)
         declared_rbs = declared&.erase_to_rbs
         inferred_rbs = inferred.erase_to_rbs
@@ -857,6 +867,28 @@ module Rigor
           declared_return_rbs: declared_rbs,
           rbs: render_rbs_line(def_node, inferred, class_name, kind)
         )
+      end
+
+      # Issue #836 — a declared `void` is return INTENT, never a wide value type waiting to be narrowed, so it
+      # is not compared against the body at all.
+      #
+      # `void` says the return value is not part of the method's contract. No synthesis can produce it: a type
+      # built from a body is always the type of the body's last expression, so `void` exists only on the
+      # CHECKING side, against a declaration the author wrote. That puts it in the same position ADR-107 gives
+      # a parameter type — authored intent inference cannot derive — and proposing the body's value for it is
+      # a category error rather than a false positive to tune.
+      #
+      # Mechanically the misreading came from the translator: `docs/type-specification/special-types.md`
+      # § `void` records that the engine maps RBS `void` to `top`, `Type::Top` accepts everything, so
+      # {#tighter?} answered "yes" for every `void`-declared method whose body happens to return a typed
+      # value. Seven of the fifteen tighter-returns in Rigor's own `sig/` were this shape, and the ADR-107 G3
+      # provenance gate inherited the misclassification with them.
+      #
+      # ANY overload declaring `void` is enough. One proposal is rendered for the whole method, so an overload
+      # set that mixes `void` with a value return still has an author saying "not part of the contract" about
+      # the return sig-gen would rewrite.
+      def declares_void?(method_def)
+        method_def.method_types.any? { |mt| mt.type.return_type.is_a?(RBS::Types::Bases::Void) }
       end
 
       def build_declared_return(method_def)

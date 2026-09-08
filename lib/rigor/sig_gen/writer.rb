@@ -657,11 +657,30 @@ module Rigor
       end
 
       def eligible_for_replacement?(candidate, decl, source)
+        return false if replaces_declared_void?(candidate, decl)
+
         case candidate.classification
         when Classification::TIGHTER_RETURN then true
         when Classification::NEW_METHOD then tightens_untyped?(candidate, decl, source)
         else false
         end
+      end
+
+      # Issue #836 — `--overwrite` never turns a declared `-> void` into a value return. The generator no
+      # longer proposes one (`Generator#declares_void?` classifies the method `equivalent`), but the writer
+      # reaches the same member through case 2 above whenever the RBS environment did not resolve the `def` to
+      # this declaration: an observed-parameter upgrade of `(untyped m) -> void` to `(Module m) -> Registry`
+      # counts one `untyped` fewer and would be applied, erasing the author's statement that the return is not
+      # part of the contract. A candidate that keeps `void` is still eligible, which is what case 2 is for —
+      # the `initialize` stub is always spelled `-> void`.
+      def replaces_declared_void?(candidate, decl)
+        member = find_method_member(decl, candidate.method_name, candidate.kind)
+        return false if member.nil?
+
+        declared_void = member.overloads.any? do |overload|
+          overload.method_type.type.return_type.is_a?(RBS::Types::Bases::Void)
+        end
+        declared_void && !candidate.rbs.to_s.end_with?(" -> void")
       end
 
       # Compares the existing member's source-side RBS text against the candidate's proposed RBS text. Returns

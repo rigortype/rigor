@@ -23,15 +23,13 @@ module Rigor
         # the lib self-check for a few thousand distinct names. One shared instance per name.
         def self.local(name)
           name = name.to_sym
-          LOCAL_TARGETS[name] ||= new(kind: :local, name: name)
+          @local_targets[name] ||= new(kind: :local, name: name)
         end
+        @local_targets = {}
 
         def initialize(kind:, name:)
           super(kind: kind.to_sym, name: name)
         end
-
-        LOCAL_TARGETS = {}
-        private_constant :LOCAL_TARGETS
       end
 
       class Fact < Data.define(:bucket, :target, :predicate, :payload, :polarity, :stability)

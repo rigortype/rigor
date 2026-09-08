@@ -252,14 +252,7 @@ module Rigor
           # actuals meets `nil`, exactly as `zip` pads. Selection zips once per overload per pass, so the
           # pairs were a top allocation site of dispatch (#775).
           def each_param_accepts?(params, arg_types)
-            index = 0
-            size = params.size
-            while index < size
-              return false unless yield(params[index], arg_types[index])
-
-              index += 1
-            end
-            true
+            (0...params.size).all? { |index| yield(params[index], arg_types[index]) }
           end
 
           # Checks the param's RBS type against an arg using alias-strict-arm matching. Optional / Union

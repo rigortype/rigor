@@ -104,8 +104,7 @@ module Rigor
       # objects per class-instance translation, ~380k of them on the lib self-check, for the same few
       # hundred names. rbs compares a TypeName by namespace + name, so a value-keyed memo answers every
       # repeat with one frozen String.
-      RELATIVE_NAMES = {}
-      private_constant :RELATIVE_NAMES
+      @relative_names = {}
 
       # #775 — the translated form of a CLOSED alias expansion, keyed by the expansion. Closed means no
       # `self`, `instance` or type variable anywhere inside, so the caller's context cannot change the
@@ -114,8 +113,7 @@ module Rigor
       # let an entry go with the loader whose memo held the expansion. `Rigor::Type::t` on the self-check
       # is a 21-member union that was re-translated ~13k times, each time re-normalising the union from
       # scratch; every repeat now shares one Union.
-      CLOSED_ALIAS_TRANSLATIONS = ObjectSpace::WeakKeyMap.new
-      private_constant :CLOSED_ALIAS_TRANSLATIONS
+      @closed_alias_translations = ObjectSpace::WeakKeyMap.new
 
       class << self
         # @param rbs_type [RBS::Types::Bases::Base, RBS::Types::ClassInstance, ...]
@@ -205,7 +203,7 @@ module Rigor
         end
 
         def relative_name(type_name)
-          RELATIVE_NAMES[type_name] ||= type_name.relative!.to_s.freeze
+          @relative_names[type_name] ||= type_name.relative!.to_s.freeze
         end
 
         # Preserves tuple precision through the boundary. Each positional element type is translated
@@ -258,11 +256,11 @@ module Rigor
           # union merge as it happens, so neither consults the memo.
           return translate_in(expanded, context.deeper) unless context.alias_depth.zero? && !FlowTracer.active?
 
-          cached = CLOSED_ALIAS_TRANSLATIONS[expanded]
+          cached = @closed_alias_translations[expanded]
           return cached if cached
 
           translated = translate_in(expanded, context.deeper)
-          CLOSED_ALIAS_TRANSLATIONS[expanded] = translated if closed_type?(expanded)
+          @closed_alias_translations[expanded] = translated if closed_type?(expanded)
           translated
         end
 

@@ -956,12 +956,10 @@ module Rigor
         # hundred names. Only the split is memoised; the constant walk above still runs every time, so a
         # class loaded (or a spec constant removed) after the first ask is answered by the live tree.
         def class_name_parts(name)
-          CLASS_NAME_PARTS[name] ||= name.delete_prefix("::").split("::").freeze
+          @class_name_parts[name] ||= name.delete_prefix("::").split("::").freeze
         end
       end
-
-      CLASS_NAME_PARTS = {}
-      private_constant :CLASS_NAME_PARTS
+      @class_name_parts = {}
     end
   end
 end

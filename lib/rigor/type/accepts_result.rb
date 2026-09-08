@@ -61,17 +61,17 @@ module Rigor
         # such literals, and each answer cost the result plus its reasons array. A reason built at the
         # site (an unfrozen interpolated String) or a reason list still builds a fresh result.
         def literal_result(trinary, mode, reasons)
-          return new(trinary, mode: mode, reasons: reasons) unless reasons.nil? || (reasons.is_a?(String) && reasons.frozen?)
+          literal = reasons.nil? || (reasons.is_a?(String) && reasons.frozen?)
+          return new(trinary, mode: mode, reasons: reasons) unless literal
 
-          by_mode = (LITERAL_RESULTS[trinary] ||= {})
+          by_mode = (@literal_results[trinary] ||= {})
           by_reason = (by_mode[mode] ||= {})
           by_reason[reasons] ||= new(trinary, mode: mode, reasons: reasons)
         end
       end
 
       # `Trinary` verdict => mode => literal reason (or nil) => the shared result.
-      LITERAL_RESULTS = {}
-      private_constant :LITERAL_RESULTS
+      @literal_results = {}
 
       def yes?
         trinary.yes?

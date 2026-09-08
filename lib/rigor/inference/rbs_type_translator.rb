@@ -107,6 +107,16 @@ module Rigor
       RELATIVE_NAMES = {}
       private_constant :RELATIVE_NAMES
 
+      # #775 — the translated form of a CLOSED alias expansion, keyed by the expansion. Closed means no
+      # `self`, `instance` or type variable anywhere inside, so the caller's context cannot change the
+      # answer; at expansion depth 0 the budget cannot either. rbs compares types by value, so the memo
+      # is per distinct expansion, not per loader (a re-parsed identical alias hits), and the weak keys
+      # let an entry go with the loader whose memo held the expansion. `Rigor::Type::t` on the self-check
+      # is a 21-member union that was re-translated ~13k times, each time re-normalising the union from
+      # scratch; every repeat now shares one Union.
+      CLOSED_ALIAS_TRANSLATIONS = ObjectSpace::WeakKeyMap.new
+      private_constant :CLOSED_ALIAS_TRANSLATIONS
+
       class << self
         # @param rbs_type [RBS::Types::Bases::Base, RBS::Types::ClassInstance, ...]
         # @param self_type [Rigor::Type, nil] substitute for `Bases::Self`.
@@ -244,8 +254,27 @@ module Rigor
 
           expanded = expander.expand_type_alias(rbs_type)
           return Type::Combinator.untyped if expanded.nil?
+          # A nested expansion is translated under its parent's budget, and `rigor trace` records every
+          # union merge as it happens, so neither consults the memo.
+          return translate_in(expanded, context.deeper) unless context.alias_depth.zero? && !FlowTracer.active?
 
-          translate_in(expanded, context.deeper)
+          cached = CLOSED_ALIAS_TRANSLATIONS[expanded]
+          return cached if cached
+
+          translated = translate_in(expanded, context.deeper)
+          CLOSED_ALIAS_TRANSLATIONS[expanded] = translated if closed_type?(expanded)
+          translated
+        end
+
+        # True when nothing in `rbs_type`'s tree reads the translation context: no `self`, no `instance`,
+        # no type variable. Every rbs type answers `each_type` (the leaves through `EmptyEachType`).
+        def closed_type?(rbs_type)
+          case rbs_type
+          when RBS::Types::Bases::Self, RBS::Types::Bases::Instance, RBS::Types::Variable then return false
+          end
+
+          rbs_type.each_type { |inner| return false unless closed_type?(inner) }
+          true
         end
 
         # #529 — `A & B` reads as its first member that carries static evidence. Every value of the

@@ -459,11 +459,16 @@ version bump, sealed CHANGELOG, and archive reach the mainline only once the
 required gate is green:
 
 ```sh
-gh pr create --base master --head release/x.y.z \
+gh pr create --draft --base master --head release/x.y.z \
   --title "Bump up version to x.y.z" --body "<short release summary>"
 gh pr checks <pr> --watch        # wait for the required ci.yml gate
+gh pr ready <pr>                 # only with an APPROVE on GitHub, CI green, no stop instruction
 gh pr merge <pr> --rebase --delete-branch
 ```
+
+The release PR is created `--draft` like every other PR (`AGENTS.md`
+§ "Commit and PR Etiquette"): the user reviews the sealed section on the PR,
+and `gh pr ready` is the recorded hand-off from review to landing.
 
 - **Merge on the required gate; review the advisory one.** `ci.yml` is the
   merge gate; `release-gate.yml` is advisory (apply the wall-noise / sweep

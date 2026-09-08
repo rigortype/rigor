@@ -100,6 +100,13 @@ module Rigor
       ALIAS_EXPANSION_LIMIT = 8
       private_constant :ALIAS_EXPANSION_LIMIT
 
+      # #775 — `TypeName#relative!` allocates a TypeName and a Namespace and `#to_s` joins the path: four
+      # objects per class-instance translation, ~380k of them on the lib self-check, for the same few
+      # hundred names. rbs compares a TypeName by namespace + name, so a value-keyed memo answers every
+      # repeat with one frozen String.
+      RELATIVE_NAMES = {}
+      private_constant :RELATIVE_NAMES
+
       class << self
         # @param rbs_type [RBS::Types::Bases::Base, RBS::Types::ClassInstance, ...]
         # @param self_type [Rigor::Type, nil] substitute for `Bases::Self`.
@@ -180,9 +187,15 @@ module Rigor
         # `Nominal["Array", [Nominal["Integer"]]]`. Variables inside the args participate in
         # substitution through the same `type_vars:` map.
         def translate_class_instance(rbs_type, context)
-          name = rbs_type.name.relative!.to_s
+          name = relative_name(rbs_type.name)
+          return Type::Combinator.nominal_of(name) if rbs_type.args.empty?
+
           translated_args = rbs_type.args.map { |arg| translate_in(arg, context) }
           Type::Combinator.nominal_of(name, type_args: translated_args)
+        end
+
+        def relative_name(type_name)
+          RELATIVE_NAMES[type_name] ||= type_name.relative!.to_s.freeze
         end
 
         # Preserves tuple precision through the boundary. Each positional element type is translated
@@ -218,8 +231,7 @@ module Rigor
         # `singleton(Foo)` is the type of the constant `Foo` itself (the class object). With the
         # dedicated Singleton type, we map directly to `Singleton[Foo]`.
         def translate_class_singleton(rbs_type, _context)
-          name = rbs_type.name.relative!.to_s
-          Type::Combinator.singleton_of(name)
+          Type::Combinator.singleton_of(relative_name(rbs_type.name))
         end
 
         # #529 — sees through a type alias instead of reading `untyped`. `expand_type_alias` resolves

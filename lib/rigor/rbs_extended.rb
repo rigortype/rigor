@@ -101,7 +101,35 @@ module Rigor
     NO_OVERRIDES = {}.freeze
     private_constant :NO_OVERRIDES
 
+    # `%a{rigor:v1:inferred-return}` — the declaration states the member's presence and its parameters and
+    # says nothing about what it returns, so the return comes from the body. Normative in
+    # `docs/type-specification/rbs-extended.md`.
+    INFERRED_RETURN_DIRECTIVE = "rigor:v1:inferred-return"
+
     module_function
+
+    # Whether `method_def` declares its return type inferred rather than contracted (issue #823).
+    #
+    # The producer is `rigor-rbs-inline`: inside a file that carries one annotation, upstream rbs-inline
+    # emits a `(untyped, …) -> untyped` skeleton for every unannotated `def` too, and an accepted signature
+    # outranks body inference — so one annotation used to retype every sibling in its file to `untyped`.
+    # The plugin now marks exactly the type slots it DEFAULTED, and {MethodDispatcher::RbsDispatch} declines
+    # a marked member so the call takes the same body-inference tier an undeclared method takes. Nothing
+    # else about the declaration changes: the class keeps its full method surface, `new` keeps its arity,
+    # and cross-file references still resolve.
+    #
+    # Reads `RBS::Definition::Method#annotations`, so it answers for an inherited member too, and a
+    # hand-written `.rbs` may carry the annotation for the same effect.
+    #
+    # @param method_def — an `RBS::Definition::Method`, or anything else answering `#annotations`.
+    def inferred_return?(method_def)
+      return false if method_def.nil?
+
+      annotations = method_def.annotations
+      return false if annotations.nil? || annotations.empty?
+
+      annotations.any? { |annotation| annotation.string.to_s.strip == INFERRED_RETURN_DIRECTIVE }
+    end
 
     # Reads RBS::Extended predicate effects off `RBS::Definition::Method#annotations`. Returns the effects in
     # source order; duplicates and unrecognised `rigor:v1:` directives are dropped. Returns an empty array (NEVER

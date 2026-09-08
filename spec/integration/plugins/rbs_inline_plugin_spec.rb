@@ -202,6 +202,217 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
+  # Issue #823 — the gate above keeps an ANNOTATION-FREE file's inference intact; inside an annotated file
+  # the same skeleton mechanism used to hit every unannotated sibling. The declaration is kept (a partially
+  # declared class reads to RBS as a fully declared one, which is what PR #779's member-level drop got
+  # wrong) and only its defaulted type slots are marked `%a{rigor:v1:inferred-return}`.
+  describe "unannotated siblings in an annotated file (issue #823)" do
+    def synthesized_for(source)
+      Dir.mktmpdir("rigor-rbs-inline-siblings-") do |dir|
+        path = File.join(dir, "subject.rb")
+        File.write(path, source)
+        plugin = Rigor::Plugin::RbsInline.new(
+          services: Rigor::Plugin::Services.new(
+            reflection: Rigor::Reflection,
+            type: Rigor::Type::Combinator,
+            configuration: Rigor::Configuration.new
+          ),
+          config: { "require_magic_comment" => false }
+        )
+        plugin.manifest.source_rbs_synthesizer.call(path)
+      end
+    end
+
+    # The issue's reproduction: one annotated method, one plain sibling returning a literal, one caller of
+    # the sibling. Master answered `untyped` and said nothing; #779 answered `call.undefined-method` on the
+    # sibling itself.
+    it "types a plain sibling from its body, not from the synthesized skeleton" do
+      result = run_plugin(source: <<~RUBY)
+        class Greeter
+          # @rbs times: Integer
+          def repeat(times)
+            times
+          end
+
+          def sibling
+            42
+          end
+        end
+
+        Greeter.new.sibling.no_such_method
+      RUBY
+
+      rules = result.diagnostics.map(&:qualified_rule)
+      expect(rules).to include("call.undefined-method")
+      expect(result.diagnostics.find { |d| d.qualified_rule == "call.undefined-method" }.message)
+        .to include("no_such_method")
+    end
+
+    # The other direction of the same rule: the annotated method is untouched, so its contract still binds.
+    it "keeps the annotated sibling's own contract binding" do
+      result = run_plugin(source: <<~RUBY)
+        class Greeter
+          # @rbs times: Integer
+          def repeat(times)
+            times
+          end
+
+          def sibling
+            42
+          end
+        end
+
+        Greeter.new.repeat("nope")
+      RUBY
+
+      expect(result.diagnostics.map(&:qualified_rule)).to include("call.argument-type-mismatch")
+    end
+
+    # An author-written `untyped` is a real contract and stays one — the reason the plugin marks the slots
+    # upstream DEFAULTED rather than every slot that reads `untyped`.
+    it "leaves an author-written untyped return as a contract" do
+      result = run_plugin(source: <<~RUBY)
+        class Greeter
+          # @rbs times: Integer
+          def repeat(times)
+            times
+          end
+
+          #: () -> untyped
+          def opaque
+            42
+          end
+        end
+
+        Greeter.new.opaque.no_such_method
+      RUBY
+
+      expect(result.diagnostics.map(&:qualified_rule)).not_to include("call.undefined-method")
+    end
+
+    # PR #779 dropped the skeleton members outright and a partially declared class cost 12
+    # `call.wrong-arity` on `new` alone. The skeleton is what carries `initialize`'s arity, so keeping it is
+    # the fix's precondition, not a side effect.
+    it "keeps new's arity from the unannotated initialize" do
+      result = run_plugin(source: <<~RUBY)
+        class Greeter
+          # @rbs times: Integer
+          def repeat(times)
+            times
+          end
+
+          def initialize(name)
+            @name = name
+          end
+        end
+
+        Greeter.new("a", "b")
+      RUBY
+
+      expect(result.diagnostics.map(&:qualified_rule)).to include("call.wrong-arity")
+    end
+
+    # #779's other measured failure: an annotation-free class produces no declaration at all, so a
+    # cross-file reference to it stopped resolving (`RBS::NoTypeFoundError` on `Registry`) and 44 classes
+    # degraded to `Dynamic[top]`. Keeping the skeleton keeps the name resolvable.
+    it "keeps a cross-file reference to an annotation-free class resolving" do
+      result = run_plugin(
+        source: <<~RUBY,
+          class Registry
+            # @rbs key: Symbol
+            def fetch(key)
+              key
+            end
+
+            def size
+              3
+            end
+          end
+        RUBY
+        files: {
+          "caller.rb" => <<~RUBY
+            Registry.new.size.no_such_method
+          RUBY
+        },
+        paths: ["demo.rb", "caller.rb"]
+      )
+
+      rules = result.diagnostics.map(&:qualified_rule)
+      expect(rules).to include("call.undefined-method")
+      expect(rules).not_to include("rbs.coverage.definition-build-failed")
+    end
+
+    it "types an attr_reader sibling from the class body rather than the skeleton" do
+      expect(synthesized_for(<<~RUBY)).to include("%a{rigor:v1:inferred-return}\n  attr_reader plain: untyped")
+        class Greeter
+          # @rbs times: Integer
+          def repeat(times)
+            times
+          end
+
+          attr_reader :plain
+        end
+      RUBY
+    end
+
+    # The stand-in the plugin renders with must never reach the environment: an undeclared type alias makes
+    # `RBS::DefinitionBuilder` raise for the whole class, which is exactly how `#:nodoc:` used to lose every
+    # annotation in a file.
+    it "never leaks the defaulted-type stand-in into the contributed RBS" do
+      synthesized = synthesized_for(<<~RUBY)
+        class Greeter
+          # @rbs times: Integer
+          def repeat(times)
+            times
+          end
+
+          def sibling(a, b = 1, *rest, key:, **kw, &blk)
+            42
+          end
+        end
+      RUBY
+
+      expect(synthesized).not_to include("rigor__inline_defaulted")
+      expect(synthesized).to include("%a{rigor:v1:inferred-return}\n  def sibling:")
+      # The parameter slots keep the skeleton's arity; only the RETURN slot is what the mark speaks about.
+      expect(synthesized).to include("(untyped a, ?untyped b, *untyped rest, key: untyped, **untyped kw)")
+    end
+
+    it "marks the return of a method whose parameters alone were annotated" do
+      synthesized = synthesized_for(<<~RUBY)
+        class Greeter
+          # @rbs times: Integer
+          def repeat(times)
+            times
+          end
+        end
+      RUBY
+
+      expect(synthesized)
+        .to include("%a{rigor:v1:inferred-return}\n  def repeat: (Integer times) -> untyped")
+    end
+
+    # The mark is a string contract across the plugin/engine boundary, spelled once on each side.
+    it "writes the directive the engine reads" do
+      expect(Rigor::Plugin::RbsInline::Synthesizer::INFERRED_RETURN_ANNOTATION)
+        .to eq(Rigor::RbsExtended::INFERRED_RETURN_DIRECTIVE)
+    end
+
+    it "does not mark a fully annotated method" do
+      synthesized = synthesized_for(<<~RUBY)
+        class Greeter
+          #: (Integer) -> String
+          def repeat(times)
+            times.to_s
+          end
+        end
+      RUBY
+
+      expect(synthesized).to include("def repeat: (Integer) -> String")
+      expect(synthesized).not_to include("rigor:v1:inferred-return")
+    end
+  end
+
   # Upstream reads `def f #:nodoc:` as a return type: `def f: () -> nodoc`, naming a type nothing declares.
   # `RBS::DefinitionBuilder` then raises `NoTypeFoundError` for the whole class, so EVERY real annotation in
   # it is silently lost. rbs-inline emits 29 of these for Ruby's own `lib/fileutils.rb`. Reported upstream as

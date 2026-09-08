@@ -79,6 +79,7 @@ def valid_string?: (untyped value) -> bool
 | `rigor:v1:assert-if-true target is T` | Refines `target` when the method returns a truthy value. |
 | `rigor:v1:assert-if-false target is T` | Refines `target` when the method returns `false` or `nil`. |
 | `rigor:v1:effect <label-list>` | Declares an **effect envelope** — an upper bound on the effect labels the method's code may perform. Also valid on a `class` / `module` declaration, where it distributes (§ "Effect envelopes"). |
+| `rigor:v1:inferred-return` | The declaration states the member's presence and its parameters and says **nothing** about what it returns; Rigor infers the return type from the implementation (§ "Declarations that do not state a return type"). |
 
 A true-branch-only predicate is sufficient for Python `TypeGuard`-like behavior. A predicate pair that describes both branches is sufficient for Python `TypeIs`-like behavior. The false branch MAY be written as an explicit negative type when that is clearer:
 
@@ -110,6 +111,21 @@ def string?: (untyped) -> bool
 ```
 
 Future versions MAY extend targets to instance variables, record keys, shape paths, and block parameters, but those SHOULD use explicit path syntax rather than overloading the annotation directive name.
+
+## Declarations that do not state a return type
+
+A declaration usually contracts both halves of a method: what it accepts and what it returns. `rigor:v1:inferred-return` splits them. It says the member exists, that its parameters are as declared, and that the return type in the signature is a placeholder rather than a contract — so Rigor types the call from the method's implementation, exactly as it would for a method no signature declares.
+
+```rbs
+%a{rigor:v1:inferred-return}
+def sibling: () -> untyped
+```
+
+Everything else the declaration says still holds. The member counts toward the class's method surface, so a call to it is not `call.undefined-method`; its parameter list still governs arity and argument-type checking; and the name resolves for other signatures that reference the class. Only the return type is withheld.
+
+The directive exists because a signature can be generated from source that never stated a return type. Rigor's rbs-inline ingestion writes it on every type slot the reader defaulted rather than read from an annotation ([ADR-93](../adr/93-default-rbs-inline-ingestion.md) WD6): inside a file that carries one annotation, the reader emits a full signature for every unannotated `def` in it too, and without this an annotation on one method would retype all of its siblings to `untyped`. An author MAY write the directive in a hand-written `.rbs` for the same effect — a partial signature that constrains arguments and defers the return.
+
+The directive takes no payload and is read on method members and on `attr_*` members. The directive wins over whatever return type the signature carries, so `untyped` is the only return type worth writing beside it; a real one there is dead text rather than a conflict Rigor reports. It is not read on a `class` / `module` declaration and does not distribute to a declaration's members the way an effect envelope does.
 
 ## Explicit conformance directive
 

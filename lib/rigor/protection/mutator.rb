@@ -127,6 +127,7 @@ module Rigor
         when Type::Constant then CONSTANT_CLASSES[type.value.class] || type.value.class.name
         when Type::Refined, Type::Difference then concrete_class_name(type.base)
         when Type::IntegerRange then "Integer"
+        when Type::FloatRange then "Float"
         when Type::App then concrete_class_name(type.bound)
         end
       end

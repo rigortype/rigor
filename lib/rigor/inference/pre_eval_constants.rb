@@ -165,6 +165,7 @@ module Rigor
         when Type::Constant then widen_constant(type)
         when Type::Refined then widen(type.base)
         when Type::IntegerRange then Type::Combinator.nominal_of("Integer")
+        when Type::FloatRange then Type::Combinator.nominal_of("Float")
         when Type::Tuple then Type::Combinator.nominal_of("Array")
         when Type::HashShape then Type::Combinator.nominal_of("Hash")
         when Type::Nominal then type.type_args.empty? ? type : Type::Combinator.nominal_of(type.class_name)

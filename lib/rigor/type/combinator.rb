@@ -7,6 +7,7 @@ require_relative "nominal"
 require_relative "singleton"
 require_relative "constant"
 require_relative "integer_range"
+require_relative "float_range"
 require_relative "tuple"
 require_relative "hash_shape"
 require_relative "data_class"
@@ -98,6 +99,8 @@ module Rigor
           # `Integer[1..6]` is likewise a value-narrowed `Integer` (it erases to `Integer` in RBS); widen it
           # so a bounded-int accumulator converges (ADR-56).
           nominal_of("Integer")
+        when FloatRange
+          nominal_of("Float")
         when Union
           union(*type.members.map { |member| widen_value_pinned(member) })
         else
@@ -137,6 +140,23 @@ module Rigor
 
       def universal_int
         IntegerRange.new(IntegerRange::NEG_INFINITY, IntegerRange::POS_INFINITY)
+      end
+
+      # ADR-109 WD4 — `Float[min..max]` / `Float[min...max]`. Bounds are non-NaN Floats; the infinities
+      # are ordinary bounds. Raises on an empty range (the payload builder declines before reaching
+      # here).
+      def float_range(min, max, exclude_end: false)
+        FloatRange.new(min, max, exclude_end: exclude_end)
+      end
+
+      # Every Float except NaN: `Float[-Float::INFINITY..]`.
+      def non_nan_float
+        FloatRange.new(-Float::INFINITY, Float::INFINITY)
+      end
+
+      # Every Float except NaN and the infinities: `Float[-Float::MAX..Float::MAX]`.
+      def finite_float
+        FloatRange.new(-Float::MAX, Float::MAX)
       end
 
       # Point-removal refinement carrier (ADR-3 OQ3 Option C). Use `non_empty_string` / `non_zero_int` /

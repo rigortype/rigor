@@ -1,0 +1,17 @@
+class Ratio
+  %a{rigor:v1:return: Float[0.0..1.0]}
+  def unit: () -> Float
+
+  %a{rigor:v1:return: non-nan-float}
+  def safe: () -> Float
+
+  %a{rigor:v1:return: Float[0.0...Float::INFINITY]}
+  def magnitude: () -> Float
+
+  %a{rigor:v1:param: x Float[0.0..1.0]}
+  def take_unit: (Float x) -> void
+
+  def take_float: (Float x) -> void
+
+  def take_integer: (Integer x) -> void
+end

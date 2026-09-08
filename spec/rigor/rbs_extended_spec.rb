@@ -265,6 +265,15 @@ RSpec.describe Rigor::RbsExtended do
       expect(effect.negative?).to be(true)
     end
 
+    it "parses Float[a..b] return and param payloads (ADR-109 WD4)" do
+      expect(described_class.parse_return_type_override("rigor:v1:return: Float[0.0...1.0]"))
+        .to eq(Rigor::Type::Combinator.float_range(0.0, 1.0, exclude_end: true))
+      override = described_class.parse_param_annotation("rigor:v1:param: ratio Float[0.0..1.0]")
+      expect(override.type).to eq(Rigor::Type::Combinator.float_range(0.0, 1.0))
+      effect = described_class.parse_assert_annotation("rigor:v1:assert x is non-nan-float")
+      expect(effect.refinement_type).to eq(Rigor::Type::Combinator.non_nan_float)
+    end
+
     it "routes a positive Integer[a..] predicate through the refinement arm" do
       effect = described_class.parse_predicate_annotation("rigor:v1:predicate-if-true n is Integer[1..]")
       expect(effect.class_name).to be_nil

@@ -1035,6 +1035,7 @@ module Rigor
           # base (minuend) class dispatches.
           when Type::Refined, Type::Difference then concrete_class_name(type.base)
           when Type::IntegerRange then "Integer"
+          when Type::FloatRange then "Float"
           end
         end
 

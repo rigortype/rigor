@@ -963,6 +963,8 @@ module Rigor
           Type::Combinator.nominal_of(value.class.name)
         when Type::IntegerRange
           Type::Combinator.nominal_of("Integer")
+        when Type::FloatRange
+          Type::Combinator.nominal_of("Float")
         else
           type
         end

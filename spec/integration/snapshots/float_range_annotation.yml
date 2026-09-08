@@ -1,0 +1,11 @@
+---
+locals:
+  r: Ratio
+  u: Float[0.0..1.0]
+assertions:
+  '1': Float[0.0..1.0]
+  '2': non-nan-float
+  '3': Float[0.0...Float::INFINITY]
+  '4': Integer
+  '5': Float
+  '6': bool

@@ -1112,6 +1112,22 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/float_range_annotation/ — ADR-109 WD4 Float[R] payloads" do
+    let(:harness) { harness_for("float_range_annotation") }
+
+    it "displays the written range, dispatches as a Float, and is accepted by Float and by itself" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "flags exactly the three suppressed call sites: an Integer parameter, an outside literal, a wider range" do
+      # Each rejected call carries `# rigor:disable argument-type-mismatch`, so a clean run proves both that
+      # the rule fired there and that nothing else fired.
+      arg_errors = harness.errors.select { |d| d.message.start_with?("argument type mismatch") }
+      expect(arg_errors).to be_empty
+    end
+  end
+
   describe "fixtures/param_extended/ — RBS::Extended rigor:v1:param: directive" do
     let(:harness) { harness_for("param_extended") }
 

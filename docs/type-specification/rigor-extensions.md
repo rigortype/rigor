@@ -10,6 +10,7 @@ This document is the catalog of internal-only forms that the analyzer uses but t
 | --- | --- | --- |
 | Refined nominal type, such as `String where non_empty` | Predicate-proven subtype of a nominal type | Nominal base, such as `String` |
 | Integer range, such as `Integer[1..]` | Numeric comparisons and bounds | `Integer` |
+| Float range, such as `Float[0.0...1.0]` | Bounded non-NaN floats, closed or half-open, from annotations (ADR-109 WD4) | `Float` |
 | Finite set of literals | Precise branch and enum tracking | RBS literal union when possible, otherwise nominal base |
 | Truthiness refinement | Branch-sensitive nil/false elimination | Erased underlying type |
 | Relational fact, such as `x == "foo"` | Captures a guard that may not be soundly reducible to a value type because Ruby equality is dispatch | Erased marker |
@@ -39,7 +40,7 @@ Rigor extensions that are not user-authored — refined nominal types proved by 
 ## How extensions interact with the rest of the type system
 
 - **Refined nominal types** are subtypes of their base for subtyping queries. The refinement adds a check that the base does not already prove. Diagnostics and narrowing keep the refinement until normalization, mutation, or budget exhaustion forces a widening.
-- **Integer ranges** participate in subtyping by interval inclusion (within `Integer`). They erase to `Integer` because RBS cannot spell the range. The notation and the `Range#cover?` definition are in [imported-built-in-types.md](imported-built-in-types.md); `Float` ranges are reserved there ([ADR-109](../adr/109-ruby-native-range-notation.md)).
+- **Integer and Float ranges** participate in subtyping by interval inclusion within their class, on the closed canonical bounds. They erase to `Integer` / `Float` because RBS cannot spell the range. The notation and the `Range#cover?` definition are in [imported-built-in-types.md](imported-built-in-types.md) ([ADR-109](../adr/109-ruby-native-range-notation.md)); Float comparison narrowing is reserved there.
 - **Finite literal unions** participate in subtyping as ordinary unions. They are bounded by the union-size budget (see [inference-budgets.md](inference-budgets.md)); when the budget is exceeded, Rigor widens to the nominal base.
 - **Truthiness refinements** are flow-sensitive (`false | nil` versus the rest of the domain). They are not value types in their own right; they are scope facts that compose with other refinements. See [control-flow-analysis.md](control-flow-analysis.md).
 - **Relational facts** are scope facts that capture comparisons whose value-type effect is not yet justified. They MUST NOT introduce a positive domain from the right-hand side of the comparison. They are retained for diagnostics, contradiction detection, and later promotion when stronger evidence appears.

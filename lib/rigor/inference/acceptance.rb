@@ -60,6 +60,7 @@ module Rigor
         Type::Nominal => :accepts_nominal,
         Type::Constant => :accepts_constant,
         Type::IntegerRange => :accepts_integer_range,
+        Type::FloatRange => :accepts_float_range,
         Type::Difference => :accepts_difference,
         Type::Refined => :accepts_refined,
         Type::Intersection => :accepts_intersection,
@@ -212,6 +213,7 @@ module Rigor
           when Type::Singleton then accepts_nominal_from_singleton(self_type, other_type, mode)
           when Type::StructClass, Type::DataClass then accepts_nominal_from_class_factory(self_type, other_type, mode)
           when Type::IntegerRange then accepts_nominal_from_integer_range(self_type, other_type, mode)
+          when Type::FloatRange then accepts_nominal_from_float_range(self_type, other_type, mode)
           else accepts_nominal_from_shape(self_type, other_type, mode)
           end
         end
@@ -304,6 +306,32 @@ module Rigor
             Type::AcceptsResult.no(
               mode: mode,
               reasons: "Nominal[#{self_type.class_name}] rejects IntegerRange"
+            )
+          end
+        end
+
+        # ADR-109 WD4 — the Float twin of the IntegerRange rule: `Nominal[Float]` and everything Float
+        # is-a accept any `FloatRange`; nothing else does.
+        FLOAT_NOMINAL_ANCESTORS = %w[Float Numeric Comparable Object BasicObject].freeze
+        private_constant :FLOAT_NOMINAL_ANCESTORS
+
+        def accepts_nominal_from_float_range(self_type, _other_type, mode)
+          unless self_type.type_args.empty?
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Nominal[#{self_type.class_name}] with type args rejects FloatRange"
+            )
+          end
+
+          if FLOAT_NOMINAL_ANCESTORS.include?(self_type.class_name)
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "FloatRange is-a #{self_type.class_name}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Nominal[#{self_type.class_name}] rejects FloatRange"
             )
           end
         end
@@ -609,6 +637,65 @@ module Rigor
             Type::AcceptsResult.no(
               mode: mode,
               reasons: "non-universal IntegerRange rejects Nominal[Integer] (could fall outside #{self_type.describe})"
+            )
+          end
+        end
+
+        # ADR-109 WD4 — `FloatRange` accepts:
+        # - Constant[f] where f is a Float the range covers (never NaN: `cover?` compares);
+        # - FloatRange[c..d] whose canonical closed bounds sit inside self's.
+        # `Nominal[Float]` is never accepted, not even by the universal range: an arbitrary Float may be
+        # NaN, and the universal range is exactly "every Float except NaN".
+        def accepts_float_range(self_type, other_type, mode)
+          case other_type
+          when Type::Constant
+            accepts_float_range_from_constant(self_type, other_type, mode)
+          when Type::FloatRange
+            accepts_float_range_from_float_range(self_type, other_type, mode)
+          when Type::Nominal
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "#{self_type.describe} rejects Nominal[#{other_type.class_name}] (could be NaN or fall outside)"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "FloatRange rejects #{other_type.class}"
+            )
+          end
+        end
+
+        def accepts_float_range_from_constant(self_type, constant, mode)
+          unless constant.value.is_a?(Float)
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "FloatRange rejects non-Float Constant"
+            )
+          end
+
+          if self_type.covers?(constant.value)
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "Constant[#{constant.value}] is in #{self_type.describe}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Constant[#{constant.value}] outside #{self_type.describe}"
+            )
+          end
+        end
+
+        def accepts_float_range_from_float_range(self_type, other_range, mode)
+          if self_type.min <= other_range.min && other_range.canonical_max <= self_type.canonical_max
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "#{other_range.describe} ⊆ #{self_type.describe}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "#{other_range.describe} not contained in #{self_type.describe}"
             )
           end
         end

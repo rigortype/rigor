@@ -191,8 +191,8 @@ module Rigor
         caps
       end
 
-      # `initialized` is a notification — no response body. Slice 7 will hook this to register
-      # `workspace/didChangeWatchedFiles` if the client advertised the capability.
+      # `initialized` is a notification — no response body. Nothing is registered here yet: the server handles
+      # `workspace/didChangeWatchedFiles` when a client sends it, but does not register for it dynamically.
       def handle_initialized
         nil
       end

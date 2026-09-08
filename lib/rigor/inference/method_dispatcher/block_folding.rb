@@ -46,9 +46,8 @@ module Rigor
         # a finitely-sized receiver it is `Constant[size]`.
         COUNT_METHOD = :count
 
-        # @param block_type inferred return type of
-        #   the call's block. `nil` means "no block at the call site"
-        #   and disqualifies every rule here.
+        # `context.block_type` is the inferred return type of the call's block; `nil` means "no block at the
+        # call site" and disqualifies every rule here.
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name

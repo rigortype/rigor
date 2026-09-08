@@ -72,26 +72,29 @@ module Rigor
         EMPTY_TYPE_PARAM_NAMES = [].freeze
         private_constant :EMPTY_TYPE_PARAM_NAMES
 
-        # @param block_type inferred block return type, propagated from
-        #   `MethodDispatcher.dispatch`. When non-nil, the selector prefers a block-bearing overload and
-        #   binds the method-level type parameter that the block's return type references to `block_type`
-        #   (Slice 6 phase C sub-phase 2).
-        # @param self_type_override when set, the substitution for `Bases::Self` in the
-        #   method's return type. Used by `MethodDispatcher#try_user_class_fallback` to preserve the
-        #   ORIGINAL receiver as the substitute for `self` even though the dispatch is routed through
-        #   `Nominal[Object]` — so that `Bundler::URI::Generic.dup` (which resolves through the `Object`
-        #   fallback because `Bundler::URI::Generic` lacks RBS) returns `Bundler::URI::Generic` per
-        #   `Kernel#dup: () -> self` rather than `Object`. Defaults to nil (compute self from the resolved
-        #   class_name as before).
-        # @param public_only when true, a method whose RBS accessibility is `:private` does not
-        #   resolve (the call yields `nil`, i.e. "no rule"). Set by the explicit-non-`self`-receiver
-        #   user-class fallback so a call like `Favourite.select(...)` does not adopt the private
-        #   `Kernel#select` signature.
+        # Four fields of `context` shape the answer beyond receiver, method name and arguments.
+        #
+        # `block_type` is the inferred block return type propagated from `MethodDispatcher.dispatch`; when
+        # non-nil, the selector prefers a block-bearing overload and binds the method-level type parameter
+        # that the block's return type references to it (Slice 6 phase C sub-phase 2).
+        #
+        # `self_type_override`, when set, is the substitution for `Bases::Self` in the method's return type.
+        # `MethodDispatcher#try_user_class_fallback` uses it to preserve the ORIGINAL receiver as the
+        # substitute for `self` even though the dispatch is routed through `Nominal[Object]` — so that
+        # `Bundler::URI::Generic.dup` (which resolves through the `Object` fallback because
+        # `Bundler::URI::Generic` lacks RBS) returns `Bundler::URI::Generic` per `Kernel#dup: () -> self`
+        # rather than `Object`. Nil computes self from the resolved class_name as before.
+        #
+        # `public_only`, when true, keeps a method whose RBS accessibility is `:private` from resolving (the
+        # call yields `nil`, i.e. "no rule"). Set by the explicit-non-`self`-receiver user-class fallback so
+        # a call like `Favourite.select(...)` does not adopt the private `Kernel#select` signature.
+        #
+        # `scope`, when supplied, enables ADR-43 RBS-complete-ancestor resolution against
+        # `ALLOWED_RBS_COMPLETE_ANCESTORS`; `nil` keeps inherited calls unresolved (`Dynamic[Top]`) — the
+        # FP-safe default for open hierarchies (`< ActionController::Base`, …).
+        #
         # @return inferred return type, or `nil` when no rule resolves (no class name,
         #   no method, dispatch on a Top/Dynamic[Top] receiver, etc.).
-        # @param scope when supplied, enables ADR-43 RBS-complete-ancestor resolution
-        #   against `ALLOWED_RBS_COMPLETE_ANCESTORS`. `nil` keeps inherited calls unresolved
-        #   (`Dynamic[Top]`) — the FP-safe default for open hierarchies (`< ActionController::Base`, …).
         def try_dispatch(context)
           environment = context.environment
           return nil if environment.nil?

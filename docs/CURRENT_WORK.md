@@ -18,101 +18,83 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 **v0.3.8 is published** (`Rigor::VERSION` is `0.3.8`, `[Unreleased]` empty as of 2026-09-09).
-Post-cut fragments ride under `changelog.d/` (#830, #844, #846, #848 among them). The next cut
-happens only when the user invokes `/rigor-release-prep`.
+Post-cut fragments ride under `changelog.d/` (#830, #844, #846, #848, #854, #857, #858, #859 among
+them). The next cut happens only when the user invokes `/rigor-release-prep`.
 
-## The #610 reopen (2026-09-09) — landed
-
-`rigor-activerecord`'s `Relation[Elem]` against `rbs collection install`'s non-generic `Relation`.
-#770 (0.3.8) added the stand-down but threaded `deferred_signature_paths:` through the loader's own
-`build_env` only; `Cache::RbsEnvironment.compute` — the build every cached run takes, which is the
-CLI default — never passed it, so the stand-down ran under `--no-cache` and on no real run. The
-gate stayed green because its loader held no store (#696's lesson in its other shape).
-
-- [#848](https://github.com/rigortype/rigor/pull/848) — **merged 2026-09-09 on the user's word**
-  (merge `c63a77ac`, master run green, rbs 3.x/4.x jobs included); #610 closed by it. Fixes:
-  the producer forwards the deferred list (new public reader, `sig-gen gap` marker #160); the env
-  key gains an env-only `rbs.deferred_signature_paths` slot (NOT in the shared run-key entries —
-  the boot-slim probe cannot rebuild a plugin-derived slot); a stood-down file is no longer reported
-  as `rbs.coverage.quarantined-signature` and is reported as
-  `rbs.coverage.plugin-signature-stood-down` (`:info`, one per file, both sides named, on cold and
-  warm runs; gated on the plugin registry contributing signatures, never on `signature_paths:`);
-  the arity read takes the entry's FIRST declaration, since `type_params` validates and raises on
-  both rbs lines. Credit: `Co-Authored-By: Nicolas Rodriguez <nico@nicoladmin.fr>` on every commit.
-- [#849](https://github.com/rigortype/rigor/issues/849) — `ready-for-agent`: a structural gate that
-  the producer forwards every `build_env_for` keyword, plus a manual line that the probe commands
-  (`type-of`, `type-scan`, `trace`, `annotate`) build without the persistent cache. Fork it from
-  post-merge master; on 0.3.8 `check` (cached) and `type-of` (store-less) typed one position from two
-  environments, which `ProbeEnvironment`'s own contract forbids.
-
-Two things the next session should not rediscover:
-
-- The loader has TWO build entries. A new `build_env_for` input must go through
-  `Cache::RbsEnvironment.compute` AND `RbsDescriptor` (the suite's `RbsEnvMemo.digest` is the
-  precedent), and its gate must build through a real cold `Cache::Store` plus a second loader for
-  the HIT — a store-less spec cannot see the producer.
-- Assert on a call INTO a relation, never on the receiver: `dump_type(rel)` reads
-  `ActiveRecord::Relation[Post]` in the collided arm too (the plugin's type-node resolver produces
-  it whether or not the class's definition builds).
-
-## The ADR-109 range-notation line (2026-09-08 → 09)
+## The ADR-109 range-notation line (2026-09-08 → 09) — landed
 
 ADR-109 restores ADR-1's decision: `C[R] = { x | x.is_a?(C) && R.cover?(x) }`, spelled with the
-Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated input alias.
+Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated input alias that
+reports `dynamic.rbs-extended.deprecated-form` (`info`). Every slice is on master, each merged on the
+user's word with its master run green:
 
-- [#830](https://github.com/rigortype/rigor/pull/830) (slice 1) and
-  [#844](https://github.com/rigortype/rigor/pull/844) (slice 2, `Type::FloatRange`) — **merged**.
-- [#846](https://github.com/rigortype/rigor/pull/846) — slice 3: truthy-edge Float comparison
-  narrowing, `nan?` / `finite?`, and `Float` absorbing a `FloatRange` union member: **merged
-  2026-09-09 on the user's word**, master run green.
-- [#854](https://github.com/rigortype/rigor/pull/854) — **merged 2026-09-09 on the user's word**
-  (merge `c07c404e`). ADR-109 WD3: `int<a, b>` still resolves and now reports
-  `dynamic.rbs-extended.deprecated-form` (`info`) naming the `Integer[a..b]` spelling, through a
-  fourth `RbsExtended::Reporter` stream carried by the worker drain and the pool replay. Two
-  CI lessons from landing it: a CONFLICTING PR gets no `pull_request` run at all (rebase first, then
-  look for the run), and if a Tests shard dies on an artifact-upload `403`, rerun the WHOLE run or
-  push a fresh commit, never `--failed` alone (the rerun shard restores newer timing data and
-  `shard-coverage` goes red).
-- [#857](https://github.com/rigortype/rigor/pull/857) — **merged 2026-09-09 on the user's word** (merge
-  `3b362102`; #831 closed by it). The last ADR-109 item: `rand(a..b)` / `Random.rand(a..b)` fold to the literal
-  range, the monotone `Math` functions map a bounded argument, a `FloatRange` receiver folds `abs` /
-  `nan?` / `finite?` / `floor` … / `between?` / `clamp`, and `clamp(range)` folds on both bounded
-  classes. The bare
-  `rand`, `rand(n)` and `rand(1.5)` forms are deliberately NOT folded: the corpus uses `rand(100)` as
-  its "unknown Integer" oracle (several specs say so), and folding it changed 27 pins' meaning; an
-  interval for those forms needs a change that replaces the oracle first.
-- Engine gaps filed while probing, all `ready-for-agent`: [#833](https://github.com/rigortype/rigor/issues/833)
-  (a Range literal argument matches the first `Range[T]` overload whatever its endpoints),
-  [#834](https://github.com/rigortype/rigor/issues/834) (`n.clamp(1..9)` has no fold),
-  [#842](https://github.com/rigortype/rigor/issues/842) (an `IntegerRange` receiver never reaches RBS
-  dispatch; `FloatRange` ships with the arm IntegerRange lacks).
+- [#830](https://github.com/rigortype/rigor/pull/830) (notation), [#844](https://github.com/rigortype/rigor/pull/844)
+  (`Type::FloatRange`, `non-nan-float` / `finite-float`), [#846](https://github.com/rigortype/rigor/pull/846)
+  (truthy-edge Float comparison narrowing, `nan?` / `finite?`), [#854](https://github.com/rigortype/rigor/pull/854)
+  (the deprecation stream), [#857](https://github.com/rigortype/rigor/pull/857) (`rand(a..b)` /
+  `Random.rand(a..b)` folds, monotone `Math`, `FloatRange` unary folds, `clamp(range)` on bounded
+  receivers; closed #831). Bare `rand`, `rand(n)`, `rand(1.5)` are deliberately NOT folded: the corpus
+  uses `rand(100)` as its "unknown Integer" oracle and folding it changed 27 pins' meaning.
+- [#858](https://github.com/rigortype/rigor/pull/858) — merged 2026-09-09 (merge `8a3ee8c5`,
+  master run 34268973064 green); closed #842. An `IntegerRange` receiver now reaches RBS dispatch
+  (`ARGV.size.fdiv(2)` types `Float`, not `Dynamic[top]`).
+- [#859](https://github.com/rigortype/rigor/pull/859) — merged 2026-09-09 (merge `4d9637cd`,
+  master run 34269827528 green); closed #833 and #834. A Range literal argument is read through its
+  endpoints (`Rigor::Inference::RangeConstant`): acceptance refutes `Range[T]` from them
+  (`Random.new.rand(1.0..2.0)` types `Float`, not the first-declared Integer arm) and a method-level
+  `Range[A]` binds `A` from the endpoint classes (`i.clamp(1..9)` on a plain `Integer` types
+  `Integer`, not `Dynamic[top] | Integer`). Endless / beginless literals still satisfy core's
+  `Range[Integer?]` slicing parameter. #858 and #859 both touched `rbs_dispatch.rb`,
+  `inference-engine.md` and `type_construction_spec.rb`; #859 was rebased once after #858 landed.
+- Filed from the probes that closed the line: [#861](https://github.com/rigortype/rigor/issues/861)
+  (`ready-for-agent`: `clamp` on an UNBOUNDED `Integer` / `Float` receiver keeps no bracket —
+  `i.clamp(1..9)` types `Integer` and `i.clamp(1, 9)` types `1 | 9 | Integer`, both should be
+  `Integer[1..9]`; the fold lives in `ConstantFolding#try_fold_clamp_range` and fires only for
+  `bounded_range?` receivers) and [#862](https://github.com/rigortype/rigor/issues/862)
+  (`ready-for-human`: `Range[A]` binds only from a Range LITERAL; `i.clamp(r)` with `r` a
+  `Range[Integer]` local is back to `Dynamic[top] | Integer` — admitting the carrier is the
+  Range-only step of the container walk #303 declined, and needs a decision first).
+- Two CI lessons that cost a cycle each: a CONFLICTING PR gets no `pull_request` run at all (rebase
+  first, then look for the run by `head_sha`); if a Tests shard dies on an artifact-upload `403`,
+  rerun the WHOLE run or push a fresh commit, never `--failed` alone (`shard-coverage` goes red).
 - The sig provenance gate (#835) pins per-file residue counts in `spec/rigor/sig_gen/provenance_spec.rb`;
   a new hand-written declaration goes red — mark it (`# sig-gen gap: #NNN — why`; #160 for a shape
   sig-gen does not emit) or move the pin with the reason in the commit body. A literal return over a
-  declared nominal no longer needs a marker: sig-gen refuses that tightening since #850
-  ([ADR-110](adr/110-inherited-declaration-precedence.md)), which closed #837.
+  declared nominal no longer needs a marker since #850 ([ADR-110](adr/110-inherited-declaration-precedence.md)).
 
-## The types-and-comments line (2026-09-08 → 09, landed)
+## The #610 reopen (2026-09-09) — landed
+
+[#848](https://github.com/rigortype/rigor/pull/848) (merge `c63a77ac`) closed #610: `rigor-activerecord`'s
+`Relation[Elem]` stand-down against `rbs collection install`'s non-generic `Relation` now runs on the
+cached (default) build too, reported as `rbs.coverage.plugin-signature-stood-down` (`:info`). Credit
+`Co-Authored-By: Nicolas Rodriguez <nico@nicoladmin.fr>` on every commit of a fix in that area.
+Open: [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`) — a structural gate
+that the producer forwards every `build_env_for` keyword, plus a manual line that the probe commands
+(`type-of`, `type-scan`, `trace`, `annotate`) build without the persistent cache.
+
+Two things not to rediscover: the loader has TWO build entries (`Cache::RbsEnvironment.compute` AND
+`RbsDescriptor`; a store-less spec cannot see the producer), and a relation assertion goes on a call
+INTO the relation, never on the receiver (`dump_type(rel)` reads `ActiveRecord::Relation[Post]` in the
+collided arm too).
+
+## The types-and-comments line (2026-09-08 → 09) — landed
 
 Rule: **a type Rigor did not produce or check is never written down** — typeless YARD doc tags
-(`@param name — description`) gated by `spec/docs/type_shaped_comments_spec.rb` over lib/, plugins/,
-examples/, spec/, tool/; ADR-107 / ADR-108; the `rigor-type-oracle` skill; `make check --fail-on=warning`
-(#822, #826, #827, #829). Inline `#:` / `# @rbs` are checked type sources, written where they say what
-the name and the code do not (#843). Engine and gate follow-ups all landed: #840 (#823), #832 (#824),
-#835 (#825), #845 (#836 `void` is intent), #850 (#837 a literal never tightens a declaration), #847
-(#838), #855 (#839 a `sig/` declaration must have code: static tier + runtime tier, zero stale),
-#852 (#841 `next` arms join the block return), #851 (Steep 11 → 0). `sig/` carries no
+(`@param name — description`) gated by `spec/docs/type_shaped_comments_spec.rb`; ADR-107 / ADR-108;
+the `rigor-type-oracle` skill; `make check --fail-on=warning`; inline `#:` / `# @rbs` are checked type
+sources written where they say what the name and the code do not (#843). Every engine and gate
+follow-up landed (#840, #832, #835, #845, #850, #847, #855, #852, #851); `sig/` carries no
 `# sig-gen gap:` marker and `rigor sig-gen --diff --tighter-returns lib` is empty. Open:
-[#853](https://github.com/rigortype/rigor/issues/853) (a block-level `break <value>` does not reach
-the call's type — the `break` sibling of #841, `ready-for-human`).
+[#853](https://github.com/rigortype/rigor/issues/853) (`ready-for-human`: a block-level `break <value>`
+does not reach the call's type — the `break` sibling of #841).
 
 ## How to enter
 
-1. Nothing of this session's is open: #848 and its handoff are on master, #610 is closed.
-2. Two subagent lanes were started 2026-09-09 on the user's word, each in its own `bin/rigor-worktree`
-   under `../rigor-wt/`: `fix-842-integer-range-dispatch` (#842, Sonnet) and
-   `fix-833-834-range-endpoint-acceptance` (#833 acceptance half + #834 RBS-tier half, Opus). They
-   open Draft PRs and run only targeted specs + `make lint check check-plugins docs-check`; the
-   coordinator runs `make verify` in each worktree SEQUENTIALLY before either lands (two parallel
-   full suites exhaust memory). Do not build on either branch until its PR is audited and green.
-3. Next after those: [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`).
+1. Nothing of this session's is open: #858, #859 and this handoff are on master; #831, #833, #834,
+   #842 are closed. The two `../rigor-wt/` lane worktrees were removed after their branches merged.
+2. Next, in this order: [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`),
+   [#861](https://github.com/rigortype/rigor/issues/861) (`ready-for-agent`, fork from master — its
+   fixture rows in `range_endpoint_acceptance.rb` pin the `Integer` answer the fold replaces),
+   then the decisions [#862](https://github.com/rigortype/rigor/issues/862) and
+   [#853](https://github.com/rigortype/rigor/issues/853) (`ready-for-human`, ask the user).
+3. Full gates run one at a time on this machine: two parallel `make verify` runs exhaust memory.

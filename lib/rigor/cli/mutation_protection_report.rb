@@ -14,7 +14,13 @@ module Rigor
     # `harness_errors` (#264) — mutants where the harness itself raised (a rescued failure), distinguished from
     # a parse-invalid mutant. Defaults to 0 so existing call sites keep constructing a `FileEffectiveness`
     # without the new keyword.
-    FileEffectiveness = Data.define(:path, :killed, :survived, :ratio, :harness_errors) do
+    # A `class ... < Data.define(...)` body, not the `Data.define(...) do ... end` shorthand: Steep
+    # resolves a `def` inside the shorthand block against the *lexically enclosing* class (here,
+    # `Rigor::CLI`, which declares its own differently-shaped `initialize`) rather than the anonymous
+    # Data subclass being defined — a `sig/` declaration for `FileEffectiveness` cannot fix this,
+    # since the misattribution happens before any signature is consulted. The explicit `class` keyword
+    # is a real namespace boundary Steep's block walker respects; behaviour is identical either way.
+    class FileEffectiveness < Data.define(:path, :killed, :survived, :ratio, :harness_errors)
       def initialize(path:, killed:, survived:, ratio:, harness_errors: 0)
         super
       end

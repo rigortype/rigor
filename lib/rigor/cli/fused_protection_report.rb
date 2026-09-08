@@ -12,7 +12,13 @@ module Rigor
     # Framing (ADR-63 / ADR-62 Criterion A, extended): the payload is the **attribution** — which protection axis is
     # missing — never raw survival. An unprotected site is "add protection here", never "your code is broken".
     # `harness_errors` (#264) — see {Rigor::CLI::FileEffectiveness}; defaults to 0 for the same reason.
-    FusedFileProtection = Data.define(:path, :type_killed, :test_killed, :unprotected, :ratio, :harness_errors) do
+    # A `class ... < Data.define(...)` body, not the `Data.define(...) do ... end` shorthand: Steep
+    # resolves a `def` inside the shorthand block against the *lexically enclosing* class (here,
+    # `Rigor::CLI`, which declares its own differently-shaped `initialize`) rather than the anonymous
+    # Data subclass being defined — a `sig/` declaration for `FusedFileProtection` cannot fix this,
+    # since the misattribution happens before any signature is consulted. The explicit `class` keyword
+    # is a real namespace boundary Steep's block walker respects; behaviour is identical either way.
+    class FusedFileProtection < Data.define(:path, :type_killed, :test_killed, :unprotected, :ratio, :harness_errors)
       def initialize(path:, type_killed:, test_killed:, unprotected:, ratio:, harness_errors: 0)
         super
       end

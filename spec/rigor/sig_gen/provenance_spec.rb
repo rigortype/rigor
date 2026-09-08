@@ -15,7 +15,7 @@
 #     # sig-gen gap: #825 — sig-gen types the body `untyped`, so the return is hand-written.
 #     def resolve: (String name) -> Type::t
 #
-# == Two mechanisms, and why not one
+# == Three mechanisms, and why not one
 #
 # The seeding audit (`docs/notes/20260908-sig-provenance-audit.md`) found 358 of 1,052 in-scope
 # declarations earned and 679 residue — 671 once the nine stale declarations the audit also turned up
@@ -31,6 +31,11 @@
 # 2. RATCHET on the residue. Per-file unmarked-residue counts are an exact snapshot below. A new
 #    hand-written declaration raises its file's count and goes red; marking it subtracts from the
 #    count. Closing an engine gap lowers a count and the gate says so, so slack cannot accumulate.
+# 3. HARD RULE on existence (#839). Every declaration must describe a method that EXISTS — proven by
+#    `sig-gen`'s `def`, by Rigor's own cross-file recognition, or by reflection over the loaded tree.
+#    Nothing else in the tree asks this direction: `make check` and `make steep-check` both ask
+#    whether the implementation matches `sig/`. Zero on a correct tree, so a hard rule costs nothing;
+#    it was nine before the seeding audit deleted them.
 #
 # == Why this file and not `spec/docs/`
 #
@@ -46,7 +51,10 @@ require "tmpdir"
 SIG_PROVENANCE_ROOT = File.expand_path("../../..", __dir__)
 
 # Computed once (a ~14 s generator pass) and shared read-only across the corpus examples.
-SIG_PROVENANCE_ROWS = SigProvenanceAuditor.audit(root: SIG_PROVENANCE_ROOT)
+# `runtime: true` opts the #839 existence tiers in: the project index over `lib/`, then a require of
+# `lib/` and reflection over it (`spec/support/sig_source_index.rb`). Safe here and nowhere else in
+# this file — the fixture audits below write their own `lib/`, and requiring one would run it.
+SIG_PROVENANCE_ROWS = SigProvenanceAuditor.audit(root: SIG_PROVENANCE_ROOT, runtime: true)
 
 # A corpus failure must stay readable; the total is always stated even when the listing is truncated.
 SIG_PROVENANCE_LISTING_CAP = 200
@@ -230,6 +238,33 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       expect(rows).to eq([SigProvenanceAuditor::NO_SOURCE])
     end
 
+    it "calls a `define_method` declaration `synthetic_source` — sig-gen enumerates defs (#839)" do
+      rows = classifications_for(ruby: "class Widget\n  define_method(:n) { 42 }\nend\n",
+                                 rbs: "class Widget\n  def n: () -> Integer\nend\n", method: "n")
+      expect(rows).to eq([SigProvenanceAuditor::SYNTHETIC])
+    end
+
+    it "calls a `Data.define` member declaration `synthetic_source` (#839)" do
+      rows = classifications_for(ruby: "Point = Data.define(:x, :y)\n",
+                                 rbs: "class Point\n  def x: () -> Integer\nend\n", method: "x")
+      expect(rows).to eq([SigProvenanceAuditor::SYNTHETIC])
+    end
+
+    it "calls a declaration whose def lives on a project superclass `inherited_source` (#839)" do
+      rows = classifications_for(ruby: "class Base\n  def n\n    42\n  end\nend\n\nclass Widget < Base\nend\n",
+                                 rbs: "class Widget\n  def n: () -> Integer\nend\n", method: "n")
+      expect(rows).to eq([SigProvenanceAuditor::INHERITED])
+    end
+
+    it "counts the #839 states as residue — existence says nothing about where the type came from" do
+      row = audit_fixture(ruby: "class Widget\n  define_method(:n) { 42 }\nend\n",
+                          rbs: "class Widget\n  def n: () -> Integer\nend\n")
+            .find { |r| r.declaration.method_name == "n" }
+
+      expect(SigProvenanceAuditor::EARNED).not_to include(row.classification)
+      expect(row).to be_residue
+    end
+
     it "leaves constants and type aliases out of scope as `non_method`" do
       rows = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n",
                            rbs: "class Widget\n  SIZE: Integer\n  type key = Symbol\n  def n: () -> 42\nend\n")
@@ -313,6 +348,31 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
 
     it "reports the residue as a total, so the number is visible without a failure" do
       expect(SIG_PROVENANCE_ROWS.count(&:residue?)).to eq(SIG_PROVENANCE_RESIDUE.values.sum)
+    end
+
+    it "resolves every declaration to a def, a recognised shape, or a runtime-defined method (#839)" do
+      stale = SIG_PROVENANCE_ROWS.select { |row| row.classification == SigProvenanceAuditor::NO_SOURCE }
+      expect(stale).to be_empty, lambda {
+        listing = stale.map { |row| "#{row.declaration} — no source" }
+        "#{provenance_failure('stale declaration', listing)}\n\n" \
+          "Each names a method nothing defines: not a `def` sig-gen can attribute, not a shape " \
+          "Rigor's own cross-file recognition knows (`attr_*`, `define_method`, `alias`, a " \
+          "`Data` / `Struct` member, an ancestor the project declares), and not a method the " \
+          "loaded tree carries. A declaration is worse than a missing one — RBS resolves calls " \
+          "through it — so delete it, or restore the code it describes.\n" \
+          "Nothing else in the tree asks this direction: `make check` and `make steep-check` both " \
+          "ask whether the implementation matches `sig/`."
+      }
+    end
+
+    it "confirms the documented runtime-generated declaration rather than exempting it (#839)" do
+      # `sig/prism_node_children.rbs` declares `#rigor_each_child` on the abstract `Prism::Node` so
+      # every subclass resolves against one declaration; `Source::NodeChildren` compiles it onto each
+      # CONCRETE node class at load. Reflection is what tells that apart from a stale declaration.
+      row = SIG_PROVENANCE_ROWS.find { |r| r.declaration.method_name == "rigor_each_child" }
+      expect(row.declaration.path).to eq("sig/prism_node_children.rbs")
+      expect(row.classification).to eq(SigProvenanceAuditor::RUNTIME_DEFINED)
+      expect(row.detail).to include("subclass")
     end
   end
 end

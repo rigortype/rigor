@@ -220,6 +220,13 @@ All nine are deleted by the commit that seeds the gate. `Prism::Node#rigor_each_
 `no_source` that is correct as written: `Rigor::Source::NodeChildren` compiles it per concrete node
 class at load, which is what its file header already says.
 
+> **Superseded 2026-09-09 by [#839](https://github.com/rigortype/rigor/issues/839).** The reflection
+> pass above was a one-off instrument; it is now two tiers inside the classifier, so `no_source`
+> means *stale* and nothing else, and the legitimate rows carry the shape that explains them
+> (`synthetic_source` / `inherited_source` / `runtime_defined`). The full re-classification, and why
+> `Prism::Node#rigor_each_child` is confirmed rather than exempted, is
+> [the follow-up audit](20260909-sig-no-source-audit.md).
+
 ### `declared_divergent` — 110 at the seeding, 108 since #836, 115 since #837
 
 The declared return differs from the inferred one and `sig-gen`'s guards refuse the swap. Two shapes,
@@ -345,6 +352,13 @@ deleted or renamed — is unchecked, and a stale declaration is worse than a mis
 resolves calls through it. The provenance gate now reports these as `no_source`, mixed in with 218
 legitimate ones; a dedicated check that distinguishes them would be sharper. Area:
 `area:self-testing`.
+
+**Fixed 2026-09-09.** The classifier asks two more sources of truth before reporting a declaration
+unattributed — Rigor's own cross-file recognition (`ScopeIndexer.discovered_project_index_for_paths`
+plus `Scope`'s ancestor walk), then reflection over the loaded tree — so the legitimate rows land in
+`synthetic_source` / `inherited_source` / `runtime_defined` and `no_source` is a hard rule at zero.
+The re-classification of all 224 rows, and the ~1.8 s the two tiers cost, are in
+[the follow-up audit](20260909-sig-no-source-audit.md).
 
 ## What this does not measure
 

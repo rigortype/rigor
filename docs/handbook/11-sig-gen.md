@@ -187,6 +187,19 @@ generated-equivalent nor marked. Rigor's own gate is
 ([ADR-107](../adr/107-checked-types-and-typeless-comments.md)
 G3).
 
+One case in that list is not a marker case at all. A
+declaration with no `def` behind it may simply describe a
+method Ruby generates — an `attr_*`, a `Data` member, one a
+class macro defines at load — or it may be left over from a
+`def` that was deleted or renamed, which nothing catches,
+because `rigor check` and Steep both ask whether the
+implementation matches `sig/` and never the converse.
+Rigor's gate separates the two by asking its own
+project index and then the loaded tree
+([#839](https://github.com/rigortype/rigor/issues/839)).
+That check requires the code under `sig/`, so it stays a
+repository gate: `sig-gen` in your project is unchanged.
+
 ## What method shapes the generator covers
 
 Slice-by-slice (each shipped via a CHANGELOG entry — this

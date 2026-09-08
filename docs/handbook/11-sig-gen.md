@@ -129,6 +129,48 @@ its reason next to the rows that did emit. In text mode a
 one-line stderr summary counts the skipped methods per
 reason instead; stdout stays paste-clean.
 
+## Recording a gap the generator cannot close
+
+`sig-gen --diff` answers "is this declaration what the
+implementation proves?" for every method it can type. The
+answers it cannot give are the interesting ones: a
+`tighter-return` you decided not to apply, a method it
+skipped, a declaration with no `def` behind it at all. Each
+of those is a hand-written type, and a hand-written type
+that nobody wrote down a reason for is indistinguishable
+from one nobody has looked at since.
+
+The convention Rigor uses on its own `sig/` is a line in the
+member's RBS comment:
+
+```rbs
+class Registry
+  # sig-gen gap: #1234 — `void` says the return is not part
+  # of the contract; sig-gen reads it as `top` and proposes
+  # the body's `Registry`.
+  def register: (Module class_object) -> void
+end
+```
+
+A comment rather than a `%a{…}` annotation, for three
+reasons: it stays out of the `rigor:v1:` directive namespace
+(`docs/type-specification/rbs-extended.md`), no engine path
+reads it, and `RBS::Parser` binds it to the member, so a
+check can find it on the AST instead of scanning lines. The
+issue number is the load-bearing half — it points at the
+engine work that would let the generator answer, which is
+the [ADR-14](../adr/14-rbs-sig-generation.md) rule that a
+gap pushing you toward hand-written RBS is the more valuable
+signal.
+
+Nothing in the CLI requires this. It is a convention you can
+gate in your own suite: parse `sig/**/*.rbs`, run the
+generator, and fail on a declaration that is neither
+generated-equivalent nor marked. Rigor's own gate is
+`spec/rigor/sig_gen/provenance_spec.rb`
+([ADR-107](../adr/107-checked-types-and-typeless-comments.md)
+G3).
+
 ## What method shapes the generator covers
 
 Slice-by-slice (each shipped via a CHANGELOG entry — this

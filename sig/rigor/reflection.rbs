@@ -3,6 +3,9 @@ module Rigor
     def self?.class_known?: (String | Symbol class_name, ?scope: Scope) -> bool
     def self?.rbs_class_known?: (String | Symbol class_name, ?scope: Scope) -> bool
     def self?.project_declared_class?: (String | Symbol class_name, ?scope: Scope?, ?environment: Environment?) -> bool
+    # sig-gen gap: #838 — sig-gen is RIGHT here: the return is
+    # `:disjoint | :equal | :subclass | :superclass | :unknown`. Applying it is a sig/ edit that has
+    # to clear the precision gate and Steep, so it is P3 of the 2026-09-08 provenance audit.
     def self?.class_ordering: (String | Symbol lhs, String | Symbol rhs, ?scope: Scope) -> Symbol
     def self?.nominal_for_name: (String | Symbol class_name, ?scope: Scope) -> Type::Nominal?
     def self?.singleton_for_name: (String | Symbol class_name, ?scope: Scope) -> Type::Singleton?

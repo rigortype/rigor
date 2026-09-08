@@ -41,6 +41,7 @@ module Rigor
       def self.default: () -> ClassRegistry
       def self.build_default: () -> ClassRegistry
       def initialize: () -> void
+      # sig-gen gap: #836 — a `void` mutator that returns self reads as a tightening to sig-gen. P1.
       def register: (Module class_object) -> void
       def registered?: (Module class_object) -> bool
       def nominal_for: (Module class_object) -> Type::Nominal

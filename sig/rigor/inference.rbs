@@ -45,14 +45,12 @@ module Rigor
       def singleton_def?: (untyped def_node) -> bool
       def self_type_for_class_body: (Array[ClassFrame] class_context) -> Type::t?
       def self_type_for_method_body: (singleton: bool) -> Type::t?
-      def qualified_name_for: (untyped constant_path_node) -> String?
-      def render_constant_path: (untyped node) -> String
       def singleton_context_for: (untyped node) -> Array[ClassFrame]
-      def captured_local_writes: (untyped block_node, Scope base_scope) -> Array[Symbol]
-      def block_introduced_locals: (untyped block_node) -> Set[Symbol]
       def drop_captured_narrowing: (untyped block_node, Scope base_scope) -> Scope
       def classify_closure_escape: (untyped call_node) -> closure_classification
       def record_closure_escape_if_any: (untyped node) -> Scope
+      # sig-gen gap: #836 — `void` is not a wide return to narrow; sig-gen proposes the body's
+      # `[Type::t, Scope] | nil`. P1 of the 2026-09-08 provenance audit.
       def evaluate_block_if_present: (untyped node) -> void
       def eval_class_body: (untyped node, Array[ClassFrame] new_context) -> [Type::t, Scope]
     end
@@ -150,6 +148,7 @@ module Rigor
     class FallbackTracer
       def initialize: () -> void
       def events: () -> Array[Fallback]
+      # sig-gen gap: #836 — a `void` mutator that returns self reads as a tightening to sig-gen. P1.
       def record_fallback: (Fallback event) -> void
       def empty?: () -> bool
       def size: () -> Integer
@@ -157,12 +156,12 @@ module Rigor
                 | () -> Enumerator[Fallback, self]
       def kinds: () -> Array[Class]
       def families: () -> Array[Symbol]
+      # sig-gen gap: #836 — same `void` mutator shape as `record_fallback` above. P1.
       def clear: () -> void
     end
 
     module ScopeIndexer
       def self?.index: (untyped root, default_scope: Scope) -> Hash[untyped, Scope]
-      def self?.build_declaration_overrides: (untyped root) -> Hash[untyped, Type::t]
       def self?.build_declaration_artifacts: (untyped root) -> [Hash[untyped, Type::t], Hash[String, Type::t]]
       def self?.build_in_source_constants: (untyped root, Scope default_scope) -> Hash[String, Type::t]
       def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] identity_table, Hash[String, Type::t] discovered) -> void
@@ -176,8 +175,6 @@ module Rigor
       def self?.constant_writes_for_file: (untyped root) -> Hash[String, untyped]
       def self?.constant_literal_value: (untyped rvalue) -> Array[untyped]?
       def self?.finalize_constant_writes: (Hash[String, Hash[String, untyped]] writes) -> [Hash[String, Type::t], Hash[String, Set[String]]]
-      def self?.qualified_name_for: (untyped constant_path_node) -> String?
-      def self?.render_constant_path: (untyped node) -> String
       def self?.propagate: (untyped node, Hash[untyped, Scope] table, Scope parent_scope) -> void
     end
 

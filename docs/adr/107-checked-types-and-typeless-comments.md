@@ -6,10 +6,11 @@ and `examples/*/lib`; the contract lands in `AGENTS.md` § "Types and Comments" 
 (`f1fdb845`); the gate `spec/docs/type_shaped_comments_spec.rb` lands with the same PR. G2 landed as
 `rigor check --fail-on=warning` in [#827](https://github.com/rigortype/rigor/pull/827) (closing
 [#812](https://github.com/rigortype/rigor/issues/812)); G3
-[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance) is not built yet — § Gates
-records what each one is load-bearing for. Archetype: deliberative. Stakes: mid — reversible in one mechanical
-pass, blast radius is this repository's own tree and the agents working in it, and it does not touch
-the engine's false-positive envelope.
+[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance) lands in
+[#835](https://github.com/rigortype/rigor/pull/835) — § Gates records what each one is load-bearing
+for. Archetype: deliberative. Stakes: mid — reversible in one mechanical pass, blast radius is this
+repository's own tree and the agents working in it, and it does not touch the engine's
+false-positive envelope.
 
 Grounding: the ingestion experiment on [#779](https://github.com/rigortype/rigor/pull/779)'s rebased
 head (`c523b0a3`, § "What the annotations said when Rigor read them"), the five-model authoring probe
@@ -149,8 +150,13 @@ an agent it means "ask Rigor, do not read the neighbours."
 - **Anything else hand-written is a recorded inference gap**, not a preference. Per
   [ADR-14](14-rbs-sig-generation.md) the gap is the more valuable signal: the response is to extend
   the engine, not to backfill by hand because it is quick.
-  [#825](https://github.com/rigortype/rigor/issues/825) specifies the gate that makes the third
-  category recorded rather than assumed; it is queued, not built.
+  [#825](https://github.com/rigortype/rigor/issues/825)'s gate makes the third category recorded
+  rather than assumed. Its seeding audit
+  ([`docs/notes/20260908-sig-provenance-audit.md`](../notes/20260908-sig-provenance-audit.md)) found
+  the category is 671 of 1,052 in-scope declarations, so the gate marks the 15 the generator actively
+  contradicts and pins the rest per file rather than demanding 671 markers — and it inverted this
+  ADR's own prediction: not one of the 15 is an inference incompleteness, and 12 are inference being
+  *more* precise than the declaration means to be.
 
 ### Comments carry prose
 
@@ -243,7 +249,7 @@ view costs a command and cannot be.
 | --- | --- | --- |
 | **G1** `spec/docs/type_shaped_comments_spec.rb` | no `[Type]` after a doc tag; no `#:` / `# @rbs` under the three lib roots; every `@param` names a real parameter of the `def` below; no stale `Slice N will` forward references | lands with #822 |
 | **G2** [#812](https://github.com/rigortype/rigor/issues/812) — `make check` fails on a warning | `def.return-type-mismatch` is a **warning**, so `make check` exits 0 with a contradicted return type in the tree. Without G2 the declared-and-checked half of the invariant is theatre | `--fail-on=warning` in a sibling PR |
-| **G3** [#825](https://github.com/rigortype/rigor/issues/825) — `sig/` provenance | every hand-written entry is generated, authored parameter intent, or a recorded gap | queued |
+| **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a marker on every `tighter-return`, and a per-file pin on the hand-authored residue | lands in #835 |
 
 Already in force, and already serving the invariant: the precision gate
 (`rigor coverage --threshold 0.58 lib`) keeps inference the primary source rather than a fallback;
@@ -307,16 +313,16 @@ Negative:
 - **Reading a type costs a command.** For a human skimming an unfamiliar file that is a real
   regression against a well-maintained typed comment — and the whole bet is that "well-maintained" is
   what 1,121 tags and a 12% contradiction rate say does not happen.
-- **The invariant is not fully gated on the day it is accepted.** G2 is unbuilt, so a contradicted
-  return type in `sig/` still exits 0; G3 is unbuilt, so `sig/` provenance rests on convention. § Gates
-  names both rather than letting the Status line imply otherwise.
+- **The invariant was not fully gated on the day it was accepted.** G2 and G3 both landed within it:
+  `--fail-on=warning` in #827, `sig/` provenance in #835. § Gates names what each holds.
 - **This tree deliberately diverges from what Rigor tells adopting projects to do.** ADR-93 says an
   inline annotation is a contract; here it is forbidden. The divergence is bounded by #823/#824 and
   recorded so it is not read as an inconsistency to "fix" in either direction.
 - **YARD's rendered parameter types are gone** for anyone generating YARD docs from this tree. No
   consumer does today.
 
-Carry-over: #812 (G2), #825 (G3), #823 and #824 (the engine gaps). #822 carries **no changelog
+Carry-over: #823 and #824 (the engine gaps), plus the three `sig-gen` gaps G3's seeding audit
+surfaced (§ "Proposed issues" in the note). #822 carries **no changelog
 fragment** ([ADR-105](105-pr-landing-flow.md)): the diff touches Prism comment lines only, the
 non-comment byte stream of every file is unchanged, and nothing user-facing changed.
 

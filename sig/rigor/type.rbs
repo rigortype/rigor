@@ -29,6 +29,9 @@ module Rigor
 
     class Top
       def self.instance: () -> Top
+      # sig-gen gap: #837 — the body is the literal `"top"`, but `describe` is the polymorphic
+      # surface every type class implements and every sibling declares `String`. P2 of the
+      # 2026-09-08 provenance audit.
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> "top"
       def top: () -> Trinary
@@ -43,6 +46,7 @@ module Rigor
 
     class Bot
       def self.instance: () -> Bot
+      # sig-gen gap: #837 — same shared `describe` contract as `Top#describe` above. P2.
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> "bot"
       def top: () -> Trinary
@@ -200,6 +204,8 @@ module Rigor
       attr_reader method_name: Symbol
       def initialize: (receiver_type: Type::t, method_name: Symbol) -> void
       def describe: (?Symbol verbosity) -> String
+      # sig-gen gap: #837 — the body is the literal `"Method"`; `erase_to_rbs` is the shared surface
+      # every type class implements and the wide `String` is the contract. P2.
       def erase_to_rbs: () -> String
       def top: () -> Trinary
       def bot: () -> Trinary

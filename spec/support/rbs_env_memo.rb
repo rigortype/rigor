@@ -49,7 +49,7 @@ module RbsEnvMemo
       !RSpec.current_example&.metadata&.fetch(:fresh_rbs_env, false)
     end
 
-    # @return [::RBS::Environment, nil] the cached environment for `key`, promoting it to most-recent.
+    # @return the cached environment for `key`, promoting it to most-recent.
     def fetch(key)
       value = cache.delete(key)
       cache[key] = value unless value.nil?

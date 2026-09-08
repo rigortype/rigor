@@ -52,7 +52,7 @@ RSpec.describe "incremental snapshot invalidation on an engine-source edit" do
 
   # One simulated `rigor check --incremental` process: a fresh memo (a real process computes the digest
   # once at boot), a fresh fingerprint, a fresh session, and the snapshot read back off disk.
-  # @return [Array(Array<Diagnostic>, Boolean)] the session's diagnostics and its warm verdict.
+  # @return the session's diagnostics and its warm verdict.
   def check(dir, lib, cache_root)
     Rigor::Cache::EngineSource.reset_process_identity!
     Dir.chdir(dir) do

@@ -24,13 +24,21 @@ module TypeShapedCommentScanner
     end
   end
 
-  # The gated scope (relative to a repo root): Rigor's own product tree. Deliberately excludes
-  # spec/, tool/, bin/, and references/ (vendored upstream, not Rigor code).
+  # The gated scope (relative to a repo root): Rigor's own product tree plus its specs and tools.
+  # Deliberately excludes bin/ and references/ (vendored upstream, not Rigor code), and the paths in
+  # SCAN_EXCLUDES below.
   SCAN_GLOBS = %w[
     lib/**/*.rb
     plugins/*/lib/**/*.rb
     examples/*/lib/**/*.rb
+    spec/**/*.rb
+    tool/**/*.rb
   ].freeze
+
+  # Paths inside the globs that are not Rigor prose: spec fixtures are analyzer INPUTS whose comments
+  # carry `# rigor:` suppression directives and must stay byte-identical, and a vendored tree under
+  # tool/ is upstream code.
+  SCAN_EXCLUDES = %w[/fixtures/ /vendor/].freeze
 
   # YARD tags whose grammar reserves a `[Type]` slot right after the tag (or after the one name
   # token that follows it, for the tags that take a name). Every one of these must be written with
@@ -84,7 +92,7 @@ module TypeShapedCommentScanner
   # description continues on the next line). YARD keeps the name binding either way (the dash lands
   # in the description text), so the delimiter costs nothing a tool reads. `@return` has no name and
   # needs no delimiter. Only the tags that take a name token are checked.
-  DELIMITED_TAG_RE = /\A@(?:param|yieldparam|option|raise)\b[ \t]+\S+[ \t]+—(?:[ \t]|\z)/
+  DELIMITED_TAG_RE = /\A@(?:param|yieldparam|option|raise)\b[ \t]+\S+(?:[ \t]*\z|[ \t]+—(?:[ \t]|\z))/
   NAME_TOKEN_TAG_RE = /\A@(?:param|yieldparam|option|raise)\b[ \t]+\S+/
 
   # R4 (stale forward reference) — narrow on purpose (AGENTS.md: "a check that fires on correct
@@ -96,7 +104,9 @@ module TypeShapedCommentScanner
 
   # Every file in the gated scope under `root`, sorted for stable output.
   def scan_paths(root)
-    SCAN_GLOBS.flat_map { |glob| Dir.glob(File.join(root, glob)) }.sort
+    SCAN_GLOBS.flat_map { |glob| Dir.glob(File.join(root, glob)) }
+              .reject { |path| SCAN_EXCLUDES.any? { |fragment| path.include?(fragment) } }
+              .sort
   end
 
   # Runs all four rules over `source` (a single file's content). `path` is only ever used to label

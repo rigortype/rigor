@@ -113,29 +113,28 @@ module RunnerHelpers
   # other shape that depends on a unique `Dir.pwd`) automatically
   # fall back to the per-call `Dir.mktmpdir` path.
   #
-  # @param source [String, nil] convenience for single-file
+  # @param source — convenience for single-file
   #   fixtures: written to `<workspace>/code.rb`.
-  # @param files [Hash{String => String}] additional files to
+  # @param files — additional files to
   #   write, keyed by relative path inside the workspace.
-  # @param sig [Hash{String => String}] RBS files. When present,
+  # @param sig — RBS files. When present,
   #   content-keyed materialisation kicks in and the resulting
   #   `signature_paths:` entry is threaded into `Configuration`.
-  # @param config [Hash] extra `.rigor.yml`-style overrides
+  # @param config — extra `.rigor.yml`-style overrides
   #   merged into the `Configuration`. `paths:` is always
   #   set to the workspace unless overridden.
-  # @param explain [Boolean] forwarded to `Runner.new(explain:)`.
-  # @param cache_store [Rigor::Cache::Store, :shared, nil]
+  # @param explain — forwarded to `Runner.new(explain:)`.
+  # @param cache_store —
   #   `:shared` (default) reuses the process-wide cache so
   #   RBS core / stdlib resolution stays hot across examples.
   #   Pass `nil` for the cache-disabled (`--no-cache`-equivalent)
   #   behaviour the cache surface tests assert against; pass
   #   an explicit `Cache::Store` to drive isolated cache
   #   behaviour from a spec.
-  # @yieldparam result [Rigor::Analysis::Result]
-  # @yieldparam dir    [String] the project root.
-  # @return [Rigor::Analysis::Result] for callers that prefer
+  # @yieldparam dir — the project root.
+  # @return for callers that prefer
   #   to assert outside the block.
-  # @raise [InternalAnalyzerErrorGuard::AnalyzerCrashed] via
+  # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed — via
   #   {InternalAnalyzerErrorGuard} if the `Result` carries a
   #   diagnostic from either analyzer-crash rescue site — a check
   #   rule raising into the `"internal analyzer error"` diagnostic,

@@ -46,7 +46,7 @@ module Rigor
       # @param result — one analysis run.
       # @param context — which oracle call produced it, so the raise points at the right seam.
       # @return the run's diagnostics, when the run was healthy.
-      # @raise AnalyzerCrashed —
+      # @raise AnalyzerCrashed
       def checked(result, context:)
         return result.diagnostics unless result.crashed?
 

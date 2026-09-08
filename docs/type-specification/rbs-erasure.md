@@ -9,7 +9,7 @@ This document defines the general erasure rules and the hash-shape erasure algor
 - Exact RBS types erase to themselves.
 - Refined types erase to their unrefined base.
 - Unsupported literal kinds erase to their nominal class.
-- Integer ranges erase to `Integer`.
+- Integer ranges erase to `Integer`; Float ranges erase to `Float`.
 - Complement and difference refinements erase to their current domain type.
 - Hash-shape openness, extra-key, and read-only markers are erased by the hash-shape erasure algorithm below.
 - Object shapes erase to a matching named interface when one exists, otherwise a conservative nominal or `top`.

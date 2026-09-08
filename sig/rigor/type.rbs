@@ -1,6 +1,6 @@
 module Rigor
   module Type
-    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Refined | Intersection | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance | BoundMethod | Result | Maybe | App
+    type t = Top | Bot | Dynamic | Constant | IntegerRange | FloatRange | Nominal | Singleton | Union | Difference | Refined | Intersection | Tuple | HashShape | DataClass | DataInstance | StructClass | StructInstance | BoundMethod | Result | Maybe | App
 
     type accepts_mode = :strict | :gradual | :loose
 
@@ -109,6 +109,30 @@ module Rigor
       def describe: (?Symbol verbosity) -> String
       def generic_description: () -> String
       def erase_to_rbs: () -> "Integer"
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class FloatRange
+      ALIAS_NAMES: Hash[[Float, Float], String]
+      attr_reader min: Float
+      attr_reader max: Float
+      def initialize: (Float min, Float max, ?exclude_end: bool) -> void
+      def exclude_end?: () -> bool
+      def canonical_max: () -> Float
+      def universal?: () -> bool
+      def covers?: (untyped value) -> bool
+      # sig-gen gap: #837 — the body returns the alias literals or the generic form, but `describe` is
+      # the polymorphic carrier contract; same shared contract as `Top#describe`.
+      def describe: (?Symbol verbosity) -> String
+      def generic_description: () -> String
+      def erase_to_rbs: () -> "Float"
       def top: () -> Trinary
       def bot: () -> Trinary
       def dynamic: () -> Trinary
@@ -467,6 +491,9 @@ module Rigor
       def self?.negative_int: () -> IntegerRange
       def self?.non_positive_int: () -> IntegerRange
       def self?.universal_int: () -> IntegerRange
+      def self?.float_range: (Float min, Float max, ?exclude_end: bool) -> FloatRange
+      def self?.non_nan_float: () -> FloatRange
+      def self?.finite_float: () -> FloatRange
       def self?.tuple_of: (*Type::t elements) -> Tuple
       def self?.hash_shape_of: (?Hash[untyped, Type::t]? pairs, **untyped options) -> HashShape
       def self?.data_class_of: (members: Array[Symbol], ?class_name: String?) -> DataClass

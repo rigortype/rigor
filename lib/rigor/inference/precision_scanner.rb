@@ -155,7 +155,7 @@ module Rigor
         when Type::Nominal, Type::Singleton,
              Type::DataClass, Type::StructClass then :nominal
         when Type::Tuple, Type::HashShape,
-             Type::IntegerRange, Type::App,
+             Type::IntegerRange, Type::FloatRange, Type::App,
              Type::DataInstance, Type::StructInstance,
              Type::BoundMethod                  then :shaped
         when Type::Refined                      then :refined

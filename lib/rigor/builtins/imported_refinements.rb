@@ -59,7 +59,10 @@ module Rigor
         "non-empty-lowercase-string" => -> { Type::Combinator.non_empty_lowercase_string },
         "non-empty-uppercase-string" => -> { Type::Combinator.non_empty_uppercase_string },
         "literal-string" => -> { Type::Combinator.literal_string },
-        "non-empty-literal-string" => -> { Type::Combinator.non_empty_literal_string }
+        "non-empty-literal-string" => -> { Type::Combinator.non_empty_literal_string },
+        # ADR-109 WD4 — names for the two Float ranges people mean most; each is an alias of a range.
+        "non-nan-float" => -> { Type::Combinator.non_nan_float },
+        "finite-float" => -> { Type::Combinator.finite_float }
       }.freeze
       private_constant :REGISTRY
 
@@ -155,6 +158,22 @@ module Rigor
           return nil if lo.is_a?(Integer) && hi.is_a?(Integer) && lo > hi
 
           Type::Combinator.integer_range(lo || Type::IntegerRange::NEG_INFINITY, hi || Type::IntegerRange::POS_INFINITY)
+        },
+        # ADR-109 WD4 — `Float[R]` is the set of Floats `R.cover?` accepts. A missing or `nil` endpoint
+        # is the infinity on that side, except that `nil..nil` covers NaN in Ruby and so is `Float`
+        # itself; an Integer endpoint coerces (`(0..1).cover?(0.5)` is true); an exclusive end is kept
+        # (the carrier canonicalises it for equality), and an empty range declines.
+        "Float" => lambda { |range|
+          return Type::Combinator.nominal_of("Float") if range.begin.nil? && range.end.nil?
+
+          lo = ImportedRefinements.float_range_endpoint(range.begin, -Float::INFINITY)
+          hi = ImportedRefinements.float_range_endpoint(range.end, Float::INFINITY)
+          return nil if lo.nil? || hi.nil?
+
+          exclusive = range.exclude_end? && !range.end.nil?
+          return nil if lo > (exclusive ? hi.prev_float : hi)
+
+          Type::Combinator.float_range(lo, hi, exclude_end: exclusive)
         }
       }.freeze
       private_constant :RANGE_HEAD_BUILDERS
@@ -227,6 +246,16 @@ module Rigor
 
       def range_head_builder(name)
         RANGE_HEAD_BUILDERS[name]
+      end
+
+      # A Float-head range endpoint as a double: `nil` (absent) is `default`, an Integer literal
+      # coerces, a non-NaN Float stands, anything else declines with `nil`.
+      def float_range_endpoint(value, default)
+        case value
+        when nil then default
+        when Integer then value.to_f
+        when Float then value.nan? ? nil : value
+        end
       end
 
       def known?(name)
@@ -305,12 +334,15 @@ module Rigor
         SYMBOL_LITERAL = /:(?<value>[a-zA-Z_][a-zA-Z0-9_]*[?!=]?)/
         STRING_LITERAL = /"(?<value>[^"\\]*)"/
         # ADR-109 — a Ruby range literal at type-arg position, `1..10` / `1...10` / `1..` / `..10` /
-        # `nil..nil`. Tried before `SIGNED_INT` so the leading integer is not consumed on its own; the
-        # operator is mandatory, so a bare integer never matches. `..` with nothing on either side is
-        # not Ruby and is rejected after the match.
-        RANGE_LITERAL = /(?<lo>-?\d+|nil)?\s*(?<op>\.\.\.?)\s*(?<hi>-?\d+|nil)?/
+        # `nil..nil`, and for the Float head `0.0...1.0` / `1e-3..` / `-Float::INFINITY..Float::MAX`.
+        # Tried before the class-name and integer scans so `Float::INFINITY..` and `1..10` are not
+        # consumed as a class name or a bare integer; the operator is mandatory, so a bare integer or
+        # constant never matches. `..` with nothing on either side is not Ruby and is rejected after
+        # the match.
+        RANGE_ENDPOINT = /-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|Float::INFINITY|Float::MAX)|nil/
+        RANGE_LITERAL = /(?<lo>#{RANGE_ENDPOINT})?\s*(?<op>\.\.\.?)\s*(?<hi>#{RANGE_ENDPOINT})?/
         private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT, :SYMBOL_LITERAL, :STRING_LITERAL,
-                         :RANGE_LITERAL
+                         :RANGE_ENDPOINT, :RANGE_LITERAL
 
         def parse_type_ast
           if (class_name = @scanner.scan(CLASS_NAME))
@@ -418,10 +450,10 @@ module Rigor
         end
 
         def parse_single_type_arg_ast
-          if (class_name = @scanner.scan(CLASS_NAME))
-            parse_class_arg_tail_ast(class_name)
-          elsif (range = scan_range_literal)
+          if (range = scan_range_literal)
             range
+          elsif (class_name = @scanner.scan(CLASS_NAME))
+            parse_class_arg_tail_ast(class_name)
           elsif (literal = @scanner.scan(SIGNED_INT))
             TypeNode::IntegerLiteral.new(value: Integer(literal))
           elsif @scanner.scan(SYMBOL_LITERAL)
@@ -474,10 +506,19 @@ module Rigor
           )
         end
 
+        # The endpoint as the Ruby value the token denotes: an Integer literal stays an Integer (the
+        # `Integer` head needs to tell `1` from `1.0`), a Float literal or one of the four spelled
+        # constants becomes the double.
         def range_endpoint(token)
-          return nil if token.nil? || token == "nil"
-
-          Integer(token)
+          case token
+          when nil, "nil" then nil
+          when "Float::INFINITY" then Float::INFINITY
+          when "-Float::INFINITY" then -Float::INFINITY
+          when "Float::MAX" then Float::MAX
+          when "-Float::MAX" then -Float::MAX
+          when /[.eE]/ then Float(token)
+          else Integer(token)
+          end
         end
 
         def skip_ws

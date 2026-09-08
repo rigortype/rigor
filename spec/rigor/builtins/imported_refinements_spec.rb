@@ -168,6 +168,46 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
       expect(described_class.parse("int_mask[1..3]")).to be_nil # parses as Constant<Range>; the builder declines it
     end
 
+    # ADR-109 WD4 — `Float[R]`: the same `cover?` definition over doubles.
+    it "parses Float[a..b] and Float[a...b] with Float, Integer, and constant endpoints" do
+      expect(described_class.parse("Float[0.0..1.0]")).to eq(Rigor::Type::Combinator.float_range(0.0, 1.0))
+      expect(described_class.parse("Float[0.0...1.0]"))
+        .to eq(Rigor::Type::Combinator.float_range(0.0, 1.0, exclude_end: true))
+      expect(described_class.parse("Float[0..1]")).to eq(Rigor::Type::Combinator.float_range(0.0, 1.0))
+      expect(described_class.parse("Float[-2.5e-3..1e3]")).to eq(Rigor::Type::Combinator.float_range(-0.0025, 1000.0))
+      expect(described_class.parse("Float[0.0..Float::INFINITY]"))
+        .to eq(Rigor::Type::Combinator.float_range(0.0, Float::INFINITY))
+      expect(described_class.parse("Float[-Float::MAX..Float::MAX]")).to eq(Rigor::Type::Combinator.finite_float)
+      expect(described_class.parse("Float[0.0...Float::INFINITY]"))
+        .to eq(Rigor::Type::Combinator.float_range(0.0, Float::INFINITY, exclude_end: true))
+    end
+
+    it "reads a missing or nil Float endpoint as the infinity on that side" do
+      expect(described_class.parse("Float[0.0..]")).to eq(Rigor::Type::Combinator.float_range(0.0, Float::INFINITY))
+      expect(described_class.parse("Float[..1.0]")).to eq(Rigor::Type::Combinator.float_range(-Float::INFINITY, 1.0))
+      expect(described_class.parse("Float[-Float::INFINITY..]")).to eq(Rigor::Type::Combinator.non_nan_float)
+      expect(described_class.parse("Float[nil..1.0]")).to eq(Rigor::Type::Combinator.float_range(-Float::INFINITY, 1.0))
+    end
+
+    it "normalises the whole-Float range to Nominal[Float], because Ruby's nil..nil covers NaN" do
+      expect(described_class.parse("Float[nil..nil]")).to eq(Rigor::Type::Combinator.nominal_of("Float"))
+    end
+
+    it "declines an empty Float range" do
+      expect(described_class.parse("Float[2.0..1.0]")).to be_nil
+      expect(described_class.parse("Float[1.0...1.0]")).to be_nil
+      expect(described_class.parse("Float[Float::INFINITY...Float::INFINITY]")).to be_nil
+    end
+
+    it "resolves the two reserved Float names" do
+      expect(described_class.parse("non-nan-float")).to eq(Rigor::Type::Combinator.non_nan_float)
+      expect(described_class.parse("finite-float")).to eq(Rigor::Type::Combinator.finite_float)
+    end
+
+    it "keeps an Integer head off Float endpoints" do
+      expect(described_class.parse("Integer[0.0..1.0]")).to be_nil
+    end
+
     it "still parses the deprecated int<min, max> alias (ADR-109 WD3)" do
       expect(described_class.parse("int<5, 10>"))
         .to eq(Rigor::Type::Combinator.integer_range(5, 10))

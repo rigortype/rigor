@@ -129,6 +129,7 @@ A short reference:
 | --- | --- |
 | Empty / non-empty | `non-empty-string`, `non-empty-array[T]`, `non-empty-hash[K, V]` |
 | Integer ranges | `positive-int`, `non-negative-int`, `negative-int`, `non-positive-int`, `non-zero-int`, `Integer[min..max]` |
+| Float ranges | `Float[0.0..1.0]`, `Float[0.0...1.0]`, `Float[0.0..]`, `non-nan-float`, `finite-float` |
 | String predicates | `lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`, `literal-string` |
 | Paired complements | `non-lowercase-string`, `non-uppercase-string`, `non-numeric-string` |
 | Composed | `non-empty-lowercase-string`, `non-empty-uppercase-string`, `non-empty-literal-string` |

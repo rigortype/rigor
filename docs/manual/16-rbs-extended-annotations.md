@@ -122,9 +122,11 @@ The right-hand side of `return:`, `param:`, `assert*`, and
 
 Refinement payloads support the parameterised forms
 `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`,
-and the bounded-integer form `Integer[1..10]`, written with a
-Ruby range literal (`1...10`, `1..`, `..10`; the PHPStan-style
-`int<1, 10>` still parses but is deprecated). Type-argument
+and the bounded numeric forms `Integer[1..10]` and
+`Float[0.0...1.0]`, written with a Ruby range literal (`1...10`,
+`1..`, `..10`; the PHPStan-style `int<1, 10>` still parses but is
+deprecated), plus the Float names `non-nan-float` and
+`finite-float`. Type-argument
 positions also accept Symbol / String literal tokens and unions
 of them — `pick_of[T, :name | :email]`,
 `Pick[T, "name" | "email"]` — each lifted to a `Constant<value>`.

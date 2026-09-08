@@ -81,7 +81,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/source.rbs" => 9,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 4,
-  "sig/rigor/type.rbs" => 209
+  "sig/rigor/type.rbs" => 217
 }.freeze
 
 module SigProvenanceSpecHelpers

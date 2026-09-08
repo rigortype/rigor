@@ -244,6 +244,10 @@ module Rigor
               # whole dispatch to Dynamic). The refinement-aware promotions (`String#upcase` →
               # `uppercase-string`, …) run in their own catalog tier ABOVE this one, so they still win.
               receiver_descriptor(receiver.base)
+            when Type::FloatRange
+              # ADR-109 WD4 — a bounded Float is a Float for every method the fold tiers do not own.
+              # (`IntegerRange` has no arm here yet: #842.)
+              ["Float", :instance, []]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end

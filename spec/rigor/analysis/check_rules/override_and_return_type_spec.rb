@@ -260,6 +260,78 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(return_diags(result)).to be_empty
       end
     end
+
+    # ADR-110 WD3 / #856. `Reflection`'s lookup reads RBS's fully resolved method table, so a signature
+    # written about a base answers for every subclass that inherits the name. Before the `defined_on?`
+    # gate this rule compared an override's body against that inherited contract and reported the
+    # override wrong — the warning half of #744, alongside the `undefined method ... for nil` the same
+    # declaration produced on the subclass's own working code.
+    describe "defined_on? gate (an inherited declaration is not this method's contract)" do
+      let(:override_source) do
+        <<~RUBY
+          class Base
+            def target_class
+              nil
+            end
+          end
+
+          class RecordList < Base
+            def target_class
+              "Issue"
+            end
+          end
+        RUBY
+      end
+
+      it "stays silent when only the ancestor declares the signature the override disagrees with" do
+        result = analyze(override_source, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def target_class: () -> nil
+          end
+
+          class RecordList < Base
+          end
+        RBS
+        expect(return_diags(result)).to be_empty
+      end
+
+      it "still fires on the class that DECLARES the signature its own body violates" do
+        # The gate must not silence the base itself: `Base` owns this declaration, so the comparison
+        # is against a contract written about this very method.
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def target_class
+              "Issue"
+            end
+          end
+        RUBY
+          class Base
+            def target_class: () -> nil
+          end
+        RBS
+        diag = return_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.method_name).to eq("target_class")
+      end
+
+      it "still fires when the override carries a declaration of its own" do
+        # Both sides authored: `RecordList` declares the contract, and its body violates it. Nothing
+        # about this comparison is inherited, so the gate leaves it alone.
+        result = analyze(override_source, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def target_class: () -> nil
+          end
+
+          class RecordList < Base
+            def target_class: () -> Integer
+          end
+        RBS
+        diag = return_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.method_name).to eq("target_class")
+        expect(diag.message).to include("declared Integer")
+      end
+    end
   end
 
   describe "def.override-visibility-reduced" do

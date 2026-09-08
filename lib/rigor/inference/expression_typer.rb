@@ -1196,6 +1196,55 @@ module Rigor
         dynamic_top
       end
 
+      # ADR-110 WD1 / #856 — the receiver's own `def` outranks a declaration that only an ANCESTOR carries.
+      #
+      # RBS resolves through the fully built method table, so `RbsDispatch` answers a subclass call with a
+      # signature written about the base. redmine's `FieldFormat::Base#target_class` honestly declares
+      # `-> nil`; `RecordList` overrides it with a real lookup, and every call on a `RecordList` receiver
+      # typed as `nil` and fired `undefined method ... for nil` on the subclass's own working code (#744).
+      # A signature is authoritative for a receiver only where someone wrote it about that receiver;
+      # reaching it through an ancestor is a lookup convenience, not an act of authorship.
+      #
+      # This is {#try_local_def_dispatch}'s shape one level up — there the enclosing class shadows a
+      # top-level `def`, here the receiver's class shadows an ancestor's declaration — and it answers the
+      # same way: re-type the override's body, and when that is not possible answer `Dynamic[Top]` rather
+      # than let the inherited declaration speak for a method it does not describe.
+      #
+      # Three conditions, and the third is the blast radius. Clause A of the ADR (an own source `def`, no
+      # own declaration) does NOT by itself stay clear of [ADR-43]: `class Foo; def each; end` inheriting
+      # `Enumerable#each` satisfies it, and disqualifying bundled declarations that way is the blanket fix
+      # ADR-43 rejected — the same reason {#instance_self_answers?}'s RBS arm is own-class only. So the
+      # ancestor whose declaration is being disqualified must itself be PROJECT-declared: a project sidecar
+      # describes the source under analysis, while a bundled signature describes a class the project does
+      # not own, where a project `def` is a monkey-patch and [ADR-17] owns the question.
+      # `project_declared_class?` fail-softs to false, so an unattributable environment changes nothing.
+      def try_overriding_def_dispatch(node, receiver, arg_types)
+        return nil unless user_inference_receiver?(receiver)
+
+        class_name = receiver.class_name
+        return nil if class_name.nil?
+        # `Scope#user_def_for`, not `discovered_method?`: the cross-file table deliberately withholds a
+        # plain instance `def` under the ADR-17 monkey-patch contract, and this gate must see one.
+        return nil if scope.user_def_for(class_name, node.name).nil?
+
+        definition = safe_rbs_method_definition(class_name, node.name, :instance)
+        return nil if definition.nil?
+        return nil if rbs_declared_on_class?(definition, class_name)
+        return nil unless project_declared_owner?(definition)
+
+        try_user_method_inference(receiver, node, arg_types) || dynamic_top
+      end
+
+      # Whether the class an inherited declaration was written about is one the project declares itself.
+      def project_declared_owner?(definition)
+        defined_in = definition.defined_in
+        return false if defined_in.nil?
+
+        Rigor::Reflection.project_declared_class?(defined_in.to_s, scope: scope)
+      rescue StandardError
+        false
+      end
+
       # Issue #618 — whether the call's enclosing `self` already answers `method_name`. Only a `self` whose
       # class is KNOWN participates: at genuine top level, and inside a block whose `self` is unmodelled,
       # `scope.self_type` is nil, the predicate is false, and the historical top-level binding stands — that
@@ -1404,6 +1453,9 @@ module Rigor
         # the answer back to `Array[union]`.
         block_fold = try_receiver_block_folds(node, receiver, arg_types)
         return block_fold if block_fold
+
+        overriding_def = try_overriding_def_dispatch(node, receiver, arg_types)
+        return overriding_def if overriding_def
 
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,

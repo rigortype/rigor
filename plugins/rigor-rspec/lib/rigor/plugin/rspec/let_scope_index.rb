@@ -45,13 +45,11 @@ module Rigor
         # ADR-52 slice 5a — every `let` / `subject` name declared anywhere in the file, across all describe
         # scopes. Feeds the plugin's `dynamic_return file_methods:` gate: the engine only consults the rule
         # for a call whose name appears here; the precise line-scoped resolution stays in `let_block_at`.
-        # @return [Array<Symbol>]
         def let_names
           @records.flat_map { |rec| rec.lets.keys }.uniq
         end
 
         # Resolves a `let` name at the given line by walking records innermost to outermost.
-        # @return [Prism::BlockNode, nil]
         def let_block_at(line, name)
           name_sym = name.to_sym
           records_at(line).reverse.each do |rec|
@@ -62,7 +60,6 @@ module Rigor
 
         # Resolves the `describe`-anchor constant name at the given line. The innermost describe with a
         # constant anchor wins; describe-with-String anchors are skipped.
-        # @return [String, nil]
         def describe_const_at(line)
           records_at(line).reverse.each do |rec|
             return rec.describe_const if rec.describe_const

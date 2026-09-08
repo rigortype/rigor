@@ -134,7 +134,7 @@ module Rigor
 
       private
 
-      # @return [Rigor::Type, nil] the receiver's inferred type, or nil when the engine raises on a synthetic
+      # @return the receiver's inferred type, or nil when the engine raises on a synthetic
       #   / unrecognised node (mirrors rigor-sorbet's defensive degrade).
       def receiver_type_of(receiver, scope)
         scope.type_of(receiver)

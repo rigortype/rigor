@@ -442,11 +442,10 @@ module Rigor
       EMPTY_CATALOG_BUNDLE = { catalog: Catalog.new.freeze!, sigil_by_path: {}, parse_errors_by_path: {} }.freeze
       private_constant :EMPTY_CATALOG_BUNDLE
 
-      # @param root [String] directory or single file.
-      # @param catalog [Catalog]
-      # @param sigil_by_path [Hash{String=>Symbol}] accumulator: harvested file → detected sigil level.
-      # @param parse_errors_by_path [Hash{String=>Array<Hash>}] accumulator: file → `{kind:,line:,column:}` tuples.
-      # @param extensions [Array<String>] file extensions to accept (e.g. `[".rb"]` for project source,
+      # @param root directory or single file.
+      # @param sigil_by_path accumulator: harvested file → detected sigil level.
+      # @param parse_errors_by_path accumulator: file → `{kind:,line:,column:}` tuples.
+      # @param extensions file extensions to accept (e.g. `[".rb"]` for project source,
       #   `[".rbi"]` for Sorbet RBI tree).
       def harvest_path(root, catalog, sigil_by_path, parse_errors_by_path, extensions)
         absolute = canonicalize(root)

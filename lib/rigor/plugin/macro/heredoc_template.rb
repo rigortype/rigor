@@ -152,7 +152,7 @@ module Rigor
         class ReturnsFromArg
           attr_reader :position, :plugin_id, :fact
 
-          # @return [ReturnsFromArg, nil] coerced value class for a Hash / nil / ReturnsFromArg input. Raises
+          # @return coerced value class for a Hash / nil / ReturnsFromArg input. Raises
           #   on any other shape so manifest authoring failures surface at construction time.
           def self.coerce(value)
             return nil if value.nil?

@@ -32,7 +32,7 @@ module Rigor
         freeze
       end
 
-      # @return [Array<Rigor::Plugin::TypeNodeResolver>] ordered
+      # @return ordered
       #   resolver instances, in plugin-registration order.
       attr_reader :resolvers
 

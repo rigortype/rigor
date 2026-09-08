@@ -20,15 +20,14 @@ module Rigor
     module MeasurementIntegrityWarning
       module_function
 
-      # @param report [MutationProtectionReport, FusedProtectionReport] both expose the two counts.
-      # @param err [IO] the stream to warn on.
-      # @param floor [Integer] {CoverageMutation::HARNESS_ERROR_WARN_FLOOR}.
-      # @return [void]
+      # @param report both expose the two counts.
+      # @param err the stream to warn on.
+      # @param floor {CoverageMutation::HARNESS_ERROR_WARN_FLOOR}.
       def emit(report, err:, floor:)
         lines_for(report, floor: floor).each { |line| err.puts(line) }
       end
 
-      # @return [Array<String>] the warnings this report earns, widest consequence first.
+      # @return the warnings this report earns, widest consequence first.
       def lines_for(report, floor:)
         lines = []
         unmeasured = report.respond_to?(:unmeasured_files) ? report.unmeasured_files : 0 # see CoverageCommand

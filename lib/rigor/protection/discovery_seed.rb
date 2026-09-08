@@ -30,12 +30,12 @@ module Rigor
     module DiscoverySeed
       module_function
 
-      # @param paths [Array<String>] the measured file set; the seed spans these files only, exactly as Tier 1's
+      # @param paths the measured file set; the seed spans these files only, exactly as Tier 1's
       #   seed does. A class declared outside them stays unknown.
-      # @param environment [Rigor::Environment] the plugin-aware environment, built once by the caller.
-      # @param target_ruby [String] Prism parse version for the parameter-inference pre-pass.
-      # @param workers [Integer] worker count for that pre-pass (0 keeps it sequential).
-      # @return [Hash{Symbol => Object}] frozen seed tables; empty when the paths yield nothing.
+      # @param environment the plugin-aware environment, built once by the caller.
+      # @param target_ruby Prism parse version for the parameter-inference pre-pass.
+      # @param workers worker count for that pre-pass (0 keeps it sequential).
+      # @return frozen seed tables; empty when the paths yield nothing.
       def build(paths:, environment:, target_ruby:, workers: 0)
         tables = discovery_tables(paths)
         params = Inference::ParameterInferenceCollector.collect(
@@ -51,8 +51,8 @@ module Rigor
       # builds. Built ONCE on the parent (before {CLI::MutationForkScan} forks, so children copy-on-write
       # inherit it), and cheap: ≈0.36s over Rigor's own 349-file `lib`.
       #
-      # @param paths [Array<String>] the measured file set, in canonical (caller) order.
-      # @return [Hash{String => Hash}] per-path bundles, the input {#tables_for_buffer} re-folds.
+      # @param paths the measured file set, in canonical (caller) order.
+      # @return per-path bundles, the input {#tables_for_buffer} re-folds.
       def bundles(paths:)
         Inference::ScopeIndexer.discovered_project_index_incremental(paths, seed_bundles: {}).fetch(:bundles)
       end
@@ -69,10 +69,10 @@ module Rigor
       #
       # ≈15ms over 349 files (one re-walk plus a whole-set fold), against ≈210ms for one mutant's analysis.
       #
-      # @param paths [Array<String>] the measured file set, in the same order {#bundles} was built from.
-      # @param bundles [Hash{String => Hash}] that bundle set.
-      # @param buffer [Rigor::Analysis::BufferBinding] the mutant binding (logical path → mutant bytes).
-      # @return [Hash{Symbol => Object}] frozen seed tables.
+      # @param paths the measured file set, in the same order {#bundles} was built from.
+      # @param bundles that bundle set.
+      # @param buffer the mutant binding (logical path → mutant bytes).
+      # @return frozen seed tables.
       def tables_for_buffer(paths:, bundles:, buffer:)
         index = Inference::ScopeIndexer.discovered_project_index_incremental(
           paths, seed_bundles: bundles, buffer: buffer

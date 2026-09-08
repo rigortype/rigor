@@ -29,13 +29,11 @@ module Rigor
         # bucket on trust.
         Undecidable = Data.define(:fqn, :path, :line, :reason)
 
-        # @param declarations [Array<Scan::Declaration>]
-        # @param references [Array<Scan::Reference>]
-        # @param root_fqns [Enumerable<String>] declarations that are entry points regardless of who references
+        # @param root_fqns declarations that are entry points regardless of who references
         #   them (config-declared globs in this slice; plugin-supplied roots are #349).
-        # @param foreign [#call] predicate answering "is this FQN owned by something outside the project?" —
+        # @param foreign predicate answering "is this FQN owned by something outside the project?" —
         #   a reopened gem or stdlib class must never be a candidate (WD6). Defaults to "nothing is foreign".
-        # @param dynamic_uses [Array<Scan::DynamicUse>] sites where a constant is reached by name at runtime.
+        # @param dynamic_uses sites where a constant is reached by name at runtime.
         #   A literal-argument site contributes a real reference; a dynamic one taints a namespace (WD4).
         def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], foreign: ->(_fqn) { false })
           @declarations = declarations

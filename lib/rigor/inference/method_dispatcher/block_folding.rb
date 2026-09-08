@@ -46,13 +46,9 @@ module Rigor
         # a finitely-sized receiver it is `Constant[size]`.
         COUNT_METHOD = :count
 
-        # @param receiver    [Rigor::Type, nil]
-        # @param method_name [Symbol]
-        # @param args        [Array<Rigor::Type>]
-        # @param block_type  [Rigor::Type, nil] inferred return type of
+        # @param block_type inferred return type of
         #   the call's block. `nil` means "no block at the call site"
         #   and disqualifies every rule here.
-        # @return [Rigor::Type, nil]
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name
@@ -135,7 +131,6 @@ module Rigor
           end
         end
 
-        # @return [:always_true, :always_false, :bool, nil]
         # rubocop:disable-next Metrics/CyclomaticComplexity
         def predicate_decision(method_name, truthiness, emptiness)
           case method_name
@@ -167,7 +162,6 @@ module Rigor
           )
         end
 
-        # @return [:empty, :non_empty, :unknown]
         def receiver_emptiness(receiver)
           case receiver
           when Type::Tuple

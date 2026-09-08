@@ -49,9 +49,9 @@ module Rigor
       SPELLING_PATTERN = /%a\{[^}]*\}/
       private_constant :SPELLING_PATTERN
 
-      # @param path [String] the buffer's readable path, as {SignatureSources.source_path} renders it.
-      # @param buffer [String] the synthesized RBS the position was read out of.
-      # @return [InlineAnchor, nil] nil when `path` is not a Ruby file — a real `.rbs` needs no mapping,
+      # @param path the buffer's readable path, as {SignatureSources.source_path} renders it.
+      # @param buffer the synthesized RBS the position was read out of.
+      # @return nil when `path` is not a Ruby file — a real `.rbs` needs no mapping,
       #   and its own line numbers are already the ones a reader can open.
       def self.for(path:, buffer:)
         return nil unless path.to_s.end_with?(RUBY_EXTENSION)
@@ -61,7 +61,7 @@ module Rigor
 
       # One-shot form, for a caller that holds a `[path, buffer, line]` triple and no anchor.
       #
-      # @return [Integer] the `.rb` line, or `buffer_line` unchanged when there is nothing to map.
+      # @return the `.rb` line, or `buffer_line` unchanged when there is nothing to map.
       def self.ruby_line(path:, buffer:, buffer_line:, spelling: nil)
         anchor = self.for(path: path, buffer: buffer)
         return buffer_line if anchor.nil?
@@ -75,10 +75,10 @@ module Rigor
         @ruby_lines = nil
       end
 
-      # @param buffer_line [Integer] 1-based, counting into the synthesized buffer.
-      # @param spelling [String, nil] the annotation's own text (`"%a{pure}"`); read off the buffer line
+      # @param buffer_line 1-based, counting into the synthesized buffer.
+      # @param spelling the annotation's own text (`"%a{pure}"`); read off the buffer line
       #   when the caller does not already hold it.
-      # @return [Integer] the 1-based line of the same annotation in the Ruby file.
+      # @return the 1-based line of the same annotation in the Ruby file.
       def line_for(buffer_line, spelling: nil)
         spelling = normalize(spelling) || spelling_at(buffer_line)
         return buffer_line if spelling.nil?

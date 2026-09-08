@@ -37,22 +37,22 @@ module Rigor
       #   that could not run is NOT a clean check and the report must never let it read as one.
       # - `route` / `reason` — the headline override, or nil to leave the presence-only recommendation standing.
       Report = Data.define(:status, :detail, :route, :reason) do
-        # @return [Boolean] true when the check did not complete — the caller must then say so rather than let the
+        # @return true when the check did not complete — the caller must then say so rather than let the
         #   fallback recommendation read as an all-clear.
         def failed?
           status == :error
         end
       end
 
-      # @param config [String, nil] the config filename the presence probe found, relative to `root`.
-      # @param root [String] project root (the analysis itself resolves paths against the process cwd, as
+      # @param config the config filename the presence probe found, relative to `root`.
+      # @param root project root (the analysis itself resolves paths against the process cwd, as
       #   `rigor check` does).
       def initialize(config:, root: Dir.pwd)
         @config = config
         @root = root
       end
 
-      # @return [Report] never raises — every failure degrades to a `:error`/`:skipped` report whose `route` is nil,
+      # @return never raises — every failure degrades to a `:error`/`:skipped` report whose `route` is nil,
       #   leaving the presence-only headline in charge.
       def run
         if @config.nil?

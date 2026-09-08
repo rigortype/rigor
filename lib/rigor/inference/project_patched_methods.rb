@@ -28,7 +28,7 @@ module Rigor
 
       attr_reader :by_key
 
-      # @param entries [Array<Entry>] flat list of declarations observed during the pre-pass.
+      # @param entries flat list of declarations observed during the pre-pass.
       #   First-write-wins on `(class_name, method_name, kind)` duplicates so the
       #   `pre-eval.duplicate-declaration` diagnostic emission stays decoupled from registry behaviour.
       def initialize(entries: [])
@@ -39,7 +39,7 @@ module Rigor
         freeze
       end
 
-      # @return [Entry, nil] the recorded entry for the given `(class_name, method_name, kind)` triple,
+      # @return the recorded entry for the given `(class_name, method_name, kind)` triple,
       #   or `nil` when no pre-eval file declared it.
       def lookup(class_name:, method_name:, kind:)
         @by_key[[class_name, method_name, kind]]

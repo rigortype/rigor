@@ -24,8 +24,8 @@ module Rigor
       module Acronyms
         module_function
 
-        # @param contents [String, nil] the source of `config/initializers/inflections.rb`.
-        # @return [Array<String>] declared acronyms in declaration order. Empty for a missing / unparseable
+        # @param contents the source of `config/initializers/inflections.rb`.
+        # @return declared acronyms in declaration order. Empty for a missing / unparseable
         #   file, or one that declares none — which leaves composition exactly as it was.
         def discover(contents)
           return [] if contents.nil? || contents.empty?
@@ -51,9 +51,9 @@ module Rigor
         # camelization of the acronym appears at a camel-word boundary — `Oauth` in `OauthMetadata` and in
         # `WellKnown::Oauth`, but never the `Oauth` inside a hypothetical `Xoauth`.
         #
-        # @param name [String] e.g. `"Activitypub::CollectionsController"`.
-        # @param acronyms [Enumerable<String>] as returned by {.discover}.
-        # @return [String] e.g. `"ActivityPub::CollectionsController"`.
+        # @param name e.g. `"Activitypub::CollectionsController"`.
+        # @param acronyms as returned by {.discover}.
+        # @return e.g. `"ActivityPub::CollectionsController"`.
         def apply(name, acronyms)
           acronyms.reduce(name) do |current, acronym|
             plain = Rigor::Plugin::Inflector.camelize(acronym.to_s.downcase)

@@ -93,8 +93,8 @@ module Rigor
       # `return nil unless File.file?(config)` gate: the miss shaped the result and left no edge for the
       # file's later appearance.
       #
-      # @param path [String] project path; relative paths expand against the working directory
-      # @return [Boolean] `File.file?`'s answer, unchanged
+      # @param path project path; relative paths expand against the working directory
+      # @return `File.file?`'s answer, unchanged
       def file?(path)
         probe(path) { |absolute| File.file?(absolute) }
       end
@@ -103,8 +103,8 @@ module Rigor
       # existence row. The discovery shape (`next [] unless directory?(root)` before a `Dir.glob`) depends
       # on the root existing exactly as a config read depends on the config file existing.
       #
-      # @param path [String] project path; relative paths expand against the working directory
-      # @return [Boolean] `File.directory?`'s answer, unchanged
+      # @param path project path; relative paths expand against the working directory
+      # @return `File.directory?`'s answer, unchanged
       def directory?(path)
         probe(path) { |absolute| File.directory?(absolute) }
       end
@@ -131,7 +131,7 @@ module Rigor
         body
       end
 
-      # @return [Rigor::Cache::Descriptor] frozen snapshot of every file / URL the boundary has read so far.
+      # @return frozen snapshot of every file / URL the boundary has read so far.
       #   Calling this multiple times yields equal descriptors; subsequent reads expand the underlying record
       #   tables.
       def cache_descriptor

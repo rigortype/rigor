@@ -16,8 +16,8 @@ module Rigor
     # standard mutation-testing hazard the `ensure` cannot cover; callers running this in CI accept that, as
     # `mutant` / Stryker do.)
     class TestSuiteOracle
-      # @param command [Array<String>] the test command (the runner hook)
-      # @param runner [#call, nil] `runner.call(command) -> true iff the suite
+      # @param command the test command (the runner hook)
+      # @param runner `runner.call(command) -> true iff the suite
       #   passed`. Defaults to shelling out via `system`.
       def initialize(command:, runner: nil)
         @command = command
@@ -31,9 +31,9 @@ module Rigor
       end
 
       # Killed iff the mutant turns the suite red. Restores `original` afterward.
-      # @param path [String] the file to (temporarily) overwrite with the mutant
-      # @param original [String] the clean bytes to restore
-      # @param mutant_source [String] the mutated bytes to test against
+      # @param path the file to (temporarily) overwrite with the mutant
+      # @param original the clean bytes to restore
+      # @param mutant_source the mutated bytes to test against
       def killed?(path:, original:, mutant_source:)
         File.write(path, mutant_source)
         !@runner.call(@command)

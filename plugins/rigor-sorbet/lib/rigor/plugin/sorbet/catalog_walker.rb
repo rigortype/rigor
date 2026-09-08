@@ -26,10 +26,10 @@ module Rigor
 
         module_function
 
-        # @param root [Prism::Node] the file's program node.
-        # @param catalog [Catalog] mutable; signatures are recorded into it.
-        # @param path [String] file path used for diagnostic provenance.
-        # @return [Array<ParseError>] errors observed during the walk; empty when the file is sig-clean.
+        # @param root the file's program node.
+        # @param catalog mutable; signatures are recorded into it.
+        # @param path file path used for diagnostic provenance.
+        # @return errors observed during the walk; empty when the file is sig-clean.
         def walk(root:, catalog:, path:)
           state = State.new(catalog: catalog, path: path)
           walk_node(root, state, lexical_path: [], in_singleton_class: false)

@@ -51,14 +51,14 @@ module Rigor
     # migration note and a user's `bleeding_edge:` list both key on.
     #
     # @!attribute id
-    #   @return [String] the stable feature id (contract vocabulary).
+    #   @return the stable feature id (contract vocabulary).
     # @!attribute summary
-    #   @return [String] a one-line description of what it changes. For a `:behaviour`
+    #   @return a one-line description of what it changes. For a `:behaviour`
     #     feature this is the *whole* explanation — there is no severity diff to read.
     # @!attribute kind
-    #   @return [Symbol] one of {KINDS}.
+    #   @return one of {KINDS}.
     # @!attribute severity_overrides
-    #   @return [Hash{String => Symbol}] canonical rule id → the severity this feature
+    #   @return canonical rule id → the severity this feature
     #     imposes. Composed *below* the user's own `severity_overrides:` and *above* the
     #     active `severity_profile` (see {Configuration::SeverityProfile.resolve}). Empty for
     #     a `:behaviour` feature.
@@ -76,12 +76,10 @@ module Rigor
         super
       end
 
-      # @return [Boolean]
       def severity?
         kind == :severity
       end
 
-      # @return [Boolean]
       def behaviour?
         kind == :behaviour
       end
@@ -193,36 +191,30 @@ module Rigor
     # cleanup can lag graduation by as many releases as it takes. The id also stays in the
     # contract vocabulary the CHANGELOG migration note keys on. Entries are removed only once
     # no call site names them.
-    #
-    # @return [Array<String>]
     GRADUATED = [].freeze
 
     module_function
 
-    # @return [Array<Feature>] the whole overlay.
+    # @return the whole overlay.
     def features
       FEATURES
     end
 
-    # @return [Array<String>] every feature id in the overlay.
+    # @return every feature id in the overlay.
     def feature_ids
       FEATURES.map(&:id)
     end
 
-    # @param id [String]
-    # @return [Feature, nil]
     def feature(id)
       FEATURES.find { |f| f.id == id }
     end
 
-    # @param id [String]
-    # @return [Boolean] whether the id has graduated to default-on ({GRADUATED}).
+    # @return whether the id has graduated to default-on ({GRADUATED}).
     def graduated?(id)
       GRADUATED.include?(id)
     end
 
-    # @param id [String]
-    # @return [Boolean] whether the id names a feature this gem knows at all — queued or
+    # @return whether the id names a feature this gem knows at all — queued or
     #   graduated. Distinct from "adopted"; see {Configuration#bleeding_edge_active?}.
     def known_id?(id)
       graduated?(id) || FEATURES.any? { |f| f.id == id }
@@ -234,10 +226,9 @@ module Rigor
     # `severity_overrides:` keeps an unknown rule id inert until it lands (robust across gem
     # versions).
     #
-    # @param selector [Hash] `{ "mode" => "none" }`,
+    # @param selector `{ "mode" => "none" }`,
     #   `{ "mode" => "all" }`, `{ "mode" => "all", "except" => [ids] }`,
     #   or `{ "mode" => "list", "ids" => [ids] }`.
-    # @return [Array<Feature>]
     def active_features(selector)
       case selector["mode"]
       when "all"
@@ -254,8 +245,7 @@ module Rigor
     # The merged severity-override map the active features impose for a selector. Frozen so
     # the result is `Ractor.shareable?`.
     #
-    # @param selector [Hash] see {#active_features}.
-    # @return [Hash{String => Symbol}]
+    # @param selector see {#active_features}.
     def severity_overrides_for(selector)
       active_features(selector).each_with_object({}) do |feature, acc|
         acc.merge!(feature.severity_overrides)
@@ -267,8 +257,7 @@ module Rigor
     # Precomputed once per Configuration; frozen (with frozen members) so the carrier stays
     # `Ractor.shareable?` across the worker boundary.
     #
-    # @param selector [Hash] see {#active_features}.
-    # @return [Set<String>]
+    # @param selector see {#active_features}.
     def active_ids_for(selector)
       Set.new(active_features(selector).map(&:id)).freeze
     end
@@ -276,8 +265,7 @@ module Rigor
     # Feature ids named by a selector that are NOT in the overlay (typo / graduated / from a
     # newer gem). Surfaced by `rigor show-bleedingedge` as a hint; never an error.
     #
-    # @param selector [Hash] see {#active_features}.
-    # @return [Array<String>]
+    # @param selector see {#active_features}.
     def unknown_selected_ids(selector)
       named =
         case selector["mode"]

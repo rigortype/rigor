@@ -53,8 +53,6 @@ module Rigor
 
       module_function
 
-      # @param contributions [Array<FlowContribution>]
-      # @return [MergeResult]
       def merge(contributions)
         contributions = Array(contributions)
         return MergeResult.new if contributions.empty?

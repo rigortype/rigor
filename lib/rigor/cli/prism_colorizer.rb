@@ -35,8 +35,8 @@ module Rigor
 
       VARIABLE_TOKENS = %i[INSTANCE_VARIABLE CLASS_VARIABLE GLOBAL_VARIABLE].freeze
 
-      # @param source [String] Ruby source.
-      # @return [String] the source with ANSI colour escapes, or
+      # @param source Ruby source.
+      # @return the source with ANSI colour escapes, or
       #   the input unchanged when lexing surfaces an error.
       def colorize(source)
         # Sources read under a POSIX locale arrive tagged US-ASCII even when they carry UTF-8 bytes; retag so the token

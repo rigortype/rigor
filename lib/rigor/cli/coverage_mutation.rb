@@ -48,8 +48,6 @@ module Rigor
       # Both measurement-integrity warnings, and the escalation rule between them, live in
       # {MeasurementIntegrityWarning}. Only the floor stays here: it is this command's policy, and
       # `coverage_command_spec` reads it off this module.
-      #
-      # @param report [MutationProtectionReport, FusedProtectionReport]
       def warn_harness_errors(report)
         MeasurementIntegrityWarning.emit(report, err: @err, floor: HARNESS_ERROR_WARN_FLOOR)
       end

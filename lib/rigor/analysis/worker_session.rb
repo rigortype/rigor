@@ -73,12 +73,11 @@ module Rigor
                   :rbs_extended_reporter, :boundary_cross_reporter,
                   :prepare_diagnostics
 
-      # @param configuration [Rigor::Configuration]
-      # @param cache_store [Rigor::Cache::Store, nil] persistent cache the session exposes to plugin-side
+      # @param cache_store persistent cache the session exposes to plugin-side
       #   producers and the RBS loader. Pass `nil` to disable caching.
-      # @param plugin_blueprints [Array<Rigor::Plugin::Blueprint>] replay descriptors. Empty array yields a
+      # @param plugin_blueprints replay descriptors. Empty array yields a
       #   session with no plugin contributions.
-      # @param explain [Boolean] when true, `#analyze` additionally emits one `:info` `fallback` diagnostic
+      # @param explain when true, `#analyze` additionally emits one `:info` `fallback` diagnostic
       #   per directly-unrecognised node, mirroring {Rigor::Analysis::Runner#explain_diagnostics}.
       def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength,Metrics/ParameterLists
                      plugin_blueprints: [], explain: false, buffer: nil,

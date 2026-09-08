@@ -30,13 +30,13 @@ module Rigor
         hint: 4
       }.freeze
 
-      # @param debouncer [Rigor::LanguageServer::Debouncer, nil]
+      # @param debouncer
       #   when present, `publish_for` schedules its work through
       #   the debouncer (cancels prior pending task for the same
       #   URI, fires after `debounce_seconds` quiet-time). Nil
       #   keeps the slice 4-7 synchronous behaviour — primarily
       #   useful for specs.
-      # @param debounce_seconds [Numeric] quiet-time before the
+      # @param debounce_seconds quiet-time before the
       #   debounced publish fires. 0 with a debouncer means
       #   "schedule on next-tick" (still async); without a
       #   debouncer the value is unused.
@@ -212,7 +212,7 @@ module Rigor
         notify(uri, diagnostics)
       end
 
-      # @return [Hash, nil] `{ uri:, path:, bytes: }` when `uri` is eligible for the batch, or nil to
+      # @return `{ uri:, path:, bytes: }` when `uri` is eligible for the batch, or nil to
       #   exclude it. Mirrors `#run_and_notify`'s own guards: a buffer closed during the debounce window is
       #   dropped silently (its didClose empty publish already cleared the markers); a desynchronised buffer
       #   publishes an EMPTY set immediately (same as the single-buffer path) rather than joining the batch.
@@ -320,7 +320,7 @@ module Rigor
         end
       end
 
-      # @return [Hash, nil] the LSP `Diagnostic` Hash, or nil to
+      # @return the LSP `Diagnostic` Hash, or nil to
       #   skip diagnostics outside the buffer's own path (e.g.
       #   `.rigor.yml`-anchored info diagnostics get filtered —
       #   they belong to the project, not the buffer).

@@ -77,9 +77,8 @@ module Rigor
       #   `ApplicationRecord`) setting `self.table_name_prefix` for every model under it — both already
       #   guess wrong identically on unpatched code.
       class ModelDiscoverer
-        # @param io_boundary [Rigor::Plugin::IoBoundary]
-        # @param search_paths [Array<String>] absolute or project-relative paths.
-        # @param base_classes [Array<String>] superclass names that identify a class as an AR model.
+        # @param search_paths absolute or project-relative paths.
+        # @param base_classes superclass names that identify a class as an AR model.
         # Declaration macros whose column's runtime value is a rich object, not the SQL scalar. Their column
         # must NOT be narrowed to the schema type (see {ModelIndex.build}'s type-override remap).
         TYPE_OVERRIDE_METHODS = %i[serialize mount_uploader mount_uploaders].freeze
@@ -113,7 +112,7 @@ module Rigor
 
         attr_reader :type_override_columns
 
-        # @return [Array<Hash>] rows of { class_name:, table_name_override:, sti_parent:, ... }
+        # @return rows of { class_name:, table_name_override:, sti_parent:, ... }
         def discover
           candidates = []
           ruby_files_under(@search_paths).each do |path|

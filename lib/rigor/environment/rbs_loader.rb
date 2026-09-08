@@ -119,8 +119,8 @@ module Rigor
         BIG_MATH_SIG_BASENAME = "big_math.rbs"
         private_constant :BIG_MATH_SIG_BASENAME
 
-        # @param libraries [Array<String>] the resolved library list, `DEFAULT_LIBRARIES` included.
-        # @return [Array<String>] the same list, minus `bigdecimal-math` when `bigdecimal` already brings
+        # @param libraries the resolved library list, `DEFAULT_LIBRARIES` included.
+        # @return the same list, minus `bigdecimal-math` when `bigdecimal` already brings
         #   `BigMath` in.
         def libraries_without_shadowed_bigdecimal_math(libraries)
           return libraries unless libraries.include?(BIGDECIMAL_LIBRARY) && libraries.include?(BIGDECIMAL_MATH_LIBRARY)
@@ -890,7 +890,7 @@ module Rigor
         # that Rigor's arithmetic-chain widening produces). The overlay is added per-file, not
         # per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` files must be gated individually.
         #
-        # @param loaded_library_names [Set<String>] libraries that actually resolved on this loader.
+        # @param loaded_library_names libraries that actually resolved on this loader.
         def add_bundled_signatures(rbs_loader, loaded_library_names)
           vendored_gem_sig_paths.each do |path|
             next unless path.directory?
@@ -910,10 +910,10 @@ module Rigor
           end
         end
 
-        # @param supplements [Hash{String => String}] basename → gating library map.
-        # @param path [Pathname] the vendored directory or overlay file to test.
-        # @param loaded_library_names [Set<String>] libraries that actually resolved on this loader.
-        # @return [Boolean] true when `path` carries no library dependency, or its library loaded.
+        # @param supplements basename → gating library map.
+        # @param path the vendored directory or overlay file to test.
+        # @param loaded_library_names libraries that actually resolved on this loader.
+        # @return true when `path` carries no library dependency, or its library loaded.
         def supplement_dependency_loaded?(supplements, path, loaded_library_names)
           library = supplements[path.basename.to_s]
           library.nil? || loaded_library_names.include?(library)
@@ -929,9 +929,9 @@ module Rigor
           __dir__
         ).freeze
 
-        # @param gem_names [Enumerable<String>] overlay-eligible Gemfile.lock gem names (the caller filters
+        # @param gem_names overlay-eligible Gemfile.lock gem names (the caller filters
         #   to the `:missing`-coverage, no-conflicting-plugin set).
-        # @return [Array<Pathname>] the bundled overlay directory for each gem that ships one; empty when
+        # @return the bundled overlay directory for each gem that ships one; empty when
         #   none match or the overlay root is absent.
         def gem_overlay_sig_paths(gem_names)
           return [] unless File.directory?(GEM_OVERLAY_SIGS_ROOT)
@@ -942,9 +942,9 @@ module Rigor
           end
         end
 
-        # @param path [String, Pathname] typically an entry from an {RbsLoader} instance's
+        # @param path typically an entry from an {RbsLoader} instance's
         #   {#signature_paths}.
-        # @return [Boolean] whether `path` sits under the bundled gem-overlay root — what
+        # @return whether `path` sits under the bundled gem-overlay root — what
         #   `CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`'s gate consults so that a class name's membership in
         #   that list alone never grants the open-receiver exemption; the overlay directory that made the
         #   entry true must have actually loaded THIS run too (issue #632, tracked further by #660).
@@ -982,7 +982,7 @@ module Rigor
         # answer to the very same question, on the class that already owns the overlay's layout
         # ({GEM_OVERLAY_SIGS_ROOT}, {.gem_overlay_sig_paths}).
         #
-        # @param signature_paths [Array<String, Pathname>] typically an {RbsLoader} instance's
+        # @param signature_paths typically an {RbsLoader} instance's
         #   {#signature_paths}. Takes the whole list rather than one entry so the twin's file set resolves
         #   once per question — `CheckRules` asks it per `ActiveSupport::Duration` receiver.
         def gem_overlay_twin_signatures_loaded?(signature_paths)
@@ -997,7 +997,7 @@ module Rigor
         # id mapping and passes the id; this resolves the id to the engine's own bundled `sig/` and answers
         # the filesystem question.
         #
-        # @param plugin_id [String] a manifest id, e.g. `"activesupport-core-ext"`.
+        # @param plugin_id a manifest id, e.g. `"activesupport-core-ext"`.
         def bundled_overlay_twin_signatures_loaded?(plugin_id, signature_paths)
           return false if signature_paths.nil? || signature_paths.empty?
 
@@ -1067,18 +1067,18 @@ module Rigor
 
       attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs
 
-      # @param libraries [Array<String, Symbol>] stdlib library names to load on top of core (e.g.,
+      # @param libraries stdlib library names to load on top of core (e.g.,
       #   `["pathname", "json"]`). Empty by default. Each entry MUST correspond to a directory under the
       #   `rbs` gem's `stdlib/` tree; unknown names are silently dropped on environment build (the underlying
       #   `RBS::EnvironmentLoader` raises and we fail-soft).
-      # @param signature_paths [Array<String, Pathname>] additional directories of `.rbs` files to load
+      # @param signature_paths additional directories of `.rbs` files to load
       #   (typically the project's `sig/` tree). Non-existent or non-directory paths are filtered out at
       #   build time so the loader stays robust to fixtures and bare repositories.
-      # @param cache_store [Rigor::Cache::Store, nil] the persistent cache the loader threads through to
+      # @param cache_store the persistent cache the loader threads through to
       #   `RbsEnvironment`, `RbsKnownClassNames`, `RbsConstantTable`, `RbsClassAncestorTable`, and
       #   `RbsClassTypeParamNames` producers. Pass `nil` (the default) to skip caching; the runner threads
       #   its own Store through here when enabled.
-      # @param virtual_rbs [Array<[String, String]>] ADR-32 WD4 — `[virtual_filename, rbs_source]` pairs
+      # @param virtual_rbs >] ADR-32 WD4 — `[virtual_filename, rbs_source]` pairs
       #   synthesised from project source by a plugin's `Manifest#source_rbs_synthesizer`. Merged into the
       #   env after `signature_paths:` and the vendored stubs. Pass `[]` (the default) when no
       #   synthesizer-emitting plugin is loaded.
@@ -1127,7 +1127,7 @@ module Rigor
       # the stderr banner) reads it, and a cache HIT reaches it too — the env was built with the file already
       # quarantined, so the condition is invisible in the cached env itself.
       #
-      # @return [Array<Array(String, String)>] empty when every `signature_paths:` file parses.
+      # @return empty when every `signature_paths:` file parses.
       def quarantined_signatures
         @state[:quarantined] ||= begin
           parse_quarantined = self.class.quarantined_project_signatures(@signature_paths)
@@ -1199,7 +1199,7 @@ module Rigor
       # persisted, so every run re-attempts and re-raises), so this is captured directly in {#env}'s rescue
       # rather than re-derived. Forcing `env` (any query does) populates it.
       #
-      # @return [Array(String, String, Array<String>), nil] `[error_class_name, first_error_line,
+      # @return `[error_class_name, first_error_line,
       #   conflicting_buffer_names]`, or nil when the environment built successfully.
       def env_build_failure
         env unless @state[:env_loaded]
@@ -1223,7 +1223,7 @@ module Rigor
       # definition-build failure leaves no trace in the env at all — the env is fine; it is the BUILD over it
       # that raised — so the rescue is the only place that ever knows.
       #
-      # @return [Array<Array(String, String, String, Array<String>)>] `[class_name, error_class_name,
+      # @return `[class_name, error_class_name,
       #   first_error_line, conflicting_buffer_names]`, one per class, in first-failure order. Empty for a
       #   healthy sig set, which is the common case.
       def definition_build_failures
@@ -1237,7 +1237,7 @@ module Rigor
       # the {#quarantined_signatures} trick — so a cache HIT, which never runs the build, reports the same
       # condition: the marshalled env simply lacks the dropped buffers.
       #
-      # @return [Array<String>] virtual buffer names (source-file paths) whose contribution was dropped.
+      # @return virtual buffer names (source-file paths) whose contribution was dropped.
       def virtual_rbs_collision_quarantined
         @state[:virtual_rbs_collisions] ||= begin
           built = @state[:env]
@@ -1415,7 +1415,7 @@ module Rigor
         {}.freeze
       end
 
-      # @return [RBS::Definition, nil] the resolved instance definition for `class_name`, or nil when the
+      # @return the resolved instance definition for `class_name`, or nil when the
       #   class is unknown or its definition cannot be built (RBS may raise on broken hierarchies; we
       #   fail-soft and return nil so the caller can fall back).
       #
@@ -1441,7 +1441,6 @@ module Rigor
         definition
       end
 
-      # @return [RBS::Definition::Method, nil]
       def instance_method(class_name:, method_name:)
         definition = instance_definition(class_name)
         return nil unless definition
@@ -1449,7 +1448,7 @@ module Rigor
         definition.methods[method_name.to_sym]
       end
 
-      # @return [Array<Symbol>, nil] every instance-method name on `class_name` — own, inherited, and
+      # @return every instance-method name on `class_name` — own, inherited, and
       #   included — as resolved by `RBS::DefinitionBuilder`. Returns `nil` (NOT `[]`) when the class
       #   definition cannot be built so callers can tell "no methods" apart from "unknown class". Used by the
       #   `rigor:v1:conforms-to` presence check ({Rigor::RbsExtended::ConformanceChecker}).
@@ -1460,7 +1459,7 @@ module Rigor
         definition.methods.keys
       end
 
-      # @return [RBS::Definition, nil] the built definition for the RBS interface `interface_name`
+      # @return the built definition for the RBS interface `interface_name`
       #   (`_RewindableStream`), whose `.methods` are the required members (including interface-ancestor
       #   members). Returns `nil` when the name does not resolve to a loaded interface (a typo, or the
       #   defining library / sig set is not on the load path). Fail-soft on RBS build errors.
@@ -1475,15 +1474,15 @@ module Rigor
         nil
       end
 
-      # @return [Array<Symbol>, nil] every method name required by the RBS interface `interface_name`, or nil
+      # @return every method name required by the RBS interface `interface_name`, or nil
       #   when it does not resolve. Thin accessor over {#interface_definition} for the presence check.
       def interface_method_names(interface_name)
         interface_definition(interface_name)&.methods&.keys
       end
 
-      # @param rbs_alias [RBS::Types::Alias] a type-alias reference (`string`, `int`, `range[int?]`, …)
+      # @param rbs_alias a type-alias reference (`string`, `int`, `range[int?]`, …)
       #   appearing in a method signature.
-      # @return [RBS::Types::t, nil] the alias's aliased type one level out, with type arguments substituted
+      # @return the alias's aliased type one level out, with type arguments substituted
       #   for a generic alias (`string` → `::String | ::_ToStr`; `range[int?]` → `::Range[int?] |
       #   ::_Range[int?]`), or nil for an unresolved name. Lets a caller see through the alias that
       #   {Inference::RbsTypeTranslator} otherwise degrades to `untyped`, which is why an interface/alias
@@ -1508,7 +1507,7 @@ module Rigor
         nil
       end
 
-      # @return [RBS::Definition, nil] the resolved singleton (class object) definition for `class_name`. The
+      # @return the resolved singleton (class object) definition for `class_name`. The
       #   methods on this definition are the *class methods* of `class_name`, including those inherited from
       #   `Class` and `Module` for class types. Returns nil for unknown names and on RBS build errors
       #   (fail-soft).
@@ -1529,7 +1528,7 @@ module Rigor
         definition
       end
 
-      # @return [RBS::Definition::Method, nil] the class method on `class_name`. For example,
+      # @return the class method on `class_name`. For example,
       #   `singleton_method(class_name: "Integer", method_name: :sqrt)` returns the definition for
       #   `Integer.sqrt`, while `singleton_method(class_name: "Foo", method_name: :new)` returns Class#new
       #   for any class type.
@@ -1606,7 +1605,7 @@ module Rigor
       # way, and both yield `[]` for an unknown or unbuildable class. Pinned by spec across all three cache
       # states.
       #
-      # @return [Array<String>] `::`-stripped ancestor names, or `[]` for an unknown or unbuildable class.
+      # @return `::`-stripped ancestor names, or `[]` for an unknown or unbuildable class.
       def ancestor_names_for(class_name)
         key = class_name.to_s.delete_prefix("::")
         during_internal_demand do
@@ -1621,7 +1620,7 @@ module Rigor
         [].freeze
       end
 
-      # @return [Array<String>] every RBS-declared constant name (top-level prefixed, e.g., `"::Math::PI"`)
+      # @return every RBS-declared constant name (top-level prefixed, e.g., `"::Math::PI"`)
       #   currently loaded into the environment. Used by the cache producer that materialises the
       #   constant-type table; ordinary callers should keep using {#constant_type} for point lookups.
       def constant_names
@@ -2287,8 +2286,6 @@ module Rigor
       # `#method_name`; `UnknownMethodAliasError` and `NoSuperclassFoundError` have `#type_name`;
       # `SuperclassMismatchError` has `#name`. `RecursiveAncestorError` has none of them and yields nil, and
       # the diagnostic then omits the clause rather than inventing one.
-      #
-      # @return [String, nil]
       def definition_build_member(error)
         return error.qualified_method_name.to_s if error.respond_to?(:qualified_method_name)
 

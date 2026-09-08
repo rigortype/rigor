@@ -42,7 +42,7 @@ module Rigor
           @search_paths = search_paths
         end
 
-        # @return [Array<String>] policy class names named by an authorization call, sorted and unique. Not
+        # @return policy class names named by an authorization call, sorted and unique. Not
         #   yet intersected with the discovered policies — the caller does that.
         def policy_names
           names = Set.new
@@ -93,7 +93,7 @@ module Rigor
           names << name if name
         end
 
-        # @return [String, nil] the policy class the argument names, or nil when the argument is an
+        # @return the policy class the argument names, or nil when the argument is an
         #   expression this reading cannot attribute to a record (a method call with arguments, a literal, an
         #   index read). Silence, not a guess: an unattributable call contributes nothing.
         def policy_name_for(node)

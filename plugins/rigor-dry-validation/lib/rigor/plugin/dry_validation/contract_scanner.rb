@@ -22,8 +22,8 @@ module Rigor
 
         module_function
 
-        # @param paths [Array<String>] absolute paths to `.rb` files the project's `paths:` resolves to.
-        # @return [Array<String>] frozen, sorted list of recognized contract class FQNs (e.g.
+        # @param paths absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @return frozen, sorted list of recognized contract class FQNs (e.g.
         #   `["App::NewUserContract", "Types::EmailContract"]`).
         def scan(paths:)
           contracts = []
@@ -50,7 +50,7 @@ module Rigor
         # not a degrade-gracefully fallback, because this plugin ships no required/optional walker of
         # its own.
         #
-        # @return [Hash{String => Hash{Symbol => Hash}}] contract FQN => `{params: <shape>}` and/or
+        # @return contract FQN => `{params: <shape>}` and/or
         #   `{json: <shape>}` (only the recognised key(s) are present; a contract with neither present
         #   contributes nothing). Each `<shape>` is exactly {DrySchema::SchemaScanner.collect_schema_shape}'s
         #   `{required:, optional:, unmodelled:}` return.

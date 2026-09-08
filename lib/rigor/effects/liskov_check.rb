@@ -56,16 +56,16 @@ module Rigor
 
       module_function
 
-      # @param table [EffectTable] the run's propagated graph.
-      # @param superclasses [Hash{String => Array<String>}] the collector's as-written superclass
+      # @param table the run's propagated graph.
+      # @param superclasses the collector's as-written superclass
       #   candidate lists (`FileCollection#superclasses`).
-      # @param method_envelopes [Hash{String => Envelope}] per-method envelopes, as written.
-      # @param class_envelopes [Hash{String => Envelope}] class- / module-level envelopes, to distribute.
-      # @param config_envelopes [Hash{String => Envelope}] `effects.envelopes:` entries already resolved
+      # @param method_envelopes per-method envelopes, as written.
+      # @param class_envelopes class- / module-level envelopes, to distribute.
+      # @param config_envelopes `effects.envelopes:` entries already resolved
       #   to the classes they select.
-      # @param positions [EnvelopeCheck::Positions] where the override's `def` is.
-      # @param apply_tolerated [Boolean] false judges against `proven` — `--no-tolerated-effects`.
-      # @return [Array<Finding>] sorted by position then key then label.
+      # @param positions where the override's `def` is.
+      # @param apply_tolerated false judges against `proven` — `--no-tolerated-effects`.
+      # @return sorted by position then key then label.
       def run(table:, superclasses:, method_envelopes:, class_envelopes:, config_envelopes: {},
               positions: EnvelopeCheck::Positions.empty, apply_tolerated: true)
         # The distributed strata, over a base of the raw per-method annotations: a base class whose method

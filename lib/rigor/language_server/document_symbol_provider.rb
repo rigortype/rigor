@@ -30,7 +30,7 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return [Array<Hash>, nil] LSP `DocumentSymbol[]` for the
+      # @return LSP `DocumentSymbol[]` for the
       #   buffer at `uri`. Returns nil when the URI isn't open or
       #   doesn't parse cleanly enough to surface symbols — LSP
       #   clients fall back to no-outline in that case.

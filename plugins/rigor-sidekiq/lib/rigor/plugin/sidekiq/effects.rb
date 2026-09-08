@@ -52,7 +52,7 @@ module Rigor
 
         module_function
 
-        # @param marker_modules [Array<String>] the modules a worker includes — the plugin's own
+        # @param marker_modules the modules a worker includes — the plugin's own
         #   `worker_marker_modules:` config, so one project setting drives the arity check and these rows.
         def attributions(marker_modules)
           marker_modules.flat_map do |marker|

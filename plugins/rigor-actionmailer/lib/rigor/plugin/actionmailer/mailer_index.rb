@@ -58,8 +58,6 @@ module Rigor
         # `"::UserMailer"`; see {MailerDiscoverer}), while a QUERY may legitimately arrive rooted:
         # `::UserMailer.welcome(u)` renders its receiver as `"::UserMailer"`. The root marker is dropped
         # here, once, so no caller needs a `find(name) || find("::#{name}")` retry (#621).
-        #
-        # @return [ClassEntry, nil]
         def find(class_name)
           @by_name[strip_leading_namespace(class_name.to_s)]
         end
@@ -68,9 +66,8 @@ module Rigor
           @by_name.key?(strip_leading_namespace(class_name.to_s))
         end
 
-        # @param file_path [String] absolute path of a mailer file (canonicalised — see plugin entry's
+        # @param file_path absolute path of a mailer file (canonicalised — see plugin entry's
         #   `harvest`)
-        # @return [ClassEntry, nil]
         def find_by_file(file_path)
           @entries.find { |entry| entry.file_path == file_path }
         end

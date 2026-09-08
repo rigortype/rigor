@@ -30,8 +30,6 @@ module Rigor
 
         module_function
 
-        # @param entry [Rigor::Configuration::Dependencies::Entry]
-        # @return [Resolved, Unresolvable]
         def resolve(entry)
           spec = locate_gem_spec(entry.gem)
           return Unresolvable.new(gem_name: entry.gem, reason: :not_in_bundle) if spec.nil?

@@ -60,7 +60,7 @@ module Rigor
 
       module_function
 
-      # @return [Symbol, nil] the tractability category for a cause, or nil when the cause is unknown /
+      # @return the tractability category for a cause, or nil when the cause is unknown /
       #   absent.
       def tractability(cause)
         TRACTABILITY[cause]

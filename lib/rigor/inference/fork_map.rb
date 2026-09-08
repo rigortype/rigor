@@ -22,10 +22,10 @@ module Rigor
     module ForkMap
       module_function
 
-      # @param items [Array] work items (file paths, or `[path, ast]` pairs), in caller order.
-      # @param workers [Integer] resolved worker count (≤1, empty items, or no `fork` → sequential).
-      # @yield [Array] a contiguous slice of `items`; must return a **marshalable** object.
-      # @return [Array] the per-slice block results, in original slice order.
+      # @param items work items (file paths, or `[path, ast]` pairs), in caller order.
+      # @param workers resolved worker count (≤1, empty items, or no `fork` → sequential).
+      # @yield a contiguous slice of `items`; must return a **marshalable** object.
+      # @return the per-slice block results, in original slice order.
       def call(items:, workers:, &block)
         worker_count = [workers, items.size].min
         return [block.call(items)] unless parallel?(worker_count) && !items.empty?
@@ -55,8 +55,6 @@ module Rigor
       # The directory check is the belt to {.run_worker}'s braces: the offer is only worth taking while the
       # parent still has the directory open, and answering `nil` once it is gone degrades to `Dir.tmpdir`
       # instead of raising `Errno::ENOENT` somewhere far from here.
-      #
-      # @return [String, nil]
       def child_scratch_dir
         return nil unless @child_scratch_dir && File.directory?(@child_scratch_dir)
 
@@ -120,7 +118,7 @@ module Rigor
         end
       end
 
-      # @return [Hash{value: Object}, nil] the child's payload wrapped so a legitimately-nil block result is
+      # @return the child's payload wrapped so a legitimately-nil block result is
       #   distinguishable from an abnormal exit. `Marshal.load` is safe: the blob was written by our own
       #   forked child to a temp file we created.
       def worker_payload(status, out_path)

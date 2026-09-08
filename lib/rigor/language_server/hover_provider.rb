@@ -29,7 +29,7 @@ module Rigor
         @renderer = renderer
       end
 
-      # @return [Hash, nil] an LSP `Hover` payload or nil when no
+      # @return an LSP `Hover` payload or nil when no
       #   expression sits at the queried position. Returning nil
       #   maps to `result: null` per the LSP spec — clients
       #   suppress the hover popup in that case.

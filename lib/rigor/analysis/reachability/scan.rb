@@ -70,10 +70,10 @@ module Rigor
           end
         end
 
-        # @param path [String] the file's path, as the report should render it.
-        # @param source [String] the file's bytes.
-        # @param target_ruby [String, nil] Prism version string, threaded from the project configuration.
-        # @return [Result, nil] nil when the file does not parse (a parse error is the analyzer's business, not
+        # @param path the file's path, as the report should render it.
+        # @param source the file's bytes.
+        # @param target_ruby Prism version string, threaded from the project configuration.
+        # @return nil when the file does not parse (a parse error is the analyzer's business, not
         #   this scan's — it simply contributes nothing rather than half a file).
         # A constant name is ASCII by construction, so a byte sequence that is not valid UTF-8 cannot be one.
         # Dropping it is both correct and the only safe answer: carrying it forward crashed the whole run on

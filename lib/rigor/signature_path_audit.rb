@@ -60,17 +60,11 @@ module Rigor
     # `nil` — the unset default, where Rigor auto-detects `<root>/sig` — to get an empty
     # result: an absent auto-detected `sig/` is a normal setup, not a misconfiguration, so it
     # is never audited.
-    #
-    # @param signature_paths [Array<String, Pathname>, nil]
-    # @return [Array<Entry>]
     def self.audit(signature_paths)
       Array(signature_paths).map { |path| classify(path.to_s) }
     end
 
     # The subset of {audit} that resolved to nothing — the entries worth warning about.
-    #
-    # @param signature_paths [Array<String, Pathname>, nil]
-    # @return [Array<Entry>]
     def self.warnings(signature_paths)
       audit(signature_paths).select(&:warning?)
     end

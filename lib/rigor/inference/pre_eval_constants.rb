@@ -92,13 +92,13 @@ module Rigor
 
       # Collects and widens the constants every `pre_eval:` file declares.
       #
-      # @param paths [Array<String>] absolute paths to the `pre_eval:` files that exist on disk.
-      # @param scope_builder [#call] `path -> Rigor::Scope`; the caller supplies a project-seeded, environment-
+      # @param paths absolute paths to the `pre_eval:` files that exist on disk.
+      # @param scope_builder `path -> Rigor::Scope`; the caller supplies a project-seeded, environment-
       #   bound scope so the rvalue typer resolves cross-file classes exactly as per-file analysis would.
-      # @param target_ruby [String, nil] the Prism parse version (`Configuration#target_ruby`).
-      # @param buffer [Rigor::Analysis::BufferBinding, nil] editor-mode binding; when set, a listed file that
+      # @param target_ruby the Prism parse version (`Configuration#target_ruby`).
+      # @param buffer editor-mode binding; when set, a listed file that
       #   matches the in-flight buffer is read from its physical bytes.
-      # @return [Hash{String => Rigor::Type}] frozen qualified-name -> published type table.
+      # @return frozen qualified-name -> published type table.
       def collect(paths:, scope_builder:, target_ruby: nil, buffer: nil)
         published = {}
         conflicted = {}

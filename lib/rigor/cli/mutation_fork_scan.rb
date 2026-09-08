@@ -32,12 +32,12 @@ module Rigor
       # reliably marshalable, and the accumulator only needs the count).
       ParseError = Data.define(:count)
 
-      # @param paths [Array<String>] the files to measure, in caller order.
-      # @param scanner [Protection::MutationScanner] built on the parent; COW-inherited by workers.
-      # @param environment [Rigor::Environment] the scanner's environment, prewarmed here before forking.
-      # @param configuration [Rigor::Configuration] for the Prism `target_ruby` version.
-      # @param workers [Integer] resolved worker count (≤1 → sequential).
-      # @return [Hash{String => Protection::MutationScanner::FileResult, ParseError}] one entry per path.
+      # @param paths the files to measure, in caller order.
+      # @param scanner built on the parent; COW-inherited by workers.
+      # @param environment the scanner's environment, prewarmed here before forking.
+      # @param configuration for the Prism `target_ruby` version.
+      # @param workers resolved worker count (≤1 → sequential).
+      # @return one entry per path.
       def run(paths:, scanner:, environment:, configuration:, workers:)
         # Force the full RBS load on the parent so children copy-on-write inherit a warm environment rather
         # than each rebuilding it after the fork. A no-op on the sequential path but cheap.

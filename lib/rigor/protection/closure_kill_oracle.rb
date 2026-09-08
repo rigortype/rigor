@@ -55,15 +55,14 @@ module Rigor
       # knowledge the single-file run does not have) must not mask a kill the shipped oracle would report.
       Baseline = Data.define(:own, :dependents)
 
-      # @param configuration [Rigor::Configuration]
-      # @param environment [Rigor::Environment] built once by the caller.
-      # @param project_scan [Rigor::Analysis::ProjectScan] built once by the caller; adopted per analysis
+      # @param environment built once by the caller.
+      # @param project_scan built once by the caller; adopted per analysis
       #   through `prebuilt:`, exactly as {DiagnosticOracle} does.
-      # @param paths [Array<String>] the measured file set, in canonical order (the seed's span: a class
+      # @param paths the measured file set, in canonical order (the seed's span: a class
       #   declared outside it stays unknown, as it does for Tier 1's seed and for {DiscoverySeed}).
-      # @param dependents [Hash{String => Array<String>}] {DependencyClosure} map, restricted to `paths`.
-      # @param seed_bundles [Hash{String => Hash}] {DiscoverySeed.bundles} over the same `paths`.
-      # @param discovery_seed [Hash, nil] the `discovery-seeded-mutation-sites` seed when that feature is also
+      # @param dependents {DependencyClosure} map, restricted to `paths`.
+      # @param seed_bundles {DiscoverySeed.bundles} over the same `paths`.
+      # @param discovery_seed the `discovery-seeded-mutation-sites` seed when that feature is also
       #   adopted, nil otherwise. It goes to the delegated {DiagnosticOracle} verbatim, so the mutated file's
       #   verdict is byte-for-byte the verdict that feature combination produces without this one; its
       #   `param_inferred_types` slot additionally rides the per-mutant closure seed, so an admitted site is

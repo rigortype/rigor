@@ -42,11 +42,11 @@ module Rigor
                   :signature_help_provider, :folding_range_provider,
                   :selection_range_provider, :project_context
 
-      # @param completion_provider [Rigor::LanguageServer::CompletionProvider, nil]
+      # @param completion_provider
       #   resolves `textDocument/completion`. Nil → `MethodNotFound`.
-      # @param signature_help_provider [Rigor::LanguageServer::SignatureHelpProvider, nil]
+      # @param signature_help_provider
       #   resolves `textDocument/signatureHelp`. Nil → `MethodNotFound`.
-      # @param project_context [Rigor::LanguageServer::ProjectContext, nil] the per-session cache of
+      # @param project_context the per-session cache of
       #   `Environment` + `Cache::Store` the providers read on every request. When present,
       #   `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration` invalidate the cache; nil
       #   means "no project context": each request rebuilds env from scratch (mainly for specs and backward
@@ -69,7 +69,7 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return [Boolean] true once the client has called `exit` and
+      # @return true once the client has called `exit` and
       #   the server has set its terminal exit code. The CLI loop
       #   reads this between dispatches to know when to stop.
       def exited?
@@ -78,10 +78,10 @@ module Rigor
 
       # Routes one LSP method call.
       #
-      # @param method [String] the LSP method name (e.g. "initialize").
-      # @param params [Hash, nil] the LSP `params` payload (Hash for
+      # @param method the LSP method name (e.g. "initialize").
+      # @param params the LSP `params` payload (Hash for
       #   request / notification methods; nil for the empty case).
-      # @return [Hash, nil] one of:
+      # @return one of:
       #   - the response result Hash for request methods,
       #   - nil for notification methods,
       #   - { error: { code:, message: } } for state / shape errors.

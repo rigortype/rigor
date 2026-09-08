@@ -30,12 +30,8 @@ module Rigor
 
         module_function
 
-        # @param block_node [Prism::BlockNode]
-        # @param describe_const [String, nil]
-        # @param factory_index [Object, nil] something responding to `find(factory_name)` and returning an
+        # @param factory_index something responding to `find(factory_name)` and returning an
         #   entry that responds to `model_class`.
-        # @param environment [Rigor::Environment, nil]
-        # @return [Rigor::Type, nil]
         def resolve(block_node, describe_const:, factory_index:, environment:)
           tail = body_tail(block_node)
           return nil if tail.nil?

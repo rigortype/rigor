@@ -337,10 +337,6 @@ module Rigor
 
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`, always; when no
       # narrowing rule matches the predicate node both entries are the receiver scope unchanged.
-      #
-      # @param node [Prism::Node, nil]
-      # @param scope [Rigor::Scope]
-      # @return [Array(Rigor::Scope, Rigor::Scope)]
       def predicate_scopes(node, scope)
         return [scope, scope] if node.nil?
 
@@ -366,11 +362,9 @@ module Rigor
       # constants narrow as `is_a?`; integer/float-endpoint ranges narrow to `Numeric`;
       # string-endpoint ranges and regexp literals narrow to `String`.
       #
-      # @param subject [Prism::Node, nil] the `case` subject.
-      # @param conditions [Array<Prism::Node>] the `when`
+      # @param subject the `case` subject.
+      # @param conditions the `when`
       #   clause's `conditions` array.
-      # @param scope [Rigor::Scope]
-      # @return [Array(Rigor::Scope, Rigor::Scope)]
       def case_when_scopes(subject, conditions, scope)
         # C1 — `case x when /re/` runs `/re/ === x`, which sets the regex match-data globals
         # exactly as a successful `=~` does. Narrow `$~`/`$&`/`$1..$N` on the clause body (the

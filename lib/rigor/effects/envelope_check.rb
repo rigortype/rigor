@@ -61,7 +61,7 @@ module Rigor
         # It lives on the value rather than in {EnvelopeCheck} because {LiskovCheck} positions its
         # findings identically, and two spellings of "where the fix goes" would eventually disagree.
         #
-        # @return [Array(String, Integer)] `[path, line]`; `[nil, 1]` for a key with no owner.
+        # @return `[path, line]`; `[nil, 1]` for a key with no owner.
         def for(key)
           class_name, separator, selector = MethodKey.split(key)
           return [nil, 1] if class_name.nil?
@@ -103,17 +103,17 @@ module Rigor
 
       module_function
 
-      # @param table [EffectTable] the run's propagated graph.
-      # @param method_envelopes [Hash{String => Envelope}] per-method envelopes, as written.
-      # @param class_envelopes [Hash{String => Envelope}] class- / module-level envelopes, to distribute.
-      # @param config_envelopes [Hash{String => Envelope}] `effects.envelopes:` entries already resolved
+      # @param table the run's propagated graph.
+      # @param method_envelopes per-method envelopes, as written.
+      # @param class_envelopes class- / module-level envelopes, to distribute.
+      # @param config_envelopes `effects.envelopes:` entries already resolved
       #   to the classes they select ({ConfigEnvelopes.for_classes}), to distribute at the lowest precedence.
-      # @param positions [Positions, DeferredPositions] the discovery tables a finding's `def`
+      # @param positions the discovery tables a finding's `def`
       #   position is read from — consulted only when a finding is built, so a deferred value's
       #   discovery force is reached exactly as often as a finding exists.
-      # @param apply_tolerated [Boolean] false judges against the undischarged-by-policy `proven` lane —
+      # @param apply_tolerated false judges against the undischarged-by-policy `proven` lane —
       #   the `--no-tolerated-effects` audit switch.
-      # @return [Array<Finding>] sorted by position then key then label, so a run explains identically twice.
+      # @return sorted by position then key then label, so a run explains identically twice.
       def run(table:, method_envelopes:, class_envelopes:, config_envelopes: {},
               positions: Positions.empty, apply_tolerated: true)
         envelopes = distribute(table, method_envelopes, class_envelopes, config_envelopes)

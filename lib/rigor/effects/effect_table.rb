@@ -61,7 +61,6 @@ module Rigor
         @empty ||= new(EMPTY_ENTRIES)
       end
 
-      # @param entries [Hash{String => Entry}]
       def initialize(entries)
         @entries = entries.sort_by { |key, _| key }.to_h.freeze
         freeze

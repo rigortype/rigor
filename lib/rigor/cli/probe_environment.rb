@@ -39,11 +39,10 @@ module Rigor
 
       # Builds the plugin-aware {Rigor::Environment} a probe types against.
       #
-      # @param configuration [Rigor::Configuration] the loaded project configuration (already carries the
+      # @param configuration the loaded project configuration (already carries the
       #   ADR-93 auto-wired `rigor-rbs-inline` entry when the library is resolvable).
-      # @param source_files [Array<String>] the file(s) the probe inspects. Threaded so each loaded plugin's
+      # @param source_files the file(s) the probe inspects. Threaded so each loaded plugin's
       #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
-      # @return [Rigor::Environment]
       def build(configuration:, source_files:)
         Environment.for_project(
           libraries: configuration.libraries,

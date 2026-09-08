@@ -35,7 +35,6 @@ module Rigor
           @load_errors = []
         end
 
-        # @return [LocaleIndex]
         def load
           per_key = {} # dotted_key => { locale => Set<String> }
           per_key_kinds = {} # dotted_key => { locale => :string|:array|:hash }

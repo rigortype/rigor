@@ -13,7 +13,7 @@ module Rigor
     # (method call, constant, local, ivar, literal) gets the most relevant type-aware presentation per
     # `docs/design/20260517-lsp-hover-completion.md`.
     class HoverRenderer
-      # @param node_scope_lookup [#[]] node-to-scope table built by `ScopeIndexer.index`. The renderer indexes
+      # @param node_scope_lookup ] node-to-scope table built by `ScopeIndexer.index`. The renderer indexes
       #   into it to retrieve the receiver's narrow scope when specialising on `CallNode`. The lookup never
       #   returns nil (the indexer's Hash carries `default_scope` as its default value), so the renderer trusts
       #   the lookup result.
@@ -83,7 +83,7 @@ module Rigor
         )
       end
 
-      # @return [[RBS::Definition::Method, String, Symbol], nil] the resolved method definition, the receiver
+      # @return , nil] the resolved method definition, the receiver
       #   class name, and the dispatch kind (`:instance` or `:singleton`); nil when the receiver shape isn't
       #   yet supported or the method doesn't resolve through the RBS env.
       def lookup_method(receiver_type, method_name, scope)

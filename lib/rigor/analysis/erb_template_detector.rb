@@ -19,8 +19,7 @@ module Rigor
 
       module_function
 
-      # @param parse_result [Prism::ParseResult]
-      # @return [Boolean] true when the parsed source looks like an ERB template (parse errors expected;
+      # @return true when the parsed source looks like an ERB template (parse errors expected;
       #   analysis should skip).
       def template?(parse_result)
         source = parse_result.source.source

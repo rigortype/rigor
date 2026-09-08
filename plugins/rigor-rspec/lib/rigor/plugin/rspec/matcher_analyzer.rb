@@ -38,13 +38,12 @@ module Rigor
       module MatcherAnalyzer
         module_function
 
-        # @param call_node [Prism::CallNode] the call whose contribution we're computing. Returns nil when
+        # @param call_node the call whose contribution we're computing. Returns nil when
         #   the call shape does not match `expect(local).to matcher`.
-        # @param environment [Rigor::Environment, nil] the surrounding environment used to resolve a
+        # @param environment the surrounding environment used to resolve a
         #   matcher's class-name argument to a `Type::Nominal`. When nil, class-name resolution falls back
         #   to a bare `Nominal[<name>]` carrier (sound — the receiver constant may be a user class not in
         #   RBS).
-        # @return [Rigor::FlowContribution, nil]
         def contribution_for(call_node, environment:)
           verb = assertion_verb(call_node)
           return nil if verb.nil?

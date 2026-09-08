@@ -42,7 +42,7 @@ module Rigor
         DEFENSIVE_EXIT_CALLS = %i[raise fail throw abort exit].freeze
 
         # @!attribute kind
-        #   @return [Symbol] `:disjoint` (this clause's type is disjoint
+        #   @return `:disjoint` (this clause's type is disjoint
         #     from the still-possible subject), `:prior_exhaustion` (an
         #     earlier clause already covered the subject), or
         #     `:exhausted_else` (every subject value is covered, so the
@@ -63,7 +63,7 @@ module Rigor
 
         # Legacy single-collector walk — kept as the oracle the ADR-53 Track B equivalence harness compares
         # {RuleWalk} against; deleted when Track B completes.
-        # @return [Array<Result>] one entry per provably-dead `when` clause.
+        # @return one entry per provably-dead `when` clause.
         def collect(root)
           walk(root, in_loop_or_block: false)
           @results.freeze

@@ -29,7 +29,6 @@ module Rigor
           freeze
         end
 
-        # @return [Entry, nil]
         def find(factory_name)
           @entries[factory_name.to_s]
         end

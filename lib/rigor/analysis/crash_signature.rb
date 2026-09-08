@@ -103,9 +103,6 @@ module Rigor
       # into. Built here, not at either rescue site, so the two twins cannot drift (issue #665) — and so
       # the appended crash frame is derived identically on the sequential and pooled paths. Keeps the
       # {CHECK_RULE_MESSAGE_PREFIX} prefix every consumer matches on; the frame is a trailing hint.
-      #
-      # @param error [StandardError]
-      # @return [String]
       def check_rule_message(error)
         base = "#{CHECK_RULE_MESSAGE_PREFIX}: #{error.class}: #{error.message}"
         frame = crash_frame(error)
@@ -117,9 +114,6 @@ module Rigor
       # bundled or third-party plugin also lives under `lib/rigor/<plugin>/`, so a frame here says where
       # the raise was, never whose defect it is. Falls back to the raw top frame when the crash is entirely
       # inside a dependency, and to nil when there is no backtrace at all.
-      #
-      # @param error [Exception]
-      # @return [String, nil]
       def crash_frame(error)
         frames = error.backtrace
         return nil if frames.nil? || frames.empty?
@@ -132,15 +126,11 @@ module Rigor
       # (the fork pool) rather than deriving it fresh from a live `Exception` — can relativize the frame it
       # already has without re-deriving `.crash_frame`'s "which frame" choice. Nil-safe, and a no-op (`sub`
       # never matches) on a frame with no `lib/rigor/` segment at all.
-      #
-      # @param frame [String, nil]
-      # @return [String, nil]
       def relativize_frame(frame)
         frame&.sub(%r{\A.*/(lib/rigor/)}, '\1')
       end
 
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
-      # @return [Symbol, nil] `:check_rule`, `:plugin`, `:rbs_build`, or nil for an ordinary diagnostic.
+      # @return `:check_rule`, `:plugin`, `:rbs_build`, or nil for an ordinary diagnostic.
       def reason(diagnostic)
         return :check_rule if diagnostic.message.to_s.start_with?(CHECK_RULE_MESSAGE_PREFIX)
         return :plugin if plugin_isolation_row?(diagnostic)
@@ -152,8 +142,6 @@ module Rigor
       # True when `diagnostic` is the rescue row that REPLACED a file's analysis — the only shape after which
       # the run's diagnostics say nothing about the code. NOT a general "something went wrong" predicate; see
       # the class doc for why `:plugin` and `:rbs_build` are excluded.
-      #
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
       def discards_file_analysis?(diagnostic)
         reason(diagnostic) == DISCARDS_FILE_ANALYSIS_REASON
       end
@@ -162,17 +150,12 @@ module Rigor
       # measurement of Rigor — see {ANALYZER_DEFECT_RULES}. Orthogonal to {.discards_file_analysis?}: the
       # user-facing tier reads the run; the Rigor-measuring tier should refuse it (the mutation fuzz does,
       # the ADR-69 kill oracle does not yet — #790).
-      #
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
       def analyzer_defect?(diagnostic)
         ANALYZER_DEFECT_RULES.include?(diagnostic.rule)
       end
 
       # A one-line "<reason> at <path>:<line>: <message>" for a failure message, so whoever reads the raise
       # sees which shape fired and where without re-deriving it.
-      #
-      # @param diagnostic [Rigor::Analysis::Diagnostic]
-      # @return [String]
       def describe(diagnostic)
         "#{reason(diagnostic) || :unknown} at #{diagnostic.path}:#{diagnostic.line}: #{diagnostic.message}"
       end

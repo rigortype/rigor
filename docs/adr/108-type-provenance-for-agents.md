@@ -1,6 +1,6 @@
 # ADR-108 — Type provenance for agents: the `rigor-type-oracle` skill and the adopting project's contract
 
-Status: **Proposed, 2026-09-08 — implementation in [#826](https://github.com/rigortype/rigor/pull/826), a Draft; flips to Accepted when it lands.**
+Status: **Accepted, 2026-09-08 — implemented by [#826](https://github.com/rigortype/rigor/pull/826).**
 Ships `skills/rigor-type-oracle/` (body + three `references/` + a four-case eval suite), the contract
 paragraph `rigor-project-init` installs into an adopting project's `AGENTS.md` / `CLAUDE.md` (Phase 8a,
 `references/06-agent-contract.md`),

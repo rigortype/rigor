@@ -8,9 +8,9 @@ agent works inside a project that has Rigor available.
 Skills are optional. Everything they do, you can do by hand with the
 commands in this manual; a skill drives the workflow end to end.
 
-## Start here — two skills to remember
+## Start here — three skills to remember
 
-You only ever need to remember two skills; the rest are reached through
+You only ever need to remember three skills; the rest are reached through
 them.
 
 - **`rigor-next-steps`** — *"what should we do next?"* The single entry
@@ -31,6 +31,20 @@ them.
   code, runs `rigor check` / `annotate` / `type-of` — then answers from
   the page or the inferred type. You never have to remember the command,
   just the question. Available at any point.
+- **`rigor-type-oracle`** — *"before you write a type, ask Rigor."* The
+  one to remember while **writing** rather than while planning. Any time
+  a type is about to be written or asserted — RBS under `sig/`, an inline
+  `#:` / `# @rbs` annotation, a Sorbet `sig`, a YARD `@param` /
+  `@return`, a type named in a doc sentence or a review comment, a nil
+  check justified by "this should be an `X`" — the type comes from
+  [`rigor type-of`](02-cli-reference.md#rigor-type-of) /
+  [`annotate`](02-cli-reference.md#rigor-annotate) /
+  [`sig-gen`](02-cli-reference.md#rigor-sig-gen), not from reading the
+  code. A type nobody obtained from Rigor is a guess, and where Rigor has
+  no answer (`Dynamic[top]`, `untyped`, a skipped method) the gap is
+  reported rather than filled in. It also ships the paragraph to keep in
+  your `AGENTS.md` / `CLAUDE.md`, so the rule holds in every agent
+  session and not only when the skill triggers.
 
 If you do not know which skill you need, start with `rigor-next-steps`.
 
@@ -72,6 +86,13 @@ is not repeated here.)
 - **`rigor-monkeypatch-resolve`** — resolves an `undefined-method`
   cluster that is really your project's own monkey-patches by wiring the
   defining files into `pre_eval:`.
+- **`rigor-type-oracle`** — sources every type an agent writes from
+  Rigor (`type-of` / `annotate` / `sig-gen`) instead of from reading the
+  code, and reports the gaps rather than filling them. It is triggered by
+  the *event* of a type being about to be written, so `rigor skill
+  describe` lists it but never routes to it — reach for it (or install
+  its `AGENTS.md` paragraph) whenever an agent documents or annotates
+  your code. Introduced above under "Start here".
 
 ### Integration and operations
 

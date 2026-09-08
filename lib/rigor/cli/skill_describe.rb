@@ -121,9 +121,9 @@ module Rigor
       # The entry-point SKILL itself — excluded from the catalogue because it is the skill being run, not a destination.
       ENTRY_POINT_SKILL = "rigor-next-steps"
 
-      # Adoption-journey order for the catalogue and the order the recommendation decision tree walks. `rigor-ask` sits
-      # last: it is the journey-agnostic "answer a question about Rigor" companion the agent can offer at any point,
-      # never a presence-recommended step.
+      # Adoption-journey order for the catalogue and the order the recommendation decision tree walks. The last two are
+      # journey-agnostic companions the agent can offer at any point, never presence-recommended steps:
+      # `rigor-type-oracle` fires on an event (being about to write a type), and `rigor-ask` on a question about Rigor.
       CATALOG_ORDER = %w[
         rigor-project-init
         rigor-rbs-setup
@@ -137,6 +137,7 @@ module Rigor
         rigor-plugin-author
         rigor-upgrade
         rigor-doctor
+        rigor-type-oracle
         rigor-ask
       ].freeze
 

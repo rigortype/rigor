@@ -14,9 +14,9 @@ demand. They reference only the public `rigor` CLI surface.
 > workflows under [`.claude/skills/`](../.claude/skills/), marked
 > `metadata.internal: true` so they are not installed for end users.
 
-## Two skills to remember
+## Three skills to remember
 
-You only ever need to remember two; the rest are reached through them.
+You only ever need to remember three; the rest are reached through them.
 
 - **`rigor-next-steps`** — *"what should we do next?"* The entry point: it
   resolves the `rigor` command (installing it if missing), onboards the
@@ -31,6 +31,14 @@ You only ever need to remember two; the rest are reached through them.
   handbook and manual **offline** via `rigor docs` *and* runs Rigor over
   your code (`rigor check` / `annotate` / `type-of`), then answers from
   the page or the inferred type. You only have to remember the question.
+- **`rigor-type-oracle`** — *"before you write a type, ask Rigor."* The
+  one to remember while **writing**, not while planning: any time a type
+  is about to be written or asserted — RBS in `sig/`, an inline `#:` /
+  `# @rbs`, a Sorbet `sig`, a YARD tag, a type named in a doc sentence or
+  a review comment, a nil check justified by "this should be an X" — the
+  type comes from `rigor type-of` / `annotate` / `sig-gen`, not from
+  reading the code. A type you did not obtain from Rigor is a guess, and
+  where Rigor has no answer the gap is reported rather than filled in.
 
 `rigor-next-steps` runs `rigor skill describe`:
 
@@ -65,6 +73,7 @@ your installed version rather than being frozen into a SKILL file — see
 | [`rigor-plugin-review`](rigor-plugin-review/SKILL.md) | Review an existing plugin against the current authoring contract and produce a prioritized upgrade path — config defaults (ADR-40), the ADR-60 WD4 helpers, `node_rule` vs a hand-rolled walk, `dynamic_return` / `narrowing_facts`, doc freshness. |
 | [`rigor-upgrade`](rigor-upgrade/SKILL.md) | Adopt a new Rigor version cleanly — diff diagnostics against the baseline, sort genuine new catches from sig-quality FPs, regenerate. |
 | [`rigor-doctor`](rigor-doctor/SKILL.md) | Validate the setup is healthy — config resolves, plugins load, baseline is fresh, the analysis sees your code. |
+| [`rigor-type-oracle`](rigor-type-oracle/SKILL.md) | **Before writing a type, ask Rigor.** Source every type from `rigor type-of` / `annotate` / `sig-gen` instead of from reading the code — RBS, inline `#:` / `# @rbs`, a Sorbet `sig`, a YARD tag, a doc sentence, a review comment. A gap (`Dynamic[top]`, `untyped`, a skipped method) is reported, never filled in. |
 
 ## Installing the skills
 

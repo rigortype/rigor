@@ -17,101 +17,62 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**v0.3.8 is published.** The release PR (`release/0.3.8`, `Bump up version to 0.3.8`) merged on
-2026-09-08; the user ran `rake release` from `master`: tag `v0.3.8` at `ffb456b0`, the GitHub Release,
-and `rigortype 0.3.8` on RubyGems all exist. `Rigor::VERSION` is `0.3.8`; `[Unreleased]` is empty;
-`changelog.d/` holds the post-cut fragments — #810, [#813](https://github.com/rigortype/rigor/pull/813)
-(the Ractor-pool twin of #798) and [#819](https://github.com/rigortype/rigor/pull/819) — all riding
-the next cut. The next cut happens only when the user invokes `/rigor-release-prep` explicitly — a
-release date or goal mentioned in a task is not that invocation (ADR-50 § WD5).
+**v0.3.8 is published** (tag `v0.3.8`, RubyGems, GitHub Release; `Rigor::VERSION` is `0.3.8` and
+`[Unreleased]` is empty as of 2026-09-08). Post-cut fragments ride under `changelog.d/`. The next cut
+happens only when the user invokes `/rigor-release-prep` explicitly — a release date or goal mentioned
+in a task is not that invocation (ADR-50 § WD5).
+
+## The 2026-09-08 range-notation session (PR open, Draft)
+
+The user asked whether Rigor's integer range type should use Ruby's own range notation so a Float
+range could follow the same rule. It should, and ADR-1 had already said so on 2026-04-27: the
+carrier shipped PHPStan's `int<min, max>` five days later against it, and a 2026-06-21
+docs-contradiction sweep rewrote the spec to match the code. The old spelling also did not round-trip
+(`int<0, max>` displayed, unparseable as input) and could not extend to Float (`min` reads as
+`Float::MIN`).
+
+- [#830](https://github.com/rigortype/rigor/pull/830) — **open, Draft, do not merge without the
+  user's word.** ADR-109 + slice 1: `Integer[1..10]` / `Integer[0..]` / `Integer[..-1]` display and
+  grammar (`TypeNode::RangeLiteral`), universal range displays `Integer`, `int<a, b>` kept as a
+  deprecated input alias, spec corpus + handbook + manual swept, nine precision snapshots
+  regenerated, grounding note `docs/notes/20260908-ruby-range-notation-and-float-intervals.md`.
+  `make verify` and `make docs-check` were green locally on the head commit (`62f65600`); watch the
+  HEAD commit's run by id, not `gh pr checks --watch`.
+- [#831](https://github.com/rigortype/rigor/issues/831) — the rest of ADR-109: the `Float[R]`
+  carrier with `non-nan-float` = `Float[-Float::INFINITY..]` and `finite-float` =
+  `Float[-Float::MAX..Float::MAX]` (slice 2), truthy-edge Float comparison narrowing and folds
+  (slice 3), and the `dynamic.rbs-extended.deprecated-form` diagnostic for the old alias. The
+  design is in ADR-109 WD3–WD5; the spec carries *Reserved (as of this writing)* markers.
+- **Another session's lane, hands off:** the crash on a reversed `int<10, 1>` annotation (internal
+  analyzer error, `rigor check` still exits 0) was spun off from this session and is being fixed
+  elsewhere; it edits `PARAMETERISED_INT_BUILDERS["int"]` in `imported_refinements.rb`, which #830
+  does not touch.
+
+Two things the next session should not rediscover:
+
+- Union display order changed with the spelling: `Integer[..4] | Integer[11..]` now sorts the
+  left half first (`[.` precedes `[1`). Regenerate a precision snapshot with `UPDATE_SNAPSHOTS=<name>`
+  rather than editing the YAML by hand.
+- An engine gap noted while probing, not scoped: `n.clamp(1..9)` types `Dynamic[top]` while
+  `n.clamp(1, 9)` folds to `Integer[1..9]`, and `rand(0.0...1.0)` picks the `Range[Integer]`
+  overload and types `Integer?`. Both are recorded in #831's slice-3 notes.
 
 ## The 2026-09-08 types-and-comments session (landed)
 
-The maintainer redefined the rule — **a type Rigor did not produce or check is never written down** —
-for Rigor's own tree and for what Rigor ships to agents. All three PRs merged in order on 2026-09-08:
-[#822](https://github.com/rigortype/rigor/pull/822) (1,121 YARD type slots emptied, doc tags now
-`@param name — description`, `AGENTS.md` § "Types and Comments", gate
-`spec/docs/type_shaped_comments_spec.rb` R1–R5, ADR-107), [#826](https://github.com/rigortype/rigor/pull/826)
-(`skills/rigor-type-oracle/`, the `AGENTS.md` fragment `rigor-project-init` installs, ADR-108 Accepted),
-[#827](https://github.com/rigortype/rigor/pull/827) (`rigor check --fail-on=SEVERITY`; `make check` /
-`check-plugins` run with `--fail-on=warning`; closed #812). Master CI green after each merge.
+**A type Rigor did not produce or check is never written down**, for Rigor's own tree and for what
+Rigor ships to agents: [#822](https://github.com/rigortype/rigor/pull/822) (typeless YARD tags,
+`AGENTS.md` § "Types and Comments", gate `spec/docs/type_shaped_comments_spec.rb`, ADR-107),
+[#826](https://github.com/rigortype/rigor/pull/826) (`skills/rigor-type-oracle/`, ADR-108),
+[#827](https://github.com/rigortype/rigor/pull/827) (`rigor check --fail-on=SEVERITY`; the gates run
+with `--fail-on=warning`). Open follow-ups, all still open on 2026-09-08:
+[#823](https://github.com/rigortype/rigor/issues/823) (an annotated method's unannotated siblings),
+[#824](https://github.com/rigortype/rigor/issues/824) (`sig/` vs inline precedence),
+[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance gate, ADR-107 G3).
 
-Open follow-ups, all `ready-for-human`: [#823](https://github.com/rigortype/rigor/issues/823) (an
-annotated method's unannotated siblings), [#824](https://github.com/rigortype/rigor/issues/824)
-(`sig/` vs inline precedence), [#825](https://github.com/rigortype/rigor/issues/825) (`sig/`
-provenance gate, ADR-107 G3). Out of scope and untouched: comments under `spec/` and `tool/` still
-carry `[Type]` slots; the gate covers `lib/`, `plugins/*/lib`, `examples/*/lib` only.
+## How to enter
 
-## The 2026-09-08 perf session (#775)
-
-The v0.3.7 allocation regression is attributed and its mechanical half recovered in
-[#819](https://github.com/rigortype/rigor/pull/819) (`perf-775-allocation-levers`, 15 levers +
-note, **Draft until an APPROVE on GitHub**): `rigor check --no-cache lib` 36,492,665 → 21,933,996
-allocations (−39.9%), diagnostics byte-identical on `lib` after every commit and on redmine at the
-end, `make verify` green. Measurement record:
-[`docs/notes/20260908-v037-allocation-regression-attribution.md`](notes/20260908-v037-allocation-regression-attribution.md);
-instruments on the unmerged branch `perfbench-harness-775` (`tool/perf775/`). Short form: the
-17M was per-file typing, not the environment build, the target or the rbs bump; no single merge
-caused it (#547 +4.1M, #556 +2.3M, #753 +1.8M, #664 +1.7M, then a tail); the per-call driver was
-the 21-member `Rigor::Type::t` alias re-translated at every call site and re-normalised at every
-join.
-
-## Ranked next engineering work
-
-1. **Land #819, then close [#775](https://github.com/rigortype/rigor/issues/775)'s gate.** Once it
-   is on `master`, trigger `release-gate.yml`, download the `bench-baseline-*` artifact and commit
-   its targets as `bench/baseline.json` (expect ≈22M allocations, ≈+16% over v0.3.6's 18.85M) with
-   a `note` that points at the attribution note — the remainder is the v0.3.7 line's inference
-   volume (64% more user-method return inferences, 68% more body evaluations), recorded rather
-   than blessed. Until then `make bench-perf` prints the `STALE` notice, not a failure.
-2. **The design-seam remainder** — [#820](https://github.com/rigortype/rigor/issues/820): the
-   measured-and-left items (a rebuilt `Scope` + merged locals `Hash` per binding, a
-   `RuleWalk::Context` per visited node, an `ExpressionTyper` per `Scope#type_of`, a
-   `StatementEvaluator` per `sub_eval`, `receiver_descriptor`'s triple per dispatch, lazy
-   `AcceptsResult` reasons). Each is a design change, not a mechanical removal; size before
-   choosing.
-3. **[#812](https://github.com/rigortype/rigor/issues/812)** — `make check` exits 0 on a warning,
-   so "MUST stay clean" is unenforced. The `def.return-type-mismatch` warning on
-   `ExpressionTyper#return_type_for` is fixed at the root by #810 (`make check` is warning-free);
-   it sat on `master` across #800–#809 because of this hole. Sibling finding
-   [#811](https://github.com/rigortype/rigor/issues/811): negative-equality narrowing cannot prune
-   a symbol literal from a mixed union — a type-model change, not a quick fix.
-4. **[#807](https://github.com/rigortype/rigor/issues/807)** — `spec/rigor/cache/store_spec.rb:628`
-   is a CI flake with a real cause: 16 threads each build a `Store` on a fresh root and race
-   `repair_writable_marker!`, so one can read a torn `schema_version.txt` and `clear_cache_root!`
-   under a sibling's `binread`. Seen once on #804's shard 1; 25 local repetitions clean.
-5. [#806](https://github.com/rigortype/rigor/issues/806) — `Plugin::Registry#type_node_resolvers`
-   unguarded at Environment construction (latent, no reachable trigger).
-
-## Pipeline notes (each earned by an incident)
-
-- **Measure allocations, not wall, and per lever.** `GC.stat(:total_allocated_objects)` over an
-  in-process `rigor check --no-cache` reproduces Linux CI to under 1% on this host and is
-  deterministic run to run; wall on the loaded laptop is not. One commit per lever, each measured
-  against its parent with the `--format json` output diffed against master — a lever that changes
-  a byte is not a lever.
-- **`RIGOR_BUDGET_TRACE` counters drift ~1% across hours** on one host (42,285 → 42,728 infer
-  entries for the same master tree; each run deterministic, diagnostics byte-identical). Compare
-  them only back-to-back, engine against engine, in one script.
-- **A hot-path helper must allocate nothing.** A `(0...n).all?` Range walk in overload selection
-  cost 0.5M objects (2.3%) on its own; a counter captured by a literal block costs zero.
-- **zsh `pipefail` + `grep -q` drops the big merges.** `git diff --name-only … | grep -q PAT`
-  fails whenever grep exits before git finishes writing (SIGPIPE), so a "touches non-Markdown"
-  filter silently kept 13 of 127 merges. Count with `grep -c`.
-- **Every lane that edits a binding doc row conflicts with every other one.** The `rbs.coverage.*`
-  and `rbs_extended.*` rows of `docs/type-specification/diagnostic-policy.md` are single very long
-  lines; resolve by taking master's line and re-applying your own phrases, verify with
-  `git diff --word-diff origin/master HEAD -- docs`, and re-read the merged sentence.
-- **`Environment.default` is a process-wide `@default ||=` singleton.** A spec that stubs a shared
-  build and then demands it on `.default` is order-dependent in a binpacker worker. Build a fresh
-  `for_project` environment in any spec that stubs or degrades a memoised build.
-- **A worktree SHARES `.git`, and submodules are NOT populated in one.** `git submodule deinit`
-  there deregisters it for the MAIN CLONE. `bin/rigor-worktree` clones the bundle copy-on-write;
-  a checkout of an older commit runs on the gems already in `vendor/bundle` (every rbs 4.x is
-  there), no `bundle install` needed.
-- **Serialize the full gate across parallel lanes** with a `mkdir /tmp/rigor-verify.lock` mutex —
-  parallel `make verify` runs have OOM-killed this host.
-- **GitHub closes only the FIRST `Fixes #N` in a comma list.** One `Fixes #N` per line.
-- **`gh pr checks --watch` armed right after a push exits 1 with "no checks reported"** — GitHub
-  has not registered the run yet. Poll until `gh pr checks` lists a check, then watch.
-- **Verify the INTEGRATED master after a batch.** No single PR's CI sees the combination.
+1. `gh pr view 830` — if the user has said to land it and the head run is green, `gh pr ready 830`
+   then `gh pr merge 830 --merge`; otherwise leave it Draft.
+2. Slice 2 of ADR-109 starts from `RANGE_HEAD_BUILDERS` in `lib/rigor/builtins/imported_refinements.rb`
+   and the reserved paragraph in `docs/type-specification/imported-built-in-types.md`; read the
+   grounding note's § 4 first, every Float fact there is already verified.

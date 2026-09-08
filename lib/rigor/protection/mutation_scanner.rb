@@ -92,8 +92,9 @@ module Rigor
       # @param limit optional per-file mutation cap (sampled with
       #   `seed`); nil analyses every type-relevant mutation (deterministic).
       # @param seed RNG seed for the optional sample.
-      # @param oracle the kill oracle (ADR-69 Seam 1);
-      #   defaults to the {DiagnosticOracle} (the ADR-62/63 behaviour).
+      # @param oracle the kill oracle (ADR-69 Seam 1) — anything answering
+      #   `baseline` and `killed?`; defaults to the {DiagnosticOracle} (the
+      #   ADR-62/63 behaviour).
       # @param site_selector which sites to mutate (ADR-69
       #   Seam 2). `:biteable` (default) keeps only concrete-type sites Rigor can
       #   bite; `:all` also mutates Dynamic-receiver dispatch sites — use only

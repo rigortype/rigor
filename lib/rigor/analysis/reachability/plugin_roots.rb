@@ -84,8 +84,9 @@ module Rigor
         # published `:reachability_roots` and `:reachability_references` fact.
         #
         # @param configuration the loaded project configuration.
-        # @param plugin_requirer how a plugin gem is brought into the process. The same seam
-        #   `Analysis::Runner` exposes, so a spec can register a plugin class without publishing a gem.
+        # @param plugin_requirer how a plugin gem is brought into the process, called with the gem name. The
+        #   same seam `Analysis::Runner` exposes, so a spec can register a plugin class without publishing a
+        #   gem.
         # @param cache_store when given, each plugin's `#prepare` producers read
         #   and write the same ADR-60 record-and-validate slots they use under `rigor check`, instead of
         #   recomputing from scratch — a routes parse or a factory discovery is a validated cache read on

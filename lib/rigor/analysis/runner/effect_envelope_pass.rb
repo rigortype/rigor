@@ -91,7 +91,7 @@ module Rigor
         # @param ancestry returns the run's as-written superclass table
         #   (`FileCollection#superclasses`) — the nominal relation `effect.liskov-widened` reads. A
         #   lambda, and called only once an envelope exists, because merging the run's collections is
-        #   not free.
+        #   not free. nil leaves that relation empty.
         # @param apply_tolerated false runs the judgment with an empty tolerated set
         #   (`--no-tolerated-effects`).
         def initialize(configuration:, rbs_loader:, effect_table:, discovery:, # rubocop:disable Metrics/ParameterLists

@@ -122,8 +122,9 @@ module Rigor
         # @param type_vars substitution map for `Bases::Variable`. Keys
         #   are the RBS variable names (e.g., `:Elem`); values are Rigor types that replace the
         #   variable. Variables that are not bound in the map degrade to Dynamic[Top].
-        # @param alias_expander resolves `RBS::Types::Alias` one level out —
-        #   in practice the environment's `RbsLoader`. When nil, aliases degrade to Dynamic[Top].
+        # @param alias_expander anything answering `expand_type_alias`, which resolves `RBS::Types::Alias`
+        #   one level out — in practice the environment's `RbsLoader`. When nil, aliases degrade to
+        #   Dynamic[Top].
         def translate(rbs_type, self_type: nil, instance_type: nil, type_vars: EMPTY_TYPE_VARS,
                       alias_expander: nil)
           translate_in(rbs_type, Context.new(self_type, instance_type, type_vars, alias_expander, 0))

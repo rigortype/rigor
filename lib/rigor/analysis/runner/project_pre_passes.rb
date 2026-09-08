@@ -35,6 +35,8 @@ module Rigor
           :pre_eval_diagnostics_from_scanner
         )
 
+        # @param plugin_requirer how a plugin gem is brought into the process, called with the gem name; nil
+        #   lets `Plugin::Loader` apply its own default.
         # @param pool_mode reader returning the pool-mode flag.
         def initialize(configuration:, cache_store:, buffer:, plugin_requirer:, pool_mode:)
           @configuration = configuration

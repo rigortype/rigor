@@ -37,13 +37,13 @@ module Rigor
       DEFAULT_COLLECTION_PATH = ".gem_rbs_collection"
       private_constant :DEFAULT_COLLECTION_PATH
 
-      # @param lockfile_path explicit path to `rbs_collection.lock.yaml`. When `nil`,
+      # @param lockfile_path — explicit path to `rbs_collection.lock.yaml`. When `nil`,
       #   falls back to `auto_detect` if `auto_detect:` is true.
-      # @param project_root resolution base for relative `lockfile_path:` and the auto-detect
+      # @param project_root — resolution base for relative `lockfile_path:` and the auto-detect
       #   search.
-      # @param auto_detect when true and `lockfile_path:` is nil, look for
+      # @param auto_detect — when true and `lockfile_path:` is nil, look for
       #   `<project_root>/rbs_collection.lock.yaml`.
-      # @param skip_gem_names gem names rigor already loads from its bundled
+      # @param skip_gem_names — gem names rigor already loads from its bundled
       #   stdlib (the merged `DEFAULT_LIBRARIES + libraries:` set). Entries whose `name` is in this set are
       #   dropped regardless of `source.type` to avoid `RBS::DuplicatedDeclarationError` on
       #   stdlib-extracted default gems. Defaults to empty.

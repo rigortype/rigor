@@ -214,40 +214,40 @@ module Rigor
         end
       end
 
-      # @param explain surface fail-soft fallback events as `:info` diagnostics.
-      # @param cache_store the persistent cache the runner exposes to producers
+      # @param explain — surface fail-soft fallback events as `:info` diagnostics.
+      # @param cache_store — the persistent cache the runner exposes to producers
       #   (`RbsConstantTable` and successors). Pass `nil` to disable caching for this run; the CLI's
       #   `--no-cache` flag wires `nil` through. v0.0.9 group A slice 1 introduces the surface; later
       #   slices route real producers through it.
-      # @param workers ADR-15 Phase 4b — when greater than zero, per-file analysis dispatches
+      # @param workers — ADR-15 Phase 4b — when greater than zero, per-file analysis dispatches
       #   across a pool of N workers. Default `0` keeps the sequential code path bit-for-bit unchanged.
       #   Controlled via the `RIGOR_RACTOR_WORKERS` env var or `.rigor.yml` `parallel.workers:` (Phase 4c,
       #   fully wired).
-      # @param collect_stats when true (default), `#run` builds a {RunStats} summary exposed via
+      # @param collect_stats — when true (default), `#run` builds a {RunStats} summary exposed via
       #   `result.stats` — this forces the RBS env build at end-of-run so the `class_decl_paths` snapshot
       #   has real source attribution. Set to false to skip the stats summary entirely; the CLI's
       #   `--no-stats` threads `false` through to keep trivial-fixture runs from warming `.rigor/cache`.
-      # @param prebuilt when supplied, the runner adopts the pre-built
+      # @param prebuilt — when supplied, the runner adopts the pre-built
       #   plugin registry / dependency-source index / scanner outputs from the snapshot and skips the
       #   per-call pre-passes that produce them. Used by long-lived integrations
       #   (`Rigor::LanguageServer::ProjectContext`) to keep per-buffer requests fast — scanners walk the
       #   project once per generation rather than once per request, and plugin `#prepare` runs once per
       #   generation rather than once per request. Watched-file invalidation is the owner's responsibility;
       #   the runner trusts the snapshot it was given.
-      # @param environment opt-in Environment override. When supplied, sequential
+      # @param environment — opt-in Environment override. When supplied, sequential
       #   mode uses the provided env instance in `#analyze_files` instead of building a fresh one via
       #   `Environment.for_project`, and attaches the runner's per-run reporter pair onto the env's mutable
       #   `Reporters` slot via `Environment#attach_reporters!`. Long-lived consumers (LSP `ProjectContext`)
       #   pass a shared env so per-publish work doesn't repeat the `Environment.for_project` build (bundler
       #   / lockfile / collection discovery, RbsLoader construction). Pool mode ignores the override — each
       #   worker continues to build its own Environment.
-      # @param discovery_seed issue #260 — opt-in cross-file discovery tables, keyed by
+      # @param discovery_seed — issue #260 — opt-in cross-file discovery tables, keyed by
       #   {Scope::DiscoveryIndex} slot name, seeded onto every per-file scope through
       #   `project_scope_seed_tables`. The ONE deliberate exception to "a `prebuilt:` runner carries no
       #   discovery tables": {Protection::DiagnosticOracle} threads the table set Tier 2's site filter already
       #   judges anchors against, so a site admitted because a sibling-file class resolved is also a site the
       #   oracle can kill at. nil (the default) leaves the prebuilt/LSP contract byte-identical.
-      # @param no_tolerated_effects ADR-103 WD1 / #385 — `rigor check --no-tolerated-effects`.
+      # @param no_tolerated_effects — ADR-103 WD1 / #385 — `rigor check --no-tolerated-effects`.
       #   Judges effect envelopes as if `effects.tolerated:` were empty. A judgment-time switch only: the
       #   run, its collection and its cache identity are unchanged.
       def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
@@ -478,8 +478,8 @@ module Rigor
       # so the result matches a one-file disk run; only the cross-file project pre-pass is empty (there is
       # one file, and the per-file indexer self-discovers its own classes / defs).
       #
-      # @param source Ruby source to analyze.
-      # @param path logical path for diagnostic locations.
+      # @param source — Ruby source to analyze.
+      # @param path — logical path for diagnostic locations.
       def run_source(source:, path: "(source).rb")
         @in_memory_sources = { path => source }
         run([path])
@@ -663,8 +663,8 @@ module Rigor
       # store) exactly as a real run's setup does, then re-drives each spec's def through the ADR-84 return
       # memo. Off any hot path — invoked only when declaration-stable changed pairs carry a persisted summary.
       #
-      # @param paths analysis roots (nil → the configuration's `paths:`).
-      # @param specs each `{ class_name:, method_name:, singleton:, keys: [[receiver, args], …] }`.
+      # @param paths — analysis roots (nil → the configuration's `paths:`).
+      # @param specs — each `{ class_name:, method_name:, singleton:, keys: [[receiver, args], …] }`.
       # @return `{ [class_name, method_name, singleton] => [return_descriptor_or_nil, …] }`.
       def evaluate_return_types(paths, specs)
         return {} if specs.empty?

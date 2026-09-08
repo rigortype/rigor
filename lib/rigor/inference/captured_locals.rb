@@ -30,7 +30,7 @@ module Rigor
 
       module_function
 
-      # @param base_scope the call-site scope the block closes over.
+      # @param base_scope — the call-site scope the block closes over.
       # @return the captured names the body writes, each once, in first-write order.
       def writes(block_node, base_scope)
         body = block_node.body

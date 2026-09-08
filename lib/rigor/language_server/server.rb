@@ -42,11 +42,11 @@ module Rigor
                   :signature_help_provider, :folding_range_provider,
                   :selection_range_provider, :project_context
 
-      # @param completion_provider
+      # @param completion_provider —
       #   resolves `textDocument/completion`. Nil → `MethodNotFound`.
-      # @param signature_help_provider
+      # @param signature_help_provider —
       #   resolves `textDocument/signatureHelp`. Nil → `MethodNotFound`.
-      # @param project_context the per-session cache of
+      # @param project_context — the per-session cache of
       #   `Environment` + `Cache::Store` the providers read on every request. When present,
       #   `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration` invalidate the cache; nil
       #   means "no project context": each request rebuilds env from scratch (mainly for specs and backward
@@ -78,8 +78,8 @@ module Rigor
 
       # Routes one LSP method call.
       #
-      # @param method the LSP method name (e.g. "initialize").
-      # @param params the LSP `params` payload (Hash for
+      # @param method — the LSP method name (e.g. "initialize").
+      # @param params — the LSP `params` payload (Hash for
       #   request / notification methods; nil for the empty case).
       # @return one of:
       #   - the response result Hash for request methods,

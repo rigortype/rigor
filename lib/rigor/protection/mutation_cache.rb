@@ -89,13 +89,13 @@ module Rigor
       UNIDENTIFIED_ENGINE = "the engine's own source tree could not be digested"
 
       class << self
-        # @param roots the analysis roots to look for a snapshot under, most-specific first
+        # @param roots — the analysis roots to look for a snapshot under, most-specific first
         #   (the command's own path arguments, then the configured `paths:`).
-        # @param project_scan the prepared whole-project scan.
-        # @param feature_ids the ADOPTED bleeding-edge ids that change this measurement.
-        # @param seed_inputs the files the {DiscoverySeed} was built over when it is
+        # @param project_scan — the prepared whole-project scan.
+        # @param feature_ids — the ADOPTED bleeding-edge ids that change this measurement.
+        # @param seed_inputs — the files the {DiscoverySeed} was built over when it is
         #   active, nil when it is not. The CLI stays the only place that knows a feature id exists.
-        # @param bypass_reason a caller-side reason to run uncached (`--no-cache`, the closure
+        # @param bypass_reason — a caller-side reason to run uncached (`--no-cache`, the closure
         #   oracle). Reported verbatim.
         # @return enabled, or a disabled instance carrying `#reason`.
         def build(configuration:, roots:, project_scan:, sampling:, feature_ids:, seed_inputs: nil,

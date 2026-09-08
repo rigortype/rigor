@@ -75,17 +75,17 @@ module Rigor
           Integer(env_value)
         end
 
-        # @param environment the warm, shared per-session Environment
+        # @param environment — the warm, shared per-session Environment
         #   (`ProjectContext#environment`) every job's Runner reuses instead of rebuilding.
-        # @param prebuilt the warm, shared pre-pass snapshot
+        # @param prebuilt — the warm, shared pre-pass snapshot
         #   (`ProjectContext#project_scan`) every job's Runner adopts instead of re-scanning.
-        # @param workers pool size. `#analyze` degrades to sequential in-process execution — one
+        # @param workers — pool size. `#analyze` degrades to sequential in-process execution — one
         #   job at a time, no `fork` — when fewer than 2 bindings are submitted, fewer than `min_batch_size`
         #   bindings are submitted, `workers` is not positive, `fork` is unavailable on this platform, or
         #   `cache_store` is nil. The middle two are the fork-pool-is-not-worth-it-yet gate documented on
         #   {DEFAULT_MIN_BATCH_SIZE}; the last two mirror
         #   {PoolCoordinator#analyze_files_in_pool}'s own fork-pool preconditions.
-        # @param min_batch_size see {DEFAULT_MIN_BATCH_SIZE}. Exposed as a constructor param
+        # @param min_batch_size — see {DEFAULT_MIN_BATCH_SIZE}. Exposed as a constructor param
         #   (rather than read from the env internally) purely for spec control; production callers get the
         #   resolved default.
         def initialize(configuration:, cache_store:, environment:, prebuilt:, workers:,

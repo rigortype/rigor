@@ -42,7 +42,7 @@ module Rigor
 
         module_function
 
-        # @param paths absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
         # @return frozen `{aliased_name => underlying_class_name}` map. Empty
         #   when no `include Dry.Types()` declaration is found.
         def scan(paths:)

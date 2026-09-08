@@ -45,9 +45,9 @@ module Rigor
         seen.values
       end
 
-      # @param labels the list as written, in source order.
-      # @param key_path the `.rigor.yml` key, for the message (`effects.tolerated`).
-      # @param consequence what the degradation cost, for the message.
+      # @param labels — the list as written, in source order.
+      # @param key_path — the `.rigor.yml` key, for the message (`effects.tolerated`).
+      # @param consequence — what the degradation cost, for the message.
       def for_config(labels:, key_path:, consequence:, registry:)
         tokens = Array(labels).map(&:to_s)
         tokens.filter_map do |token|

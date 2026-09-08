@@ -30,13 +30,13 @@ module Rigor
         hint: 4
       }.freeze
 
-      # @param debouncer
+      # @param debouncer —
       #   when present, `publish_for` schedules its work through
       #   the debouncer (cancels prior pending task for the same
       #   URI, fires after `debounce_seconds` quiet-time). Nil
       #   keeps the slice 4-7 synchronous behaviour — primarily
       #   useful for specs.
-      # @param debounce_seconds quiet-time before the
+      # @param debounce_seconds — quiet-time before the
       #   debounced publish fires. 0 with a debouncer means
       #   "schedule on next-tick" (still async); without a
       #   debouncer the value is unused.

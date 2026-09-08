@@ -344,8 +344,8 @@ module Rigor
         # local's true member state at every later read on the path. A non-fold-safe local is left untouched
         # (its reads do not fold, so the binding is never consulted for folding).
         #
-        # @param call_node the `local.member = v` call
-        # @param assigned_type the setter's assigned value type (the call's own result)
+        # @param call_node — the `local.member = v` call
+        # @param assigned_type — the setter's assigned value type (the call's own result)
         # @return the (possibly) rebound scope
         def apply_setter_writeback(call_node:, assigned_type:, scope:)
           return scope if scope.nil? || assigned_type.nil?

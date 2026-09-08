@@ -41,7 +41,7 @@ module Rigor
         end
       end
 
-      # @param scope base scope used for every type_of call. Defaults to `Scope.empty`.
+      # @param scope — base scope used for every type_of call. Defaults to `Scope.empty`.
       def initialize(scope: nil)
         @scope = scope || Scope.empty
       end

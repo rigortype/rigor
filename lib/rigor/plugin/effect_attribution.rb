@@ -77,15 +77,15 @@ module Rigor
       # callable whose body is supplied by the application.
       TAINT_CAUSES = %w[template-not-analysed opaque-callable].freeze
 
-      # @param receiver a class name or a receiver path (see above)
-      # @param method the selector this row colours
-      # @param singleton whether the row is `Receiver.method` rather than `Receiver#method`.
+      # @param receiver — a class name or a receiver path (see above)
+      # @param method — the selector this row colours
+      # @param singleton — whether the row is `Receiver.method` rather than `Receiver#method`.
       #   Meaningless — and ignored — for a receiver path, whose head already fixes the receiver object.
-      # @param labels the effect labels the call contributes
-      # @param narrow a {Rigor::Effects::Narrowing} handler name, when the call's own
+      # @param labels — the effect labels the call contributes
+      # @param narrow — a {Rigor::Effects::Narrowing} handler name, when the call's own
       #   argument literals settle a question the row cannot (`connection.execute("SELECT …")`)
-      # @param discharge see above; honoured only for a first-party bundled plugin
-      # @param why the audit justification, required exactly as `data/effects/core.yml` requires
+      # @param discharge — see above; honoured only for a first-party bundled plugin
+      # @param why — the audit justification, required exactly as `data/effects/core.yml` requires
       #   one of every row: a label with no stated reason is a claim nobody can review.
       def initialize(receiver:, method:, labels:, why:, singleton: false, narrow: nil, discharge: false, # rubocop:disable Metrics/ParameterLists
                      within: nil, on_result: false, taint: nil)

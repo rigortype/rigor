@@ -54,7 +54,7 @@ module Rigor
         # Uppercase leading keywords that mark a table-level constraint line rather than a column.
         CONSTRAINT_KEYWORDS = %w[CONSTRAINT PRIMARY UNIQUE CHECK FOREIGN EXCLUDE LIKE PARTITION].freeze
 
-        # @param source contents of `db/structure.sql`
+        # @param source — contents of `db/structure.sql`
         def self.parse(source)
           new.parse(source)
         end

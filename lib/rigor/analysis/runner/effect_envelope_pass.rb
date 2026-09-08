@@ -78,21 +78,21 @@ module Rigor
         LABELS_CONSEQUENCE = "the label is not registered"
         private_constant :LABELS_CONSEQUENCE
 
-        # @param rbs_loader the run's loader; nil disables the pass.
-        # @param effect_table the propagated graph.
-        # @param discovery forces and returns the cross-file discovery tables as
+        # @param rbs_loader — the run's loader; nil disables the pass.
+        # @param effect_table — the propagated graph.
+        # @param discovery — forces and returns the cross-file discovery tables as
         #   `[def_sources, singleton_def_sources, class_sources]`. Called only when a finding needs a
         #   position — a judged-clean envelope never forces it.
-        # @param sources in-memory sources, for the buffer-backed run path.
-        # @param unit_sources `Runner#effect_sources` — where each effect
+        # @param sources — in-memory sources, for the buffer-backed run path.
+        # @param unit_sources — `Runner#effect_sources` — where each effect
         #   unit is defined, which is what an `effects.envelopes[].match:` path glob selects on. Its paths
         #   are relativised against the working directory, which is the project root for every run that
         #   reaches here (the same assumption `Snapshot.build` makes about `reach:`).
-        # @param ancestry returns the run's as-written superclass table
+        # @param ancestry — returns the run's as-written superclass table
         #   (`FileCollection#superclasses`) — the nominal relation `effect.liskov-widened` reads. A
         #   lambda, and called only once an envelope exists, because merging the run's collections is
         #   not free. nil leaves that relation empty.
-        # @param apply_tolerated false runs the judgment with an empty tolerated set
+        # @param apply_tolerated — false runs the judgment with an empty tolerated set
         #   (`--no-tolerated-effects`).
         def initialize(configuration:, rbs_loader:, effect_table:, discovery:, # rubocop:disable Metrics/ParameterLists
                        sources: nil, unit_sources: nil, ancestry: nil, apply_tolerated: true,

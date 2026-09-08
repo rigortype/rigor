@@ -63,7 +63,7 @@ module Rigor
 
         private_constant :ECHOED_ANNOTATION, :DECLARATION_LINE, :COMMENT_LINE
 
-        # @param require_magic_comment when `false` (the default since ADR-93 WD1), the magic
+        # @param require_magic_comment — when `false` (the default since ADR-93 WD1), the magic
         #   comment is not required and the file is processed only if it actually carries an annotation — see
         #   {#annotated?}. When `true` (the old ADR-32 WD2 gate), only files opening with
         #   `# rbs_inline: enabled` are processed, and upstream's opt-in semantics apply verbatim.

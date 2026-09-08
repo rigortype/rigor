@@ -30,7 +30,7 @@ module Rigor
 
         module_function
 
-        # @param factory_index something responding to `find(factory_name)` and returning an
+        # @param factory_index — something responding to `find(factory_name)` and returning an
         #   entry that responds to `model_class`.
         def resolve(block_node, describe_const:, factory_index:, environment:)
           tail = body_tail(block_node)

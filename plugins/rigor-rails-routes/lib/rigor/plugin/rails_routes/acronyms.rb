@@ -24,7 +24,7 @@ module Rigor
       module Acronyms
         module_function
 
-        # @param contents the source of `config/initializers/inflections.rb`.
+        # @param contents — the source of `config/initializers/inflections.rb`.
         # @return declared acronyms in declaration order. Empty for a missing / unparseable
         #   file, or one that declares none — which leaves composition exactly as it was.
         def discover(contents)
@@ -51,8 +51,8 @@ module Rigor
         # camelization of the acronym appears at a camel-word boundary — `Oauth` in `OauthMetadata` and in
         # `WellKnown::Oauth`, but never the `Oauth` inside a hypothetical `Xoauth`.
         #
-        # @param name e.g. `"Activitypub::CollectionsController"`.
-        # @param acronyms as returned by {.discover}.
+        # @param name — e.g. `"Activitypub::CollectionsController"`.
+        # @param acronyms — as returned by {.discover}.
         # @return e.g. `"ActivityPub::CollectionsController"`.
         def apply(name, acronyms)
           acronyms.reduce(name) do |current, acronym|

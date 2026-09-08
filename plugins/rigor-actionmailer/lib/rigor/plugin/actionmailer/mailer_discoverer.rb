@@ -38,9 +38,9 @@ module Rigor
         VIEW_FORMATS = %w[html text].freeze
         VIEW_EXTENSIONS = %w[erb haml slim].freeze
 
-        # @param search_paths absolute or project-relative paths to scan for mailers.
-        # @param base_classes direct superclasses that mark a class as a mailer.
-        # @param views_root absolute or project-relative path to the views directory (typically
+        # @param search_paths — absolute or project-relative paths to scan for mailers.
+        # @param base_classes — direct superclasses that mark a class as a mailer.
+        # @param views_root — absolute or project-relative path to the views directory (typically
         #   `app/views`).
         def initialize(io_boundary:, search_paths:, base_classes:, views_root: DEFAULT_VIEWS_ROOT)
           @io_boundary = io_boundary

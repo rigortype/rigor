@@ -77,6 +77,16 @@ module TypeShapedCommentScanner
   # R3 (stale parameter name) — the two tags from YARD_TYPE_TAGS that name a parameter.
   PARAM_NAME_TAG_RE = /\A@(?:param|option)\b[ \t]+(\S+)/
 
+  # R5 (missing delimiter) — with the type slot gone, nothing separates the name from the prose
+  # (`@param format the output format`), which is hard to read for anyone who does not already know
+  # the parameter list. The house form puts an em dash after the name token (`@param format — the
+  # output format`, `@raise ArgumentError — when amount is zero`; a bare `@param name —` when the
+  # description continues on the next line). YARD keeps the name binding either way (the dash lands
+  # in the description text), so the delimiter costs nothing a tool reads. `@return` has no name and
+  # needs no delimiter. Only the tags that take a name token are checked.
+  DELIMITED_TAG_RE = /\A@(?:param|yieldparam|option|raise)\b[ \t]+\S+[ \t]+—(?:[ \t]|\z)/
+  NAME_TOKEN_TAG_RE = /\A@(?:param|yieldparam|option|raise)\b[ \t]+\S+/
+
   # R4 (stale forward reference) — narrow on purpose (AGENTS.md: "a check that fires on correct
   # input teaches people to route around it"). Only an explicit, numbered forward reference; not any
   # mention of "will" or "later" prose, which is common and legitimate in design-rationale comments.
@@ -93,20 +103,21 @@ module TypeShapedCommentScanner
   # the returned Violations — this method never touches the filesystem, which is what lets the unit
   # examples in the spec exercise each rule on an inline fixture.
   #
-  # Returns {r1:, r2:, r3:, r4:} => Array[Violation].
+  # Returns {r1:, r2:, r3:, r4:, r5:} => Array[Violation].
   def scan_source(path, source)
     {
       r1: r1_type_shaped_tag(path, source),
       r2: r2_inline_rbs_annotation(path, source),
       r3: r3_stale_parameter_name(path, source),
-      r4: r4_stale_forward_reference(path, source)
+      r4: r4_stale_forward_reference(path, source),
+      r5: r5_missing_delimiter(path, source)
     }
   end
 
   # Runs scan_source over every file scan_paths(root) finds, concatenating each rule's violations
   # across the whole tree. Violation#path is repo-relative (relative to `root`).
   def scan_tree(root)
-    totals = { r1: [], r2: [], r3: [], r4: [] }
+    totals = { r1: [], r2: [], r3: [], r4: [], r5: [] }
     scan_paths(root).each do |absolute|
       relative = absolute.delete_prefix("#{root}/")
       source = File.read(absolute, encoding: "utf-8")
@@ -133,6 +144,16 @@ module TypeShapedCommentScanner
   def r1_type_shaped_tag(path, source)
     inline_comments(source).filter_map do |comment|
       next unless TAG_BRACKET_RE.match?(comment_body(comment))
+
+      Violation.new(path: path, line: comment.location.start_line, excerpt: comment.location.slice.strip)
+    end
+  end
+
+  def r5_missing_delimiter(path, source)
+    inline_comments(source).filter_map do |comment|
+      body = comment_body(comment)
+      next unless NAME_TOKEN_TAG_RE.match?(body)
+      next if DELIMITED_TAG_RE.match?(body)
 
       Violation.new(path: path, line: comment.location.start_line, excerpt: comment.location.slice.strip)
     end

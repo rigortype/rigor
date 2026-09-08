@@ -103,15 +103,15 @@ module Rigor
 
       module_function
 
-      # @param table the run's propagated graph.
-      # @param method_envelopes per-method envelopes, as written.
-      # @param class_envelopes class- / module-level envelopes, to distribute.
-      # @param config_envelopes `effects.envelopes:` entries already resolved
+      # @param table — the run's propagated graph.
+      # @param method_envelopes — per-method envelopes, as written.
+      # @param class_envelopes — class- / module-level envelopes, to distribute.
+      # @param config_envelopes — `effects.envelopes:` entries already resolved
       #   to the classes they select ({ConfigEnvelopes.for_classes}), to distribute at the lowest precedence.
-      # @param positions the discovery tables a finding's `def`
+      # @param positions — the discovery tables a finding's `def`
       #   position is read from — consulted only when a finding is built, so a deferred value's
       #   discovery force is reached exactly as often as a finding exists.
-      # @param apply_tolerated false judges against the undischarged-by-policy `proven` lane —
+      # @param apply_tolerated — false judges against the undischarged-by-policy `proven` lane —
       #   the `--no-tolerated-effects` audit switch.
       # @return sorted by position then key then label, so a run explains identically twice.
       def run(table:, method_envelopes:, class_envelopes:, config_envelopes: {},

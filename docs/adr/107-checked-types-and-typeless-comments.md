@@ -164,18 +164,42 @@ A comment states what the next lines and the signature do not:
 
 It never restates a name, a type, or a signature. Doc comments use YARD's tag grammar with the type
 slot left empty — the grammar makes it optional, so these stay valid tags and keep the
-parameter-name binding a gate can check:
+parameter-name binding a gate can check — and an em dash after the name token, so the boundary
+between the name and the prose is visible without knowing the parameter list:
 
 ```ruby
 # Resolves the receiver's declared shape.
 #
-# @param node the call whose receiver is resolved
-# @param scope the enclosing scope; its narrowing facts bind the receiver
+# @param node — the call whose receiver is resolved
+# @param scope — the enclosing scope; its narrowing facts bind the receiver
 # @return nil when the receiver's class carries no declaration at all —
 #   distinct from a declaration that resolves to an empty shape
-# @raise Rigor::Error when the environment has no definition builder
+# @raise Rigor::Error — when the environment has no definition builder
 def resolve_receiver(node, scope)
 ```
+
+**Why the em dash (WD).** In YARD's default grammar `[Type]` is also the delimiter between name and
+description, and PHPDoc's `$name` sigil plays the same role; with the slot emptied, `@param format
+the output format` hides the boundary. Eight candidate forms were run through YARD's own parser
+(0.9.x) to see which keep the name binding — the property the R3 gate and YARD's unknown-parameter
+warning both rest on:
+
+| Form | YARD reads | Name binding |
+| --- | --- | --- |
+| `@param format desc` | text `desc` | kept, no visible boundary |
+| `@param format — desc` | text `— desc` | kept — **chosen** |
+| `@param format -- desc` | text `-- desc` | kept, but it is rbs-inline's `-- prose` separator, one token from `# @rbs format: T -- desc` |
+| `@param format [] desc` | text `[] desc` (not an empty type slot) | kept, reads as an empty array and invites filling |
+| `@param [] format desc` | name `[]` | broken |
+| `` @param `format` desc `` | name `` `format` `` | broken |
+| `@param format: desc` | name `format:` | broken, and rbs-inline's own spelling |
+| RDoc `format:: desc` | a definition list, no tag | no `@param` to bind |
+
+The em dash is already this corpus's prose separator, cannot be mistaken for a type or a keyword
+argument, and is what YARD's HTML renderer inserts between name and description anyway — the one
+cost is that rubydoc.info shows it twice (`format — — desc`). `@return` carries no name and takes no
+delimiter. Gate R5 requires the dash after every `@param` / `@yieldparam` / `@option` name and every
+`@raise` class.
 
 `{Foo#bar}` cross-references and `@see` stay — they are navigation, not type claims. `@!attribute [r]`
 keeps its bracket: `[r]` is an access mode, not a type.

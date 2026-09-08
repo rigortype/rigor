@@ -42,9 +42,9 @@ module Rigor
       # Writes a `(plugin_id, name) -> value` triple. Idempotent if the same value is published twice (`==`);
       # raises {Conflict} if the values differ.
       #
-      # @param plugin_id producing plugin's manifest id.
-      # @param name fact name (canonicalised to Symbol for lookup).
-      # @param value frozen-shape value object the producer chose to publish. The value is stored
+      # @param plugin_id — producing plugin's manifest id.
+      # @param name — fact name (canonicalised to Symbol for lookup).
+      # @param value — frozen-shape value object the producer chose to publish. The value is stored
       #   as-is.
       def publish(plugin_id:, name:, value:)
         plugin_id = plugin_id.to_s

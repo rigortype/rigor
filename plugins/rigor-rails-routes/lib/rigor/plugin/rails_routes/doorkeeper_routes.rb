@@ -66,7 +66,7 @@ module Rigor
 
         module_function
 
-        # @param skip controller names the project omits via `skip_controllers :name, ...`.
+        # @param skip — controller names the project omits via `skip_controllers :name, ...`.
         # @return flattened entries.
         def generate(skip: [])
           skip_set = skip.to_set(&:to_sym)

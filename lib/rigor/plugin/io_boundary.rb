@@ -93,7 +93,7 @@ module Rigor
       # `return nil unless File.file?(config)` gate: the miss shaped the result and left no edge for the
       # file's later appearance.
       #
-      # @param path project path; relative paths expand against the working directory
+      # @param path — project path; relative paths expand against the working directory
       # @return `File.file?`'s answer, unchanged
       def file?(path)
         probe(path) { |absolute| File.file?(absolute) }
@@ -103,7 +103,7 @@ module Rigor
       # existence row. The discovery shape (`next [] unless directory?(root)` before a `Dir.glob`) depends
       # on the root existing exactly as a config read depends on the config file existing.
       #
-      # @param path project path; relative paths expand against the working directory
+      # @param path — project path; relative paths expand against the working directory
       # @return `File.directory?`'s answer, unchanged
       def directory?(path)
         probe(path) { |absolute| File.directory?(absolute) }

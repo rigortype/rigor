@@ -61,7 +61,7 @@ module Rigor
           %r{(?:\A|/)config/}
         ].freeze
 
-        # @param path file being analysed
+        # @param path — file being analysed
         # The route-helper violations for a single call node (0..2), or `[]` when the node is not an
         # implicit `*_path` / `*_url` helper call, is shadowed by a same-file binding, or is in a
         # suppressed directory. ADR-37: the engine owns the walk; the same-file `shadowing` set is built

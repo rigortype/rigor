@@ -39,11 +39,11 @@ module Rigor
         end
       end
 
-      # @param lockfile_path explicit path to the Gemfile.lock. When `nil`, falls
+      # @param lockfile_path — explicit path to the Gemfile.lock. When `nil`, falls
       #   back to `auto_detect` if `auto_detect:` is true.
-      # @param project_root resolution base for a relative `lockfile_path:` and the auto-detect
+      # @param project_root — resolution base for a relative `lockfile_path:` and the auto-detect
       #   search.
-      # @param auto_detect when true and `lockfile_path:` is nil, look for
+      # @param auto_detect — when true and `lockfile_path:` is nil, look for
       #   `<project_root>/Gemfile.lock`.
       # @return frozen map of gem name → locked entry. Returns the empty frozen
       #   hash when no lockfile is resolvable, when the file is unreadable, or when Bundler refuses to parse

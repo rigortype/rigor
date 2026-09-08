@@ -30,8 +30,8 @@ module Rigor
 
       module_function
 
-      # @param node the receiver expression.
-      # @param depth recursion depth, internal.
+      # @param node — the receiver expression.
+      # @param depth — recursion depth, internal.
       # @return every variable
       #   read the expression can evaluate to; empty when it can evaluate to none.
       def candidates(node, depth = 0)

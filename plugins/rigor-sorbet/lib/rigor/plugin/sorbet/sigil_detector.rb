@@ -30,7 +30,7 @@ module Rigor
 
         module_function
 
-        # @param contents raw file contents.
+        # @param contents — raw file contents.
         # @return one of {VALID_LEVELS}; defaults to {DEFAULT_LEVEL} for sigil-less or
         #   malformed-sigil files.
         def detect(contents)

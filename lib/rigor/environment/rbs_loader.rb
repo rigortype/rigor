@@ -119,7 +119,7 @@ module Rigor
         BIG_MATH_SIG_BASENAME = "big_math.rbs"
         private_constant :BIG_MATH_SIG_BASENAME
 
-        # @param libraries the resolved library list, `DEFAULT_LIBRARIES` included.
+        # @param libraries — the resolved library list, `DEFAULT_LIBRARIES` included.
         # @return the same list, minus `bigdecimal-math` when `bigdecimal` already brings
         #   `BigMath` in.
         def libraries_without_shadowed_bigdecimal_math(libraries)
@@ -890,7 +890,7 @@ module Rigor
         # that Rigor's arithmetic-chain widening produces). The overlay is added per-file, not
         # per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` files must be gated individually.
         #
-        # @param loaded_library_names libraries that actually resolved on this loader.
+        # @param loaded_library_names — libraries that actually resolved on this loader.
         def add_bundled_signatures(rbs_loader, loaded_library_names)
           vendored_gem_sig_paths.each do |path|
             next unless path.directory?
@@ -910,9 +910,9 @@ module Rigor
           end
         end
 
-        # @param supplements basename → gating library map.
-        # @param path the vendored directory or overlay file to test.
-        # @param loaded_library_names libraries that actually resolved on this loader.
+        # @param supplements — basename → gating library map.
+        # @param path — the vendored directory or overlay file to test.
+        # @param loaded_library_names — libraries that actually resolved on this loader.
         # @return true when `path` carries no library dependency, or its library loaded.
         def supplement_dependency_loaded?(supplements, path, loaded_library_names)
           library = supplements[path.basename.to_s]
@@ -929,7 +929,7 @@ module Rigor
           __dir__
         ).freeze
 
-        # @param gem_names overlay-eligible Gemfile.lock gem names (the caller filters
+        # @param gem_names — overlay-eligible Gemfile.lock gem names (the caller filters
         #   to the `:missing`-coverage, no-conflicting-plugin set).
         # @return the bundled overlay directory for each gem that ships one; empty when
         #   none match or the overlay root is absent.
@@ -942,7 +942,7 @@ module Rigor
           end
         end
 
-        # @param path typically an entry from an {RbsLoader} instance's
+        # @param path — typically an entry from an {RbsLoader} instance's
         #   {#signature_paths}.
         # @return whether `path` sits under the bundled gem-overlay root — what
         #   `CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`'s gate consults so that a class name's membership in
@@ -982,7 +982,7 @@ module Rigor
         # answer to the very same question, on the class that already owns the overlay's layout
         # ({GEM_OVERLAY_SIGS_ROOT}, {.gem_overlay_sig_paths}).
         #
-        # @param signature_paths typically an {RbsLoader} instance's
+        # @param signature_paths — typically an {RbsLoader} instance's
         #   {#signature_paths}. Takes the whole list rather than one entry so the twin's file set resolves
         #   once per question — `CheckRules` asks it per `ActiveSupport::Duration` receiver.
         def gem_overlay_twin_signatures_loaded?(signature_paths)
@@ -997,7 +997,7 @@ module Rigor
         # id mapping and passes the id; this resolves the id to the engine's own bundled `sig/` and answers
         # the filesystem question.
         #
-        # @param plugin_id a manifest id, e.g. `"activesupport-core-ext"`.
+        # @param plugin_id — a manifest id, e.g. `"activesupport-core-ext"`.
         def bundled_overlay_twin_signatures_loaded?(plugin_id, signature_paths)
           return false if signature_paths.nil? || signature_paths.empty?
 
@@ -1067,18 +1067,18 @@ module Rigor
 
       attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs
 
-      # @param libraries stdlib library names to load on top of core (e.g.,
+      # @param libraries — stdlib library names to load on top of core (e.g.,
       #   `["pathname", "json"]`). Empty by default. Each entry MUST correspond to a directory under the
       #   `rbs` gem's `stdlib/` tree; unknown names are silently dropped on environment build (the underlying
       #   `RBS::EnvironmentLoader` raises and we fail-soft).
-      # @param signature_paths additional directories of `.rbs` files to load
+      # @param signature_paths — additional directories of `.rbs` files to load
       #   (typically the project's `sig/` tree). Non-existent or non-directory paths are filtered out at
       #   build time so the loader stays robust to fixtures and bare repositories.
-      # @param cache_store the persistent cache the loader threads through to
+      # @param cache_store — the persistent cache the loader threads through to
       #   `RbsEnvironment`, `RbsKnownClassNames`, `RbsConstantTable`, `RbsClassAncestorTable`, and
       #   `RbsClassTypeParamNames` producers. Pass `nil` (the default) to skip caching; the runner threads
       #   its own Store through here when enabled.
-      # @param virtual_rbs >] ADR-32 WD4 — `[virtual_filename, rbs_source]` pairs
+      # @param virtual_rbs — >] ADR-32 WD4 — `[virtual_filename, rbs_source]` pairs
       #   synthesised from project source by a plugin's `Manifest#source_rbs_synthesizer`. Merged into the
       #   env after `signature_paths:` and the vendored stubs. Pass `[]` (the default) when no
       #   synthesizer-emitting plugin is loaded.
@@ -1480,7 +1480,7 @@ module Rigor
         interface_definition(interface_name)&.methods&.keys
       end
 
-      # @param rbs_alias a type-alias reference (`string`, `int`, `range[int?]`, …)
+      # @param rbs_alias — a type-alias reference (`string`, `int`, `range[int?]`, …)
       #   appearing in a method signature.
       # @return the alias's aliased type one level out, with type arguments substituted
       #   for a generic alias (`string` → `::String | ::_ToStr`; `range[int?]` → `::Range[int?] |

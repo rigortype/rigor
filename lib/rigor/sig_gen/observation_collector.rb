@@ -32,9 +32,9 @@ module Rigor
     #   the collector cannot attribute them to a specific class.
     # - Zero-argument calls give no observation; methods are matched by `(class_name, method_name)` only.
     class ObservationCollector # rubocop:disable Metrics/ClassLength
-      # @param paths observe paths (files /
+      # @param paths — observe paths (files /
       #   directories).
-      # @param source_paths source-tree paths
+      # @param source_paths — source-tree paths
       #   (defaults to `configuration.paths`) pre-walked to
       #   register every project-defined class so that calls
       #   like `Foo.new.bar(x)` in the observe tree resolve

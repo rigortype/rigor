@@ -100,17 +100,17 @@ module Rigor
         [first.unescaped, false, block.body, block.parameters]
       end
 
-      # @param singleton whether the unit's `self` is the class object (`def self.x`,
+      # @param singleton — whether the unit's `self` is the class object (`def self.x`,
       #   `class << self`) — the axis that separates `mutate.self` from `mutate.static` on an ivar write
-      # @param block_parameter the unit's `&blk` parameter name, if any; a call on it is
+      # @param block_parameter — the unit's `&blk` parameter name, if any; a call on it is
       #   forwarding, not an opaque callable
-      # @param calls node-identity table of {Collector::CallRecord}s
-      # @param attribution the project's `effects.attribution:` table
-      # @param envelopes the envelopes a call site may import as a `≤` bound (#386)
-      # @param plugin_facts the loaded plugins' `effect_attributions:` (#387)
-      # @param owner_class the class this unit is defined on — the carrier an
+      # @param calls — node-identity table of {Collector::CallRecord}s
+      # @param attribution — the project's `effects.attribution:` table
+      # @param envelopes — the envelopes a call site may import as a `≤` bound (#386)
+      # @param plugin_facts — the loaded plugins' `effect_attributions:` (#387)
+      # @param owner_class — the class this unit is defined on — the carrier an
       #   implicit-self call's envelope is looked up under, since the syntax spells `Kernel#name`
-      # @param method_name this unit's own selector — what a `super` in its body names as
+      # @param method_name — this unit's own selector — what a `super` in its body names as
       #   the target the propagator resolves above `owner_class` (#446). With no name to state, a `super`
       #   taints instead.
       def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists

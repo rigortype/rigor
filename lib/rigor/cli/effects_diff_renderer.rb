@@ -50,12 +50,12 @@ module Rigor
       REGENERATION_CLOSING_LINE = "Run `rigor effects update` to regenerate the record under the current " \
                                   "rules."
 
-      # @param sources `Runner#effect_sources` — where each unit is defined.
+      # @param sources — `Runner#effect_sources` — where each unit is defined.
       #   A drift row names `file:line` so a reviewer does not have to search for the method (#435). The
       #   file rides the cached summary entry and is free; the line is resolved by parsing the row's own
       #   file ({Effects::DefinitionLines}), which is why a fresh report — no rows — still parses nothing
       #   and the whole-project parse ADR-104 removed from this command stays removed.
-      # @param lines seam for the specs; the default parses on demand.
+      # @param lines — seam for the specs; the default parses on demand.
       def initialize(out:, path:, sources: nil, lines: Effects::DefinitionLines.new)
         @out = out
         @path = path

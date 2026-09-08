@@ -46,10 +46,10 @@ module Rigor
       # Applies every change in order, each against the result of the previous — the LSP contract for a
       # multi-change `didChange` notification.
       #
-      # @param text the held buffer text; nil when no buffer is open for the URI.
-      # @param changes the `contentChanges` array.
+      # @param text — the held buffer text; nil when no buffer is open for the URI.
+      # @param changes — the `contentChanges` array.
       # @return the new buffer text.
-      # @raise UnappliableChange if any change cannot be applied.
+      # @raise UnappliableChange — if any change cannot be applied.
       def apply_all(text, changes)
         raise UnappliableChange, "contentChanges must be an Array, got #{changes.class}" unless changes.is_a?(Array)
 
@@ -64,7 +64,7 @@ module Rigor
       # companion to `range` and is accepted-but-ignored: it is redundant with `range`, historically ambiguous
       # about its units, and `range` is the authoritative field.
       #
-      # @raise UnappliableChange
+      # @raise UnappliableChange —
       def apply(text, change)
         raise UnappliableChange, "contentChanges entry must be a Hash, got #{change.class}" unless change.is_a?(Hash)
 

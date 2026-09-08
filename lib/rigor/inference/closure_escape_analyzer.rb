@@ -51,7 +51,7 @@ module Rigor
     module ClosureEscapeAnalyzer
       module_function
 
-      # @param environment reserved for the future sub-phase that consults
+      # @param environment — reserved for the future sub-phase that consults
       #   `RBS::Extended` call-timing effects; sub-phase 3a ignores it.
       # @return one of `:non_escaping`, `:escaping`, `:unknown`.
       def classify(receiver_type:, method_name:, environment: nil) # rubocop:disable Lint/UnusedMethodArgument

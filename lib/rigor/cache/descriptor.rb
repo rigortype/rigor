@@ -352,7 +352,7 @@ module Rigor
             dependencies: dependencies, globs: globs)
       end
 
-      # @param params inputs the producer was called with
+      # @param params — inputs the producer was called with
       # @return hex SHA-256 cache key for the value
       def cache_key_for(producer_id:, params: {})
         payload = {

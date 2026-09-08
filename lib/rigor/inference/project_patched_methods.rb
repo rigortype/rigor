@@ -28,7 +28,7 @@ module Rigor
 
       attr_reader :by_key
 
-      # @param entries flat list of declarations observed during the pre-pass.
+      # @param entries — flat list of declarations observed during the pre-pass.
       #   First-write-wins on `(class_name, method_name, kind)` duplicates so the
       #   `pre-eval.duplicate-declaration` diagnostic emission stays decoupled from registry behaviour.
       def initialize(entries: [])

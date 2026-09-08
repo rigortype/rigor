@@ -58,7 +58,7 @@ module Rigor
                   "every run of the project."
         private_constant :MESSAGE
 
-        # @param virtual_rbs `[buffer name, RBS source]` pairs the
+        # @param virtual_rbs — `[buffer name, RBS source]` pairs the
         #   run ALREADY resolved; never a loader built for this pass. Empty / nil simply drops the
         #   virtual-RBS stratum.
         def initialize(configuration:, virtual_rbs: nil)

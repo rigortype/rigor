@@ -93,7 +93,7 @@ module Rigor
       # per-overload, which is what makes it precise: `Array#first` is optimistic while `Array#first(3)` is
       # not, and `String#[]` / `Enumerable#find` are honest because they already spell the miss as `?`.
       #
-      # @param method_type the overload {OverloadSelector.select} returned
+      # @param method_type — the overload {OverloadSelector.select} returned
       def optimistic_overload?(method_definition, method_type)
         type_def = matching_type_def(method_definition, method_type)
         return false unless type_def.respond_to?(:overload_annotations)

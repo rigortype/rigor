@@ -52,8 +52,8 @@ module Rigor
         stripped.start_with?(root) ? stripped[root.length..] : stripped
       end
 
-      # @param signature_paths the configured roots; empty / nil takes the default.
-      # @param virtual_rbs the loader's virtual entries.
+      # @param signature_paths — the configured roots; empty / nil takes the default.
+      # @param virtual_rbs — the loader's virtual entries.
       def collect(signature_paths:, virtual_rbs: nil)
         files = roots(signature_paths).flat_map { |root| Dir.glob(File.join(root.to_s, "**", "*.rbs")).sort }
         sources = files.filter_map do |path|

@@ -16,7 +16,7 @@ module Rigor
         @value = nil
       end
 
-      # @param value a Marshal-clean tuple — the fork pool ships it back from the worker.
+      # @param value — a Marshal-clean tuple — the fork pool ships it back from the worker.
       def record(value)
         @value = value.freeze if @value.nil?
       end

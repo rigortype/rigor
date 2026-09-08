@@ -14,7 +14,7 @@ module Rigor
 
       # Builds a runner matching the configuration/plugin/cache resolution that `rigor check` itself uses.
       #
-      # @param options parsed CLI options (must contain at least
+      # @param options — parsed CLI options (must contain at least
       #   `:no_cache`, `:explain`, `:stats`, `:workers`)
       def build(configuration:, options:, buffer:, cache_root:)
         cache_store = if options.fetch(:no_cache)

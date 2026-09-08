@@ -54,7 +54,7 @@ module Rigor
         nil
       end
 
-      # @param payload what {dump} produced.
+      # @param payload — what {dump} produced.
       def load(payload)
         return nil if payload.nil?
 

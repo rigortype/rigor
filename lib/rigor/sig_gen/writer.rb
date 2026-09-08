@@ -61,7 +61,7 @@ module Rigor
                  .map { |target, group| write_target(target, group) }
       end
 
-      # @param candidates only
+      # @param candidates — only
       #   emittable classifications (new-method /
       #   tighter-return) are honoured; the caller is
       #   responsible for filtering.

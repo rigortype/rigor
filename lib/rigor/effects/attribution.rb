@@ -30,7 +30,7 @@ module Rigor
         @empty ||= new({})
       end
 
-      # @param table `Configuration#effects_attribution` — method key to
+      # @param table — `Configuration#effects_attribution` — method key to
       #   label list, both already shape-validated at load (tier 2).
       def self.build(table)
         return empty if table.nil? || table.empty?

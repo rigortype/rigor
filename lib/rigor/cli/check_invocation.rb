@@ -42,9 +42,9 @@ module Rigor
 
       # Runs the analysis the way `rigor check` does and returns the runner + its raw result.
       #
-      # @param options at least `:no_cache`, `:explain`, `:stats`, `:workers` (see {CheckRunnerFactory.build}).
-      # @param paths analysed paths; nil falls back to the configuration's `paths:`.
-      # @param cache_root nil falls back to the configuration's cache path.
+      # @param options — at least `:no_cache`, `:explain`, `:stats`, `:workers` (see {CheckRunnerFactory.build}).
+      # @param paths — analysed paths; nil falls back to the configuration's `paths:`.
+      # @param cache_root — nil falls back to the configuration's cache path.
       def run(configuration:, options:, paths: nil, buffer: nil, cache_root: nil)
         require_relative "check_runner_factory"
         runner = CheckRunnerFactory.build(
@@ -65,8 +65,8 @@ module Rigor
       # routing hint is outside the false-positive envelope, but a crash in it is not — `describe` must stay a command
       # an agent can run freely.
       #
-      # @param config_path path to the config file; nil uses {Configuration.discover}.
-      # @param options runner options (defaults to {DEEP_OPTIONS}).
+      # @param config_path — path to the config file; nil uses {Configuration.discover}.
+      # @param options — runner options (defaults to {DEEP_OPTIONS}).
       def attempt(config_path: nil, options: DEEP_OPTIONS, paths: nil)
         require_relative "../configuration"
         configuration = Configuration.load(config_path)

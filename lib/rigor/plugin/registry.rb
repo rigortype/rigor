@@ -217,13 +217,13 @@ module Rigor
     class Registry
       attr_reader :plugins, :load_errors, :blueprints, :contribution_index, :resolved_gem_paths
 
-      # @param plugins instantiated plugin instances in deterministic order.
-      # @param load_errors failures surfaced during loading. Each error is
+      # @param plugins — instantiated plugin instances in deterministic order.
+      # @param load_errors — failures surfaced during loading. Each error is
       #   also turned into a diagnostic by the runner.
-      # @param blueprints frozen, Ractor-shareable replay descriptors
+      # @param blueprints — frozen, Ractor-shareable replay descriptors
       #   aligned 1:1 with `plugins`. The loader fills this in; callers that construct Registry manually MAY
       #   pass `[]` and accept that {.materialize} cannot replay the set.
-      # @param resolved_gem_paths #194 slice 1 — `gem name => resolved file path`
+      # @param resolved_gem_paths — #194 slice 1 — `gem name => resolved file path`
       #   for each successfully required plugin gem, so `rigor plugins` can print where a loaded (and
       #   possibly frozen) plugin actually loaded from. Defaults to empty; a worker registry built by
       #   {.materialize} carries none (the provenance surface runs only on the coordinator).

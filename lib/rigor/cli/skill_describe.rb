@@ -140,9 +140,9 @@ module Rigor
         rigor-ask
       ].freeze
 
-      # @param skills discovered skills, each `{name:, path:}`.
-      # @param root project root to probe (defaults to the cwd).
-      # @param deep opt into `--deep`: run a real `rigor check` and let its result pick the headline. Off by
+      # @param skills — discovered skills, each `{name:, path:}`.
+      # @param root — project root to probe (defaults to the cwd).
+      # @param deep — opt into `--deep`: run a real `rigor check` and let its result pick the headline. Off by
       #   default, and off is ADR-73 WD2's contract — see {SkillDeepProbe} for why the whole analysis path lives
       #   behind this one flag and in its own file.
       def initialize(skills:, root: Dir.pwd, deep: false)

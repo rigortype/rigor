@@ -41,7 +41,7 @@ module Rigor
 
       # Reduce `app` against the registry.
       #
-      # @param fuel reduction-step budget (default 64 per ADR-20 WD3). Each visited
+      # @param fuel — reduction-step budget (default 64 per ADR-20 WD3). Each visited
       #   body node costs one unit. On exhaustion the reduction returns `app.bound`.
       # @return the reduced type, or `app.bound` when reduction is impossible (URI
       #   not defined, arity mismatch, body_tree absent, fuel exhausted).

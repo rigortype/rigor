@@ -50,12 +50,12 @@ module Rigor
 
       # Build the scope index for a Prism program subtree.
       #
-      # @param root usually a `Prism::ProgramNode`, but any
+      # @param root — usually a `Prism::ProgramNode`, but any
       #   subtree the caller wants the indexer to walk works.
-      # @param default_scope the scope used for the root,
+      # @param default_scope — the scope used for the root,
       #   and the fallback returned for any Prism node not contained in
       #   `root`'s subtree.
-      # @param converged_loop_recording display-path flag —
+      # @param converged_loop_recording — display-path flag —
       #   when true the evaluator re-records fixpoint-tracked loop
       #   bodies from their CONVERGED bindings so per-line probes
       #   (`rigor annotate`) reflect the post-writeback state, not the
@@ -3190,7 +3190,7 @@ module Rigor
       # `Singleton[Object]` fallback anyway. The residual leak is `Class`-only (`M.new`, `M.superclass`), which mistypes
       # only code that raises `NoMethodError` at runtime.
       #
-      # @param paths project file paths.
+      # @param paths — project file paths.
       def discovered_classes_for_paths(paths, buffer: nil)
         accumulator = {}
         paths.each do |path|
@@ -3218,7 +3218,7 @@ module Rigor
       # monkey-patch on a core/stdlib/gem class is called cross-file (ADR-17). First write wins, matching `def_nodes`'
       # own merge order.
       #
-      # @param paths project file paths.
+      # @param paths — project file paths.
       # @return
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
@@ -3433,7 +3433,7 @@ module Rigor
       # rescue's real target) contributes nothing to either table. The subset-scoped callers
       # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
       #
-      # @param paths project file paths.
+      # @param paths — project file paths.
       # @return `{ classes: Hash, def_index: Hash }`.
       def discovered_project_index_for_paths(paths, buffer: nil)
         classes = {}
@@ -3464,8 +3464,8 @@ module Rigor
       # lazily. On a cold run (`seed_bundles` empty) every file is re-walked, so the index is entirely live —
       # identical to {#discovered_project_index_for_paths} — while the bundles are built for the next run.
       #
-      # @param paths project file paths, in canonical order.
-      # @param seed_bundles the prior run's per-file bundles, keyed by logical path.
+      # @param paths — project file paths, in canonical order.
+      # @param seed_bundles — the prior run's per-file bundles, keyed by logical path.
       # @return `{ classes:, def_index:, bundles: }`.
       def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil)
         classes = {}

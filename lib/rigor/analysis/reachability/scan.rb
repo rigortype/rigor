@@ -81,9 +81,9 @@ module Rigor
           name.valid_encoding? ? name : nil
         end
 
-        # @param path the file's path, as the report should render it.
-        # @param source the file's bytes.
-        # @param target_ruby Prism version string, threaded from the project configuration.
+        # @param path — the file's path, as the report should render it.
+        # @param source — the file's bytes.
+        # @param target_ruby — Prism version string, threaded from the project configuration.
         # @return nil when the file does not parse (a parse error is the analyzer's business, not
         #   this scan's — it simply contributes nothing rather than half a file).
         def self.call(path:, source:, target_ruby: nil)

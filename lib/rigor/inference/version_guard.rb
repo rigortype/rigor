@@ -88,7 +88,7 @@ module Rigor
       GEM_VERSION_PATH = "Gem::Version"
       private_constant :GEM_VERSION_PATH
 
-      # @param node an `if` / `unless` predicate
+      # @param node — an `if` / `unless` predicate
       # @return `:truthy` / `:falsey` when the guard is decidable on the analyzer's Ruby,
       #   otherwise nil (both arms stay live)
       def verdict(node)

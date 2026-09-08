@@ -81,7 +81,7 @@ module Rigor
         # duplicates on Mastodon and ~119 on Redmine, exactly stacked with the rails-routes diagnostics.
         # Returns `[]` for unknown / arity-mismatch shapes.
         #
-        # @param helper_table each entry carries `name`, `arity`,
+        # @param helper_table — each entry carries `name`, `arity`,
         #   `acceptable_arities`, `path`, `http_method`, `action`.
         def helper_violations_for(call_node:, helper_table:)
           return [] unless implicit_helper_call?(call_node)
@@ -106,7 +106,7 @@ module Rigor
         # each filter name reference is validated against it. Calls outside a known controller
         # contribute nothing.
         #
-        # @param ancestors the lexical ancestor chain
+        # @param ancestors — the lexical ancestor chain
         def filter_violations_for(call_node:, ancestors:, controller_index:)
           return [] unless filter_call?(call_node)
 
@@ -170,8 +170,8 @@ module Rigor
         # method that doesn't call `render`) is also skipped — Phase 3 validates explicit renders only,
         # since the implicit path would false-positive on `redirect_to` / `head` / early returns.
         #
-        # @param ancestors the lexical ancestor chain
-        # @param path file being analysed
+        # @param ancestors — the lexical ancestor chain
+        # @param path — file being analysed
         def render_violations_for(call_node:, ancestors:, path:, view_search_roots:, controller_index: nil)
           return [] unless render_call?(call_node)
 

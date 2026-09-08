@@ -46,14 +46,14 @@ module Rigor
         "bundler", "rubygems"
       ].freeze
 
-      # @param bundle_path explicit path to the bundler install root. When `nil`,
+      # @param bundle_path — explicit path to the bundler install root. When `nil`,
       #   falls back to `auto_detect` if `auto_detect:` is true.
-      # @param project_root resolution base for relative `bundle_path:` and the auto-detect search.
-      # @param auto_detect when true and `bundle_path:` is nil, try `.bundle/config`'s
+      # @param project_root — resolution base for relative `bundle_path:` and the auto-detect search.
+      # @param auto_detect — when true and `bundle_path:` is nil, try `.bundle/config`'s
       #   `BUNDLE_PATH:` and `vendor/bundle/` under `project_root`.
-      # @param skip_gems gem names to exclude from discovery. Defaults to
+      # @param skip_gems — gem names to exclude from discovery. Defaults to
       #   {SKIPPED_GEMS_BY_DEFAULT}.
-      # @param locked_gems Optional O4-Layer-3 filter.
+      # @param locked_gems — Optional O4-Layer-3 filter.
       #   When non-nil and non-empty, only `sig/` directories whose gem `(name, version, platform)` tuple
       #   matches a lockfile entry are returned. Bundle entries absent from the lockfile (or at a drifted
       #   version) are silently dropped — the lockfile is treated as the source of truth for "what gems this

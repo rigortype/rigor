@@ -21,7 +21,7 @@ module Rigor
     # in multiple files for additive member contributions, but the writer only needs one canonical target per
     # class.
     class LayoutIndex
-      # @param signature_paths
+      # @param signature_paths —
       #   the `.rigor.yml`-configured signature directories.
       #   When `nil` or empty, falls back to `<project_root>/sig`
       #   if it exists (matching `Environment.for_project`'s
@@ -31,7 +31,7 @@ module Rigor
         @index = nil
       end
 
-      # @param class_name fully-qualified Ruby class
+      # @param class_name — fully-qualified Ruby class
       #   name (e.g. `"Rigor::Type::Top"`).
       # @return absolute path of the sig file
       #   that already declares this class, or `nil` when no

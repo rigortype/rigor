@@ -21,8 +21,8 @@ module Rigor
         @out = out
       end
 
-      # @param format "text" or "json"
-      # @param selection subset of
+      # @param format — "text" or "json"
+      # @param selection — subset of
       #   {Classification} constants to include; an empty
       #   array means "all emittable classifications".
       def render(candidates:, mode:, format:, selection:)

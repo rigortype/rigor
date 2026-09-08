@@ -65,8 +65,8 @@ module Rigor
 
       VALID_PRODUCER_ID = /\A[a-z][a-z0-9._-]*\z/
 
-      # @param root cache root directory.
-      # @param read_only when true, every disk-side side-effect is suppressed: `fetch_or_compute`
+      # @param root — cache root directory.
+      # @param read_only — when true, every disk-side side-effect is suppressed: `fetch_or_compute`
       #   still reads existing entries (hits, gated on a current `schema_version.txt` marker — see
       #   {#ensure_schema_version!}) and still runs the producer block on miss, but it does NOT write the
       #   produced value to disk, does NOT update the marker, and does NOT touch the on-disk root directory.
@@ -176,21 +176,21 @@ module Rigor
       end
       private_class_method :collect_producers
 
-      # @param producer_id stable cache namespace; only `[a-z][a-z0-9._-]*` is accepted.
-      # @param generation_cap how many generations of this producer survive a compaction
+      # @param producer_id — stable cache namespace; only `[a-z][a-z0-9._-]*` is accepted.
+      # @param generation_cap — how many generations of this producer survive a compaction
       #   pass — a positive `Integer` for a whole-project producer (one live entry, older ones unreachable),
       #   or {UNBOUNDED_GENERATIONS} for a producer with many simultaneously-live entries. REQUIRED, and
       #   sourced from the producer's own declaration (`RbsCacheProducer.generation_cap`,
       #   `RunCacheKey::GENERATION_CAP`, `Plugin::Base.producer generation_cap:`) rather than invented at the
       #   call site. See {#evict!}.
-      # @param params producer inputs; mixed into the cache key via {Descriptor#cache_key_for}.
-      # @param descriptor the invalidation descriptor for the value being cached.
-      # @param serialize optional callable that turns the producer's return value into a binary
+      # @param params — producer inputs; mixed into the cache key via {Descriptor#cache_key_for}.
+      # @param descriptor — the invalidation descriptor for the value being cached.
+      # @param serialize — optional callable that turns the producer's return value into a binary
       #   `String`. Defaults to `Marshal.dump(value).b`. Producers whose return values are not
       #   `Marshal`-clean (RBS-native objects with `RBS::Location` members, raw `IO`, …) MUST provide a
       #   serialiser. The pair `(serialize, deserialize)` MUST round-trip — a producer that reads with one
       #   strategy and writes with another corrupts its own cache slice.
-      # @param deserialize optional callable that turns bytes back into the producer's value.
+      # @param deserialize — optional callable that turns bytes back into the producer's value.
       #   Defaults to `Marshal.load`. Any exception (`StandardError`) raised by the deserialiser is treated as
       #   a cache miss — the entry is considered corrupt, the producer block reruns, and the next write
       #   overwrites it. This is consistent with the fault-tolerance contract for the default `Marshal.load`

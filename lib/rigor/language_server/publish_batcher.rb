@@ -15,10 +15,10 @@ module Rigor
     # dropped. The same claim/consume shape `DiagnosticPublisher#run_project_round` already uses for the
     # whole-project save round (#246), generalised to an arbitrary key type and an arbitrary batch action.
     class PublishBatcher
-      # @param on_batch `(keys) -> void`, called with the deduplicated Array of keys pending at the
+      # @param on_batch — `(keys) -> void`, called with the deduplicated Array of keys pending at the
       #   start of one round. May be called more than once in a row when keys keep arriving while a round
       #   runs.
-      # @param on_error `(exception) -> void`, called when `on_batch` raises. A round must
+      # @param on_error — `(exception) -> void`, called when `on_batch` raises. A round must
       #   never wedge the coalescing lock for every future `#enqueue` call — ownership is always released
       #   before this fires. Whatever was mid-flight when the round raised is lost; anything enqueued by a
       #   concurrent `#enqueue` call after this round's drain but before the rescue stays pending and rides

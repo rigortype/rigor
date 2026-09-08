@@ -117,7 +117,7 @@ module Rigor
 
       # --- private ------------------------------------------------------
 
-      # @param value a non-empty string
+      # @param value — a non-empty string
       def self.classify_string(value)
         if Type::Refined.ruby_numeric_literal?(value)
           NUMERIC_STRING
@@ -132,7 +132,7 @@ module Rigor
       # Called ONLY with the names in {RUNTIME_STRING_CONSTANTS} — Rigor's own source — and only
       # while this file is being loaded. It is never handed a name from the analysed program.
       #
-      # @param name a qualified constant path without a leading "::"
+      # @param name — a qualified constant path without a leading "::"
       def self.runtime_string_value(name)
         mod = ::Object
         name.split("::").each do |part|
@@ -173,7 +173,7 @@ module Rigor
 
       # --- public API ---------------------------------------------------
 
-      # @param name unqualified constant name (e.g. `"Math::PI"`,
+      # @param name — unqualified constant name (e.g. `"Math::PI"`,
       #   `"RUBY_VERSION"`, `"Ruby::ENGINE"`)
       # @return refined type, or nil to fall through
       def self.lookup(name)

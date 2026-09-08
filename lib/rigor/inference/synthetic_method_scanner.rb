@@ -40,20 +40,20 @@ module Rigor
     module SyntheticMethodScanner # rubocop:disable Metrics/ModuleLength
       module_function
 
-      # @param paths absolute paths to the project
+      # @param paths — absolute paths to the project
       #   source files to scan.
-      # @param environment used for
+      # @param environment — used for
       #   inheritance resolution against RBS-known classes
       #   (ActiveRecord::Base, Dry::Struct, etc.) that aren't
       #   declared in project source.
-      # @param fact_store
+      # @param fact_store —
       #   the per-run cross-plugin fact store. ADR-18 lookups
       #   (`Plugin::Macro::HeredocTemplate::Emit#returns_from_arg`)
       #   consult this at scan time to resolve per-call-site
       #   return types from published facts; without it, those
       #   emit rows fall back to their static `returns:` (or
       #   `"untyped"` → `Dynamic[Top]`).
-      # @param buffer
+      # @param buffer —
       #   editor-mode buffer binding. When set, reads for the
       #   logical path resolve to the buffer's physical path so
       #   the pre-pass sees the in-flight bytes instead of the

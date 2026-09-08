@@ -22,8 +22,8 @@ module Rigor
     module ForkMap
       module_function
 
-      # @param items work items (file paths, or `[path, ast]` pairs), in caller order.
-      # @param workers resolved worker count (≤1, empty items, or no `fork` → sequential).
+      # @param items — work items (file paths, or `[path, ast]` pairs), in caller order.
+      # @param workers — resolved worker count (≤1, empty items, or no `fork` → sequential).
       # @yield a contiguous slice of `items`; must return a **marshalable** object.
       # @return the per-slice block results, in original slice order.
       def call(items:, workers:, &block)

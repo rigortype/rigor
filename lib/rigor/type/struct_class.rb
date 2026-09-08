@@ -26,10 +26,10 @@ module Rigor
     class StructClass
       attr_reader :members, :class_name, :keyword_init
 
-      # @param members ordered member names.
-      # @param class_name the bound class name, or nil for
+      # @param members — ordered member names.
+      # @param class_name — the bound class name, or nil for
       #   the anonymous `Struct.new(...)` result.
-      # @param keyword_init the `keyword_init:` flag.
+      # @param keyword_init — the `keyword_init:` flag.
       def initialize(members, class_name = nil, keyword_init: false)
         unless members.is_a?(Array) && members.all?(Symbol)
           raise ArgumentError, "members must be an Array of Symbols, got #{members.inspect}"

@@ -70,10 +70,10 @@ module Rigor
         @root ||= File.expand_path("../../..", __dir__)
       end
 
-      # @param root the gem root, defaulted through {.root} so a spec can relocate the tree.
+      # @param root — the gem root, defaulted through {.root} so a spec can relocate the tree.
       # @return a digest identifying the engine's current source, or nil when the tree is
       #   version-pinned and the caller should add no slot at all.
-      # @raise Unavailable when a mutable tree's source cannot be read.
+      # @raise Unavailable — when a mutable tree's source cannot be read.
       def identity(root = self.root)
         return nil if version_pinned?(root)
 

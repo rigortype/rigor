@@ -47,8 +47,8 @@ module Rigor
       # @return empty on a healthy run; read after {#run}.
       attr_reader :unrenderable, :unresolvable_superclasses
 
-      # @param paths files / directories to scan.
-      # @param observations => Array<Array<Rigor::Type>>}]
+      # @param paths — files / directories to scan.
+      # @param observations — => Array<Array<Rigor::Type>>}]
       #   ADR-14 slice 3 — per-target-method arg-tuple observations
       #   produced by {ObservationCollector}. An empty Hash (the default)
       #   means "no observations available; emit `untyped` for every

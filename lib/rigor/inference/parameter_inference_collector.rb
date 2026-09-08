@@ -116,9 +116,9 @@ module Rigor
       # single-level pass.
       DEFAULT_ROUNDS = 3
 
-      # @param files project `.rb` paths to scan for call sites.
-      # @param target_ruby Prism parse target.
-      # @param max_rounds the WD5 fixpoint cap (1 = single-level).
+      # @param files — project `.rb` paths to scan for call sites.
+      # @param target_ruby — Prism parse target.
+      # @param max_rounds — the WD5 fixpoint cap (1 = single-level).
       # @return => Hash{Symbol => Rigor::Type}}] frozen.
       def self.collect(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS, workers: 0)
         new(files: files, environment: environment, target_ruby: target_ruby,

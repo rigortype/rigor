@@ -48,9 +48,9 @@ module Rigor
 
       module_function
 
-      # @param sources `[buffer name, RBS source]` pairs — the project's
+      # @param sources — `[buffer name, RBS source]` pairs — the project's
       #   `.rbs` files, plus the virtual entries rbs-inline and plugin `source_rbs` synthesis contribute.
-      # @param registry the vocabulary an unknown label is judged against.
+      # @param registry — the vocabulary an unknown label is judged against.
       #
       # The `ANNOTATION_HINT` routing test runs here, before any parse: a source with no honoured
       # payload can contribute neither an envelope nor an unresolved report, so a signature tree with
@@ -93,7 +93,7 @@ module Rigor
       # class discovery knows", which is a project fact; a gem's class-level tag would have to
       # distribute over a definition set this reader does not have.
       #
-      # @param loader the run's loader; it owns the env walk
+      # @param loader — the run's loader; it owns the env walk
       #   ({Rigor::Environment::RbsLoader#each_annotated_method_member}), so the environment itself never
       #   leaves it.
       # @return keyed `Class#m` / `Class.m`

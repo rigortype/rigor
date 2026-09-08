@@ -97,13 +97,13 @@ module Rigor
 
       # Looks up a refined return type for the given call.
       #
-      # @param owner_class_name the class on which the method is defined
+      # @param owner_class_name — the class on which the method is defined
       #   (e.g., `"Kernel"`). Pass `nil` when the caller hasn't resolved a defining owner
       #   yet — the lookup will then fall back to matching by `(method_name, kind)` against
       #   entries whose owner is currently in the table.
-      # @param kind one of `:singleton`, `:instance`. The caller passes the shape of
+      # @param kind — one of `:singleton`, `:instance`. The caller passes the shape of
       #   the actual call site; the table stores `:both` for entries that match either.
-      # @param arg_types positional argument types. Forwarded to the
+      # @param arg_types — positional argument types. Forwarded to the
       #   handler so future entries can discriminate on argument shape.
       # @return the refined return type, or `nil` when no override
       #   matches.

@@ -30,9 +30,9 @@ module Rigor
           @entries[key] = signature
         end
 
-        # @param class_name the class / module that carries the mixin (`class Post; include Foo;
+        # @param class_name — the class / module that carries the mixin (`class Post; include Foo;
         #   end` records under `"Post"`).
-        # @param module_name the textual name of the mixed-in module as it appeared at the
+        # @param module_name — the textual name of the mixed-in module as it appeared at the
         #   include / extend site (`"Foo"`, `"Foo::Bar"`, `"::Foo"`).
         def record_mixin(class_name:, kind:, module_name:)
           raise "Catalog already finalised" if @frozen_after_build

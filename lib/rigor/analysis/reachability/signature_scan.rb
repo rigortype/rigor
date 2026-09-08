@@ -26,7 +26,7 @@ module Rigor
       module SignatureScan
         module_function
 
-        # @param file path to a `.rbs` file.
+        # @param file — path to a `.rbs` file.
         # @return one file-level reference per distinct referenced name. Empty when the
         #   file cannot be read or parsed — a broken signature is the analyzer's business, not this scan's.
         def call(file)

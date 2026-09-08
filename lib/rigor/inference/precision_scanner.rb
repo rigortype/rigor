@@ -122,12 +122,12 @@ module Rigor
         end
       end
 
-      # @param scope base scope for type inference.
+      # @param scope — base scope for type inference.
       def initialize(scope: nil)
         @scope = scope || Scope.empty
       end
 
-      # @param root the parsed AST
+      # @param root — the parsed AST
       def scan(root)
         scope_index = ScopeIndexer.index(root, default_scope: @scope)
         tier_counts = TIERS.to_h { |t| [t, 0] }

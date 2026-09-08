@@ -83,7 +83,7 @@ module Rigor
       # have already produced `scope_index` through
       # `Rigor::Inference::ScopeIndexer.index(root, default_scope:)`.
       #
-      # @param path used to populate
+      # @param path — used to populate
       #   `Diagnostic#path`; the rule does not open files.
       #
       # ADR-53 B4 — when `node_collectors` is supplied, the converged

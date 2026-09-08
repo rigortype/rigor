@@ -46,7 +46,7 @@ module Rigor
           File.fnmatch?(pattern, path, File::FNM_PATHNAME)
         end
 
-        # @param relative_paths paths relative to `root`.
+        # @param relative_paths — paths relative to `root`.
         # @return those that belong to the project itself.
         def own(relative_paths, root)
           prefixes = submodule_prefixes(root)

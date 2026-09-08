@@ -90,7 +90,7 @@ module Rigor
       # up front (unavailable / opted out / already enabled), so callers never
       # pay for a thread that could only no-op.
       #
-      # @param seconds the amortization deadline.
+      # @param seconds — the amortization deadline.
       # @return the deadline thread, or nil when no-op up front.
       def enable_after(seconds)
         return nil unless available?

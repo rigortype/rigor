@@ -42,22 +42,22 @@ module Rigor
         end
       end
 
-      # @param paths explicit analysis roots; nil (the default) uses the configuration's
+      # @param paths — explicit analysis roots; nil (the default) uses the configuration's
       #   `paths:`.
-      # @param environment optional shared environment to thread into each internal
+      # @param environment — optional shared environment to thread into each internal
       #   Runner. Long-lived callers and specs can use this to avoid rebuilding the same RBS universe for
       #   every baseline / recheck / oracle run.
-      # @param cache_store ADR-85 WD1 — the persistent cache each internal Runner
+      # @param cache_store — ADR-85 WD1 — the persistent cache each internal Runner
       #   exposes to the RBS-env and plugin-producer tiers. A cross-process `--incremental` recheck otherwise
       #   rebuilt a fresh runner with no store, so every plugin `#prepare` producer (the ADR-9/#74/ADR-60 WD3
       #   record-and-validate caches) recomputed per invocation — 86% of a Rails warm incremental. Threading
       #   the store lets those producers serve from disk. `nil` (the default) preserves the pre-#85 behaviour
       #   the specs assert; the whole-run ADR-45 result cache stays disabled on these runs
       #   (`Runner#run_result_cacheable?` excludes `record_dependencies` / `analyze_only`).
-      # @param plugin_requirer optional gem-require hook threaded into each internal Runner
+      # @param plugin_requirer — optional gem-require hook threaded into each internal Runner
       #   (mirrors {Runner}'s parameter). nil (the default, and what the CLI passes) uses `Kernel.require`;
       #   embedders and specs inject a fake so a test plugin registers without touching the real load path.
-      # @param workers ADR-46 — the resolved fork-pool worker count threaded into every internal
+      # @param workers — ADR-46 — the resolved fork-pool worker count threaded into every internal
       #   analyzer, so a `--incremental` recheck's closure re-analysis parallelises exactly like the standard
       #   `check` path (the recon's audit: `--workers` / `RIGOR_RACTOR_WORKERS` / `parallel.workers:` were
       #   silently ignored because `build_runner` passed no `workers:`). 0 (the default, and what the specs and

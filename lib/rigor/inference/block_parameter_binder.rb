@@ -34,7 +34,7 @@ module Rigor
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
     class BlockParameterBinder
-      # @param expected_param_types positional block parameter types in order. Indices
+      # @param expected_param_types — positional block parameter types in order. Indices
       #   the binder cannot fill from this array (because the array is shorter than the parameter list, or
       #   because the slot is a kind we do not pull from the array) default to `Dynamic[Top]`.
       def initialize(expected_param_types: [])

@@ -55,10 +55,10 @@ module Rigor
 
         module_function
 
-        # @param gem_dir absolute path to the gem's installation directory.
-        # @param roots subdirectory names within the gem to walk (defaults to `["lib"]` per
+        # @param gem_dir — absolute path to the gem's installation directory.
+        # @param roots — subdirectory names within the gem to walk (defaults to `["lib"]` per
         #   `Configuration::Dependencies::Entry`).
-        # @param budget per-gem catalog cap (method-definition count). When unset, defaults
+        # @param budget — per-gem catalog cap (method-definition count). When unset, defaults
         #   to `UNBOUNDED` for backwards-compatible test paths.
         # @return frozen wrapper carrying the catalog (`Hash{[class_name, method_name] =>
         #   :instance | :singleton}`) and a `truncated?` flag set when the walker stopped harvesting because

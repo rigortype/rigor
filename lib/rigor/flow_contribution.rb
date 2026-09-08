@@ -49,24 +49,24 @@ module Rigor
 
     attr_reader(*SLOT_NAMES, :provenance)
 
-    # @param return_type normal-edge return type. Use `nil` when the contribution does not
+    # @param return_type — normal-edge return type. Use `nil` when the contribution does not
     #   refine the return type selected from the RBS contract.
-    # @param truthy_facts facts that hold only on the truthy control-flow edge. Edge-local: a
+    # @param truthy_facts — facts that hold only on the truthy control-flow edge. Edge-local: a
     #   truthy-edge fact does NOT imply its falsey-edge complement (ADR-2 § "Plugin Contribution Merging").
-    # @param falsey_facts dual of `truthy_facts`.
-    # @param post_return_facts facts that hold after the call returns normally on every edge —
+    # @param falsey_facts — dual of `truthy_facts`.
+    # @param post_return_facts — facts that hold after the call returns normally on every edge —
     #   the carrier for assertion-style contributions.
-    # @param mutations receiver and argument mutation effects.
-    # @param invalidations targeted fact invalidations beyond what mutation effects already
+    # @param mutations — receiver and argument mutation effects.
+    # @param invalidations — targeted fact invalidations beyond what mutation effects already
     #   imply.
-    # @param exceptional non-returning, raising, or unreachable effect.
-    # @param role_conformance capability-role conformance facts the contribution provides.
-    # @param effects ADR-103 WD5 — the effect labels this call edge
+    # @param exceptional — non-returning, raising, or unreachable effect.
+    # @param role_conformance — capability-role conformance facts the contribution provides.
+    # @param effects — ADR-103 WD5 — the effect labels this call edge
     #   attributes to its callee, as an upper bound. `nil` means "says nothing about effects", which is
     #   NOT the same as the empty set (which asserts the call performs none). Merged by union, the
     #   conservative direction: two sources that each name part of a call's footprint together name
     #   more of it, and neither can shrink the other's claim.
-    # @param provenance source-family, plugin-id, node, and cache-descriptor metadata. Defaults
+    # @param provenance — source-family, plugin-id, node, and cache-descriptor metadata. Defaults
     #   to `Provenance.builtin`.
     # rubocop:disable Metrics/ParameterLists
     def initialize(return_type: nil, truthy_facts: nil, falsey_facts: nil,

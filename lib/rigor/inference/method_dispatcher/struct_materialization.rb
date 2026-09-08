@@ -32,8 +32,8 @@ module Rigor
         # composed `x.dup_self.with(indent: 9).shout` shape survived — a correctly whitelisted `.with` fold
         # firing off a receiver the other gate should never have called fresh.
         #
-        # @param node the receiver EXPRESSION.
-        # @param receiver the carrier the expression produced.
+        # @param node — the receiver EXPRESSION.
+        # @param receiver — the carrier the expression produced.
         def materialization_call?(node, receiver, scope)
           return false unless node.is_a?(Prism::CallNode)
 

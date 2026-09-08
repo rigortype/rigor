@@ -53,7 +53,7 @@ module Rigor
 
         module_function
 
-        # @param plugin_id used for the contribution's `provenance.source_family`.
+        # @param plugin_id — used for the contribution's `provenance.source_family`.
         def recognize(call_node:, scope:, plugin_id:)
           return nil unless TypeTranslator.sorbet_t_namespaced?(call_node.receiver)
           return nil unless SORBET_ASSERTIONS.include?(call_node.name)

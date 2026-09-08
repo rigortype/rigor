@@ -43,7 +43,7 @@ module Rigor
 
         module_function
 
-        # @param contents_per_path file path → source text. The caller is
+        # @param contents_per_path — file path → source text. The caller is
         #   responsible for reading files (typically through the trusted `IoBoundary` so cache invalidation
         #   works).
         # @return method names suitable for inclusion in the `HelperTable`'s custom-helper set.

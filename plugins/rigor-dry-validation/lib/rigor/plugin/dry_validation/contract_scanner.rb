@@ -22,7 +22,7 @@ module Rigor
 
         module_function
 
-        # @param paths absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
         # @return frozen, sorted list of recognized contract class FQNs (e.g.
         #   `["App::NewUserContract", "Types::EmailContract"]`).
         def scan(paths:)

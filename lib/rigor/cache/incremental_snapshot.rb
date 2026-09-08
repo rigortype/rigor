@@ -222,7 +222,7 @@ module Rigor
       # The fingerprint that matched is returned alongside the payload so the caller can mix it into ITS own
       # cache key — the snapshot's identity is exactly what "these dependency edges came from that world" means.
       #
-      # @param fingerprints candidates, most-specific first.
+      # @param fingerprints — candidates, most-specific first.
       # @return `[matched fingerprint, payload]`, or nil on any miss.
       def load_any(fingerprints:)
         data = read_data

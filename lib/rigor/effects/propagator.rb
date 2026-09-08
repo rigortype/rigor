@@ -45,8 +45,8 @@ module Rigor
 
       module_function
 
-      # @param collection the run's merged per-file collections
-      # @param discharge the `effects.tolerated:` policy the undischarged lane is computed
+      # @param collection — the run's merged per-file collections
+      # @param discharge — the `effects.tolerated:` policy the undischarged lane is computed
       #   under; {Discharge.none} makes the two lanes equal.
       def propagate(collection, discharge: Discharge.none)
         return EffectTable.empty if collection.summaries.empty?

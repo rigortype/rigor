@@ -180,6 +180,30 @@ RSpec.describe "type-shaped comments (Rigor's own tree)" do
         expect(violations_for(:r4_stale_forward_reference, source)).to be_empty
       end
     end
+
+    describe "R5 missing delimiter" do
+      it "flags a name that runs straight into its description" do
+        source = "# @param format the output format\ndef foo(format); end\n"
+        expect(violations_for(:r5_missing_delimiter, source).size).to eq(1)
+      end
+
+      it "accepts the em dash after the name, and a bare name whose description continues below" do
+        source = "# @param format — the output format\n# @param width —\n#   the wrap column\n" \
+                 "def foo(format, width); end\n"
+        expect(violations_for(:r5_missing_delimiter, source)).to be_empty
+      end
+
+      it "checks @raise's exception class the same way, and leaves @return alone" do
+        source = "# @raise ArgumentError when amount is zero\n# @return the balance\ndef foo; end\n"
+        excerpts = violations_for(:r5_missing_delimiter, source).map(&:excerpt)
+        expect(excerpts).to eq(["# @raise ArgumentError when amount is zero"])
+      end
+
+      it "does not accept a double hyphen or a colon as the delimiter" do
+        source = "# @param format -- the output format\n# @param width: the wrap column\ndef foo(format, width:); end\n"
+        expect(violations_for(:r5_missing_delimiter, source).size).to eq(2)
+      end
+    end
   end
 
   describe "the corpus" do
@@ -209,6 +233,11 @@ RSpec.describe "type-shaped comments (Rigor's own tree)" do
     it "carries no stale numbered-slice forward reference (R4)" do
       violations = TYPE_SHAPED_COMMENTS_TOTALS.fetch(:r4)
       expect(violations).to be_empty, type_shaped_comments_failure("R4 stale forward reference", violations)
+    end
+
+    it "delimits every named tag with an em dash (R5)" do
+      violations = TYPE_SHAPED_COMMENTS_TOTALS.fetch(:r5)
+      expect(violations).to be_empty, type_shaped_comments_failure("R5 missing delimiter", violations)
     end
   end
 end

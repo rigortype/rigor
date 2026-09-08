@@ -43,7 +43,7 @@ module Rigor
 
         module_function
 
-        # @param contents_per_path file path → source text, read by the caller
+        # @param contents_per_path — file path → source text, read by the caller
         #   (through the trusted `IoBoundary`, so cache invalidation works).
         # @return the recognised helper-name prefixes (`["api_v3", "api_v4"]`). Empty when
         #   the project declares no grape API — nothing changes for such a project.

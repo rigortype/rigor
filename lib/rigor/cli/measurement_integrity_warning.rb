@@ -20,9 +20,9 @@ module Rigor
     module MeasurementIntegrityWarning
       module_function
 
-      # @param report both expose the two counts.
-      # @param err the stream to warn on.
-      # @param floor {CoverageMutation::HARNESS_ERROR_WARN_FLOOR}.
+      # @param report — both expose the two counts.
+      # @param err — the stream to warn on.
+      # @param floor — {CoverageMutation::HARNESS_ERROR_WARN_FLOOR}.
       def emit(report, err:, floor:)
         lines_for(report, floor: floor).each { |line| err.puts(line) }
       end

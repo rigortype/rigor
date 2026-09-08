@@ -40,7 +40,7 @@ module Rigor
 
         module_function
 
-        # @param paths absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
         # @return frozen 4-key result: `:types` (per-`Schema::Object` field
         #   table), `:enums` (per-`Schema::Enum` value list), `:input_objects`
         #   (per-`Schema::InputObject` argument table), `:mutations` (per-`Schema::Mutation`

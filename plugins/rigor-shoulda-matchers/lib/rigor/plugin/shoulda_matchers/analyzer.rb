@@ -72,7 +72,7 @@ module Rigor
 
         module_function
 
-        # @param model_index the `:model_index` fact value — the flat
+        # @param model_index — the `:model_index` fact value — the flat
         #   `class_name => { table:, columns:, associations:, ... }` Hash `rigor-activerecord` publishes
         #   (ADR-9's "the value is data, not objects" contract; see `Activerecord#index_to_published_hash`).
         #   When nil the analyzer falls silent.

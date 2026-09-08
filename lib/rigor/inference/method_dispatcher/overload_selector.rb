@@ -64,15 +64,15 @@ module Rigor
         }.freeze
         private_constant :ALIAS_STRICT_NOMINALS
 
-        # @param arg_types caller-provided types in positional order. Empty when
+        # @param arg_types — caller-provided types in positional order. Empty when
         #   there are no arguments.
-        # @param self_type substitute for `Bases::Self`.
-        # @param instance_type substitute for `Bases::Instance`.
-        # @param type_vars substitution map for class-level type variables
+        # @param self_type — substitute for `Bases::Self`.
+        # @param instance_type — substitute for `Bases::Instance`.
+        # @param type_vars — substitution map for class-level type variables
         #   (Slice 4 phase 2d). The selector threads it through to {RbsTypeTranslator} so parameter types
         #   like `::Array[Elem]` substitute Elem before the accepts check, instead of degrading the param
         #   to `Array[Dynamic[Top]]`.
-        # @param block_required when `true`, only overloads that declare a block clause are
+        # @param block_required — when `true`, only overloads that declare a block clause are
         #   considered (Slice 6 phase C sub-phase 1). The fallback also prefers a block-bearing overload
         #   over `method_types.first`. When `false` (the Slice 4 phase 2c default) the selector behaves
         #   exactly as before: `find` over arity-compatible overloads, falling back to the first

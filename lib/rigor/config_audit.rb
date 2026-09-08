@@ -36,7 +36,7 @@ module Rigor
       end
     end
 
-    # @param project_root the directory the run's relative bundler / collection
+    # @param project_root — the directory the run's relative bundler / collection
     #   paths resolve against (the CLI's CWD), used only by the explicit-path checks.
     def self.warnings(configuration, project_root: Dir.pwd)
       unknown_key_warnings(configuration) +

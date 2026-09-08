@@ -24,11 +24,11 @@ module Rigor
     module DependencyClosure
       module_function
 
-      # @param paths the measured file set, in caller order.
-      # @param environment built once by the caller.
-      # @param cache_store threaded to the recording run only (its RBS-env and
+      # @param paths — the measured file set, in caller order.
+      # @param environment — built once by the caller.
+      # @param cache_store — threaded to the recording run only (its RBS-env and
       #   plugin-producer tiers); the per-mutant analyses stay `cache_store: nil` regardless.
-      # @param workers fork-pool workers for the recording pass (the pool records per worker and
+      # @param workers — fork-pool workers for the recording pass (the pool records per worker and
       #   marshals the records back, so a pooled graph equals the sequential one).
       # @return frozen `path => sorted dependents`, restricted to `paths`.
       def build(paths:, configuration:, environment:, cache_store: nil, workers: 0)

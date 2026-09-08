@@ -55,13 +55,13 @@ module Rigor
     end
 
     class MethodParameterBinder
-      # @param class_path the qualified name of the class the method is defined in
+      # @param class_path — the qualified name of the class the method is defined in
       #   (e.g., `"Foo::Bar"`), or `nil` for a top-level `def` outside any class. When `nil` (or
       #   when the class is unknown to RBS), every parameter falls back to `Dynamic[Top]`.
-      # @param singleton `true` when the def is a singleton method (either `def
+      # @param singleton — `true` when the def is a singleton method (either `def
       #   self.foo` or a `def foo` inside `class << self`); routes the lookup through
       #   `RbsLoader#singleton_method`.
-      # @param source_path the project-relative path of the file the method is
+      # @param source_path — the project-relative path of the file the method is
       #   defined in. Used to match ADR-28 path-scoped protocol contracts; `nil` (the default
       #   for synthetic / probe scopes) disables the contract tier.
       def initialize(environment:, class_path:, singleton:, source_path: nil)

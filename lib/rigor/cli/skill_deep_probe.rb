@@ -44,8 +44,8 @@ module Rigor
         end
       end
 
-      # @param config the config filename the presence probe found, relative to `root`.
-      # @param root project root (the analysis itself resolves paths against the process cwd, as
+      # @param config — the config filename the presence probe found, relative to `root`.
+      # @param root — project root (the analysis itself resolves paths against the process cwd, as
       #   `rigor check` does).
       def initialize(config:, root: Dir.pwd)
         @config = config

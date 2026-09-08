@@ -22,7 +22,7 @@ module Rigor
     class SyntheticMethodIndex
       attr_reader :entries, :class_names
 
-      # @param class_names names of classes the substrate synthesises wholesale (ADR-36
+      # @param class_names — names of classes the substrate synthesises wholesale (ADR-36
       #   nested-class emission — the variant subclasses that have no RBS/source declaration of their own). Recorded so
       #   `Environment#class_known?` can resolve them as classes (their constant reference + `.new` dispatch) even
       #   though nothing else in the type universe declares them. Tier B/C method emissions leave this empty (their

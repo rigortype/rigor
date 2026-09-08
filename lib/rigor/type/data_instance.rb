@@ -27,9 +27,9 @@ module Rigor
     class DataInstance
       attr_reader :members, :class_name
 
-      # @param members ordered member -> type
+      # @param members — ordered member -> type
       #   map. Every declared member is present (Data instances are total).
-      # @param class_name the tagging class name, or nil for
+      # @param class_name — the tagging class name, or nil for
       #   an instance of an anonymous `Data.define(...)` class.
       def initialize(members, class_name = nil)
         unless members.is_a?(Hash) && members.each_key.all?(Symbol)

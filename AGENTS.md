@@ -150,8 +150,8 @@ flow is the `rigor-release-prep` skill.
 **A type that Rigor did not produce or check is not written down.** To learn a type, ask Rigor
 (`rigor type-of`, `rigor annotate`, `rigor sig-gen --print`), never the surrounding code or a comment.
 Types live in `sig/` (checked by `make check`) or are inferred. In `.rb` files a comment never carries
-a type: doc tags are typeless YARD (`@param name description`, `@return description`,
-`@raise ExceptionClass description`), and `#:` / `# @rbs` never appear under `lib/`, `plugins/*/lib`,
+a type: doc tags are typeless YARD with an em dash after the name token (`@param name — description`,
+`@raise ExceptionClass — description`, `@return description`), and `#:` / `# @rbs` never appear under `lib/`, `plugins/*/lib`,
 or `examples/*/lib` — the product default ([ADR-93](docs/adr/93-default-rbs-inline-ingestion.md))
 would ingest them as live contracts. Gate: `spec/docs/type_shaped_comments_spec.rb`. A comment states
 what the next lines and the signature do not — why (an ADR, an issue, a false-positive bound, a

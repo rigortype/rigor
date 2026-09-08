@@ -20,7 +20,7 @@ module Rigor
         @project_context = project_context
       end
 
-      # @param positions LSP `Position[]` — each
+      # @param positions — LSP `Position[]` — each
       #   `{ line:, character: }` 0-based.
       # @return one `SelectionRange` per
       #   position, or nil when the URI / buffer isn't resolvable.

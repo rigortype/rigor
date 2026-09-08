@@ -83,7 +83,7 @@ module Rigor
         # Executes the reduction on real constant values, or returns nil to decline. The caller falls
         # through to the nominal fold on a nil return, so every guard here is precision-additive only.
         #
-        # @param seed the optional seed type; only a foldable `Constant` seed is
+        # @param seed — the optional seed type; only a foldable `Constant` seed is
         #   honoured, any other seed declines.
         def try_constant_reduce(receiver, operator, seed)
           return nil unless CONSTANT_FOLD_OPERATORS.include?(operator)

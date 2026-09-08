@@ -37,10 +37,10 @@ module Rigor
 
       # Whether reporting `token` as an unknown label is justified.
       #
-      # @param token the spelling as written.
-      # @param registry the vocabulary AFTER plugin load; `nil` (no
+      # @param token — the spelling as written.
+      # @param registry — the vocabulary AFTER plugin load; `nil` (no
       #   vocabulary at all) makes every token unjudgeable and therefore silent.
-      # @param siblings the other tokens of the same list / the same config value.
+      # @param siblings — the other tokens of the same list / the same config value.
       def evident?(token, registry, siblings: [])
         return false if registry.nil?
         return false unless Label.valid?(token)

@@ -226,7 +226,7 @@ module Rigor
     # `severity_overrides:` keeps an unknown rule id inert until it lands (robust across gem
     # versions).
     #
-    # @param selector `{ "mode" => "none" }`,
+    # @param selector — `{ "mode" => "none" }`,
     #   `{ "mode" => "all" }`, `{ "mode" => "all", "except" => [ids] }`,
     #   or `{ "mode" => "list", "ids" => [ids] }`.
     def active_features(selector)
@@ -245,7 +245,7 @@ module Rigor
     # The merged severity-override map the active features impose for a selector. Frozen so
     # the result is `Ractor.shareable?`.
     #
-    # @param selector see {#active_features}.
+    # @param selector — see {#active_features}.
     def severity_overrides_for(selector)
       active_features(selector).each_with_object({}) do |feature, acc|
         acc.merge!(feature.severity_overrides)
@@ -257,7 +257,7 @@ module Rigor
     # Precomputed once per Configuration; frozen (with frozen members) so the carrier stays
     # `Ractor.shareable?` across the worker boundary.
     #
-    # @param selector see {#active_features}.
+    # @param selector — see {#active_features}.
     def active_ids_for(selector)
       Set.new(active_features(selector).map(&:id)).freeze
     end
@@ -265,7 +265,7 @@ module Rigor
     # Feature ids named by a selector that are NOT in the overlay (typo / graduated / from a
     # newer gem). Surfaced by `rigor show-bleedingedge` as a hint; never an error.
     #
-    # @param selector see {#active_features}.
+    # @param selector — see {#active_features}.
     def unknown_selected_ids(selector)
       named =
         case selector["mode"]

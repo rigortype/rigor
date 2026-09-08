@@ -7,7 +7,7 @@ module Rigor
     class Result
       attr_reader :diagnostics, :stats
 
-      # @param stats end-of-run telemetry (target file count, RBS class
+      # @param stats — end-of-run telemetry (target file count, RBS class
       #   breakdown, wall + RSS) collected by the Runner. Nil when stats collection wasn't requested or wasn't
       #   applicable (early-exit paths like `validate_target_ruby` failure).
       def initialize(diagnostics: [], stats: nil)

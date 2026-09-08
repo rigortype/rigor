@@ -76,11 +76,11 @@ module Rigor
 
       # Every synthetic unit `class_name` earns, as `[key, Summary, edges]` triples.
       #
-      # @param instance_methods the instance methods the class body defines, in source order
-      # @param macros receiver-less class-body calls to their literal symbol
+      # @param instance_methods — the instance methods the class body defines, in source order
+      # @param macros — receiver-less class-body calls to their literal symbol
       #   arguments, as the scanner harvested them
-      # @param uniqueness whether the class body declares a uniqueness validator
-      # @param own_units the units the class body itself defines, keyed by the
+      # @param uniqueness — whether the class body declares a uniqueness validator
+      # @param own_units — the units the class body itself defines, keyed by the
       #   suffix a synthetic key carries (`"#save"`, `".create"`), each mapped to whether that body
       #   reaches `super`. Read by {.framework_row} and by nothing else.
       def synthesize(class_name:, instance_methods:, macros:, uniqueness:, plugin_facts:, own_units: {})

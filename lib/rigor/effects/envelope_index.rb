@@ -56,10 +56,10 @@ module Rigor
 
       # Reads every stratum this index serves, once per process.
       #
-      # @param plugin_facts the loaded plugins' effect contributions
+      # @param plugin_facts — the loaded plugins' effect contributions
       #   (#387); their `effect_labels:` join the vocabulary an annotation is read against, so a gem's
       #   `%a{rigor:v1:effect rails.activejob.enqueue}` resolves rather than reading as unknown.
-      # @param environment the run's environment. Its loader supplies the
+      # @param environment — the run's environment. Its loader supplies the
       #   rbs-inline / plugin `virtual_rbs` buffers and the built RBS environment the accepted stratum is
       #   read from; without one, both are simply absent (the fail-quiet direction — a missing `≤` bound
       #   costs precision, never a finding).
@@ -120,8 +120,8 @@ module Rigor
 
       # The envelope bounding `owner`'s `selector`, or nil.
       #
-      # @param owner the receiver's static class name, as the typer projected it
-      # @param singleton whether the call is `Owner.selector` rather than `Owner#selector`
+      # @param owner — the receiver's static class name, as the typer projected it
+      # @param singleton — whether the call is `Owner.selector` rather than `Owner#selector`
       # @return never a ⊤ envelope: a bound that bounds nothing is not a bound, and
       #   importing it would both add nothing and discharge a taint on the strength of a typo.
       def [](owner, singleton, selector)

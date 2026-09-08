@@ -18,7 +18,7 @@ module Rigor
     module OriginLookup
       module_function
 
-      # @param node the receiver expression's node (nil for an implicit-self receiver)
+      # @param node — the receiver expression's node (nil for an implicit-self receiver)
       # @return the effective dynamic-origin cause, or nil when none is known
       def origin_for(scope, node)
         return nil if node.nil?

@@ -62,7 +62,7 @@ module Rigor
 
       module_function
 
-      # @param body a regex sub-pattern, typically the inner body of a
+      # @param body — a regex sub-pattern, typically the inner body of a
       #   `(?<name>body)` named capture. Anchors (`\A`, `\z`, `^`, `$`) are not stripped — the
       #   recogniser table targets bodies that the regex engine treats as anchored to the
       #   capture group bounds.
@@ -100,7 +100,7 @@ module Rigor
       # free-whitespace/`#`-comment flag from the `source` alone, so consumers bail on it before
       # calling here.
       #
-      # @param source the full regex source string.
+      # @param source — the full regex source string.
       # @return the matching imported refinement carrier, or `nil`.
       def for_whole_pattern(source)
         return nil if source.nil?

@@ -51,14 +51,14 @@ module Rigor
     #   serves it instead. The decline is measured against the declarations alone, never against what they
     #   would judge to, so it costs one glob and never a wrong answer.
     class RunCacheProbe
-      # @param explain the `--explain` flag (folded into the key, as the runner does).
+      # @param explain — the `--explain` flag (folded into the key, as the runner does).
       def initialize(configuration:, cache_root:, explain:)
         @configuration = configuration
         @cache_root = cache_root
         @explain = explain
       end
 
-      # @param paths the analysis roots (`@argv` or `configuration.paths`).
+      # @param paths — the analysis roots (`@argv` or `configuration.paths`).
       # @return the cached run result with the severity profile applied and no stats
       #   (matching a cache-served `Runner#run`), or nil to DECLINE — a miss / stale / unavailable cache — so
       #   the caller loads the engine and runs the full path. Any failure declines rather than raising: the

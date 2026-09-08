@@ -54,8 +54,8 @@ module Rigor
 
         module_function
 
-        # @param contents raw `config/routes.rb` source
-        # @param file_reader called with `"name.rb"` to load a
+        # @param contents — raw `config/routes.rb` source
+        # @param file_reader — called with `"name.rb"` to load a
         #   draw partial from `config/routes/name.rb`. Returns file contents
         #   or nil when the file is absent.
         def parse(contents, file_reader: nil, custom_helpers: [], grape_prefixes: [], acronyms: [])

@@ -152,12 +152,12 @@ module Rigor
       # diagnostic; the other annotations still apply). That claim was false until issue #785: the
       # production reporter has no `#record`, so every declined directive was dropped silently.
       #
-      # @param base starting registry (typically the bundled
+      # @param base — starting registry (typically the bundled
       #   `Rigor::Builtins::HktBuiltins.registry`).
-      # @param name_scope threaded through to the bound
+      # @param name_scope — threaded through to the bound
       #   resolver for class-name lookups; safe to omit during scanning since hkt bounds are
       #   typically `untyped` or stdlib classes.
-      # @param reporter same fail-soft reporter contract
+      # @param reporter — same fail-soft reporter contract
       #   the other RBS-extended parsers use; a collecting double that responds only to `#record` /
       #   `#<<` still works (see {Rigor::RbsExtended::HktDirectives.record_hkt_error}).
 

@@ -135,7 +135,7 @@ module Rigor
       NUMERIC_LITERAL_PREFIX = /\A[+-]?\d/
       private_constant :NUMERIC_LITERAL_PREFIX
 
-      # @param value typically a `Constant#value`
+      # @param value — typically a `Constant#value`
       # @return true when `value` is a String that is a
       #   single, complete Ruby numeric literal. Total over
       #   arbitrary input — never raises (Prism reports malformed

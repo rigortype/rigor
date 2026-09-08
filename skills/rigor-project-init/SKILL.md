@@ -135,6 +135,7 @@ mode — those points resolve without blocking:
 | 6a | **Pre-baseline cleanup** — apply quick fixes that triage diagnosed (`pre_eval:` for monkey-patch hints, `rbs collection install` if still needed). Re-run triage; repeat until the count is stable. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) § "Phase 6a" |
 | 7 | Acknowledge mode only — generate the baseline and wire `baseline:`. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
 | 8 | Surface likely real bugs; distinguish sig quality FPs from real bugs; offer escalation paths. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
+| 8a | Install the agent type-contract into `AGENTS.md` / `CLAUDE.md`, so an AI contributor sources types from Rigor instead of guessing them. | [`references/06-agent-contract.md`](references/06-agent-contract.md) |
 | 9 | Confirm the generated files with the user — what each is, and whether to commit it. | (this file — § "Final step") |
 
 Load each reference when you reach its phase. Phases run in order;
@@ -150,6 +151,7 @@ committed `sig/` directory.
 | 2 | [`references/02-configure.md`](references/02-configure.md) | **Phase 4.** Severity-profile choice tied to the mode. The `.rigor.dist.yml` template and every key it uses. The `.rigor.dist.yml` vs `.rigor.yml` convention. |
 | 3 | [`references/04-sig-uplift.md`](references/04-sig-uplift.md) | **Phase 5.** `rigor sig-gen --write` baseline. `rigor sig-gen --params=observed --write` attr_reader precision uplift. Handling residual `untyped` methods. Committing `sig/`. |
 | 4 | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) | **Phases 6–8.** `rigor triage` as the diagnosis layer. Phase 6a pre-baseline cleanup loop (`pre_eval:` for monkey-patch hints, `rbs collection install`). `rigor baseline generate` + wiring `baseline:`. Surfacing likely real bugs; sig quality FP recognition (Struct `call.wrong-arity`, `-> bot` return-type-mismatch, regex-capture `$1` FPs). The two escalation paths — write a project plugin, or open a Rigor issue. |
+| 5 | [`references/06-agent-contract.md`](references/06-agent-contract.md) | **Phase 8a.** The one paragraph the project's `AGENTS.md` / `CLAUDE.md` keeps so every agent session sources types from Rigor rather than guessing them. Where to append it, when to create the file, and what never to overwrite. |
 | — (optional) | [`references/05-jit-performance.md`](references/05-jit-performance.md) | **Operational, not a phase.** Run speed via a Ruby JIT: Rigor auto-enables YJIT for long runs (~5 s break-even), how to detect JIT support in your install, the override env vars, and why YJIT beats ZJIT for Rigor on Ruby 4.0. Read only when a large project's `rigor check` wall time matters. |
 
 ## Escalation paths (Phase 7 preview)
@@ -227,10 +229,11 @@ only in acknowledge mode). For each, give the commit recommendation:
 | `.rigor/` (contains `cache/`) | The per-file analysis cache `rigor check` writes to speed up re-runs. Regenerable and machine-local. | **No** — add `.rigor/` to `.gitignore`. |
 | `.rigor.yml` | Optional per-developer local override (not written by this skill). Takes precedence over `.rigor.dist.yml`; used to opt out locally (e.g. run without the baseline). | **No** — gitignore it if a developer creates one. |
 | `rbs_collection.lock.yaml` | Not a Rigor artefact — but if Phase 1 ran `rbs collection install`, the install may have regenerated this pre-existing project file (e.g. the stdlib gem list for the resolved Ruby). | **Yes**, but flag it separately: it is a change to an existing project file, not part of the Rigor file set. |
+| `AGENTS.md` / `CLAUDE.md` | The agent type-contract section added in Phase 8a — "a type you did not obtain from Rigor is a guess". Created only if neither file existed; otherwise this is an appended section in a pre-existing file. | **Yes** — commit it; the point is that every contributor's agent reads the same rule. Flag an appended section separately, as with `rbs_collection.lock.yaml`. |
 
 Recommend the two concrete actions and **ask before doing them**
 (both touch the user's repo): (1) add `.rigor/` — and `.rigor.yml`
 if present — to `.gitignore`; (2) commit `.rigor.dist.yml`,
-`.rigor-baseline.yml`, and `sig/` as the shared Rigor setup. Per the
-git-safety default, do not commit on the user's behalf until they
-confirm.
+`.rigor-baseline.yml`, `sig/`, and the Phase 8a `AGENTS.md` /
+`CLAUDE.md` section as the shared Rigor setup. Per the git-safety
+default, do not commit on the user's behalf until they confirm.

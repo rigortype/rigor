@@ -30,11 +30,12 @@ Two things make that easy, and you have both offline:
   `type-of` / `triage` / `coverage` answer from what Rigor inferred. A
   concrete inferred type beats any abstract explanation.
 
-This is the user's shortcut: they only ever need to remember two skills —
-**`rigor-next-steps`** ("what should we do next?") and **`rigor-ask`**
-("answer this about Rigor"). They ask in plain language; *you* turn it
-into the right lookup or analysis so they never have to remember the
-command.
+This is the user's shortcut: they only ever need to remember three
+skills — **`rigor-next-steps`** ("what should we do next?"),
+**`rigor-ask`** ("answer this about Rigor"), and **`rigor-type-oracle`**
+("before you write a type, ask Rigor"). They ask in plain language; *you*
+turn it into the right lookup or analysis so they never have to remember
+the command.
 
 ## Prefer the live map over this skill's tables
 
@@ -125,8 +126,9 @@ A good hand-off is two or three sentences of orientation plus the pointer:
 - CI → **`rigor-ci-setup`** · editor → **`rigor-editor-setup`** · MCP agent → **`rigor-mcp-setup`**
 - baseline reduction → **`rigor-baseline-reduce`** · coverage holes → **`rigor-protection-uplift`**
 - a missing gem/DSL → **`rigor-plugin-author`** · monkey-patch clusters → **`rigor-monkeypatch-resolve`**
+- about to *write* a type (RBS, `#:`, a Sorbet `sig`, a YARD tag, a doc sentence) → **`rigor-type-oracle`**
 
-When in doubt, give less and point — it respects the user's "two skills
+When in doubt, give less and point — it respects the user's "three skills
 to remember" promise and keeps each answer to the part only `rigor-ask`
 can give.
 

@@ -1,0 +1,1 @@
+**[sig-gen]** `rigor sig-gen` now builds its type universe from the same sources `rigor check` uses — the `rbs collection`, the bundle's per-gem `sig/`, and plugin signatures — so a class whose superclass those declare is emitted instead of skipped, thank you @n-rodriguez! ([#869](https://github.com/rigortype/rigor/pull/869))

@@ -19,8 +19,11 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 **v0.3.8 is published.** The release PR (`release/0.3.8`, `Bump up version to 0.3.8`) merged on
 2026-09-08; the user ran `rake release` from `master`: tag `v0.3.8` at `ffb456b0`, the GitHub Release,
-and `rigortype 0.3.8` on RubyGems all exist. `Rigor::VERSION` is `0.3.8`; `changelog.d/` holds only its
-README; `[Unreleased]` is empty. The next cut happens only when the user invokes `/rigor-release-prep`
+and `rigortype 0.3.8` on RubyGems all exist. `Rigor::VERSION` is `0.3.8`; `[Unreleased]` is empty;
+`changelog.d/` holds two post-cut fragments besides its README — #810 and
+[#813](https://github.com/rigortype/rigor/pull/813) (the Ractor-pool twin of #798: the
+`effect.annotations-unchecked` inline stratum had no producer under `RIGOR_POOL_BACKEND=ractor`), both
+riding the next cut. The next cut happens only when the user invokes `/rigor-release-prep`
 explicitly — a release date or goal mentioned in a task is not that invocation (ADR-50 § WD5).
 
 ## What v0.3.8 fixed (the 2026-09-07 triage batch)

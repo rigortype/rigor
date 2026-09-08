@@ -89,12 +89,17 @@ Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated
 
 ## The types-and-comments line (2026-09-08 → 09, landed)
 
-**A type Rigor did not produce or check is never written down** — typeless YARD doc tags gated by
-`spec/docs/type_shaped_comments_spec.rb`; ADR-107 / ADR-108; the `rigor-type-oracle` skill;
-`make check --fail-on=warning`. Inline `#:` / `# @rbs` are checked type sources, not banned (#843);
-a declared `void` is authored intent (#845); a declared nominal is never tightened to the body's
-literal (#850, ADR-110). Open, both `ready-for-human`: [#839](https://github.com/rigortype/rigor/issues/839),
-[#841](https://github.com/rigortype/rigor/issues/841). `make steep-check` has 11 pre-existing problems.
+Rule: **a type Rigor did not produce or check is never written down** — typeless YARD doc tags
+(`@param name — description`) gated by `spec/docs/type_shaped_comments_spec.rb` over lib/, plugins/,
+examples/, spec/, tool/; ADR-107 / ADR-108; the `rigor-type-oracle` skill; `make check --fail-on=warning`
+(#822, #826, #827, #829). Inline `#:` / `# @rbs` are checked type sources, written where they say what
+the name and the code do not (#843). Engine and gate follow-ups all landed: #840 (#823), #832 (#824),
+#835 (#825), #845 (#836 `void` is intent), #850 (#837 a literal never tightens a declaration), #847
+(#838), #855 (#839 a `sig/` declaration must have code: static tier + runtime tier, zero stale),
+#852 (#841 `next` arms join the block return), #851 (Steep 11 → 0). `sig/` carries no
+`# sig-gen gap:` marker and `rigor sig-gen --diff --tighter-returns lib` is empty. Open:
+[#853](https://github.com/rigortype/rigor/issues/853) (a block-level `break <value>` does not reach
+the call's type — the `break` sibling of #841, `ready-for-human`).
 
 ## How to enter
 

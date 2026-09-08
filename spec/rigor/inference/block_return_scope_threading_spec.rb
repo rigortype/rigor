@@ -154,12 +154,13 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
-    it "declines on a value-carrying `break` before the tail" do
-      # `break` is the same defect wearing different clothes: it terminates the YIELDING CALL and makes it
-      # answer 5, so `42` is as unsound here as it is for `next`. Measured on master (78983b38) at review
-      # time, this shape answers `Dynamic[top]` there too — declining restores master's answer rather than
-      # regressing anything. (The review brief predicted `42` for this shape on master; it does not.)
-      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+    it "still declines on a value-carrying `break` before the tail, which the call's own union covers" do
+      # `break` terminates the YIELDING CALL and makes it answer 5, so the threading fold's `42` was as
+      # unsound here as it is for `next`, and it declines. Issue #853 supplies the 5 from the other end — the
+      # call unions its `break` arms — so the decline is no longer what keeps this sound; it is conservative,
+      # and its remaining cost is the threaded tail, `Dynamic[top]` where threading would reach `42`. Lifting
+      # it moves the type of every block carrying a `break`, so it wants a change that can measure that.
+      expect(dumped_type(<<~RUBY)).to eq("5 | Dynamic[top]")
         m = Mutex.new
         flag = [true, false].sample
         dump_type(m.synchronize do

@@ -171,11 +171,12 @@ RSpec.describe "block `next` arm join", type: :runner do
       RUBY
     end
 
-    it "leaves a `break` unjoined" do
+    it "leaves a `break` out of the BLOCK's value and lets the call absorb it" do
       # `break value` is the value of the yielding CALL rather than of the block, so it is not a block arm.
-      # The block's own value here is the tail alone, which is what this answers — the call really can
-      # produce 5, and saying so is a separate change.
-      expect(dumped_type(synchronize_block(<<~RUBY))).to eq("42")
+      # The block's own value here is the tail alone; the 5 in the answer arrives from the other end, where
+      # issue #853 unions the arms into the call — the `Mutex#synchronize` signature makes the two visible
+      # at the same position, and this asserts they compose rather than that either absorbed the other.
+      expect(dumped_type(synchronize_block(<<~RUBY))).to eq("42 | 5")
         break 5 if flag
         42
       RUBY

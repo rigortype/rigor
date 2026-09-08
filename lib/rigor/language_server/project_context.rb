@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../environment"
+require_relative "../project_environment"
 require_relative "../cache/store"
 require_relative "../analysis/runner"
 require_relative "../analysis/incremental_session"
@@ -74,11 +75,7 @@ module Rigor
           dependency_source_index: project_scan.dependency_source_index,
           synthetic_method_index: project_scan.synthetic_method_index,
           project_patched_methods: project_scan.project_patched_methods,
-          bundler_bundle_path: @configuration.bundler_bundle_path,
-          bundler_auto_detect: @configuration.bundler_auto_detect,
-          bundler_lockfile: @configuration.bundler_lockfile,
-          rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
-          rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect
+          **ProjectEnvironment.dependency_discovery_options(@configuration)
         )
       end
 

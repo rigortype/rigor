@@ -11,7 +11,7 @@ require_relative "../scope"
 require_relative "type_scan_renderer"
 require_relative "type_scan_report"
 require_relative "command"
-require_relative "probe_environment"
+require_relative "../project_environment"
 require_relative "coverage_scan"
 
 module Rigor
@@ -89,9 +89,9 @@ module Rigor
       # Builds the plugin-aware environment that auto-detects `<cwd>/sig` by default and honours the
       # configuration's `libraries:` / `signature_paths:` keys when present. The scanned `paths` are threaded as
       # the plugin `source_rbs_synthesizer` inputs so coverage reflects the same synthesized RBS `rigor check`
-      # sees (see {ProbeEnvironment}).
+      # sees (see {ProjectEnvironment}).
       def project_environment(configuration, source_files)
-        ProbeEnvironment.build(configuration: configuration, source_files: source_files)
+        ProjectEnvironment.build(configuration: configuration, source_files: source_files)
       end
 
       def scan_one(path, scanner, accumulator, configuration)

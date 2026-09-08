@@ -14,7 +14,7 @@ require_relative "../analysis/reachability/project_files"
 require_relative "../cache/store"
 require_relative "options"
 require_relative "command"
-require_relative "probe_environment"
+require_relative "../project_environment"
 
 module Rigor
   class CLI

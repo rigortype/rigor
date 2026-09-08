@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../environment"
+require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../type"
 require_relative "../source/literals"
@@ -50,10 +51,11 @@ module Rigor
       def collect
         return {} if @paths.empty?
 
-        environment = build_environment
+        resolved = resolve_paths(@paths)
+        environment = build_environment(resolved)
         discovered_classes = preindex_source_classes
         observations = Hash.new { |h, k| h[k] = [] }
-        resolve_paths(@paths).each do |path|
+        resolved.each do |path|
           collect_from_file(path, environment, discovered_classes, observations)
         end
         observations.transform_values(&:freeze).freeze
@@ -61,11 +63,11 @@ module Rigor
 
       private
 
-      def build_environment
-        Environment.for_project(
-          libraries: @configuration.libraries,
-          signature_paths: @configuration.signature_paths
-        )
+      # Issue #821 — same universe as the generator and as `rigor check`; see
+      # {Generator#build_environment}. An observation collected against a narrower environment types its
+      # argument differently from the run that will consume it.
+      def build_environment(source_files = [])
+        ProjectEnvironment.build(configuration: @configuration, source_files: source_files)
       end
 
       def resolve_paths(args)

@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../configuration"
 require_relative "../environment"
+require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../reflection"
 require_relative "../type"
@@ -91,8 +92,8 @@ module Rigor
       end
 
       def run
-        @environment = build_environment
         resolved = resolve_paths(@paths)
+        @environment = build_environment(resolved)
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         demote_overridden_base_methods(
           demote_unresolvable_superclasses(resolve_superclass_spellings(candidates))
@@ -316,11 +317,13 @@ module Rigor
         )
       end
 
-      def build_environment
-        Environment.for_project(
-          libraries: @configuration.libraries,
-          signature_paths: @configuration.signature_paths
-        )
+      # Issue #821 — the SAME type universe `rigor check` analyses against: the project's `sig/`, the plugins,
+      # the bundle's per-gem signatures and the `rbs collection`. Built with two keywords only, the generator
+      # could not see a gem-declared superclass, and the skip guard above (`record_unresolvable_superclass`)
+      # then declined to emit every class descending from one — every Rails model, on a project whose
+      # collection was installed and whose `check` read it.
+      def build_environment(source_files = [])
+        ProjectEnvironment.build(configuration: @configuration, source_files: source_files)
       end
 
       def resolve_paths(args)

@@ -1,0 +1,16 @@
+---
+locals:
+  g: Random
+  i: Integer
+assertions:
+  '1': Float[1.0..2.0]
+  '2': Integer[1..6]
+  '3': Float
+  '4': Float
+  '5': Integer
+  '6': "[1, 2]"
+  '7': '"abc"'
+  '8': Array[String]?
+  '9': Array[String]?
+  '10': Integer
+  '11': Integer

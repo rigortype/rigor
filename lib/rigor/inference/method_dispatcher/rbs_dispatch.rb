@@ -3,6 +3,7 @@
 require_relative "../../reflection"
 require_relative "../../type"
 require_relative "../../rbs_extended"
+require_relative "../range_constant"
 require_relative "../rbs_type_translator"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
@@ -71,6 +72,13 @@ module Rigor
         private_constant :EMPTY_TYPE_VARS
         EMPTY_TYPE_PARAM_NAMES = [].freeze
         private_constant :EMPTY_TYPE_PARAM_NAMES
+        NO_BINDING = [nil, nil].freeze
+        private_constant :NO_BINDING
+
+        # Both spellings a resolved `RBS::Types::ClassInstance#name` may carry for `Range`; core
+        # signatures absolutise, but a plugin-contributed one need not.
+        RANGE_TYPE_NAMES = ["::Range", "Range"].freeze
+        private_constant :RANGE_TYPE_NAMES
 
         # Four fields of `context` shape the answer beyond receiver, method name and arguments.
         #
@@ -524,7 +532,8 @@ module Rigor
           # Envelope, deliberately the narrowest sound shape:
           #
           # * only a positional parameter (required or optional) whose declared type is EXACTLY
-          #   `RBS::Types::Variable` — no container walk, so `(Array[T]) -> T` still degrades;
+          #   `RBS::Types::Variable`, plus the one container shape issue #834 admits (see
+          #   {#range_element_binding}) — no general container walk, so `(Array[T]) -> T` still degrades;
           # * only names the SELECTED overload declares in its own `type_params` (a class-level variable
           #   keeps its receiver-derived binding);
           # * an existing key wins, so the receiver and the block return type both outrank an argument;
@@ -553,12 +562,25 @@ module Rigor
             positionals.zip(args).each_with_object({}) do |(param, arg), bindings|
               next if arg.nil?
 
-              name = variable_param_name(param, declared, type_vars)
+              name, bound = param_binding(param, arg, declared, type_vars)
               next if name.nil?
-              next if no_static_evidence?(arg)
 
-              bindings[name] = bindings.key?(name) ? Type::Combinator.union(bindings[name], arg) : arg
+              bindings[name] = bindings.key?(name) ? Type::Combinator.union(bindings[name], bound) : bound
             end
+          end
+
+          # The `(variable name, bound type)` a positional parameter contributes, or {NO_BINDING} when it
+          # contributes none. The bare-variable shape is tried first because it is the overwhelmingly
+          # common one; the `Range[A]` shape is reached only when the parameter is not a bare variable.
+          def param_binding(param, arg, declared, type_vars)
+            name = variable_param_name(param, declared, type_vars)
+            unless name.nil?
+              return NO_BINDING if no_static_evidence?(arg)
+
+              return [name, arg]
+            end
+
+            range_element_binding(param, arg, declared, type_vars)
           end
 
           def declared_type_param_names(method_type)
@@ -579,6 +601,31 @@ module Rigor
             return nil if type_vars.key?(name)
 
             name
+          end
+
+          # Issue #834 — the one container position the envelope admits: a `Range[A]` parameter against a
+          # `Constant<Range>` argument whose endpoints are literals. `Comparable#clamp: [A] (Range[A]) ->
+          # (self | A)` otherwise leaves `A` unbound and `i.clamp(1..9)` answers `Dynamic[top] | Integer`,
+          # even though the argument names the element outright. It stays this narrow because the
+          # justification does not generalise: a range literal's endpoints ARE its element type, whereas an
+          # `Array[T]` argument's carrier may have been widened long before the call.
+          #
+          # The bound is the endpoints lifted to their classes ({RangeConstant.element_type}), not the two
+          # values, so `clamp` answers `Integer` rather than a `1 | 9` the runtime contradicts for every
+          # receiver already inside the bracket.
+          def range_element_binding(param, arg, declared, type_vars)
+            declared_type = param.type
+            return NO_BINDING unless declared_type.is_a?(RBS::Types::ClassInstance)
+            return NO_BINDING unless RANGE_TYPE_NAMES.include?(declared_type.name.to_s)
+            return NO_BINDING unless declared_type.args.size == 1
+
+            element = declared_type.args.first
+            return NO_BINDING unless element.is_a?(RBS::Types::Variable)
+            return NO_BINDING unless declared.include?(element.name)
+            return NO_BINDING if type_vars.key?(element.name)
+
+            bound = RangeConstant.element_type(arg)
+            bound.nil? ? NO_BINDING : [element.name, bound]
           end
 
           # `Dynamic[top]` is the engine's "we could not tell" answer, so binding a variable to it would

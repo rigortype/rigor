@@ -27,9 +27,8 @@ release date or goal mentioned in a task is not that invocation (ADR-50 § WD5).
 
 ## The 2026-09-08 types-and-comments session (three Draft PRs, all gates green)
 
-The maintainer redefined what a type may be in Rigor's own tree — **a type Rigor did not produce or
-check is never written down** — and what Rigor ships to agents: a skill that routes "I am about to
-write a type" to the oracle instead of the source. Everything is landed as Draft, in this merge order:
+The maintainer redefined the rule — **a type Rigor did not produce or check is never written down** —
+for Rigor's own tree and for what Rigor ships to agents. Merge order:
 
 1. [#822](https://github.com/rigortype/rigor/pull/822) `type-comment-corpus` — 1,121 YARD type slots
    emptied (313 files, comment lines only), `AGENTS.md` § "Types and Comments", the gate
@@ -37,14 +36,13 @@ write a type" to the oracle instead of the source. Everything is landed as Draft
    lands; then a docs-only commit flips its status line and index row).
 2. [#826](https://github.com/rigortype/rigor/pull/826) `type-oracle-skill` — `skills/rigor-type-oracle/`,
    the `AGENTS.md` fragment `rigor-project-init` installs (Phase 8a), catalogue wiring. Rebase onto
-   #822 first; its README index row and ADR-108 status will need the dedupe.
+   #822 first and dedupe the ADR-108 index row.
 3. [#827](https://github.com/rigortype/rigor/pull/827) `check-fail-on-warning` — `rigor check
-   --fail-on=SEVERITY`; `make check` / `check-plugins` run with `--fail-on=warning`. Fixes #812.
+   --fail-on=SEVERITY`; `make check` / `check-plugins` now run with `--fail-on=warning`. Fixes #812.
 
-Follow-ups filed, all `ready-for-human`: [#823](https://github.com/rigortype/rigor/issues/823)
-(an annotated method's siblings), [#824](https://github.com/rigortype/rigor/issues/824) (`sig/` vs
-inline precedence), [#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance gate).
-#779 is closed as superseded.
+Follow-ups, all `ready-for-human`: [#823](https://github.com/rigortype/rigor/issues/823),
+[#824](https://github.com/rigortype/rigor/issues/824), [#825](https://github.com/rigortype/rigor/issues/825).
+#779 is closed as superseded; `../rigor-wt/` worktrees are disposable after the merges.
 
 ## The 2026-09-08 perf session (#775)
 

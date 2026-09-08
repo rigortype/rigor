@@ -18,8 +18,7 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 **v0.3.8 is published** (`Rigor::VERSION` is `0.3.8`, `[Unreleased]` empty as of 2026-09-09).
-Post-cut fragments ride under `changelog.d/`, now including #830 (`changed/`) and, once it lands,
-#844 (`added/`). The next cut happens only when the user invokes `/rigor-release-prep` explicitly.
+Post-cut fragments ride under `changelog.d/`, now including #830 (`changed/`) and #844 (`added/`). The next cut happens only when the user invokes `/rigor-release-prep` explicitly.
 
 ## The ADR-109 range-notation line (2026-09-08 → 09)
 
@@ -38,7 +37,10 @@ and a docs sweep sided with the code. ADR-109 restores the decision and defines
   user's word.** Slice 3: truthy-edge Float comparison narrowing (`x > c` → `Float[c..]`, `x < c` →
   `Float[...c]`, `between?`, falsy edge keeps the entry type), `nan?` / `finite?`, and union
   absorption (`Float` absorbs a `FloatRange` member) so a post-guard join names one set. Fixture
-  `float_comparison_narrowing.rb`. `make verify` / `make docs-check` green locally on head `044c824a`.
+  `float_comparison_narrowing.rb`. Head `a1782666` (an empty retrigger commit on top of `044c824a`): `make verify` /
+  `make docs-check` green locally, CI green on GitHub after three artifact-service `403` flakes.
+  If a Tests shard dies on an upload `403`, rerun the WHOLE run or push a fresh commit, never
+  `--failed` alone: the rerun shard restores newer timing data and `shard-coverage` goes red.
 - [#831](https://github.com/rigortype/rigor/issues/831) — what remains of ADR-109: Float folds
   (`abs`, `Math.sqrt`, `rand(range)`, `clamp(range)`) and the `dynamic.rbs-extended.deprecated-form`
   diagnostic for the `int<a, b>` alias (rule catalogue + taxonomy gate + manual rule list).

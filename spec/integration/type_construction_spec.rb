@@ -1031,6 +1031,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/float_comparison_narrowing.rb — ADR-109 WD5 truthy-edge Float narrowing" do
+    let(:harness) { harness_for("float_comparison_narrowing") }
+
+    it "narrows the truthy edge to a Float range, keeps the falsy edge, and rejoins to Float" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/container_size.rb — Array/String/Hash#size tightened to non_negative_int" do
     let(:harness) { harness_for("container_size") }
 

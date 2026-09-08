@@ -825,7 +825,30 @@ module Rigor
 
           return [top] if flattened.any?(Top)
 
-          unique_members(flattened)
+          absorb_float_ranges(unique_members(flattened))
+        end
+
+        # ADR-109 WD5 — a `FloatRange` member is absorbed by a bare `Nominal[Float]` member or by a
+        # `FloatRange` member that contains it. The truthy edge of `x > c` is a range and the falsy
+        # edge keeps `Float`, so the join after every Float guard would otherwise carry both and every
+        # later guard would narrow member by member into a growing union (`Float[...1.0] |
+        # Float[0.0...1.0]`) that names one set. `IntegerRange` keeps its pre-ADR-109 behaviour
+        # (`Integer | Integer[0..5]` stays as written) because both of its edges narrow.
+        def absorb_float_ranges(members)
+          return members unless members.any?(FloatRange)
+
+          members.reject do |member|
+            member.is_a?(FloatRange) &&
+              members.any? { |other| !other.equal?(member) && float_range_absorbed_by?(member, other) }
+          end
+        end
+
+        def float_range_absorbed_by?(range, other)
+          case other
+          when Nominal then other.class_name == "Float" && other.type_args.empty?
+          when FloatRange then other != range && other.accepts(range).yes?
+          else false
+          end
         end
 
         def unique_members(types)

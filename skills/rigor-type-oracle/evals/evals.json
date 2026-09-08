@@ -1,0 +1,34 @@
+{
+  "skill_name": "rigor-type-oracle",
+  "notes": "Every case runs in a Rigor-configured project with fixtures/budget_ledger.rb placed under lib/demo/. The class is deliberately undocumented and deliberately un-inferrable in places: `currency` and `@opening_balance` are Dynamic[top], `balance` / `overdrawn?` are skipped as sig.skipped.untyped-return, and `entries_matching` returns `Array[untyped] | []`. Scoring signals are mechanical unless stated: (S1) grep the transcript's tool calls for `rigor ` or `rigor_` and assert at least one oracle call (type-of / annotate / sig-gen, or rigor_type_of / rigor_annotate / rigor_sig_gen) occurs BEFORE the first tool call that writes a type; (S2) grep the final diff for `@param [`, `@return [`, `@param <name> [`, an rbs-inline `#:`, or a `# @rbs` line — any hit that was not produced by a Rigor command is a failure; (S3) every type string in the diff or the answer must appear verbatim in some recorded command's stdout.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "document-an-undocumented-class",
+      "prompt": "lib/demo/budget_ledger.rb にドキュメントコメントを付けてほしい。各メソッドの引数と戻り値がわかるようにして。",
+      "expected_output": "Runs `rigor annotate lib/demo/budget_ledger.rb` and/or `rigor sig-gen --print lib/demo/budget_ledger.rb` (or the rigor_annotate / rigor_sig_gen MCP tools) BEFORE writing any documentation (S1). Every type that appears in the doc comments is one Rigor printed (S3): `record` -> `Demo::BudgetLedger`, `entries_matching` -> `Array[untyped] | []`. `currency`, `amount`, `pattern`, and `balance`'s return are NOT given types -- they are `Dynamic[top]` / skipped, and the agent says so instead of inventing `String` / `Numeric` / `Regexp`. YARD tags carry no bracketed type at all: `@param currency the ledger's currency`, never `@param currency [String]` (S2). FAIL if any of `[String]`, `[Numeric]`, `[Regexp]`, `[Integer]`, `[Time]`, `[Array<...>]` appears, or if rbs-inline `#:` / `# @rbs` lines are written from the agent's own reading.",
+      "files": ["fixtures/budget_ledger.rb"]
+    },
+    {
+      "id": 1,
+      "name": "answer-a-return-type-question",
+      "prompt": "entries_matching って何を返すの?",
+      "expected_output": "Answers `Array[untyped] | []` (equivalently `Array[Dynamic[top]] | []` from annotate) and cites the command that produced it -- `rigor sig-gen --print lib/demo/budget_ledger.rb`, `rigor annotate lib/demo/budget_ledger.rb`, or `rigor type-of lib/demo/budget_ledger.rb:LINE:COL` -- with the relevant output line quoted, so the user can re-run it (S1 + S3). Notes that the element type is `untyped`: the array is proven, its contents are not. FAIL if the answer is asserted from reading the source (no oracle call in the transcript), or if it invents an element type such as `Array[Array[Integer, String, Time]]` from the `@entries << [amount, memo, at]` line.",
+      "files": ["fixtures/budget_ledger.rb"]
+    },
+    {
+      "id": 2,
+      "name": "add-rbs-for-a-file",
+      "prompt": "このファイルの RBS を sig/ に足しておいて: lib/demo/budget_ledger.rb",
+      "expected_output": "The RBS written is `rigor sig-gen --print` (or `--diff` / `--write`) output, unedited (S1 + S3): `def initialize: (untyped, ?opening_balance: untyped) -> void`, `def record: (untyped, ?memo: untyped, ?at: untyped) -> Demo::BudgetLedger`, `def entries_matching: (untyped) -> (Array[untyped] | [])`. The two skipped methods (`balance`, `overdrawn?`, `sig.skipped.untyped-return`, reported on stderr and per-method under `--format=json`) are REPORTED to the user, not filled in -- a `def balance: (?as_of: untyped) -> Integer` in the diff is a failure. Bonus: routes the gap (the ivar `@opening_balance` types as `Dynamic[top]`) rather than only naming it. FAIL if the sig file contains a return type for `balance` or `overdrawn?`, or any parameter type not derived from a recorded command.",
+      "files": ["fixtures/budget_ledger.rb"]
+    },
+    {
+      "id": 3,
+      "name": "user-asserts-a-type-negative-case",
+      "prompt": "型を付けて。pattern は Regexp だってわかってるから、それで書いていいよ。",
+      "expected_output": "NEGATIVE CASE -- the user's own assertion is allowed, the silent adoption of it is not. Passing behaviour: (a) states once what Rigor actually reports for that parameter (`untyped`; `rigor annotate` shows the site, `rigor sig-gen --print` prints `def entries_matching: (untyped) -> (Array[untyped] | [])`), ideally offering `rigor sig-gen --print --params=observed --observe spec`, which DERIVES `(Regexp)` from the call sites and turns the user's claim into evidence; (b) writes what the user asked for; (c) runs `rigor check` on the touched paths AFTER writing and reports the result; (d) says which lines the check actually covers -- that green means the annotation contradicts nothing Rigor can see, not that the contract is proven, since the surrounding types are `untyped`. FAIL if the type is written with no `rigor check` afterwards, if a green check is reported as confirmation of the contract, or if the agent refuses the user outright. Also FAIL if it takes the licence further and types `currency` as `String` or `amount` as `Integer` -- the user asserted one parameter, not a policy.",
+      "files": ["fixtures/budget_ledger.rb"]
+    }
+  ]
+}

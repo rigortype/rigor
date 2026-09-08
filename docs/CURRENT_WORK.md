@@ -69,7 +69,8 @@ Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated
   user's word.** ADR-109 WD3: `int<a, b>` still resolves and now reports
   `dynamic.rbs-extended.deprecated-form` (`info`) naming the `Integer[a..b]` spelling, through a
   fourth `RbsExtended::Reporter` stream carried by the worker drain and the pool replay. Head
-  `2bfeb5b9`: `make verify` / `make docs-check` green locally; watch the HEAD run by id. If a Tests
+  `0e3f2dda` (rebased onto master after #850–#852 made the PR CONFLICTING, which is why it had no
+  run): `make verify` / `make docs-check` green locally; watch the HEAD run by id. If a Tests
   shard dies on an artifact-upload `403`, rerun the WHOLE run or push a fresh commit, never
   `--failed` alone (the rerun shard restores newer timing data and `shard-coverage` goes red).
 - [#831](https://github.com/rigortype/rigor/issues/831) — once #854 lands, all that remains of

@@ -1,0 +1,1 @@
+- **[rigor check]** A block that leaves through `next value` now types as that value joined with its fall-through tail, so a predicate block shaped `ops.all? { |o| next false unless o; true }` no longer reads as unconditionally true and no longer draws a `flow.always-truthy-condition` on the correct code around it. ([#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM))

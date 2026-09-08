@@ -90,7 +90,7 @@ states:
 | `new-file` | No RBS file declares the receiver class at all. |
 | `new-method` | RBS file declares the class but not this method. |
 | `tighter-return` | RBS file declares the method, but the inferred return is a strict subtype of the declared return. |
-| `equivalent` | The inferred return is not a strict subtype of the declared one — identical, wider, or unrelated — so there is nothing to tighten. Silently skipped. |
+| `equivalent` | Nothing for `sig-gen` to propose: the inferred return is identical, wider or unrelated, or it is a narrowing the generator declines (a literal under a wider declaration, anything under a declared `void`). Silently skipped. |
 | `skipped` | Disqualified for one of the reasons below. |
 
 The `sig.skipped.*` reasons are:
@@ -144,11 +144,11 @@ The convention Rigor uses on its own `sig/` is a line in the
 member's RBS comment:
 
 ```rbs
-class Bot
-  # sig-gen gap: #1234 — every sibling type declares
-  # `String`; sig-gen proposes the literal "bot", which
-  # would pin one implementation of a shared surface.
-  def describe: () -> String
+class Registry
+  # sig-gen gap: #1234 — sig-gen types the body `untyped`
+  # (the ivar has no inferred field type yet), so this
+  # return is hand-written until it can prove one.
+  def resolve: (String name) -> Entry
 end
 ```
 
@@ -158,6 +158,15 @@ contract, and no inference synthesizes it, so a `void`
 declaration is authored intent the way a parameter type is
 ([ADR-14](../adr/14-rbs-sig-generation.md) § "The
 inference-vs-RBS contradiction rule").
+
+Neither does a declaration the body proves as a literal.
+`sig-gen` will not propose `"bot"` for a `def describe: ()
+-> String` whose body is the string `"bot"`: the declared
+type is your abstraction over that body, and pinning the
+literal would rewrite a contract every sibling class shares.
+A method no `.rbs` declares is unaffected — the literal is
+still the strictest thing the body proves, and that is what
+gets written.
 
 A comment rather than a `%a{…}` annotation, for three
 reasons: it stays out of the `rigor:v1:` directive namespace

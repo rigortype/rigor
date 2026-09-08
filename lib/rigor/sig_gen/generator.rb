@@ -42,6 +42,10 @@ module Rigor
     # - A declared `void` return is never compared as a value type. It is the author's statement that the
     #   return is not part of the contract, which no inference can synthesize, so the method classifies
     #   `equivalent` carrying `void` itself as the declared spelling (#836; see {#declares_void?}).
+    # - A proposal that erases to an RBS literal never tightens an existing declaration: the declared type is
+    #   the author's abstraction over the body and the literal is what it hides (#837; see
+    #   {#pins_literal_over_declaration?}). A method with no declaration is unaffected — clause 1 still emits
+    #   the strictest carrier the body proves.
     class Generator # rubocop:disable Metrics/ClassLength
       # Methods the generator rendered into RBS that `rbs` itself rejects. Populated by {#build_candidate}; each
       # one is a Rigor rendering DEFECT, not a property of the user's code, so the CLI reports them as such.
@@ -853,7 +857,7 @@ module Rigor
           return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
-        unless tighter?(declared, inferred) && !computed_literal_tightening?(inferred, def_node)
+        unless tighter?(declared, inferred) && !literal_decline?(inferred, def_node)
           return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
@@ -973,6 +977,48 @@ module Rigor
         inferred.is_a?(Type::Tuple) || inferred.is_a?(Type::HashShape)
       end
 
+      # The two reasons a `Type::Constant` the body proves is not the method's contract. Both say the same
+      # thing from opposite ends: the precision is real about this body and says nothing about the promise
+      # the method makes to its callers.
+      def literal_decline?(inferred, def_node)
+        computed_literal_tightening?(inferred, def_node) || pins_literal_over_declaration?(inferred)
+      end
+
+      # Issue #837 — a proposal that erases to an RBS LITERAL type never tightens an existing declaration.
+      #
+      # `Type::Top#describe` really does return `"top"`, but `describe` is the surface every `Rigor::Type::*`
+      # class implements and every one of them declares `String`. The declared nominal is the author's
+      # abstraction over the body, and the literal is the implementation detail that abstraction deliberately
+      # hides — the same reading #836 gave a declared `void`. ADR-107 § Decision puts both on the intent
+      # side: no synthesis produces an abstraction, because a type built from a body is always the type of
+      # the body's last expression, so the choice to be wider than the body only ever exists in a declaration
+      # someone wrote.
+      #
+      # The generator already answered this way whenever the declaration happened to be a UNION.
+      # `Configuration.discover` declares `String?` against a body proving `".rigor.dist.yml" |
+      # ".rigor.yml" | nil` and {#loses_declared_union_member?} refuses it, because no literal covers the
+      # declared `String`. Whether the author wrote `String` or `String?` is not a decision about literals,
+      # so the two shapes now answer alike.
+      #
+      # Scoped by the ERASURE, not by the carrier. `Type::Constant` also carries values RBS has no literal
+      # spelling for (`Float`, `Regexp`, `Set`, `Pathname`, `Date`, …) and those erase to the class name, so
+      # `def pi: () -> Numeric` against a body of `3.14` still proposes the ordinary nominal `Float`. A union
+      # is refused when ANY member is a literal: a mixed `("a" | Float)` pins `"a"` just as a bare one does.
+      # A literal nested inside a shape carrier (`[1, 2]`, a `HashShape` value) is a different question,
+      # already answered for the collection declarations that matter by {#narrows_collection_to_shape?}.
+      def pins_literal_over_declaration?(inferred)
+        members = inferred.is_a?(Type::Union) ? inferred.members : [inferred]
+        members.any? { |member| rbs_literal?(member) }
+      end
+
+      # `Type::Constant#erase_to_rbs` spells the values RBS writes as literal types (`true` / `false` /
+      # `nil`, an Integer, a Symbol, a String) as that literal and every other carrier as its value's class
+      # name. Asking which of the two branches it took keeps the list of literal-spellable classes from
+      # forking a second copy into this file.
+      def rbs_literal?(type)
+        type.is_a?(Type::Constant) && type.erase_to_rbs != type.value.class.name
+      end
+
       # Heuristic added after the third-round self-dogfood: `FallbackTracer#size` body is `@events.size`, where
       # `@events` is initialised to `[]` and never assigned again at the class-ivar pre-pass level. The
       # `Type::Tuple[]` (size 0) folds `.size` to `Constant<0>` — the carrier knows the empty-tuple cardinality
@@ -980,6 +1026,11 @@ module Rigor
       # signal is "the body's last expression is NOT a directly-authored literal but the inferred type IS a
       # Constant"; in that case the precision came from inference over an internal computation, not the
       # author's contract, so refuse to tighten.
+      #
+      # Since #837 the literal-ERASING half of this is refused whichever expression produced it. What stays
+      # this guard's own is the `Constant` that erases to a class name: `def average = @total / 2.0` folds to
+      # `Constant<2.5>` and would propose the perfectly ordinary `Float`, which is still the fold's answer
+      # about one body rather than the method's contract.
       def computed_literal_tightening?(inferred, def_node)
         return false unless inferred.is_a?(Type::Constant)
 

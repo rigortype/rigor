@@ -29,9 +29,6 @@ module Rigor
 
     class Top
       def self.instance: () -> Top
-      # sig-gen gap: #837 — the body is the literal `"top"`, but `describe` is the polymorphic
-      # surface every type class implements and every sibling declares `String`. P2 of the
-      # 2026-09-08 provenance audit.
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> "top"
       def top: () -> Trinary
@@ -46,7 +43,6 @@ module Rigor
 
     class Bot
       def self.instance: () -> Bot
-      # sig-gen gap: #837 — same shared `describe` contract as `Top#describe` above. P2.
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> "bot"
       def top: () -> Trinary
@@ -128,8 +124,6 @@ module Rigor
       def canonical_max: () -> Float
       def universal?: () -> bool
       def covers?: (untyped value) -> bool
-      # sig-gen gap: #837 — the body returns the alias literals or the generic form, but `describe` is
-      # the polymorphic carrier contract; same shared contract as `Top#describe`.
       def describe: (?Symbol verbosity) -> String
       def generic_description: () -> String
       def erase_to_rbs: () -> "Float"
@@ -228,8 +222,6 @@ module Rigor
       attr_reader method_name: Symbol
       def initialize: (receiver_type: Type::t, method_name: Symbol) -> void
       def describe: (?Symbol verbosity) -> String
-      # sig-gen gap: #837 — the body is the literal `"Method"`; `erase_to_rbs` is the shared surface
-      # every type class implements and the wide `String` is the contract. P2.
       def erase_to_rbs: () -> String
       def top: () -> Trinary
       def bot: () -> Trinary

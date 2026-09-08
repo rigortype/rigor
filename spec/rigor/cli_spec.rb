@@ -1760,7 +1760,7 @@ RSpec.describe Rigor::CLI do
       end
 
       it "leaves user-authored tighter-return declarations alone without --overwrite" do
-        write_fixture("lib/widget.rb", "class Widget\n  def n; 42; end\nend\n")
+        write_fixture("lib/widget.rb", "class Widget\n  def n; 4.2; end\nend\n")
         write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> Numeric\nend\n")
         config = write_config
 
@@ -1801,14 +1801,14 @@ RSpec.describe Rigor::CLI do
       end
 
       it "rewrites tighter-return declarations under --overwrite" do
-        write_fixture("lib/widget.rb", "class Widget\n  def n; 42; end\nend\n")
+        write_fixture("lib/widget.rb", "class Widget\n  def n; 4.2; end\nend\n")
         write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> Numeric\nend\n")
         config = write_config
 
         Dir.chdir(tmpdir) { run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}") }
         output = File.read(File.join(tmpdir, "sig/widget.rbs"))
 
-        expect(output).to include("def n: () -> 42")
+        expect(output).to include("def n: () -> Float")
         expect(output).not_to include("Numeric")
       end
 

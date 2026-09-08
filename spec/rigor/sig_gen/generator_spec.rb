@@ -730,15 +730,18 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
 
-    it "DOES tighten when the body's last expression is a directly-authored literal" do
-      write_fixture("sig/box.rbs", "class Box\n  def status: () -> Integer\nend\n")
-      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+    it "DOES tighten when a directly-authored literal carrier erases to a nominal" do
+      # The must-still-succeed half of the pair. `Constant<3.14>` is a literal carrier, but RBS has no Float
+      # literal type, so the proposal is the ordinary nominal `Float` and #837's decline does not apply —
+      # only the erasure decides, not the carrier class.
+      write_fixture("sig/box.rbs", "class Box\n  def load_factor: () -> Numeric\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def load_factor\n    3.14\n  end\nend\n")
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
-      method = gen.run.find { |c| c.method_name == :status }
+      method = gen.run.find { |c| c.method_name == :load_factor }
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
-      expect(method.rbs).to eq("def status: () -> 200")
+      expect(method.rbs).to eq("def load_factor: () -> Float")
     end
 
     it "refuses to tighten when an `untyped` type-arg would be replaced by a concrete form" do
@@ -779,15 +782,78 @@ RSpec.describe Rigor::SigGen::Generator do
     end
 
     it "classifies a strict subtype as tighter-return and renders the inferred form" do
-      write_fixture("sig/box.rbs", "class Box\n  def value: () -> Numeric\nend\n")
-      path = write_fixture("lib/box.rb", "class Box\n  def value\n    42\n  end\nend\n")
+      write_fixture("sig/box.rbs", "class Box\n  def label: (untyped text) -> Object\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def label(text)\n    \"v\#{text}\"\n  end\nend\n")
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
-      method = gen.run.find { |c| c.method_name == :value }
+      method = gen.run.find { |c| c.method_name == :label }
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
-      expect(method.declared_return_rbs).to eq("Numeric")
-      expect(method.rbs).to eq("def value: () -> 42")
+      expect(method.declared_return_rbs).to eq("Object")
+      expect(method.rbs).to eq("def label: (untyped) -> String")
+    end
+  end
+
+  # Issue #837. A declared nominal is the author's abstraction over the body; a literal that erases into it
+  # is the implementation detail the abstraction hides. `Type::Top#describe` really does return `"top"`, but
+  # `describe` is the surface every `Rigor::Type::*` class implements and every one of them declares
+  # `String`, so pinning the literal would break the shared contract for one sibling.
+  describe "#run when the body proves a literal and the declaration is wider" do
+    it "classifies the method equivalent rather than pinning the literal onto the declared nominal" do
+      write_fixture("sig/top.rbs", "class Top\n  def describe: () -> String\nend\n")
+      path = write_fixture("lib/top.rb", "class Top\n  def describe\n    \"top\"\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :describe }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.rbs).to be_nil
+      expect(method.declared_return_rbs).to eq("String")
+    end
+
+    it "declines a UNION of literals too — the `Trinary#to_s` shape, where no single arm is the contract" do
+      write_fixture("sig/mood.rbs", "class Mood\n  def to_s: () -> String\nend\n")
+      src = "class Mood\n  def to_s\n    rand < 0.5 ? \"yes\" : \"no\"\n  end\nend\n"
+      path = write_fixture("lib/mood.rb", src)
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :to_s }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.inferred_return.erase_to_rbs).to eq(%("no" | "yes"))
+    end
+
+    it "declines against a declared `top`, which is where the translator lands a widened return" do
+      write_fixture("sig/box.rbs", "class Box\n  def payload: () -> top\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def payload\n    \"x\"\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :payload }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "leaves a declared union of literals to the union guard, which already refuses a narrower arm" do
+      # No literal tightening over a declared union is reachable: dropping an arm is exactly what
+      # `loses_declared_union_member?` refuses, so the two guards agree without overlapping.
+      write_fixture("sig/box.rbs", "class Box\n  def status: () -> (\"high\" | \"low\")\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def status\n    \"high\"\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :status }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "still emits the literal for a method NO declaration covers — ADR-5 clause 1 is untouched" do
+      write_fixture("sig/top.rbs", "class Top\n  def other: () -> String\nend\n")
+      path = write_fixture("lib/top.rb", "class Top\n  def describe\n    \"top\"\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :describe }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::NEW_METHOD)
+      expect(method.rbs).to eq(%(def describe: () -> "top"))
     end
   end
 
@@ -797,11 +863,11 @@ RSpec.describe Rigor::SigGen::Generator do
   # everything, so every `void` mutator whose body returns a typed value used to read as a tightening.
   describe "#run when the declaration returns `void`" do
     it "classifies the method equivalent and carries `void` itself as the declared spelling" do
-      write_fixture("sig/box.rbs", "class Box\n  def status: () -> void\nend\n")
-      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+      write_fixture("sig/box.rbs", "class Box\n  def load_factor: () -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def load_factor\n    0.75\n  end\nend\n")
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
-      method = gen.run.find { |c| c.method_name == :status }
+      method = gen.run.find { |c| c.method_name == :load_factor }
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
       expect(method.declared_return_rbs).to eq("void")
@@ -809,15 +875,16 @@ RSpec.describe Rigor::SigGen::Generator do
     end
 
     it "still proposes the same body's tightening when the declaration names a value type" do
-      # The control for the example above: the decline is `void`'s doing, not the fixture's.
-      write_fixture("sig/box.rbs", "class Box\n  def status: () -> Integer\nend\n")
-      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+      # The control for the example above: the decline is `void`'s doing, not the fixture's. The body proves
+      # a `Float`, which #837 leaves proposable — a literal one would be declined for its own reason.
+      write_fixture("sig/box.rbs", "class Box\n  def load_factor: () -> Numeric\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def load_factor\n    0.75\n  end\nend\n")
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
-      method = gen.run.find { |c| c.method_name == :status }
+      method = gen.run.find { |c| c.method_name == :load_factor }
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
-      expect(method.rbs).to eq("def status: () -> 200")
+      expect(method.rbs).to eq("def load_factor: () -> Float")
     end
 
     it "declines the `void` mutator shape whose body's last expression is an ivar write" do
@@ -833,27 +900,27 @@ RSpec.describe Rigor::SigGen::Generator do
     end
 
     it "declines when only ONE overload declares `void` — one proposal is rendered for the whole method" do
-      write_fixture("sig/box.rbs", "class Box\n  def status: () -> void\n               " \
-                                   "| (untyped flag) -> Integer\nend\n")
-      path = write_fixture("lib/box.rb", "class Box\n  def status(flag = nil)\n    200\n  end\nend\n")
+      write_fixture("sig/box.rbs", "class Box\n  def load_factor: () -> void\n               " \
+                                   "| (untyped flag) -> Numeric\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def load_factor(flag = nil)\n    0.75\n  end\nend\n")
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
-      method = gen.run.find { |c| c.method_name == :status }
+      method = gen.run.find { |c| c.method_name == :load_factor }
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
       expect(method.declared_return_rbs).to eq("void")
     end
 
     it "keeps the row out of the JSON payload, so `--diff` and `--write` see no candidate" do
-      write_fixture("sig/box.rbs", "class Box\n  def status: () -> void\nend\n")
-      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+      write_fixture("sig/box.rbs", "class Box\n  def load_factor: () -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def load_factor\n    0.75\n  end\nend\n")
 
       out = StringIO.new
       candidates = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run
       Rigor::SigGen::Renderer.new(out: out).render(candidates: candidates, mode: :diff, format: "json",
                                                    selection: [])
 
-      expect(JSON.parse(out.string).fetch("candidates").map { |c| c["method"] }).not_to include("status")
+      expect(JSON.parse(out.string).fetch("candidates").map { |c| c["method"] }).not_to include("load_factor")
     end
 
     it "leaves the `initialize` stub alone — sig-gen spells a constructor `-> void` unconditionally" do

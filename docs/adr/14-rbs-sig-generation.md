@@ -272,7 +272,16 @@ existing RBS-declared return when:
    from the existing declaration's RBS spelling, AND
 2. The new type is a subtype of the existing declaration
    under `Inference::Acceptance.accepts(existing, new,
-   mode: :strict)`.
+   mode: :strict)`, AND
+3. The new type does not erase to an RBS *literal* type.
+   A declaration the body proves as a literal is the
+   author's abstraction over that body, not a type
+   waiting to be narrowed (#837; the dated paragraph in
+   § "The inference-vs-RBS contradiction rule"). Clause 3
+   is about the erasure, not the carrier: a
+   `Type::Constant` RBS cannot spell as a literal erases
+   to its class name, so a body of `3.14` still proposes
+   `Float`.
 
 The strict-mode acceptance check is the same predicate
 the analyzer uses for return-type-mismatch
@@ -635,6 +644,38 @@ replace one ([#836](https://github.com/rigortype/rigor/issues/836)). Before the
 fix, `top` accepting every value made every `void` mutator whose body returns a
 typed value read as a tightening — seven of the fifteen in Rigor's own `sig/`.
 
+**2026-09-09 — a proposal that erases to an RBS literal is exempt for the same
+reason.** `Rigor::Type::Top#describe` really does return `"top"`, but `describe`
+is the surface every `Rigor::Type::*` class implements and every one of them
+declares `String`. The declared nominal is the author's abstraction over the
+body; the literal is the implementation detail that abstraction hides, and
+nothing on the synthesis side produces an abstraction, since a type built from a
+body is always the type of the body's last expression. So the choice to be wider
+than the body only ever exists in a declaration someone wrote, which is where
+ADR-107 § Decision already puts `void` and a parameter type.
+`compare_against_declared` classifies the method `equivalent`
+([#837](https://github.com/rigortype/rigor/issues/837)). The generator had
+always answered this way when the declaration happened to be a UNION —
+`Configuration.discover` declares `String?` against a body proving
+`".rigor.dist.yml" | ".rigor.yml" | nil` and `loses_declared_union_member?`
+refuses it — and whether the author wrote `String` or `String?` was never a
+decision about literals.
+
+Two boundaries. The rule is on the ERASURE, so a `Type::Constant` RBS has no
+literal spelling for still proposes its nominal: `def pi: () -> Numeric` against
+a body of `3.14` proposes `Float`. And it binds only against an EXISTING
+declaration — a method no `.rbs` declares still gets the strictest carrier the
+body proves, which is clause 1 and the bulk of what `sig-gen` writes. The cost
+is an honest enum narrowing (`Symbol` declared over a body proving
+`:asc | :desc`) that is no longer proposed; the author can still write the union
+by hand, and refusing to rewrite a working contract is worth more than proposing
+a narrower one, per AGENTS.md § Implementation Guidelines. The sibling scan
+[#837](https://github.com/rigortype/rigor/issues/837) proposed was tried first
+and could not carry it: `Type::Top` and `Type::Bot` share no ancestor, so
+"sibling" would need a namespace convention no adopting project could predict,
+and `Cache::RbsCacheProducer.generation_cap` — declared `Integer`, body `2`, no
+override anywhere — has no wider declaration to find.
+
 ## Revision history
 
 - 2026-05-12 — initial draft.
@@ -655,3 +696,7 @@ typed value read as a tightening — seven of the fifteen in Rigor's own `sig/`.
   rule: it is authored intent no synthesis produces, so the generator compares
   nothing and classifies `equivalent`. See the dated paragraph in § "The
   inference-vs-RBS contradiction rule".
+- 2026-09-09 — #837 exempted a proposal that erases to an RBS literal, on the
+  same reading: the declared type is the author's abstraction over the body.
+  Clause 3 of § "What 'more precise' means for tighter-return mode" and the
+  second dated paragraph in § "The inference-vs-RBS contradiction rule".

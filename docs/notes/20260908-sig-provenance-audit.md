@@ -39,28 +39,33 @@ plus 5.4 s of examples today, and hanging a 10 s pass off it would nearly triple
 `sig-gen` compares **returns only**; parameters are never inferred (ADR-5 clause 2), so a
 declaration whose return matches inference is earned however its parameters are written.
 
-> **Re-measured 2026-09-09**, after [#836](https://github.com/rigortype/rigor/issues/836) landed. The
-> two tables below are the current numbers; the seeding figures stay quoted in the prose that reasons
-> about them. What moved: `tighter_return` 15 → 8, and 73 declarations — every `-> void` the
-> classifier matched to a `def` — left `generated` / `parameter_intent` / `declared_divergent` for
-> the new `return_intent`. The nine stale declarations the audit turned up were also deleted between
-> the two runs, which is why the in-scope total drops from 1,052 to 1,044.
+> **Re-measured 2026-09-09**, after [#836](https://github.com/rigortype/rigor/issues/836) and
+> [#837](https://github.com/rigortype/rigor/issues/837) landed. The two tables below are the current
+> numbers; the seeding figures stay quoted in the prose that reasons about them. What #836 moved:
+> `tighter_return` 15 → 8, and 73 declarations — every `-> void` the classifier matched to a `def` —
+> left `generated` / `parameter_intent` / `declared_divergent` for the new `return_intent`. The nine
+> stale declarations the audit turned up were deleted between those two runs, which took the in-scope
+> total from 1,052 to 1,044. What #837 moved: `tighter_return` 8 → 2, its six rows becoming
+> `declared_divergent` — five of them its own, the sixth `Reflection.class_ordering`, which #838 had
+> filed as applicable. The in-scope total is 1,065 here because ADR-109 slice 2's `Type::FloatRange`
+> carrier landed in between; that growth is not this fix's.
 
 | classification | n | earned? | what it means |
 | --- | --- | --- | --- |
-| `generated` | 163 | yes | the declared return is exactly what `sig-gen` proves, and no parameter is narrower than `untyped` |
-| `parameter_intent` | 131 | yes | same return, plus at least one parameter or block typed by the author — ADR-5 clause 2's half |
-| `return_intent` | 73 | yes | the declared return is `void` — authored intent no synthesis can produce, so `sig-gen` compares nothing (#836) |
-| `tighter_return` | 8 | **marker required** | `sig-gen` proposes a narrower return; ADR-14 says apply it or record why not |
-| `declared_divergent` | 108 | residue | declared and inferred returns differ and `sig-gen` will not propose the swap |
+| `generated` | 173 | yes | the declared return is exactly what `sig-gen` proves, and no parameter is narrower than `untyped` |
+| `parameter_intent` | 132 | yes | same return, plus at least one parameter or block typed by the author — ADR-5 clause 2's half |
+| `return_intent` | 74 | yes | the declared return is `void` — authored intent no synthesis can produce, so `sig-gen` compares nothing (#836) |
+| `tighter_return` | 2 | **marker required** | `sig-gen` proposes a narrower return; ADR-14 says apply it or record why not |
+| `declared_divergent` | 115 | residue | declared and inferred returns differ and `sig-gen` will not propose the swap |
 | `untranslatable_declared` | 0 | residue | `sig-gen` could not translate the declared return into a type object at all |
-| `unrenderable` | 342 | residue | `sig-gen` declined the `def` (`sig.skipped.*`) |
+| `unrenderable` | 345 | residue | `sig-gen` declined the `def` (`sig.skipped.*`) |
 | `unmatched_declaration` | 0 | residue | `sig-gen` found the `def`, the RBS environment did not resolve it to this declaration |
-| `no_source` | 219 | residue | no `def` `sig-gen` can attribute to this declaration |
-| `non_method` | 198 | out of scope | constants, type aliases, `include`, class and module headers |
+| `no_source` | 224 | residue | no `def` `sig-gen` can attribute to this declaration |
+| `non_method` | 200 | out of scope | constants, type aliases, `include`, class and module headers |
 
-**367 of 1,044 in-scope declarations (35.2%) are earned; 669 are residue; 8 need a marker.** (The
-seeding run measured 358 of 1,052 earned, 679 residue, 15 markers.) Two buckets in the table are
+**379 of 1,065 in-scope declarations (35.6%) are earned; 684 are residue — 683 of them unmarked, the
+number the ratchet pins — and 2 need a marker.** (The seeding run measured 358 of 1,052 earned, 679
+residue, 15 markers.) Two buckets in the table are
 empty by construction rather than by luck, and are kept because each names a real hole a future
 `sig/` could fall into: `untranslatable_declared` fires when `Generator#build_declared_return` cannot
 translate any overload, and `unmatched_declaration` fires for a `new_method` that is neither a
@@ -83,7 +88,7 @@ gate pins, and the two columns the seeding run showed empty everywhere (`untrans
 | `sig/rigor/analysis/dependency_source_inference/index.rbs` | 0 | 0 | 0 | 0 | 1 | 0 |
 | `sig/rigor/analysis/fact_store.rbs` | 0 | 4 | 1 | 12 | 15 | 17 |
 | `sig/rigor/ast.rbs` | 0 | 0 | 1 | 0 | 4 | 1 |
-| `sig/rigor/cache.rbs` | 1 | 0 | 1 | 0 | 0 | 1 |
+| `sig/rigor/cache.rbs` | 0 | 1 | 1 | 0 | 0 | 2 |
 | `sig/rigor/cli/diff_command.rbs` | 0 | 0 | 0 | 1 | 1 | 1 |
 | `sig/rigor/cli/explain_command.rbs` | 0 | 0 | 0 | 1 | 1 | 1 |
 | `sig/rigor/cli/sig_gen_command.rbs` | 0 | 1 | 0 | 1 | 0 | 2 |
@@ -106,12 +111,12 @@ gate pins, and the two columns the seeding run showed empty everywhere (`untrans
 | `sig/rigor/plugin/trust_policy.rbs` | 0 | 0 | 0 | 0 | 2 | 0 |
 | `sig/rigor/plugin/type_node_resolver.rbs` | 0 | 0 | 0 | 0 | 1 | 0 |
 | `sig/rigor/rbs_extended.rbs` | 0 | 4 | 4 | 15 | 12 | 23 |
-| `sig/rigor/reflection.rbs` | 1 | 3 | 6 | 0 | 6 | 9 |
+| `sig/rigor/reflection.rbs` | 0 | 4 | 6 | 0 | 6 | 9 |
 | `sig/rigor/scope.rbs` | 2 | 3 | 78 | 30 | 41 | 111 |
 | `sig/rigor/source.rbs` | 0 | 2 | 7 | 0 | 7 | 9 |
 | `sig/rigor/testing.rbs` | 0 | 0 | 4 | 0 | 0 | 4 |
-| `sig/rigor/trinary.rbs` | 1 | 0 | 1 | 3 | 11 | 4 |
-| `sig/rigor/type.rbs` | 3 | 27 | 59 | 123 | 156 | 209 |
+| `sig/rigor/trinary.rbs` | 0 | 1 | 1 | 3 | 11 | 5 |
+| `sig/rigor/type.rbs` | 0 | 31 | 62 | 128 | 168 | 221 |
 
 ## The 15 `tighter_return`s, and what they say about `sig-gen`
 
@@ -122,8 +127,10 @@ narrow a contract that is deliberately wide.
 
 The seven `void` rows are **no longer proposed** — #836 landed on 2026-09-09 and their markers came
 out of `sig/` with it; they are kept here because the reading is what the fix is built on. Eight
-remained after that fix; three of those (below) were applied on 2026-09-09 (#838) and their markers
-are gone too. Five still carry their marker.
+remained after that fix. On 2026-09-09 the three applicable ones were applied (#838) and #837 took
+the other six with it — its own five, and `Reflection.class_ordering`, which this table calls
+applicable and which is a literal union over a declared nominal like the rest. None still carries
+a marker.
 
 | declaration | declared | `sig-gen` proposes | reading |
 | --- | --- | --- | --- |
@@ -134,12 +141,12 @@ are gone too. Five still carry their marker.
 | `Rigor::Inference::FallbackTracer#clear` | `void` | `FallbackTracer` | void-vs-value (fixed, #836) |
 | `Rigor::Plugin::FactStore#each_fact` | `void` | `Array` | void-vs-value (fixed, #836) |
 | `Rigor::Scope#enqueue_ancestors` | `void` | `Array \| nil` | void-vs-value (fixed, #836) |
-| `Rigor::Cache::RbsCacheProducer.generation_cap` | `Integer` | `2` | literal over a shared contract |
-| `Rigor::Trinary#to_s` | `String` | `"maybe" \| "no" \| "yes"` | literal over a shared contract |
-| `Rigor::Type::Top#describe` | `String` | `"top"` | literal over a shared contract |
-| `Rigor::Type::Bot#describe` | `String` | `"bot"` | literal over a shared contract |
-| `Rigor::Type::BoundMethod#erase_to_rbs` | `String` | `"Method"` | literal over a shared contract |
-| `Rigor::Reflection.class_ordering` | `Symbol` | `:disjoint \| :equal \| :subclass \| :superclass \| :unknown` | applicable (applied, #838) |
+| `Rigor::Cache::RbsCacheProducer.generation_cap` | `Integer` | `2` | literal over a wider declaration (fixed, #837) |
+| `Rigor::Trinary#to_s` | `String` | `"maybe" \| "no" \| "yes"` | literal over a wider declaration (fixed, #837) |
+| `Rigor::Type::Top#describe` | `String` | `"top"` | literal over a wider declaration (fixed, #837) |
+| `Rigor::Type::Bot#describe` | `String` | `"bot"` | literal over a wider declaration (fixed, #837) |
+| `Rigor::Type::BoundMethod#erase_to_rbs` | `String` | `"Method"` | literal over a wider declaration (fixed, #837) |
+| `Rigor::Reflection.class_ordering` | `Symbol` | `:disjoint \| :equal \| :subclass \| :superclass \| :unknown` | applicable (applied, #838; #837 would no longer propose it) |
 | `Rigor::Scope#user_def_through_ancestors` | `[untyped?, String?]` | `[untyped, String] \| [nil, nil]` | applicable (applied, #838) |
 | `Rigor::Scope#singleton_def_through_ancestors` | `[untyped?, String?]` | `[untyped, String] \| [nil, nil]` | applicable (applied, #838) |
 
@@ -158,7 +165,10 @@ carrying `void` itself as the declared spelling, and the gate reads that as the 
 declares `String`; the same for `Trinary#to_s` and `BoundMethod#erase_to_rbs`.
 `Generator#computed_literal_tightening?` exists for exactly this hazard but fires only when the body's
 last expression is *not* a direct literal — here it is one, so the guard passes. Filed as **P2**,
-[#837](https://github.com/rigortype/rigor/issues/837).
+[#837](https://github.com/rigortype/rigor/issues/837), and **fixed on 2026-09-09** by a criterion
+wider than the sibling scan the issue proposed: a proposal that erases to an RBS literal never
+tightens an existing declaration at all. See the P2 entry below for why the sibling scan could not
+carry it.
 
 **Three were genuinely applicable**, and were left declared with a marker rather than applied when
 the provenance gate landed — changing a declaration is a `sig/` edit that has to clear the precision
@@ -169,9 +179,9 @@ now reads exactly what `sig-gen --diff --tighter-returns lib` proposes, the thre
 `tighter_return` sits outside the residue pin (#845), so applying the tightenings moves rows within
 the earned/marked bookkeeping, not the pinned residue counts.
 
-## Where the residue declarations come from (679 at the seeding, 669 now)
+## Where the residue declarations come from (679 at the seeding, 684 now)
 
-### `unrenderable` — 342, every one `sig.skipped.untyped-return`
+### `unrenderable` — 342 at the seeding, 345 now, every one `sig.skipped.untyped-return`
 
 `sig-gen` inferred `Dynamic[top]` for the body and declined to emit `-> untyped`. The dominant shape
 is an `attr_reader` over an ivar the class-ivar pre-pass could not type
@@ -180,7 +190,7 @@ is an `attr_reader` over an ivar the class-ivar pre-pass could not type
 WD3 have not. This is the single largest lever on the residue and the one number in this note most
 worth watching: 342 declarations exist in `sig/` because inference answers `untyped` for the method.
 
-### `no_source` — 227 at the seeding, 219 once the nine stale declarations below were deleted
+### `no_source` — 227 at the seeding, 219 once the nine stale declarations below were deleted, 224 now
 
 `sig-gen` enumerates `def`s; `sig/` declares methods, and the two disagree in five ways. Measured by
 Ruby reflection over a fully-required `lib/`:
@@ -210,7 +220,7 @@ All nine are deleted by the commit that seeds the gate. `Prism::Node#rigor_each_
 `no_source` that is correct as written: `Rigor::Source::NodeChildren` compiles it per concrete node
 class at load, which is what its file header already says.
 
-### `declared_divergent` — 110 at the seeding, 108 since #836
+### `declared_divergent` — 110 at the seeding, 108 since #836, 115 since #837
 
 The declared return differs from the inferred one and `sig-gen`'s guards refuse the swap. Two shapes,
 both benign, and one worth naming:
@@ -223,7 +233,10 @@ both benign, and one worth naming:
 - **the rest are declared lenience the generator protects**: `Configuration.discover` declares
   `String?` where the body proves `".rigor.dist.yml" | ".rigor.yml" | nil`;
   `CLI::TypeOfCommand#run` declares `Integer` against `0 | 1 | Integer`. `loses_declared_union_member?`
-  and `replaces_untyped_type_arg?` fire, so no tightening is proposed and none should be.
+  and `replaces_untyped_type_arg?` fire, so no tightening is proposed and none should be. The six rows
+  #837 moved here are the same shape with the `?` taken off — `Top#describe` declares `String` against
+  a body proving `"top"` — which is the observation the fix is built on: whether the author wrote
+  `String` or `String?` was never a decision about literals, and only the union spelling was protected.
 
 None of them is a `def.return-type-mismatch`: a declaration *narrower* than the body proves is
 gate G2's job (`make check --fail-on=warning`, [#827](https://github.com/rigortype/rigor/pull/827)),
@@ -236,7 +249,8 @@ that fires 679 times on a correct tree is the failure mode `AGENTS.md` § Implem
 puts above worst-case static reading. So G3 lands as two mechanisms:
 
 1. **Hard rule, seeded now.** Every `tighter_return` carries a marker naming the issue that says why
-   the declaration stays. Fifteen at the seeding, eight since #836; a ninth fails the gate on arrival.
+   the declaration stays. Fifteen at the seeding, eight since #836, two since #837; a third fails the
+   gate on arrival.
 2. **Ratchet, pinned now.** Per-file unmarked-residue counts are an exact snapshot in the spec. A new
    hand-written declaration raises its file's count and goes red; the author either marks it (a marker
    subtracts from the count) or moves the pin deliberately. Closing an engine gap lowers a count, and
@@ -245,8 +259,8 @@ puts above worst-case static reading. So G3 lands as two mechanisms:
 The marker is a line in the member's own RBS comment:
 
 ```rbs
-# sig-gen gap: #837 — every sibling type class declares `String`; see P2.
-def describe: (?Symbol verbosity) -> String
+# sig-gen gap: #825 — sig-gen types the body `untyped`, so the return is hand-written.
+def resolve: (String name) -> Type::t
 ```
 
 A comment rather than a `%a{…}` annotation. [ADR-0](../adr/0-concept.md) requires the metadata to live
@@ -287,6 +301,30 @@ the tightening when an ancestor or a sibling implementation of the same method c
 declaration — the inverse of the [#744](https://github.com/rigortype/rigor/issues/744) guard, which
 already reasons about overrides in the other direction. Evidence: the five rows above. Area:
 `area:sig-gen`.
+
+**Fixed 2026-09-09, on a wider criterion than the one filed.** A proposal that erases to an RBS
+literal never tightens an existing declaration: the declared type is the author's abstraction over the
+body and the literal is the implementation detail that abstraction hides, which is where ADR-107 puts
+`void` and a parameter type. `compare_against_declared` classifies those `equivalent`, and the
+markers came out of `sig/` with the fix; the five rows are now `declared_divergent`, counted by the
+ratchet like the `String?` lenience they are a spelling variant of.
+
+The sibling scan this issue proposed was tried against the five rows first and cannot carry them.
+`Type::Top` and `Type::Bot` share no ancestor — `Rigor::Type` is an empty namespace module — so
+"sibling" would have to mean something like "another class in the same namespace declaring this
+method name", which is a rule an adopting project cannot predict from its own code. And it answers
+the wrong thing for `RbsCacheProducer.generation_cap`: no subclass overrides `generation_cap` and no
+other declaration of it exists, so no scan finds a wider one, yet `2` is exactly as wrong a contract
+for a cap a subclass may turn. The erasure criterion needs neither an ancestor walk nor a namespace
+convention, and it is checked on the pair the generator already has in hand.
+
+The cost is that an honest enum narrowing — a declared `Symbol` over a body proving
+`:asc | :desc` — is no longer proposed either. That is `class_ordering`, the one #838 row this fix
+also silenced. It is the acceptable half of the trade: pinning `"top"` onto a shared surface rewrites
+a working contract, while a missed narrowing leaves a working wide one, and AGENTS.md
+§ Implementation Guidelines weighs the false positive higher. The author can still write the union by
+hand, and the gate reads it as `generated` — a declaration matching what inference proves is earned
+however it got there.
 
 **P3 — [#838](https://github.com/rigortype/rigor/issues/838) — apply the three tightenings `sig-gen`
 is right about.** `Reflection.class_ordering` →

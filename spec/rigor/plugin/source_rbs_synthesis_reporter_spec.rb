@@ -33,4 +33,20 @@ RSpec.describe Rigor::Plugin::SourceRbsSynthesisReporter do
     reporter.record(plugin_id: "rbs-inline", path: "/tmp/demo.rb", message: "boom")
     expect(reporter.entries).to be_frozen
   end
+
+  # Issue #824 — a worker pool re-runs the whole env build in EVERY worker over the same project file list
+  # and drains each worker's stream into this one reporter, so an identical entry arrives once per worker.
+  # Each entry becomes one `:info` row, and N copies of one row say nothing the first does not.
+  it "collapses an identical entry so a pooled run reports what a sequential one does" do
+    3.times { reporter.record(plugin_id: "rbs-inline", path: "/tmp/demo.rb", message: "boom") }
+    expect(reporter.entries.size).to eq(1)
+  end
+
+  it "keeps entries that differ in any field, kind included" do
+    reporter.record(plugin_id: "rbs-inline", path: "/tmp/demo.rb", message: "boom")
+    reporter.record(plugin_id: "rbs-inline", path: "/tmp/demo.rb", message: "boom", kind: :not_honoured)
+    reporter.record(plugin_id: "rbs-inline", path: "/tmp/other.rb", message: "boom")
+    reporter.record(plugin_id: "other", path: "/tmp/demo.rb", message: "boom")
+    expect(reporter.entries.size).to eq(4)
+  end
 end

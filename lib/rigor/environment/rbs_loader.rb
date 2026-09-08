@@ -86,7 +86,10 @@ module Rigor
           env = RBS::Environment.from_loader(rbs_loader)
           project_files = project_sig_files(signature_paths)
           add_project_signatures(env, signature_paths, deferred_signature_paths)
-          add_virtual_rbs(env, virtual_rbs)
+          # Issue #824 — the project's own signatures are already in `env` at this point, so the inline
+          # contribution can be asked the question that keeps the two from colliding: which of its members
+          # does a `.rbs` file already declare? Those stand down per member ({.add_virtual_rbs}).
+          add_virtual_rbs(env, virtual_rbs, sig_member_owners: signature_member_owners(project_files, virtual_rbs))
           synthesize_missing_namespaces(env)
           # Issue #777 — resolve-time backstop: also unload colliding PROJECT buffers (class-vs-module /
           # constant redeclarations against bundled RBS). Virtual culprits are preferred when both appear.
@@ -798,7 +801,12 @@ module Rigor
         # provenance (RBS parse errors cite it) — it is not a real file path. Per WD6 the synthesizer-emit
         # path is responsible for catching its own parse errors and returning `nil` rather than garbage; this
         # method assumes its input is parseable and only rescues `RBS::ParsingError` as a fail-soft.
-        def add_virtual_rbs(env, virtual_rbs)
+        # @param sig_member_owners — issue #824 — `{[class, method, kind] => signature_path}`
+        #   from {.signature_member_owners}. Every member it names is removed from the inline contribution
+        #   before the declaration is added, so `sig/` wins per MEMBER instead of the two colliding and
+        #   costing the whole class its method surface (ADR-32 WD13). The stand-down is reported, never
+        #   silent: {RbsLoader#inline_member_standdowns} re-derives the same set for the run's `:info` row.
+        def add_virtual_rbs(env, virtual_rbs, sig_member_owners: {})
           return if virtual_rbs.nil? || virtual_rbs.empty?
 
           virtual_rbs.each do |filename, content|
@@ -809,6 +817,7 @@ module Rigor
 
             buffer = ::RBS::Buffer.new(name: filename.to_s, content: content.to_s)
             _, directives, decls = ::RBS::Parser.parse_signature(buffer)
+            strip_members_declared_in_signatures!(decls, sig_member_owners) unless sig_member_owners.empty?
             add_parsed_decls(env, buffer, directives, decls)
           rescue ::RBS::BaseError
             # WD6 fail-soft: a single broken virtual RBS contribution does not pull the whole env down — for
@@ -826,6 +835,187 @@ module Rigor
             # under the 3.x API this degrades to today's behaviour.
             env.sources.reject! { |source| source.buffer.name == buffer.name } if env.respond_to?(:sources)
           end
+        end
+
+        # Issue #824 / ADR-32 WD13 — the member-level half of inline-vs-`sig/` precedence.
+        #
+        # A method declared BOTH by a project `.rbs` and by an inline annotation in its own `.rb` lands twice
+        # in one `RBS::Environment`: rbs merges the two sources into a single `ClassEntry` and ranks neither,
+        # so `RBS::DefinitionBuilder::MethodBuilder::Methods#validate!` raises
+        # `RBS::DuplicatedMethodDefinitionError` and the WHOLE class loses its method surface — every call on
+        # it, real methods and typos alike, reads `Dynamic[top]`. Measured on Rigor's own tree while
+        # [#779](https://github.com/rigortype/rigor/pull/779) was evaluated: 17 of 234 annotated files
+        # overlapped `sig/`, and the collision took 44 classes down. Steep 2.1 / rbs 4.1 have no precedence
+        # rule to follow here (Steep reports the same collision as a signature diagnostic and the class still
+        # fails to build), so the spec's "SHOULD follow Steep 2.0" pointer resolves to nothing and the choice
+        # is Rigor's: the reviewed, `sig-gen`-managed `.rbs` wins, per member.
+        #
+        # @return `{[class_name, method_name, kind] => signature_path}` for every
+        #   method-shaped member the project's own `signature_paths:` files declare and the inline sources
+        #   also name. Empty — and free — for a project that contributes no inline RBS, which is every
+        #   project without a `source_rbs_synthesizer:` plugin.
+        #
+        # The parse is scoped by a substring pre-filter over each file's text: a declaration has to spell its
+        # own name, so a signature file mentioning none of the names the inline sources declare cannot
+        # collide with them. The filter over-approximates (it matches a name in a comment or a type position
+        # too), so it can only cost an unnecessary parse, never miss a collision.
+        def signature_member_owners(project_files, virtual_rbs)
+          return {} if project_files.nil? || virtual_rbs.nil? || virtual_rbs.empty?
+
+          names = inline_declared_name_segments(virtual_rbs)
+          return {} if names.empty?
+
+          project_files.to_a.sort.each_with_object({}) do |file, owners|
+            decls = parse_signature_file_if_mentions(file, names)
+            next if decls.nil?
+
+            each_declared_member(decls) do |class_name, member|
+              member_method_keys(member).each do |method_name, kind|
+                owners[[class_name, method_name, kind]] ||= file
+              end
+            end
+          end
+        end
+
+        # The `[class, method, kind, signature_path, virtual_buffer_name]` record for every inline member
+        # {.add_virtual_rbs} stands down, sorted and deduplicated.
+        #
+        # Derived from the loader's own INPUTS — the synthesized sources and the project's signature files —
+        # never from the built environment, for {RbsLoader#quarantined_signatures}' reason turned inside out:
+        # a cache HIT never runs the build, and the stripped member leaves no trace in the environment to
+        # read back. The same two inputs answer identically warm and cold, which is what makes the reported
+        # set independent of cache state.
+        def inline_member_standdowns_for(signature_paths:, virtual_rbs:)
+          owners = signature_member_owners(project_sig_files(signature_paths), virtual_rbs)
+          return [].freeze if owners.empty?
+
+          records = virtual_rbs.flat_map do |name, content|
+            next [] if content.nil? || content.empty? || invalid_encoding?(content.to_s)
+
+            decls = parse_signature_source(name, content.to_s)
+            decls.nil? ? [] : member_standdowns_in(name, decls, owners)
+          end
+          records.uniq.sort_by { |record| [record[0], record[1].to_s, record[2].to_s] }.freeze
+        end
+
+        def member_standdowns_in(virtual_name, decls, owners)
+          records = []
+          each_declared_member(decls) do |class_name, member|
+            member_method_keys(member).each do |method_name, kind|
+              signature_path = owners[[class_name, method_name, kind]]
+              next if signature_path.nil?
+
+              records << [class_name, method_name, kind, signature_path, virtual_name.to_s].freeze
+            end
+          end
+          records
+        end
+
+        # Removes, in place, every member `owners` says a project signature already declares. Nested
+        # declarations are descended into after the rejection, and a declaration member contributes no method
+        # key, so nesting is never itself removed.
+        def strip_members_declared_in_signatures!(decls, owners, prefix = [])
+          Array(decls).each do |decl|
+            next unless declaration_with_members?(decl)
+
+            inner = prefix + [decl.name.to_s.delete_prefix("::")]
+            class_name = inner.join("::")
+            decl.members.reject! do |member|
+              member_method_keys(member).any? { |method_name, kind| owners.key?([class_name, method_name, kind]) }
+            end
+            strip_members_declared_in_signatures!(decl.members, owners, inner)
+          end
+        end
+
+        # Yields `[class_name, member]` for every member of every class / module declaration in `decls`,
+        # descending through nesting. The enclosing path is accumulated and the name rendered `::`-stripped,
+        # so a `module Foo; class Bar` and a `class Foo::Bar` elsewhere key the same — which is what makes a
+        # `sig/` declaration and an inline one comparable at all.
+        def each_declared_member(decls, prefix = [], &block)
+          Array(decls).each do |decl|
+            next unless declaration_with_members?(decl)
+
+            inner = prefix + [decl.name.to_s.delete_prefix("::")]
+            class_name = inner.join("::")
+            decl.members.each { |member| block.call(class_name, member) }
+            each_declared_member(decl.members, inner, &block)
+          end
+        end
+
+        def declaration_with_members?(decl)
+          (decl.is_a?(::RBS::AST::Declarations::Module) || decl.is_a?(::RBS::AST::Declarations::Class)) &&
+            decl.respond_to?(:members)
+        end
+
+        # The `[method_name, kind]` pairs one RBS member contributes to a definition build, mirroring
+        # `RBS::DefinitionBuilder::MethodBuilder#build_instance` / `#build_singleton` — which is what decides
+        # whether two members collide. An attribute contributes its reader and / or writer name (`foo`,
+        # `foo=`), an alias its new name, and `def self?.x` both sides. An `overloading?` member (`def x: ...
+        # | ...`) contributes NOTHING: rbs files those under `overloads` rather than `originals`, so they are
+        # designed to compose with an existing declaration and must not stand down against it.
+        def member_method_keys(member)
+          case member
+          when ::RBS::AST::Members::MethodDefinition then method_definition_keys(member)
+          when ::RBS::AST::Members::AttrReader then [[member.name, member.kind]]
+          when ::RBS::AST::Members::AttrWriter then [[:"#{member.name}=", member.kind]]
+          when ::RBS::AST::Members::AttrAccessor then [[member.name, member.kind], [:"#{member.name}=", member.kind]]
+          when ::RBS::AST::Members::Alias then [[member.new_name, member.kind]]
+          else []
+          end
+        end
+
+        def method_definition_keys(member)
+          return [] if member.respond_to?(:overloading?) && member.overloading?
+
+          case member.kind
+          when :instance then [[member.name, :instance]]
+          when :singleton then [[member.name, :singleton]]
+          else [[member.name, :instance], [member.name, :singleton]] # `def self?.x` defines both sides
+          end
+        end
+
+        # A class / module declaration header, as the pre-filter in {.signature_member_owners} reads it out of
+        # synthesized RBS text.
+        INLINE_DECLARATION_NAME = /^[ \t]*(?:class|module)[ \t]+([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)/
+        private_constant :INLINE_DECLARATION_NAME
+
+        # Every `::`-separated segment of every class / module name the inline sources declare, read off the
+        # synthesized TEXT rather than a parse: the set only has to be a SUPERSET (it feeds the pre-filter),
+        # and a regexp over the handful of annotated files is far cheaper than parsing them a second time.
+        # Entries {.add_virtual_rbs} would skip are skipped here too — an empty or invalid-UTF-8 contribution
+        # declares nothing, and `String#scan` raises `ArgumentError` on invalid bytes rather than returning
+        # no match.
+        def inline_declared_name_segments(virtual_rbs)
+          virtual_rbs.each_with_object(Set.new) do |(_name, content), acc|
+            content = content.to_s
+            next if content.empty? || invalid_encoding?(content)
+
+            content.scan(INLINE_DECLARATION_NAME) { |(declared)| acc.merge(declared.split("::")) }
+          end
+        end
+
+        # Parses one project signature file, or nil when it is unreadable, not valid UTF-8, unparseable, or
+        # mentions none of `names` (so nothing in it can collide with the inline sources).
+        def parse_signature_file_if_mentions(file, names)
+          content = File.read(file, encoding: "UTF-8")
+          return nil if invalid_encoding?(content)
+          return nil if names.none? { |name| content.include?(name) }
+
+          parse_signature_source(file, content)
+        rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
+          nil
+        end
+
+        # The declarations of already-read RBS text, or nil when it does not parse. The twin of
+        # {.parse_signature_file} for content the caller already holds (a synthesized virtual source, or a
+        # signature file the pre-filter has just read).
+        def parse_signature_source(name, content)
+          _buffer, _directives, decls = ::RBS::Parser.parse_signature(
+            ::RBS::Buffer.new(name: name.to_s, content: content)
+          )
+          decls
+        rescue ::RBS::BaseError
+          nil
         end
 
         # Per-gem `data/vendored_gem_sigs/<gem>/` directories that ship with Rigor. Each subdirectory is one
@@ -1097,8 +1287,8 @@ module Rigor
         # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
         # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
         # `:definition_build_deferred_count`, `:definition_build_deferred_first`,
-        # `:definition_build_summary_warned`, `:internal_demand`, `:internal_demand_status`, `:builder`,
-        # `:reflection`,
+        # `:definition_build_summary_warned`, `:inline_member_standdowns`, `:internal_demand`,
+        # `:internal_demand_status`, `:builder`, `:reflection`,
         # `:instance_definitions_table`, `:singleton_definitions_table`.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
@@ -1250,6 +1440,25 @@ module Rigor
             end.freeze
           end
         end
+      end
+
+      # Issue #824 / ADR-32 WD13 — the inline (rbs-inline) members that stood down because the project's own
+      # `signature_paths:` already declare the same `(class, method, kind)`. The `.rbs` wins per member; the
+      # rest of the file's annotations still bind, and the class keeps its method surface instead of failing
+      # its definition build.
+      #
+      # The sibling of {#virtual_rbs_collision_quarantined} one granularity finer: that one names a whole
+      # inline FILE dropped for a class-level duplicate, this one names a single member. Both are derived
+      # rather than recorded, so a cache HIT — where no build ran — reports the same condition; here the
+      # derivation reads the loader's inputs rather than the built env, because a stripped member leaves no
+      # trace in the env at all.
+      #
+      # @return `[class_name, method_name, kind, signature_path,
+      #   virtual_buffer_name]` records, sorted. Empty (and free) whenever the project contributes no inline
+      #   RBS or none of it overlaps a signature file.
+      def inline_member_standdowns
+        @state[:inline_member_standdowns] ||=
+          self.class.inline_member_standdowns_for(signature_paths: @signature_paths, virtual_rbs: @virtual_rbs)
       end
 
       # The referenced-but-undeclared types {.stub_missing_referenced_types} stubbed so the project classes

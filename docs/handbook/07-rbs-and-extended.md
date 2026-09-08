@@ -465,6 +465,18 @@ Notes:
   `source-rbs-synthesis-failed` `:info` diagnostic; the file
   falls back to no inline-RBS contribution and analysis
   continues.
+- When a method is declared **both** in `sig/` and by an
+  inline annotation, the `.rbs` wins for that one method and
+  the inline signature is dropped — reported as a
+  `source-rbs-annotation-not-honoured` `:info` naming both
+  files. Only the overlapping member stands down; every other
+  annotation in the file still binds, and the class keeps its
+  method surface. This matters while migrating in either
+  direction: rbs and Steep merge the two sources without
+  ranking them, so left to collide they fail the class's
+  definition build and every call on it — real methods and
+  typos alike — reads `Dynamic[top]`. Delete one of the two
+  declarations to make the inline one take effect.
 
 Full plugin documentation, configuration options (including
 the `require_magic_comment: false` host-context override the

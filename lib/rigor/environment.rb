@@ -357,6 +357,13 @@ module Rigor
           # the bundle walk and `rbs collection install` all stay authoritative.
           deferred_signature_paths: plugin_sig_paths
         )
+        # Issue #824 / ADR-32 WD13 — one `:info` per inline member the loader stood down against the
+        # project's own `sig/`. Recorded HERE because this is where the reporter is: the run's
+        # `source_rbs_synthesis` stream already carries WD12's "parsed but not honoured" rows, drains out of
+        # pool workers, and is regenerated (never cached) on every run, so the member-level stand-down needs
+        # no plumbing of its own. Costs nothing for a project with no inline RBS: the loader's reader
+        # short-circuits on an empty `virtual_rbs`.
+        record_inline_member_standdowns(loader, source_rbs_synthesis_reporter, root)
         # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
         # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that
         # don't consult HKT (e.g. `rigor check --cache-stats --no-stats`) don't pay the eager env-build cost
@@ -534,6 +541,54 @@ module Rigor
 
       def record_synthesis_entry(reporter, plugin, path, message, kind)
         reporter&.record(plugin_id: plugin.manifest.id, path: path, message: message.to_s, kind: kind)
+      end
+
+      # ADR-32 WD13 — turn each {Environment::RbsLoader#inline_member_standdowns} record into a WD12
+      # `:not_honoured` entry, so the run's `plugin.rbs-inline.source-rbs-annotation-not-honoured` row names
+      # BOTH sources and which one won. WD12's rule is what makes this necessary rather than optional: an
+      # annotation Rigor parses and does not honour is reported, never swallowed — and a silent per-member
+      # strip is exactly the shape that rule forbids.
+      #
+      # The row is positioned at the annotated `.rb` (line 1, as every entry on this stream is): the member's
+      # own position lives in the synthesized RBS buffer, which describes a document nobody has, and the
+      # ADR-54 environment cache drops positions anyway, so a line read off it would differ warm and cold.
+      def record_inline_member_standdowns(loader, reporter, root)
+        return if reporter.nil?
+
+        loader.inline_member_standdowns.each do |class_name, method_name, kind, signature_path, virtual_name|
+          plugin_id, path = split_virtual_source_name(virtual_name)
+          next if path.nil?
+
+          reporter.record(
+            plugin_id: plugin_id, path: path, kind: :not_honoured,
+            message: inline_member_standdown_message(class_name, method_name, kind, signature_path, root)
+          )
+        end
+      end
+
+      # Splits a virtual buffer name back into the pair {.collect_virtual_rbs} composed it from
+      # (`virtual:<plugin id>:<source path>`). Limited to three fields so a path carrying a colon survives.
+      # Returns `[nil, nil]` for a name in any other shape — a synthesizer channel this method does not own.
+      def split_virtual_source_name(virtual_name)
+        prefix, plugin_id, path = virtual_name.to_s.split(":", 3)
+        return [nil, nil] unless prefix == "virtual" && plugin_id && !plugin_id.empty? && path && !path.empty?
+
+        [plugin_id, path]
+      end
+
+      def inline_member_standdown_message(class_name, method_name, kind, signature_path, root)
+        separator = kind == :singleton ? "." : "#"
+        "`#{class_name}#{separator}#{method_name}` is also declared in " \
+          "`#{path_relative_to(signature_path, root)}`, and an explicit `.rbs` declaration wins over an " \
+          "inline annotation for the same member, so the inline signature was dropped. Left to collide the " \
+          "two would fail the class's definition build, and every call on it — real methods and typos " \
+          "alike — would read `Dynamic[top]`. Remove one of the two declarations to make the inline " \
+          "annotation bind."
+      end
+
+      def path_relative_to(path, root)
+        prefix = "#{root}#{File::SEPARATOR}"
+        path.to_s.start_with?(prefix) ? path.to_s.delete_prefix(prefix) : path.to_s
       end
 
       SYNTHESIZER_CACHE_PRODUCER_ID = "plugin.source_rbs_synthesizer"

@@ -424,6 +424,93 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
+  # Issue #824 / ADR-32 WD13 — a method declared by BOTH `sig/` and an inline annotation. rbs merges the two
+  # sources into one `ClassEntry` and ranks neither, so before this the definition build raised
+  # `RBS::DuplicatedMethodDefinitionError` and the whole class lost its method surface. `sig/` now wins per
+  # member, and the drop is reported rather than swallowed (WD12).
+  describe "precedence against sig/ (issue #824)" do
+    let(:sig_and_inline) do
+      run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            # @rbs (Integer) -> String
+            def shared(value) = value.to_s
+
+            # @rbs (Integer) -> Integer
+            def only_inline(value) = value + 1
+          end
+        RUBY
+        files: { "sig/demo.rbs" => <<~RBS },
+          class Demo
+            def shared: (::String) -> ::Integer
+            def only_sig: () -> ::String
+          end
+        RBS
+        signature_paths: ["sig"]
+      )
+    end
+
+    it "lets the sig/ declaration win for the shared member" do
+      # The `.rbs` says `-> Integer` and the body returns a String, so the sig/ contract is the one being
+      # checked. Under the inline signature (`-> String`) the body would agree and nothing would fire.
+      mismatches = sig_and_inline.diagnostics.select { |d| d.qualified_rule == "def.return-type-mismatch" }
+      expect(mismatches.size).to eq(1)
+      expect(mismatches.first.message).to include("declared Integer", "inferred String")
+    end
+
+    it "does not degrade the class: no rbs.coverage.definition-build-failed" do
+      expect(sig_and_inline.diagnostics.map(&:qualified_rule))
+        .not_to include("rbs.coverage.definition-build-failed")
+    end
+
+    it "reports one info row naming the member, the .rbs that won, and the annotated file" do
+      rows = sig_and_inline.diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
+      expect(rows.size).to eq(1)
+      expect(rows.first.severity).to eq(:info)
+      expect(rows.first.path).to end_with("demo.rb")
+      expect(rows.first.message).to include("`Demo#shared`", "sig/demo.rbs", "inline signature was dropped")
+    end
+
+    # The rest of the file is unaffected — the same promise WD12's `module-self` row makes.
+    it "keeps an inline member that sig/ does not declare" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            # @rbs (Integer) -> String
+            def shared(value) = value.to_s
+
+            # @rbs (Integer) -> Integer
+            def only_inline(value) = value + 1
+          end
+
+          Demo.new.only_inline("nope")
+        RUBY
+        files: { "sig/demo.rbs" => "class Demo\n  def shared: (::String) -> ::Integer\nend\n" },
+        signature_paths: ["sig"]
+      )
+      mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
+      expect(mismatches.size).to eq(1)
+      expect(mismatches.first.message).to include("only_inline")
+    end
+
+    it "stays silent when the inline annotations do not overlap sig/" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            # @rbs (Integer) -> Integer
+            def only_inline(value) = value + 1
+          end
+        RUBY
+        files: { "sig/demo.rbs" => "class Demo\n  def only_sig: () -> ::String\nend\n" },
+        signature_paths: ["sig"]
+      )
+      expect(result.diagnostics.map(&:qualified_rule)).not_to include("source-rbs-annotation-not-honoured")
+    end
+  end
+
   describe "per-file cache (ADR-32 WD5)" do
     let(:cache_root) { Dir.mktmpdir("rigor-rbs-inline-cache-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: cache_root) }

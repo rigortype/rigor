@@ -1,6 +1,7 @@
 # ADR-32 — Inline-RBS comment ingestion as an opt-in plugin
 
-Status: **Accepted, 2026-05-25; implemented in v0.1.10.**
+Status: **Accepted, 2026-05-25; implemented in v0.1.10; amended
+2026-09-08 with WD13 (inline-vs-`sig/` precedence).**
 
 The
 bundled `rigor-rbs-inline` plugin, the `source_rbs_synthesizer:`
@@ -22,6 +23,12 @@ skip the per-file magic-comment gate. The ADR-29 browser
 playground sets it to `false` so that any pasted snippet is
 analysed as inline-RBS without the user typing
 `# rbs_inline: enabled`.
+
+**Amended 2026-09-08** with WD13, closing
+[#824](https://github.com/rigortype/rigor/issues/824). WD13 decides
+the precedence between a `sig/` declaration and an inline annotation
+of the same member — the `.rbs` wins, per member, and the drop is
+reported under WD12's rule.
 
 **Amended 2026-07-30** with WD11 and WD12, closing
 [#229](https://github.com/rigortype/rigor/issues/229). WD11 keeps
@@ -463,6 +470,104 @@ Reporting it downstream is a mitigation, not the fix. A parser that
 accepts an annotation its own writer discards is an upstream
 `rbs-inline` defect, and fixing it there would close the gap for every
 rbs-inline user rather than only Rigor's.
+
+### WD13 — A `sig/` declaration wins over an inline one, per member
+
+*2026-09-08, closing [#824](https://github.com/rigortype/rigor/issues/824).*
+
+A method declared **both** in `sig/` and by an inline annotation in its
+own `.rb` had no decided outcome. Both declarations entered one RBS
+environment, `RBS::DuplicatedMethodDefinitionError` fired at definition
+build, and the whole class degraded to `Dynamic[top]` behind one
+`rbs.coverage.definition-build-failed` row — real methods and typos
+alike stopped resolving. Measured on Rigor's own tree while
+[#779](https://github.com/rigortype/rigor/pull/779) was evaluated: 17 of
+234 annotated files overlapped `sig/`, and the collision took 44 classes
+down. That is the ordinary state of a project migrating in either
+direction, not an authoring error.
+
+**Decision: the `.rbs` declaration wins, per MEMBER.** The colliding
+inline member is removed from the synthesized declaration before the
+environment is built; every other annotation in the file still binds;
+the class builds. Each dropped member is reported once as
+`source-rbs-annotation-not-honoured` `:info`, naming the member, the
+`.rbs` that won, and the annotated `.rb` — WD12's rule applied to a new
+case, and the reason the silent strip #779 proposed was not adoptable.
+
+#### The spec's Steep pointer resolves to nothing
+
+`overview.md` says Rigor SHOULD follow Steep 2.0's precedence for inline
+annotations. Read against the sources, **Steep has no precedence here**:
+
+- rbs merges an `RBS::Source::Ruby` (inline) declaration and an
+  `RBS::Source::RBS` one into the *same* `ClassEntry`, whose
+  `context_decls` is a flat untagged list — `insert_ruby_decl` reuses
+  the entry a `.rbs` file created (`rbs/lib/rbs/environment.rb:379-390`,
+  `environment/class_entry.rb:15-29`).
+- `MethodBuilder#build_instance` walks both branches into one `Methods`
+  object and `validate!` raises as soon as one name has two `originals`
+  (`rbs/lib/rbs/definition_builder/method_builder.rb:99-160`, `:35-42`).
+  `build_singleton` is symmetric (`:164-192`).
+- Steep feeds `sig/*.rbs` and inline `.rb` into one `SignatureService`
+  and one `RBS::Environment` with no ordering
+  (`steep/lib/steep/services/type_check_service.rb:301-309`,
+  `services/signature_service.rb:302-325`), and surfaces the raise as
+  `Diagnostic::Signature::DuplicatedMethodDefinition`
+  (`steep/lib/steep/diagnostic/signature.rb:566-571`). Checked against
+  steep 2.1.0.dev and rbs 4.1.0; a search for any preference logic
+  across both trees returns nothing, and no upstream test pins the
+  inline-vs-`.rbs` case for one class.
+
+So there is nothing to follow, and the SHOULD leaves the choice to
+Rigor. What Steep *does* — report it and let the class fail to build —
+is half adoptable. The reporting half we keep. The degradation half we
+do not: Rigor's equivalent is one run-level `:warning` for a class that
+silently answers `Dynamic[top]` to everything, which is the
+false-negative cost [ADR-5](5-robustness-principle.md) ranks below a
+worst-case static reading, and #824 measured it at 44 classes from 17
+files.
+
+#### Why `sig/` is the winner
+
+- It is the **reviewed artefact**: the file a reviewer diffs, and the
+  one `rigor sig-gen --diff` reasons about
+  ([ADR-14](14-rbs-sig-generation.md)). An inline annotation is edited
+  in the same commit as the code it sits above; the `.rbs` is the
+  deliberate statement of the contract.
+- The spec already calls standalone `.rbs` files "the preferred place
+  for complete type definitions" (`overview.md`), and the file-level
+  collision quarantine already resolves the same way (WD6's
+  transactional drop, and issue #777's project-vs-bundled rule).
+- rbs itself gives the inline side the deferring form: a `def x: ... |
+  ...` inline member is filed under `overloads` rather than `originals`
+  and composes with an existing declaration instead of colliding
+  (`method_builder.rb:256-264`). That shape is deliberately left alone —
+  it is the sanctioned way to have both, so it must not stand down.
+
+#### Scope
+
+Per member and per `(class, method, kind)`, matching what the definition
+builder actually collides on: an attribute contributes its reader and
+writer names, an alias its new name, `def self?.x` both sides. Two
+neighbouring overlaps are deliberately **not** covered — a project
+`.rbs` against *bundled* RBS is the file-level quarantine (#777), and
+two `.rbs` files declaring one member still fail the class's definition
+build, because neither of them is the more reviewed one.
+
+The report is derived from the loader's inputs (the synthesized sources
+and the project's signature files) rather than recorded during the
+environment build, so a cache HIT — which never runs the build —
+reports the same set. It is positioned at the annotated `.rb`, line 1,
+like every other entry on that stream: the member's own position lives
+in the synthesized RBS buffer, which describes a document nobody has,
+and the ADR-54 environment cache drops positions anyway.
+
+Measured on the reproduction: before, `RBS::DuplicatedMethodDefinitionError
+::Demo#shared has duplicated definitions` and no method on `Demo`
+resolves; after, `Demo#shared` is `(::String) -> ::Integer` (the `.rbs`
+type), the inline-only `Demo#only_inline` still binds, `sig/`'s
+`only_sig` is intact, `definition_build_failures` is empty, and one
+`:info` names both files.
 
 ## Consequences
 

@@ -45,7 +45,48 @@ plugin id/version + config), so an unchanged second run skips the parse.
 | Rule | Severity | Fires when |
 | --- | --- | --- |
 | `plugin.rbs-inline.source-rbs-synthesis-failed` | info | rbs-inline could not parse a file; analysis falls back to no inline-RBS contribution and the diagnostic carries the upstream error |
-| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Today this means the `# @rbs module-self: Foo` spelling; see below |
+| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Two causes: a member your `sig/` also declares (see [Precedence](#precedence)), and the `# @rbs module-self: Foo` spelling (see below) |
+
+## Precedence
+
+When a method is declared **both** in `sig/` and by an inline
+annotation, **the `.rbs` wins, per member.** The inline signature for
+that one method is dropped; every other annotation in the file still
+binds, and the class keeps its method surface.
+
+```ruby
+# lib/demo.rb                  # sig/demo.rbs
+class Demo                     # class Demo
+  # @rbs (Integer) -> String   #   def shared: (String) -> Integer  ← this one wins
+  def shared(v) = v.to_s       #   def only_sig: () -> String
+                               # end
+  # @rbs (Integer) -> Integer
+  def only_inline(v) = v + 1   # ← inline-only: still binds
+end
+```
+
+Each dropped member is reported once as
+`plugin.rbs-inline.source-rbs-annotation-not-honoured`, naming the
+member and the `.rbs` that won. Delete one of the two declarations to
+make the inline annotation take effect.
+
+`sig/` wins because it is the reviewed artefact — the one you diff in
+review and the one `rigor sig-gen --diff` reasons about. There is no
+upstream rule to defer to: rbs merges an inline `.rb` declaration and a
+`.rbs` one into a single class entry and ranks neither, so Steep reports
+the same overlap as a signature error and the class still fails to
+build. Rigor keeps the reporting and drops the degradation
+([ADR-32](../../adr/32-rbs-inline-comment-ingestion.md) WD13) — left to
+collide, one duplicated method costs the class every other method, and
+each call on it, real methods and typos alike, reads `Dynamic[top]`.
+
+Two overlaps this does **not** cover: a `.rbs` that collides with
+*bundled* RBS (Ruby core, stdlib, a gem's signatures) is quarantined
+file-by-file instead, reported as `rbs.coverage.quarantined-signature`;
+and two `.rbs` files declaring the same member still fail the class's
+definition build and surface as `rbs.coverage.definition-build-failed` —
+neither side of that pair is more reviewed than the other, so there is
+nothing to prefer.
 
 ## Which inline-RBS dialect Rigor reads
 

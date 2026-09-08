@@ -6,10 +6,11 @@ and `examples/*/lib`; the contract lands in `AGENTS.md` § "Types and Comments" 
 (`f1fdb845`); the gate `spec/docs/type_shaped_comments_spec.rb` lands with the same PR. G2 landed as
 `rigor check --fail-on=warning` in [#827](https://github.com/rigortype/rigor/pull/827) (closing
 [#812](https://github.com/rigortype/rigor/issues/812)); G3
-[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance) lands in PRNUM — § Gates
-records what each one is load-bearing for. Archetype: deliberative. Stakes: mid — reversible in one mechanical
-pass, blast radius is this repository's own tree and the agents working in it, and it does not touch
-the engine's false-positive envelope.
+[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance) lands in
+[#835](https://github.com/rigortype/rigor/pull/835) — § Gates records what each one is load-bearing
+for. Archetype: deliberative. Stakes: mid — reversible in one mechanical pass, blast radius is this
+repository's own tree and the agents working in it, and it does not touch the engine's
+false-positive envelope.
 
 Grounding: the ingestion experiment on [#779](https://github.com/rigortype/rigor/pull/779)'s rebased
 head (`c523b0a3`, § "What the annotations said when Rigor read them"), the five-model authoring probe
@@ -248,7 +249,7 @@ view costs a command and cannot be.
 | --- | --- | --- |
 | **G1** `spec/docs/type_shaped_comments_spec.rb` | no `[Type]` after a doc tag; no `#:` / `# @rbs` under the three lib roots; every `@param` names a real parameter of the `def` below; no stale `Slice N will` forward references | lands with #822 |
 | **G2** [#812](https://github.com/rigortype/rigor/issues/812) — `make check` fails on a warning | `def.return-type-mismatch` is a **warning**, so `make check` exits 0 with a contradicted return type in the tree. Without G2 the declared-and-checked half of the invariant is theatre | `--fail-on=warning` in a sibling PR |
-| **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a marker on every `tighter-return`, and a per-file pin on the hand-authored residue | lands in PRNUM |
+| **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a marker on every `tighter-return`, and a per-file pin on the hand-authored residue | lands in #835 |
 
 Already in force, and already serving the invariant: the precision gate
 (`rigor coverage --threshold 0.58 lib`) keeps inference the primary source rather than a fallback;
@@ -313,7 +314,7 @@ Negative:
   regression against a well-maintained typed comment — and the whole bet is that "well-maintained" is
   what 1,121 tags and a 12% contradiction rate say does not happen.
 - **The invariant was not fully gated on the day it was accepted.** G2 and G3 both landed within it:
-  `--fail-on=warning` in #827, `sig/` provenance in PRNUM. § Gates names what each holds.
+  `--fail-on=warning` in #827, `sig/` provenance in #835. § Gates names what each holds.
 - **This tree deliberately diverges from what Rigor tells adopting projects to do.** ADR-93 says an
   inline annotation is a contract; here it is forbidden. The divergence is bounded by #823/#824 and
   recorded so it is not read as an inconsistency to "fix" in either direction.

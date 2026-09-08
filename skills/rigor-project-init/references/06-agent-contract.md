@@ -1,6 +1,6 @@
 # 06 — Install the agent type-contract into AGENTS.md / CLAUDE.md
 
-Covers **Phase 8b**. Input: an onboarded project (config written, sigs
+Covers **Phase 8a**. Input: an onboarded project (config written, sigs
 generated, baseline decided). Output: one section in the file the
 project's coding agents read at startup.
 

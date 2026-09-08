@@ -1,0 +1,1 @@
+- **[cache]** `rigor type-of`, `type-scan`, `trace` and `annotate` are documented as building their environment fresh — they never read or write the persistent cache, which is why none of them accepts `--no-cache` ([#864](https://github.com/rigortype/rigor/pull/864)).

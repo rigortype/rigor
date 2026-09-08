@@ -181,7 +181,7 @@ What you must **report rather than write**: `balance` and `overdrawn?`
 were skipped as `sig.skipped.untyped-return` — `@opening_balance` is
 `Dynamic[top]`, so the arithmetic proves nothing. `currency` is not
 `String` on any evidence Rigor has; it is `untyped`, and the YARD tag is
-`@param currency the ledger's currency` with no type at all.
+`@param currency — the ledger's currency` with no type at all.
 
 Call-site derivation closes the parameter half where specs exist:
 

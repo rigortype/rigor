@@ -207,6 +207,12 @@ end
 one Ruby's `Range#cover?` would accept, so `Float[0.0..]` contains
 `Float::INFINITY` and never `Float::NAN`.
 
+Some calls produce a bounded Float on their own: `rand(0.0...1.0)`
+and `Random.rand(1.0..2.0)` are the range they name, `Math.sqrt(n)` of a `non-negative-int` is
+`Float[0.0..]`, and `x.clamp(0.0, 1.0)` or `x.clamp(0.0..1.0)` on a
+bounded `x` is the bracket. A bounded Float knows it is not `NaN`,
+so `u.nan?` folds to `false` and `u.round` to an integer range.
+
 ## Predicate methods on refinements
 
 Rigor recognises a small set of "type-carrier predicate

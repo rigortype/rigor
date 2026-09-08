@@ -7,7 +7,7 @@ ADR-1's decision for `Integer`: the carrier displays `Integer[1..10]` / `Integer
 accepted as a deprecated input alias that nothing prints any more. Slice 2 adds the `Float[R]`
 carrier (`Type::FloatRange`) with `non-nan-float` / `finite-float`. Slice 3 (landed 2026-09-09)
 adds the truthy-edge comparison narrowing of § WD5, `nan?` / `finite?`, and the union absorption
-that keeps a post-guard join to one set. The § WD3 deprecation diagnostic landed 2026-09-09; the Float folds remain in [#831](https://github.com/rigortype/rigor/issues/831). Archetype: deliberative.
+that keeps a post-guard join to one set. The § WD3 deprecation diagnostic landed 2026-09-09 in [#854](https://github.com/rigortype/rigor/pull/854), and the Float folds (`rand`, the monotone `Math` functions, `abs`, `clamp`, the integer conversions on a bounded Float) the same day, closing [#831](https://github.com/rigortype/rigor/issues/831). Archetype: deliberative.
 Stakes: mid — the annotation grammar is public surface ([ADR-50](50-release-engineering-and-stability-strategy.md)
 WD1) so the old input form gets a deprecation window; the display is not contract; the Float
 part touches the soundness envelope through NaN and is fixed here at design level only.

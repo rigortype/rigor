@@ -6,6 +6,6 @@ assertions:
   '1': Float[0.0..1.0]
   '2': non-nan-float
   '3': Float[0.0...Float::INFINITY]
-  '4': Integer
+  '4': Integer[0..1]
   '5': Float
-  '6': bool
+  '6': 'false'

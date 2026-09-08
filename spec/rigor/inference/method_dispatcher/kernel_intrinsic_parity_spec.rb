@@ -29,7 +29,8 @@ KERNEL_INTRINSIC_PARITY_TEMPLATES = {
   String: ["(42)", '"42"'],
   Hash: ["(nil)", "{}"],
   format: ['("%d", 1)', '"1"'],
-  sprintf: ['("%d", 2)', '"2"']
+  sprintf: ['("%d", 2)', '"2"'],
+  rand: ["(1..6)", "Integer[1..6]"]
 }.freeze
 
 RSpec.describe "Kernel intrinsic fold spelling parity (ADR-91 WD3)" do

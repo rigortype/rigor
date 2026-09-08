@@ -44,7 +44,19 @@ module Rigor
         MATH_BINARY = Set[:atan2, :hypot, :ldexp].freeze
         MATH_TUPLE_UNARY = Set[:frexp, :lgamma].freeze
 
-        private_constant :MATH_UNARY, :MATH_BINARY, :MATH_TUPLE_UNARY
+        # ADR-109 — the monotone non-decreasing functions, each with the inclusive lower edge of its
+        # domain (`nil` for every real). Over a bounded argument the image is the closed range between the
+        # images of the bounds: `Math.sqrt(Integer[0..])` is `Float[0.0..]`, `Math.exp(Float[..0.0])` is
+        # `Float[0.0..1.0]`. A bound below the domain edge raises at run time for the value that reaches
+        # it, so the fold declines. Not listed: the non-monotone functions (`sin`, `cos`, `tan`, `gamma`,
+        # `erfc` decreases, `acos` decreases) and the ones whose image needs a sign split.
+        MATH_MONOTONE_DOMAIN = {
+          sqrt: 0.0, cbrt: nil, exp: nil, expm1: nil,
+          log: 0.0, log2: 0.0, log10: 0.0, log1p: -1.0,
+          atan: nil, sinh: nil, tanh: nil, asinh: nil, erf: nil
+        }.freeze
+
+        private_constant :MATH_UNARY, :MATH_BINARY, :MATH_TUPLE_UNARY, :MATH_MONOTONE_DOMAIN
 
         module_function
 
@@ -77,11 +89,36 @@ module Rigor
           return nil unless args.size == 1
 
           x = numeric_constant(args.first)
-          return nil if x.nil?
+          return fold_monotone_range(method_name, args.first) if x.nil?
 
           fold_float_result(Math.public_send(method_name, x))
         rescue Math::DomainError, RangeError
           nil
+        end
+
+        # The bounded-argument arm of {fold_unary} / {fold_log}: an `IntegerRange` or `FloatRange`
+        # argument to a monotone function folds to the range between the images of its bounds.
+        def fold_monotone_range(method_name, arg)
+          return nil unless MATH_MONOTONE_DOMAIN.key?(method_name)
+
+          lower, upper = range_bounds(arg)
+          return nil if lower.nil?
+
+          edge = MATH_MONOTONE_DOMAIN[method_name]
+          return nil if edge && lower < edge
+
+          Type::Combinator.float_range(Math.public_send(method_name, lower), Math.public_send(method_name, upper))
+        rescue Math::DomainError, RangeError, ArgumentError
+          nil
+        end
+
+        # `[lower, upper]` as doubles for a bounded numeric carrier, `nil` for anything else. An
+        # exclusive Float end reads as its canonical closed bound, one double below.
+        def range_bounds(arg)
+          case arg
+          when Type::FloatRange then [arg.min, arg.canonical_max]
+          when Type::IntegerRange then [arg.lower.to_f, arg.upper.to_f]
+          end
         end
 
         def fold_binary(method_name, args)
@@ -101,6 +138,7 @@ module Rigor
           return nil unless [1, 2].include?(args.size)
 
           values = args.map { |a| numeric_constant(a) }
+          return fold_monotone_range(:log, args.first) if args.size == 1 && values.first.nil?
           return nil if values.any?(&:nil?)
 
           fold_float_result(Math.log(*values))

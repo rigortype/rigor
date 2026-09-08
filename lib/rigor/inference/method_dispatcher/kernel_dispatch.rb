@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "constant_folding"
+require_relative "random_folding"
 
 module Rigor
   module Inference
@@ -43,7 +44,7 @@ module Rigor
         # every entry is spelling-parity checked. Public (not private_constant) and Ractor-shareable
         # because the gate and the spec both read it.
         INTRINSIC_NAMES = Ractor.make_shareable(
-          Set[:Array, :Integer, :Float, :Rational, :Complex, :p, :pp, :String, :Hash, :format, :sprintf]
+          Set[:Array, :Integer, :Float, :Rational, :Complex, :p, :pp, :String, :Hash, :format, :sprintf, :rand]
         )
 
         # `Kernel#Rational` / `Kernel#Complex` constructor folds. When every argument is a `Type::Constant`
@@ -101,6 +102,11 @@ module Rigor
           return try_string(context) if method_name == :String
           return try_hash(context) if method_name == :Hash
           return try_format(context) if FORMAT_METHODS.include?(method_name)
+          # ADR-109 / #833 — `Kernel#rand(a..b)` lands in the literal range, a bounded carrier of the
+          # range's own class (never a constant: the generator advances). The other argument shapes
+          # stay unfolded on purpose; {RandomFolding} owns the `Random.rand` spelling and the reading.
+          # A splat still declines: the reading needs exactly one literal-Range argument.
+          return RandomFolding.interval_for_args(args) if method_name == :rand
 
           nil
         end

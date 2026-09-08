@@ -78,6 +78,14 @@ per-class blocklist entry, or a genuine plugin-contract misuse — **never disab
   `docs/CURRENT_WORK.md`. Anything touching a non-`.md` file is code: branch + PR.
 - Push with an explicit refspec — `git push origin HEAD:refs/heads/<branch>`. This clone's
   `push.default` can otherwise land a bare `push -u` on `master`.
+- **Every PR is created `--draft`, and a PR that must not be merged stays Draft.** `gh pr ready`
+  only when the landing conditions all hold: an APPROVE recorded on GitHub, CI green, and no standing
+  stop instruction from the user. A "マージはストップ" / "hold this" instruction is translated into PR
+  state at once (`gh pr ready --undo`), and a REQUEST_CHANGES or review verdict is left on GitHub
+  (`gh pr review`, or a PR comment), never only in chat — chat and subagent output are invisible to
+  every other session and to the same session after context compaction. Draft is the one signal
+  another session can see: #788 was merged by a sibling session on 2026-09-08 because GitHub showed it
+  open, green, and Ready while its owner's stop instruction lived only in conversation.
 - **Land audited+green PRs as you go; do not queue them — but only the PRs THIS session opened.** In
   an autonomous session, merge each of your own PRs (`gh pr merge N --merge`) as soon as the diff is
   audited and `make verify` + CI are green; fork the next branch from post-merge `master`. If the

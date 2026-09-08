@@ -273,7 +273,7 @@ view costs a command and cannot be.
 | --- | --- | --- |
 | **G1** `spec/docs/type_shaped_comments_spec.rb` | no `[Type]` after a doc tag; an em dash after every tag's name token; every `@param` names a real parameter of the `def` below; no stale `Slice N will` forward references | lands with #822 |
 | **G2** [#812](https://github.com/rigortype/rigor/issues/812) — `make check` fails on a warning | `def.return-type-mismatch` is a **warning**, so `make check` exits 0 with a contradicted return type in the tree. Without G2 the declared-and-checked half of the invariant is theatre | `--fail-on=warning` in a sibling PR |
-| **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a marker on every `tighter-return`, and a per-file pin on the hand-authored residue | lands in #835 |
+| **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a marker on every `tighter-return`, a per-file pin on the hand-authored residue, and ([#839](https://github.com/rigortype/rigor/issues/839)) a method that exists — proven by a `def`, by Rigor's own synthetic-shape recognition, or by reflection over the loaded tree | in force |
 
 Already in force, and already serving the invariant: the precision gate
 (`rigor coverage --threshold 0.58 lib`) keeps inference the primary source rather than a fallback;

@@ -250,6 +250,13 @@ class SigSourceIndex
   # nothing `sig/` describes. Everything else is required, because `require "rigor"` alone leaves
   # ~110 files unloaded — the whole CLI, LSP and MCP surface — and five `CLI::*Command#initialize`
   # declarations resolve only once their file is loaded.
+  #
+  # `plugins/` is NOT loaded, and that is the one boundary this index has. Nothing under `sig/`
+  # describes a plugin-contributed member today (`rigor-ffi` adds `ffi_*` to `Plugin::Base`, and
+  # `sig/rigor/plugin/base.rbs` declares none of them), and requiring a plugin registers it, which
+  # would put a live plugin into every spec process sharing this one. A declaration of such a member
+  # would be reported stale; the fix is to require its plugin here — the way
+  # `spec/rigor/public_api_drift_spec.rb` requires `rigor-ffi` for the same reason — not to exempt it.
   def load_project
     return if @loaded
 

@@ -250,9 +250,11 @@ module Rigor
 
           # `params.zip(arg_types).all? { |param, arg| ... }` without the pair arrays: a formal beyond the
           # actuals meets `nil`, exactly as `zip` pads. Selection zips once per overload per pass, so the
-          # pairs were a top allocation site of dispatch (#775).
+          # pairs were a top allocation site of dispatch (#775). The counter is a captured local, so the
+          # walk allocates nothing (a Range or an Enumerator would be one object per overload per pass).
           def each_param_accepts?(params, arg_types)
-            (0...params.size).all? { |index| yield(params[index], arg_types[index]) }
+            index = -1
+            params.all? { |param| yield(param, arg_types[index += 1]) }
           end
 
           # Checks the param's RBS type against an arg using alias-strict-arm matching. Optional / Union

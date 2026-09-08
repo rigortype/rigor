@@ -1,0 +1,1 @@
+- **[inference]** A `Range` literal argument is now read through its endpoints, so a call like `Random.new.rand(1.0..2.0)` types `Float` instead of taking the `Range[Integer]` overload that happened to be declared first, and `n.clamp(1..9)` on a plain `Integer` keeps its `Integer` type instead of going untyped ([#859](https://github.com/rigortype/rigor/pull/859))

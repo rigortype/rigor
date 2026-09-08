@@ -122,8 +122,14 @@ lint:
 # unchanged tree's previous result; the fingerprint excludes engine code
 # (only `Rigor::VERSION`), so an engine edit at the same version could be
 # masked by a stale hit. The gate always re-runs the analysis fresh.
+#
+# `--fail-on=warning` (issue #812): `rigor check`'s own exit code is
+# `:error`-only, so a `:warning` (e.g. `def.return-type-mismatch`, #810)
+# used to pass this gate and CI silently. Raising the bar here — rather
+# than in `Result#success?` — keeps ordinary users' exit-code contract
+# unchanged and makes only THIS self-check as strict as AGENTS.md claims.
 check:
-	bundle exec exe/rigor check --no-cache --no-ci-detect lib
+	bundle exec exe/rigor check --no-cache --no-ci-detect --fail-on=warning lib
 
 # Self-check the bundled plugin / example LIB trees against the
 # `Plugin::Base` contract. ADR-43 ancestor resolution makes a plugin's
@@ -132,9 +138,10 @@ check:
 # turns that into a gate. Lib dirs only (the `demo/` trees deliberately
 # exercise un-modelled framework DSLs and are not a clean target). MUST
 # stay clean for the same reason `check` does: fix the cause, never
-# disable the rule.
+# disable the rule. `--fail-on=warning` for the same reason as `check`
+# above (issue #812).
 check-plugins:
-	bundle exec exe/rigor check --no-cache --no-ci-detect plugins/*/lib examples/*/lib
+	bundle exec exe/rigor check --no-cache --no-ci-detect --fail-on=warning plugins/*/lib examples/*/lib
 
 # ADR-46 incremental-analysis acceptance gate. `--verify-incremental`
 # runs a baseline analysis, re-analyzes a subset of files and serves the

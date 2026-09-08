@@ -296,6 +296,74 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(err).to include("--tmp-file and --instead-of must appear together")
   end
 
+  # Issue #812 — `rigor check`'s exit code is `:error`-only by default, so a `:warning` (or `:info`)
+  # diagnostic passes both this process's exit code and a Makefile gate built on it (`def.return-type-mismatch`,
+  # #810, sat on `master` this way across #800-#809). `--fail-on` raises the bar for callers — like the `check`
+  # / `check-plugins` self-check targets — that want the stricter reading without changing what an ordinary
+  # `rigor check` invocation reports.
+  describe "--fail-on" do
+    # `call.undefined-method` fires reliably on a well-typed receiver with no library configuration; overriding
+    # its severity via `severity_overrides:` gives a deterministic single `:warning` (or `:info`) without
+    # depending on any rule's authored default.
+    def write_severity_override_project(severity)
+      File.write(".rigor.yml", "severity_overrides:\n  call: #{severity}\n")
+      File.write("warn.rb", "1.this_method_does_not_exist\n")
+    end
+
+    it "exits 0 on a lone :warning without the flag" do
+      write_severity_override_project("warning")
+
+      status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "warn.rb"])
+
+      expect(status).to eq(0)
+      expect(out).to include("warning:")
+    end
+
+    it "exits non-zero on the same :warning with --fail-on=warning" do
+      write_severity_override_project("warning")
+
+      status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on=warning", "warn.rb"])
+
+      expect(status).to eq(1)
+      expect(out).to include("warning:")
+    end
+
+    it "exits non-zero on a lone :info with --fail-on=info" do
+      write_severity_override_project("info")
+
+      status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on=info", "warn.rb"])
+
+      expect(status).to eq(1)
+      expect(out).to include("info:")
+    end
+
+    it "leaves a lone :info passing under --fail-on=warning" do
+      write_severity_override_project("info")
+
+      status, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on=warning", "warn.rb"])
+
+      expect(status).to eq(0)
+    end
+
+    it "exits with a usage error for an unrecognised --fail-on value" do
+      File.write("clean.rb", "x = 1\n")
+
+      status, _out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on=bogus", "clean.rb"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("invalid --fail-on value: bogus")
+    end
+
+    it "carries the effective threshold in the --format json payload" do
+      File.write("clean.rb", "x = 1\n")
+
+      _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--fail-on=warning",
+                           "clean.rb"])
+
+      expect(JSON.parse(out).fetch("fail_on")).to eq("warning")
+    end
+  end
+
   describe "#parse_check_options" do
     subject(:command) { described_class.new(argv: argv, out: StringIO.new, err: StringIO.new) }
 
@@ -306,7 +374,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
 
       expect(options).to include(
         format: "text", stats: true, ci_detect: true, no_cache: false,
-        baseline: :unset, baseline_strict: false, incremental: false
+        baseline: :unset, baseline_strict: false, incremental: false, fail_on: :error
       )
     end
 
@@ -320,6 +388,14 @@ RSpec.describe Rigor::CLI::CheckCommand do
 
       expect(options).to include(format: "json", stats: false, ci_detect: false, no_cache: true)
       expect(command.instance_variable_get(:@argv)).to eq(%w[lib spec])
+    end
+
+    it "parses --fail-on=warning into the :warning symbol" do
+      command = described_class.new(argv: ["--fail-on=warning"], out: StringIO.new, err: StringIO.new)
+
+      options = command.send(:parse_check_options)
+
+      expect(options).to include(fail_on: :warning)
     end
   end
 

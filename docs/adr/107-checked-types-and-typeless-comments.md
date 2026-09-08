@@ -3,11 +3,11 @@
 Status: **Accepted, 2026-09-08 — implemented by [#822](https://github.com/rigortype/rigor/pull/822).**
 The corpus rewrite (`af1a0b84`) empties the type slot in every YARD tag under `lib/`, `plugins/*/lib`
 and `examples/*/lib`; the contract lands in `AGENTS.md` § "Types and Comments" and `CONTEXT.md`
-(`f1fdb845`); the gate `spec/docs/type_shaped_comments_spec.rb` lands with the same PR. Two of the
-three gates this ADR names are not built yet — [#812](https://github.com/rigortype/rigor/issues/812)
-(`make check` must fail on a warning) and
-[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance) — and § Gates records what
-each one is load-bearing for. Archetype: deliberative. Stakes: mid — reversible in one mechanical
+(`f1fdb845`); the gate `spec/docs/type_shaped_comments_spec.rb` lands with the same PR. G2 landed as
+`rigor check --fail-on=warning` in [#827](https://github.com/rigortype/rigor/pull/827) (closing
+[#812](https://github.com/rigortype/rigor/issues/812)); G3
+[#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance) is not built yet — § Gates
+records what each one is load-bearing for. Archetype: deliberative. Stakes: mid — reversible in one mechanical
 pass, blast radius is this repository's own tree and the agents working in it, and it does not touch
 the engine's false-positive envelope.
 

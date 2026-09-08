@@ -78,10 +78,12 @@ per-class blocklist entry, or a genuine plugin-contract misuse — **never disab
   `docs/CURRENT_WORK.md`. Anything touching a non-`.md` file is code: branch + PR.
 - Push with an explicit refspec — `git push origin HEAD:refs/heads/<branch>`. This clone's
   `push.default` can otherwise land a bare `push -u` on `master`.
-- **PRs are born Draft and stay Draft until they may land.** `gh pr ready` only with an APPROVE on
-  GitHub, CI green, and no standing stop instruction; a stop instruction becomes `gh pr ready --undo`
-  at once; review verdicts go on GitHub, never only in chat. Draft is the one hold signal another
-  session — or this one after compaction — can see
+- **PRs are born Draft and stay Draft until they may land.** `gh pr ready` only on the user's
+  explicit instruction to land that PR, with CI green on its head commit and no standing stop
+  instruction. The instruction arrives in chat: this is a one-developer repository and every PR is
+  opened under the user's account, so a GitHub APPROVE on it cannot exist (an author cannot approve
+  their own PR) — never wait for one. A stop instruction becomes `gh pr ready --undo` at once.
+  Draft is the one hold signal another session — or this one after compaction — can see
   ([postmortem](docs/notes/20260908-pr-788-draft-discipline-postmortem.md)).
 - **Land your own audited+green PRs as you go; do not queue them.** In an autonomous session, merge
   each PR this session opened (`gh pr merge N --merge`) as soon as the diff is audited and

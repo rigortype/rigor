@@ -462,7 +462,7 @@ required gate is green:
 gh pr create --draft --base master --head release/x.y.z \
   --title "Bump up version to x.y.z" --body "<short release summary>"
 gh pr checks <pr> --watch        # wait for the required ci.yml gate
-gh pr ready <pr>                 # only with an APPROVE on GitHub, CI green, no stop instruction
+gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
 gh pr merge <pr> --rebase --delete-branch
 ```
 

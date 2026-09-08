@@ -142,9 +142,10 @@ gh pr create --draft --base master --title "Update dependencies: bundled gems + 
 
 The PR's `ci.yml` gate re-runs the full suite on a clean checkout (its own
 `bundle install`), which is the authoritative cross-environment check. The PR
-is created `--draft` and goes Ready (`gh pr ready <pr>`) only once an APPROVE
-is recorded on GitHub, CI is green, and no stop instruction stands
-(`AGENTS.md` § "Commit and PR Etiquette").
+is created `--draft` and goes Ready (`gh pr ready <pr>`) only on the user's
+explicit instruction to land it, with CI green and no stop instruction standing
+(`AGENTS.md` § "Commit and PR Etiquette" — a GitHub APPROVE cannot exist on a
+one-developer repository, so it is not the trigger).
 
 ## Stays untouched (out of scope here)
 

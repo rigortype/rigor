@@ -73,9 +73,14 @@ Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated
   look for the run), and if a Tests shard dies on an artifact-upload `403`, rerun the WHOLE run or
   push a fresh commit, never `--failed` alone (the rerun shard restores newer timing data and
   `shard-coverage` goes red).
-- [#831](https://github.com/rigortype/rigor/issues/831) — all that remains of ADR-109 is the Float
-  folds (`abs`, `Math.sqrt`, `rand(range)`, `clamp(range)`), overlapping #833 / #834 / #842 below;
-  in progress on branch `claude/float-folds` (no PR yet as of this handoff).
+- [#857](https://github.com/rigortype/rigor/pull/857) — **open, Draft, do not merge without the
+  user's word.** The last ADR-109 item (#831): `rand(a..b)` / `Random.rand(a..b)` fold to the literal
+  range, the monotone `Math` functions map a bounded argument, a `FloatRange` receiver folds `abs` /
+  `nan?` / `finite?` / `floor` … / `between?` / `clamp`, and `clamp(range)` folds on both bounded
+  classes. Head `917d8105`: `make verify` / `make docs-check` green locally; `Closes #831`. The bare
+  `rand`, `rand(n)` and `rand(1.5)` forms are deliberately NOT folded: the corpus uses `rand(100)` as
+  its "unknown Integer" oracle (several specs say so), and folding it changed 27 pins' meaning; an
+  interval for those forms needs a change that replaces the oracle first.
 - Engine gaps filed while probing, all `ready-for-agent`: [#833](https://github.com/rigortype/rigor/issues/833)
   (a Range literal argument matches the first `Range[T]` overload whatever its endpoints),
   [#834](https://github.com/rigortype/rigor/issues/834) (`n.clamp(1..9)` has no fold),
@@ -104,5 +109,7 @@ the call's type — the `break` sibling of #841, `ready-for-human`).
 ## How to enter
 
 1. Nothing of this session's is open: #848 and its handoff are on master, #610 is closed.
-2. Next: #831's Float folds (branch `claude/float-folds`, fork from current master if it is stale),
-   or [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`).
+2. `gh pr view 857` — if the user has said to land it and the head run is green, `gh pr ready 857`
+   then `gh pr merge 857 --merge`; otherwise leave it Draft.
+3. Next: [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`), or #842 / #833 / #834's
+   remaining halves. Fork from post-merge master.

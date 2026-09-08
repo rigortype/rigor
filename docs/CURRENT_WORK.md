@@ -37,10 +37,13 @@ landed in #788 round 11; the per-file-analysis half is a snapshot-persistence de
 
 1. **[#775](https://github.com/rigortype/rigor/issues/775)** — recover `rigor check lib` allocations
    toward the v0.3.6 18.8M. Unchanged from the previous handoff; still the top perf item.
-2. `make check lib` prints one `def.return-type-mismatch` warning at
-   `lib/rigor/inference/expression_typer.rb:274` (`return_type_for`). Pre-existing on the v0.3.7
-   line (three lanes confirmed it independently against their base commit); the gate exits 0
-   because it is a warning, but AGENTS.md says the self-check MUST stay clean. Fix at the root.
+2. **[#812](https://github.com/rigortype/rigor/issues/812)** — `make check` exits 0 on a warning,
+   so "MUST stay clean" is unenforced. The `def.return-type-mismatch` warning on
+   `ExpressionTyper#return_type_for` ranked here last session is fixed at the root by #810 (the
+   ADR-55 fixpoint loop owns its cap; `make check` is warning-free); it sat on `master` across
+   #800–#809 because of this hole. Sibling finding, filed as
+   [#811](https://github.com/rigortype/rigor/issues/811): negative-equality narrowing cannot prune
+   a symbol literal from a mixed union — a type-model change, not a quick fix.
 3. **[#807](https://github.com/rigortype/rigor/issues/807)** — `spec/rigor/cache/store_spec.rb:628`
    is a CI flake with a real cause: 16 threads each build a `Store` on a fresh root and race
    `repair_writable_marker!`, so one can read a torn `schema_version.txt` and `clear_cache_root!`
@@ -65,4 +68,6 @@ landed in #788 round 11; the per-file-analysis half is a snapshot-persistence de
   parallel `make verify` runs have OOM-killed this host. Kill a lane's redundant re-verify once its
   PR has merged; it holds the mutex for four minutes that the next lane needs.
 - **GitHub closes only the FIRST `Fixes #N` in a comma list.** One `Fixes #N` per line.
+- **`gh pr checks --watch` armed right after a push exits 1 with "no checks reported"** — GitHub
+  has not registered the run yet. Poll until `gh pr checks` lists a check, then watch.
 - **Verify the INTEGRATED master after a batch.** No single PR's CI sees the combination.

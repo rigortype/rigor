@@ -135,7 +135,7 @@ in `git status` (`vendor/bundle` stays untracked).
 ## Push and open the PR
 
 ```sh
-git push origin HEAD:refs/heads/<branch>
+git push -u origin <branch>
 gh pr create --draft --base master --title "Update dependencies: bundled gems + Nix Flake dev environment" \
   --body "<the two commits, per-layer>"
 ```

@@ -62,10 +62,19 @@ Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated
 
 - [#830](https://github.com/rigortype/rigor/pull/830) (slice 1) and
   [#844](https://github.com/rigortype/rigor/pull/844) (slice 2, `Type::FloatRange`) — **merged**.
-- [#846](https://github.com/rigortype/rigor/pull/846) — slice 3's truthy-edge Float comparison
-  narrowing: **merged 2026-09-08** (another session's). [#831](https://github.com/rigortype/rigor/issues/831)
-  is still open — check what of slice 3 (`nan?` / `finite?` narrowing, Float folds, the
-  `dynamic.rbs-extended.deprecated-form` diagnostic) #846 left before sizing it.
+- [#846](https://github.com/rigortype/rigor/pull/846) — slice 3: truthy-edge Float comparison
+  narrowing, `nan?` / `finite?`, and `Float` absorbing a `FloatRange` union member: **merged
+  2026-09-09 on the user's word**, master run green.
+- [#854](https://github.com/rigortype/rigor/pull/854) — **open, Draft, do not merge without the
+  user's word.** ADR-109 WD3: `int<a, b>` still resolves and now reports
+  `dynamic.rbs-extended.deprecated-form` (`info`) naming the `Integer[a..b]` spelling, through a
+  fourth `RbsExtended::Reporter` stream carried by the worker drain and the pool replay. Head
+  `2bfeb5b9`: `make verify` / `make docs-check` green locally; watch the HEAD run by id. If a Tests
+  shard dies on an artifact-upload `403`, rerun the WHOLE run or push a fresh commit, never
+  `--failed` alone (the rerun shard restores newer timing data and `shard-coverage` goes red).
+- [#831](https://github.com/rigortype/rigor/issues/831) — once #854 lands, all that remains of
+  ADR-109 is the Float folds (`abs`, `Math.sqrt`, `rand(range)`, `clamp(range)`), overlapping
+  #833 / #834 / #842 below.
 - Engine gaps filed while probing, all `ready-for-agent`: [#833](https://github.com/rigortype/rigor/issues/833)
   (a Range literal argument matches the first `Range[T]` overload whatever its endpoints),
   [#834](https://github.com/rigortype/rigor/issues/834) (`n.clamp(1..9)` has no fold),
@@ -89,5 +98,7 @@ literal (#850, ADR-110). Open, both `ready-for-human`: [#839](https://github.com
 ## How to enter
 
 1. Nothing of this session's is open: #848 and its handoff are on master, #610 is closed.
-2. Next: [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`), or #831's
-   remainder after checking #846's diff. Fork from current master.
+2. `gh pr view 854` — if the user has said to land it and the head run is green, `gh pr ready 854`
+   then `gh pr merge 854 --merge`; otherwise leave it Draft.
+3. Next: [#849](https://github.com/rigortype/rigor/issues/849) (`ready-for-agent`), or #831's Float
+   folds. Fork from post-merge master.

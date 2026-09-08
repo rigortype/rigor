@@ -219,6 +219,10 @@ RSpec.describe Rigor::RbsExtended do
       expect(described_class.parse_return_type_override("rigor:v1:return: non-empty-array[")).to be_nil
       expect(described_class.parse_return_type_override("rigor:v1:return: int<5, 10")).to be_nil
     end
+
+    it "returns nil for int<min, max> with reversed bounds instead of raising" do
+      expect(described_class.parse_return_type_override("rigor:v1:return: int<10, 1>")).to be_nil
+    end
   end
 
   describe ".parse_param_annotation" do

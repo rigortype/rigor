@@ -141,11 +141,14 @@ module Rigor
 
       # `name<min, max>` — integer-bound parameterised refinements. Each builder takes an
       # `Array<Integer>` and returns a `Rigor::Type` (or `nil`). Bounds are signed integer
-      # literals; `min` MUST be ≤ `max` for the carrier to construct successfully
-      # (`Type::IntegerRange` enforces the invariant).
+      # literals. A reversed pair (`min` > `max`) is declined as `nil` like every other shape
+      # mismatch, so the caller surfaces `dynamic.rbs-extended.unresolved` at the annotation;
+      # `Type::IntegerRange` raises on it instead, and that `ArgumentError` used to escape as an
+      # `internal analyzer error` that abandoned the whole Ruby file.
       PARAMETERISED_INT_BUILDERS = {
         "int" => lambda { |bounds|
           return nil unless bounds.size == 2
+          return nil if bounds[0] > bounds[1]
 
           Type::Combinator.integer_range(bounds[0], bounds[1])
         }

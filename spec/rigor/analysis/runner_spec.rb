@@ -5262,6 +5262,20 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.path).to include("demo.rbs")
     end
 
+    it "declines a reversed `int<max, min>` payload as unresolved instead of crashing the file" do
+      # `Type::IntegerRange` raises on `min > max`; before the builder declined the pair, that
+      # `ArgumentError` surfaced as an `internal analyzer error` row and the file was not analyzed.
+      result = analyze_reporter_demo("ReversedBoundsDemo", "int<10, 1>")
+      diag = result.diagnostics.find { |d| d.rule == "dynamic.rbs-extended.unresolved" }
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("int<10, 1>")
+      expect(diag.path).to include("demo.rbs")
+      expect(diag.line).to eq(2)
+      crashes = result.diagnostics.select { |d| d.message.start_with?("internal analyzer error") }
+      expect(crashes).to be_empty
+    end
+
     it "surfaces a shape-projection on a non-shape carrier as `dynamic.shape.lossy-projection`" do
       result = analyze_reporter_demo("LossyDemo", "pick_of[Hash[String, Integer], String]")
       diag = result.diagnostics.find { |d| d.rule == "dynamic.shape.lossy-projection" }

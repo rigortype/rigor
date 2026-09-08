@@ -23,6 +23,8 @@ module Rigor
     def or: (Trinary other) -> Trinary
     def ==: (untyped other) -> bool
     def hash: () -> Integer
+    # sig-gen gap: #TBD — the three bodies are literals, so sig-gen proposes
+    # `"maybe" | "no" | "yes"`; `to_s` is Object's contract and stays `String`. P2.
     def to_s: () -> String
     def inspect: () -> String
   end

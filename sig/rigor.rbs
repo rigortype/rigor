@@ -153,6 +153,8 @@ module Rigor
   end
 
   module ValueSemantics
+    # sig-gen gap: #TBD — `void` says the return is not part of the contract; sig-gen reads it as
+    # `top` and proposes `Module`, the body's last expression. P1 of the 2026-09-08 provenance audit.
     def self.included: (Module base) -> void
 
     module ClassMethods

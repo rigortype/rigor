@@ -89,9 +89,11 @@ class SigProvenanceAuditor
     #
     # @param root — the repository root.
     # @param candidates — pre-computed `sig-gen` output, so a caller running several assertions
-    #   pays the ~20 s generator pass once.
-    def audit(root:, candidates: nil)
-      classify(declarations(root: root), candidates || generate(root: root))
+    #   pays the ~14 s generator pass once.
+    # @param configuration — overrides the configuration discovered under `root`; a fixture tree
+    #   has no `.rigor.yml` and needs `signature_paths` pointed at its own `sig/`.
+    def audit(root:, candidates: nil, configuration: nil)
+      classify(declarations(root: root), candidates || generate(root: root, configuration: configuration))
     end
 
     # Every member of every `.rbs` under `sig/`, in file then source order.
@@ -104,11 +106,10 @@ class SigProvenanceAuditor
     # `sig-gen`'s view of `lib/`. `include_private: true` because `sig/` declares private helpers
     # (`Rigor::Inference::Narrowing`'s singleton block, for one) and the default public-only pass
     # would report every one of them as `:no_source`.
-    def generate(root:, paths: ["lib"])
+    def generate(root:, paths: ["lib"], configuration: nil)
       Dir.chdir(root) do
-        configuration = Rigor::Configuration.load(nil)
-        Rigor::SigGen::Generator.new(configuration: configuration, paths: paths,
-                                     observations: {}, include_private: true).run
+        Rigor::SigGen::Generator.new(configuration: configuration || Rigor::Configuration.load(nil),
+                                     paths: paths, observations: {}, include_private: true).run
       end
     end
 

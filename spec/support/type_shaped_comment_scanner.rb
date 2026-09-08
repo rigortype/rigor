@@ -5,10 +5,9 @@ require "prism"
 # Scanner behind spec/docs/type_shaped_comments_spec.rb. A "type-shaped comment" is a type written
 # in a comment rather than checked RBS (sig/) or an inferred type: it is never verified, so it can
 # lie, and an agent reading the source has no way to tell a comment type from a checked one. Types
-# live in sig/ or are left to inference; comments carry prose. See AGENTS.md's "RBS Authorship" and
-# ADR-93 for why an inline rbs-inline annotation (`#:`, `# @rbs`) is a stronger violation of the same
-# idea in THIS repository specifically — Rigor's own product default ingests those as live type
-# sources, so one left in Rigor's own tree would be read by Rigor itself, not just by a human.
+# live in sig/, in an inline `#:` / `# @rbs` annotation (a type SOURCE the product ingests and checks,
+# ADR-93 — not a comment, and not scanned here), or are left to inference; comments carry prose.
+# See AGENTS.md § "Types and Comments".
 #
 # Every rule works off `Prism.parse_comments`/`Prism#comments` — real `Comment` nodes, never a
 # line-oriented regex over raw source — so text that merely looks like a comment inside a string or
@@ -64,24 +63,6 @@ module TypeShapedCommentScanner
     )
   /x
 
-  # R2 (inline rbs annotation) — mirrors the coarse, deliberately false-positive-safe heuristic
-  # `DiagnosticAggregator` already ships for the same shape, `INLINE_ANNOTATION_SHAPE`
-  # (lib/rigor/analysis/runner/diagnostic_aggregator.rb, ~L270-310), used there to detect that a
-  # project carries rbs-inline annotations when the `rbs-inline` library itself is not installed.
-  # Reused verbatim in judgment, simplified in mechanics: that heuristic scans raw file text and so
-  # anchors on `(?:^|\s)#` to admit a trailing comment; here every candidate is already an isolated
-  # Prism `Comment`, whose slice always starts at the `#` itself, so `\A#` is the same test. Keys on
-  # the `# @rbs` block form (`# @rbs!`, `# @rbs skip` included — anything starting `@rbs` followed by
-  # a word boundary) and on a `#:` comment immediately followed by the start of an RBS type (`(`,
-  # `[`, `{`, `?`, an uppercase `Constant`, or an RBS lowercase base type). Never matches an RDoc
-  # directive (`#:nodoc:`, `#:yields:`, `#:call-seq:`, …), which reads as a bare lowercase word
-  # closed by a colon and so satisfies neither alternative.
-  INLINE_RBS_RE = /
-    \A\#\s*@rbs\b
-    |
-    \A\#:[ \t]*(?:[\[({?A-Z]|(?:bool|void|nil|untyped|top|bot|self|instance|class)\b)
-  /x
-
   # R3 (stale parameter name) — the two tags from YARD_TYPE_TAGS that name a parameter.
   PARAM_NAME_TAG_RE = /\A@(?:param|option)\b[ \t]+(\S+)/
 
@@ -113,11 +94,10 @@ module TypeShapedCommentScanner
   # the returned Violations — this method never touches the filesystem, which is what lets the unit
   # examples in the spec exercise each rule on an inline fixture.
   #
-  # Returns {r1:, r2:, r3:, r4:, r5:} => Array[Violation].
+  # Returns {r1:, r3:, r4:, r5:} => Array[Violation].
   def scan_source(path, source)
     {
       r1: r1_type_shaped_tag(path, source),
-      r2: r2_inline_rbs_annotation(path, source),
       r3: r3_stale_parameter_name(path, source),
       r4: r4_stale_forward_reference(path, source),
       r5: r5_missing_delimiter(path, source)
@@ -127,7 +107,7 @@ module TypeShapedCommentScanner
   # Runs scan_source over every file scan_paths(root) finds, concatenating each rule's violations
   # across the whole tree. Violation#path is repo-relative (relative to `root`).
   def scan_tree(root)
-    totals = { r1: [], r2: [], r3: [], r4: [], r5: [] }
+    totals = { r1: [], r3: [], r4: [], r5: [] }
     scan_paths(root).each do |absolute|
       relative = absolute.delete_prefix("#{root}/")
       source = File.read(absolute, encoding: "utf-8")
@@ -164,14 +144,6 @@ module TypeShapedCommentScanner
       body = comment_body(comment)
       next unless NAME_TOKEN_TAG_RE.match?(body)
       next if DELIMITED_TAG_RE.match?(body)
-
-      Violation.new(path: path, line: comment.location.start_line, excerpt: comment.location.slice.strip)
-    end
-  end
-
-  def r2_inline_rbs_annotation(path, source)
-    inline_comments(source).filter_map do |comment|
-      next unless INLINE_RBS_RE.match?(comment.location.slice)
 
       Violation.new(path: path, line: comment.location.start_line, excerpt: comment.location.slice.strip)
     end

@@ -93,4 +93,5 @@ Style guidance is only about whether authors should write a type in `.rb` source
 
 - `#: void` and `#: bot` are strongly recommended when they express intent and create useful inference boundaries.
 - Short returns such as `#: bool`, `#: String`, or `#: User` are neutral; authors MAY write them when they make intent clearer.
+- A return the method name does not suggest, or a type that says more than the nominal class — `:asc | :desc` rather than `Symbol`, a record shape rather than `Hash` — is worth writing inline as documentation the checker verifies. The same nominal class restated on every method (`#: String`, `#: Array`) adds nothing a reader does not already have from the name and the body.
 - Complex inline types — unions, generics, records, and nested method types — are valid RBS/rbs-inline input and MUST be accepted. Rigor's style guidance prefers moving them to `.rbs` or generated stubs, but Rigor MUST NOT report diagnostics merely for using them.

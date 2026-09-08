@@ -213,6 +213,11 @@ that no static reading can prove. Do not argue past one exchange:
 If the check *does* go red, the annotation modeled the wrong contract:
 report it and revert, never suppress the diagnostic.
 
+The same holds for an inline annotation a human wrote as documentation —
+`#: void`, `#: :asc | :desc`, a parameter contract. It is their intent,
+checked by `rigor check`, not a guess for you to "correct" to what inference
+shows. Leave it; if the check finds a contradiction, report that.
+
 ## Installing the rule in the project
 
 An agent that never loads this skill still guesses. The durable fix is

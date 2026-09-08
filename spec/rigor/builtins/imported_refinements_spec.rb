@@ -215,6 +215,19 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         .to eq(Rigor::Type::Combinator.integer_range(-3, 7))
     end
 
+    it "records the deprecated alias on the reporter with the spelling to write instead" do
+      reporter = Rigor::RbsExtended::Reporter.new
+      location = RBS::Location.new(RBS::Buffer.new(name: "sig/a.rbs", content: "class A\nend\n"), 8, 9)
+
+      described_class.parse("int<5, 10>", reporter: reporter, source_location: location)
+      described_class.parse("Integer[5..10]", reporter: reporter, source_location: location)
+      described_class.parse("int<10, 5>", reporter: reporter, source_location: location)
+
+      entries = reporter.deprecated_forms
+      expect(entries.map { |e| [e.payload, e.replacement, e.path, e.line, e.column] })
+        .to eq([["int<5, 10>", "Integer[5..10]", "sig/a.rbs", 2, 1]])
+    end
+
     it "declines int<min, max> with reversed bounds instead of raising" do
       # `Type::IntegerRange` raises on `min > max`; the builder declines first so the payload is
       # reported as `dynamic.rbs-extended.unresolved` rather than crashing the file's analysis.

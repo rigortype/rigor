@@ -628,6 +628,22 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
         .to eq([["sig/widget.rbs", 2, 3], ["sig/other.rbs", 9, 5]])
     end
 
+    # ADR-109 WD3 — the deprecated-form stream names the replacement spelling and stays :info.
+    it "drains deprecated-form events into dynamic.rbs-extended.deprecated-form rows naming the replacement" do
+      reporter = Rigor::RbsExtended::Reporter.new
+      reporter.record_deprecated_form(payload: "int<5, 10>", replacement: "Integer[5..10]",
+                                      path: "sig/widget.rbs", line: 4, column: 3)
+
+      diagnostics = build_aggregator(rbs_extended_reporter: reporter).rbs_extended_reporter_diagnostics
+
+      expect(diagnostics.size).to eq(1)
+      row = diagnostics.first
+      expect(row.rule).to eq("dynamic.rbs-extended.deprecated-form")
+      expect(row.severity).to eq(:info)
+      expect(row.message).to include("`int<5, 10>`").and include("`Integer[5..10]`")
+      expect([row.path, row.line, row.column]).to eq(["sig/widget.rbs", 4, 3])
+    end
+
     it "falls back to .rigor.yml:1:1 for an unresolved payload with no position" do
       reporter = Rigor::RbsExtended::Reporter.new
       reporter.record_unresolved(payload: "rigor:v1:wat")

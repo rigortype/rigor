@@ -726,6 +726,26 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(coordinator_reporter.hkt_directive_errors.first.path).to eq("sig/a.rbs")
     end
 
+    # ADR-109 WD3 — the deprecated-form stream replays by its primitives and dedups across workers too.
+    it "replays a worker's deprecated-form events and collapses two workers' copies into one row" do
+      coordinator_reporter = Rigor::RbsExtended::Reporter.new
+      coordinator = build_coordinator(rbs_extended_reporter: coordinator_reporter)
+      worker_reporter = Rigor::RbsExtended::Reporter.new
+      worker_reporter.record_deprecated_form(payload: "int<5, 10>", replacement: "Integer[5..10]",
+                                             path: "sig/a.rbs", line: 3, column: 3)
+
+      2.times do
+        coordinator.merge_worker_reporters(
+          rbs_extended: { unresolved_payloads: [], lossy_projections: [],
+                          deprecated_forms: worker_reporter.deprecated_forms },
+          boundary_cross: [], source_rbs_synthesis: []
+        )
+      end
+
+      expect(coordinator_reporter.deprecated_forms.map(&:replacement)).to eq(["Integer[5..10]"])
+      expect(coordinator_reporter.deprecated_forms.first.line).to eq(3)
+    end
+
     it "tolerates a drain shape that carries no hkt-directive key" do
       coordinator_reporter = Rigor::RbsExtended::Reporter.new
       coordinator = build_coordinator(rbs_extended_reporter: coordinator_reporter)

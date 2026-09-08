@@ -802,6 +802,18 @@ module Rigor
               message: entry.message, path: entry.path, line: entry.line, column: entry.column
             )
           end
+          replay_deprecated_forms(rbs)
+        end
+
+        # ADR-109 WD3 — the fourth stream, read with the nil default like the hkt one so an older drain
+        # shape records nothing.
+        def replay_deprecated_forms(rbs)
+          Array(rbs[:deprecated_forms]).each do |entry|
+            @rbs_extended_reporter.record_deprecated_form(
+              payload: entry.payload, replacement: entry.replacement,
+              path: entry.path, line: entry.line, column: entry.column
+            )
+          end
         end
 
         # Issue #696 — accumulate the per-class `RBS::DefinitionBuilder` failures this run observed, deduped

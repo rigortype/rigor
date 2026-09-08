@@ -337,6 +337,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       expect(drained[:rbs_extended][:unresolved_payloads]).to be_frozen
       expect(drained[:rbs_extended][:lossy_projections]).to be_frozen
       expect(drained[:rbs_extended][:hkt_directive_errors]).to be_frozen
+      expect(drained[:rbs_extended][:deprecated_forms]).to be_frozen
       expect(drained[:boundary_cross]).to be_frozen
     end
 
@@ -703,7 +704,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
   # project whose `sig/` produced a single unresolved payload or lossy projection killed every fork worker
   # HERE — after its files were analysed — and the run degraded to in-process re-analysis.
   describe "#drain_reporters payload shape (issue #805)" do
-    it "ships all three RbsExtended::Reporter streams through the fork backend's Marshal channel" do
+    it "ships all four RbsExtended::Reporter streams through the fork backend's Marshal channel" do
       session = described_class.new(
         configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
       )
@@ -722,7 +723,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       drained = session.drain_reporters
 
       expect(Marshal.load(Marshal.dump(drained))).to eq(drained)
-      expect(drained[:rbs_extended].values.map { |s| Ractor.shareable?(s) }).to eq([true, true, true])
+      expect(drained[:rbs_extended].values.map { |s| Ractor.shareable?(s) }).to eq([true, true, true, true])
       expect(drained[:rbs_extended][:unresolved_payloads].first.line).to eq(1)
     end
   end

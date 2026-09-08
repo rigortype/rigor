@@ -703,7 +703,23 @@ module Rigor
           bounds = node.args.map { |a| a.is_a?(TypeNode::IntegerLiteral) ? a.value : nil }
           return nil if bounds.any?(&:nil?)
 
-          builder.call(bounds)
+          result = builder.call(bounds)
+          record_deprecated_form(node, bounds, result) unless result.nil?
+          result
+        end
+
+        # ADR-109 WD3 — the angle-bracket form still resolves, and the run says so once per annotation with
+        # the spelling the same type now displays as. Recorded only when the payload resolved: an
+        # unresolvable one already surfaces as `dynamic.rbs-extended.unresolved`, and a second row for it
+        # would name a replacement for something that never parsed.
+        def record_deprecated_form(node, bounds, result)
+          return if @reporter.nil?
+
+          path, line, column = RbsExtended::Reporter.position_of(@source_location)
+          @reporter.record_deprecated_form(
+            payload: "#{node.head}<#{bounds.join(', ')}>", replacement: result.describe,
+            path: path, line: line, column: column
+          )
         end
 
         def resolve_args(args)

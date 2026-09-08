@@ -125,7 +125,8 @@ Refinement payloads support the parameterised forms
 and the bounded numeric forms `Integer[1..10]` and
 `Float[0.0...1.0]`, written with a Ruby range literal (`1...10`,
 `1..`, `..10`; the PHPStan-style `int<1, 10>` still parses but is
-deprecated), plus the Float names `non-nan-float` and
+deprecated and reports `dynamic.rbs-extended.deprecated-form` with
+the spelling to write), plus the Float names `non-nan-float` and
 `finite-float`. Type-argument
 positions also accept Symbol / String literal tokens and unions
 of them — `pick_of[T, :name | :email]`,

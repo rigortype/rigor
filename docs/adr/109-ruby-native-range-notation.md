@@ -7,8 +7,7 @@ ADR-1's decision for `Integer`: the carrier displays `Integer[1..10]` / `Integer
 accepted as a deprecated input alias that nothing prints any more. Slice 2 adds the `Float[R]`
 carrier (`Type::FloatRange`) with `non-nan-float` / `finite-float`. Slice 3 (landed 2026-09-09)
 adds the truthy-edge comparison narrowing of § WD5, `nan?` / `finite?`, and the union absorption
-that keeps a post-guard join to one set. Float folds and the `int<a, b>` deprecation diagnostic
-(§ WD3) remain in [#831](https://github.com/rigortype/rigor/issues/831). Archetype: deliberative.
+that keeps a post-guard join to one set. The § WD3 deprecation diagnostic landed 2026-09-09; the Float folds remain in [#831](https://github.com/rigortype/rigor/issues/831). Archetype: deliberative.
 Stakes: mid — the annotation grammar is public surface ([ADR-50](50-release-engineering-and-stability-strategy.md)
 WD1) so the old input form gets a deprecation window; the display is not contract; the Float
 part touches the soundness envelope through NaN and is fixed here at design level only.
@@ -80,9 +79,9 @@ lifts to `Constant<Range>` like the other leaf literals, so plugin resolvers
 ([ADR-13](13-typenode-resolver-plugin.md)) may consume it.
 
 **WD3 — The deprecated alias.** `int<a, b>` remains accepted by the grammar for one deprecation
-window and is never printed again. The warning-window step of ADR-50 WD7 is a
-`dynamic.rbs-extended.deprecated-form` info diagnostic (follow-up); removal rides the next
-compatibility break. Diagnostic text is non-contract (ADR-50 § Decision 3), so the display change
+window and is never printed again. The warning-window step of ADR-50 WD7 is the
+`dynamic.rbs-extended.deprecated-form` info diagnostic, one row per annotation naming the
+`Integer[a..b]` spelling to write; removal rides the next compatibility break. Diagnostic text is non-contract (ADR-50 § Decision 3), so the display change
 ships in a minor; a message-mode baseline that matched `int<` is regenerated.
 
 **WD4 — `Float[R]` (slice 2, design).** A `Type::FloatRange` carrier holds two doubles (±`Float::INFINITY`

@@ -16,7 +16,7 @@ module Rigor
       # Each rule mirrors Ruby's actual iteration semantics:
       #
       # - `n.times { |i| … }` yields `i ∈ [0, n-1]` when `n > 0`, nothing otherwise. The block-param type is
-      #   therefore `int<0, n-1>` for a `Constant<Integer>` receiver, `int<0, upper-1>` for a finite
+      #   therefore `Integer[0..n-1]` for a `Constant<Integer>` receiver, `Integer[0..upper-1]` for a finite
       #   `IntegerRange`, and `non_negative_int` for any unbounded-above shape.
       # - `a.upto(b) { |i| … }` yields `i ∈ [a, b]` when `a <= b`. Lower bound from the receiver, upper
       #   bound from the argument.

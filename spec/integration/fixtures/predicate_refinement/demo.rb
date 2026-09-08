@@ -79,10 +79,10 @@ assert_type("decimal-int-string", d.upcase)
 # `#to_i` parses to a plain (possibly signed) Integer, NOT
 # non-negative-int: the decimal-int-string predicate `/\A-?\d+\z/`
 # admits a leading sign, so a `"-7"` inhabitant yields `-7`. The
-# carrier is the full `int` range (`universal_int`), keeping the
+# carrier is the universal range (`universal_int`, displayed as `Integer`), keeping the
 # narrowing sound while still handing downstream a range to refine.
 di = d.to_i
-assert_type("int", di)
+assert_type("Integer", di)
 
 o = user.octal_mode
 assert_type("octal-int-string", o)

@@ -4,21 +4,21 @@ locals:
   acc: Array[Integer]
   b: Integer
   c: Integer
-  counter: int<2, max>
+  counter: Integer[2..]
   d: Integer
   fresh: Integer?
   g: Dynamic[top]
-  i: int<3, max>
-  j: int<3, max>
-  k: int<3, max>
-  m: int<3, max>
-  "n": int<5, max>
+  i: Integer[3..]
+  j: Integer[3..]
+  k: Integer[3..]
+  m: Integer[3..]
+  "n": Integer[5..]
   p: Integer
-  q: int<3, max>
+  q: Integer[3..]
   total: Integer
 assertions:
   '1': Integer
-  '2': int<3, max>
+  '2': Integer[3..]
   '3': Integer
   '4': Integer
   '5': Integer

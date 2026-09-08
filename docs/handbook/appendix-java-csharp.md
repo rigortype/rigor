@@ -292,7 +292,7 @@ class refinement carriers, produced automatically by narrowing.
 | --- | --- | --- |
 | `non-empty-string` | a `NonEmptyString` value class wrapping validation | Rigor produces it from `unless s.empty?`, no wrapper type. |
 | `positive-int` | a `PositiveInt` value object, or a runtime guard | Rigor narrows from `n > 0`. |
-| `int<1, 9>` | an `enum` of nine constants, or a range check | Rigor's range carrier handles arbitrary bounds without enumerating them. |
+| `Integer[1..9]` | an `enum` of nine constants, or a range check | Rigor's range carrier handles arbitrary bounds without enumerating them. |
 | `numeric-string` | `string` + `int.TryParse` discipline | No type-level analogue in either language. |
 | `non-empty-array[T]` | a non-empty-collection value class | Rigor produces it from `unless arr.empty?`. |
 
@@ -379,7 +379,7 @@ longer than you might expect, because neither has literal types:
   `Constant<"FOO">`, not `String`. Rigor catalogues which
   built-in methods are pure and folds through them.
 - **First-class refinements.** `non-empty-string`, `positive-int`,
-  `int<1, 9>`, `numeric-string` — invariants on ordinary types,
+  `Integer[1..9]`, `numeric-string` — invariants on ordinary types,
   no value-class wrapper.
 - **Structural facets without a declaration.** A Ruby object that
   has the right methods satisfies an RBS `interface` (a

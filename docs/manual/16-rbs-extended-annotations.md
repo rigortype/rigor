@@ -122,7 +122,9 @@ The right-hand side of `return:`, `param:`, `assert*`, and
 
 Refinement payloads support the parameterised forms
 `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`,
-and the bounded-integer form `int<min, max>`. Type-argument
+and the bounded-integer form `Integer[1..10]`, written with a
+Ruby range literal (`1...10`, `1..`, `..10`; the PHPStan-style
+`int<1, 10>` still parses but is deprecated). Type-argument
 positions also accept Symbol / String literal tokens and unions
 of them — `pick_of[T, :name | :email]`,
 `Pick[T, "name" | "email"]` — each lifted to a `Constant<value>`.

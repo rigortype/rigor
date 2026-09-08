@@ -35,6 +35,6 @@ assert_type("bool", parity > 2)
 # result is an Integer, the analyzer widens to the bounding
 # `IntegerRange`. Here `[1..5].sample + [10, 20, 30, 40, 50].sample`
 # has 5 × 5 = 25 distinct sums (well over the cap), so the
-# analyzer surfaces `int<11, 55>` instead of giving up.
+# analyzer surfaces `Integer[11..55]` instead of giving up.
 spread = [1, 2, 3, 4, 5].sample + [10, 20, 30, 40, 50].sample
-assert_type("int<11, 55>", spread)
+assert_type("Integer[11..55]", spread)

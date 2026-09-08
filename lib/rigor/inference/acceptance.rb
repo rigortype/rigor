@@ -538,7 +538,7 @@ module Rigor
         # IntegerRange[a..b] accepts:
         # - Constant[n] where n is an Integer covered by [a..b];
         # - IntegerRange[c..d] where [c..d] ⊆ [a..b];
-        # - Nominal[Integer] only when self is the universal range (`int<min, max>`), since otherwise an
+        # - Nominal[Integer] only when self is the universal range (`Integer[min..max]`), since otherwise an
         #   arbitrary Integer could fall outside the bound.
         # Anything else is rejected.
         def accepts_integer_range(self_type, other_type, mode)

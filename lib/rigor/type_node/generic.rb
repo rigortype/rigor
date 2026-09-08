@@ -48,7 +48,7 @@ module Rigor
       # stays additive — every earlier-shape Generic remains valid.
       def valid_arg?(arg)
         arg.is_a?(Identifier) || arg.is_a?(Generic) || arg.is_a?(IntegerLiteral) ||
-          arg.is_a?(SymbolLiteral) || arg.is_a?(StringLiteral) ||
+          arg.is_a?(SymbolLiteral) || arg.is_a?(StringLiteral) || arg.is_a?(RangeLiteral) ||
           arg.is_a?(IndexedAccess) || arg.is_a?(Union)
       end
     end

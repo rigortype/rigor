@@ -11,6 +11,7 @@ end
 
 require_relative "type_node/identifier"
 require_relative "type_node/integer_literal"
+require_relative "type_node/range_literal"
 require_relative "type_node/symbol_literal"
 require_relative "type_node/string_literal"
 require_relative "type_node/generic"

@@ -506,6 +506,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   TYPE_NODE_INTEGER_LITERAL_INSTANCE = %w[value()].freeze
 
+  TYPE_NODE_RANGE_LITERAL_INSTANCE = %w[value()].freeze
+
   TYPE_NODE_SYMBOL_LITERAL_INSTANCE = %w[value()].freeze
 
   TYPE_NODE_STRING_LITERAL_INSTANCE = %w[value()].freeze
@@ -541,6 +543,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::TypeNode::Identifier
     Rigor::TypeNode::Generic
     Rigor::TypeNode::IntegerLiteral
+    Rigor::TypeNode::RangeLiteral
     Rigor::TypeNode::SymbolLiteral
     Rigor::TypeNode::StringLiteral
     Rigor::TypeNode::IndexedAccess
@@ -830,6 +833,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-13 slice-3 integer-literal AST surface" do
       expect(instance_signatures(Rigor::TypeNode::IntegerLiteral)).to eq(
         PublicApiDriftSnapshots::TYPE_NODE_INTEGER_LITERAL_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::RangeLiteral" do
+    it "exposes the expected ADR-109 range-literal AST surface" do
+      expect(instance_signatures(Rigor::TypeNode::RangeLiteral)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_RANGE_LITERAL_INSTANCE
       )
     end
   end

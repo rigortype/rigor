@@ -224,7 +224,7 @@ end
 | --- | --- | --- |
 | `positive-int` | `when n > 0` | Rigor names and carries the result. |
 | `non-empty-string` | `when s != ""` / `byte_size(s) > 0` | Rigor produces it from `unless s.empty?`. |
-| `int<1, 9>` | `when x in 1..9` | Rigor's range carrier handles arbitrary bounds. |
+| `Integer[1..9]` | `when x in 1..9` | Rigor's range carrier handles arbitrary bounds. |
 | `non-empty-array[T]` | `when xs != []` | Rigor produces it from `unless arr.empty?`. |
 | `numeric-string` | `Integer.parse/1` + match | No direct Elixir analogue. |
 
@@ -283,7 +283,7 @@ The other direction:
   and Elixir's types do not fold call results to singleton
   types this way.
 - **Named refinement carriers.** `non-empty-string`,
-  `positive-int`, `int<1, 9>`, `numeric-string` — first-class,
+  `positive-int`, `Integer[1..9]`, `numeric-string` — first-class,
   named, and flowed onward from a guard.
 - **Inferred object shapes and capability roles.** Beyond
   behaviours and protocols, Rigor infers anonymous structural

@@ -105,7 +105,7 @@ choices.
   conditional / mapped types do not have a Rigor analogue.
 - [**Coming from PHPStan**](appendix-phpstan.md) — the
   closest peer in spirit. Identical refinement vocabulary
-  (`non-empty-string`, `int<min, max>`, `numeric-string`,
+  (`non-empty-string`, `Integer[min..max]`, `numeric-string`,
   `literal-string`), `@phpstan-assert*` ↔ `RBS::Extended`,
   Type-Specifying Extensions ↔ plugins, baseline diffing.
 - [**Coming from mypy / Pyright**](appendix-mypy.md) — gradual

@@ -107,7 +107,7 @@ matched member:
 ```ruby
 case n
 when 0      then :zero        # Constant<0>
-when 1..9   then :small       # int<1, 9>
+when 1..9   then :small       # Integer[1..9]
 when 10     then :ten         # Constant<10>
 else             :large       # everything else
 end
@@ -153,7 +153,7 @@ end
 ```
 
 The `is_a?` narrowed `x` to `Integer`, then the integer
-comparison narrowed it further to `int<1, max>`.
+comparison narrowed it further to `Integer[1..]`.
 
 ## Integer comparisons
 
@@ -165,7 +165,7 @@ integer ranges:
 def safe_index(arr, n)
   return :empty if arr.empty?
   return :out_of_range if n < 0 || n >= arr.size
-  # n: int<0, arr.size - 1>  (in practice: int<0, max>
+  # n: Integer[0..arr.size - 1]  (in practice: Integer[0..]
   # tightened against `n >= arr.size`)
   arr.fetch(n)
 end
@@ -176,7 +176,7 @@ Range comparisons compose with literals:
 ```ruby
 n = some_input
 if n.between?(1, 9)
-  # n: int<1, 9>
+  # n: Integer[1..9]
 end
 ```
 

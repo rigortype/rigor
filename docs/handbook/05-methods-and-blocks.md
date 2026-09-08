@@ -21,7 +21,7 @@ first one that produces a result:
 2. **Shape dispatch.** The receiver carries a `Tuple` /
    `HashShape` / `IntegerRange` / refinement and the method
    has a per-shape rule. `Tuple[A, B, C].size` →
-   `Constant<3>`; `int<0, max>.zero?` → `Constant<true> |
+   `Constant<3>`; `Integer[0..].zero?` → `Constant<true> |
    Constant<false>`.
 3. **RBS dispatch.** The class has an RBS sig for the method.
    Argument types are checked against the parameter contract

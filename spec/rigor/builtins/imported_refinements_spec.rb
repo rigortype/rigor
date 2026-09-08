@@ -122,7 +122,53 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
                ))
     end
 
-    it "parses int<min, max> with signed integer bounds" do
+    # ADR-109 — the range refinement is spelled with the Ruby range literal `Range#cover?` reads.
+    it "parses Integer[a..b] with signed integer endpoints" do
+      expect(described_class.parse("Integer[5..10]"))
+        .to eq(Rigor::Type::Combinator.integer_range(5, 10))
+      expect(described_class.parse("Integer[-3..7]"))
+        .to eq(Rigor::Type::Combinator.integer_range(-3, 7))
+      expect(described_class.parse("Integer[ 1 .. 10 ]"))
+        .to eq(Rigor::Type::Combinator.integer_range(1, 10))
+    end
+
+    it "canonicalises an exclusive end to the closed range" do
+      expect(described_class.parse("Integer[1...10]"))
+        .to eq(Rigor::Type::Combinator.integer_range(1, 9))
+      expect(described_class.parse("Integer[...10]"))
+        .to eq(Rigor::Type::Combinator.integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 9))
+    end
+
+    it "reads endless, beginless, and nil endpoints as the carrier's infinities" do
+      expect(described_class.parse("Integer[1..]")).to eq(Rigor::Type::Combinator.positive_int)
+      expect(described_class.parse("Integer[..0]")).to eq(Rigor::Type::Combinator.non_positive_int)
+      expect(described_class.parse("Integer[nil..nil]")).to eq(Rigor::Type::Combinator.universal_int)
+      expect(described_class.parse("Integer[nil..5]"))
+        .to eq(Rigor::Type::Combinator.integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 5))
+    end
+
+    it "declines an empty range instead of resolving it to bot or a Nominal" do
+      expect(described_class.parse("Integer[5..1]")).to be_nil
+      expect(described_class.parse("Integer[1...1]")).to be_nil
+    end
+
+    it "declines a range head with the wrong arity and a bare `..`" do
+      expect(described_class.parse("Integer[1..10, 3]")).to be_nil
+      expect(described_class.parse("Integer[..]")).to be_nil
+    end
+
+    it "keeps non-range Integer type args on the RBS Nominal path" do
+      expect(described_class.parse("Integer[Foo]"))
+        .to eq(Rigor::Type::Combinator.nominal_of("Integer", type_args: [Rigor::Type::Combinator.nominal_of("Foo")]))
+    end
+
+    it "lifts a range literal under any other head to a Constant<Range>" do
+      expect(described_class.parse("non-empty-array[Integer[1..3]]"))
+        .to eq(Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.integer_range(1, 3)))
+      expect(described_class.parse("int_mask[1..3]")).to be_nil # parses as Constant<Range>; the builder declines it
+    end
+
+    it "still parses the deprecated int<min, max> alias (ADR-109 WD3)" do
       expect(described_class.parse("int<5, 10>"))
         .to eq(Rigor::Type::Combinator.integer_range(5, 10))
       expect(described_class.parse("int<-3, 7>"))

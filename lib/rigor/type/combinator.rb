@@ -95,7 +95,7 @@ module Rigor
           # rather than flooring to `Dynamic[top]` (ADR-56).
           widen_value_pinned(type.base)
         when IntegerRange
-          # `int<1, 6>` is likewise a value-narrowed `Integer` (it erases to `Integer` in RBS); widen it
+          # `Integer[1..6]` is likewise a value-narrowed `Integer` (it erases to `Integer` in RBS); widen it
           # so a bounded-int accumulator converges (ADR-56).
           nominal_of("Integer")
         when Union

@@ -31,11 +31,12 @@ module Rigor
     # - **No-argument refinement names** (`non-empty-string`, `non-zero-int`,
     #   `lowercase-string`, …) live in `REGISTRY` and resolve through `lookup(name)`.
     # - **Parameterised refinement payloads** (`non-empty-array[Integer]`,
-    #   `non-empty-hash[Symbol, Integer]`, `int<5, 10>`) are accepted by `parse(payload)`. The
-    #   full grammar is documented on `Parser`. The two surfaces share `REGISTRY` for the
-    #   no-arg head names; the parameterised head names live in `PARAMETERISED_TYPE_BUILDERS`
-    #   (square-bracket form, type args) and `PARAMETERISED_INT_BUILDERS` (angle-bracket form,
-    #   integer bounds).
+    #   `non-empty-hash[Symbol, Integer]`, `Integer[5..10]`, and the deprecated `int<5, 10>`)
+    #   are accepted by `parse(payload)`. The full grammar is documented on `Parser`. The two
+    #   surfaces share `REGISTRY` for the no-arg head names; the parameterised head names live
+    #   in `PARAMETERISED_TYPE_BUILDERS` (square-bracket form, type args), `RANGE_HEAD_BUILDERS`
+    #   (a numeric class over a range literal) and `PARAMETERISED_INT_BUILDERS` (the deprecated
+    #   angle-bracket form, integer bounds).
     module ImportedRefinements
       REGISTRY = {
         "non-empty-string" => -> { Type::Combinator.non_empty_string },
@@ -139,7 +140,27 @@ module Rigor
       }.freeze
       private_constant :PARAMETERISED_TYPE_BUILDERS
 
-      # `name<min, max>` — integer-bound parameterised refinements. Each builder takes an
+      # `Class[range]` — a numeric class head bounded by a Ruby range literal (ADR-109). The
+      # builder receives the `Range` value and returns the carrier, or `nil` when the range is
+      # empty or its endpoints are not literals of the head class; `nil` surfaces as the ordinary
+      # unresolved-payload diagnostic. `Float` joins this table with the `FloatRange` carrier.
+      RANGE_HEAD_BUILDERS = {
+        "Integer" => lambda { |range|
+          lo = range.begin
+          hi = range.end
+          return nil unless (lo.nil? || lo.is_a?(Integer)) && (hi.nil? || hi.is_a?(Integer))
+
+          # `1...10` is the set `1..9`: Integer ranges canonicalise to the closed form.
+          hi -= 1 if range.exclude_end? && hi.is_a?(Integer)
+          return nil if lo.is_a?(Integer) && hi.is_a?(Integer) && lo > hi
+
+          Type::Combinator.integer_range(lo || Type::IntegerRange::NEG_INFINITY, hi || Type::IntegerRange::POS_INFINITY)
+        }
+      }.freeze
+      private_constant :RANGE_HEAD_BUILDERS
+
+      # `name<min, max>` — the PHPStan-style integer-bound form ADR-109 deprecates: still parsed so
+      # signatures written against v0.1–v0.3 keep resolving, never displayed. Each builder takes an
       # `Array<Integer>` and returns a `Rigor::Type` (or `nil`). Bounds are signed integer
       # literals. A reversed pair (`min` > `max`) is declined as `nil` like every other shape
       # mismatch, so the caller surfaces `dynamic.rbs-extended.unresolved` at the annotation;
@@ -204,6 +225,10 @@ module Rigor
         PARAMETERISED_INT_BUILDERS[name]
       end
 
+      def range_head_builder(name)
+        RANGE_HEAD_BUILDERS[name]
+      end
+
       def known?(name)
         REGISTRY.key?(name.to_s) ||
           PARAMETERISED_TYPE_BUILDERS.key?(name.to_s) ||
@@ -222,8 +247,10 @@ module Rigor
       #   parametric  := simple_name '[' type_arg_list ']'
       #                | simple_name '<' int_bound_list '>'
       #   type_arg_list := type_arg (',' type_arg)*
-      #   type_arg    := type | class_name
+      #   type_arg    := range_literal | type | class_name
       #   class_name  := /[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*/
+      #   range_literal := endpoint? ('..' | '...') endpoint?     (at least one side written)
+      #   endpoint    := signed_int | 'nil'
       #   int_bound_list := signed_int (',' signed_int)*
       #   signed_int  := /-?\d+/
       #
@@ -277,7 +304,13 @@ module Rigor
         # delimiter.
         SYMBOL_LITERAL = /:(?<value>[a-zA-Z_][a-zA-Z0-9_]*[?!=]?)/
         STRING_LITERAL = /"(?<value>[^"\\]*)"/
-        private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT, :SYMBOL_LITERAL, :STRING_LITERAL
+        # ADR-109 — a Ruby range literal at type-arg position, `1..10` / `1...10` / `1..` / `..10` /
+        # `nil..nil`. Tried before `SIGNED_INT` so the leading integer is not consumed on its own; the
+        # operator is mandatory, so a bare integer never matches. `..` with nothing on either side is
+        # not Ruby and is rejected after the match.
+        RANGE_LITERAL = /(?<lo>-?\d+|nil)?\s*(?<op>\.\.\.?)\s*(?<hi>-?\d+|nil)?/
+        private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT, :SYMBOL_LITERAL, :STRING_LITERAL,
+                         :RANGE_LITERAL
 
         def parse_type_ast
           if (class_name = @scanner.scan(CLASS_NAME))
@@ -387,6 +420,8 @@ module Rigor
         def parse_single_type_arg_ast
           if (class_name = @scanner.scan(CLASS_NAME))
             parse_class_arg_tail_ast(class_name)
+          elsif (range = scan_range_literal)
+            range
           elsif (literal = @scanner.scan(SIGNED_INT))
             TypeNode::IntegerLiteral.new(value: Integer(literal))
           elsif @scanner.scan(SYMBOL_LITERAL)
@@ -422,6 +457,27 @@ module Rigor
           return nil if literal.nil?
 
           Integer(literal)
+        end
+
+        # Returns a {TypeNode::RangeLiteral} when the scanner sits on a Ruby range literal, `nil`
+        # (without consuming input) otherwise. `nil` and an absent endpoint both become Ruby's
+        # `nil` endpoint; the two spellings denote the same range.
+        def scan_range_literal
+          return nil unless @scanner.scan(RANGE_LITERAL)
+
+          lo = @scanner[:lo]
+          hi = @scanner[:hi]
+          return nil if lo.nil? && hi.nil?
+
+          TypeNode::RangeLiteral.new(
+            value: Range.new(range_endpoint(lo), range_endpoint(hi), @scanner[:op] == "...")
+          )
+        end
+
+        def range_endpoint(token)
+          return nil if token.nil? || token == "nil"
+
+          Integer(token)
         end
 
         def skip_ws
@@ -466,7 +522,7 @@ module Rigor
         # `StringLiteral`) carries a Ruby value that lifts directly to a `Constant<value>`
         # carrier through the same helper.
         LITERAL_AST_NODES = [
-          TypeNode::IntegerLiteral, TypeNode::SymbolLiteral, TypeNode::StringLiteral
+          TypeNode::IntegerLiteral, TypeNode::SymbolLiteral, TypeNode::StringLiteral, TypeNode::RangeLiteral
         ].freeze
         private_constant :LITERAL_AST_NODES
 
@@ -522,6 +578,11 @@ module Rigor
         end
 
         def resolve_generic(node)
+          # ADR-109 — `Integer[1..10]`. A range literal under a numeric head is that head's range
+          # refinement or nothing: an empty or malformed range declines here rather than falling
+          # through to a `Nominal[Integer, [Constant<Range>]]` the RBS fallback would otherwise build.
+          return resolve_range_head(node) if range_headed?(node)
+
           builtin = try_builtin_parametric(node)
           return builtin unless builtin.nil?
 
@@ -548,6 +609,19 @@ module Rigor
 
         def try_builtin_parametric(node)
           try_parametric_type_builder(node) || try_parametric_int_builder(node)
+        end
+
+        def range_headed?(node)
+          !ImportedRefinements.range_head_builder(node.head).nil? &&
+            node.args.any?(TypeNode::RangeLiteral)
+        end
+
+        # Exactly one range literal under the head; `Integer[1..10, 3]` is not a range refinement.
+        # Anything else under the same head (`Integer[Foo]`) keeps its pre-ADR-109 path.
+        def resolve_range_head(node)
+          return nil unless node.args.size == 1
+
+          ImportedRefinements.range_head_builder(node.head).call(node.args.first.value)
         end
 
         def try_parametric_type_builder(node)

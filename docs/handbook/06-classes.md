@@ -113,11 +113,11 @@ class Counter
   end
 
   def bump
-    @count += 1   # @count rebound to int<1, max>
+    @count += 1   # @count rebound to Integer[1..]
   end
 
   def value
-    @count        # int<0, max>  (union of seen writes)
+    @count        # Integer[0..]  (union of seen writes)
   end
 end
 ```

@@ -285,11 +285,11 @@ module Rigor
       #   Walk the current type's union members, keep each part disjoint from `base`, and add
       #   the removed-value Constant once when any current member covers it. `assert s is
       #   ~non-empty-string` over `s: String | nil` narrows to `Constant[""] | NilClass`.
-      # - `IntegerRange[a, b]` (v0.0.5+ slice). Complement is the two open halves `int<min,
-      #   a-1>` and `int<b+1, max>`, each intersected with the integer-domain parts of
+      # - `IntegerRange[a, b]` (v0.0.5+ slice). Complement is the two open halves
+      #   `Integer[..a-1]` and `Integer[b+1..]`, each intersected with the integer-domain parts of
       #   `current_type`. Non-integer parts (nil, String, …) of a Union receiver survive
-      #   unchanged. `assert n is ~int<5, 10>` over `n: Integer | nil` narrows to `int<min, 4> |
-      #   int<11, max> | NilClass`.
+      #   unchanged. `assert n is ~Integer[5..10]` over `n: Integer | nil` narrows to `Integer[..4] |
+      #   Integer[11..] | NilClass`.
       # - `Type::Intersection[M1, M2, …]` (v0.0.5+ slice). De Morgan: `D \ (M1 ∩ M2) = (D \ M1)
       #   ∪ (D \ M2)`. Each member's complement is computed independently within
       #   `current_type` and the results are unioned. Members the algebra cannot complement
@@ -474,7 +474,7 @@ module Rigor
         end
 
         # Complement of an `IntegerRange[a, b]` within `current_type`. Splits the range
-        # complement into the two open halves `int<min, a-1>` and `int<b+1, max>` (skipping a
+        # complement into the two open halves `Integer[..a-1]` and `Integer[b+1..]` (skipping a
         # half when its bound is infinity), then intersects each half with the integer-domain
         # parts of `current_type`. Non-integer parts of a Union receiver (nil, String, …)
         # survive unchanged.
@@ -499,8 +499,8 @@ module Rigor
           Type::Combinator.union(*survivors)
         end
 
-        # Returns the two open halves of an IntegerRange's complement: the left half `int<-∞,
-        # a-1>` (when `a` is finite) and the right half `int<b+1, ∞>` (when `b` is finite).
+        # Returns the two open halves of an IntegerRange's complement: the left half
+        # `Integer[..a-1]` (when `a` is finite) and the right half `Integer[b+1..]` (when `b` is finite).
         # Universal ranges (both bounds infinite) yield an empty array — the complement is
         # empty.
         def integer_range_complement_halves(range)

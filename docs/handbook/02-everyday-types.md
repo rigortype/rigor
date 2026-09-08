@@ -25,7 +25,7 @@ n = ARGV.size
 ```
 
 A vanilla checker says: `n: Integer`. Rigor says:
-`n: int<0, max>` (a non-negative integer — `Array#size` cannot
+`n: Integer[0..]` (a non-negative integer — `Array#size` cannot
 return a negative count).
 
 The reason this matters: most diagnostics Rigor wants to fire
@@ -40,7 +40,7 @@ or narrow (`Constant<3>`, `non-empty-string`). The rest of
 this chapter is the carrier zoo.
 
 One note on notation before the zoo: angle brackets hold a
-concrete value or bound — `Constant<3>`, `int<0, max>` —
+concrete value or bound — `Constant<3>`, `Integer[0..]` —
 while square brackets hold type parameters, exactly as in RBS
 — `Nominal[String]`, `Hash[K, V]`, `Dynamic[top]`. A type
 parameter names the type of a *part*: `Hash[K, V]` is a Hash
@@ -124,27 +124,30 @@ nominal carrier or `Dynamic[top]`.
 
 Some integer-valued expressions produce a known range without
 producing a single literal value. Rigor describes those with
-`Type::IntegerRange`, displayed as `int<min, max>`:
+`Type::IntegerRange`, displayed as `Integer[…]` around the Ruby
+range literal that covers the values, `Integer[1..10]`:
 
 ```ruby
-n = ARGV.size               #=> dump_type: int<0, max>
-m = n + 1                   #=> dump_type: int<1, max>
-double = n * 2              #=> dump_type: int<0, max>
+n = ARGV.size               #=> dump_type: Integer[0..]
+m = n + 1                   #=> dump_type: Integer[1..]
+double = n * 2              #=> dump_type: Integer[0..]
 ```
 
-`max` here means "positive infinity" — the upper bound is
-unbounded; `min`, which appears in the table below, is its
-mirror, "negative infinity." Multiplication preserves the
-floor, so `n * 2` stays `int<0, max>`.
+The literal means what it means in Ruby: `Integer[0..]` is
+every integer `(0..).cover?` accepts, an endless range is
+unbounded above, a beginless one (`Integer[..-1]`) is unbounded
+below, and `Integer[1...10]` is written back as `Integer[1..9]`
+because for integers the two are the same set. Multiplication
+preserves the floor, so `n * 2` stays `Integer[0..]`.
 
 A handful of common ranges have shorter names:
 
 | Spelling | Meaning |
 | --- | --- |
-| `positive-int` | `int<1, max>` |
-| `non-negative-int` | `int<0, max>` |
-| `negative-int` | `int<min, -1>` |
-| `non-positive-int` | `int<min, 0>` |
+| `positive-int` | `Integer[1..]` |
+| `non-negative-int` | `Integer[0..]` |
+| `negative-int` | `Integer[..-1]` |
+| `non-positive-int` | `Integer[..0]` |
 
 `Array#size`, `Array#length`, `Hash#size`, `String#size`, …
 all carry `non-negative-int`. `Array#count` does too. Adding

@@ -722,9 +722,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
-  # IntegerRange (positive-int, non-negative-int, int<a, b>, …) folding. Compare to PHPStan's `int<min, max>` family.
-  # The carrier never widens beyond what the inputs imply, so `int<5, 10> + int<1, 2>` is exactly `int<6, 12>` rather
-  # than the looser `Nominal[Integer]`.
+  # IntegerRange (positive-int, non-negative-int, Integer[a..b], …) folding. Compare to PHPStan's `int<min, max>`
+  # family. The carrier never widens beyond what the inputs imply, so `Integer[5..10] + Integer[1..2]` is exactly
+  # `Integer[6..12]` rather than the looser `Nominal[Integer]`.
   describe "integer range fold" do
     def positive_int = Rigor::Type::Combinator.positive_int
     def non_negative_int = Rigor::Type::Combinator.non_negative_int
@@ -766,8 +766,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "folds a Union mixing Constant<Integer> and IntegerRange members via the bounding interval" do
-        # `1 | int<1, 6>` (e.g. an accumulator's running fixpoint assumption) reduces to the bounding
-        # interval int<1, 6> rather than bailing to Dynamic — `numeric_set_of`'s union_integer_bounds path.
+        # `1 | Integer[1..6]` (e.g. an accumulator's running fixpoint assumption) reduces to the bounding
+        # interval Integer[1..6] rather than bailing to Dynamic — `numeric_set_of`'s union_integer_bounds path.
         mixed = Rigor::Type::Combinator.union(constant_of(1), integer_range(1, 6))
         type = fold_types(mixed, :+, [constant_of(1)])
         expect(type).to eq(integer_range(2, 7))
@@ -776,7 +776,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
     describe "binary comparison" do
       it "is always-true when ranges are entirely ordered" do
-        # int<1, 5> < int<6, 10> → all true
+        # Integer[1..5] < Integer[6..10] → all true
         expect(
           fold_types(integer_range(1, 5), :<, [integer_range(6, 10)])
         ).to eq(constant_of(true))
@@ -836,7 +836,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         expect(fold_types(positive_int, :to_int)).to eq(positive_int)
       end
 
-      it "int<3, 7>.to_i → int<3, 7> (finite range preserved)" do
+      it "Integer[3..7].to_i → Integer[3..7] (finite range preserved)" do
         r = integer_range(3, 7)
         expect(fold_types(r, :to_i)).to eq(r)
       end
@@ -871,7 +871,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
     describe "binary multiplication" do
       it "multiplies two finite ranges via 4-corner min/max" do
-        # int<-2, 3> * int<1, 4> → corners {-2, -8, 3, 12} → int<-8, 12>
+        # Integer[-2..3] * Integer[1..4] → corners {-2, -8, 3, 12} → Integer[-8..12]
         type = fold_types(integer_range(-2, 3), :*, [integer_range(1, 4)])
         expect(type).to eq(integer_range(-8, 12))
       end
@@ -888,7 +888,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "extends to +∞ when a positive endpoint hits +∞" do
-        # positive_int × int<2, 3> → int<2, +∞>
+        # positive_int × Integer[2..3] → Integer[2..]
         type = fold_types(positive_int, :*, [integer_range(2, 3)])
         expect(type).to eq(integer_range(2, Rigor::Type::IntegerRange::POS_INFINITY))
       end
@@ -896,7 +896,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
     describe "binary integer division" do
       it "divides two non-zero ranges via corner quotients" do
-        # int<10, 20> / int<2, 5> → corners {2, 5, 4, 10} → int<2, 10>
+        # Integer[10..20] / Integer[2..5] → corners {2, 5, 4, 10} → Integer[2..10]
         type = fold_types(integer_range(10, 20), :/, [integer_range(2, 5)])
         expect(type).to eq(integer_range(2, 10))
       end
@@ -907,19 +907,19 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "narrows positive_int / Constant[2] to non_negative_int" do
-        # 1/2 = 0, ∞/2 = ∞ → int<0, +∞> = non-negative-int
+        # 1/2 = 0, ∞/2 = ∞ → Integer[0..] = non-negative-int
         type = fold_types(positive_int, :/, [constant_of(2)])
         expect(type).to eq(non_negative_int)
       end
     end
 
     describe "binary modulo" do
-      it "narrows `range % positive Constant` to int<0, n-1>" do
+      it "narrows `range % positive Constant` to Integer[0..n-1]" do
         type = fold_types(integer_range(-100, 100), :%, [constant_of(5)])
         expect(type).to eq(integer_range(0, 4))
       end
 
-      it "narrows `range % negative Constant` to int<n+1, 0>" do
+      it "narrows `range % negative Constant` to Integer[n+1..0]" do
         type = fold_types(integer_range(-100, 100), :%, [constant_of(-3)])
         expect(type).to eq(integer_range(-2, 0))
       end
@@ -978,14 +978,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     describe "bit_length" do
-      it "narrows finite ranges to int<0, max_bit_length>" do
+      it "narrows finite ranges to Integer[0..max_bit_length]" do
         # 0..255 → bit_length 0..8
         type = fold_types(integer_range(0, 255), :bit_length)
         expect(type).to eq(integer_range(0, 8))
       end
 
       it "considers magnitude on the negative side" do
-        # int<-256, 100> → max bit_length is bit_length(256)=9 (for negatives, bit_length(-256)=8;
+        # Integer[-256..100] → max bit_length is bit_length(256)=9 (for negatives, bit_length(-256)=8;
         # but we use [|min|, |max|].max .bit_length per Ruby semantics here,
         # which gives max(bit_length(-256), bit_length(100)) = max(8, 7) = 8.
         type = fold_types(integer_range(-256, 100), :bit_length)
@@ -1201,29 +1201,29 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     describe "IntegerRange receiver — v0.0.6 ternary fold" do
       def integer_range(min, max) = Rigor::Type::Combinator.integer_range(min, max)
 
-      it "folds int<3, 7>.between?(0, 10) to Constant[true] when fully inside" do
+      it "folds Integer[3..7].between?(0, 10) to Constant[true] when fully inside" do
         result = fold_types(integer_range(3, 7), :between?, [constant_of(0), constant_of(10)])
         expect(result).to eq(constant_of(true))
       end
 
-      it "folds int<20, 30>.between?(0, 10) to Constant[false] when fully outside" do
+      it "folds Integer[20..30].between?(0, 10) to Constant[false] when fully outside" do
         result = fold_types(integer_range(20, 30), :between?, [constant_of(0), constant_of(10)])
         expect(result).to eq(constant_of(false))
       end
 
-      it "widens int<3, 15>.between?(0, 10) to bool when partially overlapping" do
+      it "widens Integer[3..15].between?(0, 10) to bool when partially overlapping" do
         result = fold_types(integer_range(3, 15), :between?, [constant_of(0), constant_of(10)])
         expect(result).to eq(
           Rigor::Type::Combinator.union(constant_of(true), constant_of(false))
         )
       end
 
-      it "folds int<3, 7>.clamp(0, 10) to the same range (bracket contains range)" do
+      it "folds Integer[3..7].clamp(0, 10) to the same range (bracket contains range)" do
         result = fold_types(integer_range(3, 7), :clamp, [constant_of(0), constant_of(10)])
         expect(result).to eq(integer_range(3, 7))
       end
 
-      it "folds int<3, 7>.clamp(4, 6) to int<4, 6> (intersection)" do
+      it "folds Integer[3..7].clamp(4, 6) to Integer[4..6] (intersection)" do
         result = fold_types(integer_range(3, 7), :clamp, [constant_of(4), constant_of(6)])
         expect(result).to eq(integer_range(4, 6))
       end
@@ -1234,8 +1234,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "declines clamp when bracket excludes the range entirely" do
-        # int<10, 20>.clamp(0, 5) — the bracket is fully below the range, so every receiver value snaps to 5; the fold
-        # declines so the RBS tier widens rather than the dispatcher inventing the snap point.
+        # Integer[10..20].clamp(0, 5) — the bracket is fully below the range, so every receiver value snaps to 5;
+        # the fold declines so the RBS tier widens rather than the dispatcher inventing the snap point.
         result = fold_types(integer_range(10, 20), :clamp, [constant_of(0), constant_of(5)])
         expect(result).to be_nil
       end

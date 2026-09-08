@@ -7,7 +7,7 @@ include Rigor::Testing
 #
 #   rigor:v1:return: non-empty-array[Integer]
 #   rigor:v1:return: non-empty-hash[Symbol, Integer]
-#   rigor:v1:return: int<5, 10>
+#   rigor:v1:return: Integer[5..10]
 #
 # At call sites, Rigor sees the parameterised carrier rather
 # than the raw RBS-declared collection / Integer return.
@@ -38,4 +38,4 @@ assert_type("non-empty-hash[Symbol, Integer]", attrs)
 assert_type("positive-int", attrs.size)
 
 idx = c.small_index
-assert_type("int<5, 10>", idx)
+assert_type("Integer[5..10]", idx)

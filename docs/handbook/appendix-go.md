@@ -243,7 +243,7 @@ carriers that encode an invariant on the value.
 | --- | --- | --- |
 | `non-empty-string` | runtime `if len(s) == 0` check | Rigor produces it from `unless s.empty?`. |
 | `positive-int` | runtime `if n <= 0` check | Rigor narrows from `n > 0`. |
-| `int<1, 9>` | runtime range check | Rigor's range carrier handles arbitrary bounds. |
+| `Integer[1..9]` | runtime range check | Rigor's range carrier handles arbitrary bounds. |
 | `numeric-string` | `strconv.Atoi` + error check | No type-level analogue in Go. |
 | `non-empty-array[T]` | runtime `len(xs) == 0` check | Rigor produces it from `unless arr.empty?`. |
 
@@ -311,7 +311,7 @@ is deliberately minimal:
 - **Constant folding through method calls.** `"foo".upcase` is
   `Constant<"FOO">`, not `string`.
 - **Refinements.** `non-empty-string`, `positive-int`,
-  `int<1, 9>` — invariants on the value, no runtime check needed
+  `Integer[1..9]` — invariants on the value, no runtime check needed
   to know them statically.
 - **Inferred shapes beyond interfaces.** Rigor infers anonymous
   object shapes and capability roles, not just satisfaction of a

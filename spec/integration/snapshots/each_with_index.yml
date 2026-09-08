@@ -5,5 +5,5 @@ assertions:
   '2': non-negative-int
   '3': "[:a | :b, 1 | 2]"
   '4': non-negative-int
-  '5': int<5, 7>
+  '5': Integer[5..7]
   '6': non-negative-int

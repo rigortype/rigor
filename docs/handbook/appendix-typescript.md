@@ -101,7 +101,7 @@ positive, an array that is provably non-empty.
 | --- | --- | --- |
 | `non-empty-string` | `\`${string}${string}\`` (template literal trick) or branded `NonEmptyString` | Awkward in TS; Rigor produces it from `unless s.empty?` automatically. |
 | `positive-int` | branded `PositiveInt` | TS users tend to skip the brand — Rigor narrows from `n > 0`. |
-| `int<1, 9>` | union of literal types `1 \| 2 \| 3 \| ... \| 9` | Rigor's range carrier handles arbitrary bounds without exploding. |
+| `Integer[1..9]` | union of literal types `1 \| 2 \| 3 \| ... \| 9` | Rigor's range carrier handles arbitrary bounds without exploding. |
 | `numeric-string` | (none useful) | TS has no equivalent; Rigor narrows from regex matches against numeric patterns. |
 | `non-empty-array[T]` | `[T, ...T[]]` (tuple-with-rest) | TS has the encoding but few APIs use it; Rigor produces it from `unless arr.empty?`. |
 

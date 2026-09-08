@@ -19,7 +19,7 @@ specification](../type-specification/README.md), the spec binds.
 | What about types that may or may not match? | Gradual consistency (`~`) | The `Dynamic[T]` carrier and the trinary certainty `yes / no / maybe` |
 | How are user types identified? | Nominal vs structural | **Nominal-first hybrid** — classes by name, plus structural facets (`interface`, `HashShape`, capability roles) |
 | How are generics expressed? | Parametric polymorphism (System F-style, but predicative) | RBS generics `class Array[Elem]`, method generics `def map: [U] () { (Elem) -> U } -> Array[U]` |
-| How is "x is a non-empty string" expressed? | Refinement / predicate subtyping | First-class refinement carriers (`non-empty-string`, `int<min, max>`, …) |
+| How is "x is a non-empty string" expressed? | Refinement / predicate subtyping | First-class refinement carriers (`non-empty-string`, `Integer[min..max]`, …) |
 | How does `if x.is_a?(String)` change `x`'s type? | Occurrence typing / flow-sensitive narrowing | Edge-aware narrowing with trinary certainty |
 | What about side effects? | Effect systems | The engine's effect model (mutation, exception, escape) — internal, not user-visible |
 | Soundness or completeness? | Pick one (or neither) | **Neither in full** — Rigor optimises for no-false-positives, with a robustness-principle bias |
@@ -528,7 +528,7 @@ refinements with reserved names:
 | `non-empty-string` | `s : String, s.size >= 1` | refinement on `String` |
 | `numeric-string` | `s : String, s =~ /\A[+-]?\d+(\.\d+)?\z/` | refinement on `String` |
 | `literal-string` | "provably built from literals" | refinement on `String` |
-| `int<min, max>` | `n : Integer, min <= n <= max` | range carrier |
+| `Integer[min..max]` | `n : Integer, min <= n <= max` | range carrier |
 | `non-zero-int` | `n : Integer, n != 0` | refinement on `Integer` |
 | `positive-int` | `n : Integer, n > 0` | refinement on `Integer` |
 | `non-empty-array[T]` | `arr : Array[T], arr.size >= 1` | refinement on `Array[T]` |
@@ -1491,7 +1491,7 @@ here so you can stop looking:
   and Rigor does not synthesise it.
 - **Full dependent types.** No `Vec[n, T]` with `n : Integer`.
   Type-checking is decidable but inference is not; integer-range
-  refinements (`int<min, max>`) cover the most common practical
+  refinements (`Integer[min..max]`) cover the most common practical
   need without crossing the line.
 - **Row polymorphism as a user-quantifiable axis.** `HashShape`
   carries open-vs-closed semantics internally but does not
@@ -1581,7 +1581,7 @@ they map to the sections of this appendix:
   matching and exhaustiveness."
 - Rondon, Kawaguchi & Jhala. "Liquid Types." *PLDI 2008.* The
   refinement-types-with-SMT framework that informs the
-  `int<min, max>` carrier (Rigor uses a much weaker, decidable
+  `Integer[min..max]` carrier (Rigor uses a much weaker, decidable
   fragment).
 - Lucassen & Gifford. "Polymorphic Effect Systems."
   *POPL 1988.* Origin of effect systems.

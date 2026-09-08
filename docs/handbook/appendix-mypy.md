@@ -71,7 +71,7 @@ features one at a time (`Literal`, `LiteralString`, `TypeIs`,
 | `non-empty-string` | (no built-in; PEP 675's `LiteralString` is closest in spirit but different in semantics) |
 | `literal-string` | `LiteralString` (PEP 675) — provably built from source-code literals. **Direct match.** |
 | `positive-int` | (no built-in; convention is `Annotated[int, Gt(0)]` with third-party validators) |
-| `int<min, max>` | (no built-in; same `Annotated[int, Range(...)]` convention) |
+| `Integer[min..max]` | (no built-in; same `Annotated[int, Range(...)]` convention) |
 | `numeric-string` | (no built-in) |
 | `non-empty-array[T]` | (no built-in; some libraries use `tuple[T, *tuple[T, ...]]`) |
 | `Constant<42>` | `Literal[42]` |
@@ -286,7 +286,7 @@ draws the distinction in full.
   `Hash`.
 - **First-class refinement carriers with narrowing.**
   `non-empty-string`, `positive-int`, `numeric-string`,
-  `int<min, max>` — values restricted by predicate, narrowed
+  `Integer[min..max]` — values restricted by predicate, narrowed
   by the corresponding Ruby predicate methods.
 - **No-false-positives stance.** mypy will warn about dynamic
   code unless `--no-warn-unused-ignores` or `--ignore-missing-imports`

@@ -1,7 +1,7 @@
 ---
 locals:
   k: negative-int | non-negative-int
-  m: Integer | int<0, 5> | nil
+  m: Integer | Integer[0..5] | nil
   mask: '15'
   "n": 0 | negative-int | positive-int
   power: '125'
@@ -10,7 +10,7 @@ assertions:
   '1': positive-int
   '2': '0'
   '3': negative-int
-  '4': int<0, 5>
+  '4': Integer[0..5]
   '5': '125'
   '6': '15'
   '7': '256'

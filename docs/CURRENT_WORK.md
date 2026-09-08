@@ -18,67 +18,73 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 **v0.3.8 is published** (`Rigor::VERSION` is `0.3.8`, `[Unreleased]` empty as of 2026-09-09).
-Post-cut fragments ride under `changelog.d/`, now including #830 (`changed/`) and #844 (`added/`). The next cut happens only when the user invokes `/rigor-release-prep` explicitly.
+Post-cut fragments ride under `changelog.d/`: #830 and #844 landed (`changed/`, `added/`); #848
+adds `fixed/` once it lands. The next cut happens only when the user invokes `/rigor-release-prep`.
 
-## The ADR-109 range-notation line (2026-09-08 → 09)
+## The #610 reopen (2026-09-09) — PR #848, Draft, awaiting the user's word
 
-The user asked whether integer ranges should use Ruby's own range notation so Float ranges could
-follow the same rule. ADR-1 had already decided so; the carrier drifted to PHPStan's `int<min, max>`
-and a docs sweep sided with the code. ADR-109 restores the decision and defines
-`C[R] = { x | x.is_a?(C) && R.cover?(x) }`.
+`rigor-activerecord`'s `Relation[Elem]` against `rbs collection install`'s non-generic `Relation`.
+#770 (0.3.8) added the stand-down but threaded `deferred_signature_paths:` through the loader's own
+`build_env` only; `Cache::RbsEnvironment.compute` — the build every cached run takes, which is the
+CLI default — never passed it, so the stand-down ran under `--no-cache` and on no real run. The
+gate stayed green because its loader held no store (#696's lesson in its other shape).
 
-- [#830](https://github.com/rigortype/rigor/pull/830) — **merged 2026-09-09** on the user's word,
-  master CI green. Slice 1: `Integer[1..10]` display + grammar, `int<a, b>` a deprecated input alias.
-- [#844](https://github.com/rigortype/rigor/pull/844) — **merged 2026-09-09** on the user's word,
-  master CI green. Slice 2: `Type::FloatRange`, `Float[0.0...1.0]` grammar, `non-nan-float` /
-  `finite-float`, acceptance, RBS dispatch as `Float`; the `sig/rigor/type.rbs` residue pin moved
-  209 → 217 (reason in the commit body).
-- [#846](https://github.com/rigortype/rigor/pull/846) — **open, Draft, do not merge without the
-  user's word.** Slice 3: truthy-edge Float comparison narrowing (`x > c` → `Float[c..]`, `x < c` →
-  `Float[...c]`, `between?`, falsy edge keeps the entry type), `nan?` / `finite?`, and union
-  absorption (`Float` absorbs a `FloatRange` member) so a post-guard join names one set. Fixture
-  `float_comparison_narrowing.rb`. Head `a1782666` (an empty retrigger commit on top of `044c824a`): `make verify` /
-  `make docs-check` green locally, CI green on GitHub after three artifact-service `403` flakes.
-  If a Tests shard dies on an upload `403`, rerun the WHOLE run or push a fresh commit, never
-  `--failed` alone: the rerun shard restores newer timing data and `shard-coverage` goes red.
-- [#831](https://github.com/rigortype/rigor/issues/831) — what remains of ADR-109: Float folds
-  (`abs`, `Math.sqrt`, `rand(range)`, `clamp(range)`) and the `dynamic.rbs-extended.deprecated-form`
-  diagnostic for the `int<a, b>` alias (rule catalogue + taxonomy gate + manual rule list).
-- Engine gaps filed while probing, all `ready-for-agent`: [#833](https://github.com/rigortype/rigor/issues/833)
-  (a Range literal argument matches the first `Range[T]` overload whatever its endpoints, so
-  `rand(0.0...1.0)` types `Integer?`), [#834](https://github.com/rigortype/rigor/issues/834)
-  (`n.clamp(1..9)` has no fold), [#842](https://github.com/rigortype/rigor/issues/842) (an
-  `IntegerRange` receiver never reaches RBS dispatch, `ARGV.size.fdiv(2)` types `Dynamic[top]`;
-  `FloatRange` ships with the arm IntegerRange lacks).
+- [#848](https://github.com/rigortype/rigor/pull/848) — **open, Draft, do not `gh pr ready` or
+  merge without the user's word.** CI green on head `0a0ba3e1`, rbs 3.x/4.x jobs included. Fixes:
+  the producer forwards the deferred list (new public reader, `sig-gen gap` marker #160); the env
+  key gains an env-only `rbs.deferred_signature_paths` slot (NOT in the shared run-key entries —
+  the boot-slim probe cannot rebuild a plugin-derived slot); a stood-down file is no longer reported
+  as `rbs.coverage.quarantined-signature` and is reported as
+  `rbs.coverage.plugin-signature-stood-down` (`:info`, one per file, both sides named, on cold and
+  warm runs; gated on the plugin registry contributing signatures, never on `signature_paths:`);
+  the arity read takes the entry's FIRST declaration, since `type_params` validates and raises on
+  both rbs lines. Credit: `Co-Authored-By: Nicolas Rodriguez <nico@nicoladmin.fr>` on every commit.
+- [#849](https://github.com/rigortype/rigor/issues/849) — `ready-for-agent`: a structural gate that
+  the producer forwards every `build_env_for` keyword, plus a manual line that the probe commands
+  (`type-of`, `type-scan`, `trace`, `annotate`) build without the persistent cache. Fork it from
+  post-merge master; on 0.3.8 `check` (cached) and `type-of` (store-less) typed one position from two
+  environments, which `ProbeEnvironment`'s own contract forbids.
 
 Two things the next session should not rediscover:
 
-- The sig provenance gate (#835) pins per-file residue counts in `spec/rigor/sig_gen/provenance_spec.rb`.
-  A new carrier's `sig/` block adds residue of the same shapes `IntegerRange` carries (hand-typed
-  attr_readers, mixin-provided `top` / `bot` / `dynamic` / `accepts`, the `eql?` alias); mark
-  `describe` with #837 like `Top#describe`, move the pin, and say why in the commit body.
-- Union display order follows the spelling: `Integer[..4] | Integer[11..]` sorts the beginless
-  half first. Regenerate a precision snapshot with `UPDATE_SNAPSHOTS=<name>`, never by hand.
+- The loader has TWO build entries. A new `build_env_for` input must go through
+  `Cache::RbsEnvironment.compute` AND `RbsDescriptor` (the suite's `RbsEnvMemo.digest` is the
+  precedent), and its gate must build through a real cold `Cache::Store` plus a second loader for
+  the HIT — a store-less spec cannot see the producer.
+- Assert on a call INTO a relation, never on the receiver: `dump_type(rel)` reads
+  `ActiveRecord::Relation[Post]` in the collided arm too (the plugin's type-node resolver produces
+  it whether or not the class's definition builds).
 
-## The types-and-comments line (2026-09-08 → 09, all landed)
+## The ADR-109 range-notation line (2026-09-08 → 09)
 
-Rule: **a type Rigor did not produce or check is never written down** — typeless YARD doc tags
-(`@param name — description`) gated by `spec/docs/type_shaped_comments_spec.rb` over lib/, plugins/,
-examples/, spec/, tool/; ADR-107 / ADR-108; the `rigor-type-oracle` skill; `make check --fail-on=warning`
-(#822, #826, #827, #829). Follow-ups closed: #823 (an unannotated sibling is declared but inferred,
-#840), #824 (`sig/` wins over an inline annotation, #832), #825 (the `sig/` provenance gate, #835).
-Corrected on 2026-09-09: inline `#:` / `# @rbs` are **not** banned — checked type sources, written
-where they say what the name and the code do not (`void`, `:asc | :desc` over `Symbol`); the nominal
-class restated on every method is the noise to avoid (#843: ADR-107 amended, gate R2 withdrawn,
-`static.value-use.void` enabled in the self-check). A declared `void` is authored intent: sig-gen no
-longer proposes against it and the provenance gate counts it as earned (#845, closing #836). Open:
-[#837](https://github.com/rigortype/rigor/issues/837), [#838](https://github.com/rigortype/rigor/issues/838)
-(`ready-for-agent`), [#839](https://github.com/rigortype/rigor/issues/839),
+ADR-109 restores ADR-1's decision: `C[R] = { x | x.is_a?(C) && R.cover?(x) }`, spelled with the
+Ruby literal (`Integer[1..10]`, `Float[0.0...1.0]`); `int<a, b>` is a deprecated input alias.
+
+- [#830](https://github.com/rigortype/rigor/pull/830) (slice 1) and
+  [#844](https://github.com/rigortype/rigor/pull/844) (slice 2, `Type::FloatRange`) — **merged**.
+- [#846](https://github.com/rigortype/rigor/pull/846) — slice 3 (truthy-edge Float comparison
+  narrowing, [#831](https://github.com/rigortype/rigor/issues/831)): **open, Draft, not this
+  session's PR — hands off unless its session hands the lane over.**
+- Engine gaps filed while probing, all `ready-for-agent`: [#833](https://github.com/rigortype/rigor/issues/833)
+  (a Range literal argument matches the first `Range[T]` overload whatever its endpoints),
+  [#834](https://github.com/rigortype/rigor/issues/834) (`n.clamp(1..9)` has no fold),
+  [#842](https://github.com/rigortype/rigor/issues/842) (an `IntegerRange` receiver never reaches RBS
+  dispatch; `FloatRange` ships with the arm IntegerRange lacks).
+- The sig provenance gate (#835) pins per-file residue counts in `spec/rigor/sig_gen/provenance_spec.rb`;
+  a new hand-written declaration goes red — mark it (`# sig-gen gap: #NNN — why`, #837 for a literal
+  return, #160 for a shape sig-gen does not emit) or move the pin with the reason in the commit body.
+
+## The types-and-comments line (2026-09-08 → 09, landed)
+
+**A type Rigor did not produce or check is never written down** — typeless YARD doc tags gated by
+`spec/docs/type_shaped_comments_spec.rb`; ADR-107 / ADR-108; the `rigor-type-oracle` skill;
+`make check --fail-on=warning`. Inline `#:` / `# @rbs` are checked type sources, not banned (#843);
+a declared `void` is authored intent (#845). Open, all `ready-for-human`:
+[#837](https://github.com/rigortype/rigor/issues/837), [#839](https://github.com/rigortype/rigor/issues/839),
 [#841](https://github.com/rigortype/rigor/issues/841). `make steep-check` has 11 pre-existing problems.
 
 ## How to enter
 
-1. `gh pr view 846` — if the user has said to land it and the head run is green, `gh pr ready 846`
-   then `gh pr merge 846 --merge`; otherwise leave it Draft.
-2. Next in the line is the rest of #831 (folds, then the deprecation diagnostic), forked from
-   post-merge master.
+1. `gh pr view 848` — if the user has said to land it and the head run is green, `gh pr ready 848`
+   then `gh pr merge 848 --merge`, and watch the master merge run; otherwise leave it Draft.
+2. #849 next in this line, forked from post-merge master. #846 belongs to another session.

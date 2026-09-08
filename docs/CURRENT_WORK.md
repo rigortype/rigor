@@ -25,6 +25,27 @@ and `rigortype 0.3.8` on RubyGems all exist. `Rigor::VERSION` is `0.3.8`; `[Unre
 the next cut. The next cut happens only when the user invokes `/rigor-release-prep` explicitly — a
 release date or goal mentioned in a task is not that invocation (ADR-50 § WD5).
 
+## The 2026-09-08 types-and-comments session (three Draft PRs, all gates green)
+
+The maintainer redefined what a type may be in Rigor's own tree — **a type Rigor did not produce or
+check is never written down** — and what Rigor ships to agents: a skill that routes "I am about to
+write a type" to the oracle instead of the source. Everything is landed as Draft, in this merge order:
+
+1. [#822](https://github.com/rigortype/rigor/pull/822) `type-comment-corpus` — 1,121 YARD type slots
+   emptied (313 files, comment lines only), `AGENTS.md` § "Types and Comments", the gate
+   `spec/docs/type_shaped_comments_spec.rb`, ADR-107 (Accepted) and ADR-108 (**Proposed** until #826
+   lands; then a docs-only commit flips its status line and index row).
+2. [#826](https://github.com/rigortype/rigor/pull/826) `type-oracle-skill` — `skills/rigor-type-oracle/`,
+   the `AGENTS.md` fragment `rigor-project-init` installs (Phase 8a), catalogue wiring. Rebase onto
+   #822 first; its README index row and ADR-108 status will need the dedupe.
+3. [#827](https://github.com/rigortype/rigor/pull/827) `check-fail-on-warning` — `rigor check
+   --fail-on=SEVERITY`; `make check` / `check-plugins` run with `--fail-on=warning`. Fixes #812.
+
+Follow-ups filed, all `ready-for-human`: [#823](https://github.com/rigortype/rigor/issues/823)
+(an annotated method's siblings), [#824](https://github.com/rigortype/rigor/issues/824) (`sig/` vs
+inline precedence), [#825](https://github.com/rigortype/rigor/issues/825) (`sig/` provenance gate).
+#779 is closed as superseded.
+
 ## The 2026-09-08 perf session (#775)
 
 The v0.3.7 allocation regression is attributed and its mechanical half recovered in

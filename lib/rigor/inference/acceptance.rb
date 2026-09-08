@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../type"
+require_relative "range_constant"
 
 module Rigor
   module Inference
@@ -199,7 +200,8 @@ module Rigor
         #   {#accepts_nominal_args});
         # - Constant[v] when v.is_a?(klass(C)). The type_args of self are ignored here because a Constant
         #   carries a concrete value, not a generic instantiation, and the analyzer has no way to refute the
-        #   args from a literal alone.
+        #   args from a literal alone. A Range value is the one exception — see
+        #   {#accepts_range_constant_type_arg}.
         # - Tuple[*] when self is the Array (or a supertype) family. The Tuple is projected to
         #   `Nominal[Array, [union(elements)]]` so the existing generic-arg machinery handles it.
         # - HashShape{*} when self is the Hash (or a supertype) family, projected to
@@ -517,7 +519,7 @@ module Rigor
 
         def accepts_nominal_from_constant(self_type, constant, mode)
           ruby_class = resolve_class(self_type.class_name)
-          return constant_is_a_result(ruby_class, constant, self_type, mode) if ruby_class
+          return accepts_loaded_class_from_constant(ruby_class, constant, self_type, mode) if ruby_class
 
           # The host process may not have required the constant's declared self_type (e.g. `BigDecimal`
           # since Ruby 3.4 is no longer a default gem). Fall back to inspecting the value's own class
@@ -552,6 +554,13 @@ module Rigor
           end
         end
 
+        def accepts_loaded_class_from_constant(ruby_class, constant, self_type, mode)
+          result = constant_is_a_result(ruby_class, constant, self_type, mode)
+          return result unless result.yes?
+
+          accepts_range_constant_type_arg(self_type, constant, mode) || result
+        end
+
         def constant_is_a_result(ruby_class, constant, self_type, mode)
           if constant.value.is_a?(ruby_class)
             Type::AcceptsResult.yes(mode: mode, reasons: "Constant value is_a?(#{self_type.class_name})")
@@ -560,6 +569,49 @@ module Rigor
               mode: mode,
               reasons: "Constant value is not a #{self_type.class_name}"
             )
+          end
+        end
+
+        # Issue #833 — the single exception to "the type_args of self are ignored for a Constant".
+        #
+        # A `Constant<Range>` is the one literal that does pin a generic instantiation: the engine
+        # builds it only when both endpoints are static, so `Range[T]` CAN be refuted from the literal.
+        # Without this, `Nominal[Range, [Integer]]` accepted `0.0...1.0` and `OverloadSelector` pass 1
+        # pinned whichever `Range[…]` arm came first in declaration order — for `Kernel#rand` that is
+        # `(::Range[Integer]) -> Integer?`, ahead of every Float arm.
+        #
+        # Returns nil — "no opinion, keep the class-level answer" — outside the envelope: a raw `Range`
+        # or any other arity of type_args, and a range the shared reader cannot read endpoints from.
+        # A missing endpoint contributes nothing, because a beginless or endless literal inhabits
+        # `Range[T]` for every T (`Range[Integer?]` is the common core spelling of the slicing param).
+        #
+        # Known coarse spot, deliberately not special-cased: a mixed-endpoint literal (`1.0..2`) is
+        # rejected by `Range[Integer]` and by `Range[Float]` alike, so overload selection falls through
+        # to its gradual pass and then to the first-overload fallback exactly as it did before.
+        def accepts_range_constant_type_arg(self_type, constant, mode)
+          return nil unless self_type.type_args.size == 1
+
+          endpoints = RangeConstant.literal_endpoints(constant)
+          return nil if endpoints.nil?
+
+          element = self_type.type_args.first
+          combine_range_endpoint_results(
+            endpoints.map { |endpoint| accepts(element, Type::Combinator.constant_of(endpoint), mode: mode) },
+            element,
+            mode
+          )
+        end
+
+        def combine_range_endpoint_results(per_endpoint, element, mode)
+          if per_endpoint.any?(&:no?)
+            Type::AcceptsResult.no(mode: mode, reasons: "a Range endpoint is rejected by #{element.describe}")
+          elsif per_endpoint.any?(&:maybe?)
+            Type::AcceptsResult.maybe(
+              mode: mode,
+              reasons: "a Range endpoint could not be proven accepted by #{element.describe}"
+            )
+          else
+            Type::AcceptsResult.yes(mode: mode, reasons: "every Range endpoint accepted by #{element.describe}")
           end
         end
 

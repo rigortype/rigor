@@ -238,6 +238,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
             def self.pair: [T] (T obj) -> ::Array[T]
             def self.both: [T] (T a, T b) -> T
             def self.boxed: [T] (::Array[T] objs) -> T
+            def self.bracket: [A] (::Range[A] range) -> A
           end
 
           class RigorSpecCrate[T]
@@ -292,6 +293,40 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       it "does not walk into a container position (`Array[T] arg` stays unbound)" do
         arg = Rigor::Type::Combinator.nominal_of(Array, type_args: [Rigor::Type::Combinator.constant_of("x")])
         expect(bind(box, :boxed, [arg])).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      # Issue #834 — the one container position the envelope admits. `Comparable#clamp: [A] (Range[A]) ->
+      # (self | A)` left `A` unbound, so `Integer(ARGV[0]).clamp(1..9)` answered `Dynamic[top] | Integer`.
+      describe "a `Range[A]` parameter against a Constant<Range> argument" do
+        it "binds A to the endpoints' class, not to the endpoint values" do
+          # Lifted, because `1..9` yields Integers rather than the two values 1 and 9; a `1 | 9` binding
+          # would be contradicted by every receiver already inside the bracket.
+          type = bind(box, :bracket, [Rigor::Type::Combinator.constant_of(1..9)])
+          expect(type).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "binds from the present endpoint of an endless range" do
+          type = bind(box, :bracket, [Rigor::Type::Combinator.constant_of(Range.new(1, nil))])
+          expect(type).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "unions the endpoints of a mixed-endpoint range" do
+          type = bind(box, :bracket, [Rigor::Type::Combinator.constant_of(1.0..2)])
+          expect(type).to be_a(Rigor::Type::Union)
+          expect(type.members.map(&:class_name)).to contain_exactly("Float", "Integer")
+        end
+
+        it "leaves A unbound for a Range carrier that is not a literal" do
+          # A `Nominal[Range, [Integer]]` argument reached its carrier by some other route; only the
+          # literal's own endpoints justify the binding, so the container walk stops here.
+          arg = Rigor::Type::Combinator.nominal_of("Range", type_args: [Rigor::Type::Combinator.nominal_of(Integer)])
+          expect(bind(box, :bracket, [arg])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "leaves A unbound for a Constant that is not a Range" do
+          expect(bind(box, :bracket, [Rigor::Type::Combinator.constant_of(1)]))
+            .to equal(Rigor::Type::Combinator.untyped)
+        end
       end
 
       it "lets a class-level type variable of the same name win over the argument binding" do

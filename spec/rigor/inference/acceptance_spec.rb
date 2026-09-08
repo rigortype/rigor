@@ -12,6 +12,7 @@ RSpec.describe Rigor::Inference::Acceptance do
   def int_nominal = Rigor::Type::Combinator.nominal_of(Integer)
   def str_nominal = Rigor::Type::Combinator.nominal_of(String)
   def numeric_nominal = Rigor::Type::Combinator.nominal_of(Numeric)
+  def float_nominal = Rigor::Type::Combinator.nominal_of(Float)
   def int_singleton = Rigor::Type::Combinator.singleton_of(Integer)
   def str_singleton = Rigor::Type::Combinator.singleton_of(String)
   def int_constant = Rigor::Type::Combinator.constant_of(1)
@@ -133,6 +134,66 @@ RSpec.describe Rigor::Inference::Acceptance do
       # `Numeric` IS loadable so this routes through `is_a?` — asserted here to make the assignment of behavior clear:
       # the ancestor fallback only kicks in when the target Ruby class can't be resolved.
       expect(accepts(numeric_nominal, int_constant)).to be_yes
+    end
+  end
+
+  describe "Nominal[Range, [T]] acceptance of a Constant<Range>" do
+    # Issue #833 — the one exception to "type args are ignored for a Constant". The engine builds
+    # `Constant<Range>` only from static endpoints, so `Range[T]` CAN be refuted from the literal. Without
+    # it, `Nominal[Range, [Integer]]` accepted `0.0...1.0` and `Kernel#rand`'s `(::Range[Integer]) ->
+    # Integer?` arm won pass 1 by declaration order for a Float range.
+    def range_nominal(*args) = Rigor::Type::Combinator.nominal_of("Range", type_args: args)
+    def range_constant(value) = Rigor::Type::Combinator.constant_of(value)
+
+    it "rejects a Float-endpoint range under Range[Integer]" do
+      expect(accepts(range_nominal(int_nominal), range_constant(0.0...1.0))).to be_no
+    end
+
+    it "accepts an Integer-endpoint range under Range[Integer]" do
+      expect(accepts(range_nominal(int_nominal), range_constant(1..6))).to be_yes
+    end
+
+    it "accepts an endless Integer range under Range[Integer]" do
+      # A missing endpoint contributes nothing: `(1..)` inhabits `Range[T]` for every T that admits 1.
+      expect(accepts(range_nominal(int_nominal), range_constant(Range.new(1, nil)))).to be_yes
+    end
+
+    it "accepts a Float-endpoint range under Range[Float]" do
+      expect(accepts(range_nominal(float_nominal), range_constant(0.0...1.0))).to be_yes
+    end
+
+    it "rejects an Integer-endpoint range under Range[Float]" do
+      expect(accepts(range_nominal(float_nominal), range_constant(1..6))).to be_no
+    end
+
+    it "accepts a beginless Integer range under Range[Integer?]" do
+      # `Range[Integer?]` is core RBS's spelling of the slicing parameter (`Array#[]`), so this arm keeps
+      # accepting the endless and beginless literals real code passes it.
+      nilable = Rigor::Type::Combinator.union(int_nominal, Rigor::Type::Combinator.constant_of(nil))
+      expect(accepts(range_nominal(nilable), range_constant(Range.new(nil, 5)))).to be_yes
+      expect(accepts(range_nominal(nilable), range_constant(0..1))).to be_yes
+    end
+
+    it "keeps accepting every Constant<Range> under a raw Range" do
+      [0.0...1.0, 1..6, "a".."z"].each do |value|
+        expect(accepts(Rigor::Type::Combinator.nominal_of("Range"), range_constant(value))).to be_yes
+      end
+    end
+
+    it "keeps accepting a range with no endpoint at all" do
+      expect(accepts(range_nominal(int_nominal), range_constant(Range.new(nil, nil)))).to be_yes
+    end
+
+    it "rejects a mixed-endpoint range under both Range[Integer] and Range[Float]" do
+      # The known coarse spot, recorded rather than special-cased: `1.0..2` satisfies neither arm, so
+      # overload selection falls through to its gradual pass and the first-overload fallback as before.
+      expect(accepts(range_nominal(int_nominal), range_constant(1.0..2))).to be_no
+      expect(accepts(range_nominal(float_nominal), range_constant(1.0..2))).to be_no
+    end
+
+    it "accepts anything under Range[untyped]" do
+      # `Comparable#clamp`'s `Range[A]` translates its unbound variable this way; the arm must stay open.
+      expect(accepts(range_nominal(dyn_top), range_constant(0.0...1.0))).to be_yes
     end
   end
 

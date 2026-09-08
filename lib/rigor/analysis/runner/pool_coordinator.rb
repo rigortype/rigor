@@ -389,15 +389,22 @@ module Rigor
           # finds. `#prewarm_rbs_cache_for_pool` already builds and fully loads exactly this
           # coordinator-side environment (to warm the cache before any worker spawns); it now hands it
           # back so its RBS state can be read the same way the fork pool reads its pre-fork session
-          # environment. The conformance scan inside the snapshot demands the definition of every
-          # `rigor:v1:conforms-to` class — a demand no Ractor worker shares memory with — so a resulting
-          # definition-build failure is recorded explicitly right after, exactly as the empty-closure
-          # branch reads its own environment's demand (#788). No matching explicit call for the HKT-scan
-          # outcome: every worker already demands it from its OWN environment in `#drain_reporters`, and
-          # the scan has one outcome whoever demands it, so a worker's report already says what the
-          # coordinator's own demand would.
-          warm_env = prewarm_rbs_cache_for_pool
+          # environment. The effect-annotation carrier (#441 — the inline stratum of
+          # `effect.annotations-unchecked`, read by the residual pass after this environment is gone) is
+          # taken off the same environment, in the same ORDER as the fork pool and the sequential path
+          # take theirs: it had no producer here either, so an annotation living only in an rbs-inline
+          # comment lost its row under this backend alone. That read is only as good as the environment's
+          # virtual RBS, which is why the prewarm is built the way the workers build theirs (see
+          # {#prewarm_rbs_cache_for_pool}). The conformance scan inside the signature-state snapshot
+          # demands the definition of every `rigor:v1:conforms-to` class — a demand no Ractor worker
+          # shares memory with — so a resulting definition-build failure is recorded explicitly right
+          # after, exactly as the empty-closure branch reads its own environment's demand (#788). No
+          # matching explicit call for the HKT-scan outcome: every worker already demands it from its OWN
+          # environment in `#drain_reporters`, and the scan has one outcome whoever demands it, so a
+          # worker's report already says what the coordinator's own demand would.
+          warm_env = prewarm_rbs_cache_for_pool(source_files: source_files)
           snapshot_project_signature_state(warm_env)
+          snapshot_effect_annotation_carrier(warm_env&.rbs_loader)
           record_definition_build_failures(warm_env&.rbs_loader&.definition_build_failures)
 
           configuration = @configuration
@@ -658,19 +665,46 @@ module Rigor
         # ADR-15 Phase 4b.x — drives every cached RBS producer on the main Ractor so each worker can serve
         # all reflection queries from disk (Marshal-load only). Builds a single coordinator-side
         # {Environment} for this purpose and returns it fully loaded — issue #798: the caller also reads
-        # the project-signature state off it, since it is the only environment this backend's coordinator
-        # ever holds. Workers still build their OWN `Environment.for_project` inside the Ractor body, which
-        # then routes through `cached_env` instead of `RBS::EnvironmentLoader.new`.
-        def prewarm_rbs_cache_for_pool
+        # the project-signature state and the effect-annotation carrier off it, since it is the only
+        # environment this backend's coordinator ever holds. Workers still build their OWN
+        # `Environment.for_project` inside the Ractor body, which then routes through `cached_env` instead
+        # of `RBS::EnvironmentLoader.new`.
+        #
+        # Built with the loaded plugin registry over the project's WHOLE file list (#793's rule), exactly
+        # as each worker builds its own. `Environment.for_project` collects plugin-synthesized virtual RBS
+        # only when handed BOTH (`collect_virtual_rbs` short-circuits on a nil registry and on an empty
+        # list), and this used to pass neither: its loader's `virtual_rbs` read empty on every project, so
+        # a carrier snapshotted off it would have been `[]` whatever the rbs-inline comments said — the
+        # method called, the row still missing. Two more things follow from building the environment the
+        # workers build: the env-cache descriptor digests the same signature roots (a plugin's
+        # `signature_paths:`) and the same virtual set, so the slot this warms is the slot the workers
+        # read; and each synthesizer runs once here and is memoised through the cache store (ADR-32 WD5)
+        # instead of once per worker.
+        #
+        # Deliberately NOT {#build_runner_environment}: that hands the environment the run's own reporter
+        # accumulators, and an environment BUILD writes to one of them — `collect_virtual_rbs` records a
+        # synthesizer's parse failures and unhonoured annotations on the `source_rbs_synthesis` reporter.
+        # Every Ractor worker builds this same environment with reporters of its own and drains them back
+        # through {#merge_worker_reporters}, whose replay of that stream appends without dedup, so a
+        # coordinator-side reporter here would count each entry once more than the drains already do. The
+        # other two are written only by demands this environment never receives (the HKT scan, per-file
+        # dispatch); all three are withheld together so the no-double-count holds by construction rather
+        # than by which reads happen to be made. The dispatch-only per-run state (the dependency-source
+        # index, the synthetic-method / project-patched indexes) is withheld for the same reason: nothing
+        # here dispatches.
+        # @param source_files [Array<String>] the WHOLE project's file list, never the analyzed subset.
+        def prewarm_rbs_cache_for_pool(source_files:)
           warm_env = Environment.for_project(
             libraries: @configuration.libraries,
             signature_paths: @configuration.signature_paths,
             cache_store: @cache_store,
+            plugin_registry: plugin_registry,
             bundler_bundle_path: @configuration.bundler_bundle_path,
             bundler_auto_detect: @configuration.bundler_auto_detect,
             bundler_lockfile: @configuration.bundler_lockfile,
             rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
-            rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect
+            rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect,
+            source_files: source_files
           )
           warm_env.rbs_loader&.prewarm
           warm_env

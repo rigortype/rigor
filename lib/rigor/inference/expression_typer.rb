@@ -2578,7 +2578,6 @@ module Rigor
         summaries = context.summaries
         depth = seed_fixpoint_summary(summaries, plain_signature)
         consult_depths = (Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] ||= [])
-        computed = nil
 
         RECURSION_FIXPOINT_CAP.times do |iteration|
           summaries[plain_signature][:consulted] = false
@@ -2612,9 +2611,15 @@ module Rigor
             return resolved unless resolved.nil?
           end
 
-          step = fixpoint_step(summaries, plain_signature, computed, iteration)
-          return step unless step == :continue
+          converged = fixpoint_step(summaries, plain_signature, computed, iteration)
+          return converged if converged
         end
+
+        # Out of iterations and still unstable. The collapse is the loop's own tail rather than a branch
+        # inside `fixpoint_step`: `Integer#times` yields its receiver when no iteration returns, so a
+        # tail-less loop reads as a path that returns an Integer summary (the `def.return-type-mismatch`
+        # on `return_type_for` this shape retired), and the loop, not the step, owns its cap.
+        collapse_fixpoint_cap(summaries, plain_signature)
       end
 
       # Seeds the thread-local summary entry for a fixpoint owner: the `bot` Kleene seed plus the
@@ -2650,8 +2655,10 @@ module Rigor
 
       # One Kleene-iteration step of the fixpoint loop. Joins `computed` into the running assumption
       # (widening value-pinned constituents on the final permitted iteration to force convergence) and
-      # either returns a final type — convergence, or the capped `untyped` collapse — or `:continue` to
-      # request another body evaluation, having advanced the stored assumption. ADR-55 WD2.
+      # returns the converged type, or `nil` — no final type yet — having advanced the stored assumption
+      # so the caller's next body evaluation reads the wider iterate. The step never decides that the
+      # loop is over: whether another evaluation follows is the caller's cap, and a `nil` on the final
+      # iteration lands in `collapse_fixpoint_cap`. ADR-55 WD2.
       def fixpoint_step(summaries, plain_signature, computed, iteration)
         assumption = summaries[plain_signature][:assumption]
         last_iteration = iteration == RECURSION_FIXPOINT_CAP - 1
@@ -2662,17 +2669,19 @@ module Rigor
         # (joining it back changes nothing).
         return candidate if joined == assumption
 
-        if last_iteration
-          # Out of iterations and still unstable — collapse to today's widening behaviour. ADR-84 WD3: the
-          # cap is a per-owner constant, so the event references the owner's own frame.
-          note_transient_fallback(BudgetTrace::RECURSION_FIXPOINT_CAP, own_guard_frame_position)
-          scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
-          summaries[plain_signature][:assumption] = Type::Combinator.untyped
-          return Type::Combinator.untyped
-        end
-
         summaries[plain_signature][:assumption] = joined
-        :continue
+        nil
+      end
+
+      # The capped collapse: `RECURSION_FIXPOINT_CAP` evaluations advanced the assumption without
+      # converging, so the summary degrades to today's widening behaviour, `untyped`, parked in the
+      # assumption for any consumer that still reads it. ADR-84 WD3: the cap is a per-owner constant, so
+      # the event references the owner's own frame.
+      def collapse_fixpoint_cap(summaries, plain_signature)
+        note_transient_fallback(BudgetTrace::RECURSION_FIXPOINT_CAP, own_guard_frame_position)
+        scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
+        summaries[plain_signature][:assumption] = Type::Combinator.untyped
+        Type::Combinator.untyped
       end
 
       # Rebuilds the user-method body scope with every bound positional parameter widened to its nominal

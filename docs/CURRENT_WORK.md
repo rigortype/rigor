@@ -17,17 +17,22 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**v0.3.8 is published** (tag `v0.3.8` on `ffb456b0`, RubyGems `0.3.8`, GitHub Release; verified
-2026-09-08 by `git ls-remote --tags`, the RubyGems API and `gh release view`). `Rigor::VERSION` is
-`0.3.8`; `changelog.d/` holds the fragments of the next cycle.
+**v0.3.8 is published.** The release PR (`release/0.3.8`, `Bump up version to 0.3.8`) merged on
+2026-09-08; the user ran `rake release` from `master`: tag `v0.3.8` at `ffb456b0`, the GitHub Release,
+and `rigortype 0.3.8` on RubyGems all exist. `Rigor::VERSION` is `0.3.8`; `[Unreleased]` is empty;
+`changelog.d/` holds the post-cut fragments — #810, [#813](https://github.com/rigortype/rigor/pull/813)
+(the Ractor-pool twin of #798) and [#819](https://github.com/rigortype/rigor/pull/819) — all riding
+the next cut. The next cut happens only when the user invokes `/rigor-release-prep` explicitly — a
+release date or goal mentioned in a task is not that invocation (ADR-50 § WD5).
 
 ## The 2026-09-08 perf session (#775)
 
 The v0.3.7 allocation regression is attributed and its mechanical half recovered in
 [#819](https://github.com/rigortype/rigor/pull/819) (`perf-775-allocation-levers`, 15 levers +
-note): `rigor check --no-cache lib` 36,492,665 → 21,933,996 allocations (−39.9%), diagnostics
-byte-identical on `lib` after every commit and on redmine at the end, `make verify` green.
-Measurement record: [`docs/notes/20260908-v037-allocation-regression-attribution.md`](notes/20260908-v037-allocation-regression-attribution.md);
+note, **Draft until an APPROVE on GitHub**): `rigor check --no-cache lib` 36,492,665 → 21,933,996
+allocations (−39.9%), diagnostics byte-identical on `lib` after every commit and on redmine at the
+end, `make verify` green. Measurement record:
+[`docs/notes/20260908-v037-allocation-regression-attribution.md`](notes/20260908-v037-allocation-regression-attribution.md);
 instruments on the unmerged branch `perfbench-harness-775` (`tool/perf775/`). Short form: the
 17M was per-file typing, not the environment build, the target or the rbs bump; no single merge
 caused it (#547 +4.1M, #556 +2.3M, #753 +1.8M, #664 +1.7M, then a tail); the per-call driver was
@@ -36,10 +41,10 @@ join.
 
 ## Ranked next engineering work
 
-1. **Close [#775](https://github.com/rigortype/rigor/issues/775)'s gate.** After #819 is on
-   `master`, trigger `release-gate.yml`, download the `bench-baseline-*` artifact and commit its
-   targets as `bench/baseline.json` (expect ≈22M allocations, ≈+16% over v0.3.6's 18.85M) with a
-   `note` that points at the attribution note — the remainder is the v0.3.7 line's inference
+1. **Land #819, then close [#775](https://github.com/rigortype/rigor/issues/775)'s gate.** Once it
+   is on `master`, trigger `release-gate.yml`, download the `bench-baseline-*` artifact and commit
+   its targets as `bench/baseline.json` (expect ≈22M allocations, ≈+16% over v0.3.6's 18.85M) with
+   a `note` that points at the attribution note — the remainder is the v0.3.7 line's inference
    volume (64% more user-method return inferences, 68% more body evaluations), recorded rather
    than blessed. Until then `make bench-perf` prints the `STALE` notice, not a failure.
 2. **The design-seam remainder** — [#820](https://github.com/rigortype/rigor/issues/820): the
@@ -48,12 +53,16 @@ join.
    `StatementEvaluator` per `sub_eval`, `receiver_descriptor`'s triple per dispatch, lazy
    `AcceptsResult` reasons). Each is a design change, not a mechanical removal; size before
    choosing.
-3. `make check lib` prints one `def.return-type-mismatch` warning at
-   `lib/rigor/inference/expression_typer.rb:274` (`return_type_for`). Pre-existing on the v0.3.7
-   line; the gate exits 0 because it is a warning ([#812](https://github.com/rigortype/rigor/issues/812)),
-   but AGENTS.md says the self-check MUST stay clean. Fix at the root.
+3. **[#812](https://github.com/rigortype/rigor/issues/812)** — `make check` exits 0 on a warning,
+   so "MUST stay clean" is unenforced. The `def.return-type-mismatch` warning on
+   `ExpressionTyper#return_type_for` is fixed at the root by #810 (`make check` is warning-free);
+   it sat on `master` across #800–#809 because of this hole. Sibling finding
+   [#811](https://github.com/rigortype/rigor/issues/811): negative-equality narrowing cannot prune
+   a symbol literal from a mixed union — a type-model change, not a quick fix.
 4. **[#807](https://github.com/rigortype/rigor/issues/807)** — `spec/rigor/cache/store_spec.rb:628`
-   is a CI flake with a real cause (16 threads race `repair_writable_marker!` on a fresh root).
+   is a CI flake with a real cause: 16 threads each build a `Store` on a fresh root and race
+   `repair_writable_marker!`, so one can read a torn `schema_version.txt` and `clear_cache_root!`
+   under a sibling's `binread`. Seen once on #804's shard 1; 25 local repetitions clean.
 5. [#806](https://github.com/rigortype/rigor/issues/806) — `Plugin::Registry#type_node_resolvers`
    unguarded at Environment construction (latent, no reachable trigger).
 
@@ -86,4 +95,6 @@ join.
 - **Serialize the full gate across parallel lanes** with a `mkdir /tmp/rigor-verify.lock` mutex —
   parallel `make verify` runs have OOM-killed this host.
 - **GitHub closes only the FIRST `Fixes #N` in a comma list.** One `Fixes #N` per line.
+- **`gh pr checks --watch` armed right after a push exits 1 with "no checks reported"** — GitHub
+  has not registered the run yet. Poll until `gh pr checks` lists a check, then watch.
 - **Verify the INTEGRATED master after a batch.** No single PR's CI sees the combination.

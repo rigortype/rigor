@@ -1,0 +1,1 @@
+- **[rigor check]** A pooled run on the opt-in Ractor backend (`RIGOR_POOL_BACKEND=ractor`) now reports the `effect.annotations-unchecked` row for an effect annotation that lives only in an rbs-inline comment, as the sequential and fork-pool runs over the same project do, instead of silently dropping it. ([#813](https://github.com/rigortype/rigor/pull/813))

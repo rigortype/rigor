@@ -78,19 +78,32 @@ per-class blocklist entry, or a genuine plugin-contract misuse — **never disab
   `docs/CURRENT_WORK.md`. Anything touching a non-`.md` file is code: branch + PR.
 - Push with an explicit refspec — `git push origin HEAD:refs/heads/<branch>`. This clone's
   `push.default` can otherwise land a bare `push -u` on `master`.
-- **Land audited+green PRs as you go; do not queue them.** In an autonomous session, merge each PR
-  (`gh pr merge N --merge`) as soon as the diff is audited and `make verify` + CI are green; fork
-  the next branch from post-merge `master`. If the merge is denied, say so immediately. Batching or
-  stacking is reserved for changes the user must adjudicate as a set — deferral manufactures stacks
-  and sibling conflicts ([ADR-105](docs/adr/105-pr-landing-flow.md)).
+- **PRs are born Draft and stay Draft until they may land.** `gh pr ready` only with an APPROVE on
+  GitHub, CI green, and no standing stop instruction; a stop instruction becomes `gh pr ready --undo`
+  at once; review verdicts go on GitHub, never only in chat. Draft is the one hold signal another
+  session — or this one after compaction — can see
+  ([postmortem](docs/notes/20260908-pr-788-draft-discipline-postmortem.md)).
+- **Land your own audited+green PRs as you go; do not queue them.** In an autonomous session, merge
+  each PR this session opened (`gh pr merge N --merge`) as soon as the diff is audited and
+  `make verify` + CI are green; fork the next branch from post-merge `master`. If the merge is denied,
+  say so immediately. Batching or stacking is reserved for changes the user must adjudicate as a set —
+  deferral manufactures stacks and sibling conflicts ([ADR-105](docs/adr/105-pr-landing-flow.md)).
+- **Another session's open PR or uncommitted tree is in-flight: hands off.** Do not commit, rebase,
+  push, merge, or build on it until its owning session hands the lane over. A green gate is not a
+  hand-over.
+- **A fix for a bug report credits the reporter**: `Co-Authored-By: Name <email>` on every commit of
+  the fix, fragment commit included, and `thank you @handle!` in the changelog entry. Ask for a missing
+  email, never guess. This is credit to a person; AI attribution lines stay out of commits and PR bodies.
 
 ## Release Cadence
 
 Normative in [ADR-50](docs/adr/50-release-engineering-and-stability-strategy.md) § WD5; the mechanical
 flow is the `rigor-release-prep` skill.
 
-- **No autonomous version bumps.** `Rigor::VERSION`, `CHANGELOG.md` released-version sections, and
-  `Gemfile.lock` change only on explicit user request. Adding `## [Unreleased]` entries does not count.
+- **The only release path is the user invoking `/rigor-release-prep`.** A release goal or date in a
+  task is context, not that invocation: land the fixes, leave `[Unreleased]` and `changelog.d/`
+  untouched, stop. `Rigor::VERSION`, `CHANGELOG.md` released-version sections, `Gemfile.lock`, and the
+  README status line change only inside it; adding `## [Unreleased]` entries does not count.
 - **Single-digit version components.** `0.0.9`'s successor is `0.1.0`, never `0.0.10`; `0.9.x`'s is
   `1.0.0`. Recursively, at every position.
 - **Never run `bundle exec rake release`** without explicit authorisation — it tags, pushes, and

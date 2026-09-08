@@ -1611,4 +1611,127 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(collision_warnings.first).not_to include(clean_virtual.first)
     end
   end
+
+  # Issue #824 / ADR-32 WD13 — the MEMBER-level sibling of the file-level quarantine above. A method
+  # declared by both `sig/` and an inline annotation used to raise `RBS::DuplicatedMethodDefinitionError`
+  # at definition-build time, taking the whole class to `Dynamic[top]`. `sig/` now wins per member: the
+  # inline member stands down, everything else in the file still binds, and the stand-down is reported.
+  describe "inline member stand-down against sig/ (issue #824)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-inline-member-spec-") }
+    let(:sig_file) { File.join(tmpdir, "demo.rbs") }
+    let(:virtual_name) { "virtual:rbs-inline:/app/lib/demo.rb" }
+    let(:virtual_rbs) do
+      [[virtual_name, <<~RBS]]
+        class Demo
+          def shared: (::Integer) -> ::String
+          def only_inline: (::Integer) -> ::Integer
+          def self.shared_singleton: () -> ::String
+          attr_reader shared_attr: ::String
+        end
+      RBS
+    end
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    before do
+      File.write(sig_file, <<~RBS)
+        class Demo
+          def shared: (::String) -> ::Integer
+          def only_sig: () -> ::String
+          def self.shared_singleton: () -> ::Integer
+          def shared_attr: () -> ::Integer
+        end
+      RBS
+    end
+
+    def build_loader(virtual = virtual_rbs, paths: [tmpdir])
+      loader = described_class.new(signature_paths: paths, virtual_rbs: virtual)
+      allow(loader).to receive(:warn)
+      loader
+    end
+
+    # The example PR #779 introduced, kept as the behavioural core: the duplicate goes, the inline-only
+    # method stays. What #779 lacked — and what ADR-32 WD12 requires — is the report, pinned below.
+    it "keeps an inline method that sig/ does not declare, and drops the duplicate" do
+      definition = build_loader.instance_definition("Demo")
+      expect(definition).not_to be_nil
+      expect(definition.methods.keys).to include(:shared, :only_sig, :only_inline)
+      expect(definition.methods[:shared].method_types.map(&:to_s)).to eq(["(::String) -> ::Integer"])
+      expect(definition.methods[:only_inline].method_types.map(&:to_s)).to eq(["(::Integer) -> ::Integer"])
+    end
+
+    # The whole point of the change: before it, ONE duplicated member cost the class every other member.
+    it "leaves the class buildable, so definition_build_failures stays empty" do
+      loader = build_loader
+      loader.instance_definition("Demo")
+      loader.singleton_definition("Demo")
+      expect(loader.definition_build_failures).to be_empty
+    end
+
+    it "matches the member kind: the singleton duplicate stands down on the singleton side" do
+      definition = build_loader.singleton_definition("Demo")
+      expect(definition).not_to be_nil
+      expect(definition.methods[:shared_singleton].method_types.map(&:to_s)).to eq(["() -> ::Integer"])
+    end
+
+    # An `attr_reader foo` and a `def foo` are one method to `RBS::DefinitionBuilder`, so they collide —
+    # the member key has to be the method name the attribute generates, not the attribute's own name.
+    it "treats an inline attribute and a sig/ def of the same name as one member" do
+      definition = build_loader.instance_definition("Demo")
+      expect(definition.methods[:shared_attr].method_types.map(&:to_s)).to eq(["() -> ::Integer"])
+    end
+
+    it "reports each stand-down with the class, member, kind and both source paths" do
+      expect(build_loader.inline_member_standdowns).to eq(
+        [
+          ["Demo", :shared, :instance, sig_file, virtual_name],
+          ["Demo", :shared_attr, :instance, sig_file, virtual_name],
+          ["Demo", :shared_singleton, :singleton, sig_file, virtual_name]
+        ]
+      )
+    end
+
+    it "reports nothing when the inline members do not overlap sig/" do
+      virtual = [[virtual_name, "class Demo\n  def only_inline: () -> ::Integer\nend\n"]]
+      loader = build_loader(virtual)
+      expect(loader.inline_member_standdowns).to be_empty
+      expect(loader.instance_definition("Demo").methods[:only_inline]).not_to be_nil
+    end
+
+    it "reports nothing for a project with no inline contribution at all" do
+      expect(build_loader([]).inline_member_standdowns).to be_empty
+    end
+
+    # `def x: ... | ...` is filed under `overloads`, not `originals`, so rbs composes it with an existing
+    # declaration instead of raising. Standing it down would drop a contribution that was designed to
+    # coexist — the one shape upstream sanctions for having both.
+    it "keeps an overloading inline member, which rbs composes rather than duplicates" do
+      virtual = [[virtual_name, "class Demo\n  def shared: (::Symbol) -> ::Integer | ...\nend\n"]]
+      loader = build_loader(virtual)
+      expect(loader.inline_member_standdowns).to be_empty
+      expect(loader.instance_definition("Demo").methods[:shared].method_types.map(&:to_s))
+        .to eq(["(::Symbol) -> ::Integer", "(::String) -> ::Integer"])
+    end
+
+    # The answer must not depend on cache state: the derivation reads the loader's own inputs, never the
+    # built environment, so a loader that has never built one answers identically.
+    it "answers without building the environment" do
+      loader = build_loader
+      expect(loader.inline_member_standdowns.map { |record| record[1] }).to eq(%i[shared shared_attr
+                                                                                  shared_singleton])
+      expect(loader.instance_variable_get(:@state)[:env_loaded]).to be_nil
+    end
+
+    # Nesting is what makes the two sides comparable at all: the writer emits `module Outer\n class Inner`
+    # while `sig/` may spell the same class `class Outer::Inner`.
+    it "matches a nested inline declaration against a qualified sig/ one" do
+      File.write(sig_file, "module Outer\nend\n\nclass Outer::Inner\n  def shared: () -> ::Integer\nend\n")
+      virtual = [[virtual_name, "module Outer\n  class Inner\n    def shared: () -> ::String\n  end\nend\n"]]
+      loader = build_loader(virtual)
+      expect(loader.inline_member_standdowns)
+        .to eq([["Outer::Inner", :shared, :instance, sig_file, virtual_name]])
+      expect(loader.instance_definition("Outer::Inner").methods[:shared].method_types.map(&:to_s))
+        .to eq(["() -> ::Integer"])
+    end
+  end
 end

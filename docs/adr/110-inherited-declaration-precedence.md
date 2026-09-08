@@ -1,9 +1,10 @@
 # ADR-110 — An inherited declaration does not outrank the receiver's own `def`
 
-Status: **Accepted, 2026-09-09 — the adjudication only; nothing is implemented.** This ADR answers
-[#744](https://github.com/rigortype/rigor/issues/744) half 2, the question
-[#745](https://github.com/rigortype/rigor/pull/745) deliberately left open when it fixed half 1. The
-engine change it decides is gated on WD5's corpus measurement and is not scheduled here. Archetype:
+Status: **Accepted, 2026-09-09 — implemented by [#856](https://github.com/rigortype/rigor/issues/856).**
+This ADR answers [#744](https://github.com/rigortype/rigor/issues/744) half 2, the question
+[#745](https://github.com/rigortype/rigor/pull/745) deliberately left open when it fixed half 1. WD1 and
+WD3 landed together with WD5's corpus measurement, recorded under WD5 below; Clause A gained a third
+condition during implementation, marked as an amendment where it is stated. Archetype:
 deliberative. Stakes: high — it moves a precedence the whole dispatcher rests on, its blast radius is
 every project whose classes override a signed ancestor method, and it sits directly on the
 false-positive envelope.
@@ -75,12 +76,22 @@ That is the criterion, and it is meant to be reused: it is the sentence the five
 each deriving locally. It is bounded by two clauses that keep it from becoming the much larger claim
 that inherited declarations are untrustworthy in general.
 
-**Clause A — the conflict must be visible.** The rule engages only where the receiver's own class has a
-source `def` for the name and no declaration of its own for it. With no override, the inherited
-declaration *is* about the method that runs, and it binds exactly as today. This is what keeps the
-decision out of [ADR-43](43-rbs-complete-ancestor-resolution.md)'s territory, where resolving inherited
-return types is the precision win and cannot be separated from the risk: "you cannot get one without the
-other" (`43:99`).
+**Clause A — the conflict must be visible, and the declaration being disqualified must be the project's
+own.** Three conditions: the receiver's own class has a source `def` for the name; it carries no
+declaration of its own for it; and the ancestor whose declaration would otherwise answer is itself
+project-declared. With no override, the inherited declaration *is* about the method that runs, and it
+binds exactly as today.
+
+**The third condition is an amendment from implementation (#856), and the first two are not sufficient
+without it.** As first written this clause claimed to keep the decision out of
+[ADR-43](43-rbs-complete-ancestor-resolution.md)'s territory on its own; it does not. `class Foo; def
+each; end` inheriting `Enumerable#each` satisfies both, and disqualifying bundled declarations that way
+is precisely the blanket fix ADR-43 rejected — "you cannot get one without the other" (`43:99`). It is
+the same reason `ExpressionTyper#instance_self_answers?` keeps its RBS arm own-class only. The authority
+distinction is the one `Reflection.project_declared_class?` already draws: a project sidecar describes
+the source under analysis, while a bundled signature describes a class the project does not own, where a
+project `def` is a monkey-patch and [ADR-17](17-monkey-patch-pre-evaluation.md) owns the question. It
+fail-softs to false, so an environment whose declarations cannot be attributed changes nothing.
 
 **Clause B — withhold, never manufacture.** Disqualifying the inherited declaration may only ever *lose*
 precision. It may not substitute a different precise type on the strength of the override alone, and it
@@ -139,6 +150,30 @@ hold together:
 
 Failing 2 falsifies the implementation, not the decision. Failing 4 beyond a margin the reviewer accepts
 reopens WD1's choice of `Dynamic[top]`.
+
+**Measured (2026-09-09, #856).** 25 survey targets, both arms from one bundle with the two changed files
+toggled in place, `--no-cache --no-baseline` and the project's own config:
+
+| | base | WD1 only | WD3 only | both |
+| --- | --- | --- | --- | --- |
+| Whole corpus, new diagnostics | — | — | — | **0** |
+| redmine, hand-written `sig/` declaring the base | 1021 | **1017** | 1021 | 1017 |
+| rgl | 31 | 31 | **30** | 30 |
+
+Criterion 1: redmine's four sites (`field_format.rb:769`, `:784`, `:801`, `:822`) fire in the base arm
+and clear in the change arm — the whole delta, and all of it WD1's. Criterion 2: zero new diagnostics
+anywhere, and the one removal outside redmine is rgl's `def.return-type-mismatch` on `RGL::DOT::Node#to_s`,
+compared against bundled `Object#to_s` because neither `Node` nor `Element` is declared in rgl's own
+`sig/` — all of it WD3's. The per-lever arms are what make the two separable: each lever is live, they do
+not overlap, and neither adds anything. Criterion 3: `make verify` green, `make check` and
+`make check-plugins` clean under `--fail-on=warning`. Criterion 4: redmine's precise nodes fall 23942 →
+23936 (six nodes, 55.4% either way at one decimal); textbringer is identical on both arms. Six nodes is
+the Negative below, measured rather than asserted.
+
+One thing the measurement corrects: the `def.return-type-mismatch` warning in #744's synthetic repro does
+**not** reproduce on real redmine. `RecordList#target_class`'s `@target_class ||= … rescue nil` body does
+not infer to a proven `:no`, so `compare_return` stays silent there and WD3 removes nothing on redmine.
+WD3 rests on ADR-35 conformance and the rgl site, not on #744's four sites.
 
 ## Rejected / deferred alternatives
 

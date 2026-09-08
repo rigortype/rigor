@@ -2909,6 +2909,14 @@ module Rigor
         #
         # - Skips methods without an RBS declaration. The rule has no contract to compare against for
         #   source-only methods.
+        # - Skips a `def` whose only declaration was resolved through an ANCESTOR. `Reflection`'s lookup
+        #   reads the fully resolved method table, so a signature written about a base class answers for
+        #   every subclass that inherits the name; comparing an override's body against it reports the
+        #   override wrong for disagreeing with a contract that was never written about it (#744, and
+        #   the four redmine sites in #856). ADR-35 already specifies this rule as comparing a method's
+        #   OWN declared return, and the sibling override rules gate on `defined_on?` — this one did not.
+        #   The inherited-declaration signal belongs to the ADR-35 family, which requires both sides
+        #   authored. Decided in ADR-110 WD3.
         # - Skips methods whose enclosing class isn't a `Type::Singleton` self_type that we can name
         #   (top-level / module-level methods land outside the rule).
         # - Skips methods whose body's last expression is absent or types as `Dynamic[top]` (the
@@ -2976,6 +2984,7 @@ module Rigor
               Reflection.singleton_method_definition(self_type.class_name, def_node.name, scope: scope)
             end
           return nil if method_def.nil?
+          return nil unless defined_on?(method_def, self_type.class_name)
 
           override = Rigor::RbsExtended.read_return_type_override(method_def, environment: scope.environment)
           return override if override

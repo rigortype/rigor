@@ -1,0 +1,1 @@
+- **[sig-gen]** A method whose `sig/` declaration returns `void` is no longer reported as a `tighter-return`: `void` says the return value is not part of the contract, so `sig-gen --diff` proposes nothing for it and neither `--write` nor `--overwrite` can replace it with the value the body happens to return. ([#845](https://github.com/rigortype/rigor/pull/845))

@@ -8,6 +8,9 @@
 # - a RETURN type is generated — `rigor sig-gen` proves it from the body (ADR-5 clause 1);
 # - a PARAMETER type is authored intent — inference never derives one and ADR-5 clause 2 keeps it
 #   deliberately lenient, so hand-writing is legitimate there;
+# - a `void` RETURN is authored intent for the same reason (#836): it says the return value is not
+#   part of the contract, and nothing on the synthesis side produces it, since a type built from a
+#   body is always the type of the body's last expression;
 # - anything else hand-written is a gap `sig-gen` could not close, and by ADR-14's contradiction
 #   rule the gap is the more valuable signal, so it is RECORDED rather than assumed.
 #
@@ -46,6 +49,12 @@ class SigProvenanceAuditor
   # Return equivalent, at least one parameter (or block) typed narrower than `untyped`. Earned —
   # ADR-5 clause 2 makes the parameter half the author's to write.
   PARAMETER_INTENT = :parameter_intent
+  # The declared return is `void`. Earned, for the same reason a parameter type is: `void` says the
+  # return value is not part of the contract, and no synthesis produces it — a type built from a body
+  # is always the type of the body's last expression, so `void` only ever exists on the checking side
+  # (`docs/type-specification/special-types.md` § `void`). `sig-gen` says so itself: it never compares
+  # a `void` declaration (#836) and spells every constructor `-> void` unconditionally.
+  RETURN_INTENT = :return_intent
   # `sig-gen` proposes a narrower return than the declaration. ADR-14: apply it, or record why not.
   TIGHTER_RETURN = :tighter_return
   # Declared and inferred returns differ and `sig-gen` will not propose the swap — either the
@@ -65,7 +74,7 @@ class SigProvenanceAuditor
   # return type to generate, so the provenance rule has nothing to say about them.
   NON_METHOD = :non_method
 
-  EARNED = [GENERATED, PARAMETER_INTENT].freeze
+  EARNED = [GENERATED, PARAMETER_INTENT, RETURN_INTENT].freeze
   RESIDUE = [DECLARED_DIVERGENT, UNTRANSLATABLE, UNRENDERABLE, UNMATCHED, NO_SOURCE].freeze
 
   MARKER_PATTERN = /sig-gen gap:\s*#(?<issue>\d+)\b/
@@ -187,21 +196,23 @@ class SigProvenanceAuditor
 
     # `sig-gen` never compares an `initialize` against an existing declaration: it emits a
     # `(<runtime param shape>) -> void` stub unconditionally, because Ruby's constructor return
-    # value is never meaningful (`Generator#initialize_stub_candidate`). So the whole of a declared
-    # `-> void` constructor that `sig-gen` also emits IS the generated answer, and everything the
-    # author added to it is the parameter list — ADR-5 clause 2's half, exactly.
+    # value is never meaningful (`Generator#initialize_stub_candidate`). The declared `-> void` is
+    # {RETURN_INTENT} like any other — the constructor is only the case that reaches this arm rather
+    # than the compared one, and everything the author added to it is the parameter list.
     def classify_new_method(decl, candidate)
-      if decl.method_name == "initialize" && decl.return_rbs == "void"
-        return Row.new(declaration: decl, classification: decl.typed_params ? PARAMETER_INTENT : GENERATED,
-                       detail: "void")
-      end
+      return Row.new(declaration: decl, classification: RETURN_INTENT, detail: "void") if decl.return_rbs == "void"
 
       Row.new(declaration: decl, classification: UNMATCHED, detail: candidate.classification.to_s)
     end
 
     def classify_equivalent(decl, candidate)
       inferred = candidate.inferred_return&.erase_to_rbs
-      if candidate.declared_return_rbs.nil?
+      if candidate.declared_return_rbs == "void"
+        # `sig-gen` compared nothing: the declaration is `void`, so there is no value contract to
+        # prove (`Generator#declares_void?`). The `void` is read off the candidate rather than the
+        # declaration so the gate and the generator cannot disagree about which spelling counts.
+        Row.new(declaration: decl, classification: RETURN_INTENT, detail: "void")
+      elsif candidate.declared_return_rbs.nil?
         Row.new(declaration: decl, classification: UNTRANSLATABLE, detail: "sig-gen infers #{inferred}")
       elsif candidate.declared_return_rbs == inferred
         Row.new(declaration: decl, classification: decl.typed_params ? PARAMETER_INTENT : GENERATED,

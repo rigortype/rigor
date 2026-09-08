@@ -196,6 +196,29 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(result.skipped.map(&:last)).to eq([:user_authored])
     end
 
+    it "refuses to replace a declared `-> void` with a value return, however many `untyped`s it clears" do
+      # Issue #836 — the generator no longer proposes a value return for a `void` declaration, but a
+      # NEW_METHOD candidate reaches the same member whenever the RBS environment did not resolve the `def`
+      # to it, and an observed-parameter upgrade counts one `untyped` fewer.
+      write_target("class Foo\n  def register: (untyped object) -> void\nend\n")
+      stub = new_method_candidate(method_name: :register, rbs: "def register: (Module object) -> Foo")
+
+      result = writer(overwrite: true).write("lib/foo.rb", [stub])
+
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+      expect(File.read(File.join(tmpdir, "sig/foo.rbs"))).to include("(untyped object) -> void")
+    end
+
+    it "still applies a parameter tightening that KEEPS the declared `-> void`" do
+      write_target("class Foo\n  def register: (untyped object) -> void\nend\n")
+      stub = new_method_candidate(method_name: :register, rbs: "def register: (Module object) -> void")
+
+      result = writer(overwrite: true).write("lib/foo.rb", [stub])
+
+      expect(result.action).to eq(:updated)
+      expect(File.read(File.join(tmpdir, "sig/foo.rbs"))).to include("(Module object) -> void")
+    end
+
     it "does NOT replace without --overwrite even when the new RBS tightens untypeds" do
       write_target("class Foo\n  def m: (untyped) -> Integer\nend\n")
       stub = new_method_candidate(

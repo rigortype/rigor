@@ -791,6 +791,83 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #836. A declared `void` is the author's statement that the return value is not part of the
+  # contract, and nothing on the synthesis side can produce one: a type built from a body is always the type
+  # of the body's last expression. `Inference::RbsTypeTranslator` maps RBS `void` to `top`, `Top` accepts
+  # everything, so every `void` mutator whose body returns a typed value used to read as a tightening.
+  describe "#run when the declaration returns `void`" do
+    it "classifies the method equivalent and carries `void` itself as the declared spelling" do
+      write_fixture("sig/box.rbs", "class Box\n  def status: () -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :status }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.declared_return_rbs).to eq("void")
+      expect(method.rbs).to be_nil
+    end
+
+    it "still proposes the same body's tightening when the declaration names a value type" do
+      # The control for the example above: the decline is `void`'s doing, not the fixture's.
+      write_fixture("sig/box.rbs", "class Box\n  def status: () -> Integer\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :status }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def status: () -> 200")
+    end
+
+    it "declines the `void` mutator shape whose body's last expression is an ivar write" do
+      write_fixture("sig/registry.rbs", "class Registry\n  def register: (untyped object) -> void\nend\n")
+      src = "class Registry\n  def register(object)\n    @objects = [object]\n  end\nend\n"
+      path = write_fixture("lib/registry.rb", src)
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :register }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.declared_return_rbs).to eq("void")
+    end
+
+    it "declines when only ONE overload declares `void` — one proposal is rendered for the whole method" do
+      write_fixture("sig/box.rbs", "class Box\n  def status: () -> void\n               " \
+                                   "| (untyped flag) -> Integer\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def status(flag = nil)\n    200\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :status }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.declared_return_rbs).to eq("void")
+    end
+
+    it "keeps the row out of the JSON payload, so `--diff` and `--write` see no candidate" do
+      write_fixture("sig/box.rbs", "class Box\n  def status: () -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+
+      out = StringIO.new
+      candidates = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run
+      Rigor::SigGen::Renderer.new(out: out).render(candidates: candidates, mode: :diff, format: "json",
+                                                   selection: [])
+
+      expect(JSON.parse(out.string).fetch("candidates").map { |c| c["method"] }).not_to include("status")
+    end
+
+    it "leaves the `initialize` stub alone — sig-gen spells a constructor `-> void` unconditionally" do
+      write_fixture("sig/box.rbs", "class Box\n  def initialize: (untyped size) -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def initialize(size)\n    @size = size\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      init = gen.run.find { |c| c.method_name == :initialize }
+
+      expect(init.classification).to eq(Rigor::SigGen::Classification::NEW_METHOD)
+      expect(init.rbs).to eq("def initialize: (untyped) -> void")
+    end
+  end
+
   describe "#run on singleton methods (slice 4)" do
     it "emits `def self.foo: ...` for `def self.foo` defs" do
       path = write_fixture("lib/holder.rb", "class Holder\n  def self.factory\n    \"hi\"\n  end\nend\n")

@@ -316,10 +316,37 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
           expect(type.members.map(&:class_name)).to contain_exactly("Float", "Integer")
         end
 
-        it "leaves A unbound for a Range carrier that is not a literal" do
-          # A `Nominal[Range, [Integer]]` argument reached its carrier by some other route; only the
-          # literal's own endpoints justify the binding, so the container walk stops here.
+        it "binds A from a Nominal[Range, [T]] carrier's own type arg" do
+          # Issue #862 — `1..ARGV.size` has no literal endpoint, so `ExpressionTyper` hands back the
+          # nominal carrier. Its `T` is the element the Range was constructed with, and a Range is
+          # immutable, so the carrier says as much as a literal's endpoints do.
           arg = Rigor::Type::Combinator.nominal_of("Range", type_args: [Rigor::Type::Combinator.nominal_of(Integer)])
+          expect(bind(box, :bracket, [arg])).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "binds A from a Nominal[Range, [T]] carrier whose T is a union of Nominals" do
+          element = Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.nominal_of(Integer), Rigor::Type::Combinator.nominal_of(Float)
+          )
+          arg = Rigor::Type::Combinator.nominal_of("Range", type_args: [element])
+          type = bind(box, :bracket, [arg])
+          expect(type).to be_a(Rigor::Type::Union)
+          expect(type.members.map(&:class_name)).to contain_exactly("Float", "Integer")
+        end
+
+        it "leaves A unbound for a Nominal[Range, [untyped]] carrier" do
+          # An untyped element is an absence of evidence; binding it would dress `self | A` up as an
+          # inference while it reads `self | unknown`.
+          arg = Rigor::Type::Combinator.nominal_of("Range", type_args: [Rigor::Type::Combinator.untyped])
+          expect(bind(box, :bracket, [arg])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "leaves A unbound for a Dynamic argument" do
+          expect(bind(box, :bracket, [Rigor::Type::Combinator.untyped])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "leaves A unbound for a Nominal carrier that is not a Range" do
+          arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of(Integer)])
           expect(bind(box, :bracket, [arg])).to equal(Rigor::Type::Combinator.untyped)
         end
 

@@ -75,8 +75,9 @@ module Rigor
         NO_BINDING = [nil, nil].freeze
         private_constant :NO_BINDING
 
-        # Both spellings a resolved `RBS::Types::ClassInstance#name` may carry for `Range`; core
-        # signatures absolutise, but a plugin-contributed one need not.
+        # Both spellings a resolved `RBS::Types::ClassInstance#name` — or a `Nominal#class_name` built
+        # from one — may carry for `Range`; core signatures absolutise, but a plugin-contributed one
+        # need not.
         RANGE_TYPE_NAMES = ["::Range", "Range"].freeze
         private_constant :RANGE_TYPE_NAMES
 
@@ -603,16 +604,13 @@ module Rigor
             name
           end
 
-          # Issue #834 — the one container position the envelope admits: a `Range[A]` parameter against a
-          # `Constant<Range>` argument whose endpoints are literals. `Comparable#clamp: [A] (Range[A]) ->
+          # Issues #834 / #862 — the one container position the envelope admits: a `Range[A]` parameter
+          # against a Range argument that names its own element. `Comparable#clamp: [A] (Range[A]) ->
           # (self | A)` otherwise leaves `A` unbound and `i.clamp(1..9)` answers `Dynamic[top] | Integer`,
-          # even though the argument names the element outright. It stays this narrow because the
-          # justification does not generalise: a range literal's endpoints ARE its element type, whereas an
-          # `Array[T]` argument's carrier may have been widened long before the call.
-          #
-          # The bound is the endpoints lifted to their classes ({RangeConstant.element_type}), not the two
-          # values, so `clamp` answers `Integer` rather than a `1 | 9` the runtime contradicts for every
-          # receiver already inside the bracket.
+          # even though the argument names the element outright. It stays Range-only because the
+          # justification does not generalise: a Range is immutable and its element type is fixed at
+          # construction, whereas an `Array[T]` argument's carrier may have been widened long before the
+          # call reached here.
           def range_element_binding(param, arg, declared, type_vars)
             declared_type = param.type
             return NO_BINDING unless declared_type.is_a?(RBS::Types::ClassInstance)
@@ -624,8 +622,37 @@ module Rigor
             return NO_BINDING unless declared.include?(element.name)
             return NO_BINDING if type_vars.key?(element.name)
 
-            bound = RangeConstant.element_type(arg)
+            bound = range_argument_element(arg)
             bound.nil? ? NO_BINDING : [element.name, bound]
+          end
+
+          # The element a Range argument names, or nil when it names none.
+          #
+          # Two carriers qualify. A `Constant<Range>` contributes its endpoints lifted to their classes
+          # ({RangeConstant.element_type}), not the two values, so `clamp(1..9)` answers `Integer` rather
+          # than a `1 | 9` the runtime contradicts for every receiver already inside the bracket. A
+          # `Nominal[Range, [T]]` (issue #862 — `1..ARGV.size` has no literal endpoint to read, so
+          # `ExpressionTyper` hands back the nominal carrier) contributes `T` itself.
+          #
+          # A nominal carrier qualifies only when `T` is a Nominal or a union of Nominals. `untyped`, a
+          # `Dynamic`, or a still-unbound type variable would launder an unknown into the result — the
+          # caller's `self | A` would read as `self | unknown` while claiming to be inferred — so those
+          # keep degrading as an unbound variable does.
+          def range_argument_element(arg)
+            return RangeConstant.element_type(arg) unless arg.is_a?(Type::Nominal)
+            return nil unless RANGE_TYPE_NAMES.include?(arg.class_name)
+            return nil unless arg.type_args.size == 1
+
+            element = arg.type_args.first
+            nominal_only?(element) ? element : nil
+          end
+
+          def nominal_only?(type)
+            case type
+            when Type::Nominal then true
+            when Type::Union then type.members.all?(Type::Nominal)
+            else false
+            end
           end
 
           # `Dynamic[top]` is the engine's "we could not tell" answer, so binding a variable to it would

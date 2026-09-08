@@ -32,3 +32,8 @@ assert_type("Array[String]?", ARGV[0..])
 i = Integer(ARGV[0])
 assert_type("Integer", i.clamp(1..9))
 assert_type("Integer", i.clamp(1..))
+
+# Issue #862 — the same binding from a non-literal Range carrier. `1..ARGV.size` has no literal
+# endpoint, so the carrier is `Range[Integer]` rather than a Constant; the element it was
+# constructed with is just as binding, because a Range cannot be widened afterwards.
+assert_type("Integer", i.clamp(1..ARGV.size))

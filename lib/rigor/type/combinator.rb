@@ -68,8 +68,16 @@ module Rigor
         Singleton.new(resolve_class_name(class_name_or_object))
       end
 
+      # #775 — `nil`, `true` and `false` are interned: a Constant is an immutable value, and these three
+      # are built on every optional translation, nil check and predicate fold (~200k of the ~210k Constant
+      # constructions on the lib self-check), so one shared instance each is unobservable and free.
       def constant_of(value)
-        Constant.new(value)
+        case value
+        when nil then NIL_CONSTANT
+        when true then TRUE_CONSTANT
+        when false then FALSE_CONSTANT
+        else Constant.new(value)
+        end
       end
 
       # Widens every value-pinned (`Constant`) constituent of `type` to its nominal base (`Constant[1]` ->
@@ -871,6 +879,11 @@ module Rigor
 
       # Eager-allocated at load time; see `untyped` method comment above.
       @untyped = Dynamic.new(Top.instance)
+
+      NIL_CONSTANT = Constant.new(nil)
+      TRUE_CONSTANT = Constant.new(true)
+      FALSE_CONSTANT = Constant.new(false)
+      private_constant :NIL_CONSTANT, :TRUE_CONSTANT, :FALSE_CONSTANT
     end
   end
 end

@@ -122,7 +122,8 @@ narrow a contract that is deliberately wide.
 
 The seven `void` rows are **no longer proposed** — #836 landed on 2026-09-09 and their markers came
 out of `sig/` with it; they are kept here because the reading is what the fix is built on. Eight
-remain, and each still carries its marker.
+remained after that fix; three of those (below) were applied on 2026-09-09 (#838) and their markers
+are gone too. Five still carry their marker.
 
 | declaration | declared | `sig-gen` proposes | reading |
 | --- | --- | --- | --- |
@@ -138,9 +139,9 @@ remain, and each still carries its marker.
 | `Rigor::Type::Top#describe` | `String` | `"top"` | literal over a shared contract |
 | `Rigor::Type::Bot#describe` | `String` | `"bot"` | literal over a shared contract |
 | `Rigor::Type::BoundMethod#erase_to_rbs` | `String` | `"Method"` | literal over a shared contract |
-| `Rigor::Reflection.class_ordering` | `Symbol` | `:disjoint \| :equal \| :subclass \| :superclass \| :unknown` | applicable |
-| `Rigor::Scope#user_def_through_ancestors` | `[untyped?, String?]` | `[untyped, String] \| [nil, nil]` | applicable |
-| `Rigor::Scope#singleton_def_through_ancestors` | `[untyped?, String?]` | `[untyped, String] \| [nil, nil]` | applicable |
+| `Rigor::Reflection.class_ordering` | `Symbol` | `:disjoint \| :equal \| :subclass \| :superclass \| :unknown` | applicable (applied, #838) |
+| `Rigor::Scope#user_def_through_ancestors` | `[untyped?, String?]` | `[untyped, String] \| [nil, nil]` | applicable (applied, #838) |
+| `Rigor::Scope#singleton_def_through_ancestors` | `[untyped?, String?]` | `[untyped, String] \| [nil, nil]` | applicable (applied, #838) |
 
 **Seven are `void`.** `Inference::RbsTypeTranslator` maps RBS `void` to `Type::Top`, and `Top` accepts
 everything, so `Generator#tighter?` reports every `void`-declared method whose body happens to return
@@ -159,10 +160,14 @@ declares `String`; the same for `Trinary#to_s` and `BoundMethod#erase_to_rbs`.
 last expression is *not* a direct literal — here it is one, so the guard passes. Filed as **P2**,
 [#837](https://github.com/rigortype/rigor/issues/837).
 
-**Three are genuinely applicable** and were still left declared, with a marker, rather than applied:
-changing a declaration is a `sig/` edit that has to clear the precision gate and Steep, and the
-provenance gate landing is not the commit to do it in. Filed as **P3**,
-[#838](https://github.com/rigortype/rigor/issues/838).
+**Three were genuinely applicable**, and were left declared with a marker rather than applied when
+the provenance gate landed — changing a declaration is a `sig/` edit that has to clear the precision
+gate and Steep on its own, and that landing was not the commit to do it in. Filed as **P3**,
+[#838](https://github.com/rigortype/rigor/issues/838), and **applied on 2026-09-09**: each declaration
+now reads exactly what `sig-gen --diff --tighter-returns lib` proposes, the three `# sig-gen gap:
+#838` markers are gone, and the residue pin in `spec/rigor/sig_gen/provenance_spec.rb` is unchanged —
+`tighter_return` sits outside the residue pin (#845), so applying the tightenings moves rows within
+the earned/marked bookkeeping, not the pinned residue counts.
 
 ## Where the residue declarations come from (679 at the seeding, 669 now)
 
@@ -256,8 +261,9 @@ nothing, so the gate does not accept one.
 ## The follow-up issues
 
 Filed from this section, and each marker in `sig/` names the one for its category. Fifteen at the
-seeding: seven pointed at #836, five at #837, three at #838. Eight remain — the seven #836 markers
-came out when the fix landed.
+seeding: seven pointed at #836, five at #837, three at #838. Five remain — the seven #836 markers
+came out when that fix landed, and the three #838 markers came out when those tightenings were
+applied.
 
 **P1 — [#836](https://github.com/rigortype/rigor/issues/836) — `sig-gen` proposes a value tightening
 for a method declared `void`.** `RbsTypeTranslator` maps `void` to `Type::Top`, `Top.accepts` is
@@ -288,6 +294,11 @@ is right about.** `Reflection.class_ordering` →
 `[untyped, String] | [nil, nil]`. Each is a `sig/` edit that has to clear
 `rigor coverage --threshold 0.58 lib` and `make steep-check`, so it is its own change. Area:
 `area:sig-gen`.
+
+**Applied 2026-09-09.** All three declarations now match `rigor sig-gen --diff --tighter-returns lib`
+exactly, and their `# sig-gen gap: #838` markers are gone. `make check --fail-on=warning`, the
+precision gate, `make lint`, and `make steep-check` all stayed clean; the residue pin in
+`spec/rigor/sig_gen/provenance_spec.rb` did not move, since `tighter_return` sits outside it (#845).
 
 **P4 — [#839](https://github.com/rigortype/rigor/issues/839) — nothing checks that a declaration in
 `sig/` describes a method that exists.** Nine did not (above). `make check` and `make steep-check`

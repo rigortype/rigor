@@ -1,15 +1,12 @@
 # frozen_string_literal: true
 
 # Gate Rigor's own tree against "type-shaped comments": a type written in a comment is never checked
-# by Rigor (types live in sig/, checked by `make check`, or are left to inference), so it can lie, and
-# an AI agent reading the source has no way to tell a comment's claimed type from a checked one. See
-# spec/support/type_shaped_comment_scanner.rb for the four rules (R1-R4) and their rationale — this
-# file only wires the scanner to RSpec: unit examples pin each rule's judgment on inline fixtures
-# (independent of the corpus), and corpus examples run it over lib/, plugins/*/lib/, examples/*/lib/.
-#
-# R1 is EXPECTED to fail on this branch: master carries ~1,100 bracketed YARD tags in lib/ alone, and
-# clearing that corpus is separate work happening on another branch. This spec is the gate, not the
-# fix — do not silence R1's corpus example to make it green.
+# by Rigor (types live in sig/ or in an inline `#:` / `# @rbs` annotation, both checked by `make check`,
+# or are left to inference), so it can lie, and an AI agent reading the source has no way to tell a
+# comment's claimed type from a checked one. See spec/support/type_shaped_comment_scanner.rb for the
+# rules (R1, R3, R4, R5) and their rationale — this file only wires the scanner to RSpec: unit examples
+# pin each rule's judgment on inline fixtures (independent of the corpus), and corpus examples run it
+# over lib/, plugins/*/lib/, examples/*/lib/, spec/ and tool/ (fixtures and vendored trees excluded).
 require "spec_helper"
 
 TYPE_SHAPED_COMMENTS_ROOT = File.expand_path("../..", __dir__)
@@ -87,37 +84,6 @@ RSpec.describe "type-shaped comments (Rigor's own tree)" do
       it "does not flag @see or a {Foo#bar} cross-reference" do
         source = "# @see {Foo#bar}\ndef foo; end\n"
         expect(violations_for(:r1_type_shaped_tag, source)).to be_empty
-      end
-    end
-
-    describe "R2 inline rbs annotation" do
-      it "flags a `# @rbs` block-form annotation" do
-        source = "# @rbs (Integer) -> void\ndef foo(x); end\n"
-        expect(violations_for(:r2_inline_rbs_annotation, source).size).to eq(1)
-      end
-
-      it "flags `# @rbs!` and `# @rbs skip`" do
-        expect(violations_for(:r2_inline_rbs_annotation, "# @rbs! type foo = Integer\nx = 1\n").size).to eq(1)
-        expect(violations_for(:r2_inline_rbs_annotation, "# @rbs skip\ndef foo; end\n").size).to eq(1)
-      end
-
-      it "flags a `#:` comment immediately followed by an RBS type" do
-        source = "#: (Integer) -> void\ndef foo(x); end\n"
-        expect(violations_for(:r2_inline_rbs_annotation, source).size).to eq(1)
-      end
-
-      it "does not flag RDoc directives (`#:nodoc:`, `#:call-seq:`)" do
-        expect(violations_for(:r2_inline_rbs_annotation, "#:nodoc:\ndef foo; end\n")).to be_empty
-        source = "#:call-seq:\n#:  foo(x)\ndef foo(x); end\n"
-        expect(violations_for(:r2_inline_rbs_annotation, source)).to be_empty
-      end
-
-      it "never matches text that only looks like an annotation inside a string literal" do
-        # Regression for lib/rigor/analysis/rule_catalog.rb, whose diagnostic message strings embed the
-        # literal text "# @rbs" — Prism never emits a Comment for it, so the scanner (which only ever
-        # looks at real Comment nodes) must not either.
-        source = %(MESSAGE = "the annotation is written as an rbs-inline \\"# @rbs %a{...}\\" comment"\n)
-        expect(violations_for(:r2_inline_rbs_annotation, source)).to be_empty
       end
     end
 
@@ -226,11 +192,6 @@ RSpec.describe "type-shaped comments (Rigor's own tree)" do
     it "carries no type-shaped YARD tag (R1)" do
       violations = TYPE_SHAPED_COMMENTS_TOTALS.fetch(:r1)
       expect(violations).to be_empty, type_shaped_comments_failure("R1 type-shaped tag", violations)
-    end
-
-    it "carries no inline rbs-inline annotation (R2)" do
-      violations = TYPE_SHAPED_COMMENTS_TOTALS.fetch(:r2)
-      expect(violations).to be_empty, type_shaped_comments_failure("R2 inline rbs annotation", violations)
     end
 
     it "carries no stale @param/@option name (R3)" do

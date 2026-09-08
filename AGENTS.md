@@ -149,11 +149,16 @@ flow is the `rigor-release-prep` skill.
 
 **A type that Rigor did not produce or check is not written down.** To learn a type, ask Rigor
 (`rigor type-of`, `rigor annotate`, `rigor sig-gen --print`), never the surrounding code or a comment.
-Types live in `sig/` (checked by `make check`) or are inferred. In `.rb` files a comment never carries
-a type: doc tags are typeless YARD with an em dash after the name token (`@param name — description`,
-`@raise ExceptionClass — description`, `@return description`), and `#:` / `# @rbs` never appear under `lib/`, `plugins/*/lib`,
-or `examples/*/lib` — the product default ([ADR-93](docs/adr/93-default-rbs-inline-ingestion.md))
-would ingest them as live contracts. Gate: `spec/docs/type_shaped_comments_spec.rb`. A comment states
+Types live in `sig/` (checked by `make check`), in an inline `#:` / `# @rbs` annotation (ingested by
+the product default, [ADR-93](docs/adr/93-default-rbs-inline-ingestion.md), and checked the same way;
+where `sig/` declares the same member, `sig/` wins and an `:info` says so), or are inferred. Write an
+inline annotation where it says something the name and the surrounding code do not — `void` / `bot`
+intent, a return the name does not suggest, a type that says more than the nominal class (`:asc |
+:desc` over `Symbol`), a parameter's contract. Listing the nominal class inference already shows on
+every method (`#: String`, `#: Array`) is the same noise as restating a name. In `.rb` files a comment
+never carries a type: doc tags are typeless YARD with an em dash after the name token
+(`@param name — description`, `@raise ExceptionClass — description`, `@return description`). Gate:
+`spec/docs/type_shaped_comments_spec.rb`. A comment states
 what the next lines and the signature do not — why (an ADR, an issue, a false-positive bound, a
 declined alternative), a constraint the type system cannot express, what `nil` means — and never
 restates a name, a type, or a signature. Why:

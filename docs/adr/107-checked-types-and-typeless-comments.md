@@ -12,6 +12,16 @@ for. Archetype: deliberative. Stakes: mid — reversible in one mechanical pass,
 repository's own tree and the agents working in it, and it does not touch the engine's
 false-positive envelope.
 
+**Amended 2026-09-09.** Two corrections after the first day in force. (1) Inline `#:` / `# @rbs`
+are not banned from this tree: they are type sources the product checks
+([ADR-93](93-default-rbs-inline-ingestion.md)), and the rule for them is the one this ADR already
+gives comments — write one where it says something the name and the surrounding code do not. The
+former § "Inline `#:` and `# @rbs` do not appear in this tree" is replaced by § "Inline annotations
+are documentation that is checked", and gate rule R2 is withdrawn. (2) A declared `void` return is
+authored intent, not a generated type: the provenance rule gains that exception, and
+[#836](https://github.com/rigortype/rigor/issues/836) removes the seven markers the first audit
+demanded for it.
+
 Grounding: the ingestion experiment on [#779](https://github.com/rigortype/rigor/pull/779)'s rebased
 head (`c523b0a3`, § "What the annotations said when Rigor read them"), the five-model authoring probe
 of 2026-09-08 (§ "What models write, with and without a rule"), and the rewrite's own diff
@@ -137,6 +147,7 @@ an agent it means "ask Rigor, do not read the neighbours."
 | **Implementation** | the truth | — |
 | **Inference** | the first type source. Nothing is written down; the type is computed on demand | the precision gate `rigor coverage --threshold 0.58 lib`, which only ever moves up |
 | **`sig/`** | contracts: the public API boundary of [ADR-2](2-extension-api.md), plus authored intent | `make check`, `spec/rigor/public_api_drift_spec.rb`, `make steep-check` |
+| **Inline annotations** (`#:`, `# @rbs`) | documentation that is checked: `void` / `bot` intent, a return the name does not suggest, a type that says more than the nominal class, a parameter's contract | the product default ingests them ([ADR-93](93-default-rbs-inline-ingestion.md)) and `make check` checks them; where `sig/` declares the same member, `sig/` wins and an `:info` says so ([ADR-32](32-rbs-inline-comment-ingestion.md) WD13) |
 | **Comments** | prose only — never a type | `spec/docs/type_shaped_comments_spec.rb` |
 
 `sig/` has an internal provenance rule that follows from
@@ -144,6 +155,10 @@ an agent it means "ask Rigor, do not read the neighbours."
 
 - **Return types are generated** — `rigor sig-gen` emits the strictest carrier the body proves
   (ADR-5 clause 1), and the generator never emits a tightening the analyzer itself would reject.
+  The one exception is `void`: it is the author saying the value is not part of the contract, and no
+  synthesizer produces it — a type built from a body is always the type of the last expression, so
+  `void` works only on the checking side. A declared `void` is therefore intent, like a parameter
+  type, and needs no marker ([#836](https://github.com/rigortype/rigor/issues/836)).
 - **Parameter types are authored intent** — inference does not derive them, and ADR-5 clause 2 keeps
   them deliberately lenient. A hand-written parameter type is the author saying what the method is
   *for*, which is information the implementation does not contain.
@@ -210,24 +225,33 @@ delimiter. Gate R5 requires the dash after every `@param` / `@yieldparam` / `@op
 `{Foo#bar}` cross-references and `@see` stay — they are navigation, not type claims. `@!attribute [r]`
 keeps its bracket: `[r]` is an access mode, not a type.
 
-### Inline `#:` and `# @rbs` do not appear in this tree
+### Inline annotations are documentation that is checked
 
-Not under `lib/`, `plugins/*/lib`, or `examples/*/lib`, for two independent reasons:
+An inline `#:` / `# @rbs` annotation is a type source: the product default ingests it
+([ADR-93](93-default-rbs-inline-ingestion.md)), `make check` checks it, and where `sig/` declares the
+same member `sig/` wins with an `:info` that names both files ([ADR-32](32-rbs-inline-comment-ingestion.md)
+WD13). So it never enters the fourth state this ADR forbids. What decides whether to write one is the
+same test the comment rule applies: does it say something the name and the surrounding code do not?
 
-1. **The product default would ingest them as live contracts.** ADR-93 wires the bundled plugin on
-   whenever `rbs-inline` resolves, and the spec's § "Inline annotation handling" makes an annotation
-   a real contract wherever it appears. So an inline type here is either checked — in which case it
-   is `sig/` with worse ergonomics and the precedence hazard of
-   [#824](https://github.com/rigortype/rigor/issues/824) — or gated off, which is #779's fourth state
-   wearing the product's own syntax.
-2. **This tree is the demonstration of [ADR-0](0-concept.md)'s "no annotations required."** A
-   codebase whose author reaches for annotations to type it is evidence about the inference engine,
-   and the honest response is to fix the engine.
+- Worth writing: `void` / `bot` intent (the spec's own style guidance calls `#: void` strongly
+  recommended, and it is the one return no synthesizer can produce); a return the method name does
+  not suggest; a type that says more than the nominal class — `:asc | :desc` rather than `Symbol`, a
+  record shape rather than `Hash`; a parameter's contract.
+- Noise: the nominal class inference already shows, listed on every method (`#: String`,
+  `#: Array`). That is the type-level twin of a comment restating a name, and the reason the first
+  version of this ADR reached for a ban. The ban was the wrong instrument — it also removed `#: void`,
+  which the spec recommends — so the criterion is quality, judged the way comment quality is judged,
+  and the machine gate is `make check`.
 
-This is a rule about *this* repository. [ADR-32](32-rbs-inline-comment-ingestion.md) /
-[ADR-93](93-default-rbs-inline-ingestion.md) /
-[ADR-94](94-rbs-inline-reader-and-the-rbs-3x-floor.md) are untouched: in an adopting project, `#:` and
-`# @rbs` are type *sources*, and Rigor honours them.
+Two facts made the ban unnecessary the day after it was written: an annotation on one method no
+longer retypes its siblings ([#823](https://github.com/rigortype/rigor/issues/823)), and an overlap
+with `sig/` no longer degrades the class ([#824](https://github.com/rigortype/rigor/issues/824)). What
+stays true from [ADR-0](0-concept.md): this tree demonstrates that annotations are not *required*,
+which is a claim about inference, not a reason to withhold documentation a reader benefits from.
+
+The `rigor-type-oracle` skill ([ADR-108](108-type-provenance-for-agents.md)) is unchanged by this: an
+agent still obtains a type from Rigor or from call-site evidence, and an annotation a human wrote as
+documentation is intent the check verifies, never a guess for the agent to rewrite.
 
 ### Reading a type is a generated view
 
@@ -247,7 +271,7 @@ view costs a command and cannot be.
 
 | Gate | What it holds | State |
 | --- | --- | --- |
-| **G1** `spec/docs/type_shaped_comments_spec.rb` | no `[Type]` after a doc tag; no `#:` / `# @rbs` under the three lib roots; every `@param` names a real parameter of the `def` below; no stale `Slice N will` forward references | lands with #822 |
+| **G1** `spec/docs/type_shaped_comments_spec.rb` | no `[Type]` after a doc tag; an em dash after every tag's name token; every `@param` names a real parameter of the `def` below; no stale `Slice N will` forward references | lands with #822 |
 | **G2** [#812](https://github.com/rigortype/rigor/issues/812) — `make check` fails on a warning | `def.return-type-mismatch` is a **warning**, so `make check` exits 0 with a contradicted return type in the tree. Without G2 the declared-and-checked half of the invariant is theatre | `--fail-on=warning` in a sibling PR |
 | **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a marker on every `tighter-return`, and a per-file pin on the hand-authored residue | lands in #835 |
 
@@ -286,7 +310,7 @@ is deferred rather than rejected outright.
 | Candidate | Reason it lost |
 | --- | --- |
 | **RDoc conventions** (`== Parameters:` with `name::` lists) | Stdlib-native and well-trained, but converting ~32k lines of Markdown-flavoured comments is a markup migration, not a comment pass; there is no parameter-name binding to gate; and `:call-seq:` is itself a type slot in prose. The probe shows models imitate RDoc happily *with an exemplar* — but with none, their prior reaches for typed YARD or `#:` anyway (Round 2). Decisively: RDoc has no machine-detectable failure mode. The bracket is the detector. |
-| **Checked rbs-inline in this tree** (keep `# @rbs`, turn the ingestion gate off) | Consistent with the product spec, and the honest version of what #779 wanted. Non-viable today: #823 makes a partially annotated class worse than an unannotated one, and #824 has no precedence rule against the existing `sig/`. It also reverses ADR-0's thesis in the one tree that demonstrates it, and Rigor's own answer to the parameter half is caller observation (ADR-14 `--observe`), not annotation. Users' projects are a different question, and ADR-93 stands there. |
+| **Checked rbs-inline in this tree** (keep `# @rbs`, turn the ingestion gate off) | Consistent with the product spec, and the honest version of what #779 wanted. Non-viable today: #823 makes a partially annotated class worse than an unannotated one, and #824 has no precedence rule against the existing `sig/`. It also reverses ADR-0's thesis in the one tree that demonstrates it, and Rigor's own answer to the parameter half is caller observation (ADR-14 `--observe`), not annotation. Users' projects are a different question, and ADR-93 stands there. **Superseded 2026-09-09**: #823 and #824 closed the day after, and the amendment above admits inline annotations under the documentation criterion. |
 | **Typed YARD made checked**, via a YARD→RBS synthesizer plugin | Aligns with the model prior, so it would be cheap to comply with. But a *guessed* type that happens to pass the check narrows the contract silently — the Sonnet `Regexp?` case would have shipped as a real parameter contract nobody chose. It also needs #823 first, and it re-imports the "informal type language" problem the 34 `Rigor::Type?` mismatches are made of. |
 | **Prose-only, Ruby-core style** (no tags at all) | Canonical and the most heavily trained form of all. But there is no `@param`-name binding to gate, and core-style prose states types in sentences ("Returns a new Array") — so the silent residue § Consequences already accepts would be considerably larger, with nothing to measure it. |
 | **Keep the ingestion gate** (`require_magic_comment: true` in `.rigor.dist.yml`, i.e. ship #779) | The worst available combination: annotations in the product's own syntax, in the product's own tree, that the product is configured not to read. They look checked. Every one of the 85 diagnostics was invisible while the gate was on. |

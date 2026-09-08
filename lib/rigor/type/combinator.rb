@@ -60,7 +60,7 @@ module Rigor
       # list of Rigor::Type values that carry the receiver's generic instantiation (`Array[Integer]` is
       # `Nominal["Array", [Nominal["Integer"]]]`). Omitting the keyword produces the raw form
       # `Nominal["Array"]`, which is structurally distinct from any applied form.
-      def nominal_of(class_name_or_object, type_args: [])
+      def nominal_of(class_name_or_object, type_args: Nominal::EMPTY_TYPE_ARGS)
         Nominal.new(resolve_class_name(class_name_or_object), type_args)
       end
 

@@ -93,11 +93,14 @@ jobs:
   #
   # Three shards, because a spec FILE is binpacker's scheduling unit and
   # cannot be split: a shard can never finish faster than the heaviest file
-  # it holds. Measured at 423 files, the three heaviest are 87s / 51s / 40s
-  # and land in three different shards, so the floor is ~87s while an even
-  # split of the total is ~63s per runner. A fourth shard would buy nothing
-  # but another job's setup. Past that floor the next lever is not more
-  # shards but a cheaper `runner_spec.rb`.
+  # it holds. Measured at 438 files (run 34269150881), the suite is ~1604s
+  # of predicted work, so the twelve workers of a 3x4 matrix have a floor
+  # of ~134s each — which shards 2 and 3 hit exactly, LPT partitioning all
+  # three slices to 534.6s of weight apiece. Shard 1 cannot reach it:
+  # `runner_spec.rb` alone weighs ~167s, so it occupies a whole worker and
+  # becomes the job's makespan on its own. A fourth shard would buy nothing
+  # but another job's setup, and neither would a better partition. Past
+  # this floor the only lever is a cheaper `runner_spec.rb`.
   test:
     name: Tests (Ruby ${{ matrix.ruby }}, shard ${{ matrix.shard }}/3)
     needs: changes
@@ -164,20 +167,43 @@ jobs:
           path: tmp/binpacker-report-${{ matrix.shard }}.json
           retention-days: 1
 
-      # The pool-runner spec is excluded from the default suite (see
-      # spec/spec_helper.rb) and runs as its own rspec process. Without
-      # this step the gated file has no CI coverage at all — a
-      # deterministic failure in it once rotted unnoticed for three
-      # weeks (fork-backend default 86ed9129 → fixed 7ebeac08).
-      #
-      # Pinned to one shard: it is a single file outside the sharded set,
-      # so running it in every shard would triple its cost for no coverage.
+  # ── 1a. Specs binpacker deliberately excludes ───────────────────
+  # `binpacker.yml`'s `test_exclude` keeps two things out of the sharded
+  # suite because they modify global state and must own their rspec
+  # process: `runner_pool_spec.rb` (also gated behind
+  # RIGOR_INCLUDE_RACTOR_POOL, see spec/spec_helper.rb) and
+  # `spec/integration/plugins/` (rigor-ffi re-opens Rigor::Plugin::Base,
+  # which flakes `public_api_drift_spec.rb`). Without a job they have no
+  # CI coverage at all — a deterministic failure in the pool spec once
+  # rotted unnoticed for three weeks (fork-backend default 86ed9129 →
+  # fixed 7ebeac08).
+  #
+  # Their own job rather than a step pinned to `matrix.shard == 1`, which
+  # is where they used to live: that pinned 18s + 127s onto the shard
+  # already carrying the suite's heaviest file, so shard 1's job ran 339s
+  # against shard 3's 117s. As a peer job the 145s runs concurrently and
+  # leaves the matrix's wall time to the matrix (run 34269150881).
+  excluded-specs:
+    name: Excluded specs (pool runner + plugin integration)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
       - name: Run pool-runner spec
-        if: matrix.shard == 1
         run: make test-ractor-pool
 
       - name: Run plugin integration tests
-        if: matrix.shard == 1
         run: make test-integration-plugins
 
   # ── 1b. Shard coverage ──────────────────────────────────────────
@@ -579,7 +605,7 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [changes, test, shard-coverage, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge]
+    needs: [changes, test, shard-coverage, excluded-specs, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -588,6 +614,7 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           TEST_RESULT: ${{ needs.test.result }}
           SHARD_COVERAGE_RESULT: ${{ needs.shard-coverage.result }}
+          EXCLUDED_SPECS_RESULT: ${{ needs.excluded-specs.result }}
           RBS_COMPAT_RESULT: ${{ needs.rbs-compat.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           SELF_CHECK_RESULT: ${{ needs.self-check.result }}
@@ -603,7 +630,7 @@ jobs:
           fi
           # A gated job that was skipped (Markdown-only PR) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT"; do
+          for job_result in "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

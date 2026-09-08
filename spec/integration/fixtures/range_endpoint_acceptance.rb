@@ -26,14 +26,22 @@ assert_type('"abc"', "abc"[0..])
 assert_type("Array[String]?", ARGV[0..1])
 assert_type("Array[String]?", ARGV[0..])
 
-# `Comparable#clamp: [A] (Range[A]) -> (self | A)` on a plain Integer receiver — no fold applies,
-# because an unbounded Integer has no bracket of its own to intersect. Before #834 the unbound `A`
-# degraded to `Dynamic[top]` and the whole call answered `Dynamic[top] | Integer`.
+# `Comparable#clamp: [A] (Range[A]) -> (self | A)` on a plain Integer receiver. Before #834 the
+# unbound `A` degraded to `Dynamic[top]` and the whole call answered `Dynamic[top] | Integer`; #833
+# / #834 recovered the receiver's class, and #861 recovered the bracket itself — `clamp` returns a
+# value inside the bracket whatever bounds the receiver carries, so a plain Integer takes it entire.
 i = Integer(ARGV[0])
-assert_type("Integer", i.clamp(1..9))
-assert_type("Integer", i.clamp(1..))
+assert_type("Integer[1..9]", i.clamp(1..9))
+assert_type("positive-int", i.clamp(1..))
+assert_type("Integer[1..9]", i.clamp(1, 9))
+assert_type("Float[0.0..1.0]", ARGV[0].to_f.clamp(0.0..1.0))
+
+# An exclusive end raises `ArgumentError: cannot clamp with an exclusive range`, and a mixed-class
+# bracket returns the receiver OR a bound, so both keep the RBS tier's answer.
+assert_type("Integer", i.clamp(1...9))
 
 # Issue #862 — the same binding from a non-literal Range carrier. `1..ARGV.size` has no literal
 # endpoint, so the carrier is `Range[Integer]` rather than a Constant; the element it was
-# constructed with is just as binding, because a Range cannot be widened afterwards.
+# constructed with is just as binding, because a Range cannot be widened afterwards. The #861 fold
+# declines here (no literal bound to take), so the answer is the RBS tier's.
 assert_type("Integer", i.clamp(1..ARGV.size))

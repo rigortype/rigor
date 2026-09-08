@@ -1666,6 +1666,50 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
 
+    describe "clamp on an unbounded receiver (#861)" do
+      def nominal_of(name) = Rigor::Type::Combinator.nominal_of(name)
+
+      it "takes the bracket entire for a plain Integer receiver" do
+        expect(fold_types(nominal_of("Integer"), :clamp, [constant_of(1..9)])).to eq(integer_range(1, 9))
+        expect(fold_types(nominal_of("Integer"), :clamp, [constant_of(1), constant_of(9)]))
+          .to eq(integer_range(1, 9))
+      end
+
+      it "keeps an open side open" do
+        expect(fold_types(nominal_of("Integer"), :clamp, [constant_of(1..)]))
+          .to eq(integer_range(1, Rigor::Type::IntegerRange::POS_INFINITY))
+        expect(fold_types(nominal_of("Integer"), :clamp, [constant_of(..9)]))
+          .to eq(integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 9))
+      end
+
+      it "takes the bracket entire for a plain Float receiver" do
+        expect(fold_types(nominal_of("Float"), :clamp, [constant_of(0.0..1.0)])).to eq(float_range(0.0, 1.0))
+        expect(fold_types(nominal_of("Float"), :clamp, [constant_of(0.0), constant_of(1.0)]))
+          .to eq(float_range(0.0, 1.0))
+      end
+
+      it "declines an exclusive end and a reversed bracket, both of which raise at run time" do
+        expect(fold_types(nominal_of("Integer"), :clamp, [constant_of(1...9)])).to be_nil
+        expect(fold_types(nominal_of("Integer"), :clamp, [constant_of(9), constant_of(1)])).to be_nil
+        expect(fold_types(nominal_of("Float"), :clamp, [constant_of(0.0...1.0)])).to be_nil
+      end
+
+      it "declines a bracket whose endpoints are not literals of the receiver's own class" do
+        # `1.clamp(0.5, 2.5)` returns the receiver OR a bound, so the run-time class is a union.
+        expect(fold_types(nominal_of("Integer"), :clamp, [constant_of(1), constant_of(9.5)])).to be_nil
+        expect(fold_types(nominal_of("Float"), :clamp, [constant_of(0), constant_of(1)])).to be_nil
+        expect(fold_types(nominal_of("Integer"), :clamp, [nominal_of("Integer"), constant_of(9)])).to be_nil
+        expect(fold_types(nominal_of("Float"), :clamp,
+                          [constant_of(Float::NAN), constant_of(1.0)])).to be_nil
+      end
+
+      it "leaves a bounded receiver on its own intersecting fold, and other methods unfolded" do
+        expect(fold_types(integer_range(3, 7), :clamp, [constant_of(1..9)])).to eq(integer_range(3, 7))
+        expect(fold_types(nominal_of("Integer"), :between?, [constant_of(1), constant_of(9)])).to be_nil
+        expect(fold_types(nominal_of("String"), :clamp, [constant_of(1..9)])).to be_nil
+      end
+    end
+
     describe "arithmetic" do
       it "declines Float-range arithmetic for now" do
         expect(fold_types(float_range(0.0, 1.0), :+, [constant_of(1.0)])).to be_nil

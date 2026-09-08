@@ -233,15 +233,8 @@ module Rigor
             first_arg = args.first
             return nil unless first_arg.is_a?(Type::Constant) && first_arg.value.is_a?(Symbol)
           end
-          self_return = try_fold_self_return(receiver, method_name, args)
-          return self_return if self_return
-
-          # v0.0.7 — `String#%` against a `Tuple` / `HashShape` argument runs Ruby's format-string engine
-          # when both sides are statically constant. The standard `numeric_set_of` path bails on Tuple /
-          # HashShape arguments because they are not scalar-Constant carriers, so the special-case sits
-          # ahead of the numeric path.
-          format_lift = try_fold_string_format(receiver, method_name, args)
-          return format_lift if format_lift
+          ahead = try_fold_ahead_of_numeric_path(receiver, method_name, args)
+          return ahead if ahead
 
           receiver_set = numeric_set_of(receiver)
           return nil unless receiver_set
@@ -250,6 +243,20 @@ module Rigor
           return nil if arg_sets.any?(&:nil?)
 
           dispatch_by_arity(receiver_set, method_name, arg_sets)
+        end
+
+        # The folds that must answer before `numeric_set_of` gets a say, because the receiver or an
+        # argument is a carrier it declines:
+        #
+        # - the self-returners, whose receiver may be any `Constant`;
+        # - v0.0.7's `String#%` against a `Tuple` / `HashShape` argument, neither a scalar-Constant
+        #   carrier, which runs Ruby's own format-string engine;
+        # - #861's `clamp` on a plain `Integer` / `Float` receiver, a `Nominal` that `numeric_set_of`
+        #   declines outright.
+        def try_fold_ahead_of_numeric_path(receiver, method_name, args)
+          try_fold_self_return(receiver, method_name, args) ||
+            try_fold_string_format(receiver, method_name, args) ||
+            try_fold_unbounded_clamp(receiver, method_name, args)
         end
 
         # `freeze` / `itself` / `dup` / `clone` on a value-pinned receiver return the receiver carrier.
@@ -451,6 +458,88 @@ module Rigor
 
         def clamp_endpoints_are?(klass, lower, upper)
           (lower.nil? || lower.is_a?(klass)) && (upper.nil? || upper.is_a?(klass))
+        end
+
+        # #861 — `clamp` on a receiver that carries no bracket of its own. `Comparable#clamp` returns a
+        # value inside the bracket whatever the receiver's bounds are, so a plain `Integer` / `Float`
+        # receiver takes the bracket entire: `i.clamp(1..9)` and `i.clamp(1, 9)` are `Integer[1..9]`
+        # where the RBS tier's `self | A` could only say `Integer` (resp. `1 | 9 | Integer`).
+        #
+        # Endpoints must be literals of the receiver's own class. A mixed bracket is `Comparable`'s
+        # business rather than the fold's: `1.clamp(0.5, 2.5)` returns the receiver OR a bound, so the
+        # run-time class is a union across `Integer` and `Float`, and it declines here.
+        #
+        # `Float` covers `NaN` while a `FloatRange` never does — sound in this direction, because
+        # `clamp` on a NaN receiver raises (`comparison of Float with Float failed`) and the call that
+        # returns is always inside the bracket.
+        #
+        # The two run-time raisers `clamp_bracket` already declines — an exclusive end (`cannot clamp
+        # with an exclusive range`) and a reversed bracket — keep declining here.
+        def try_fold_unbounded_clamp(receiver, method_name, args)
+          return nil unless method_name == :clamp
+
+          klass = unbounded_clamp_receiver_class(receiver)
+          return nil unless klass
+
+          case args.size
+          when 1 then fold_unbounded_clamp_range(klass, args.first)
+          when 2 then fold_unbounded_clamp_pair(klass, args)
+          end
+        end
+
+        # `Integer` / `Float` for a bare nominal receiver of that class; `nil` for everything else,
+        # the bounded carriers included — those keep their own intersecting folds.
+        def unbounded_clamp_receiver_class(receiver)
+          return nil unless receiver.is_a?(Type::Nominal) && receiver.type_args.empty?
+
+          case receiver.class_name
+          when "Integer" then Integer
+          when "Float" then Float
+          end
+        end
+
+        def fold_unbounded_clamp_range(klass, arg)
+          bracket = clamp_bracket(numeric_set_of(arg))
+          return nil if bracket.nil?
+
+          lower, upper = bracket
+          return nil unless clamp_endpoints_are?(klass, lower, upper)
+          return nil if clamp_bound_nan?(lower) || clamp_bound_nan?(upper)
+
+          unbounded_clamp_result(klass, lower, upper)
+        end
+
+        def fold_unbounded_clamp_pair(klass, args)
+          values = args.map { |arg| single_clamp_bound(klass, numeric_set_of(arg)) }
+          lower, upper = values
+          return nil if lower.nil? || upper.nil?
+          return nil if lower > upper
+
+          unbounded_clamp_result(klass, lower, upper)
+        end
+
+        # The two-argument form takes no `nil` bound: `clamp(nil, 9)` is `Comparable`'s own
+        # one-sided form, which the catalogue does not route here.
+        def single_clamp_bound(klass, values)
+          return nil unless values.is_a?(Array) && values.size == 1
+
+          value = values.first
+          return nil unless value.is_a?(klass)
+
+          clamp_bound_nan?(value) ? nil : value
+        end
+
+        # A NaN bound orders against nothing, so `clamp` raises for it — no bracket to fold to.
+        def clamp_bound_nan?(bound)
+          bound.is_a?(Float) && bound.nan?
+        end
+
+        def unbounded_clamp_result(klass, lower, upper)
+          if klass == Integer
+            build_integer_range(lower || -Float::INFINITY, upper || Float::INFINITY)
+          else
+            Type::Combinator.float_range(lower || -Float::INFINITY, upper || Float::INFINITY)
+          end
         end
 
         # `Integer#divmod` and `Float#divmod` return a 2-element array `[quotient, remainder]`. We project

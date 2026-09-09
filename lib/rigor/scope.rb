@@ -1067,7 +1067,6 @@ module Rigor
     # the cross-file project pre-pass ({Inference::ScopeIndexer.discovered_def_index_for_paths}) and only when
     # dependency recording is active. No-op when the class is not a project class (core / stdlib / gem names
     # never appear in the source map). Gated by the caller on the recorder being active.
-    #
     def record_class_dependency(class_name)
       sites = @discovery.discovered_class_sources[class_name.to_s]
       return if sites.nil?

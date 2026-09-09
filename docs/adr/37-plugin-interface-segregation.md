@@ -177,6 +177,10 @@ out to all plugins.
 
 ### 2. `TypeSpecifyingExtension` (from `flow_contribution_for`, fact slots)
 
+*Note: this design's `type_specifier` DSL was renamed `narrowing_facts` by
+ADR-80; the old name was removed in 0.3.0. The record below is left as
+originally written.*
+
 Predicate / assertion narrowing — the `truthy_facts` / `falsey_facts` /
 `post_return_facts` slots — method-gated and edge-aware.
 
@@ -378,7 +382,9 @@ block. Returns a `Type` (or `nil` to decline). `receivers:` is the greppable,
 indexable gate — the engine can group extensions by class instead of asking
 every plugin about every call.
 
-**`type_specifier` (→ `post_return_facts`, method-gated).** 
+**`type_specifier` (→ `post_return_facts`, method-gated).** *Renamed
+`narrowing_facts` by ADR-80; the `type_specifier` name below is the
+as-implemented record and was removed in 0.3.0.*
 
 ```ruby
 type_specifier methods: [:assert_kind_of, :assert_instance_of] do |call_node, scope|

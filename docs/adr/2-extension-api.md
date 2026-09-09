@@ -383,8 +383,9 @@ Working response: the first public plugin milestone should defer broad expressio
   accumulate per-run mutable state in their
   `diagnostics_for_file` hooks (`flow_contribution_for`
   **was removed in ADR-52 WD3, 2026-06-11** — migrate to
-  `dynamic_return` / `type_specifier`; see CHANGELOG
-  `### Removed`)
+  `dynamic_return` / `narrowing_facts` (ADR-37 named this
+  `type_specifier`; ADR-80 renamed it, and the old name was
+  removed in 0.3.0); see CHANGELOG `### Removed`)
   (the `rigor-sorbet`
   `@reachable_absurd_nodes` /
   `@reveal_type_calls` /

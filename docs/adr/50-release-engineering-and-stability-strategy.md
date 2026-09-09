@@ -134,7 +134,7 @@ The v1.0.0 contract (enumerated, drafted at v0.2.0) covers:
 | --- | --- |
 | CLI commands + flags (`check`, `triage`, `baseline`, `sig-gen`, `lsp`, `mcp`, …) | yes |
 | `.rigor.yml` keys + value grammar | yes |
-| Plugin contract — `Plugin::Base` hooks + the manifest fields (ADR-37's `node_rule` / `dynamic_return` / `type_specifier` + the declarative fields) | yes (the ADR-37 narrow protocols; the deprecated fat hooks per WD3) |
+| Plugin contract — `Plugin::Base` hooks + the manifest fields (ADR-37's `node_rule` / `dynamic_return` / `narrowing_facts` — renamed from `type_specifier` by ADR-80, old name removed in 0.3.0 — + the declarative fields) | yes (the ADR-37 narrow protocols; the deprecated fat hooks per WD3) |
 | Diagnostic **identifiers** + suppression markers + `severity_overrides:` keys | yes (the *vocabulary*, not the firing set — § Decision 3) |
 | Baseline file format + cache schema version | yes (format; schema bumps invalidate, never mis-read) |
 | `RBS::Extended` annotation grammar (`%a{rigor:v1:…}`) | yes |

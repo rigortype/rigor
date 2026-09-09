@@ -112,6 +112,14 @@ module Rigor
         hexdigest(path) == digest
       end
 
+      # The content-digest field of a packed `:stat` entry ({.pack_stat}); nil when the entry is absent or not
+      # well-formed. Exposed for the caller that must compare the recorded digest against bytes it hashes
+      # itself rather than against the file on disk — the incremental session's editor-mode freshness check,
+      # whose authority is the editor's buffer.
+      def self.content_digest(packed)
+        parse_stat(packed)&.first
+      end
+
       # The VALIDATION-side stat, served from the per-run table when one is installed — a collecting run
       # validates the effects entry and the diagnostics entry against the same ~thousands-of-files
       # dependency descriptor, and the second pass is pure repetition under the run's own stable-filesystem

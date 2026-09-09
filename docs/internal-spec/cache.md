@@ -673,6 +673,38 @@ full run, so the snapshot can never wedge or stale an analysis.
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`
    is re-analysed and the rest served from `Payload#cache`.
 
+### Editor mode (`--tmp-file` / `--instead-of`)
+
+An incremental run may carry an `Analysis::BufferBinding`: one project
+path whose bytes are read from the editor's temp file instead of from
+disk. Two rules bind that run, and neither follows from the tier above.
+
+- **The binding is resolved against the analysed set, not by string
+  equality.** `--instead-of` carries whatever spelling the editor hands
+  the CLI (absolute, `./`-prefixed, relative); the analysed set carries
+  the spelling the run's path arguments produce. A binding whose logical
+  path is not a member of that set MUST be re-spelled onto the member
+  with the same real path. Without it the substitution silently applies
+  nowhere: the run reads the file on disk, reports an empty closure, and
+  serves the pre-buffer answers
+  ([#960](https://github.com/rigortype/rigor/issues/960)).
+- **The buffer's own content digest decides change, not the recorded
+  stat tuple.** The substituted path is changed exactly when the
+  editor's bytes hash to something other than the digest the snapshot
+  recorded for it — an edit in the editor never moves the on-disk stat
+  tuple, so the stat tier reads the file as fresh no matter what the
+  user typed. The closure is then `{path} ∪ dependents[path]`; a buffer
+  whose bytes equal the recorded digest leaves the closure empty,
+  because every cached answer was computed under exactly those bytes.
+
+A buffer-bearing session MUST NOT write its snapshot back. Its per-file
+digests and diagnostics describe bytes that exist only in the editor,
+and persisting them would make the next `rigor check --incremental`
+believe the file on disk had already been analysed in a state it was
+never in. A session that cannot reuse an existing snapshot therefore
+declines rather than running a baseline — nothing it computed could warm
+the next keystroke anyway.
+
 ### `Payload` (current `SCHEMA = 13`)
 
 ```

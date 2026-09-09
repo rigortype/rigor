@@ -18,84 +18,71 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 **v0.3.8 is published** (`Rigor::VERSION` is `0.3.8`, `[Unreleased]` empty as of 2026-09-09).
-Post-cut fragments ride under `changelog.d/` (#830, #844, #846, #848, #854, #857, #858, #859, #864,
-#865, #866, #868, #869 among them). The next cut happens only when the user invokes
+Post-cut fragments ride under `changelog.d/`. The next cut happens only when the user invokes
 `/rigor-release-prep`.
 
-## The 2026-09-09 five-lane batch — landed
+## In flight — another session owns these, hands off
 
-Five issues, five worktrees (`bin/rigor-worktree`), five Draft PRs, each merged on the user's word
-with its master run green, in this order:
+- [#885](https://github.com/rigortype/rigor/pull/885) — Draft, closes #878 (lambda literal's local
+  writes bound to its body scope). Not yours to merge.
+- Worktree `../rigor-wt/fix-882-unused-discovery-axes` is checked out at master and being worked:
+  [#882](https://github.com/rigortype/rigor/issues/882), `rigor unused`'s `foreign_predicate` builds
+  without the discovery axes (a #821-shaped gap) and `prewarm_rbs_cache_for_pool` spells the five
+  axes literally instead of splatting `ProjectEnvironment.dependency_discovery_options`.
 
-- [#869](https://github.com/rigortype/rigor/pull/869) closed #821 (reported by Nicolas Rodriguez):
-  `sig-gen` and the four probe commands built their environment with `libraries:` +
-  `signature_paths:` only, so the rbs collection, the bundle's per-gem `sig/` and plugin signatures
-  were invisible and the superclass-without-RBS skip guard declined every Rails model. New
-  `Rigor::ProjectEnvironment` (`lib/rigor/project_environment.rb`) is the single build path for every
-  non-`check` command; `ProjectEnvironment.dependency_discovery_options(configuration)` is the ONE
-  spelling of the five discovery axes, used by the pool coordinator, the worker session and the LSP
-  context too. Fail-soft is three-tiered (plugins → dependencies → RBS core + `sig/`). Behaviour
-  note: `sig-gen` now passes `source_files:`, so ADR-93 inline `#:` annotations count as existing
-  declarations for it, as they do for `check`.
-- [#864](https://github.com/rigortype/rigor/pull/864) closed #849: a structural gate in
-  `spec/rigor/cache/rbs_environment_spec.rb` reads `RbsLoader.build_env_for`'s keyword list off the
-  method (past `RbsEnvMemo::Interception`) and proves `Cache::RbsEnvironment.compute` forwards every
-  one from the loader's own readers, through a real `Cache::Store`. The manual now states that
-  `type-of` / `type-scan` / `trace` / `annotate` never touch the persistent cache.
-- [#865](https://github.com/rigortype/rigor/pull/865) closed #853: a block-level `break <value>` is
-  unioned into the yielding CALL's type at `ExpressionTyper#call_dispatch_type_for`, above every
-  dispatch tier; the folds keep folding the no-break path. Arms come from a separate thread-local
-  value sink in `StatementEvaluator`, filtered by node identity; only bodies whose syntactic scan
-  finds a block-level `break` pay the extra evaluation. #852's `next` join no longer declines when a
-  `break` is co-resident. Residue: the `break` entry in `JUMP_NODES` (scope threading) is now
-  conservative rather than load-bearing — `5 | Dynamic[top]` where threading would reach `5 | 42`;
-  lifting it moves every block carrying a `break`, so it waits for a change that can measure that.
-- [#866](https://github.com/rigortype/rigor/pull/866) closed #862 (decision: option 1, recorded on
-  the issue): `RbsDispatch#range_element_binding` also binds `Range[A]` from a
-  `Nominal[Range, [T]]` carrier when `T` is a Nominal or a union of Nominals; `untyped`, `Dynamic`
-  and a type variable keep declining. Range-only, because a Range is immutable and its element type
-  is fixed at construction — the #303 widening argument does not carry.
-- [#868](https://github.com/rigortype/rigor/pull/868) closed #861: `clamp` on a plain `Integer` /
-  `Float` receiver folds to the bracket (`ConstantFolding#try_fold_unbounded_clamp`): `i.clamp(1..9)`
-  and `i.clamp(1, 9)` are `Integer[1..9]`, `f.clamp(0.0..1.0)` is `Float[0.0..1.0]`. Exclusive end,
-  mixed-class bounds, NaN bounds and non-literal bounds decline. `i.clamp(1..)` renders as the
-  existing alias `positive-int`. Rebased once after #866: both added rows to
-  `spec/integration/fixtures/range_endpoint_acceptance.rb` and its snapshot.
+## CI wall time — landed, and the lever is now elsewhere
 
-Open from the batch:
+Workflow **371s → ~220s** ([#863](https://github.com/rigortype/rigor/pull/863),
+[#867](https://github.com/rigortype/rigor/pull/867)); shard jobs 339/172/117s → 176/182/175s, with
+their actual makespans inside 4.4s of each other.
 
-- [#880](https://github.com/rigortype/rigor/pull/880) — Draft, CI green, spec-only: the #864 gate's
-  sibling for the other build entry. `spec/rigor/project_environment_spec.rb` reads
-  `Environment.for_project`'s keywords and asserts every one not on an explicit non-discovery
-  allowlist is spelled by `dependency_discovery_options`, pins each value to its configuration
-  reader, and checks the call sites (behaviourally where cheap, at source level for the worker
-  session / LSP context / sig-gen collectors). Merge on the user's word.
-- [#876](https://github.com/rigortype/rigor/issues/876) (`ready-for-agent`): `RbsDescriptor` digests
-  inputs rather than calling `build_env_for`, so #864's gate cannot see it; pin its digest to every
-  environment-changing keyword.
-- [#882](https://github.com/rigortype/rigor/issues/882) (`ready-for-agent`): `rigor unused`'s
-  `foreign_predicate` builds without the discovery axes (a #821-shaped gap), and
-  `prewarm_rbs_cache_for_pool` spells the five axes literally instead of splatting the helper.
+The shard *partition* was never the problem — LPT already cut all three slices to 534.6s of weight
+apiece and shards 2/3 hit the twelve-worker floor exactly. The spread was two other things:
 
-Operational lessons from the batch:
+- 145s of it was `Run pool-runner spec` + `Run plugin integration tests`, steps pinned
+  `if: matrix.shard == 1` on the shard that also held the heaviest file. Both are outside the
+  sharded set (`binpacker.yml`'s `test_exclude`), so they are now the peer job `excluded-specs`.
+- `runner_spec.rb` (5,955 lines, ~167s) exceeded the per-worker budget and set the matrix makespan
+  alone. Split at its one seam — attributing the timing file's **per-example** records to top-level
+  `describe`s showed `CheckRules diagnostics` was 65.2% of the file and the next block 9.4% — into
+  `runner_check_rules_spec.rb`. `--dry-run --format json` proves 355 examples and identical full
+  descriptions on both sides.
 
-- Five lanes serialise on ONE machine-wide `make verify` lock (`mkdir /tmp/rigor-verify.lock`); the
-  last lane waited ~55 min for it. Another session's gate does not take the lock — two full gates
-  did overlap once and survived, but do not count on it.
-- A subagent that reports "holding for the monitor notification" after a background gate is NOT
-  dead — it finished ~20 min later with its report; doing its push / PR by hand only duplicated
-  work. Check `ps` for its `make verify` before taking a lane over.
-- ADR-105's fragment grammar wants the line to start with `- `; a lane whose full gate ran before
-  its fragment existed (PR first, fragment second) only learns that on CI.
+**`Self-check (cold)` (172–196s) is now the critical path**, co-equal with the Tests shards. Further
+spec-side work buys ~nothing at the workflow level; size that job before proposing anything here.
+
+Residue worth knowing, all of it already commented at the code:
+
+- binpacker weighs a file by summing every `[file, name]` entry its history holds and never drops a
+  vanished test, so a split charges the old path forever. `ci.yml`'s cache key carries a manual
+  generation token (`binpacker-timings-v2-…`) — **bump it whenever a spec file is split, renamed, or
+  deleted**. Preserving example names does not help; the lookup is per-path.
+- A cache-key bump costs **two** cold runs: caches saved on a feature branch are invisible to
+  master, so the first master run after the merge is cold too and is what seeds the namespace. Do
+  not read a partition's balance from a run whose restore step logged "Cache not found".
+- `make test-binpacker` now does `mkdir -p tmp` because `Report#write` has no mkpath and `tmp/` is
+  gitignored — the report write silently depended on the timing cache restoring into that directory,
+  and the first genuine miss failed the whole matrix with all 3,357 of a shard's examples passing.
+
+## Also landed 2026-09-09 by the parallel lanes
+
+[#880](https://github.com/rigortype/rigor/pull/880) (the `Environment.for_project` discovery-keyword
+gate, sibling to #864), [#881](https://github.com/rigortype/rigor/pull/881),
+[#883](https://github.com/rigortype/rigor/pull/883) (rooted-spelling version guard folds),
+[#884](https://github.com/rigortype/rigor/pull/884) (arity declines on a receiver whose surface is
+not enumerable), [#886](https://github.com/rigortype/rigor/pull/886) (closed #876 — `RbsDescriptor`'s
+digest pinned to every environment-changing `build_env_for` input).
 
 ## How to enter
 
-1. Nothing of this session's is uncommitted. Six lane worktrees under `../rigor-wt/` were removed;
-   `gate-project-environment-discovery-keywords` (#880) and `fix-861-clamp-unbounded-receiver`
-   (merged) may still exist — remove after #880 lands.
-2. Next: land [#880](https://github.com/rigortype/rigor/pull/880) on the user's word, then
-   [#876](https://github.com/rigortype/rigor/issues/876) (`ready-for-agent`). After that the
-   `ready-for-agent` engine bugs [#807](https://github.com/rigortype/rigor/issues/807) (cache store
-   `repair_writable_marker!` race) and [#806](https://github.com/rigortype/rigor/issues/806)
-   (unguarded manifest reads in `Plugin::Registry`) are independent and small.
-3. Full gates run one at a time on this machine: two parallel `make verify` runs exhaust memory.
+1. Nothing of this session's is uncommitted; master is at the #886 merge and green.
+2. Leave #885 and the `fix-882-unused-discovery-axes` worktree alone unless their session hands over.
+3. Next unclaimed work: [#807](https://github.com/rigortype/rigor/issues/807) (cache store
+   `repair_writable_marker!` races a concurrent constructor and can clear the root under a reader)
+   and [#806](https://github.com/rigortype/rigor/issues/806) (unguarded manifest reads in
+   `Plugin::Registry#type_node_resolvers`) — both `ready-for-agent`, independent, and small.
+4. Full gates run one at a time on this machine: two parallel `make verify` runs exhaust memory, and
+   the lanes serialise on a machine-wide lock (`mkdir /tmp/rigor-verify.lock`). Another session's
+   gate does not take that lock, so check `ps` before assuming a lane is idle.
+5. `../rigor-wt/` also holds `fix-876-rbs-descriptor-digest-gate` (merged) and
+   `perfbench-harness-775`; the first is safe to remove.

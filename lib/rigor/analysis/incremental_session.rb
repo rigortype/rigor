@@ -407,10 +407,13 @@ module Rigor
       end
 
       # The current project file set (cheap directory expansion, no analysis), used to detect files added /
-      # removed since the last run.
+      # removed since the last run. Also where an editor buffer's binding is re-spelled onto the set, since
+      # this is where the run first learns how it spells its own members.
       def current_files
         runner = build_runner
-        @paths ? runner.analysis_file_set(@paths) : runner.analysis_file_set
+        files = @paths ? runner.analysis_file_set(@paths) : runner.analysis_file_set
+        rebind_buffer(files)
+        files
       end
 
       # Verification engine (the `--verify-incremental` gate): with NO source edit, re-analyze `subset` fresh
@@ -1017,18 +1020,51 @@ module Rigor
         candidates.reject { |path| stat_fresh?(path) }
       end
 
-      # A bound buffer's logical path is never fresh: the bytes to analyse live in the editor's temp file, and
-      # the recorded entry describes the file on disk. Re-analysing it when the two happen to agree costs one
-      # file; trusting the stat tuple would serve the editor its own stale diagnostics.
       def buffer_path?(path)
         !@buffer.nil? && path == @buffer.logical_path
+      end
+
+      # Editor mode (#146) — the bound buffer's logical path is fresh exactly when the EDITOR's bytes still
+      # hash to the digest the snapshot recorded for the file they stand in for. The recorded stat tuple
+      # describes the file on disk, which an edit in the editor never moves, so validating through it serves
+      # the editor its own pre-buffer answers (#960); hashing the buffer makes the substituted file changed
+      # whenever it differs, and keeps an untouched buffer out of the closure. Anything unreadable or
+      # unrecorded reads as changed, the conservative direction the rest of this tier takes.
+      def buffer_fresh?(path)
+        recorded = Cache::FileDigest.content_digest(@digests[path])
+        return false if recorded.nil?
+
+        Cache::FileDigest.hexdigest(@buffer.resolve(path)) == recorded
+      rescue StandardError
+        false
+      end
+
+      # Editor mode (#146 / #960) — `--instead-of` is spelled the way the editor spells it (absolute, or
+      # `./`-prefixed), while the analysed set is spelled the way the run's path arguments produce. A binding
+      # whose logical path matches no member of that set substitutes nothing at all: every reader keeps
+      # reading the file on disk and the run answers as if no buffer had been passed. Re-spell the binding
+      # onto the set's own member, identified by real path, once the set is known.
+      def rebind_buffer(files)
+        return if @buffer.nil? || files.include?(@buffer.logical_path)
+
+        target = real_path(@buffer.logical_path)
+        return if target.nil?
+
+        match = files.find { |path| real_path(path) == target }
+        @buffer = BufferBinding.new(logical_path: match, physical_path: @buffer.physical_path) if match
+      end
+
+      def real_path(path)
+        File.realpath(path)
+      rescue StandardError
+        nil
       end
 
       # True when `path`'s recorded stat entry proves it unchanged since the last analysis. Any stat / parse
       # failure (missing entry, unreadable / vanished file) reads as NOT fresh (→ re-analyse), preserving the
       # prior `digest(path) != recorded` "changed" semantics for a file that cannot be validated.
       def stat_fresh?(path)
-        return false if buffer_path?(path)
+        return buffer_fresh?(path) if buffer_path?(path)
 
         entry = @digests[path]
         return false if entry.nil?

@@ -878,7 +878,30 @@ end
       end
     end
 
-    it "re-analyses the buffer even when its bytes match the file on disk" do
+    # #960 — `--instead-of` carries whatever spelling the editor hands the CLI, while the analysed set carries
+    # the spelling the run's path arguments produce. A binding whose logical path is not character-identical to
+    # a member of that set used to substitute nothing anywhere: the run read the file on disk, reported an
+    # empty closure, and served the pre-buffer answers — a wrong answer that looked like a fast one.
+    it "substitutes the buffer when the logical path is spelled differently from the analysed set's member" do
+      Dir.mktmpdir do |dir|
+        buffer = write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+        warm_snapshot(config, dir, snapshot, fp)
+
+        detour = Rigor::Analysis::BufferBinding.new(
+          logical_path: File.join(dir, "lib", "..", "lib", "widget.rb"),
+          physical_path: buffer.physical_path
+        )
+        result = guarded_run_buffer_recheck(buffer_session(config, dir, detour), snapshot: snapshot, fingerprint: fp)
+
+        expect(result.diagnostics.map(&:message)).to include(a_string_matching(/undefined method `upcase' for 1/))
+        expect(result.affected).to include(File.join(dir, "lib", "widget.rb"), File.join(dir, "lib", "other.rb"))
+      end
+    end
+
+    it "leaves the closure empty when the buffer's bytes match the file on disk" do
       Dir.mktmpdir do |dir|
         write_editor_project(dir)
         config = editor_config(dir)
@@ -894,9 +917,11 @@ end
         result = guarded_run_buffer_recheck(buffer_session(config, dir, binding_to_identical), snapshot: snapshot,
                                                                                                fingerprint: fp)
 
-        # The stat tuple of the temp file says nothing about the logical path, so the buffer is always re-read.
-        expect(result.affected).to include(File.join(dir, "lib", "widget.rb"))
-        expect(project_diagnostics(result.diagnostics)).to be_empty
+        # The buffer's own content digest is the authority (#960), and it equals the one the snapshot recorded
+        # for the file it stands in for — so the cached answers describe these very bytes. The example above
+        # is the must-still-fire counterpart: a buffer that differs still drags its dependents in.
+        expect(result.affected).to be_empty
+        expect(sorted(result.diagnostics)).to eq(sorted(full_run(analysis_root(dir))))
       end
     end
   end

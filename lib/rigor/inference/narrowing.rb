@@ -2521,6 +2521,11 @@ module Rigor
         # through {#rooted_class_predicate_name}, which layers #614's extra decline on top of the
         # same walk. A rooted `::Foo` names the top level and never a lexically nearer shadow, so
         # it keeps the un-walked spelling. nil for any non-constant shape, as before.
+        #
+        # PUBLIC, alone among the helpers in this block (#655): `case`/`when`'s VALUE side lives in
+        # `ExpressionTyper` and matched on the as-written spelling, so the two halves of one `case`
+        # disagreed — the flow side narrowed through this walk while the value side resolved the
+        # pattern against whatever the environment knew under that literal name.
         def lexical_class_name(node, scope)
           bare_name = static_class_name(node)
           return nil if bare_name.nil?
@@ -2528,6 +2533,7 @@ module Rigor
 
           resolve_class_name_lexically(bare_name, scope)
         end
+        public :lexical_class_name
 
         # ----- narrow_class / narrow_not_class helpers -----
 

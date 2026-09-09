@@ -882,8 +882,17 @@ module Rigor
       #
       # Other pattern shapes (Range, Regexp, custom `===`) stay `:maybe` — the existing union fallback
       # handles them.
+      #
+      # The class reference is resolved through {Narrowing.lexical_class_name}, the walk the narrowing
+      # side of the same `case` already uses (#655). Matching on the as-written spelling instead made a
+      # SHADOWED name confidently wrong rather than merely unresolved: `when Random` inside
+      # `Bar::Nested` names `Bar::Nested::Random`, the environment answered the core `::Random` the
+      # spelling matches at top level, and a subject that is a core `Random` then made the arm certain
+      # — dropping the `else` Ruby actually takes and typing the expression as a branch that never
+      # runs. The documented argument that an unresolvable pattern can only lose certainty holds for an
+      # unresolvable name and not for a shadowed one.
       def case_when_pattern_certainty(subject_type, pattern_node)
-        class_name = Source::ConstantPath.qualified_name_or_nil(pattern_node)
+        class_name = Narrowing.lexical_class_name(pattern_node, scope)
         return Narrowing.class_pattern_certainty(subject_type, class_name, environment: scope.environment) if class_name
 
         literal = literal_pattern_value(pattern_node)

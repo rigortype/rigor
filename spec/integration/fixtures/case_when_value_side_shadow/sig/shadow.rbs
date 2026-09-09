@@ -1,0 +1,13 @@
+# `class_pattern_certainty` reduces the pattern through class ordering, and the
+# ordering is `:unknown` for a class no RBS declares — which is `:maybe`, the one
+# answer this fixture must not get for free. So the shadowing class is declared
+# here, exactly as https://github.com/rigortype/rigor/issues/655 reports it (the
+# issue's `sig/app.rbs`), and the core `Random` it shadows is already known.
+
+module Bar
+  module Nested
+    class Random
+      def nested_only: () -> String
+    end
+  end
+end

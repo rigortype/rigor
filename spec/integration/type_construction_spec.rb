@@ -440,6 +440,34 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #655 — the same walk on the side of `case` that types the EXPRESSION rather
+  # than the one that narrows the subject. Matching on the as-written spelling
+  # made a shadowed pattern name confidently wrong, which drops a live arm: the
+  # expression types as a branch Ruby never takes, and the next call on it is
+  # reported against the wrong class.
+  describe "fixtures/case_when_value_side_shadow.rb — the value side resolves the pattern too" do
+    let(:harness) { harness_for("case_when_value_side_shadow") }
+
+    it "types the expression as the arm Ruby takes when the pattern name is shadowed" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity. One assertion is the defect, one pins the narrowing side it
+    # has to agree with, and two are must-still-succeed arms an implementation
+    # that stopped deciding certainty at all would break.
+    it "still asserts one type per value-side position" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(4)
+    end
+
+    # The false-positive arm the issue reports: `.upcase` on the `else` arm and
+    # `.succ` on the numeric one are each declared on that arm's class and on no
+    # other, so a dropped arm surfaces here as `call.undefined-method`.
+    it "leaves no other diagnostic on the case results" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   # #652 — the sibling defect of the fixture above, and the one that made this
   # family a DERIVATION bug rather than a per-shape one. Ruby's `Module.nesting`
   # inside a compact `class Admin::CompactController` is that class alone, so a

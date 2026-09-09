@@ -253,6 +253,52 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to eq(Rigor::Type::Combinator.constant_of("admin"))
       end
 
+      # ADR-82 WD4 — `framework_dsl_boundary` is what a plugin ANSWERING `Dynamic` means: the plugin knows
+      # the member exists and knows it crosses a DSL boundary it cannot type. rigor-activerecord is the
+      # first producer (a `serialize`d / json column reader); this pins the engine half it depends on.
+      it "records framework_dsl_boundary when the plugin answers Dynamic" do
+        services = services_for_test
+        plugin_class = make_plugin("dsl-boundary-contributor", Rigor::Type::Combinator.untyped)
+        Rigor::Plugin.register(plugin_class)
+        plugin = plugin_class.new(services: services, config: {})
+        env = env_with([plugin])
+        scope = scope_with(env)
+
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Object"),
+          method_name: :foo,
+          arg_types: [],
+          environment: env,
+          call_node: call_node,
+          scope: scope
+        )
+
+        expect(result).to eq(Rigor::Type::Combinator.untyped)
+        expect(scope.dynamic_origins[call_node]).to eq(Rigor::Inference::DynamicOrigin::FRAMEWORK_DSL_BOUNDARY)
+      end
+
+      # The control: a plugin answering a CONCRETE type is a protected site, not a boundary, and must
+      # record no cause at all.
+      it "records no dynamic origin when the plugin answers a concrete type" do
+        services = services_for_test
+        plugin_class = make_plugin("concrete-contributor", Rigor::Type::Combinator.constant_of("admin"))
+        Rigor::Plugin.register(plugin_class)
+        plugin = plugin_class.new(services: services, config: {})
+        env = env_with([plugin])
+        scope = scope_with(env)
+
+        described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Object"),
+          method_name: :foo,
+          arg_types: [],
+          environment: env,
+          call_node: call_node,
+          scope: scope
+        )
+
+        expect(scope.dynamic_origins[call_node]).to be_nil
+      end
+
       it "skips the plugin tier when call_node or scope is nil (internal callers)" do
         services = services_for_test
         plugin_class = make_plugin("flow-contributor", Rigor::Type::Combinator.constant_of("admin"))

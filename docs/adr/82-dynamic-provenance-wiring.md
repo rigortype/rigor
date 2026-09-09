@@ -305,6 +305,13 @@ that re-labels without improving attribution accuracy is not landed.
   (the plugin knows it emitted a dynamic boundary) and is deferred to per-plugin
   follow-up, not wired generically here — guessing "framework boundary" for any
   unresolved receiver would violate the honesty criterion.
+  **First producer ([#936](https://github.com/rigortype/rigor/issues/936)):**
+  `rigor-activerecord` answers `Dynamic[top]` for a column reader whose value type
+  a macro overrode (`serialize`, `mount_uploader`, json / jsonb), where it
+  previously declined — the plugin knows the reader exists because the schema
+  declares the column, and knows it cannot type it, so the answer is honest rather
+  than a guess. Provenance-only: the site's type is what dispatch widened to
+  anyway, and the diagnostic stream is unchanged.
 
 - **WD5 — the measurement gate. (Resolved 2026-07-06.)** WD2+WD3 landed first
   (cheap, no scope change) and were measured on Mastodon app+lib: they re-bucket

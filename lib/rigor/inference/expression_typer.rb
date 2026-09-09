@@ -1314,30 +1314,65 @@ module Rigor
         end
       end
 
-      # The instance side of {#self_type_answers?}: the class's own discovered methods (`def`, `attr_*`,
-      # `define_method`, `alias`), its `Struct.new` / `Data.define` member accessors, a `def` reached through
-      # its project ancestors (superclass chain and included modules), and an RBS method declared on the
-      # class ITSELF.
+      # The instance side of {#self_type_answers?}: the discovered methods (`def`, `attr_*`,
+      # `define_method`, `alias`) of the class or any project ancestor, its `Struct.new` / `Data.define`
+      # member accessors, a `def` reached through its project ancestors (superclass chain and included
+      # modules), and an RBS method declared on an owner that PRECEDES `::Object` in the MRO.
       #
-      # The RBS arm is own-class only, deliberately. An inherited-declaration test would match every
-      # `Object` / `Kernel` / `Enumerable` name and retract the binding v0.0.3 A exists for — a `def
-      # select(...)` collocated with its DSL-block call site would route straight back through
-      # `Enumerable#select`.
+      # Issue #633 — the discovery arm walks ancestors because inheritance does not distinguish how a
+      # method got there: a superclass `attr_accessor :stext` and an included module's `attr_reader` bind
+      # ahead of a top-level `def stext` exactly as an inherited `def` does, and only the latter had a walk.
+      #
+      # The RBS arm's cut-off is `::Object`, not the own class. A top-level `def` IS a private `Object`
+      # instance method, the last link of every MRO, so any declared owner that comes before `::Object`
+      # wins at runtime — `Exception#message` for a `StandardError` subclass, `Array#first`,
+      # `Comparable#clamp`. What the cut-off keeps out is the tier v0.0.3 A exists for and #316 / #319
+      # refined: a name owned by `Object` or `Kernel` themselves (`inspect`, `format`) is at or after the
+      # top-level `def`'s own rung, so the historical binding still stands there.
       def instance_self_answers?(class_name, method_name)
         return false if class_name.nil?
-        return true if scope.discovered_method?(class_name, method_name, :instance)
+        return true if scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
         return true if meta_member?(class_name, method_name)
         return true if resolve_user_def_through_ancestors(class_name, method_name)
 
-        rbs_declared_on_class?(safe_rbs_method_definition(class_name, method_name, :instance), class_name)
+        rbs_ancestor_answers?(class_name, method_name)
+      end
+
+      # The RBS arm of {#instance_self_answers?}. A project class is usually absent from the RBS
+      # environment, so the declaration that decides the question is written about an ancestor the project
+      # does not declare (`StandardError`, `Array`, `Comparable`) — each is asked on its own terms, and
+      # each of them is itself before `::Object` in the reader's MRO by construction.
+      def rbs_ancestor_answers?(class_name, method_name)
+        definition = safe_rbs_method_definition(class_name, method_name, :instance)
+        return true if rbs_declared_before_object?(definition, class_name)
+
+        scope.external_ancestor_name_candidates(class_name, name_memo: class_graph_buckets[:name])
+             .any? { |candidates| external_ancestor_answers?(candidates, method_name) }
+      end
+
+      # The first candidate spelling the RBS environment knows is the ancestor Ruby resolves; a name it
+      # knows nothing about contributes no evidence either way.
+      def external_ancestor_answers?(candidates, method_name)
+        candidates.each do |candidate|
+          next if instance_ancestor_names(candidate).empty?
+
+          return rbs_declared_before_object?(
+            safe_rbs_method_definition(candidate, method_name, :instance), candidate
+          )
+        end
+        false
       end
 
       # The singleton side: a class-body `self` is `Singleton[Foo]`, where an implicit-self call reaches
       # `Foo`'s own class methods before `Object`'s private top-level `def`.
+      #
+      # Issue #633 — both discovery arms follow the superclass chain, because a subclass inherits its
+      # parent's class methods; `Scope` narrows the singleton walk to superclasses for the same reason
+      # (an `include`d module's `def self.x` is not callable on the includer).
       def singleton_self_answers?(class_name, method_name)
         return false if class_name.nil?
-        return true if scope.discovered_method?(class_name, method_name, :singleton)
-        return true unless scope.singleton_def_for(class_name, method_name).nil?
+        return true if scope.discovered_method_through_ancestors?(class_name, method_name, :singleton)
+        return true unless scope.singleton_def_through_ancestors(class_name, method_name).first.nil?
 
         rbs_declared_on_class?(safe_rbs_method_definition(class_name, method_name, :singleton), class_name)
       end
@@ -1372,6 +1407,36 @@ module Rigor
         return false if defined_in.nil?
 
         defined_in.to_s.delete_prefix("::") == class_name.to_s.delete_prefix("::")
+      end
+
+      # Issue #633 — true when the declaration's owner sits strictly before `::Object` in `class_name`'s
+      # instance MRO, i.e. Ruby dispatches to it ahead of a top-level `def` (which is `Object`'s own
+      # private instance method). The own class trivially qualifies. An owner absent from the ancestor
+      # list, an unbuildable class, and an ancestry that does not reach `Object` (a `BasicObject`
+      # descendant) all answer false, leaving the historical top-level binding untouched.
+      def rbs_declared_before_object?(definition, class_name)
+        return true if rbs_declared_on_class?(definition, class_name)
+        return false if definition.nil? || !definition.respond_to?(:defined_in)
+
+        owner = definition.defined_in
+        return false if owner.nil?
+
+        ancestors = instance_ancestor_names(class_name)
+        object_index = ancestors.index("Object")
+        owner_index = ancestors.index(owner.to_s.delete_prefix("::"))
+        !object_index.nil? && !owner_index.nil? && owner_index < object_index
+      end
+
+      # The class's instance-side ancestors in MRO order, `::`-stripped, or `[]` for a class the RBS
+      # environment does not know or cannot build. Read through the loader's accessor rather than
+      # `instance_definition(...).ancestors` because that is the one wired to the ancestor-name cache and
+      # marked as RIGOR'S OWN demand — ordering two ancestors is not the analysis asking whether either
+      # one's methods resolve, and the `rbs.coverage` bookkeeping must not record it as such.
+      def instance_ancestor_names(class_name)
+        loader = scope.environment&.rbs_loader
+        loader ? loader.ancestor_names_for(class_name.to_s) : []
+      rescue StandardError
+        []
       end
 
       # Issue #520 — Ruby defines the value of an attribute / index assignment (`x.attr = v`, `h[k] = v`)

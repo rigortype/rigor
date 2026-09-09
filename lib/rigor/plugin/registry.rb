@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require_relative "blueprint"
+# Issue #806 — {Registry#guarded_manifest} constructs one. `Rigor::Plugin::LoadError` MUST be defined by
+# then: an unresolved bare `LoadError` in this lexical scope silently falls back to Ruby's own ::LoadError.
+require_relative "load_error"
 
 module Rigor
   module Plugin
@@ -229,11 +232,14 @@ module Rigor
       #   {.materialize} carries none (the provenance surface runs only on the coordinator).
       def initialize(plugins: [], load_errors: [], blueprints: [], resolved_gem_paths: {})
         @plugins = plugins.dup.freeze
-        @load_errors = load_errors.dup.freeze
         @blueprints = blueprints.dup.freeze
         @resolved_gem_paths = resolved_gem_paths.dup.freeze
         @contribution_index = ContributionIndex.new(@plugins)
-        compile_aggregates
+        # Issue #806 — every manifest the construction-time aggregates need is read ONCE here, behind a
+        # per-plugin rescue, and a plugin that raises joins `load_errors` instead of taking the run down.
+        manifest_errors = []
+        compile_aggregates(@plugins.map { |plugin| guarded_manifest(plugin, manifest_errors) })
+        @load_errors = (load_errors + manifest_errors).freeze
         # ADR-52 WD4 — the single engine-owned node-rule walk, compiled once per run from the node-rule
         # plugin subset (registry order). The runner reuses it for every file; it builds fresh per-file
         # state internally, so it is safe to freeze and share.
@@ -306,9 +312,14 @@ module Rigor
       # in plugin registration order. `Environment#build_name_scope` builds a `TypeNode::ResolverChain` from
       # this list (environment.rb). The first non-nil `#resolve(node, scope)` return wins per ADR-13 WD3 /
       # WD5 — registration order is the user's lever.
-      def type_node_resolvers
-        plugins.flat_map { |plugin| plugin.manifest.type_node_resolvers }
-      end
+      #
+      # Issue #806 — compiled at construction alongside its `compile_aggregates` siblings, and for a second
+      # reason beyond theirs: `Environment#build_name_scope` demands it during Environment CONSTRUCTION, so
+      # the previous per-call `plugin.manifest` read had no rescue above it anywhere — a plugin raising here
+      # aborted every `Environment.for_project`, i.e. the whole run, before any seam could record it. The
+      # guard has to sit at registry construction because that is the last point at which a failure can still
+      # join `load_errors` (the registry freezes immediately after).
+      attr_reader :type_node_resolvers
 
       # ADR-20 slice 6 — aggregate every loaded plugin's manifest-declared HKT registrations + definitions
       # into a single `Inference::HktRegistry` overlay that `Environment#hkt_registry` merges on top of the
@@ -419,10 +430,14 @@ module Rigor
       # compiled once at construction (the registry is frozen, so the flat_map-on-every-call versions
       # re-derived an invariant). `@contracts_by_path` is a mutable per-path memo inside the frozen registry
       # — safe because the contract set and the glob semantics are fixed for the lifetime of the run.
-      def compile_aggregates
-        @additional_initializers = @plugins.flat_map { |p| safe_manifest(p)&.additional_initializers || [] }.freeze
-        @open_receivers = @plugins.flat_map { |p| (safe_manifest(p)&.open_receivers || []).map(&:to_s) }.uniq.freeze
+      #
+      # @param manifests — one entry per plugin, positionally aligned with `@plugins`;
+      #   nil where {#guarded_manifest} caught a raising manifest read.
+      def compile_aggregates(manifests)
+        @additional_initializers = manifests.flat_map { |m| m&.additional_initializers || [] }.freeze
+        @open_receivers = manifests.flat_map { |m| (m&.open_receivers || []).map(&:to_s) }.uniq.freeze
         @open_receivers_set = @open_receivers.to_set.freeze
+        @type_node_resolvers = manifests.flat_map { |m| m&.type_node_resolvers || [] }.freeze
         @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
         @contracts_by_path = {}
         @effect_memo = {}
@@ -463,6 +478,21 @@ module Rigor
       def safe_manifest(plugin)
         plugin.manifest
       rescue StandardError
+        nil
+      end
+
+      # Issue #806 — {#safe_manifest} with a receipt. The construction-time aggregates degraded silently
+      # when a manifest read raised, so a plugin that contributed nothing looked identical to a plugin that
+      # was never asked; the load-error channel is where "a plugin could not be loaded" already lives, and
+      # `Analysis::Runner` turns each entry into one `plugin_loader.load-error` row naming the plugin. The
+      # plugin ref is the CLASS, not `manifest.id`: the manifest is the surface that just failed.
+      def guarded_manifest(plugin, errors)
+        plugin.manifest
+      rescue StandardError => e
+        errors << LoadError.new(
+          "plugin #{plugin.class} raised while reading its manifest: #{e.class}: #{e.message}",
+          plugin_ref: plugin.class.to_s, cause: e
+        )
         nil
       end
 

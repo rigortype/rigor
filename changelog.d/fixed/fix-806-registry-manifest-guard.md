@@ -1,0 +1,1 @@
+- **[plugins]** A plugin whose manifest cannot be read no longer aborts the run during environment construction: it is reported as a single plugin load error naming the plugin, and analysis continues over the plugins that loaded ([#890](https://github.com/rigortype/rigor/pull/890))

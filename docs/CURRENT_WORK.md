@@ -102,6 +102,17 @@ internal spec documents has never existed).
   joining an in-source `include` DERIVES a positive edge and would license a fresh FP on an `else`
   arm.
 
+## Release planning — the milestones were rebuilt on 2026-09-09
+
+`v0.3.9` (33 issues) is the LAST 0.3.x release: every non-breaking fix, and the deprecation
+announcements for what `v0.4.0` (17 issues) removes — `v0.4.0` is the pre-1.0 hard break (ADR-50
+WD5/WD7: `int<a,b>` gone, effects default-on per ADR-103 WD15, soaked bleeding-edge graduations,
+plugin-contract and type-model changes that need a corpus FP diff). `gh issue list --milestone v0.3.9`
+is the v0.3.9 backlog, ordered roughly: user-visible FPs (#609 external, #917, #909, #633, #617,
+#645), stale-cache runs (#629, #630, #639, #640, #796, #794), CLI/plugin contract additions (#925
+WD1 before the freeze, #920, #921, #928), then the ADR gates (#939 → #940, #941). The shipped
+`v0.3.0`/`v0.3.3`/`v0.3.6`/`v0.3.x` milestones are closed; `v0.4.x` holds the line-level backlog.
+
 ## How to enter
 
 1. Nothing is uncommitted and no PR of this session's is open. Other sessions merge to master

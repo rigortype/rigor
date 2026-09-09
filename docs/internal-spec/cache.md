@@ -431,7 +431,12 @@ A read encountering any of the following silently returns a
 cache miss; the producer block reruns and the next write
 overwrites the bad entry:
 
-- Missing entry file.
+- Missing entry file — including one that disappears between
+  the existence check and the open (`Errno::ENOENT`), which is
+  what a concurrent process clearing or compacting the root
+  looks like. Every other `SystemCallError` (permission, I/O)
+  still raises: a broken filesystem must stay visible rather
+  than degrade into an endless recompute.
 - Entry shorter than the minimum envelope (header + trailer).
 - Mismatched magic + format-version header.
 - Mismatched trailing SHA-256.
@@ -462,6 +467,15 @@ with different semantics for a writable vs. a read-only store:
 **Writable store:**
 
 - Marker missing → write the current value, proceed. Disk available.
+- Marker present but EMPTY → treated exactly as missing: write the
+  current value, proceed, keep the entries. Disk available.
+  Emptiness carries no information — it is what a torn in-place
+  write looks like, what a crash between the create and the write
+  leaves behind, and what the clear-then-rewrite below itself passes
+  through — and destroying a cache root is the wrong answer to an
+  ambiguous signal. Declining grants the entries no trust they did
+  not already have, since a missing marker over existing entries is
+  kept and served by the rule above.
 - Marker matches → proceed. Disk available.
 - Marker disagrees → wipe every entry under `<root>` (`unlink` every
   child via `FileUtils.rm_rf`), rewrite the marker, and proceed as if
@@ -529,6 +543,15 @@ a fully committed entry, never a torn write — POSIX guarantees
 a brief window where the destination file exists but is empty
 (between `O_CREAT` and the first successful `rename`) treats it
 as a cache miss per the read fault-tolerance rules above.
+
+`schema_version.txt` is published by steps 3–5 alone — the same
+temp-file-then-rename, without the destination lock. It needs the
+atomicity: its reader is another process's `Store` constructor,
+which takes no lock, and a reader that saw a truncated marker
+would conclude the marker disagreed and clear the root under a
+sibling mid-read. It does not need the lock: every writer of the
+marker writes the same value, so there is no last-writer-wins
+question to settle.
 
 ### File format
 

@@ -394,10 +394,22 @@ module Rigor
 
       # Reads and validates one entry file. Any failure (missing, short, bad magic, bad version, bad
       # checksum, unmarshal-able) returns nil so the caller treats it as a cache miss.
+      #
+      # The `ENOENT` rescue covers the gap between the existence check and the open: a concurrent process
+      # compacting or clearing the root can unlink the file in between, and a file that is gone reads as the
+      # same miss the existence check above already reports for one that was never there (issue #807). It is
+      # deliberately narrow — every other `SystemCallError` (a permission error, an I/O error) still raises,
+      # so a genuinely broken filesystem stays visible instead of degrading into an endless recompute. A
+      # present-but-corrupt file is not touched by this either: it still goes through the envelope and
+      # payload checks below.
       def read_entry(path, deserialize: nil)
         return nil unless File.file?(path)
 
-        bytes = File.binread(path)
+        begin
+          bytes = File.binread(path)
+        rescue Errno::ENOENT
+          return nil
+        end
         return nil unless envelope_valid?(bytes)
 
         body = bytes.byteslice(HEADER.bytesize, bytes.bytesize - HEADER.bytesize - 32)
@@ -486,19 +498,31 @@ module Rigor
       def atomically_replace(path, body)
         File.open(path, File::RDWR | File::CREAT, 0o644) do |lock_fd|
           lock_fd.flock(File::LOCK_EX)
-          tmp = "#{path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
-          begin
-            File.open(tmp, "wb") do |f|
-              f.write(body)
-              f.fsync
-            end
-            File.rename(tmp, path)
-          ensure
-            # A failed write/rename must not leak its temp file — rely on the 1-hour `cleanup_stale_temp_files`
-            # sweep only as a backstop for crashes that skip this ensure entirely.
-            unlink_entry(tmp) if File.exist?(tmp)
-          end
+          publish_by_rename(path, body)
           fsync_directory(File.dirname(path))
+        end
+      end
+
+      # The rename-into-place half of {#atomically_replace}, without the destination lock: writes `body` to a
+      # sibling temp file, fsyncs it, and renames it over `path`. POSIX makes the rename atomic within one
+      # filesystem, so an unlocked concurrent reader sees either the previous contents in full or the new
+      # ones in full — never a truncated or half-written file.
+      #
+      # {#repair_writable_marker!} uses this half alone. It needs the atomicity (its reader is another
+      # process's constructor, which does not lock) but not the ordering a lock would buy: every writer of
+      # `schema_version.txt` writes the same value, so there is no last-writer-wins question to settle.
+      def publish_by_rename(path, body)
+        tmp = "#{path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
+        begin
+          File.open(tmp, "wb") do |f|
+            f.write(body)
+            f.fsync
+          end
+          File.rename(tmp, path)
+        ensure
+          # A failed write/rename must not leak its temp file — rely on the 1-hour `cleanup_stale_temp_files`
+          # sweep only as a backstop for crashes that skip this ensure entirely.
+          unlink_entry(tmp) if File.exist?(tmp)
         end
       end
 
@@ -530,23 +554,46 @@ module Rigor
         false
       end
 
+      # The marker is PUBLISHED BY RENAME rather than written in place. Its reader is another process's
+      # constructor, which takes no lock, so an `O_TRUNC`-then-write would expose a window in which the file
+      # exists and is empty; a reader landing there concludes the marker disagrees and clears the whole cache
+      # root — under, among others, a sibling that is between its own `File.file?` and `File.binread`, which
+      # is the `Errno::ENOENT` of issue #807. Two `rigor check` processes over one fresh `.rigor/cache` are
+      # enough to hit it.
+      #
+      # An EMPTY marker is treated as an ABSENT one — rewritten, never cleared on. Emptiness carries no
+      # information: it is what a torn write by an older Rigor looks like, what a crash between the create
+      # and the write leaves, and what this method's own clear-then-rewrite passes through. Answering an
+      # ambiguous signal by destroying a cache root is the wrong trade, and declining grants the entries
+      # below no trust they did not already have — a marker that is simply MISSING over existing entries is
+      # already kept and served (see the spec's writable-store rules), and `clear_cache_root!` removes the
+      # marker before rewriting it, so it produces that state itself.
       def repair_writable_marker!
         FileUtils.mkdir_p(@root)
         marker = File.join(@root, "schema_version.txt")
         current = self.class.schema_marker_value
 
-        if File.file?(marker)
-          on_disk = File.read(marker).strip
-          return true if on_disk == current
+        on_disk = read_marker(marker)
+        return true if on_disk == current
 
-          clear_cache_root!
-        end
+        clear_cache_root! unless on_disk.nil? || on_disk.empty?
 
         FileUtils.mkdir_p(@root)
-        File.write(marker, "#{current}\n")
+        publish_by_rename(marker, "#{current}\n")
+        fsync_directory(@root)
         true
       rescue StandardError
         false
+      end
+
+      # @return the marker's content, or nil when there is none to read — including the case of a concurrent
+      #   {#clear_cache_root!} removing it between the check and the open.
+      def read_marker(path)
+        return nil unless File.file?(path)
+
+        File.read(path).strip
+      rescue Errno::ENOENT
+        nil
       end
 
       def clear_cache_root!

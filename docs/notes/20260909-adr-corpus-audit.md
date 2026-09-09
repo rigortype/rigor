@@ -296,6 +296,19 @@ already 2.5 months into pointing at a deleted spec and ADR-6 was already wrong a
 status-only lens structurally cannot see architecture drift. If this audit is repeated, it should be
 repeated on the axes used here.
 
+## Where each finding went
+
+Filed 2026-09-09, after the § 0 defects that were fixed directly.
+
+| | Issues |
+| --- | --- |
+| § 0 live defects, fixed directly | [#906](https://github.com/rigortype/rigor/pull/906) (playground argv, `rigor help` verbs), [#908](https://github.com/rigortype/rigor/pull/908) (loader meta-gem branch, rigor-rbnacl activation), [#913](https://github.com/rigortype/rigor/pull/913) (the `plugins_isolation:` correction) |
+| § 0 live defects, filed | #918 rigor-ffi `config_schema` · #919 rigor-unused-adjudicate · #920 `rigor init` rule list · #921 `:factory_index` · #922 `MergeResult#conflicts` · #923 `node_rule_diagnostics` · #924 ADR-88 opacity |
+| § 1 buried work | #911 `plugins_isolation:` · #925 ADR-96 WD1+WD2 · #926 ADR-27 WD5 · #927 ADR-50 freeze obligations · #928 → #929 → #930 capability roles · #932 ADR-68 · #933 ADR-66 · #934 ADR-17 3b · #935 ADR-19 · #936 / #937 / #938 residue bundles |
+| § 2, § 3, § 4 | #939 the status-header gate → #940 the reverse-drift sweep · #941 `type_specifier` · #942 `docs/types.md` · #943 partial supersession |
+
+The `:factory_index` finding was sharpened while filing: the cause is that a **producer value** (ADR-60) and a **published fact** (ADR-9) are different channels with the same name — `rigor-factorybot` declares `producer :factory_index` and publishes only `:reachability_references`, while `rigor-rspec` reads the fact store. Two findings were dropped as refuted during filing, and the ADR-50 status observation was removed from #927 for the same reason.
+
 ## Suggested sequencing
 
 - **Now, cheap, high yield** — the § 0 defects (four of them are one-line fixes), and the ADR-102 /

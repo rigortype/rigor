@@ -517,6 +517,20 @@ RSpec.describe "plugins/rigor-sorbet" do
       expect(diags).to be_empty
     end
 
+    # The positive half of the example above, added by #673. `translate_shape` collected an ARRAY of pairs
+    # and handed it to `hash_shape_of`, which validates its argument is a Hash and raises `ArgumentError`
+    # — so this module's documented "never nil; unrecognised forms degrade" contract was really "this one
+    # form raises", and every sig-declared shape was lost. Asserted on the translator directly because the
+    # run-level example above cannot see it: a shape that never arrives produces no diagnostics at all,
+    # and Rigor's own inference of the literal body answers the same type either way.
+    it "builds the HashShape rather than raising on the array of pairs it collects" do
+      node = Prism.parse("{name: String, age: Integer}").value.statements.body.first
+      translated = Rigor::Plugin::Sorbet::TypeTranslator.translate(node)
+
+      expect(translated).to be_a(Rigor::Type::HashShape)
+      expect(translated.describe(:short)).to eq("{ name: String, age: Integer }")
+    end
+
     it "leaves unsupported `T.proc` / `T.attached_class` constructs as Dynamic[top] without crashing" do
       source = <<~RUBY
         #{SIG_STUB}

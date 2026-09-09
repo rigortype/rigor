@@ -230,7 +230,12 @@ module Rigor
 
             pairs << [element.key.unescaped.to_sym, translate(element.value)]
           end
-          Rigor::Type::Combinator.hash_shape_of(pairs)
+          # `.to_h`: `hash_shape_of` validates its argument is a Hash and raises `ArgumentError` on the
+          # array-of-pairs form, so `sig { returns({name: String}) }` degraded to `Dynamic[top]` through
+          # the plugin's rescue instead of producing a shape. Found by #673, when relaxing
+          # `call.argument-type-mismatch` to check the positional arguments of keyword-bearing
+          # signatures made the call site visible.
+          Rigor::Type::Combinator.hash_shape_of(pairs.to_h)
         end
 
         # Renders a constant-path node (`Foo::Bar`, `::Foo::Bar`) as a `::`-joined String. Mirrors the

@@ -31,6 +31,8 @@ module Rigor
       :constant_sources,
       :published_constant_names,
       :local_constant_names,
+      :published_constant_alias_names,
+      :published_constant_ivars,
       :data_member_layouts,
       :struct_member_layouts,
       :param_inferred_types,
@@ -113,6 +115,16 @@ module Rigor
         # author cannot see. Both empty outside a runner-seeded scope, which makes the guard a no-op there.
         published_constant_names: EMPTY_NAME_SET,
         local_constant_names: EMPTY_NAME_SET,
+        # Issue #667 — the two per-file tables that carry a published constant's provenance across a COPY,
+        # which the name sets above cannot: they answer about a reference's spelling, and a copy has none.
+        # `published_constant_alias_names` is the last segments of the constants THIS FILE assigns straight
+        # from a foreign published one (`MODE2 = AppConfig::MODE`), which the local-declaration exemption
+        # would otherwise release. `published_constant_ivars` is `{class name => Set[ivar name]}` for an ivar
+        # whose class-ivar seed is such a copy (`@mode = AppConfig::MODE` in `initialize`), stamped onto the
+        # flow carrier at method entry. Both are seeded by `ScopeIndexer.index` and only when the project
+        # published something, so a project with no cross-file value constants pays no walk.
+        published_constant_alias_names: EMPTY_NAME_SET,
+        published_constant_ivars: EMPTY_TABLE,
         data_member_layouts: EMPTY_TABLE,
         struct_member_layouts: EMPTY_TABLE,
         # ADR-67 WD3 — the call-site parameter-inference table, keyed by `[class_name, method_name, kind]` (the

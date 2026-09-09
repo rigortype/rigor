@@ -14,6 +14,7 @@ require_relative "body_fixpoint"
 require_relative "captured_locals"
 require_relative "dynamic_origin"
 require_relative "../analysis/check_rules/inferred_param_guard"
+require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "content_join"
@@ -300,14 +301,27 @@ module Rigor
       # to a follow-up; for now they degrade to "type the rhs, do not rebind" via the default branch in {#evaluate}.
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
+        bound = bind_local_write(node, rhs_type, post_rhs)
+        # Issue #667 — `m = AppConfig::MODE` makes `m` a copy of a constant the reader's file does not
+        # declare, so `m == :production` folding to `true` is the project's configuration and not a logic
+        # error the author can see. Stamped LAST, across every binding path above: an RHS can be both an
+        # ADR-58 ivar copy and a published-constant copy (`@mode = AppConfig::MODE` in the ctor, `m = @mode`
+        # here), and the two marks answer unrelated questions.
+        return [rhs_type, bound] unless published_constant_copy?(node.value, rhs_type, post_rhs)
+
+        [rhs_type, bound.with_published_constant_mark(:local, node.name)]
+      end
+
+      # The binding half of {#eval_local_write}: the three mutually exclusive provenance paths a local write
+      # can take, unchanged from when they were inline.
+      def bind_local_write(node, rhs_type, post_rhs)
         # ADR-58 WD1 — `r = @right` where `@right`'s optionality is purely declaration-sourced makes `r`
         # declaration-sourced too (the survey's exact rotation/traversal shape `r = @right; r.key`). The mark is
         # computed on the RHS *value*'s provenance — a pure ivar read of a currently declaration-sourced ivar — so it
         # survives the local copy. Any other RHS (a call result, a method-local-nil-bearing value) leaves the local
         # flow-live and the diagnostic fires as before.
-        if declaration_sourced_ivar_read?(node.value, post_rhs)
-          return [rhs_type, post_rhs.with_declaration_sourced_local(node.name, rhs_type)]
-        end
+        return post_rhs.with_declaration_sourced_local(node.name, rhs_type) if
+          declaration_sourced_ivar_read?(node.value, post_rhs)
 
         bound = post_rhs.with_local(node.name, rhs_type)
         # ADR-67 WD6b — a local whose RHS is (transitively) rooted at an inferred parameter inherits the
@@ -315,14 +329,24 @@ module Rigor
         # same lower-bound reason (`vindex = codepoints[i] - x; vindex < y`). The mark is STICKY across
         # narrowing/joins (see `Scope#without_inferred_param_mark`), so a genuine rewrite from a non-param RHS
         # must clear it here. No-op unless the `parameter_inference:` gate seeded a parameter this RHS reaches.
-        if Analysis::CheckRules::InferredParamGuard.rooted?(node.value, scope)
-          return [rhs_type, bound.with_inferred_param_mark(node.name)]
-        end
+        return bound.with_inferred_param_mark(node.name) if
+          Analysis::CheckRules::InferredParamGuard.rooted?(node.value, scope)
 
         bound = bound.without_inferred_param_mark(node.name)
         bound = bound.with_local_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
-        bound = bound.with_optimistic_local(node.name, optimistic_rhs_origin(node.value, post_rhs))
-        [rhs_type, bound]
+        bound.with_optimistic_local(node.name, optimistic_rhs_origin(node.value, post_rhs))
+      end
+
+      # Issue #667 — true when this write copies a value whose constancy rests on a foreign published
+      # constant. The `Type::Constant` pre-gate is what keeps the question cheap and is not merely an
+      # optimisation: the mark exists to withhold `flow.always-truthy-condition`, which only ever fires on a
+      # predicate that folded, so a non-constant RHS has nothing to withhold. It also keeps the guard's one
+      # interprocedural hop off every `x = foo(y)` in a project that publishes anything at all — the same
+      # gate {Analysis::CheckRules::AlwaysTruthyConditionCollector} puts in front of it.
+      def published_constant_copy?(value_node, rhs_type, scope_after_rhs)
+        return false unless rhs_type.is_a?(Type::Constant)
+
+        Analysis::CheckRules::PublishedConstantGuard.rooted?(value_node, scope_after_rhs)
       end
 
       # Issue #286 — the optimistic-nil-free counterpart of {#rhs_origin}, differing in two ways. It does not
@@ -368,6 +392,11 @@ module Rigor
         bound = post_rhs.with_ivar(node.name, rhs_type)
         bound = bound.with_ivar_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
         bound = bound.with_optimistic_ivar(node.name, optimistic_rhs_origin(node.value, post_rhs))
+        # Issue #667 — the ivar twin of the local stamp. This is the SAME-method half; the cross-method one
+        # (`@mode = AppConfig::MODE` in `initialize`, read in a sibling) rides the class-ivar census and is
+        # stamped by {#seed_instance_ivars}.
+        bound = bound.with_published_constant_mark(:ivar, node.name) if
+          published_constant_copy?(node.value, rhs_type, post_rhs)
         [rhs_type, bound]
       end
 
@@ -2936,7 +2965,15 @@ module Rigor
         # flow-live, so `seed_declaration_sourced_ivar` marks each seeded ivar: `possible-nil-receiver` then declines to
         # fire on the cross-method invariant unless a method-local write or narrowing makes the nil flow-live (which
         # drops the mark).
-        seeded.reduce(body_scope) { |acc, (name, type)| acc.seed_declaration_sourced_ivar(name, type) }
+        #
+        # Issue #667 — the same seed carries the published-constant mark for the ivars the class-ivar census
+        # found assigned straight from a foreign published constant, so `@mode == :production` in a sibling
+        # method withholds `flow.always-truthy-condition` the way the direct read of the constant does.
+        marked = scope.published_constant_ivars_for(path)
+        seeded.reduce(body_scope) do |acc, (name, type)|
+          stamped = acc.seed_declaration_sourced_ivar(name, type)
+          marked.include?(name) ? stamped.with_published_constant_mark(:ivar, name) : stamped
+        end
       end
 
       # Cvars are visible from BOTH instance and singleton method bodies of the enclosing class, so this seed is

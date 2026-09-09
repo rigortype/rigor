@@ -7,6 +7,7 @@ require_relative "../type"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../cache/file_digest"
+require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "index_write_widening"
@@ -110,6 +111,7 @@ module Rigor
           build_in_source_constants(root, seeded_scope), literal_mutations[:constants]
         )
         seeded_scope = seed_constant_tables(seeded_scope, default_scope, in_source_constants, root)
+        seeded_scope = seed_published_constant_ivars(seeded_scope, root)
 
         # Slice 7 phase 12. In-source method discovery. Walks every class/module body for `Prism::DefNode` and
         # recognised `define_method` calls and records the introduced method names. `rigor check` consults the table to
@@ -1605,11 +1607,19 @@ module Rigor
       # `Scope#published_constant?`: a project-published constant the analysed file also assigns is one its
       # author can see, so the truthiness rules keep firing on it. Both are seeded here, where the per-file
       # table is still separable from the project seed it is about to merge over.
+      # Issue #667 — the alias table rides the same census and the same gate, because it answers the third
+      # half of the same question: which of THIS file's own constant names carry a value the author never
+      # saw. One census call now feeds both sets.
       def seed_constant_tables(seeded_scope, default_scope, in_source_constants, root)
         merged = merge_seeded_constants(default_scope.in_source_constants, in_source_constants)
+        published = default_scope.published_constant_names
+        census = published.empty? ? nil : constant_write_census(root)
         seeded_scope.with_discovery(
-          seeded_scope.discovery.with(in_source_constants: merged,
-                                      local_constant_names: local_constant_name_set(root, default_scope))
+          seeded_scope.discovery.with(
+            in_source_constants: merged,
+            local_constant_names: local_constant_name_set(census, published),
+            published_constant_alias_names: published_constant_alias_name_set(census, published)
+          )
         )
       end
 
@@ -1626,12 +1636,86 @@ module Rigor
       # "could another file's value for this name be wrong?" — yes, so the name stays censused — and this
       # exemption asks "did this file declare it?" — no, `[Foo].each { |k| k::X = 1 }` declares `Foo::X`.
       # Granting it un-withheld `flow.always-truthy-condition` for a name the file never wrote.
-      def local_constant_name_set(root, default_scope)
-        published = default_scope.published_constant_names
-        return Scope::DiscoveryIndex::EMPTY.local_constant_names if published.empty?
+      def local_constant_name_set(census, published)
+        return Scope::DiscoveryIndex::EMPTY.local_constant_names if census.nil?
 
-        names = constant_write_census(root).declared.select { |name| published.include?(name.split("::").last) }
+        names = census.declared.select { |name| published.include?(name.split("::").last) }
         names.empty? ? Scope::DiscoveryIndex::EMPTY.local_constant_names : names.to_set.freeze
+      end
+
+      # Issue #667 — the last segments of the constants this file assigns straight from a constant the
+      # project published and this file does NOT itself declare. `MODE2 = AppConfig::MODE` renames a foreign
+      # declaration, so the local-declaration exemption releasing `MODE2` is the wrong answer: the author can
+      # see the alias but not the value. The source's own foreignness is asked against the census's
+      # `declared` half — the same suffix relation `Scope#published_constant?` uses — so a same-file
+      # `MODE2 = MODE1` pair stays fully reportable.
+      def published_constant_alias_name_set(census, published)
+        return Scope::DiscoveryIndex::EMPTY.published_constant_alias_names if census.nil?
+
+        names = census.aliases.filter_map do |target, source|
+          next unless published.include?(source.split("::").last)
+          next if census_declares_constant?(census.declared, source)
+
+          target.split("::").last
+        end
+        names.empty? ? Scope::DiscoveryIndex::EMPTY.published_constant_alias_names : names.to_set.freeze
+      end
+
+      def census_declares_constant?(declared, reference)
+        return true if declared.include?(reference)
+
+        suffix = "::#{reference}"
+        declared.any? { |name| name.end_with?(suffix) }
+      end
+
+      # Issue #667 — `{class name => Set[ivar name]}` for an ivar whose class-ivar seed is a copy of a
+      # foreign published constant (`@mode = AppConfig::MODE` in `initialize`). The cross-method half of the
+      # copy provenance: the write and the `@mode == :production` that reads it sit in different method
+      # bodies, so no flow edge connects them and the fact has to be censused per class, exactly as the
+      # ADR-58 nil seed it rides beside is. Runs only when the project published something.
+      def seed_published_constant_ivars(seeded_scope, root)
+        return seeded_scope if seeded_scope.published_constant_names.empty?
+
+        table = {}
+        walk_published_constant_ivars(root, [], seeded_scope, table)
+        return seeded_scope if table.empty?
+
+        seeded_scope.with_discovery(
+          seeded_scope.discovery.with(published_constant_ivars: table.transform_values(&:freeze).freeze)
+        )
+      end
+
+      def walk_published_constant_ivars(node, qualified_prefix, scope, table)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
+          if child_prefix
+            walk_published_constant_ivars(node.body, child_prefix, scope, table) if node.body
+            return
+          end
+        when Prism::DefNode
+          # A `def self.…` body writes the singleton's ivars, which take no instance seed at all.
+          return unless node.receiver.nil?
+        when Prism::InstanceVariableWriteNode
+          record_published_constant_ivar(node, qualified_prefix, scope, table)
+        end
+
+        node.rigor_each_child { |child| walk_published_constant_ivars(child, qualified_prefix, scope, table) }
+      end
+
+      # The class-ivar accumulator (already seeded when this runs) is the pre-gate: an ivar whose seed is not
+      # a `Type::Constant` can never fold a predicate, so there is nothing for the mark to withhold and the
+      # guard's one interprocedural hop is not worth paying for it.
+      def record_published_constant_ivar(node, qualified_prefix, scope, table)
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        return unless scope.class_ivars_for(class_name)[node.name].is_a?(Type::Constant)
+        return unless Analysis::CheckRules::PublishedConstantGuard.rooted?(node.value, scope)
+
+        (table[class_name] ||= Set.new) << node.name
       end
 
       def merge_seeded_constants(seeded, per_file)
@@ -3908,11 +3992,16 @@ module Rigor
       # the names already recorded, so a repeat write retracts whatever either rvalue was; `declared` the
       # subset whose write NAMES its target, which is the only half {Scope#local_constant_names} may exempt
       # ([#710](https://github.com/rigortype/rigor/issues/710)).
-      CensusTables = Data.define(:writes, :seen, :declared)
+      # `aliases` is `{qualified target name => the constant reference its rvalue names}` for the one
+      # unpublishable rvalue shape whose provenance is still knowable ([#667](https://github.com/rigortype/rigor/issues/667)):
+      # a plain `MODE2 = AppConfig::MODE`. The census cannot publish a VALUE for it — resolving the source
+      # is the typed walk's job, not this syntactic one — but it can record that the name is a rename of
+      # another, which is all the withholding guard needs.
+      CensusTables = Data.define(:writes, :seen, :declared, :aliases)
       private_constant :CensusTables
 
       def constant_write_census(root)
-        tables = CensusTables.new(writes: {}, seen: Set.new, declared: Set.new)
+        tables = CensusTables.new(writes: {}, seen: Set.new, declared: Set.new, aliases: {})
         walk_constant_write_census(root, [], tables)
         tables
       end
@@ -3954,11 +4043,13 @@ module Rigor
         case node
         when Prism::ConstantWriteNode
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s),
-                                       constant_literal_value(node.value), tables)
+                                       constant_literal_value(node.value), tables,
+                                       alias_of: constant_alias_source(node.value))
         when Prism::ConstantPathWriteNode
           record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
                                        constant_path_write_literal(node, self_owner), tables,
-                                       nameable: nameable_write_target?(node.target, self_owner))
+                                       nameable: nameable_write_target?(node.target, self_owner),
+                                       alias_of: constant_alias_source(node.value))
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, tables)
         when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
@@ -4051,11 +4142,33 @@ module Rigor
       # ([#710](https://github.com/rigortype/rigor/issues/710)). The two are separate tables rather than one
       # richer descriptor because a name can be written both ways in one file, and then the file DID declare
       # it however the two writes are ordered.
-      def record_constant_write_census(full, literal, tables, nameable: true)
+      def record_constant_write_census(full, literal, tables, nameable: true, alias_of: nil)
         return if full.nil?
 
         tables.declared << full if nameable
-        tables.writes[full] = tables.seen.add?(full) ? (literal || CONSTANT_UNPUBLISHABLE) : CONSTANT_UNPUBLISHABLE
+        first_write = tables.seen.add?(full)
+        tables.writes[full] = first_write ? (literal || CONSTANT_UNPUBLISHABLE) : CONSTANT_UNPUBLISHABLE
+        record_constant_alias_census(full, alias_of, tables, first_write && nameable)
+      end
+
+      # Issue #667 — a name written TWICE is not an alias of anything the walk can name, exactly as it is
+      # unpublishable above; the `delete` is what retracts a first write's record when the second arrives.
+      def record_constant_alias_census(full, alias_of, tables, keep)
+        if keep && alias_of
+          tables.aliases[full] = alias_of
+        else
+          tables.aliases.delete(full)
+        end
+      end
+
+      # The constant reference an rvalue names, or nil when it names none. `AppConfig::MODE` renders
+      # qualified; a path that renders no qualified name falls back to its own last segment, which is all
+      # `Scope#published_constant?` can be asked about anyway.
+      def constant_alias_source(rvalue)
+        case rvalue
+        when Prism::ConstantReadNode then rvalue.name.to_s
+        when Prism::ConstantPathNode then Source::ConstantPath.qualified_name_or_nil(rvalue) || rvalue.name&.to_s
+        end
       end
 
       # The frozen-scalar literal fold: `[value]` for a publishable rvalue, nil to decline. The one-element

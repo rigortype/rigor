@@ -408,6 +408,176 @@ RSpec.describe "cross-file value constants" do
     end
   end
 
+  # Issue #667 — a value the reader COPIED out of such a constant before branching on it. A copy has no
+  # spelling the syntactic root walk can recognise, so the provenance is stamped where the copy happens and
+  # travels with the value: on the `Scope` flow carrier for a local / ivar, and on a per-file census table
+  # for a same-file constant alias, which is not flow at all. Every withholding below is paired with the
+  # same shape copied from a constant the reading file DECLARES, which must keep firing — without that
+  # pairing the change would be indistinguishable from disabling the rule.
+  describe "a value copied out of a published constant (#667)" do
+    let(:config) { "module AppConfig\n  MODE = :production\nend\n" }
+
+    it "withholds the three copy shapes the issue names" do
+      reader = <<~RUBY
+        class Reader
+          MODE2 = AppConfig::MODE
+
+          def initialize
+            @mode = AppConfig::MODE
+          end
+
+          def local_copy
+            m = AppConfig::MODE
+            m == :production ? "prod" : "dev"
+          end
+
+          def ivar_copy
+            @mode == :production ? "prod" : "dev"
+          end
+
+          def alias_copy
+            MODE2 == :production ? "prod" : "dev"
+          end
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => config, "a.rb" => reader)).to eq([])
+    end
+
+    it "keeps firing on the same three shapes copied from a constant this file declares" do
+      # The must-still-fire half, shape for shape. The guard turns on "the value came from another file",
+      # never on "the value came from a constant".
+      source = <<~RUBY
+        class Own
+          OWN_MODE = :production
+          OWN_ALIAS = OWN_MODE
+
+          def initialize
+            @own = OWN_MODE
+          end
+
+          def local_copy
+            m = OWN_MODE
+            m == :production ? "prod" : "dev"
+          end
+
+          def ivar_copy
+            @own == :production ? "prod" : "dev"
+          end
+
+          def alias_copy
+            OWN_ALIAS == :production ? "prod" : "dev"
+          end
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => source)).to eq(["b.rb:11", "b.rb:15", "b.rb:19"])
+    end
+
+    it "keeps firing on a local the reading file assigned a literal of its own" do
+      # The issue's own gate line: `m = :production; m == :production` is a fold the author can see whole,
+      # in a project that publishes a constant of the same value.
+      reader = <<~RUBY
+        def own_literal
+          m = :production
+          m == :production ? "prod" : "dev"
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => config, "a.rb" => reader)).to eq(["a.rb:3"])
+    end
+
+    it "drops the mark when the copy is rebound" do
+      # The carrier is flow state keyed on a rebindable binding, which is what makes it right for a copy and
+      # wrong for #644's project-wide fact. A later write is flow the author CAN see, so the rule returns.
+      reader = <<~RUBY
+        def rebound
+          m = AppConfig::MODE
+          m = :production
+          m == :production ? "prod" : "dev"
+        end
+
+        class Holder
+          def initialize
+            @mode = AppConfig::MODE
+          end
+
+          def overwrite
+            @mode = :production
+            @mode == :production ? "prod" : "dev"
+          end
+        end
+      RUBY
+      # `flow_warnings` sorts as strings, so `a.rb:14` precedes `a.rb:4`.
+      expect(flow_warnings("b.rb" => config, "a.rb" => reader)).to eq(["a.rb:14", "a.rb:4"])
+    end
+
+    it "withholds when only ONE arm of a join copied the constant" do
+      # The mark unions at a join, the opposite of ADR-58's intersection and for the opposite reason: the
+      # mark only ever withholds, so keeping it where either arm copied is the false-positive-safe merge.
+      reader = <<~RUBY
+        def joined(cond)
+          if cond
+            m = AppConfig::MODE
+          else
+            m = :production
+          end
+          m == :production ? "prod" : "dev"
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => config, "a.rb" => reader)).to eq([])
+    end
+
+    it "withholds across a second local hop" do
+      # `b = a` copies a marked local, and the guard reads the mark through the binding the same way it
+      # reads a constant reference — so a rename does not un-withhold.
+      reader = <<~RUBY
+        def two_hops
+          a = AppConfig::MODE
+          b = a
+          b == :production ? "prod" : "dev"
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => config, "a.rb" => reader)).to eq([])
+    end
+
+    it "keeps firing on an alias of a constant the reading file declares" do
+      # The alias table asks its source's foreignness through the same suffix relation the local exemption
+      # uses, so a same-file rename chain stays fully reportable.
+      source = <<~RUBY
+        module Owner
+          FIRST = :here
+          SECOND = FIRST
+
+          def self.check = SECOND == :here ? "y" : "n"
+        end
+      RUBY
+      expect(flow_warnings("b.rb" => source)).to eq(["b.rb:5"])
+    end
+
+    it "keeps firing on an alias whose own name is reassigned in the same file" do
+      # A name written twice is not a rename of anything the census can pin, exactly as it is unpublishable:
+      # the second write retracts the alias record, and the reader is back to a fold it can see.
+      reader = <<~RUBY
+        ALIASED = AppConfig::MODE
+        ALIASED = :production
+
+        def check = ALIASED == :production ? "y" : "n"
+      RUBY
+      expect(flow_warnings("b.rb" => config, "a.rb" => reader)).to eq(["a.rb:4"])
+    end
+
+    it "leaves the copied value itself intact" do
+      # The carrier discipline: the withholding may only remove a firing, never the value. `m` still types
+      # `:production`, so dispatch, argument typing and `call.undefined-method` keep the precision #644
+      # published the constant for.
+      reader = <<~RUBY
+        def copy
+          m = AppConfig::MODE
+          Rigor.dump_type(m)
+        end
+      RUBY
+      expect(dumps("b.rb" => config, "a.rb" => reader)).to eq([":production"])
+    end
+  end
+
   describe "write forms the conflict rule must see" do
     # Each of these is a SECOND assignment to a name another file publishes. If the census cannot see the
     # form, the name publishes a value the program does not have — the conflict rule bypassed rather than a

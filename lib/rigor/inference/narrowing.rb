@@ -2578,8 +2578,7 @@ module Rigor
         end
 
         # Issue #657 — `Bot` is the assertion "this can never match", and only a KNOWN-disjoint ordering
-        # supports it. `subclass_of?` folds `:disjoint` and `:unknown` into one `false`, which is safe on
-        # the negative edge (where the pre-state survives) and an over-claim on the positive one:
+        # supports it (the reason {#declines_bot?} exists, and the repro it was written against):
         #
         #   module Taggable; def tag = "t"; end
         #   class Integer; include Taggable; end
@@ -2601,8 +2600,7 @@ module Rigor
         def narrow_constant_to_class(constant, class_name, context)
           rigor_class = constant.value.class.name
           return constant if subclass_of?(rigor_class, class_name, context)
-          return Type::Combinator.untyped if !context.exact &&
-                                             class_ordering(rigor_class, class_name, context) == :unknown
+          return Type::Combinator.untyped if declines_bot?(rigor_class, class_name, context)
 
           Type::Combinator.bot
         end
@@ -2646,8 +2644,14 @@ module Rigor
           end
         end
 
+        # A shape projects to `Array` / `Hash`, and reopening either of those to include a project module
+        # leaves the ordering `:unknown` for the same reason #657's `Integer` does — so `[1, 2]` under `when
+        # Taggable` reached the same unsupported `Bot`. The carrier differs; the missing evidence does not.
         def narrow_shape_to_class(shape, projected_class, class_name, context)
-          subclass_of?(projected_class, class_name, context) ? shape : Type::Combinator.bot
+          return shape if subclass_of?(projected_class, class_name, context)
+          return Type::Combinator.untyped if declines_bot?(projected_class, class_name, context)
+
+          Type::Combinator.bot
         end
 
         def narrow_shape_not_class(shape, projected_class, class_name, context)
@@ -2658,8 +2662,17 @@ module Rigor
         # subclass of `Module`). Asking `Foo.is_a?(Class)` returns true; `Foo.is_a?(Foo)`
         # returns false unless `Foo` is `Class` itself. We approximate this by treating
         # singletons uniformly as `Class` instances.
+        #
+        # The approximation answers through `Class`, so a target `Class` cannot be ordered against — a
+        # project module, typically — lands on the same `:unknown` #657 collapsed to `Bot`, and `case Widget
+        # when Meta` was reported unreachable where `Widget` had `extend Meta`. Residue this deliberately
+        # leaves: `extend` is not modelled at all, so a target the environment DOES order against `Class`
+        # still collapses, and `extend Comparable` keeps its false positive (#898).
         def narrow_singleton_to_class(singleton, class_name, context)
-          subclass_of?("Class", class_name, context) ? singleton : Type::Combinator.bot
+          return singleton if subclass_of?("Class", class_name, context)
+          return Type::Combinator.untyped if declines_bot?("Class", class_name, context)
+
+          Type::Combinator.bot
         end
 
         def narrow_singleton_not_class(singleton, class_name, context)
@@ -2673,6 +2686,22 @@ module Rigor
           when Type::Dynamic, Type::Top then Type::Combinator.nominal_of(class_name)
           else type
           end
+        end
+
+        # Whether the positive edge must decline the `Bot` that `subclass_of?` returning false would
+        # otherwise authorise (#657). `subclass_of?` folds `:disjoint` and `:unknown` into one `false`, and
+        # only the first is evidence that the guard can never match; the second is the environment saying it
+        # cannot tell, which any file reopening either side can make true.
+        #
+        # This only ever ADDS a decline: every caller keeps its own `subclass_of?` test first, so the
+        # preserving edge is untouched, and a `:disjoint`, `:equal`, `:subclass` or `:superclass` verdict
+        # never reaches here. There is no ordering it turns INTO a match — the honest answer for
+        # "cannot tell" is Dynamic, never the asked class.
+        #
+        # `instance_of?` is exempt because it compares the exact class: a module is never an object's class,
+        # so that edge's `Bot` rests on the guard's own semantics rather than on the ordering.
+        def declines_bot?(rigor_class_name, target_class_name, context)
+          !context.exact && class_ordering(rigor_class_name, target_class_name, context) == :unknown
         end
 
         # Returns `true` when an instance of `rigor_class_name` satisfies

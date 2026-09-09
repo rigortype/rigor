@@ -31,11 +31,14 @@ and skipping one is how a live class ends up on a deletion list.
 
 Run the report and answer these against the project in front of you.
 
-**Are framework roots actually supplied?** The summary prints
-`roots: N (M from plugins, …)`. On a framework application `0 from plugins`
-means nothing is naming your controllers, jobs or policies, so most of the
-report is noise. Stop and fix the plugin configuration — `rigor docs
-07-plugins` — rather than adjudicating hundreds of rows.
+**Are framework roots actually supplied?** When a plugin contributes roots, the
+summary's `roots:` line grows a parenthetical: `roots: N (M from plugins, K
+matched no declaration)`. The parenthetical is omitted entirely when no plugin
+contributed — so on a framework application, a bare `roots: N` with **no**
+`(… from plugins …)` note means nothing is naming your controllers, jobs or
+policies, and most of the report is noise. Stop and fix the plugin
+configuration — `rigor docs 07-plugins` — rather than adjudicating hundreds of
+rows.
 
 **Does the project ship signatures?** If `signature_paths:` is configured, also
 run with it emptied and compare:

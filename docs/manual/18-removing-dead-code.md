@@ -80,14 +80,16 @@ partition `declared` — they sum to 1497. **`reachable only from tests`
 is a subset of `reachable`**, not a fifth bucket, so do not add it in.
 
 Read `roots` first. A root is a declaration something outside your code
-reaches — an entry point, a route, a framework convention.
-Reachability is computed *from* roots, so a thin root set inflates
-everything below it. The pathological case is a Rails application with
-`0 from plugins`: nothing in Ruby source names a controller, so every
-controller you own appears dead. There is no published healthy ratio
-to compare against; what you are checking is whether the number is
-plausible for your framework, and `0 from plugins` on a framework app
-never is.
+reaches — an entry point, a route, a framework convention. The
+`(… from plugins, …)` parenthetical is omitted entirely when no plugin
+contributed a root, so a bare `roots: N` with no such note is itself
+the signal. Reachability is computed *from* roots, so a thin root set
+inflates everything below it. The pathological case is a Rails
+application with no `from plugins` note at all: nothing in Ruby source
+names a controller, so every controller you own appears dead. There is
+no published healthy ratio to compare against; what you are checking
+is whether the number is plausible for your framework, and a missing
+`from plugins` note on a framework app never is.
 
 ## Getting the number down
 

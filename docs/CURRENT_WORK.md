@@ -73,14 +73,18 @@ Open from the batch:
 - [#876](https://github.com/rigortype/rigor/issues/876) (`ready-for-agent`): `RbsDescriptor` digests
   inputs rather than calling `build_env_for`, so #864's gate cannot see it; pin its digest to every
   environment-changing keyword.
+- [#882](https://github.com/rigortype/rigor/issues/882) (`ready-for-agent`): `rigor unused`'s
+  `foreign_predicate` builds without the discovery axes (a #821-shaped gap), and
+  `prewarm_rbs_cache_for_pool` spells the five axes literally instead of splatting the helper.
 
 Operational lessons from the batch:
 
 - Five lanes serialise on ONE machine-wide `make verify` lock (`mkdir /tmp/rigor-verify.lock`); the
   last lane waited ~55 min for it. Another session's gate does not take the lock — two full gates
   did overlap once and survived, but do not count on it.
-- A subagent that "holds for the monitor notification" after a background gate is dead, not
-  waiting: finish its lane by hand (verify log → push → Draft PR → watch).
+- A subagent that reports "holding for the monitor notification" after a background gate is NOT
+  dead — it finished ~20 min later with its report; doing its push / PR by hand only duplicated
+  work. Check `ps` for its `make verify` before taking a lane over.
 - ADR-105's fragment grammar wants the line to start with `- `; a lane whose full gate ran before
   its fragment existed (PR first, fragment second) only learns that on CI.
 

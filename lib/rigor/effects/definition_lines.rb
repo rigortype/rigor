@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "method_key"
+require_relative "../source/constant_path"
 
 module Rigor
   module Effects
@@ -62,10 +63,10 @@ module Rigor
       def walk(node, nesting, singleton:, index:)
         case node
         when Prism::ModuleNode, Prism::ClassNode
-          name = constant_name(node.constant_path)
-          return if name.nil?
+          inner = header_nesting(nesting, node.constant_path)
+          return if inner.nil?
 
-          walk_children(node.body, nesting + [name], singleton: false, index: index)
+          walk_children(node.body, inner, singleton: false, index: index)
         when Prism::SingletonClassNode
           walk_children(node.body, nesting, singleton: true, index: index)
         when Prism::DefNode
@@ -74,6 +75,24 @@ module Rigor
         else
           walk_children(node, nesting, singleton: singleton, index: index)
         end
+      end
+
+      # A ROOTED header is the one case that needs no resolution to place: `::` re-anchors the declaration at
+      # the top level wherever it is written, exactly as `Source::ConstantPath.declaration_prefix` reads it
+      # for the engine's own walks. Prism's `full_name` KEEPS the `::`, so `class ::Rooted` inside
+      # `module Outer` was indexed under `Outer::::Rooted#m` — a key no caller spells, which cost the row
+      # its line while every unrooted sibling in the same file kept one
+      # ([#722](https://github.com/rigortype/rigor/issues/722) residue 4).
+      #
+      # nil propagates the refusal {#constant_name} makes, so a header naming no constant leaves the subtree
+      # unindexed rather than under a guessed name.
+      def header_nesting(nesting, constant_path)
+        name = constant_name(constant_path)
+        return nil if name.nil?
+
+        return nesting + [name] unless Source::ConstantPath.rooted?(constant_path)
+
+        [name.delete_prefix("::")]
       end
 
       def walk_children(node, nesting, singleton:, index:)

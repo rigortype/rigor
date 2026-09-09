@@ -70,6 +70,45 @@ RSpec.describe Rigor::Effects::DefinitionLines do
     expect(lines.for(key: "Tracer::Loud#emit", path: path)).to eq(5)
   end
 
+  # Issue #722 residue 4 — the defect here is the opposite of the renderer's: Prism's `full_name` KEEPS the
+  # `::`, so the enclosing nesting was joined onto a name that had already opted out of it and the key came
+  # out `Tracer::::Loud#emit`. Nothing spells that, so the row silently kept only its file while every
+  # unrooted sibling in the same file kept its line.
+  it "anchors a rooted class header at the top level" do
+    path = write("rooted.rb", <<~RUBY)
+      module Tracer
+        class ::Loud
+          def emit
+          end
+        end
+
+        class Quiet
+          def emit
+          end
+        end
+      end
+    RUBY
+
+    expect(lines.for(key: "Loud#emit", path: path)).to eq(3)
+    expect(lines.for(key: "Tracer::Loud#emit", path: path)).to be_nil
+    # The control: the reset is conditional on the `::`, and the unrooted sibling must keep its nesting.
+    expect(lines.for(key: "Tracer::Quiet#emit", path: path)).to eq(8)
+  end
+
+  it "anchors a rooted COMPACT class header at the top level" do
+    path = write("rooted_compact.rb", <<~RUBY)
+      module Outer
+        class ::Tracer::Loud
+          def emit
+          end
+        end
+      end
+    RUBY
+
+    expect(lines.for(key: "Tracer::Loud#emit", path: path)).to eq(3)
+    expect(lines.for(key: "Outer::Tracer::Loud#emit", path: path)).to be_nil
+  end
+
   # A reopening within one file has two lines for one key, and only one of them is where a reader starts.
   it "answers the first def when a file defines the same method twice" do
     path = write("reopened.rb", <<~RUBY)

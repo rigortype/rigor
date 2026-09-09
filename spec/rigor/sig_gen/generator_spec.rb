@@ -440,6 +440,87 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #722 residue 3 — sig-gen builds its qualified names from the header with its own walk, so #708's
+  # rooted-header defect survived here after the engine's walks were fixed. It is the copy that matters most:
+  # every other reader recomputes its answer next run, and this one writes it into a `sig/` file the user keeps.
+  describe "a rooted declaration header" do
+    it "anchors a single-segment rooted header at the top level, not under the enclosing module" do
+      path = write_fixture("lib/rooted.rb", <<~RUBY)
+        module MyApp
+          class ::Foo
+            def a
+              1
+            end
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.map { |c| [c.class_name, c.method_name] }).to eq([["Foo", :a]])
+    end
+
+    it "anchors a multi-segment rooted header at the top level" do
+      # `class ::Rooted::Bar` inside `module Outer` was written out as `Outer::Rooted::Bar` — a namespace the
+      # program never has, so the emitted sidecar described a class nothing calls.
+      path = write_fixture("lib/rooted_path.rb", <<~RUBY)
+        module Outer
+          class ::Rooted::Bar
+            def b
+              2
+            end
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.map { |c| [c.class_name, c.method_name] }).to eq([["Rooted::Bar", :b]])
+    end
+
+    # Mandatory control: the reset is conditional on the `::`, and a fix that anchored every header would
+    # flatten every nested class in the project into a top-level one.
+    it "still nests an UNROOTED header under the enclosing module" do
+      path = write_fixture("lib/nested.rb", <<~RUBY)
+        module MyApp
+          class Foo
+            def a
+              1
+            end
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.map { |c| [c.class_name, c.method_name] }).to eq([["MyApp::Foo", :a]])
+    end
+
+    # The superclass expression beside a rooted header is NOT re-anchored: Ruby evaluates it in the enclosing
+    # cref, so the nesting `resolve_superclass_spellings` (#738) resolves it against stays the outer one.
+    it "resolves the superclass of a rooted header in the enclosing nesting" do
+      path = write_fixture("lib/rooted_super.rb", <<~RUBY)
+        module MyApp
+          class Base
+            def b
+              1
+            end
+          end
+
+          class ::Foo < Base
+            def a
+              2
+            end
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.first.class_superclasses["Foo"]).to eq("MyApp::Base")
+    end
+  end
+
   describe "superclass capture (ADR-14)" do
     it "records a plain-constant superclass on every candidate" do
       src = <<~RUBY

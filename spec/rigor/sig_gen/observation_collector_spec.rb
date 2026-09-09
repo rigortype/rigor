@@ -57,6 +57,24 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
     expect(arg_types).to contain_exactly("42", '"text"')
   end
 
+  # Issue #722 residue 3 — the source pre-index is a second copy of the header walk, so it carried #708 too:
+  # `class ::Calc` inside `module MyApp` was pre-indexed as `MyApp::Calc`, and the observe tree's `Calc.new`
+  # then typed as no class at all. The failure is SILENT — a missing observation reads exactly like a spec
+  # that never called the method — so the control below is the half that discriminates.
+  it "pre-indexes a rooted source header at the top level" do
+    write_fixture("lib/calc.rb", "module MyApp\n  class ::Calc\n    def m(x); x; end\n  end\nend\n")
+    spec = write_fixture("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+    expect(collector(paths: [spec]).collect.keys).to contain_exactly(["Calc", :m])
+  end
+
+  it "still pre-indexes an UNROOTED source header under its enclosing module" do
+    write_fixture("lib/calc.rb", "module MyApp\n  class Calc\n    def m(x); x; end\n  end\nend\n")
+    spec = write_fixture("spec/calc_spec.rb", "MyApp::Calc.new.m(42)\n")
+
+    expect(collector(paths: [spec]).collect.keys).to contain_exactly(["MyApp::Calc", :m])
+  end
+
   it "skips zero-argument calls" do
     write_fixture("lib/calc.rb", "class Calc\n  def go; 1; end\nend\n")
     spec = write_fixture("spec/calc_spec.rb", "Calc.new.go\n")

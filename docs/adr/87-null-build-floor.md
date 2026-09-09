@@ -216,6 +216,10 @@ hit verdict is what WD4 serves engine-free;
 re-measured and the design keeps digest authority); [ADR-60](60-pre-freeze-plugin-contract-consolidation.md)'s
 `watch:` machinery hosts WD2; [ADR-46](46-incremental-dependency-graph.md)/[ADR-85](85-seed-bundles-and-lazy-def-node-handles.md)
 own the incremental path WD3 trims; [ADR-86](86-partial-native-extensions.md)
-WD4's non-native ladder is advanced one rung; [ADR-50](50-release-engineering-and-stability-strategy.md)
+WD4's non-native ladder is advanced one rung, and this ADR **partially
+supersedes** the residual-profile attribution ADR-86's rejection reads (the
+"Honest note on gitlab C" above re-measures the same campaign and finds a
+chunk of what it called intrinsic was removable non-native overhead);
+[ADR-50](50-release-engineering-and-stability-strategy.md)
 owns any future incremental-by-default flip and freezes the new `cache.validation`
 config key + `:stat` comparator as public vocabulary at v1.0.

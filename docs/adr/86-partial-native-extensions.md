@@ -133,3 +133,16 @@ the platform taxes in criterion 3; [ADR-83](83-dynamic-origin-algebra.md) is
 the precedent for recording a measured rejection as an ADR; the
 [campaign note](../notes/20260713-corpus-perf-campaign.md) carries the
 residual-profile tables this decision reads.
+
+> **Partially superseded by [ADR-87](87-null-build-floor.md) (2026-07-16).**
+> ADR-87 re-measures the SAME `20260713-corpus-perf-campaign.md` profile this
+> ADR's residual bucketing reads, and finds part of what that campaign
+> attributed to intrinsic (already-native) engine work was actually
+> non-intrinsic boot/validation overhead — ADR-87's own "Honest note" records
+> one such attribution as measured wrong and corrects it. WD1–WD5 then
+> recovered real wall-clock wins (monorepo null ≈1.68s → ~0.34s) in pure
+> Ruby, with no native extension. This does not reopen the native-extraction
+> question — WD1–WD5 are boot/validation, not the two residual pure-Ruby
+> costs this ADR names — but it means the residual profile the rejection
+> rests on should be re-read against ADR-87's corrected floors before being
+> cited as the current picture.

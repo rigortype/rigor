@@ -189,6 +189,15 @@ the larger long-term cost.
 
 ### WD2 — Honor the upstream `# rbs_inline: enabled` magic comment
 
+> **Partially superseded by [ADR-93](93-default-rbs-inline-ingestion.md#relationship-to-other-adrs)
+> (2026-07-18).** ADR-93 WD1 flips the plugin's default wiring — it is now
+> auto-loaded wherever `rbs-inline` is resolvable, with the presence-gated
+> `enabled: false` opt-out — and says so explicitly in its own "Relationship
+> to other ADRs" section: "WD2's default and the opt-in activation are
+> superseded on acceptance." WD2's per-file magic-comment gate itself is
+> untouched by that flip and still governs which files inside an active
+> plugin get synthesised.
+
 The plugin synthesises RBS **only** for files whose first
 non-blank lines include `# rbs_inline: enabled`. Files without
 the magic comment are passed through untouched.
@@ -350,6 +359,14 @@ slice 1 against the installed rbs-inline version.
 
 ### WD10 — Host-context override: `require_magic_comment:` plugin config
 
+> **Partially superseded by [ADR-93 WD1](93-default-rbs-inline-ingestion.md#wd1--the-magic-comment-free-mode-gates-on-annotation-presence-then-becomes-the-default)
+> (2026-07-18, [#186](https://github.com/rigortype/rigor/pull/186)).** The
+> `require_magic_comment: true` default recorded below is flipped: the
+> plugin's default is now the annotation-presence-gated mode, and
+> `require_magic_comment: true` is the escape hatch back to this WD's
+> original behaviour, one config line away. The key and its host-context
+> override mechanism are otherwise unchanged.
+
 The plugin exposes a single boolean config key,
 **`require_magic_comment:`**, defaulting to `true` (which
 preserves WD2 verbatim for ordinary `.rigor.yml`-driven
@@ -419,7 +436,10 @@ Grounded in the measured grammar diff,
 - **The rbs floor is not the obstacle**, unlike
   [ADR-94](94-rbs-inline-reader-and-the-rbs-3x-floor.md)'s adjacent
   question: `rbs-inline` itself requires `rbs (~> 4.0)`, so every user
-  ADR-93's auto-wire can activate for is already on 4.x.
+  ADR-93's auto-wire can activate for is already on 4.x. **Partially
+  supersedes ADR-94**: its "migration costs the rbs 3.x floor" deferral
+  premise does not hold — the floor was never what kept the gem in
+  place.
 - **A move would be a rewrite, not a swap.** The built-in parser has no
   `opt_in:` magic-comment mode (so WD2 / WD10 have no counterpart), no
   annotation-presence probe (so ADR-93's gating would be rebuilt — and

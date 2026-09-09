@@ -134,6 +134,21 @@ N/A is not zero: an exempted axis is **removed from the denominator** (§4).
    *0*: badly disproportionate either way. *(all archetypes; weighted up for
    mechanical)*
 
+**Partial supersession (axis 6, in-place form).** Axis 6 above is graded on the
+whole-document `Status` line, but the corpus's actual failure mode is
+narrower: one working decision, slice, or rejected-alternative row is
+overtaken by a later ADR while the rest of the document stands — which does
+not change the status word. Mark it where it stands, on both sides: the
+overtaken ADR gets a blockquote at the point — `> **Partially superseded by
+ADR-N (§ X / WDn), linked to its section.** <what changed and why>` — and the
+superseding ADR names the same correction back (its "Relationship to other
+ADRs" section, or wherever it already cites the ADR it corrects). Where the
+correction lands directly in a non-ADR contract document rather than a later
+ADR, name that document and the change that amended it instead of inventing
+an ADR number. The README row and the `Status:` header both keep their
+existing status word; see `docs/adr/README.md` § "How to Read" and
+[ADR-97](97-adr-index-budgets.md) WD2.
+
 ### 4. Scoring & the don't-over-penalize rule
 
 Final score = `sum(scored axes) / (2 × count(scored axes))`, expressed as a

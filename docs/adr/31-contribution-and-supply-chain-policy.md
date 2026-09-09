@@ -435,6 +435,14 @@ All four conditions must hold:
    the MPL is explicitly compatible with them at the file-
    combination level, but the author must consent to the change.
 
+This settles distribution on the single bundled `rigortype` gem and
+**partially supersedes [ADR-12](12-dry-rb-packaging.md)**, whose packaging
+premise was the reverse flow — each `rigor-dry-*` plugin eventually
+`git subtree split` into its own published gem. Subtree *merge* here is the
+rare, reserved, third-party-to-monorepo import this WD5 describes, never the
+outbound split ADR-12 planned for; the per-plugin gemspecs it depended on
+were deleted (`9769f5fa`).
+
 Subtree merge is **not a path third-party authors should plan
 around**. The default expectation is "your plugin stays in your
 repo, indefinitely." Subtree merge is a sometimes-appropriate

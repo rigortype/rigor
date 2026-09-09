@@ -49,7 +49,7 @@ Abbreviated `nix … develop --command` below; commands are otherwise shown in t
 | `make check-plugins` | Plugin-contract self-check over `plugins/*/lib examples/*/lib` ([ADR-43](docs/adr/43-rbs-complete-ancestor-resolution.md)). MUST stay clean. |
 | `make docs-check` | Docs gates: link integrity, manual drift, agent-index budgets. |
 | `make verify-sequential` | Use when chasing parallel-only flakes. |
-| `make cache-clean` | Wipe `.rigor/cache` — the store never evicts ([ADR-6](docs/adr/6-cache-persistence-backend.md)), so stale slots accumulate. |
+| `make cache-clean` | Wipe `.rigor/cache` — the store's LRU cap ([ADR-54](docs/adr/54-cache-slimming.md) WD3, 256 MB default) evicts by size, not by relevance, so stale slots under the cap still accumulate. |
 | `make steep-install`, `make steep-check` | Cross-checker pass, isolated under `tool/steep/Gemfile`. |
 
 `exe/rigor help` lists the CLI. When diagnosing an inference gap, `rigor type-of FILE:LINE:COL` prints

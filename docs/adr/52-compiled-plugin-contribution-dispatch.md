@@ -63,6 +63,9 @@ raised for any plugin still defining the hook (silently-never-called is the
 worst failure mode for a third-party author) — pointing at the CHANGELOG
 migration note that maps each legacy idiom to its WD2 successor; ADR-2/ADR-37
 status lines, the plugin-author skill, internal-spec, and the READMEs swept.
+**Partially supersedes [ADR-34](34-toplevel-unresolved-self-call-default.md)**'s
+open questions, which still name `flow_contribution_for` as the toplevel-DSL
+registration mechanism a Rake/`bin/*` fix would use.
 **Slice 6 (single node-rule walk) implemented 2026-06-11**: an engine-owned
 `Plugin::NodeRuleWalk` does one `each_with_ancestors` pass per file dispatching
 to every matching `(plugin, rule)` — per-plugin `node_file_context` runs once

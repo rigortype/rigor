@@ -51,15 +51,29 @@ module Rigor
 
         def build_entries
           require_bundled_plugins
-          Plugin.registered.filter_map do |id, plugin_class|
+          loaded_plugin_manifests.filter_map do |manifest|
+            id = manifest.id
             next unless FirstParty.bundled?(id)
-
-            manifest = plugin_class.manifest
             next if manifest.target_gems.empty?
 
             Entry.new(gem_name: "#{FirstParty::GEM_PREFIX}#{id}", plugin_id: id,
                       target_gems: manifest.target_gems)
           end.sort_by(&:gem_name).freeze
+        end
+
+        # The manifests of every plugin class the process has loaded, one per id. Read off the classes
+        # rather than {Rigor::Plugin.registered}: `require` is idempotent, so a plugin required earlier and
+        # then dropped by `Rigor::Plugin.unregister!` (every spec does this) is absent from the registry
+        # while still loaded, and an index built from the registry at that moment silently lacks it — the
+        # advisory then reads the project's own enabled plugin as a gap and fails `rigor doctor`.
+        def loaded_plugin_manifests
+          ObjectSpace.each_object(Class).filter_map do |klass|
+            next unless klass < Plugin::Base
+
+            klass.manifest
+          rescue ArgumentError
+            nil
+          end.uniq(&:id)
         end
 
         # A plugin gem that fails to load is skipped rather than fatal: the catalogue exists to *advise*, and

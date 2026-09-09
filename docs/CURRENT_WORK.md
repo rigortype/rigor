@@ -22,17 +22,17 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 `changelog.d/` is now large — 2026-09-09 alone added roughly thirty PRs across four batches. The next
 cut happens only when the user invokes `/rigor-release-prep`.
 
+**Two sessions ran on 2026-09-09** and both finished; neither has an open PR.
+
 ## 2026-09-09 batch 4 — six lanes, all landed
 
-- [#916](https://github.com/rigortype/rigor/pull/916) closed #673. `ActiveSupport::TimeWithZone` is
-  now a declared `::Time` SUBCLASS carrying its four readers, which buys them without the
-  `Time | TimeWithZone` union #632 measured as collapsing every downstream chain. Five core-ext
-  methods moved onto `Object` (`duplicable?` is `bool`, not `true` — the `Singleton` override answers
-  false). Argument checking now admits keyword-bearing signatures, but only a CLASS-refuted argument
-  fires there: unrestricted it produced two new verdicts on correct code across six projects, both
-  resting on nullability. By-product true positive: `rigor-sorbet`'s `translate_shape` was handing an
-  Array to `hash_shape_of`, so every `sig { returns({…}) }` degraded to `Dynamic[top]` through the
-  plugin's rescue, contradicting its documented never-fails contract.
+- [#916](https://github.com/rigortype/rigor/pull/916) closed #673. `ActiveSupport::TimeWithZone` is a
+  declared `::Time` SUBCLASS, which buys its readers without the union #632 measured as collapsing
+  every downstream chain. Argument checking now admits keyword-bearing signatures, but only a
+  CLASS-refuted argument fires there — unrestricted it produced two new verdicts on correct code
+  across six projects. By-product true positive: `rigor-sorbet`'s `translate_shape` handed an Array
+  to `hash_shape_of`, so every `sig { returns({…}) }` degraded to `Dynamic[top]` through the plugin's
+  rescue, contradicting its documented never-fails contract.
 - [#914](https://github.com/rigortype/rigor/pull/914) closed #661's three gaps. The overlay parity
   guard now names the drifted selector instead of raising `NameError` from its failure lambda (a
   lambda body only runs on failure, which is why a green suite never caught it); widening it to
@@ -40,17 +40,14 @@ cut happens only when the user invokes `/rigor-release-prep`.
   `a <=> b` on an inherited `Kernel#<=>` reads `Integer?` rather than the identity comparison's `0?`,
   which had been narrowing `n.negative? if n` to a `bot` branch.
 - [#912](https://github.com/rigortype/rigor/pull/912) closed #668 and #663. A dynamic constant target
-  is filed under a `*::LIMIT` wildcard key that retracts every censused name with that segment,
-  instead of the bare last segment — the one name such a write can never reach.
-  `IncrementalSnapshot::SCHEMA` 18 → 19, because a pre-19 blob's bare key deserialises cleanly and
-  would serve the pre-fix answer warm. For #663 the issue's literal `sources.size > 1` was NOT used
-  (it retracts an agreeing pair of listed files, and misses an unlisted writer when the listed file is
-  outside `paths:`); the rule is "any writer outside the listed set".
-- [#910](https://github.com/rigortype/rigor/pull/910) closed #898. `extend` was already recorded
-  since #526 but consumed inside the indexer and thrown away; this is survival plumbing to `Scope`,
-  not a new walk. Per extended module the question is `M <= target`: `:equal` / `:subclass` /
-  `:unknown` withhold the `Bot`, `:superclass` and `:disjoint` keep it. The first cut used "not
-  `:disjoint`" and silently retracted `case Widget when Integer` — now a pinned example.
+  is filed under a `*::LIMIT` wildcard key, not the bare last segment — the one name such a write can
+  never reach. `IncrementalSnapshot::SCHEMA` 18 → 19, because a pre-19 blob's bare key deserialises
+  cleanly and would serve the pre-fix answer warm. For #663 the rule is "any writer outside the
+  listed set", not the issue's literal `sources.size > 1`.
+- [#910](https://github.com/rigortype/rigor/pull/910) closed #898 — `extend` survives to `Scope`
+  (recorded since #526, thrown away inside the indexer). Per module the question is `M <= target`:
+  `:equal` / `:subclass` / `:unknown` withhold the `Bot`, `:superclass` and `:disjoint` keep it. The
+  first cut used "not `:disjoint`" and silently retracted `case Widget when Integer` — now pinned.
 - [#907](https://github.com/rigortype/rigor/pull/907) — the #693 SIZING, and its conclusion was
   **not worth doing**. See below.
 - Batch 3 (#899, #901, #902, #903, #904, #905), batch 2 (#892–#897) and batch 1 (#864–#891) are in
@@ -68,6 +65,21 @@ answer is FALSE. A `class << self` ivar write lands in the enclosing class's INS
 `def.ivar-write-mismatch` fires on correct Ruby — filed as
 [#909](https://github.com/rigortype/rigor/issues/909) (`ready-for-agent`), cheaper than the seeding
 it was found while declining, and with the only reachable symptom.
+
+## The ADR corpus audit — the backlog changed shape
+
+[`docs/notes/20260909-adr-corpus-audit.md`](notes/20260909-adr-corpus-audit.md) swept all 111 ADRs
+and **filed 26 issues** (#911, #918-#930, #932-#943), so `ready-for-agent` returns a much larger set
+than it did this morning; the note's § "Where each finding went" maps every finding. Its headline:
+**the corpus under-claims.** ADR-102 says "Nothing implemented" about a command that shipped in
+v0.3.4 and ADR-103's index row says it about the effect system, so `Proposed` is no longer readable
+as "the unbuilt set" — do not trust an ADR's status without checking the code.
+
+Three fixes landed from it: #906 (`rigor playground` dropped its first argument; `rigor help` omitted
+`baseline` and `unused`), #908 (any FFI-family plugin listed ALONE failed to load — requiring it
+registers `rigor-ffi` too and the loader called that a meta-gem; `rigor-rbnacl` never called
+`Rigor::Plugin.register` at all), #913 (the `.rigor.yml` `plugins_isolation:` key the normative
+internal spec documents has never existed).
 
 ## Open threads
 
@@ -95,7 +107,10 @@ it was found while declining, and with the only reachable symptom.
 1. Nothing is uncommitted and no PR of this session's is open. Other sessions merge to master
    throughout, so re-derive any file:line at current HEAD.
 2. `gh issue list --label ready-for-agent` is the backlog. #909, #915, #710-adjacent census work and
-   #530 are unblocked.
+   #530 are unblocked. From the audit, **#939 → #940 is the highest-leverage pair**: nothing compares
+   an ADR's own `Status:` header to its README row, and no spec parses that header at all. #939 adds
+   the gate, #940 is the ~20-ADR sweep it makes checked rather than asserted. #918-#924 are the
+   audit's remaining live defects, each reproducible through the CLI.
 3. Remote CI as the gate with NO local `make verify` is the default worth repeating: targeted specs
    plus rubocop locally, rebase onto master immediately before pushing. Three batches ran that way.
 4. Two harness traps this cycle paid for: `FixtureHarness` under-detects versus the CLI on a flat

@@ -111,8 +111,12 @@ module Rigor
         return 1 if parse_errors?(parse_result, file)
 
         # Built with no tracer attached — it would otherwise double-record fallback events with the per-node
-        # `type_of` calls below.
-        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
+        # `type_of` calls below. `with_source_path(file)` (like `annotate` and `trace` already do) matters
+        # beyond diagnostics attribution: a plugin `dynamic_return file_methods:` rule (ADR-52 slice 5a,
+        # e.g. rigor-rspec's `let`-binding resolver, #921) gates on `scope.source_path` and fails closed
+        # when it is nil — an unset source_path silently declined every such rule under this command.
+        scope_index = Inference::ScopeIndexer.index(parse_result.value,
+                                                    default_scope: base_scope.with_source_path(file))
         locator = Source::NodeLocator.new(source: source, root: parse_result.value)
         lines = indexed_targets.filter_map { |target, _index| target.line if target.column.nil? }
         line_nodes, line_totals = collect_line_nodes(parse_result.value, lines)

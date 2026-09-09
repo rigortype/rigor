@@ -91,7 +91,27 @@ module Rigor
         configuration: configuration,
         cache_store: nil
       )
-      Plugin::Loader.load(configuration: configuration, services: services)
+      registry = Plugin::Loader.load(configuration: configuration, services: services)
+      run_plugin_prepare(registry)
+      registry
+    end
+
+    # `Analysis::WorkerSession#run_plugin_prepare` runs every plugin's `#prepare(services)` before the real
+    # `check` pipeline reads `services.fact_store` — an ADR-9 fact published there (#921's `:factory_index`,
+    # `rigor-activerecord`'s `:model_index`, …) is otherwise invisible. The probe commands built on
+    # {ProjectEnvironment} share the same plugin registry and the same `read_fact` call sites, so they need
+    # the same step; skipping it made every cross-plugin fact silently read nil under `type-of` / `annotate`
+    # / `trace` / `sig-gen` even once a plugin published it correctly. Per-plugin `rescue` keeps one plugin's
+    # `#prepare` failure from costing the rest — the probes have no diagnostic pipeline to report it through,
+    # so it is swallowed the same way the rest of this module fails soft.
+    def run_plugin_prepare(registry)
+      return if registry.nil? || registry.empty?
+
+      registry.plugins.each do |plugin|
+        plugin.prepare(plugin.services)
+      rescue StandardError
+        next
+      end
     end
 
     # The first fail-soft floor: no plugin tier and no synthesized RBS, but still the project's own dependency

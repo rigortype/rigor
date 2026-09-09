@@ -10,9 +10,15 @@ RSpec.describe Rigor::PluginGapAdvisory do
 
   after { FileUtils.remove_entry(root) }
 
-  def write_lock(*gems)
+  # `direct:` defaults to the whole spec list, so an arm that does not care about the distinction reads as
+  # before; pass it explicitly to model a transitive gem.
+  def write_lock(*gems, direct: gems)
     specs = gems.map { |gem| "    #{gem} (1.0.0)\n" }.join
-    File.write(File.join(root, "Gemfile.lock"), "GEM\n  specs:\n#{specs}\nPLATFORMS\n  ruby\n")
+    deps = direct.map { |gem| "  #{gem}\n" }.join
+    File.write(
+      File.join(root, "Gemfile.lock"),
+      "GEM\n  specs:\n#{specs}\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n#{deps}"
+    )
   end
 
   describe ".gaps" do
@@ -51,6 +57,29 @@ RSpec.describe Rigor::PluginGapAdvisory do
 
       expect(described_class.gaps(project_root: root, plugins: [])).to be_empty
     end
+
+    # `minitest` and `i18n` are activesupport's dependencies, so they sit in nearly every Rails lock. Advising
+    # on them fires on a project that never chose them.
+    it "ignores a modelled gem that is only in the resolved graph" do
+      write_lock("sidekiq", "minitest", "i18n", direct: ["sidekiq"])
+
+      expect(described_class.gaps(project_root: root, plugins: []).map(&:plugin_gem)).to eq(["rigor-sidekiq"])
+    end
+
+    it "returns nothing when the lockfile declares no dependencies at all" do
+      write_lock("sidekiq", "minitest", direct: [])
+
+      expect(described_class.gaps(project_root: root, plugins: [])).to be_empty
+    end
+
+    # A Rails app's Gemfile says `rails`; without the umbrella table the whole family would go unmentioned.
+    it "expands an umbrella dependency to the gems its members model" do
+      # Only the umbrella is in the graph at all, so this arm fails on any read that skips the expansion.
+      write_lock("rails", direct: ["rails"])
+
+      expect(described_class.gaps(project_root: root, plugins: []).map(&:plugin_gem))
+        .to include("rigor-activerecord", "rigor-railties")
+    end
   end
 
   describe ".unconfigured?" do
@@ -58,6 +87,14 @@ RSpec.describe Rigor::PluginGapAdvisory do
       write_lock("sidekiq", "activerecord")
 
       expect(described_class.unconfigured?(project_root: root, plugins: [])).to be(true)
+    end
+
+    # The `:fail` is the branch a false positive costs the most in: it exits non-zero on a project that is
+    # correctly configured. A lock with no `DEPENDENCIES` section must never reach it.
+    it "is false when the only modelled gems are transitive" do
+      write_lock("minitest", "i18n", direct: [])
+
+      expect(described_class.unconfigured?(project_root: root, plugins: [])).to be(false)
     end
 
     it "is false once one of them is enabled, even with others still missing" do

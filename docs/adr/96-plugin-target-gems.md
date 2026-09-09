@@ -108,9 +108,17 @@ pre-freeze window for the same reason ADR-60's own changes did.
 ### WD2 — the plugin-gap advisory (implemented)
 
 `rigor doctor` and `rigor skill describe` read `target_gems:` instead of their
-copy-pasted constants, and report **per plugin**: this gem is locked, this plugin exists
-for it, it is not in `plugins:`. Generalising beyond Rails is not extra work — it is what
-deleting the Rails-specific tables leaves behind.
+copy-pasted constants, and report **per plugin**: this gem is a dependency, this plugin
+exists for it, it is not in `plugins:`. Generalising beyond Rails is not extra work — it is
+what deleting the Rails-specific tables leaves behind.
+
+The match is against the lockfile's `DEPENDENCIES` section — the gems the project chose —
+and never its resolved graph, because `minitest`, `i18n`, `activesupport` and `ffi` are
+transitive in nearly every Rails lock and advising on them would fire on correct
+configuration. A direct dependency on an umbrella gem also stands in for the constituents
+its members model (a Rails app declares `rails`, never `activerecord`), from a small
+explicit table in the advisory rather than from whatever the umbrella happens to resolve
+to.
 
 Severity is **`:warn`, not `:fail`**. Not adopting a plugin is a legitimate choice, and a
 choice must not fail the command forever; `doctor` exits non-zero only on `:fail`. The

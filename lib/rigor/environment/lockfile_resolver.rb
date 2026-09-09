@@ -59,6 +59,53 @@ module Rigor
         parse(resolved)
       end
 
+      # The gems the project declares for itself — the lockfile's `DEPENDENCIES` section, which is what a
+      # `Gemfile` actually asked for, as opposed to {locked_gems}'s full resolved graph. A consumer that
+      # advises the user about their own stack has to read this one: `minitest`, `i18n`, `activesupport` and
+      # `ffi` sit in nearly every Rails lock as somebody else's dependency, so matching against the resolved
+      # graph advises about gems the project never chose.
+      #
+      # @param lockfile_path — explicit path to the Gemfile.lock; `nil` falls back to `auto_detect`.
+      # @param project_root — resolution base for a relative `lockfile_path:` and the auto-detect search.
+      # @param auto_detect — when true and `lockfile_path:` is nil, look for `<project_root>/Gemfile.lock`.
+      # @return frozen set of gem names. Empty when no lockfile is resolvable, when it is unreadable, when
+      #   Bundler refuses to parse it, or when the lockfile has no `DEPENDENCIES` section at all.
+      def self.direct_dependency_names(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
+        resolved = resolve_lockfile_path(
+          lockfile_path: lockfile_path,
+          project_root: project_root,
+          auto_detect: auto_detect
+        )
+        return EMPTY_NAMES unless resolved
+
+        parse_dependency_names(resolved)
+      end
+
+      EMPTY_NAMES = Set.new.freeze
+      private_constant :EMPTY_NAMES
+
+      def self.parse_dependency_names(path)
+        require "bundler"
+      rescue LoadError => e
+        warn "rigor: cannot read #{path}: bundler is not available (#{e.message})"
+        EMPTY_NAMES
+      else
+        do_parse_dependency_names(path)
+      end
+      private_class_method :parse_dependency_names
+
+      def self.do_parse_dependency_names(path)
+        parser = Bundler::LockfileParser.new(File.read(path.to_s))
+        # `#dependencies` is the parsed `DEPENDENCIES` section keyed by gem name, so the version constraint
+        # and the pinned-source `!` suffix are already stripped for us. The upstream bundler RBS shim does
+        # not declare it.
+        parser.dependencies.keys.to_set { |name| -name.to_s }.freeze # rigor:disable undefined-method
+      rescue StandardError => e
+        warn "rigor: ignoring malformed #{path} (#{e.class}: #{e.message})"
+        EMPTY_NAMES
+      end
+      private_class_method :do_parse_dependency_names
+
       # Returns the resolved lockfile path (`Pathname`) or `nil` when neither explicit nor auto-detect
       # produces one. Public so the stats banner can show what rigor picked up.
       def self.resolve_lockfile_path(lockfile_path:, project_root: Dir.pwd, auto_detect: true)

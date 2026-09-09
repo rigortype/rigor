@@ -41,7 +41,7 @@ module Rigor
 
       private
 
-      # ADR-96 WD2 — true when the project locks gems that bundled plugins model and enables none of those
+      # ADR-96 WD2 — true when the project depends on gems that bundled plugins model and enables none of those
       # plugins, so `rigor-plugin-tune` buys more than community RBS would (the 20260620 field trial's strap
       # case). Reads each plugin's `target_gems:` rather than the Rails-only table it replaces, so the cue
       # covers every framework Rigor ships a plugin for. Only fires on an already-configured project; an
@@ -201,7 +201,7 @@ module Rigor
           ["rigor-project-init", "this project has no Rigor configuration yet — start here."]
         elsif state.fetch(:plugins_unconfigured)
           ["rigor-plugin-tune",
-           "your Gemfile.lock holds gems Rigor ships plugins for and none is enabled — wire them so " \
+           "your Gemfile declares gems Rigor ships plugins for and none is enabled — wire them so " \
            "those framework calls resolve (a bigger win here than community RBS)."]
         # ADR-73's second `rbs-setup` priority-softening case (2026-09-10): CI wiring is presence-only and
         # side-effect-free, while community-RBS install is network-bound (`rbs collection install` hits

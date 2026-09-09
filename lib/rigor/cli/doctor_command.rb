@@ -285,8 +285,11 @@ module Rigor
       # ADR-96 WD2 — the plugin-gap advisory, read off each bundled plugin's `target_gems:` rather than the
       # Rails-only tables it replaces. Per plugin, so a Rails app that enabled only `rigor-activerecord` now
       # hears about the other seven; `:warn`, because declining a plugin is a legitimate choice and must not
-      # fail the command forever. The one `:fail` is today's behaviour generalised: the project locks gems
-      # Rigor models and enables none of the plugins that model them, which is genuinely unconfigured.
+      # fail the command forever. The one `:fail` is today's behaviour generalised: the project depends on
+      # gems Rigor models and enables none of the plugins that model them, which is genuinely unconfigured.
+      # Both branches read the lockfile's `DEPENDENCIES` section, never its resolved graph: a transitive
+      # `minitest` or `i18n` rides along in nearly every Rails lock, and failing `doctor` on one would fail a
+      # correctly configured project.
       def check_plugin_gap(configuration)
         return [] if Configuration.discover.nil?
 
@@ -304,7 +307,7 @@ module Rigor
         {
           check: CHECK_PLUGIN_GAP,
           status: :fail,
-          message: "#{gaps.size} bundled plugin(s) model gems in Gemfile.lock and none is enabled " \
+          message: "#{gaps.size} bundled plugin(s) model gems this project depends on and none is enabled " \
                    "(#{gaps.map(&:plugin_gem).join(', ')})",
           hint: "Add the plugins for your stack to `.rigor.yml` `plugins:` so framework calls resolve."
         }
@@ -314,8 +317,8 @@ module Rigor
         {
           check: CHECK_PLUGIN_GAP,
           status: :warn,
-          message: "#{gap.locked_gems.join(', ')} #{gap.locked_gems.one? ? 'is' : 'are'} in Gemfile.lock " \
-                   "and #{gap.plugin_gem} models it, but it is not enabled",
+          message: "#{gap.locked_gems.join(', ')} #{gap.locked_gems.one? ? 'is a dependency' : 'are dependencies'} " \
+                   "of this project and #{gap.plugin_gem} models it, but it is not enabled",
           hint: "Add `#{gap.plugin_gem}` to `.rigor.yml` `plugins:`, or leave it out deliberately."
         }
       end

@@ -157,7 +157,7 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     it "fails when locked gems have bundled plugins and none of them is enabled" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\n")
-      File.write("Gemfile.lock", "GEM\n  specs:\n    railties (8.0.0)\n")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    railties (8.0.0)\n\nDEPENDENCIES\n  railties\n")
 
       status, out, = run([])
       expect(status).to eq(1)
@@ -170,7 +170,11 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     it "warns per unenabled plugin once another matching plugin is enabled" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\nplugins:\n  - rigor-activerecord\n")
-      File.write("Gemfile.lock", "GEM\n  specs:\n    activerecord (8.0.0)\n    railties (8.0.0)\n")
+      File.write(
+        "Gemfile.lock",
+        "GEM\n  specs:\n    activerecord (8.0.0)\n    railties (8.0.0)\n\n" \
+        "DEPENDENCIES\n  activerecord\n  railties\n"
+      )
 
       status, out, = run([])
       expect(status).to eq(0)
@@ -182,11 +186,53 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     it "stays silent when every plugin modelling a locked gem is enabled" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\nplugins:\n  - rigor-sidekiq\n")
-      File.write("Gemfile.lock", "GEM\n  specs:\n    sidekiq (7.3.0)\n")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    sidekiq (7.3.0)\n\nDEPENDENCIES\n  sidekiq!\n")
 
       status, out, = run([])
       expect(status).to eq(0)
       expect(out).not_to include("plugin_gap")
+    end
+
+    # A transitive gem is somebody else's dependency. `minitest` and `i18n` ride along in nearly every Rails
+    # lock, so matching the resolved graph would fail `doctor` on a correctly configured project — the false
+    # positive AGENTS.md ranks above worst-case static reading.
+    it "ignores a modelled gem that is only a transitive dependency" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\nplugins:\n  - rigor-sidekiq\n")
+      File.write(
+        "Gemfile.lock",
+        "GEM\n  specs:\n    i18n (1.14.6)\n    minitest (5.25.4)\n    sidekiq (7.3.0)\n\n" \
+        "DEPENDENCIES\n  sidekiq\n"
+      )
+
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).not_to include("plugin_gap")
+    end
+
+    it "does not fail a project whose lockfile declares no dependencies" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\n")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    i18n (1.14.6)\n    minitest (5.25.4)\n")
+
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).not_to include("plugin_gap")
+    end
+
+    # A Rails app declares `rails`, never `activerecord`; the umbrella table is what keeps the family visible
+    # under a direct-dependency match.
+    it "surfaces the Rails family from a direct `rails` dependency" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\nplugins:\n  - rigor-activerecord\n")
+      File.write(
+        "Gemfile.lock",
+        "GEM\n  specs:\n    rails (8.0.0)\n\nDEPENDENCIES\n  rails\n"
+      )
+
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).to include("rigor-railties models it")
     end
   end
 

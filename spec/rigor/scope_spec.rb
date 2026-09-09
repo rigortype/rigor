@@ -448,6 +448,7 @@ RSpec.describe Rigor::Scope do
       { merged: %i[
           locals fact_store self_type ivars cvars globals
           indexed_narrowings method_chain_narrowings declaration_sourced
+          published_constant_sourced
           struct_fold_safe_locals opaque_block_self
           local_origins ivar_origins optimistic_locals optimistic_ivars
         ],
@@ -483,6 +484,7 @@ RSpec.describe Rigor::Scope do
         indexed_narrowings: { %i[local h k] => type }.freeze,
         method_chain_narrowings: { %i[local r m] => type }.freeze,
         declaration_sourced: Set[%i[local x]].freeze,
+        published_constant_sourced: Set[%i[local x]].freeze,
         source_path: "lib/a.rb",
         struct_fold_safe_locals: Set[:s].freeze,
         opaque_block_self: true,

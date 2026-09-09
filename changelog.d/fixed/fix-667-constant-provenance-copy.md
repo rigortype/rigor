@@ -1,0 +1,1 @@
+- **[diagnostics]** `flow.always-truthy-condition` no longer fires when the condition folds from a value COPIED out of a cross-file configuration constant — into a local, into an instance variable, or through a same-file constant alias — while still firing on a value the reading file itself assigned ([#904](https://github.com/rigortype/rigor/pull/904)).

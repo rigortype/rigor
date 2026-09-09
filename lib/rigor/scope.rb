@@ -21,7 +21,7 @@ module Rigor
     attr_reader :environment, :locals, :fact_store, :self_type,
                 :ivars, :cvars, :globals,
                 :indexed_narrowings, :method_chain_narrowings,
-                :declaration_sourced,
+                :declaration_sourced, :published_constant_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
                 :opaque_block_self, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
@@ -55,6 +55,14 @@ module Rigor
     def published_constant_names = @discovery.published_constant_names
     def local_constant_names = @discovery.local_constant_names
 
+    # Issue #667 — the instance-variable names of `class_name` whose class-ivar seed comes from a foreign
+    # published constant (`@mode = AppConfig::MODE` in `initialize`, read in a sibling method).
+    # `StatementEvaluator#seed_instance_ivars` stamps the flow mark for these at method-body entry, the way
+    # ADR-58's seed stamps its own; a method-local write or narrowing then drops it through `with_ivar`.
+    def published_constant_ivars_for(class_name)
+      @discovery.published_constant_ivars[class_name] || EMPTY_PUBLISHED_CONSTANT_IVARS
+    end
+
     # Issue #644 — true when the constant reference `name` (as written: `MODE` or `AppConfig::MODE`) is
     # published by the cross-file value-constant table and is NOT assigned by the file being analysed: a
     # value this file's author cannot see the declaration of. {Analysis::CheckRules::PublishedConstantGuard}
@@ -76,13 +84,26 @@ module Rigor
     # over already-qualified names rather than a second lexical ladder: the engine's ladder
     # (`Reflection.resolve_constant_type`) answers with a TYPE and not with the candidate that won, and
     # reimplementing the walk here is the very thing that made the receiver resolution wrong once already.
+    #
+    # Issue #667 — a third answer sits beside those two. `MODE2 = AppConfig::MODE` is assigned by this file,
+    # so the exemption above releases it, yet its value is still one the author never saw: the alias only
+    # renames the foreign declaration. `published_constant_alias_names` holds the last segments of exactly
+    # those aliases, and matching on the last segment over-answers in the WITHHOLDING direction, which is the
+    # safe one.
     def published_constant?(name)
       names = @discovery.published_constant_names
+      return true if published_constant_alias?(name)
       return false if names.empty?
       return false unless names.include?(name.split("::").last)
 
       !locally_declared_constant?(name)
     end
+
+    def published_constant_alias?(name)
+      aliases = @discovery.published_constant_alias_names
+      !aliases.empty? && aliases.include?(name.split("::").last)
+    end
+    private :published_constant_alias?
 
     def locally_declared_constant?(reference_name)
       local = @discovery.local_constant_names
@@ -153,9 +174,21 @@ module Rigor
     # threaded by reference through transitions; reset per method body (a fresh entry scope drops it), so the
     # name keys never collide across bodies.
     EMPTY_ORIGINS = {}.freeze
+    # Issue #667 — the set of variable references currently bound to a value COPIED out of a constant the
+    # project published and this file does not declare. Members are frozen `[kind, name]` pairs, the same
+    # spelling {EMPTY_DECLARATION_SOURCED} uses, but a DELIBERATELY SEPARATE carrier: this mark joins by
+    # UNION where ADR-58's kinds intersect, and it answers a different question (what a value's *constancy*
+    # rests on, not what a binding's *optionality* rests on) for a different consumer. Folding it into the
+    # ADR-58 set would be the third establishing transition its *Non-transitivity* passage reserves as a
+    # decision, on a Set that already carries two opposite join policies.
+    EMPTY_PUBLISHED_CONSTANT_SOURCED = Set.new.freeze
+    # Issue #667 — the empty answer of {#published_constant_ivars_for}, so a class with no such ivar (every
+    # class in a project that publishes nothing) allocates none.
+    EMPTY_PUBLISHED_CONSTANT_IVARS = Set.new.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
-                     :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS
+                     :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS, :EMPTY_PUBLISHED_CONSTANT_SOURCED,
+                     :EMPTY_PUBLISHED_CONSTANT_IVARS
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -207,6 +240,7 @@ module Rigor
       indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
       method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
       declaration_sourced: EMPTY_DECLARATION_SOURCED,
+      published_constant_sourced: EMPTY_PUBLISHED_CONSTANT_SOURCED,
       source_path: nil,
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
       opaque_block_self: false,
@@ -231,6 +265,7 @@ module Rigor
       @indexed_narrowings = indexed_narrowings
       @method_chain_narrowings = method_chain_narrowings
       @declaration_sourced = declaration_sourced
+      @published_constant_sourced = published_constant_sourced
       @source_path = source_path
       @struct_fold_safe_locals = struct_fold_safe_locals
       @opaque_block_self = opaque_block_self
@@ -314,6 +349,10 @@ module Rigor
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
               declaration_sourced: drop_declaration_sourced_for(:local, name),
+              # Issue #667 — rebinding is flow-live for the published-constant mark too: the new value need
+              # not be a copy of anything. `with_published_constant_mark` re-stamps afterward when the write's
+              # rvalue is one.
+              published_constant_sourced: drop_published_constant_sourced_for(:local, name),
               local_origins: drop_origin(@local_origins, name),
               optimistic_locals: drop_origin(@optimistic_locals, name))
     end
@@ -419,6 +458,7 @@ module Rigor
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
               declaration_sourced: drop_declaration_sourced_for(:ivar, name),
+              published_constant_sourced: drop_published_constant_sourced_for(:ivar, name),
               ivar_origins: drop_origin(@ivar_origins, name),
               optimistic_ivars: drop_origin(@optimistic_ivars, name))
     end
@@ -443,6 +483,22 @@ module Rigor
     # into a private method.
     def with_local_declaration_mark(name)
       rebuild(declaration_sourced: add_declaration_sourced(:local, name))
+    end
+
+    # Issue #667 — record that `name` is currently bound to a value copied out of a foreign published
+    # constant. Always applied AFTER the `with_local` / `with_ivar` that binds the value (both drop the mark
+    # unconditionally), exactly as {#with_local_declaration_mark} is.
+    def with_published_constant_mark(kind, name)
+      rebuild(published_constant_sourced: add_published_constant_sourced(kind, name))
+    end
+
+    # Issue #667 — true when `(kind, name)`'s current binding is a copy of a constant the project published
+    # and this file does not declare. Asked through
+    # {Analysis::CheckRules::PublishedConstantGuard}, never directly from a rule.
+    def published_constant_sourced?(kind, name)
+      return false if @published_constant_sourced.empty?
+
+      @published_constant_sourced.include?([kind.to_sym, name.to_sym])
     end
 
     # ADR-58 WD1 — true when `(kind, name)`'s binding optionality is purely declaration-sourced (no flow-live
@@ -1143,7 +1199,8 @@ module Rigor
         @globals == other.globals &&
         @indexed_narrowings == other.indexed_narrowings &&
         @method_chain_narrowings == other.method_chain_narrowings &&
-        @declaration_sourced == other.declaration_sourced
+        @declaration_sourced == other.declaration_sourced &&
+        @published_constant_sourced == other.published_constant_sourced
     end
     alias eql? ==
 
@@ -1160,6 +1217,7 @@ module Rigor
       indexed_narrowings: @indexed_narrowings,
       method_chain_narrowings: @method_chain_narrowings,
       declaration_sourced: @declaration_sourced,
+      published_constant_sourced: @published_constant_sourced,
       source_path: @source_path,
       struct_fold_safe_locals: @struct_fold_safe_locals,
       opaque_block_self: @opaque_block_self,
@@ -1181,6 +1239,7 @@ module Rigor
         indexed_narrowings: indexed_narrowings,
         method_chain_narrowings: method_chain_narrowings,
         declaration_sourced: declaration_sourced,
+        published_constant_sourced: published_constant_sourced,
         source_path: source_path,
         struct_fold_safe_locals: struct_fold_safe_locals,
         opaque_block_self: opaque_block_self,
@@ -1226,6 +1285,12 @@ module Rigor
         # path made the binding flow-live (a method-local nil write / failed-guard narrowing), the merge is
         # flow-live and `possible-nil-receiver` fires as before.
         declaration_sourced: join_declaration_sourced(other),
+        # Issue #667 — UNION, the opposite of the line above, which is the first reason this mark does not
+        # ride the ADR-58 Set. The mark only ever WITHHOLDS a firing, so keeping it when either arm bound the
+        # name from a published constant is the false-positive-safe merge: `if c then m = MODE else m = MODE2
+        # end; m == :x` must not warn because one arm's copy is invisible to the reader's author. ADR-67
+        # WD6b's `:inferred_param` taint takes the same direction for the same reason.
+        published_constant_sourced: join_published_constant_sourced(other),
         source_path: source_path,
         # Issue #589 — the fold-safe set MUST survive a merge. It was simply absent from this constructor
         # call, so it fell back to the empty default and every `if` / `while` in a method silently revoked
@@ -1357,6 +1422,34 @@ module Rigor
     end
 
     # ADR-58 WD1 — set/clear the declaration-sourced provenance mark.
+    # Issue #667 — the #667 carrier's add/drop pair. Deliberately not reusing
+    # {#add_declaration_sourced} / {#drop_declaration_sourced_for}: the two sets are joined by opposite
+    # policies, so sharing the storage would make every future edit to either one a decision about both.
+    def add_published_constant_sourced(kind, name)
+      ref = [kind.to_sym, name.to_sym].freeze
+      return @published_constant_sourced if @published_constant_sourced.include?(ref)
+
+      (@published_constant_sourced.dup << ref).freeze
+    end
+
+    def drop_published_constant_sourced_for(kind, name)
+      return @published_constant_sourced if @published_constant_sourced.empty?
+
+      ref = [kind.to_sym, name.to_sym]
+      return @published_constant_sourced unless @published_constant_sourced.include?(ref)
+
+      (@published_constant_sourced - [ref]).freeze
+    end
+
+    def join_published_constant_sourced(other)
+      mine = @published_constant_sourced
+      theirs = other.published_constant_sourced
+      return mine if mine.equal?(theirs) || theirs.empty?
+      return theirs if mine.empty?
+
+      (mine | theirs).freeze
+    end
+
     def add_declaration_sourced(kind, name)
       ref = [kind.to_sym, name.to_sym]
       return @declaration_sourced if @declaration_sourced.include?(ref)

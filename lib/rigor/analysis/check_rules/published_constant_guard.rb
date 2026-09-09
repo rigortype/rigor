@@ -50,11 +50,18 @@ module Rigor
       #   passage is the precedent for stopping at one hop rather than building a provenance channel through
       #   the return memo.
       #
-      # Deliberately NOT covered, and a separate change: a value copied into a local (`m = MODE; m == :x`),
-      # into an ivar (`@mode = MODE` in `initialize`), or through a same-file constant alias
-      # (`MODE2 = AppConfig::MODE`). Each needs flow provenance — ADR-58's `r = @x` stamping is the shape —
-      # rather than a syntactic root walk, and approximating it here is exactly the ad-hoc widening ADR-58's
-      # *Non-transitivity* passage forbids. Two hops (`live? -> prod? -> MODE`) also stay uncovered.
+      # - a value COPIED out of such a constant before the predicate reads it (issue #667) — into a local
+      #   (`m = AppConfig::MODE; m == :x`), into an ivar (`@mode = AppConfig::MODE` in `initialize`), or
+      #   through a same-file alias (`MODE2 = AppConfig::MODE`). A copy has no spelling for the root walk to
+      #   recognise, so the provenance is stamped on the value where the copy happens and travels with it:
+      #   the first two on the `Scope` flow carrier `published_constant_sourced` (dropped by any rebinding,
+      #   unioned at a join), the alias on the per-file `published_constant_alias_names` census table, which
+      #   needs no flow machinery at all because a constant write is not flow. This walk only READS those
+      #   marks — the widening ADR-58's *Non-transitivity* passage forbids is inferring one AT a consumer,
+      #   and the establishing transitions are named in
+      #   `docs/internal-spec/inference-engine.md` § "The truthiness withholding".
+      #
+      # Deliberately NOT covered: two interprocedural hops (`live? -> prod? -> MODE`).
       module PublishedConstantGuard
         # A defensive depth cap against a pathological chain (the walk is otherwise linear in chain length).
         MAX_DEPTH = 64
@@ -73,6 +80,8 @@ module Rigor
           case node
           when Prism::ConstantReadNode then scope.published_constant?(node.name.to_s)
           when Prism::ConstantPathNode then published_path?(node, scope)
+          when Prism::LocalVariableReadNode then scope.published_constant_sourced?(:local, node.name)
+          when Prism::InstanceVariableReadNode then scope.published_constant_sourced?(:ivar, node.name)
           when Prism::CallNode then rooted_call?(node, scope, depth)
           else rooted_through_composition?(node, scope, depth)
           end

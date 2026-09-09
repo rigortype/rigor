@@ -1,6 +1,6 @@
 # ADR-20: Lightweight Higher-Kinded Polymorphism (Lightweight HKT)
 
-Status: **Accepted (partial implementation, 2026-05-18).**
+Status: **Accepted — slices 1-6 implemented** (slices 1-3 and 6 on 2026-05-18; slices 4 and 5 in v0.3.7, the `rigor-dry-monads` `Result` / `Maybe` carriers and implicit HKT registration of recursive `type` aliases).
 
 Originally
 proposed 2026-05-18; promoted to accepted the same day after slices
@@ -88,11 +88,12 @@ ship demand-driven.
 - (Originally listed: Slice 2e — `Environment.for_project` HKT
   annotation scan. **LANDED 2026-05-18** — see "What landed"
   below.)
-- **Slice 4** — multi-arg HKT validation via `rigor-dry-monads`
-  `Result[T, E]` / `Maybe[T]` carriers. Queued behind ADR-3
-  amendment for the underlying value-object representation.
-- **Slice 5** — sugar via recursive `type` aliases. Gated on
-  user feedback that the explicit `%a{...}` form is too verbose.
+- (Originally listed: Slice 4 — multi-arg HKT validation via
+  `rigor-dry-monads` `Result[T, E]` / `Maybe[T]` carriers.
+  **LANDED in v0.3.7**, #712.)
+- (Originally listed: Slice 5 — sugar via recursive `type`
+  aliases. **LANDED in v0.3.7** — a recursive `type` alias is
+  registered as an HKT implicitly.)
 - (Originally listed: Slice 6 — plugin-side resolver hookup.
   **LANDED 2026-05-18** — see "What landed" below.)
 

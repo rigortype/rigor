@@ -6,8 +6,10 @@ wiring are implemented, with `rigor-minitest` shipping the first
 declarations (`Minitest::Test` / `ActiveSupport::TestCase` /
 `Test::Unit::TestCase` → `setup`). The block-form variant (RSpec
 `before { }` / `let { }`, whose ivar writes live in a call block rather
-than a `DefNode`) is deferred to a follow-on slice — it needs the ivar
-write-collector to descend declared call blocks.
+than a `DefNode`) has since been implemented too: the ivar
+write-collector descends declared call blocks behind
+`ScopeIndexer#block_initializer?`, and `rigor-rspec` ships the
+declarations.
 
 Records the decision to add a plugin `Manifest` field,
 `additional_initializers:`, that lets a plugin declare which non-`initialize`

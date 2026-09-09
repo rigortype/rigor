@@ -1,7 +1,7 @@
 # ADR-48 — Struct / Data value folding (member-shape carriers)
 
 Status: **Accepted — `Data.define` slices 1–4 implemented (v0.1.17) plus
-bare-local block-form parity; `Struct` follow-up slices 1–4 implemented
+bare-local block-form parity; `Struct` follow-up slices 1-5 implemented
 (fresh-chain + fold-safe bound-local + setter re-typing).** Two new
 type carriers — a **member-class carrier** (`Type::DataClass`) and a
 **member-instance carrier** (`Type::DataInstance`) — so that a

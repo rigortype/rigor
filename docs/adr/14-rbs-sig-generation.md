@@ -1,10 +1,10 @@
 # ADR-14 — RBS signature generation and augmentation from inference
 
-Status: **Accepted, 2026-05-12; MVP (Slice 1) implemented in v0.1.4.**
+Status: **Accepted, 2026-05-12; slices 1-5 implemented** (slice 1's MVP in v0.1.4, then `--write`, `--params=observed`, the additional method shapes, and the RSpec-aware observations with the handbook chapter).
 
 `rigor sig-gen --print` / `--diff` for `def` methods with
 return-only emission lives under `lib/rigor/sig_gen/`.
-Slices 2–5 remain demand-driven.
+Slices 2–5 have since landed too.
 
 ## Context
 

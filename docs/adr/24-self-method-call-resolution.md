@@ -15,8 +15,9 @@ the dominant `Object`/`BasicObject` self-type-fallback class (287) is now
 excluded, but the abstract / template-method base-class pattern (a base calls
 a method its subclasses implement) is an unaddressed false-positive under the
 current per-class gate. Gate widening to superclass/include chains is deferred
-(it would only enlarge that class); the required next step is subclass-aware
-gating. See slice 4 below.**
+(it would only enlarge that class). Subclass-aware gating has since shipped
+(`CheckRules#method_defined_on_known_subclass?`); the rule still ships `:off`.
+See slice 4 below.**
 
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)

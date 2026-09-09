@@ -3,6 +3,7 @@ locals:
   built: Array[Dynamic[top] | String]
   compound: Array[Dynamic[top] | Integer]
   csv_options: Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
+  emptied: Array[1 | 2 | Dynamic[top] | Integer]
   fixed_include: Array[1 | 2 | Dynamic[top] | Integer]
   fp_compound: Array[Dynamic[top] | Integer]
   fp_hash: Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
@@ -14,6 +15,8 @@ locals:
   or_written: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
   popped: Array[1 | 2]
   pushed: Array[1 | 2 | Dynamic[top] | Integer]
+  refined: Array[1 | 2 | Dynamic[top] | Integer] | non-empty-array[1 | 2 | Dynamic[top]
+    | Integer | String]
   shoveled: Array[1 | 2 | Dynamic[top] | Integer]
   slotted: Array[Dynamic[top] | Integer]
   sorted: Array[1 | 2]
@@ -36,4 +39,6 @@ assertions:
   '13': Array[1 | 2 | 3]
   '14': Array[1 | 2]
   '15': Array[1 | 2]
-  '16': "[1, 2]"
+  '16': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
+  '17': Array[1 | 2 | Dynamic[top] | Integer]
+  '18': "[1, 2]"

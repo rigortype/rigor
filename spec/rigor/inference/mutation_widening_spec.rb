@@ -190,6 +190,52 @@ RSpec.describe Rigor::Inference::MutationWidening do
       end
     end
 
+    # Issue #936 — ADR-56 WD2.9's deferred branch. The `Tuple` arm joins a mutator's added element;
+    # the `Difference` arm dropped it, so `xs << "s"` on a narrowed `non-empty-array[String]` read an
+    # element type the array provably does not only hold.
+    it "joins the added element into a non-empty-array refinement and keeps the witness" do
+      # The element bound carries a gradual arm, as the narrowed local in the integration fixture
+      # does, so the appended class is admitted rather than taking the seed-admissibility floor.
+      element = Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                              Rigor::Type::Combinator.untyped)
+      non_empty = Rigor::Type::Combinator.non_empty_array(element)
+      widened = described_class.widen_for_mutator(non_empty, :<<,
+                                                  arg_types: [Rigor::Type::Combinator.constant_of("s")])
+      expect(widened).to be_a(Rigor::Type::Difference)
+      expect(widened.removes_empty_witness?).to be(true)
+      expect(widened.base.type_args.first.describe).to include("String")
+    end
+
+    it "retracts the witness when the same appended element reaches an emptying mutator" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      widened = described_class.widen_for_mutator(non_empty, :replace,
+                                                  arg_types: [Rigor::Type::Combinator.constant_of(1)])
+      expect(widened).to be_a(Rigor::Type::Nominal)
+      expect(widened.class_name).to eq("Array")
+    end
+
+    it "joins the stored pair into a non-empty-hash refinement and keeps the witness" do
+      non_empty = Rigor::Type::Combinator.non_empty_hash(
+        Rigor::Type::Combinator.nominal_of("Symbol"),
+        Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                      Rigor::Type::Combinator.untyped)
+      )
+      widened = described_class.widen_for_mutator(
+        non_empty, :[]=,
+        arg_types: [Rigor::Type::Combinator.constant_of(:k), Rigor::Type::Combinator.nominal_of("String")]
+      )
+      expect(widened).to be_a(Rigor::Type::Difference)
+      expect(widened.removes_empty_witness?).to be(true)
+      expect(widened.base.type_args.last.describe).to include("String")
+    end
+
+    # A size-preserving mutator with nothing to join leaves the binding exactly as it was, and the
+    # arm must signal that as a decline rather than as a rebind to an equal type.
+    it "declines a witness-preserving mutator that adds no evidence" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      expect(described_class.widen_for_mutator(non_empty, :sort!)).to be_nil
+    end
+
     it "keeps the non-empty-array refinement under readers and non-mutating siblings" do
       non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
       expect(described_class.widen_for_mutator(non_empty, :size)).to be_nil

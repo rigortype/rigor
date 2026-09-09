@@ -222,6 +222,25 @@ sorted = [1, 2]
 sorted.sort!
 assert_type("Array[1 | 2]", sorted)
 
+# --- A seed narrowed to a `non-empty-array` refinement (issue #936).
+# The `Difference` arm used to widen to the base and drop the appended
+# element entirely, so `refined` read back without its `String` arm; and
+# it retracted the non-empty witness for an append, which cannot empty
+# anything. An emptying mutator still retracts it. ---
+refined = [1, 2]
+refined.push(3)
+if refined.any?
+  refined << "s"
+  assert_type("non-empty-array[1 | 2 | Dynamic[top] | Integer | String]", refined)
+end
+
+emptied = [1, 2]
+emptied.push(3)
+if emptied.any?
+  emptied.clear
+  assert_type("Array[1 | 2 | Dynamic[top] | Integer]", emptied)
+end
+
 # --- A collection NOBODY mutates keeps its exact literal Tuple: the
 # join must not widen on the read path. ---
 untouched = [1, 2]

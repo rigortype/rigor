@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "../source/node_children"
 require_relative "content_join"
 require_relative "receiver_alias"
+require_relative "refinement_mutation"
 require_relative "string_mutation"
 
 module Rigor
@@ -155,10 +156,14 @@ module Rigor
       # needs.
       # A `Constant[String]` counts too since issue #617 residue (4): the gate exists to skip typing arguments
       # nothing will consume, and this carrier IS consumed now — `buf << x` on a `+"ab"` rewrites the binding.
+      # An empty-witness `Difference` counts too (issue #936): the `non-empty-array[T]` arm joins the
+      # mutator's added element now, so its arguments are evidence this seam consumes rather than
+      # arguments nothing will read.
       def shape_carrier?(type)
         case type
         when Type::Tuple, Type::HashShape then true
         when Type::Constant then StringMutation.constant?(type)
+        when Type::Difference then type.removes_empty_witness?
         when Type::Union then type.members.any? { |m| shape_carrier?(m) }
         else false
         end
@@ -284,7 +289,7 @@ module Rigor
                            ContentJoin.hash_shape_key_values(type))
         when Type::Constant then StringMutation.widen_constant(type, method_name)
         when Type::Difference
-          widen_difference(type, method_name)
+          widen_difference(type, method_name, arg_types: arg_types)
         when Type::Union
           widen_union(type, method_name, values: values, arg_types: arg_types)
         end
@@ -479,26 +484,19 @@ module Rigor
         end
       end
 
-      # `non-empty-array[T]` / `non-empty-hash[K, V]` → the bare base nominal. These refinement
-      # carriers are what `empty?` / `any?` narrowing writes (ADR-47 §4-4), and they are just as
-      # invalidated by an in-place mutator as a `Tuple` is: `arr.clear` makes `arr` empty, so a
-      # surviving `Difference[Array[T], Tuple[]]` would project `arr.size` to `positive-int` and
-      # fold `arr.size == 0` to `Constant[false]` — a false `flow.always-falsey-condition` on
-      # correct code.
-      #
-      # Only the EMPTY-witness differences over Array / Hash are widened, and only for that
-      # base's mutator table. The other catalogued refinements are unreachable from these tables
-      # by construction: `non-empty-string` and `non-zero-int` bind String / Integer receivers,
-      # whose mutators (`String#<<` and friends) appear in neither `ARRAY_MUTATORS` nor
-      # `HASH_MUTATORS` — and none of them can empty a non-empty string anyway.
-      def widen_difference(difference, method_name)
-        return nil unless difference.removes_empty_witness?
-
-        base = difference.base
-        case base.class_name
-        when "Array" then ARRAY_MUTATORS.include?(method_name) ? base : nil
-        when "Hash" then HASH_MUTATORS.include?(method_name) ? base : nil
-        when "String" then StringMutation::EMPTYING_MUTATORS.include?(method_name) ? base : nil
+      # The empty-witness refinement arm. {RefinementMutation} owns the witness half — whether
+      # `xs` is still provably non-empty after `method_name` — and takes the content half from
+      # here, so a refinement joins the mutator's added content on exactly the terms the `Tuple` /
+      # `HashShape` arms above do (issue #936, ADR-56 WD2.9's deferred branch).
+      def widen_difference(difference, method_name, arg_types: NO_ARG_TYPES)
+        RefinementMutation.widen(difference, method_name) do |base|
+          if base.class_name == "Array"
+            ARRAY_MUTATORS.include?(method_name) &&
+              join_added_elements(base, method_name, arg_types, ContentJoin.collection_element_types(base))
+          else
+            HASH_MUTATORS.include?(method_name) &&
+              join_added_pairs(base, method_name, arg_types, ContentJoin.hash_shape_key_values(base))
+          end
         end
       end
 

@@ -65,8 +65,6 @@ module Rigor
       #   plain `(receiver, method)` signature was already on the recursion guard stack.
       # - {MEMO_REFUSE_UNROLL} — pre-ADR-84 blanket refusal (constant-arg unroll in flight). Kept in the table
       #   as the ADR-84 WD3 gate pin: structurally unreachable, must read ~0.
-      # - {MEMO_REFUSE_CONSULT_TAINTED} — a candidate frame computed a result but an ADR-55 fixpoint summary
-      #   was *consulted* during the compute, so the result is a transient Kleene iterate and was NOT stored.
       # - {MEMO_REFUSE_TRANSIENT} — ADR-84 WD3: a candidate frame's compute bracket saw a
       #   transient-machinery event (recursion-guard hit / unroll-fuel exhaustion / ADR-55 WD1 clamp /
       #   fixpoint-cap collapse — `ExpressionTyper#note_transient_fallback`) that referenced a stack frame
@@ -79,15 +77,13 @@ module Rigor
       MEMO_BODY_EVALS = :memo_body_evals
       MEMO_REFUSE_ON_STACK = :memo_refuse_on_stack
       MEMO_REFUSE_UNROLL = :memo_refuse_unroll
-      MEMO_REFUSE_CONSULT_TAINTED = :memo_refuse_consult_tainted
       MEMO_REFUSE_TRANSIENT = :memo_refuse_transient
 
       CATEGORIES = [
         RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL,
         RECURSION_FIXPOINT_CAP, BLOCK_WRITEBACK_CAP,
         MEMO_ENTRIES, MEMO_HITS, MEMO_MISSES, MEMO_BODY_EVALS,
-        MEMO_REFUSE_ON_STACK, MEMO_REFUSE_UNROLL, MEMO_REFUSE_CONSULT_TAINTED,
-        MEMO_REFUSE_TRANSIENT
+        MEMO_REFUSE_ON_STACK, MEMO_REFUSE_UNROLL, MEMO_REFUSE_TRANSIENT
       ].freeze
 
       # Distribution (histogram) categories — read-only observations of a value's size at a site, used to

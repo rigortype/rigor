@@ -14,3 +14,4 @@ assertions:
   '9': Array[String]?
   '10': Integer
   '11': Integer
+  '12': Integer

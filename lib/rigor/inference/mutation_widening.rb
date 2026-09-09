@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "../source/node_children"
 require_relative "content_join"
 require_relative "receiver_alias"
+require_relative "string_mutation"
 
 module Rigor
   module Inference
@@ -98,7 +99,7 @@ module Rigor
       # in-place call on this name change its binding?" against (issue #587: the block-return
       # threading gate). Derived from the two tables above rather than spelled out, so the scan and
       # the widening it predicts cannot drift apart.
-      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS).freeze
+      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | StringMutation::MUTATORS).freeze
 
       # Methods that return the receiver (or a shallow copy) and cannot mutate it. They must not
       # trigger widening or any other receiver-fact invalidation. The list is intentionally
@@ -152,9 +153,12 @@ module Rigor
       # A union carrying a shape member is joinable too (issue #645): {#widen_union} widens that
       # member through the same join, so the arguments the caller would skip are the evidence it
       # needs.
+      # A `Constant[String]` counts too since issue #617 residue (4): the gate exists to skip typing arguments
+      # nothing will consume, and this carrier IS consumed now — `buf << x` on a `+"ab"` rewrites the binding.
       def shape_carrier?(type)
         case type
         when Type::Tuple, Type::HashShape then true
+        when Type::Constant then StringMutation.constant?(type)
         when Type::Union then type.members.any? { |m| shape_carrier?(m) }
         else false
         end
@@ -231,30 +235,24 @@ module Rigor
         end
       end
 
+      # The local and ivar arms differ only in which pair of `Scope` accessors they use, so they are read out
+      # of one table rather than written twice: a carrier the widening responds to must not be widened on one
+      # kind of binding and left on the other.
+      ALIAS_ACCESSORS = {
+        Prism::LocalVariableReadNode => %i[local with_local],
+        Prism::InstanceVariableReadNode => %i[ivar with_ivar]
+      }.freeze
+      private_constant :ALIAS_ACCESSORS
+
       def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES)
-        case read
-        when Prism::LocalVariableReadNode
-          widen_local(method_name, read.name, scope, values: values, arg_types: arg_types)
-        when Prism::InstanceVariableReadNode
-          widen_ivar(method_name, read.name, scope, values: values, arg_types: arg_types)
-        else scope
-        end
-      end
+        getter, builder = ALIAS_ACCESSORS[read.class]
+        return scope if getter.nil?
 
-      def widen_local(method_name, var_name, current_scope, values: :widen, arg_types: NO_ARG_TYPES)
-        current = current_scope.local(var_name)
+        current = scope.public_send(getter, read.name)
         widened = widen_for_mutator(current, method_name, values: values, arg_types: arg_types)
-        return current_scope if widened.nil?
+        return scope if widened.nil?
 
-        current_scope.with_local(var_name, widened)
-      end
-
-      def widen_ivar(method_name, var_name, current_scope, values: :widen, arg_types: NO_ARG_TYPES)
-        current = current_scope.ivar(var_name)
-        widened = widen_for_mutator(current, method_name, values: values, arg_types: arg_types)
-        return current_scope if widened.nil?
-
-        current_scope.with_ivar(var_name, widened)
+        scope.public_send(builder, read.name, widened)
       end
 
       # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning
@@ -284,6 +282,7 @@ module Rigor
 
           join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
                            ContentJoin.hash_shape_key_values(type))
+        when Type::Constant then StringMutation.widen_constant(type, method_name)
         when Type::Difference
           widen_difference(type, method_name)
         when Type::Union
@@ -325,7 +324,8 @@ module Rigor
       # {ContentJoin.array_residue} / {ContentJoin.hash_residue}, whichever table names the call.
       def mutation_carrier?(member, method_name)
         (ARRAY_MUTATORS.include?(method_name) && ContentJoin.array_residue(member).empty?) ||
-          (HASH_MUTATORS.include?(method_name) && ContentJoin.hash_residue(member).empty?)
+          (HASH_MUTATORS.include?(method_name) && ContentJoin.hash_residue(member).empty?) ||
+          (StringMutation::MUTATORS.include?(method_name) && StringMutation.constant?(member))
       end
 
       # Joins the element evidence the mutator's own ARGUMENTS introduce into the already-widened
@@ -498,6 +498,7 @@ module Rigor
         case base.class_name
         when "Array" then ARRAY_MUTATORS.include?(method_name) ? base : nil
         when "Hash" then HASH_MUTATORS.include?(method_name) ? base : nil
+        when "String" then StringMutation::EMPTYING_MUTATORS.include?(method_name) ? base : nil
         end
       end
 

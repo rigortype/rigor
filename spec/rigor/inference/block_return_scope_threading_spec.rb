@@ -601,4 +601,146 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
   end
+
+  # Issue #617 — the four block-return residues #587 left behind. Each pair is a residue plus the arm that
+  # must keep folding, because every decline here is bought with precision somewhere adjacent.
+  describe "issue #617 block-return residues" do
+    def flow_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+    end
+
+    describe "(1) find / detect / index / find_index over a rebound-capture predicate" do
+      it "answers an element-or-nil where the entry-scope predicate short-circuited to nil" do
+        # Runtime answer is `2`. The per-position predicates do not fold, so the walk floors instead of
+        # letting `BlockFolding` read the first iteration's `Constant[false]` and return `nil`.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          seen = 0
+          dump_type([1, 2].find do |e|
+            seen += 1
+            seen == 2
+          end)
+        RUBY
+      end
+
+      it "answers Integer? for the same shape under index" do
+        # Runtime answer is `1`.
+        expect(dumped_type(<<~RUBY)).to eq("Integer?")
+          seen = 0
+          dump_type([1, 2].index do |e|
+            seen += 1
+            seen == 2
+          end)
+        RUBY
+      end
+
+      it "answers the one-liner form too" do
+        # `(seen += 1) == 2` rebinds inside an expression, which the body evaluator does not thread, so the
+        # fixpoint came back on its seed and every position re-read `Constant[0]`.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          seen = 0
+          dump_type([1, 2].find { |e| (seen += 1) == 2 })
+        RUBY
+      end
+
+      it "still folds find to the matching element when the predicate decides" do
+        expect(dumped_type("dump_type([1, 2].find { |e| e == 2 })")).to eq("2")
+      end
+
+      it "still folds find to nil when no position matches" do
+        expect(dumped_type("dump_type([1, 2].find { |e| e == 5 })")).to eq("nil")
+      end
+
+      it "still folds index to the matching position" do
+        expect(dumped_type("dump_type([1, 2].index { |e| e == 2 })")).to eq("1")
+      end
+    end
+
+    describe "(2) the content-mutation family above the per-element threading cap" do
+      it "floors a position whose tail reads a parameter the body mutated in place" do
+        # Nine slots each holding `[1]`; the walk answered nine provably-empty `[]`. The cap withholds the
+        # per-position body evaluation, so the honest answer above it is "unknown", not the pre-state.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          dump_type(([[]] * 9).map do |a|
+            a << 1
+            a
+          end)
+        RUBY
+      end
+
+      it "keeps threading the same shape at the cap" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Array[Dynamic[top] | Integer]'] * 3).join(', ')}]")
+          dump_type(([[]] * 3).map do |a|
+            a << 1
+            a
+          end)
+        RUBY
+      end
+
+      it "still reads the captured-local fixpoint above the cap" do
+        # The floor consults the fixpoint's names: `total` IS answered at any arity, so it must not be
+        # floored along with the mutated parameter.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Integer'] * 9).join(', ')}]")
+          total = 0
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            total += e
+            total
+          end)
+        RUBY
+      end
+
+      it "leaves a tail that ignores its prefix precise above the cap" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['5'] * 9).join(', ')}]")
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            q = e
+            5
+          end)
+        RUBY
+      end
+    end
+
+    describe "(3) a compound write as the block's tail" do
+      it "types the map result as the counter's converged type" do
+        # Runtime `[1, 2]`. The pin answered `[1, 1]` because the expression typer read a compound write as
+        # its rvalue alone, whatever the target held.
+        expect(dumped_type("total = 0\ndump_type([1, 2].map { total += 1 })")).to eq("[Integer, Integer]")
+      end
+
+      it "stops the always-truthy firing on the second position" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          total = 0
+          r = [1, 2].map { total += 1 }
+          puts "x" if r.last == 1
+        RUBY
+      end
+
+      it "keeps the straight-line compound write folded" do
+        # The evaluator's own answer must not move: `total` is `15` after the write, and so is the write.
+        expect(dumped_type("total = 10\ndump_type(total += 5)")).to eq("15")
+      end
+    end
+
+    describe "(4) straight-line String mutation" do
+      it "widens a mutated string literal binding" do
+        expect(dumped_type("s = +\"ab\"\ns << \"c\"\ndump_type(s)")).to eq("String")
+      end
+
+      it "stops the always-truthy firing on the mutated value" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          s = +"ab"
+          s << "c"
+          puts "x" if s == "ab"
+        RUBY
+      end
+
+      it "leaves an unmutated string literal pinned" do
+        expect(dumped_type("s = +\"ab\"\ndump_type(s)")).to eq("\"ab\"")
+      end
+
+      it "leaves a non-mutating sibling call pinned" do
+        # `upcase` returns a new String; only the bang form rewrites the receiver.
+        expect(dumped_type("s = +\"ab\"\ns.upcase\ndump_type(s)")).to eq("\"ab\"")
+      end
+    end
+  end
 end

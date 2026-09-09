@@ -41,6 +41,40 @@ RSpec.describe Rigor::CLI do
     expect(undocumented).to be_empty
   end
 
+  # `run` shifts the verb off `@argv` before dispatch, so a handler that slices again drops its
+  # first real argument — and, with no arguments at all, hands `nil` to a command that iterates it.
+  describe "playground argument forwarding" do
+    let(:playground_command) do
+      Class.new do
+        class << self
+          attr_accessor :received
+        end
+
+        def initialize(argv, _out, _err)
+          self.class.received = argv
+        end
+
+        def run = 0
+      end
+    end
+
+    def run_playground(*argv)
+      cli = described_class.new(["playground", *argv], out: StringIO.new, err: StringIO.new)
+      allow(cli).to receive(:require).with("rigor/playground").and_return(true)
+      stub_const("Rigor::CLI::PlaygroundCommand", playground_command)
+      cli.run
+      playground_command.received
+    end
+
+    it "forwards every argument" do
+      expect(run_playground("--port=4000", "--no-open")).to eq(["--port=4000", "--no-open"])
+    end
+
+    it "forwards an empty list rather than nil when invoked bare" do
+      expect(run_playground).to eq([])
+    end
+  end
+
   it "reports unknown commands as usage errors" do
     status, _out, err = run_cli("nope")
 

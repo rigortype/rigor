@@ -320,7 +320,10 @@ module Rigor
         @err.puts "Install it with: gem install rigor-playground"
         return EXIT_USAGE
       end
-      Rigor::CLI::PlaygroundCommand.new(@argv[1..], @out, @err).run
+      # `run` shifts the verb off `@argv` before dispatching, so the handler receives the arguments
+      # already. Slicing here dropped the first one — `rigor playground --port=4000` served the
+      # default port, and a bare `rigor playground` passed `nil` into a command that iterates it.
+      Rigor::CLI::PlaygroundCommand.new(@argv, @out, @err).run
     end
 
     def run_skill

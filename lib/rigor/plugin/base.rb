@@ -1045,7 +1045,7 @@ module Rigor
         Cache::Descriptor.new(
           files: boundary.files,
           configs: boundary.configs,
-          globs: watch_glob_entries(producer[:watch])
+          globs: (watch_glob_entries(producer[:watch]) + boundary.globs).uniq
         )
       end
 

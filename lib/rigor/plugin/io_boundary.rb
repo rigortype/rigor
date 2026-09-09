@@ -27,6 +27,12 @@ module Rigor
     #   A plugin that gates its read or its glob on one of these shapes its result on the answer, so the
     #   answer is a dependency; probing through `File` directly leaves that dependency unrecorded and the
     #   warm run serves the pre-appearance result.
+    # - `#list_directory(path)` — the directory-LISTING fingerprint (ADR-45 WD1c, #629): returns the
+    #   directory's entry paths and records ONE {Cache::Descriptor::GlobEntry} for `path/*`, so any file
+    #   added to or removed from the directory (and any content edit under it) invalidates. It is the row
+    #   for a plugin that asks "which of these N candidate files exists here?" — rigor-actionpack tries
+    #   nine template extensions per `render` call — where N per-path probe rows would put thousands of
+    #   validations on every warm run and one listing row puts one per directory.
     # - `#open_url(url)` — fetches the URL when the policy permits it (`network_policy: :allowlist` plus an
     #   `allowed_url_hosts` match) and raises {AccessDeniedError} otherwise. v0.1.2 ships the allowlist
     #   surface; the default project policy still has `network_policy: :disabled` so plugins that want network
@@ -48,6 +54,7 @@ module Rigor
         @plugin_id = plugin_id.to_s.dup.freeze
         @file_entries = {}
         @config_entries = {}
+        @glob_entries = {}
         @http_client = http_client
         @mutex = Mutex.new
       end
@@ -109,6 +116,33 @@ module Rigor
         probe(path) { |absolute| File.directory?(absolute) }
       end
 
+      # ADR-45 WD1c (#629) — the directory-listing fingerprint. Returns the paths `path` currently holds
+      # (`[]` when it is not a directory), and records a single {Cache::Descriptor::GlobEntry} over
+      # `path/*` so the recorded dependency is the directory's whole listing rather than one row per
+      # name the caller went on to test. An addition, a removal, or an edit under the directory all move
+      # the glob signature; a caller that answered "no such file" from the listing therefore invalidates
+      # the moment the file appears.
+      #
+      # Why not N {#file?} probes: a caller like rigor-actionpack's template lookup tries an extension
+      # family per candidate, so per-path rows scale with (renders × extensions × view roots) — thousands
+      # of stat validations per warm run on a Rails-scale project — while the listing row scales with the
+      # number of directories actually consulted. The listing row is also the STRICTLY stronger dependency
+      # of the two: it covers names the caller never thought to probe.
+      #
+      # Recording, not the answer, is what the policy gates, exactly as in {#probe}: an out-of-scope
+      # directory is listed truthfully and contributes no row.
+      #
+      # @param path — project directory; relative paths expand against the working directory
+      # @return the absolute paths directly under `path` in `Dir.glob` order; empty when not a directory
+      def list_directory(path)
+        absolute = File.expand_path(path.to_s)
+        entries = Dir.glob(File.join(absolute, "*"))
+        return entries unless @policy.allow_read?(absolute)
+
+        record_glob_entry(absolute, "*")
+        entries
+      end
+
       # Fetches the URL when the policy permits it. Returns the response body. Raises {AccessDeniedError} when
       # the policy is `:disabled`, the URL scheme is not `https`, the host is not on the allowlist, the
       # response is non-2xx, the body exceeds {URL_MAX_BYTES}, or the request times out
@@ -135,8 +169,10 @@ module Rigor
       #   Calling this multiple times yields equal descriptors; subsequent reads expand the underlying record
       #   tables.
       def cache_descriptor
-        files, configs = @mutex.synchronize { [@file_entries.values.dup, @config_entries.values.dup] }
-        Cache::Descriptor.new(files: files, configs: configs)
+        files, configs, globs = @mutex.synchronize do
+          [@file_entries.values.dup, @config_entries.values.dup, @glob_entries.values.dup]
+        end
+        Cache::Descriptor.new(files: files, configs: configs, globs: globs)
       end
 
       private
@@ -207,6 +243,14 @@ module Rigor
       def record_presence_entry(path)
         entry = Cache::Descriptor::FileEntry.present(path: path)
         @mutex.synchronize { @file_entries[path] ||= entry }
+      end
+
+      # ADR-45 WD1c (#629) — the listing row for {#list_directory}, deduplicated per (root, pattern) slot.
+      # Recomputed on each call rather than `||=`d, so a directory listed again after a mid-run mutation
+      # carries the signature of the state the LAST reader saw.
+      def record_glob_entry(root, pattern)
+        entry = Cache::Descriptor::GlobEntry.compute(root: root, pattern: pattern)
+        @mutex.synchronize { @glob_entries[entry.slot_key] = entry }
       end
 
       def record_url_entry(url, body)

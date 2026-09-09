@@ -1190,7 +1190,13 @@ module Rigor
           # are frozen after the run, and a plugin that never built a boundary read no files through it,
           # so it contributes no dependencies.
           boundary = plugin.instance_variable_get(:@io_boundary)
-          entries.concat(boundary.cache_descriptor.files) if boundary
+          if boundary
+            # #629 — a boundary carries GlobEntry listing rows too (`IoBoundary#list_directory`), and they
+            # are the only edge back to a file the run decided was ABSENT from a directory it consulted.
+            boundary_descriptor = boundary.cache_descriptor
+            entries.concat(boundary_descriptor.files)
+            globs.concat(boundary_descriptor.globs)
+          end
           plugin.class.producers.each_value do |prod|
             globs.concat(plugin.send(:watch_glob_entries, prod[:watch])) if prod[:watch]
           end

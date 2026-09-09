@@ -74,10 +74,11 @@ module Rigor
       # `watch:` covers exactly the files the scan reads: one glob per project `paths:` entry, co-extensive
       # with {#scannable_paths}. A {Cache::Descriptor::GlobEntry} digests every file matching its glob, so a
       # content edit, a file addition, and a file removal anywhere under those paths all move the digest and
-      # invalidate the entry. The scan reads no file individually through the `IoBoundary`, so the evaluated
-      # `watch:` globs are the entire dependency descriptor — and they fully cover the scan's input.
+      # invalidate the entry. Since #630 the scan ALSO reads each file through the `IoBoundary`, so the
+      # descriptor carries a per-file row beside the globs: the globs alone already covered the scan's
+      # input, and the per-file rows are what a subset or incremental run has to invalidate on.
       producer :dry_type_aliases, watch: -> { alias_watch_globs } do |_params|
-        AliasScanner.scan(paths: scannable_paths)
+        AliasScanner.scan(paths: scannable_paths, io_boundary: io_boundary)
       end
 
       # Builds the (cached) alias table and publishes it via the ADR-9 fact store. `producer_value` runs the
@@ -102,11 +103,13 @@ module Rigor
       # Resolves the project's `paths:` to a flat list of `.rb` files the scanner walks. Mirrors
       # `Analysis::Runner`'s `expand_paths` floor; we don't need the runner's full exclude/sort surface
       # because the alias table is a union — any duplicate scan is a no-op.
+      # ADR-45 WD1b (#613 / #630) — the classification probes go through the boundary, so an entry that
+      # is not there yet (or stops being a directory) is a recorded dependency of the scan's input set.
       def scannable_paths
         @scannable_paths ||= services.configuration.paths.flat_map do |entry|
-          if File.directory?(entry)
+          if io_boundary.directory?(entry)
             Dir.glob(File.join(entry, "**", "*.rb"), sort: true)
-          elsif File.file?(entry) && entry.end_with?(".rb")
+          elsif io_boundary.file?(entry) && entry.end_with?(".rb")
             [entry]
           else
             []
@@ -122,9 +125,9 @@ module Rigor
       # would read is watched, so any edit / addition / removal under those paths invalidates the cache.
       def alias_watch_globs
         services.configuration.paths.filter_map do |entry|
-          if File.directory?(entry)
+          if io_boundary.directory?(entry)
             [entry, "**/*.rb"]
-          elsif File.file?(entry) && entry.end_with?(".rb")
+          elsif io_boundary.file?(entry) && entry.end_with?(".rb")
             [File.dirname(entry), File.basename(entry)]
           end
         end

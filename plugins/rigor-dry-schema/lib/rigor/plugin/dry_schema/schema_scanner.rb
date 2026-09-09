@@ -41,23 +41,25 @@ module Rigor
         module_function
 
         # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param io_boundary — the plugin's {Rigor::Plugin::IoBoundary}; every source read goes
+        #   through it (#630) so each scanned file is a recorded cache dependency.
         # @param type_aliases — the ADR-9 `:dry_type_aliases` fact published by
         #   `rigor-dry-types` when loaded. Used to resolve `value(Types::Email)` references to their
         #   underlying class. Empty when the plugin isn't loaded.
         # @return frozen per-schema typed-key
         #   table. Empty when no recognisable schema declaration is found.
-        def scan(paths:, type_aliases: {})
+        def scan(paths:, io_boundary:, type_aliases: {})
           table = {}
           paths.each do |path|
-            scan_file(path, type_aliases).each do |schema_const, shape|
+            scan_file(path, io_boundary, type_aliases).each do |schema_const, shape|
               table[schema_const] ||= shape
             end
           end
           table.freeze
         end
 
-        def scan_file(path, type_aliases)
-          source = File.read(path)
+        def scan_file(path, io_boundary, type_aliases)
+          source = io_boundary.read_file(path)
           parse_result = Prism.parse(source, filepath: path)
           return {} unless parse_result.errors.empty?
 

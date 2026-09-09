@@ -145,7 +145,18 @@ module Rigor
             when Prism::LocalVariableReadNode then scope.local(read.name)
             when Prism::InstanceVariableReadNode then scope.ivar(read.name)
             end
-          current.is_a?(Type::Tuple) || current.is_a?(Type::HashShape)
+          shape_carrier?(current)
+        end
+      end
+
+      # A union carrying a shape member is joinable too (issue #645): {#widen_union} widens that
+      # member through the same join, so the arguments the caller would skip are the evidence it
+      # needs.
+      def shape_carrier?(type)
+        case type
+        when Type::Tuple, Type::HashShape then true
+        when Type::Union then type.members.any? { |m| shape_carrier?(m) }
+        else false
         end
       end
 
@@ -275,7 +286,46 @@ module Rigor
                            ContentJoin.hash_shape_key_values(type))
         when Type::Difference
           widen_difference(type, method_name)
+        when Type::Union
+          widen_union(type, method_name, values: values, arg_types: arg_types)
         end
+      end
+
+      # A `Union` seed is widened MEMBERWISE (issue #645). Declining it outright left a straight-line
+      # mutation on a union binding recording nothing at all — `out = flag ? 5 : [2]; out << 2` kept
+      # the `[2]` Tuple's arity after the mutation falsified it, so a later `out.size == 1` folds on a
+      # value the program never holds.
+      #
+      # Which members the mutation stands for is {ContentJoin}'s residue partition read from this
+      # side, so the straight-line seam and the block seam (#631) agree about a union: a member the
+      # mutator's class carries widens through the ordinary non-union path above, every other member
+      # survives whole. The two tables are consulted per member rather than once for the union, which
+      # is what a name in BOTH of them (`clear`, `delete`, `replace`) needs on a mixed
+      # `Array | Hash` seed.
+      #
+      # `nil` when no member widened — a union with no carrier member, or one whose carriers are
+      # already nominal, is untouched exactly as the scalar path leaves them.
+      def widen_union(union, method_name, values: :widen, arg_types: NO_ARG_TYPES)
+        widened_any = false
+        members = union.members.map do |member|
+          next member unless mutation_carrier?(member, method_name)
+
+          widened = widen_for_mutator(member, method_name, values: values, arg_types: arg_types)
+          next member if widened.nil?
+
+          widened_any = true
+          widened
+        end
+        return nil unless widened_any
+
+        Type::Combinator.union(*members)
+      end
+
+      # True when the mutator's own class stands for `member` — the absorbed side of
+      # {ContentJoin.array_residue} / {ContentJoin.hash_residue}, whichever table names the call.
+      def mutation_carrier?(member, method_name)
+        (ARRAY_MUTATORS.include?(method_name) && ContentJoin.array_residue(member).empty?) ||
+          (HASH_MUTATORS.include?(method_name) && ContentJoin.hash_residue(member).empty?)
       end
 
       # Joins the element evidence the mutator's own ARGUMENTS introduce into the already-widened

@@ -112,6 +112,61 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(described_class.widen_for_mutator(shape, :<<)).to be_nil
     end
 
+    # Issue #645 — a straight-line mutator on a `Union` binding used to record NOTHING: the
+    # `[2]` Tuple kept its arity after the mutation falsified it, so a later `out.size == 1`
+    # would fold on a value the program never holds.
+    context "with a Union receiver (issue #645)" do
+      let(:tuple) { Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(2)) }
+
+      it "widens the carrier member and keeps the others whole" do
+        seed = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(5), tuple)
+        widened = described_class.widen_for_mutator(seed, :<<)
+        expect(widened).to be_a(Rigor::Type::Union)
+        expect(widened.members).to include(Rigor::Type::Combinator.constant_of(5))
+        arrays = widened.members.grep(Rigor::Type::Nominal).select { |m| m.class_name == "Array" }
+        expect(arrays.size).to eq(1)
+        expect(widened.members.grep(Rigor::Type::Tuple)).to be_empty
+      end
+
+      it "widens every carrier member of a Union of two Tuples" do
+        other = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
+        seed = Rigor::Type::Combinator.union(tuple, other)
+        widened = described_class.widen_for_mutator(seed, :<<)
+        expect(widened.members.grep(Rigor::Type::Tuple)).to be_empty
+        expect(widened.members).to all(be_a(Rigor::Type::Nominal))
+      end
+
+      it "widens a HashShape member of a Union under a Hash mutator" do
+        shape = Rigor::Type::HashShape.new(a: Rigor::Type::Combinator.constant_of(1))
+        seed = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(5), shape)
+        widened = described_class.widen_for_mutator(seed, :[]=)
+        expect(widened.members.grep(Rigor::Type::HashShape)).to be_empty
+        hashes = widened.members.grep(Rigor::Type::Nominal).select { |m| m.class_name == "Hash" }
+        expect(hashes.size).to eq(1)
+      end
+
+      it "widens a non-empty-array refinement member alongside a foreign member" do
+        non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+        seed = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(5), non_empty)
+        widened = described_class.widen_for_mutator(seed, :clear)
+        expect(widened.members).to include(non_empty.base)
+        expect(widened.members).to include(Rigor::Type::Combinator.constant_of(5))
+      end
+
+      it "declines a Union with no carrier member for that mutator" do
+        seed = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(5),
+                                             Rigor::Type::Combinator.nominal_of("String"))
+        expect(described_class.widen_for_mutator(seed, :<<)).to be_nil
+      end
+
+      it "declines a Union whose Tuple member is not a carrier for that mutator" do
+        seed = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(5), tuple)
+        expect(described_class.widen_for_mutator(seed, :[]=)).not_to be_nil
+        expect(described_class.widen_for_mutator(seed, :map)).to be_nil
+        expect(described_class.widen_for_mutator(seed, :store)).to be_nil
+      end
+    end
+
     it "is a no-op for non-shape types" do
       expect(described_class.widen_for_mutator(Rigor::Type::Combinator.nominal_of("String"), :<<)).to be_nil
       expect(described_class.widen_for_mutator(Rigor::Type::Combinator.constant_of(1), :<<)).to be_nil

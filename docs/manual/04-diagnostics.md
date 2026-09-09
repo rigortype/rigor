@@ -85,6 +85,17 @@ carries no `documentation_url`.
 Plugins may contribute further families and rules; `rigor
 explain` lists whatever the active configuration loads.
 
+`flow.unreachable-branch` and `flow.always-truthy-condition` fold
+version guards — `RUBY_VERSION` / `RUBY_ENGINE` comparisons, and
+`X::VERSION` for a default gem of the running Ruby — against the
+Ruby interpreter running `rigor`, never `target_ruby`. The
+diagnostic set is therefore host-dependent: the same file can fold
+a different arm on Ruby 3.3 than on Ruby 4.0, and a project whose
+CI pins a different Ruby than your workstation should expect the CI
+run's result, not yours. See
+[Version-guard condition folding](../type-specification/control-flow-analysis.md#version-guard-condition-folding)
+for the exact foldable set.
+
 ## Evidence tier
 
 Every rule in the catalogue above carries an **evidence tier** —

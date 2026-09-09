@@ -74,8 +74,9 @@ module Rigor
       # `watch:` covers exactly the files the scan reads: one glob per project `paths:` entry, co-extensive
       # with {#scannable_paths}. A {Cache::Descriptor::GlobEntry} digests every file matching its glob, so a
       # content edit, a file addition, and a file removal anywhere under those paths all move the digest and
-      # invalidate the entry. The scan reads no file individually through the `IoBoundary`, so the evaluated
-      # `watch:` globs are the entire dependency descriptor — and they fully cover the scan's input.
+      # invalidate the entry. Since #630 the scan ALSO reads each file through the `IoBoundary`, so the
+      # descriptor carries a per-file row beside the globs: the globs alone already covered the scan's
+      # input, and the per-file rows are what a subset or incremental run has to invalidate on.
       producer :dry_type_aliases, watch: -> { alias_watch_globs } do |_params|
         AliasScanner.scan(paths: scannable_paths, io_boundary: io_boundary)
       end

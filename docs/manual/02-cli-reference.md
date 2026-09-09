@@ -138,6 +138,17 @@ truncation explicit. `--trace` records fail-soft fallbacks,
 after the rows of a line table in text output. The editor-mode
 `--tmp-file` / `--instead-of` pair is accepted as on `check`.
 
+The four probe commands — `type-of`, `type-scan`, `trace` and
+`annotate` — build their environment fresh on every invocation
+and never read or write the persistent cache. That is why none
+of them takes `--no-cache`: the flag would have nothing to skip.
+A probe therefore types against the environment `rigor check
+--no-cache` analyses with. The environment a cached (default)
+`rigor check` builds is meant to be identical, and Rigor gates
+the two builds against each other — but if you are chasing a
+disagreement between a probe and a `check` run, comparing
+against `rigor check --no-cache` removes that variable.
+
 ## `rigor trace`
 
 Replay HOW the engine typed a file, step by step, as a

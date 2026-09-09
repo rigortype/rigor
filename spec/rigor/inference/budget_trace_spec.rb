@@ -67,13 +67,13 @@ RSpec.describe Rigor::Inference::BudgetTrace do
     it "counts the ADR-57 memo-profile categories" do
       described_class.hit(described_class::MEMO_ENTRIES)
       described_class.hit(described_class::MEMO_HITS)
-      described_class.hit(described_class::MEMO_REFUSE_CONSULT_TAINTED)
+      described_class.hit(described_class::MEMO_REFUSE_TRANSIENT)
 
       snap = described_class.snapshot
       expect(snap[described_class::MEMO_ENTRIES]).to eq(1)
       expect(snap[described_class::MEMO_HITS]).to eq(1)
       expect(snap[described_class::MEMO_MISSES]).to eq(0)
-      expect(snap[described_class::MEMO_REFUSE_CONSULT_TAINTED]).to eq(1)
+      expect(snap[described_class::MEMO_REFUSE_TRANSIENT]).to eq(1)
     end
 
     it "returns a frozen snapshot" do

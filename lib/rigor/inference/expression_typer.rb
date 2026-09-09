@@ -2132,14 +2132,6 @@ module Rigor
       INFERENCE_SUMMARY_KEY = :__rigor_user_method_return_summary__
       private_constant :INFERENCE_SUMMARY_KEY
 
-      # Monotonic per-thread counter, bumped once each time `consult_summary` actually reads an in-flight
-      # fixpoint assumption (ADR-55 slice 2). A method return computed across an interval in which this
-      # counter does NOT move depended on no transient Kleene iterate, so it is FINAL and safe to memoise —
-      # even when the `summaries` table is non-empty because some unrelated outermost frame merely *seeded*
-      # (but never consulted) its own entry. See `infer_user_method_return`'s post-hoc memo gate.
-      SUMMARY_CONSULT_COUNTER_KEY = :__rigor_user_method_summary_consults__
-      private_constant :SUMMARY_CONSULT_COUNTER_KEY
-
       # Per-thread append-only log of the seed depths of every in-flight summary `consult_summary` read
       # (ADR-55 slice 2 mutual-recursion soundness fix, 2026-06-12). Each fixpoint owner records the guard
       # stack size at seed time on its entry (`depth:`); a consult appends the consulted entry's depth here.
@@ -2363,15 +2355,18 @@ module Rigor
 
       # The candidate-frame memo path: consult the current run generation's bucket, and on a miss compute
       # and store a FINAL result. Reached only when `memo_candidate?` held (see `infer_user_method_return`).
-      # The store gate (ADR-84 WD3): a result is stored when the ADR-55 fixpoint consult counter did not
-      # move across the compute (the WD0 `MEMO_REFUSE_CONSULT_TAINTED` non-store) AND no transient-machinery
-      # event during the bracket referenced a stack frame BELOW the bracket's entry depth (see
-      # TRANSIENT_EVENT_DEPTHS_KEY). Below-entry events — an ancestor's in-flight Kleene iterate read by a
-      # guard hit, a shared-fuel exhaustion, a possibly-ancestor-caused WD1 clamp — mean the ancestor
-      # context influenced `result`, which a standalone recompute would not reproduce; at-or-above-entry
-      # events are the compute's own deterministic machinery (its own converged fixpoint, sub-cycles that
-      # opened and closed inside the bracket) and do not block the store. A top-of-stack compute (entry
-      # depth 0) is standalone by construction. ADR-84 WD6 adds one exemption on top: a tainted result that
+      # The store gate (ADR-84 WD3): a result is stored when no transient-machinery event during the
+      # bracket referenced a stack frame BELOW the bracket's entry depth (see TRANSIENT_EVENT_DEPTHS_KEY).
+      # A separate ADR-55 fixpoint-consult bracket counter used to sit in front of this test; it is gone
+      # (issue #875) because the event log already subsumes it — the sole `consult_summary` call site is
+      # the in-cycle guard hit, which logs its event at the consulted owner's position first, so a consult
+      # that could taint a bracket is a below-entry event by construction. Below-entry events — an
+      # ancestor's in-flight Kleene iterate read by a guard hit, a shared-fuel exhaustion, a
+      # possibly-ancestor-caused WD1 clamp — mean the ancestor context influenced `result`, which a
+      # standalone recompute would not reproduce; at-or-above-entry events are the compute's own
+      # deterministic machinery (its own converged fixpoint, sub-cycles that opened and closed inside the
+      # bracket) and do not block the store. A top-of-stack compute (entry depth 0) is standalone by
+      # construction. ADR-84 WD6 adds one exemption on top: a tainted result that
       # is already `Dynamic[top]` is stored anyway — see `top_result?`. A hit under ADR-46 recording
       # replays the entry's captured read-set into the current consumer (see the INVARIANT comment at the
       # call site).
@@ -2396,13 +2391,10 @@ module Rigor
 
         entry_depth = stack.size
         event_mark = transient_event_mark
-        consults_before = summary_consult_count
         result, read_set = compute_with_read_capture(def_node, body_scope, stack, summaries,
                                                      receiver, arg_types, plain_signature)
 
-        if summary_consult_count != consults_before
-          BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_CONSULT_TAINTED)
-        elsif context_tainted?(event_mark, entry_depth) && !top_result?(result)
+        if context_tainted?(event_mark, entry_depth) && !top_result?(result)
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
         else
           per_def[memo_key] = MemoEntry.new(result: result, read_set: read_set,
@@ -2413,10 +2405,6 @@ module Rigor
 
       def transient_event_mark
         Thread.current[TRANSIENT_EVENT_DEPTHS_KEY]&.size || 0
-      end
-
-      def summary_consult_count
-        Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
       end
 
       # ADR-84 WD3 — true when a transient-machinery event logged during the bracket (entries past
@@ -2533,10 +2521,10 @@ module Rigor
       # stable across the body walk, that is necessary (but not sufficient) for a FINAL result — this plain
       # signature must not itself be on the recursion guard stack (else we are inside its own cycle,
       # returning a Kleene iterate by construction). Sufficiency is decided post-hoc in
-      # `consult_and_store_return_memo` by the two bracket counters (fixpoint consults + ADR-84 WD3
-      # transient-machinery events) — so unlike the prior form this deliberately does NOT refuse while a
-      # constant-arg unroll is in flight: a nested frame whose compute finishes without a single transient
-      # event ran exactly as it would standalone (fuel consumption without exhaustion is invisible), and
+      # `consult_and_store_return_memo` by the ADR-84 WD3 transient-machinery event bracket — so unlike
+      # the prior form this deliberately does NOT refuse while a constant-arg unroll is in flight: a
+      # nested frame whose compute finishes without a single transient event ran exactly as it would
+      # standalone (fuel consumption without exhaustion is invisible), and
       # the blanket exclusion refused 82% of mail's body evaluations for such final results (ADR-84).
       def memo_candidate?(stack, plain_signature)
         stack.none? { |frame| plain_part(frame) == plain_signature }

@@ -1,0 +1,1 @@
+- **[inference]** A content mutation reached through an index read (`c[0] << 5`, `b[0][0] << 1`, `xs.first << 3`) now widens that element inside its container, so a following `c[0].last == 5` no longer folds to a false always-falsey and `b[0][0].first` no longer reads `nil`. ([#964](https://github.com/rigortype/rigor/pull/964))

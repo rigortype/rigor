@@ -18,13 +18,25 @@ require "spec_helper"
 # The invariant is one-directional on purpose. The plugin is the authoring home, so a row lands there
 # first; what must never happen is that it STAYS there, because the overlay is the copy that applies
 # automatically and therefore reaches every project that has not opted in.
+#
+# The comparison is by SELECTOR, deliberately, and NOT by signature (issue #661 asked). The two halves are
+# def-line identical today, but a signature comparison would go red on a legitimate divergence — the
+# overlay is free to be the more conservative copy (`() -> untyped` where the plugin, which a project has
+# to opt into, can afford a precise type), and a looser overlay row costs nothing: the drift that hurt in
+# #449 was a row the overlay did not declare AT ALL, which is what this guard catches. Under AGENTS.md's
+# false-positives-outrank-worst-case-reading rule, a gate that fires on a deliberate difference is the
+# thing that teaches people to route around it, so the narrower invariant is the one worth enforcing.
 RSpec.describe "ActiveSupport overlay / plugin parity" do
+  def repo_root
+    File.expand_path("../../..", __dir__)
+  end
+
   def overlay_path
-    File.expand_path("../../../data/gem_overlay/activesupport/core_ext.rbs", __dir__)
+    File.join(repo_root, "data/gem_overlay/activesupport/core_ext.rbs")
   end
 
   def plugin_path
-    File.expand_path("../../../plugins/rigor-activesupport-core-ext/sig/active_support/core_ext.rbs", __dir__)
+    File.join(repo_root, "plugins/rigor-activesupport-core-ext/sig/active_support/core_ext.rbs")
   end
 
   # Parsed with RBS rather than by regex: a regex over `def` lines cannot see nesting, and `ERB::Util`
@@ -48,15 +60,33 @@ RSpec.describe "ActiveSupport overlay / plugin parity" do
     end
   end
 
+  # Issue #661 — the drifted selectors, spelled out. This lived inline in the failure lambda below and
+  # named a constant (`OVERLAY`) that never existed, so the one run that reaches it — a real drift —
+  # raised `NameError` instead of reporting what drifted. A lambda body is only ever executed on failure,
+  # which is exactly why it needs an example of its own ("names the drifted selector", below) rather than
+  # the passing run's coverage.
+  def drift_message(missing)
+    "the plugin declares #{missing.size} selector(s) the auto-applied overlay does not, so a project " \
+      "that locks activesupport without the plugin sees a false positive on each:\n  " \
+      "#{missing.sort.join("\n  ")}\n" \
+      "Add them to #{overlay_path.delete_prefix("#{repo_root}/")} (declarations only — the overlay " \
+      "carries no effect annotations)."
+  end
+
   it "declares in the overlay every selector the plugin declares" do
     missing = selectors(plugin_path) - selectors(overlay_path)
 
-    expect(missing).to be_empty, lambda {
-      "the plugin declares #{missing.size} selector(s) the auto-applied overlay does not, so a project " \
-        "that locks activesupport without the plugin sees a false positive on each:\n  " \
-        "#{missing.sort.join("\n  ")}\nAdd them to #{OVERLAY.sub("#{Dir.pwd}/", '')} (declarations only — " \
-        "the overlay carries no effect annotations)."
-    }
+    expect(missing).to be_empty, -> { drift_message(missing) }
+  end
+
+  # The failure path itself, driven directly: on a drift the author must be told WHICH selector to port
+  # and where to put it, and there is no other run in which that string is ever built.
+  it "names the drifted selector in the failure message" do
+    message = drift_message(Set["ActiveSupport::Duration#parts", "String#dasherize"])
+
+    expect(message).to include("ActiveSupport::Duration#parts", "String#dasherize")
+    expect(message).to include("data/gem_overlay/activesupport/core_ext.rbs")
+    expect(message).to include("2 selector(s)")
   end
 
   # The guard's own non-vacuity: a parity assertion passes trivially if the extractor returns nothing,

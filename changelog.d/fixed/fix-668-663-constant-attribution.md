@@ -1,0 +1,1 @@
+- **[engine]** A constant write whose target is a runtime expression (`k::LIMIT = 7`) no longer leaves a namespaced `Foo::LIMIT` reading the value it may have replaced, and a constant published from a `pre_eval:` file now reads gradual when a file outside `pre_eval:` assigns the same name a different value ([#912](https://github.com/rigortype/rigor/pull/912)).

@@ -2535,8 +2535,8 @@ module Rigor
           arguments = call_node.arguments&.arguments || []
           arguments.each_with_index do |arg, index|
             arg_type = scope.type_of(arg)
-            params = overload_positional_params(method_types, index)
-            next if params.nil? # arity divergence — some overload lacks a param here
+            params = checkable_overload_params(method_types, index, param_overrides, scope)
+            next if params.nil?
 
             mismatch =
               if nil_member?(arg_type) # pure nil only — not a `T | nil` union
@@ -2547,6 +2547,19 @@ module Rigor
             return mismatch if mismatch
           end
           nil
+        end
+
+        # The parameter set at `index` that a verdict may rest on, or nil when there is none — the two
+        # reasons being arity divergence (an overload with no param there, which is `call.wrong-arity`'s
+        # concern) and an overload whose param names a class carrying no definition ({#stub_typed_param?},
+        # issue #661). Both channels below fire only when EVERY overload rejects, so either one is enough
+        # to unseat that premise.
+        def checkable_overload_params(method_types, index, param_overrides, scope)
+          params = overload_positional_params(method_types, index)
+          return nil if params.nil?
+          return nil if params.any? { |param| stub_typed_param?(param, param_overrides, scope) }
+
+          params
         end
 
         # The nil channel: a pure `nil` argument no overload admits (ADR-58
@@ -2592,6 +2605,53 @@ module Rigor
 
           substitution = RBS::Substitution.build(bounded.map(&:name), bounded.map(&:upper_bound))
           param.map_type { |type| type.sub(substitution) }
+        end
+
+        # ADR-26 WD8's PARAMETER-side twin (issue #661). `sig/app.rbs` declaring
+        # `(ActiveSupport::TimeWithZone) -> void` in a project that never brings ActiveSupport's RBS in
+        # names a class that carries no definition anywhere in the environment. Rigor still refuted
+        # `App.take_twz(Time.now)` against it — `expected ActiveSupport::TimeWithZone, got Time` on a call
+        # that works — because the acceptance walk compares nominals and `Time`'s ancestry does not list a
+        # name nothing declares.
+        #
+        # WD8 already declines the two signature rules on such a RECEIVER, on the ground that there is
+        # nothing authoritative to check the call against. It is the same one position over: with no
+        # ancestry there is no fact that could make an argument satisfy the parameter either, so the
+        # rejection is the missing signature restated as an error rather than a finding about the program.
+        # Under AGENTS.md's false-positives-outrank-worst-case rule the honest answer is to decline, and
+        # the report it costs is one the analyzer never had evidence for.
+        #
+        # Both shapes the missing name arrives in are covered, deliberately as ONE criterion. A name an
+        # INSTANCE-method signature references is minted as an empty stub so the class builds
+        # ({Environment::RbsLoader.stub_missing_referenced_types}) and reads back as RBS-known; the same
+        # name in a SINGLETON signature is not, because that pass mirrors rbs's own membership test and
+        # `validate_type_params` never reaches singleton members. That asymmetry is an artifact of which
+        # pass ran, not of what is knowable, and the issue's own repro is the singleton half.
+        #
+        # A `rigor:v1:param` override is a real Rigor type the author wrote against the call site's own
+        # method, so it is consulted first and checked normally.
+        def stub_typed_param?(param, param_overrides, scope)
+          return false if param_overrides[param.name]
+
+          undefined_param_class?(param.type, scope)
+        end
+
+        # Only the arms a verdict can rest on directly: a union member, an optional's inner type, an
+        # expanded alias, and the class instance / singleton itself. Deliberately NOT recursive into type
+        # ARGUMENTS — `Array[Missing]` is still refuted by an `Integer` argument on the `Array` alone, and
+        # declining there would be a lost report bought for nothing.
+        def undefined_param_class?(rbs_type, scope)
+          case rbs_type
+          when RBS::Types::Union then rbs_type.types.any? { |member| undefined_param_class?(member, scope) }
+          when RBS::Types::Optional then undefined_param_class?(rbs_type.type, scope)
+          when RBS::Types::Alias
+            expanded = scope.environment&.rbs_loader&.expand_type_alias(rbs_type)
+            !expanded.nil? && undefined_param_class?(expanded, scope)
+          when RBS::Types::ClassInstance, RBS::Types::ClassSingleton
+            name = rbs_type.name
+            synthesized_stub_receiver?(name, scope) || !Rigor::Reflection.rbs_class_known?(name.to_s, scope: scope)
+          else false
+          end
         end
 
         # The class names whose instances `nil` IS — `NilClass` and every
@@ -2796,6 +2856,8 @@ module Rigor
         # the original translated-acceptance check, with a `rigor:v1:param`
         # override taking precedence over the RBS-declared type.
         def single_argument_mismatch(param, arg, scope, param_overrides)
+          return nil if stub_typed_param?(param, param_overrides, scope)
+
           arg_type = scope.type_of(arg)
 
           if nil_member?(arg_type)

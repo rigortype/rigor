@@ -172,7 +172,11 @@ module Rigor
         #
         # @param ancestors — the lexical ancestor chain
         # @param path — file being analysed
-        def render_violations_for(call_node:, ancestors:, path:, view_search_roots:, controller_index: nil)
+        # @param io_boundary — the plugin's {Rigor::Plugin::IoBoundary}; #629 — every filesystem
+        #   question this phase asks goes through it, so "no such template" is a recorded dependency and
+        #   the run-result cache invalidates once the template appears
+        def render_violations_for(call_node:, ancestors:, path:, view_search_roots:, io_boundary:,
+                                  controller_index: nil)
           return [] unless render_call?(call_node)
 
           class_name = enclosing_controller_name(ancestors)
@@ -204,12 +208,12 @@ module Rigor
           # `app/views/admin/settings/` holds about/, appearance/, … but no top-level templates). Skip
           # render checks for these — the diagnostic would be a false positive against intentional Rails
           # abstract-base layouts.
-          return [] if abstract_base_controller?(class_name, controller_path, view_search_roots)
+          return [] if abstract_base_controller?(class_name, controller_path, view_search_roots, io_boundary)
 
           target = render_target_for(call_node, controller_path)
           return [] if target.nil?
 
-          violation = render_violation(call_node, target, view_search_roots)
+          violation = render_violation(call_node, target, view_search_roots, io_boundary)
           violation ? [violation] : []
         end
 
@@ -393,15 +397,16 @@ module Rigor
         #       controllers.
         # Deliberately NOT triggered by "no view directory at all" because that fires the diagnostic we
         # DO want for genuinely-missing views (the typo / forgot-to-create case).
-        def abstract_base_controller?(class_name, controller_path, view_search_roots)
+        def abstract_base_controller?(class_name, controller_path, view_search_roots, io_boundary)
           return true if class_name.end_with?("BaseController")
 
           view_search_roots.any? do |root|
             dir = File.join(root, controller_path)
-            next false unless File.directory?(dir)
-
-            entries = Dir.children(dir)
-            entries.any? && entries.all? { |e| File.directory?(File.join(dir, e)) }
+            # #629 — the listing row this records is the same one {#locate_template} needs, and the
+            # boundary deduplicates it per directory, so the whole render phase costs one glob
+            # validation per consulted view directory on a warm run.
+            entries = io_boundary.list_directory(dir)
+            entries.any? && entries.all? { |e| File.directory?(e) }
           end
         end
 
@@ -460,9 +465,9 @@ module Rigor
           Rigor::Plugin::Inflector.underscore(stripped)
         end
 
-        def render_violation(call_node, target, view_search_roots)
+        def render_violation(call_node, target, view_search_roots, io_boundary)
           kind, relative = target
-          existing = locate_template(relative, view_search_roots)
+          existing = locate_template(relative, view_search_roots, io_boundary)
           if existing
             render_target_violation(call_node, kind, relative, existing)
           else
@@ -470,11 +475,22 @@ module Rigor
           end
         end
 
-        def locate_template(relative, view_search_roots)
+        # #629 — resolved from the DIRECTORY LISTING, not from a probe per candidate path. The old shape
+        # asked `File.file?` up to `extensions × roots` times per `render` call and recorded nothing, so a
+        # cached run kept reporting `plugin.actionpack.missing-template` after the template was written.
+        # One {Rigor::Plugin::IoBoundary#list_directory} row per `app/views/<controller>` directory carries
+        # the dependency instead: any file added or removed there invalidates the run, and the warm-run
+        # validation count is the number of view directories the run consulted rather than the number of
+        # candidate paths it tried.
+        def locate_template(relative, view_search_roots, io_boundary)
+          basename = File.basename(relative)
           view_search_roots.each do |root|
+            # Names, not paths: the boundary answers in absolute paths while `root` may be the relative
+            # `app/views` the user configured, and the reported candidate keeps the configured spelling.
+            listing = io_boundary.list_directory(File.join(root, File.dirname(relative)))
+            names = listing.map { |entry| File.basename(entry) }
             RENDER_TEMPLATE_EXTENSIONS.each do |ext|
-              candidate = File.join(root, "#{relative}#{ext}")
-              return candidate if File.file?(candidate)
+              return File.join(root, "#{relative}#{ext}") if names.include?("#{basename}#{ext}")
             end
           end
           nil

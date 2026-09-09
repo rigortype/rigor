@@ -277,13 +277,12 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     expect(upcase_errors("text.upcase\n")).not_to be_empty
   end
 
-  # The RBS veto is own-class only, and this is what buys that restriction: an inherited-declaration test
-  # would match every name on `Object` / `Kernel` / `Enumerable` and retract the binding v0.0.3 A exists for
-  # (a helper `def select(...)` re-routed straight back through `Enumerable#select`). `Widget` is RBS-known
-  # but declares nothing of its own, so `inspect` resolves only through `Object` — where the RBS return is
-  # `String`, which is what makes this a discriminating assertion rather than a silence: a veto that counted
-  # the ancestor would answer `String` and the `upcase` error would vanish.
-  it "does not treat an ancestor's RBS declaration as the class's own" do
+  # The RBS veto stops at `::Object`, and this is what buys that cut-off: counting EVERY inherited
+  # declaration would match every name on `Object` / `Kernel` and retract the binding v0.0.3 A exists for.
+  # `Widget` is RBS-known but declares nothing of its own, so `inspect` resolves only through `Object` —
+  # where the RBS return is `String`, which is what makes this a discriminating assertion rather than a
+  # silence: a veto that counted that owner would answer `String` and the `upcase` error would vanish.
+  it "does not treat an `Object`-owned RBS declaration as reaching before the top-level def" do
     signatures = { "widget.rbs" => <<~RBS }
       class Widget
       end
@@ -302,5 +301,173 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     SUBJECT
 
     expect(messages_for(files, signatures: signatures).grep(/upcase/)).not_to be_empty
+  end
+  # --- issue #633: the sources the veto did not reach -------------------------------------------------
+  #
+  # Each pairs a must-not-fire with the must-still-fire arm one file below it, so a build that simply
+  # stopped binding top-level defs cannot pass the pair.
+
+  it "reads an `attr_accessor` inherited from a project superclass" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Base
+        attr_accessor :text
+
+        def initialize
+          @text = "s"
+        end
+      end
+
+      class Sub < Base
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads an `attr_reader` contributed by an included module" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      module Mixin
+        attr_reader :text
+      end
+
+      class Sub
+        include Mixin
+
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a `define_method` inherited from a project superclass" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Base
+        define_method(:text) { "s" }
+      end
+
+      class Sub < Base
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "still binds a top-level def in a subclass whose ancestors define nothing of the name" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Base
+        attr_accessor :other
+      end
+
+      class Sub < Base
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  # `Exception#message` is declared on an ancestor that precedes `::Object` in `MyErr`'s MRO, so Ruby
+  # dispatches there and never reaches the top-level `def message`.
+  it "reads an RBS method declared on a bundled superclass before ::Object" do
+    files = { "shadow.rb" => <<~SHADOW, "subject.rb" => <<~SUBJECT }
+      def message
+        nil
+      end
+    SHADOW
+      class MyErr < StandardError
+        def shout
+          message.upcase
+        end
+      end
+    SUBJECT
+
+    expect(messages_for(files).grep(/upcase/)).to be_empty
+  end
+
+  it "reads an RBS method declared on an included bundled module before ::Object" do
+    files = { "shadow.rb" => <<~SHADOW, "subject.rb" => <<~SUBJECT }
+      def clamp(low, high)
+        nil
+      end
+    SHADOW
+      class Cmp
+        include Comparable
+
+        def <=>(other)
+          0
+        end
+
+        def within
+          clamp(1, 2).to_s
+        end
+      end
+    SUBJECT
+
+    expect(messages_for(files).grep(/to_s/)).to be_empty
+  end
+
+  it "still binds a top-level def no bundled ancestor of the subclass declares" do
+    files = { "shadow.rb" => <<~SHADOW, "subject.rb" => <<~SUBJECT }
+      def text
+        nil
+      end
+    SHADOW
+      class MyErr < StandardError
+        def shout
+          text.upcase
+        end
+      end
+    SUBJECT
+
+    expect(messages_for(files).grep(/upcase/)).not_to be_empty
+  end
+
+  it "reads a `def self.` inherited from a project superclass, in the subclass body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Base
+        def self.text
+          "b"
+        end
+      end
+
+      class Sub < Base
+        SHOUTED = text.upcase
+      end
+    RUBY
+  end
+
+  it "reads a `def self.` inherited from a project superclass, inside a class method" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Base
+        def self.text
+          "b"
+        end
+      end
+
+      class Sub < Base
+        def self.shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "still binds a top-level def in a class method whose superclass has no such class method" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Base
+        def self.other
+          "b"
+        end
+      end
+
+      class Sub < Base
+        def self.shout
+          text.upcase
+        end
+      end
+    RUBY
   end
 end

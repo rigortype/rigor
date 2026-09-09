@@ -42,6 +42,8 @@ Skill with `rigor skill <name>`. (The canonical web copy is
 - `15-type-protection-coverage` — `rigor coverage --protection`.
 - `16-rbs-extended-annotations` — the `%a{rigor:v1:…}` annotations.
 - `17-driving-improvement` — the `rigor-next-steps`-driven improvement loop.
+- `18-removing-dead-code` — working `rigor unused` as a campaign on an old codebase.
+- `19-effect-labels` — `rigor effects`, the `.rigor-effects.yml` snapshot, and `%a{pure}`.
 
 ## Handbook (read with `rigor docs <name>`)
 

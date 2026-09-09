@@ -41,15 +41,17 @@ module Rigor
         module_function
 
         # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param io_boundary — the plugin's {Rigor::Plugin::IoBoundary}; every source read goes
+        #   through it (#630) so each scanned file is a recorded cache dependency.
         # @return frozen 4-key result: `:types` (per-`Schema::Object` field
         #   table), `:enums` (per-`Schema::Enum` value list), `:input_objects`
         #   (per-`Schema::InputObject` argument table), `:mutations` (per-`Schema::Mutation`
         #   arguments+fields table). Any subset may be empty when no recognisable declaration of that
         #   kind is found.
-        def scan(paths:)
+        def scan(paths:, io_boundary:)
           acc = empty_accumulator
           paths.each do |path|
-            merge_accumulator(acc, scan_file(path))
+            merge_accumulator(acc, scan_file(path, io_boundary))
           end
           freeze_accumulator(acc)
         end
@@ -75,8 +77,8 @@ module Rigor
         end
         private_class_method :freeze_accumulator
 
-        def scan_file(path)
-          source = File.read(path)
+        def scan_file(path, io_boundary)
+          source = io_boundary.read_file(path)
           parse_result = Prism.parse(source, filepath: path)
           return empty_accumulator unless parse_result.errors.empty?
 

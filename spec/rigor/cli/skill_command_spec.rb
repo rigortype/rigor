@@ -124,11 +124,12 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("\u2192 rigor-protection-uplift \u2014")
     end
 
-    it "recommends rigor-rbs-setup when gems are present without community RBS" do
+    it "recommends rigor-rbs-setup when gems are present without community RBS and CI is wired" do
       _status, out, = describe_in(
         {
           ".rigor.dist.yml" => "target_ruby: '3.3'\n",
-          "Gemfile.lock" => "GEM\n  specs:\n"
+          "Gemfile.lock" => "GEM\n  specs:\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n"
         }
       )
       expect(out).to include("\u2192 rigor-rbs-setup \u2014")
@@ -140,12 +141,26 @@ RSpec.describe Rigor::CLI::SkillCommand do
         {
           ".rigor.dist.yml" => "target_ruby: '3.3'\n",
           "Gemfile.lock" => "GEM\n  specs:\n",
-          "rbs_collection.lock.yaml" => "sources: []\n"
+          "rbs_collection.lock.yaml" => "sources: []\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n"
         }
       )
       expect(out).not_to include("\u2192 rigor-rbs-setup \u2014")
-      expect(out).to include("\u2192 rigor-ci-setup \u2014")
+      expect(out).to include("\u2192 rigor-protection-uplift \u2014")
       expect(out).to include("Community RBS:  collection installed")
+    end
+
+    # ADR-73's second `rbs-setup` priority-softening case: CI wiring is cheap and local; community-RBS install is
+    # network-bound. A configured project with untyped gems AND no CI should be pointed at CI first.
+    it "prefers rigor-ci-setup over rigor-rbs-setup when both apply" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          "Gemfile.lock" => "GEM\n  specs:\n"
+        }
+      )
+      expect(out).to include("\u2192 rigor-ci-setup \u2014")
+      expect(out).not_to include("\u2192 rigor-rbs-setup \u2014")
     end
 
     # NB: assert on the recommendation *reason* (unique to the headline), not the bare skill name — the "For the agent"
@@ -164,7 +179,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
       _status, out, = describe_in(
         {
           ".rigor.dist.yml" => "target_ruby: '3.4'\nplugins:\n  - rigor-activerecord\n",
-          "Gemfile.lock" => "GEM\n  specs:\n    railties (8.0.0)\n"
+          "Gemfile.lock" => "GEM\n  specs:\n    railties (8.0.0)\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n"
         }
       )
       expect(out).not_to include("→ rigor-plugin-tune — your Gemfile.lock holds gems Rigor ships plugins for")

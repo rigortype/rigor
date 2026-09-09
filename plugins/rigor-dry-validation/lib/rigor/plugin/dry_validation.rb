@@ -95,7 +95,7 @@ module Rigor
       end
 
       def prepare(services)
-        contracts = ContractScanner.scan(paths: scannable_paths(services))
+        contracts = ContractScanner.scan(paths: scannable_paths(services), io_boundary: io_boundary)
         unless contracts.empty?
           services.fact_store.publish(
             plugin_id: manifest.id,
@@ -105,7 +105,9 @@ module Rigor
         end
 
         type_aliases = services.fact_store.read(plugin_id: "dry-types", name: :dry_type_aliases) || {}
-        params_table = ContractScanner.scan_schema_blocks(paths: scannable_paths(services), type_aliases: type_aliases)
+        params_table = ContractScanner.scan_schema_blocks(paths: scannable_paths(services),
+                                                          io_boundary: io_boundary,
+                                                          type_aliases: type_aliases)
         return if params_table.empty?
 
         services.fact_store.publish(
@@ -138,11 +140,13 @@ module Rigor
         shapes[name] = row.nil? ? nil : ParamsShape.build(row)
       end
 
+      # ADR-45 WD1b (#613 / #630) — the classification probes go through the boundary, so an entry that
+      # is not there yet (or stops being a directory) is a recorded dependency of the scan's input set.
       def scannable_paths(services)
         @scannable_paths ||= services.configuration.paths.flat_map do |entry|
-          if File.directory?(entry)
+          if io_boundary.directory?(entry)
             Dir.glob(File.join(entry, "**", "*.rb"), sort: true)
-          elsif File.file?(entry) && entry.end_with?(".rb")
+          elsif io_boundary.file?(entry) && entry.end_with?(".rb")
             [entry]
           else
             []

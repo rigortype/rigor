@@ -280,6 +280,26 @@ trade for speed. Defenses:
      across processes / CI) + wire a user-facing `--incremental` *speedup*
      flag (the gate proves the machinery sound; the speedup flag is the
      payoff) + extend the CI gate to the Mastodon + GitLab survey trees.
+     **Declined for now (2026-09-10, #938):** `--verify-incremental` runs
+     roughly three analyses per target (baseline + subset reanalysis + the
+     full-run oracle) — `make check-incremental`'s own note above clocks
+     that at ~39s for Rigor's own `lib` + `plugins/*/lib` + `examples/*/lib`
+     combined, which is why it stays out of the local `make verify` fast
+     path. `.github/workflows/oss-sweep.yml`'s `sweep` job already spends
+     its 30-minute budget on two full Mastodon analyses (`rigor check` +
+     `rigor coverage`) against `app lib config` — a tree far larger than
+     Rigor's own — with no calibrated timing data for a third, ~2-3×-cost
+     pass on top. Adding it needs its own job (parallel to `sweep`, so a
+     slow verify doesn't block the diagnostic-count / precision gate) with
+     a timeout calibrated from a first cold run, mirroring how
+     `effect-budget` was split out for the same reason (its own comment:
+     "a warm analysis cache … is exactly what a cold cost measurement must
+     not have"). GitLab needs more than a job: `data/oss-sweep/` holds only
+     `mastodon-sha.txt` / `mastodon-rigor.yml` / `mastodon-thresholds.json`
+     — a GitLab pin, sparse-checkout path list, and `.rigor.yml` would all
+     be new files, none of which exist today. Both are scoped, not
+     abandoned; a future session can pick either up as its own PR once a
+     baseline timing exists.
 3. **Structural tier — negative-dependency tracking (landed).** A symbol
    that *appears* in an edit must re-check the consumers that looked it up
    and missed. Most misses are already covered: a missed *class method*

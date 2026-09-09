@@ -255,6 +255,8 @@ The reference values are read from the Ruby running the analyzer, the same premi
 - `RUBY_ENGINE == / != "…"`. Ordering comparisons on an engine name are not version guards and MUST NOT fold.
 - `X::VERSION`, only for constants belonging to a **default gem of the running Ruby**. A gem whose version the project resolves through its own `Gemfile.lock` MUST NOT be read from the analyzer's runtime, because the two copies can differ.
 
+A **rooted** spelling names the same constant its bare twin does — `::` only makes the top-level lookup explicit — so `::RUBY_VERSION`, `::RUBY_ENGINE` and `::X::VERSION` MUST fold exactly as `RUBY_VERSION`, `RUBY_ENGINE` and `X::VERSION` do. This widens no set: a rooted name outside the sets above is as unfoldable as the bare one.
+
 Everything else keeps both arms live, which is always the safe answer: `<=>` (it yields an ordering, not a verdict), `RUBY_PLATFORM` (every comparison against it is platform-dependent by construction, and the checking machine need not be the running machine), `defined?`-style capability probes, `!` / `&&` / `||` compositions, `case` subjects, and a comparison between two bare String literals (a constant comparison, not a version guard). A guard with an unreadable operand is undecidable and both of its arms MUST stay live.
 
 Rationale and the false-positive argument: [ADR-47](../adr/47-narrowing-driven-clause-reachability.md) § WD5.

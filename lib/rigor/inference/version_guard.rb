@@ -48,6 +48,8 @@ module Rigor
     #   with the running Ruby**, where "the analyzer's Ruby is the target's Ruby" already covers them.
     #   A third-party gem's `VERSION` is not read: its version is the project's `Gemfile.lock`'s to say,
     #   and the lockfile is not visible from the inference layer.
+    # * The ROOTED spelling of any of the above — `::RUBY_VERSION`, `::RUBY_ENGINE`, `::Psych::VERSION` —
+    #   names the same constant as its bare twin and folds identically; see {.read_constant}.
     # * `RUBY_PLATFORM` — **never** folded. Every comparison against it is by construction
     #   platform-dependent, and the machine running `rigor` need not be the machine running the program.
     # * `<=>` — never folded (it yields -1/0/1, not a branch verdict), and neither are `defined?(Ractor)`
@@ -68,7 +70,7 @@ module Rigor
 
       # Predefined constants read from the analyzer's runtime, mapped to the operand kind they produce.
       # `:string` operands accept every comparison; `:engine` operands accept equality only.
-      PREDEFINED = { RUBY_VERSION: :string, RUBY_ENGINE: :engine }.freeze
+      PREDEFINED = { "RUBY_VERSION" => :string, "RUBY_ENGINE" => :engine }.freeze
       private_constant :PREDEFINED
 
       # Operand kinds that carry a plain Ruby String, i.e. the ones `Gem::Version.new` may wrap and the
@@ -112,30 +114,37 @@ module Rigor
       def read_operand(node)
         case node
         when Prism::StringNode then [:literal_string, node.unescaped]
-        when Prism::ConstantReadNode then read_predefined(node)
-        when Prism::ConstantPathNode then read_version_constant(node)
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then read_constant(node)
         when Prism::CallNode then read_gem_version(node)
         end
       end
       private_class_method :read_operand
 
-      def read_predefined(node)
-        kind = PREDEFINED[node.name]
+      # Dispatches on the RESOLVED name rather than on the node class. `::RUBY_VERSION` names the very
+      # constant `RUBY_VERSION` names — the leading `::` only makes the top-level lookup explicit — but
+      # Prism spells it as a `ConstantPathNode` with a nil parent, so a node-class dispatch sent it down
+      # the `X::VERSION` path and declined it for not being a curated qualified name. The same program
+      # then had two diagnostic sets for two spellings of one guard
+      # ([#877](https://github.com/rigortype/rigor/issues/877)).
+      #
+      # The foldable set is unchanged and stays closed: an unqualified name folds only when it is one of
+      # {PREDEFINED}, a qualified one only when it is in {VERSION_CONSTANTS}.
+      def read_constant(node)
+        path = Source::ConstantPath.qualified_name_or_nil(node)
+        return nil unless path
+
+        kind =
+          if path.include?("::")
+            :string if VERSION_CONSTANTS.include?(path)
+          else
+            PREDEFINED[path]
+          end
         return nil unless kind
 
-        value = runtime_value(node.name.to_s)
+        value = runtime_value(path)
         value && [kind, value]
       end
-      private_class_method :read_predefined
-
-      def read_version_constant(node)
-        path = Source::ConstantPath.qualified_name_or_nil(node)
-        return nil unless path && VERSION_CONSTANTS.include?(path)
-
-        value = runtime_value(path)
-        value && [:string, value]
-      end
-      private_class_method :read_version_constant
+      private_class_method :read_constant
 
       # `Gem::Version.new(<readable>)`. The inner operand must be a plain version String — an engine name
       # is not a version, and `Gem::Version.new` raises on anything `Gem::Version.correct?` rejects, so a

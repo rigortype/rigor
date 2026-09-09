@@ -8,6 +8,7 @@ require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../reflection"
 require_relative "../type"
+require_relative "../source/constant_path"
 require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
@@ -421,14 +422,22 @@ module Rigor
         end
       end
 
+      # [#722](https://github.com/rigortype/rigor/issues/722) residue 3 — the qualified name is built by
+      # `Source::ConstantPath.declaration_prefix`, the same reader the engine's declaration walks use, so a
+      # ROOTED header re-anchors here too. Appending the rendered name to the enclosing prefix wrote
+      # `class ::Foo` inside `module MyApp` out as `MyApp::Foo` — sig-gen's own copy of #708, and the one
+      # copy that persists its answer into a file the user keeps.
+      #
+      # `prefix` stays the nesting the header is WRITTEN in for {#record_superclass}: `::` re-anchors the
+      # declaration, not the superclass expression beside it, which Ruby still evaluates in the enclosing cref.
       def descend_into_namespace?(node, prefix, out)
-        name = qualified_constant_path(node.constant_path)
-        return false unless name
+        child_prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+        return false unless child_prefix
 
-        full = (prefix + [name]).join("::")
+        full = child_prefix.join("::")
         @namespace_kinds[full] = node.is_a?(Prism::ClassNode) ? :class : :module
         record_superclass(node, full, prefix)
-        walk_namespace_body(node, prefix + [name], out)
+        walk_namespace_body(node, child_prefix, out)
         true
       end
 
@@ -1166,9 +1175,9 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_constant_path(node.constant_path)
-          if name
-            walk_attr_calls(node.body, prefix + [name], false, ctx) if node.body
+          child_prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+          if child_prefix
+            walk_attr_calls(node.body, child_prefix, false, ctx) if node.body
             return
           end
         when Prism::SingletonClassNode
@@ -1250,9 +1259,9 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_constant_path(node.constant_path)
-          if name
-            collect_init_ivar_obs(node.body, prefix + [name], result) if node.body
+          child_prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+          if child_prefix
+            collect_init_ivar_obs(node.body, child_prefix, result) if node.body
             return
           end
         when Prism::DefNode

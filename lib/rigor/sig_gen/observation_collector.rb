@@ -6,6 +6,7 @@ require_relative "../environment"
 require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../type"
+require_relative "../source/constant_path"
 require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "../inference/scope_indexer"
@@ -119,11 +120,11 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
-          name = qualified_constant_path(node.constant_path)
-          if name
-            full = (prefix + [name]).join("::")
+          child_prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+          if child_prefix
+            full = child_prefix.join("::")
             accumulator[full] = Type::Combinator.singleton_of(full)
-            walk_class_decls(node.body, prefix + [name], accumulator) if node.body
+            walk_class_decls(node.body, child_prefix, accumulator) if node.body
             return
           end
         end

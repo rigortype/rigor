@@ -1195,11 +1195,30 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer).to be_empty
     end
 
-    it "types InstanceVariableOrWriteNode as the rvalue type" do
+    it "types an UNBOUND InstanceVariableOrWriteNode as the rvalue (the memoization idiom)" do
+      # `def self.default = @default ||= new` — nothing wrote `@default` on any path the analyzer saw,
+      # so the stored value is the rvalue. ADR-5 optimism; the bound case below takes the union.
       type = scope.type_of(parse_expression("@x ||= 7"), tracer: tracer)
 
-      expect(type.value).to eq(7)
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(7))
       expect(tracer).to be_empty
+    end
+
+    it "types a BOUND InstanceVariableOrWriteNode as the value it stores, not the rvalue alone" do
+      # `@x ||= 7` evaluates to `@x` whenever `@x` is already truthy (issue #617 residue (3)). This is
+      # `StatementEvaluator#compound_result_type`'s answer; the two paths must not disagree.
+      bound = scope.with_ivar(:@x, Rigor::Type::Combinator.nominal_of("String"))
+      type = bound.type_of(parse_expression("@x ||= 7"))
+
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to include(Rigor::Type::Combinator.constant_of(7))
+      expect(type.members).to include(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "folds InstanceVariableOrWriteNode to the rvalue when the target is provably falsey" do
+      bound = scope.with_ivar(:@x, Rigor::Type::Combinator.constant_of(nil))
+
+      expect(bound.type_of(parse_expression("@x ||= 7")).value).to eq(7)
     end
 
     describe "ivar/cvar/global reads consult Scope bindings (Slice 7 phase 1)" do

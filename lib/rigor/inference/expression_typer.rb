@@ -109,23 +109,23 @@ module Rigor
         Prism::SelfNode => :type_of_self_node,
         Prism::InstanceVariableReadNode => :type_of_instance_variable_read,
         Prism::InstanceVariableWriteNode => :type_of_assignment_write,
-        Prism::InstanceVariableOperatorWriteNode => :type_of_assignment_write,
-        Prism::InstanceVariableOrWriteNode => :type_of_assignment_write,
-        Prism::InstanceVariableAndWriteNode => :type_of_assignment_write,
+        Prism::InstanceVariableOperatorWriteNode => :type_of_compound_variable_write,
+        Prism::InstanceVariableOrWriteNode => :type_of_compound_variable_write,
+        Prism::InstanceVariableAndWriteNode => :type_of_compound_variable_write,
         Prism::ClassVariableReadNode => :type_of_class_variable_read,
         Prism::ClassVariableWriteNode => :type_of_assignment_write,
-        Prism::ClassVariableOperatorWriteNode => :type_of_assignment_write,
-        Prism::ClassVariableOrWriteNode => :type_of_assignment_write,
-        Prism::ClassVariableAndWriteNode => :type_of_assignment_write,
+        Prism::ClassVariableOperatorWriteNode => :type_of_compound_variable_write,
+        Prism::ClassVariableOrWriteNode => :type_of_compound_variable_write,
+        Prism::ClassVariableAndWriteNode => :type_of_compound_variable_write,
         Prism::GlobalVariableReadNode => :type_of_global_variable_read,
         Prism::GlobalVariableWriteNode => :type_of_assignment_write,
-        Prism::GlobalVariableOperatorWriteNode => :type_of_assignment_write,
-        Prism::GlobalVariableOrWriteNode => :type_of_assignment_write,
-        Prism::GlobalVariableAndWriteNode => :type_of_assignment_write,
+        Prism::GlobalVariableOperatorWriteNode => :type_of_compound_variable_write,
+        Prism::GlobalVariableOrWriteNode => :type_of_compound_variable_write,
+        Prism::GlobalVariableAndWriteNode => :type_of_compound_variable_write,
         # Compound writes that share the `.value` rvalue accessor
-        Prism::LocalVariableOperatorWriteNode => :type_of_assignment_write,
-        Prism::LocalVariableOrWriteNode => :type_of_assignment_write,
-        Prism::LocalVariableAndWriteNode => :type_of_assignment_write,
+        Prism::LocalVariableOperatorWriteNode => :type_of_compound_variable_write,
+        Prism::LocalVariableOrWriteNode => :type_of_compound_variable_write,
+        Prism::LocalVariableAndWriteNode => :type_of_compound_variable_write,
         Prism::IndexOperatorWriteNode => :type_of_assignment_write,
         Prism::IndexOrWriteNode => :type_of_assignment_write,
         Prism::IndexAndWriteNode => :type_of_assignment_write,
@@ -342,6 +342,71 @@ module Rigor
       # (Slice 3), never of `type_of` itself.
       def type_of_assignment_write(node)
         type_of(node.value)
+      end
+
+      # `v += 1` / `@v ||= x` / `$v &&= x` as an EXPRESSION. The value of a compound write is the value it
+      # stores, which is a function of the variable's CURRENT binding — not of the rvalue alone. Typing it as
+      # `type_of(node.value)` answered `1` for `total += 1` whatever `total` held.
+      #
+      # `StatementEvaluator#compound_eval` already computes the right answer on the straight-line path, so the
+      # gap only showed where a body is typed WITHOUT that evaluator: the block-return pass types a
+      # single-statement body by expression alone, and issue #617 residue (3) is the live consequence —
+      # `total = 0; r = [1, 2].map { total += 1 }` folded to `[1, 1]`, and `r.last == 1` fired a false
+      # `flow.always-truthy-condition` on a program where it is `2`. Under the per-element fold the captured
+      # local is already bound to its converged `Integer` (issue #587 (b)); reading that binding here is what
+      # turns the stale pin into the honest `Integer`.
+      #
+      # The algebra is `StatementEvaluator#compound_result_type`'s, deliberately: the two must not disagree
+      # about what a compound write evaluates to. An unbound target is `Dynamic[top]` — the same fallback the
+      # evaluator takes — and an operator the receiver does not answer widens to `Dynamic[top]` rather than
+      # inventing the rvalue.
+      #
+      # Constant and index targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body,
+      # and `IndexOperatorWriteNode` is typed through `Scope#type_of`'s own indexed path by
+      # `StatementEvaluator#eval_index_write`.
+      def type_of_compound_variable_write(node)
+        current = compound_write_current_binding(node)
+        rhs = type_of(node.value)
+
+        case node
+        when Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode,
+             Prism::ClassVariableOrWriteNode, Prism::GlobalVariableOrWriteNode
+          # An UNBOUND target is the memoization idiom (`def self.default = @default ||= new`): nothing
+          # has written the variable on any path the analyzer saw, so the stored value is the rvalue.
+          # Reading it as `Dynamic[top] | rhs` would skip every memoized singleton in `sig-gen`
+          # (ADR-5 optimism; three `.default` readers went `sig.skipped.untyped-return` without this).
+          return rhs if current.nil?
+
+          Type::Combinator.union(Narrowing.narrow_truthy(current), rhs)
+        when Prism::LocalVariableAndWriteNode, Prism::InstanceVariableAndWriteNode,
+             Prism::ClassVariableAndWriteNode, Prism::GlobalVariableAndWriteNode
+          return rhs if current.nil?
+
+          Type::Combinator.union(Narrowing.narrow_falsey(current), rhs)
+        else
+          compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
+        end
+      end
+
+      def compound_write_current_binding(node)
+        case node
+        when Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
+             Prism::LocalVariableAndWriteNode then scope.local(node.name)
+        when Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
+             Prism::InstanceVariableAndWriteNode then scope.ivar(node.name)
+        when Prism::ClassVariableOperatorWriteNode, Prism::ClassVariableOrWriteNode,
+             Prism::ClassVariableAndWriteNode then scope.cvar(node.name)
+        else scope.global(node.name)
+        end
+      end
+
+      def compound_operator_result(current, rhs, operator)
+        MethodDispatcher.dispatch(
+          receiver_type: current,
+          method_name: operator.to_sym,
+          arg_types: [rhs],
+          environment: scope.environment
+        ) || dynamic_top
       end
 
       # Slice 7 phase 1 — instance/class/global variable reads. Each lookup returns the type currently bound
@@ -3723,17 +3788,43 @@ module Rigor
       # so `[1].each { v = 5 }` really does bind the outer `v`, and `[1].each { outer << 1 }` really does
       # mutate the outer `outer`), while a jump counts only above the nearest {JUMP_BOUNDARY_NODES} boundary.
       def tail_depends_on_body_binding?(statements)
-        written = Set.new
-        statements[0...-1].each do |statement|
-          return false unless prefix_statement_jump_free?(statement, written, false)
-        end
-        return false if written.empty?
+        written = prefix_written_names(statements)
+        return false if written.nil?
 
         Source::NodeWalker.each(statements.last) do |node|
           return true if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
         end
         false
       end
+
+      # WHICH names the predicate above answers YES on — every name the tail observes that the prefix binds
+      # or mutates in place. Only the arity-cap floor ({#unanswered_tail_dependency?}) needs them, which is
+      # why the predicate is not written over this method: the predicate runs for every multi-statement block
+      # body and short-circuits on the first hit, the floor runs for a handful of calls. Sharing
+      # {#prefix_written_names} is what keeps the two from drifting about what the prefix binds.
+      def tail_dependent_body_names(statements)
+        written = prefix_written_names(statements)
+        return EMPTY_NAME_SET if written.nil?
+
+        Source::NodeWalker.each(statements.last).filter_map do |node|
+          node.name if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
+        end.to_set
+      end
+
+      # The names the prefix binds or mutates in place, or `nil` when the scan declines — a prefix that can
+      # jump out of the block with a value the fall-through misses, or one that binds nothing at all.
+      def prefix_written_names(statements)
+        written = Set.new
+        statements[0...-1].each do |statement|
+          return nil unless prefix_statement_jump_free?(statement, written, false)
+        end
+        return nil if written.empty?
+
+        written
+      end
+
+      EMPTY_NAME_SET = Set.new.freeze
+      private_constant :EMPTY_NAME_SET
 
       # True when `node` cannot jump out of the block with a value, collecting into `written` the names it
       # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call, through
@@ -3800,7 +3891,38 @@ module Rigor
         per_position = per_element_block_results(call_node.block, element_types)
         return nil if per_position.nil? || per_position.any?(&:nil?)
 
-        assemble_per_element_result(call_node.name, per_position, element_types)
+        assemble_per_element_result(call_node.name, per_position, element_types) ||
+          find_family_floor(call_node.name, element_types)
+      end
+
+      # The honest answer for `find` / `detect` / `find_index` / `index` when this fold walked every position
+      # and the assembler still could not decide — which happens for exactly one reason: some position's
+      # predicate is not a `Constant`, so "the first matching one" is not a static fact.
+      #
+      # Falling through to the dispatcher was WRONG for this family, and issue #617 residue (1) is the bill:
+      # `seen = 0; [1, 2].find do |e| seen += 1; seen == 2 end` answered `nil` where the runtime answers `2`.
+      # The dispatcher's `BlockFolding` reads ONE block-return type, typed from the call's ENTRY scope, so a
+      # predicate over a rebound capture pins the first iteration (`Constant[false]`) and
+      # `FALSEY_BLOCK_NIL_METHODS` short-circuits the whole call to `nil`. This walk already knows better: it
+      # typed the predicate per position and saw that it does not fold. Answering here is what keeps that
+      # knowledge from being thrown away in favour of a worse-informed tier.
+      #
+      # The floor is what `find` can return and no tighter: one of the receiver's own elements, or `nil` when
+      # no element matches. Value pinning survives because it is still true of every candidate — `find` hands
+      # back an element, it does not compute one. `find_index` / `index` answer a position in the receiver, so
+      # `Integer?` is their floor.
+      #
+      # Nothing else in {PER_ELEMENT_TUPLE_METHODS} takes a floor: `map`'s assembler cannot decline,
+      # and `select` / `reject` / `filter_map` / `flat_map` fall through to an RBS projection that is merely
+      # wider, never wrong — `BlockFolding`'s filter folds decline on a non-Constant block instead of
+      # answering.
+      def find_family_floor(method_name, element_types)
+        case method_name
+        when :find, :detect
+          Type::Combinator.union(*element_types, Type::Combinator.constant_of(nil))
+        when :find_index, :index
+          Type::Combinator.union(Type::Combinator.nominal_of("Integer"), Type::Combinator.constant_of(nil))
+        end
       end
 
       # Evaluates the call's block once per receiver element. Two block shapes are supported:
@@ -3838,8 +3960,46 @@ module Rigor
           element_types.map { |element_type| type_block_body_with_param(block, [element_type], captured: captured) }
         end
         return results.call if element_types.size <= PER_ELEMENT_THREADING_LIMIT
+        return uncapped_body_floor(element_types) if unanswered_tail_dependency?(block, captured)
 
         without_block_body_threading(&results)
+      end
+
+      # Above {PER_ELEMENT_THREADING_LIMIT} the threading is suppressed, and a position is typed tail-only.
+      # For a tail that reads what the body's own prefix wrote or mutated, tail-only is not a wider answer —
+      # it is the ENTRY binding, which the prefix has already falsified.
+      #
+      # #584's cliff comment promised `Dynamic[top]` above the cap, and that held for a body-LOCAL: `[1, …,
+      # 9].map do v = e; v end` has no entry binding for `v`, so tail-only lands on `Dynamic[top]` by itself.
+      # A mutated PARAMETER has one, and issue #617 residue (2) is what it buys: `([[]] * 9).map do |a| a <<
+      # 1; a end` answered nine stale `[]`, a provably-empty array at every position of a result whose slots
+      # each hold `[1]`. Flooring the whole walk restores the promise for both shapes — the cost the cap
+      # refuses to pay is the per-position body evaluation, and declining to pay it means declining to know,
+      # not answering the pre-state.
+      #
+      # {#tail_depends_on_body_binding?} is the same predicate the threading gate uses, so "would threading
+      # have changed this tail" and "is tail-only untrustworthy here" stay one question. A body it answers
+      # false for keeps its exact tail-only fold above the cap, which is every single-statement block and
+      # every multi-statement block whose tail ignores its prefix.
+      def uncapped_body_floor(element_types)
+        Array.new(element_types.size) { Type::Combinator.untyped }
+      end
+
+      # True when the tail reads something the prefix changed that NOTHING has re-answered for this walk.
+      #
+      # `captured` is the converged binding of every outer local the block rebinds ({#per_element_captured_bindings}),
+      # and its cost is independent of the arity, so it keeps working above the cap: `total = 0; [1, …,
+      # 9].map do total += e; total end` reads `total` as the fixpoint's `Integer` at every position and needs
+      # no floor. What the cap actually withholds is the per-position body evaluation, so the names it leaves
+      # unanswered are the ones the fixpoint does not cover — a mutated block PARAMETER (issue #617 residue
+      # (2)'s `|a| a << 1; a`) or a mutated outer local the block never rebinds.
+      def unanswered_tail_dependency?(block, captured)
+        body = block.body
+        return false unless body.is_a?(Prism::StatementsNode)
+        return false if body.body.size < 2
+
+        answered = captured&.keys || []
+        tail_dependent_body_names(body.body).any? { |name| !answered.include?(name) }
       end
 
       # Issue #587 (b) — first-iteration pinning. Every position of this fold is typed from the SAME entry
@@ -3886,12 +4046,44 @@ module Rigor
 
       def converged_captured_bindings(block, names, element_types)
         param_types = [Type::Combinator.union(*element_types)]
-        BodyFixpoint.converge(
+        seeds = names.to_h { |name| [name, scope.local(name)] }
+        converged = BodyFixpoint.converge(
           names: names,
-          seed_bindings: names.to_h { |name| [name, scope.local(name)] },
+          seed_bindings: seeds,
           widen: Type::Combinator.method(:widen_value_pinned),
           evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names) }
         )
+        unmoved_pins_floored(converged, seeds)
+      end
+
+      # A name the write scan says this block REBINDS, whose fixpoint came back on exactly its value-pinned
+      # seed, is floored rather than believed.
+      #
+      # The fixpoint reads each pass's exit binding out of `StatementEvaluator`, and that evaluator only
+      # threads a write it sees as a STATEMENT: a rebind nested inside an expression — `(seen += 1) == 2` as
+      # the block's whole body — leaves the exit scope holding the entry binding, so the fixpoint converges on
+      # the seed and every position of the fold answers the first iteration again. That is issue #617 residue
+      # (1)'s one-liner, `seen = 0; [1, 2].find { |e| (seen += 1) == 2 }` answering `nil` where Ruby answers
+      # `2`: the pinned `Constant[0]` made both predicates `Constant[false]`, and `find` short-circuits on a
+      # provably-falsey block.
+      #
+      # An unmoved pin cannot be distinguished from a write that genuinely restores its own entry value
+      # (`x = 5; xs.each { x = 5 }`), so the floor gives that shape up too. It is the far cheaper side: a
+      # value-pinned seed the block rebinds is the exact pre-state this fold exists to stop trusting, and
+      # `Dynamic[top]` is the same escaping-block floor {#captured_floor} already uses. Seeds that carry no
+      # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
+      # `Nominal` here would only lose a class for nothing.
+      def unmoved_pins_floored(converged, seeds)
+        converged.to_h do |name, type|
+          seed = seeds[name]
+          next [name, type] unless type == seed && value_pinned?(seed)
+
+          [name, Type::Combinator.untyped]
+        end
+      end
+
+      def value_pinned?(type)
+        !type.nil? && Type::Combinator.widen_value_pinned(type) != type
       end
 
       # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the

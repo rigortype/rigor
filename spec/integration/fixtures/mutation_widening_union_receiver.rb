@@ -44,7 +44,7 @@ end
 def union_no_carrier(flag)
   y = flag ? 5 : "s"
   y << "t"
-  assert_type("\"s\" | 5", y)
+  assert_type("5 | String", y)
   y
 end
 

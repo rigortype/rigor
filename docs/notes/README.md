@@ -145,6 +145,7 @@ comparison) appears nowhere else in this index.
 | 2026-07-04 | [`plugins/` 近代化スイープ — SKILL 適用による本番プラグインのドリフト監査](20260704-plugins-modernization-sweep.md) |
 | 2026-07-19 | [Website showcase — "this gets a type?!" inference examples (core + plugins)](20260719-website-showcase-inference-examples.md) |
 | 2026-09-08 | [PR #788 was merged under a stop instruction — Draft-discipline postmortem](20260908-pr-788-draft-discipline-postmortem.md) |
+| 2026-09-09 | [ADR corpus audit — buried work, implementation drift, and obsolescence](20260909-adr-corpus-audit.md) |
 
 ## Adding a note
 

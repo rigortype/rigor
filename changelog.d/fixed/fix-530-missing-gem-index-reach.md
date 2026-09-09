@@ -1,0 +1,1 @@
+- **[coverage]** A project with no `Gemfile.lock` now attributes unresolved constants to the installed gem that declares them, so `coverage --protection` routes its gem boundary to `add_rbs` instead of reporting the whole thing as an engine gap. ([#952](https://github.com/rigortype/rigor/pull/952))

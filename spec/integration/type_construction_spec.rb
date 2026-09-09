@@ -510,6 +510,40 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #703 — the two residues #690's own review left, both about a constant written through a
+  # PATH. A meta-new factory assigned that way was recognised by no walk that gives such a
+  # write a class name, so its discovered class, member layout, `.new` shape and block-body
+  # defs went missing together and correct member calls fired `undefined method … for
+  # Struct`; and the mutation census emitted every lexical candidate for a ROOTED receiver,
+  # widening a sibling constant the write cannot reach.
+  describe "fixtures/constant_path_write_residues.rb — a path-written factory and a rooted mutation" do
+    let(:harness) { harness_for("constant_path_write_residues") }
+
+    it "names a path-written meta-new class and spares the rooted receiver's siblings" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity. Each factory is asserted through the constant, the instance its `.new`
+    # builds and the block-defined override, on three spellings that must NOT collapse into
+    # each other: the path form under a module, the bare twin whose answers the path form is
+    # written against, and the rooted form whose namespace is the top-level `Holder` rather
+    # than the `Admin::Holder` the unrooted write beside it resolves to. The census pair is
+    # written twice over for the same reason — a rooted write must widen only its own name,
+    # and an unrooted one must still widen both.
+    it "still asserts every factory spelling and both mutation directions" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(13)
+    end
+
+    # The false-positive arm, and the half that makes this a bug rather than lost precision:
+    # master answers `Struct` for a path-written factory's instance, and `Struct` is a class
+    # RBS knows, so `call.undefined-method` fires on the members and on the block's own
+    # override — five of them here, on code Ruby runs.
+    it "leaves no other diagnostic on the recorded receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   # #681 — the last member of the family, and the one path a stamp could not fix.
   # `ExpressionTyper#build_user_method_body_scope` rebuilds a CALLEE's body scope from
   # the receiver's type when it needs that callee's return, so nothing was in hand to

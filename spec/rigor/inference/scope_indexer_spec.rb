@@ -2274,5 +2274,22 @@ end
     it "records nothing for a class variable mutated at the top level" do
       expect(census("@@t = {}\n@@t[:k] = 1\n")[:cvars]).to be_empty
     end
+
+    # #703 — the third arm of the alignment #690 made on the write side. `::Table::ROWS` names the top
+    # level unconditionally, so the `Admin::Table::ROWS` a bare spelling would also reach is a different
+    # constant and keeps its empty-shape fold. The two spellings are indistinguishable by name alone —
+    # the strict render they share drops the root marker — so the exemption has to be taken from the
+    # node, exactly as `constant_path_write_key` takes it.
+    it "records only the rooted candidate for a rooted path receiver" do
+      result = census("module Admin\n  def self.fill(k) = ::Table::ROWS[k] = 1\nend\n")
+      expect(result[:constants]).to eq(Set["Table::ROWS"])
+    end
+
+    # Must-still-record: the unrooted spelling from the same body reaches every lexical candidate, which
+    # is what the arm above may not be allowed to have taken away.
+    it "still records every lexical candidate for an unrooted path receiver" do
+      result = census("module Admin\n  def self.fill(k) = Table::ROWS[k] = 1\nend\n")
+      expect(result[:constants]).to eq(Set["Admin::Table::ROWS", "Table::ROWS"])
+    end
   end
 end

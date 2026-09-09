@@ -85,7 +85,7 @@ RSpec.describe "meta-new block body at constant-write position" do
     RUBY
   end
 
-  it "enters a constant-path write's body under the call site's anonymous name" do
+  it "enters a constant-path write's body the same way" do
     expect(rules_for(<<~RUBY)).not_to include("call.unresolved-toplevel")
       module Outer; end
       Outer::Line = Struct.new(:text) do
@@ -95,6 +95,48 @@ RSpec.describe "meta-new block body at constant-write position" do
       end
       p Outer::Line
     RUBY
+  end
+
+  # Issue #703 — the path spelling of the very form #590 re-homed. Every walk that gives a meta-new constant write
+  # a class name took only the bare `ConstantWriteNode`, so `Holder::Thing = Struct.new(:a) do … end` — ordinary
+  # Ruby — registered no factory at all: the constant answered `singleton(Struct)`, its instance answered `Struct`,
+  # and because `Struct` is a class RBS knows, the members and the block's own override each fired
+  # `call.undefined-method` on correct code.
+  describe "a factory assigned through a constant path" do
+    it "reports nothing for the issue's repro" do
+      expect(diagnostics_for(<<~RUBY).map(&:message)).to be_empty
+        module Admin
+          class Holder; end
+
+          Holder::Thing = Struct.new(:a) do
+            def other = "y"
+          end
+
+          class Reader
+            def go
+              thing = Holder::Thing.new(1)
+              p thing.a
+              p thing.other
+            end
+          end
+        end
+        p Admin::Holder::Thing.new(2).other
+      RUBY
+    end
+
+    # The instrument can say "yes": the body is entered as a class body, so a genuinely wrong call inside it
+    # still fires — the same pairing the bare form's arm above takes.
+    it "still checks the statements inside the path-written body" do
+      expect(rules_for(<<~RUBY)).to include("call.wrong-arity")
+        module Outer; end
+        Outer::Line = Struct.new(:text) do
+          def shout
+            Object.new(1)
+          end
+        end
+        p Outer::Line
+      RUBY
+    end
   end
 
   # ADR-34 keeps the rule out of class bodies (ADR-24 WD3 leniency): the constant-write body is now the same class
@@ -208,6 +250,54 @@ RSpec.describe "meta-new block body at constant-write position" do
       expect(scope.toplevel?).to be(false)
       expect(scope.self_type.describe(:short)).to eq("Outer::Line")
       expect(index[def_node].self_type.describe(:short)).to eq("singleton(Outer::Line)")
+    end
+
+    # Issue #703 — the path spelling resolves its own namespace through the nesting, so a
+    # `Holder::Line = …` inside `module Outer` names `Outer::Holder::Line`, exactly as the compact
+    # `class Holder::Line` header at the same position does. These pre-passes run before any scope
+    # exists, which is why they share one prefix helper with the discovered-class registration rather
+    # than each spelling the qualification themselves.
+    it "keys a path-written body under the namespace the write's own nesting gives it" do
+      index, program = index_and_program(<<~RUBY)
+        module Outer
+          class Holder; end
+
+          Holder::Line = Struct.new(:text) do
+            def shout
+              text.upcase
+            end
+          end
+        end
+      RUBY
+      write = program.statements.body.first.body.body[1]
+      def_node = write.value.block.body.body.first
+      member_read = def_node.body.body.first.receiver
+
+      expect(index[member_read].self_type.describe(:short)).to eq("Outer::Holder::Line")
+      expect(index[write].discovered_method?("Outer::Holder::Line", :shout, :instance)).to be(true)
+      expect(index[write].discovered_method?("Outer::Holder::Line", :text, :instance)).to be(true)
+    end
+
+    # A ROOTED target re-anchors at the top level the way a rooted `class ::Rooted::Bar` header does, so
+    # the enclosing frames are dropped rather than prefixed onto the name.
+    it "resets the frame stack for a rooted path write" do
+      index, program = index_and_program(<<~RUBY)
+        class Holder; end
+
+        module Outer
+          ::Holder::Line = Struct.new(:text) do
+            def shout
+              text.upcase
+            end
+          end
+        end
+      RUBY
+      write = program.statements.body[1].body.body.first
+      def_node = write.value.block.body.body.first
+      member_read = def_node.body.body.first.receiver
+
+      expect(index[member_read].self_type.describe(:short)).to eq("Holder::Line")
+      expect(index[write].discovered_method?("Holder::Line", :shout, :instance)).to be(true)
     end
 
     it "registers the members of a constant-write struct body as discovered readers" do

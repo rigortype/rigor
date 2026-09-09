@@ -405,22 +405,36 @@ module Rigor
       # The class context a meta-new rvalue block is entered under, or nil when the rvalue is not that shape. The
       # KEY must be the one `ScopeIndexer` filed the body's defs and member layout under, so the two passes agree —
       # which is why the decision is delegated to the ScopeIndexer's own recognition rather than re-spelled here. A
-      # `Prism::ConstantWriteNode` whose rvalue `ScopeIndexer.meta_new_block_body` recognises is keyed by the
-      # constant's qualified name, one frame appended to the lexical context exactly as a `class Const` keyword body
-      # would be. Every other block form — a constant-PATH write (`A::B = Struct.new do … end`, which has no
-      # constant-keyed registration) or a shape the ScopeIndexer's stricter argument check rejects
-      # (`Const = Struct.new(*names) do … end`) — was registered under the call site's anonymous name and is
-      # entered under that.
+      # constant write whose rvalue `ScopeIndexer.meta_new_block_body` recognises is keyed by the constant's
+      # qualified name, one frame appended to the lexical context exactly as a `class Const` keyword body would be
+      # — the path spelling included since [#703](https://github.com/rigortype/rigor/issues/703). A shape the
+      # ScopeIndexer's stricter argument check rejects (`Const = Struct.new(*names) do … end`) is registered under
+      # the call site's anonymous name and is entered under that.
       def meta_new_constant_body_context(node)
         call_node = node.value
         return nil unless call_node.is_a?(Prism::CallNode) && call_node.block.is_a?(Prism::BlockNode)
 
-        if node.is_a?(Prism::ConstantWriteNode) && ScopeIndexer.meta_new_block_body(node)
-          return @class_context + [ClassFrame.new(name: node.name.to_s, singleton: false)]
-        end
+        constant = meta_new_constant_context(node)
+        return constant if constant
 
         anonymous = AnonymousMetaClass.name_for(call_node, scope.source_path)
         anonymous && [ClassFrame.new(name: anonymous, singleton: false)]
+      end
+
+      # The frame stack for a constant-keyed meta-new body, or nil when nothing keys it by a constant. A ROOTED
+      # path write re-anchors at the top level the way a rooted `class ::Rooted::Bar` header does
+      # ({#eval_class_or_module}), so the stack resets to that frame alone rather than gaining one under the
+      # enclosure — `current_class_path` joins the stack, and `ScopeIndexer`'s own prefix resets there too.
+      def meta_new_constant_context(node)
+        return nil unless ScopeIndexer.meta_new_block_body(node)
+
+        case node
+        when Prism::ConstantWriteNode
+          @class_context + [ClassFrame.new(name: node.name.to_s, singleton: false)]
+        when Prism::ConstantPathWriteNode
+          frame = ClassFrame.new(name: Source::ConstantPath.qualified_name(node.target), singleton: false)
+          Source::ConstantPath.rooted?(node.target) ? [frame] : @class_context + [frame]
+        end
       end
 
       # Slice 7 phase 3 — compound writes (||=, &&=, +=/-=/...) for every variable kind. Each handler:

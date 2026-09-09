@@ -1,0 +1,7 @@
+---
+locals: {}
+assertions:
+  '1': '"else"'
+  '2': Bar::Nested::Random
+  '3': '1'
+  '4': '"else" | 1'

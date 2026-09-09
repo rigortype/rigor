@@ -1,0 +1,10 @@
+---
+locals: {}
+assertions:
+  '1': singleton(P::Base::B)
+  '2': singleton(P::Mixin::M)
+  '3': P::Base::B
+  '4': P::Base::B
+  '5': A::B
+  '6': singleton(P::Base2::Head::Leaf)
+  '7': singleton(A::B)

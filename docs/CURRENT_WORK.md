@@ -10,7 +10,6 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   including claims in THIS file. Three sessions running, its own pointers have been wrong.
 -->
 
-
 # Current Work — Session Handoff
 
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
@@ -18,99 +17,58 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Where the cycle stands
 
-**v0.3.8 is published** (`Rigor::VERSION` is `0.3.8`, `[Unreleased]` empty). The cycle under
-`changelog.d/` is now large — 2026-09-09 alone added roughly thirty PRs across four batches. The next
-cut happens only when the user invokes `/rigor-release-prep`.
+**v0.3.8 is published**; `[Unreleased]` is empty and `changelog.d/` holds the whole cycle (2026-09-09's
+~30 PRs plus 2026-09-10's batch below). The next cut happens only when the user invokes
+`/rigor-release-prep`.
 
-**Two sessions ran on 2026-09-09** and both finished; neither has an open PR.
+## 2026-09-10 — the v0.3.9 milestone sweep, 15 parallel lanes
 
-## 2026-09-09 batch 4 — six lanes, all landed
+One session drove `gh issue list --milestone v0.3.9` with Sonnet/Opus lanes in worktrees, no local
+full gate, remote CI as the gate, adversarial review before each merge. Landed (all merged, master
+green at the last integration run):
 
-- [#916](https://github.com/rigortype/rigor/pull/916) closed #673: `TimeWithZone` is a declared `::Time`
-  subclass; keyword-bearing signatures are argument-checked, but only a CLASS-refuted argument fires.
-  By-product true positive: `rigor-sorbet`'s `translate_shape` degraded every `sig { returns({…}) }`.
-- [#914](https://github.com/rigortype/rigor/pull/914) closed #661: the overlay parity guard names the
-  drifted selector (its failure lambda used to raise `NameError`); inherited `Kernel#<=>` reads `Integer?`.
-- [#912](https://github.com/rigortype/rigor/pull/912) closed #668/#663: dynamic constant targets file
-  under a `*::LIMIT` wildcard key; `IncrementalSnapshot::SCHEMA` 18 → 19.
-- [#910](https://github.com/rigortype/rigor/pull/910) closed #898: `extend` reaches `Scope`; per module
-  `M <= target` decides whether the `Bot` is withheld (`:equal`/`:subclass`/`:unknown`) or kept.
-- [#907](https://github.com/rigortype/rigor/pull/907) — the #693 sizing; conclusion **not worth doing**.
-- Batches 1–3 (#864–#905) are in the git log; each closed the issue it names.
-
-## The #693 measurement, and why it matters more than the fix would have
-
-#693 asked for two census-walk precision gaps to be SIZED before implementing, and they were:
-`docs/notes/20260909-census-walk-gap-movable-sites.md`, instrument in `tool/probe-693/`, 14 targets
-and 17,706 files. 28 / 25 / 3 movable sites, every recoverable rvalue a bare collection that hands
-`untyped` onward one hop later. Declined, and #693 is closed as measured-and-declined.
-
-The by-product is the part that mattered: the issue's premise that neither shape produces a wrong
-answer is FALSE. A `class << self` ivar write lands in the enclosing class's INSTANCE facet, so
-`def.ivar-write-mismatch` fires on correct Ruby — filed as
-[#909](https://github.com/rigortype/rigor/issues/909) (`ready-for-agent`), cheaper than the seeding
-it was found while declining, and with the only reachable symptom.
-
-## The ADR corpus audit — the backlog changed shape
-
-[`docs/notes/20260909-adr-corpus-audit.md`](notes/20260909-adr-corpus-audit.md) swept all 111 ADRs
-and **filed 26 issues** (#911, #918-#930, #932-#943), so `ready-for-agent` returns a much larger set
-than it did this morning; the note's § "Where each finding went" maps every finding. Its headline:
-**the corpus under-claims.** ADR-102 says "Nothing implemented" about a command that shipped in
-v0.3.4 and ADR-103's index row says it about the effect system, so `Proposed` is no longer readable
-as "the unbuilt set" — do not trust an ADR's status without checking the code.
-
-Three fixes landed from it: #906 (`rigor playground` dropped its first argument; `rigor help` omitted
-`baseline` and `unused`), #908 (any FFI-family plugin listed ALONE failed to load — requiring it
-registers `rigor-ffi` too and the loader called that a meta-gem; `rigor-rbnacl` never called
-`Rigor::Plugin.register` at all), #913 (the `.rigor.yml` `plugins_isolation:` key the normative
-internal spec documents has never existed).
+- Engine FPs: #946 (#917 `.new` arity on an undeclared constructor), #945 (#909 `class << self`
+  ivar facet), #955 (#633 own-method veto reaches inherited/pre-`Object`/singleton sources), #951
+  (#645 union mutator widening), #964 (#643 element-read mutation), #965 (#617 block-return residues:
+  compound-write tail, `String#<<`, find-family floor, cap floor), #961 (#722 compact-header leading
+  segment; `IncrementalSnapshot::SCHEMA` 20).
+- Caches: #954 (#629/#630 plugin `IoBoundary` reads + `list_directory` row), #958 (#639 class-existence
+  edge; #640 was already fixed and is now gated), #966 (#960 editor-mode `--instead-of` spelling +
+  buffer digest).
+- CLI/plugins: #949 (#925 `target_gems:` + plugin-gap advisory, DIRECT deps only + `rails` umbrella),
+  #968 (#936 item 3, the `Difference` mutator arm; #936 closed), #944 (#918 rigor-ffi `config_schema`), #947 (#920 `rigor init` rule list from `ALL_RULES`), #950
+  (#921 `:factory_index` fact + probe commands run `#prepare`), #957 (#609 sig-gen `::`-anchored
+  superclass, exit 70 on a fatal error, `sig/` IS auto-discovered), #952 (#530 lockfile-less gem
+  provenance), #962 (#936 items 1/4/5/7), #967 (doctor catalogue off loaded classes — an
+  order-dependent shard flake that reddened master once).
+- Docs straight to master: #919, #940 (17 ADRs re-statused with code evidence), #941, #942, #943
+  (partial-supersession marker in ADR-49, ten ADRs), #948 (#939 the header-vs-index status gate),
+  #956 (#938 residues).
+- Adjudicated without code: #533 closed (6/8 already fixed; item 5 split to #953).
 
 ## Open threads
 
-- [#909](https://github.com/rigortype/rigor/issues/909) (`ready-for-agent`) — the facet conflation
-  above. Do NOT take the census table split on its behalf; marking a `class << self` def as singleton
-  for the write-mismatch collector is a spelling fix.
-- [#915](https://github.com/rigortype/rigor/issues/915) (`ready-for-agent`) — two extend records the
-  singleton ancestry still never sees: `class << self; include M; end` (widening the walk also moves
-  #526's method fold) and an RBS-declared `extend` (the environment exposes no singleton-ancestry
-  query at all).
-- [#931](https://github.com/rigortype/rigor/issues/931) (`ready-for-human`) — there is no
-  block-presence rule of any kind, so a call omitting a required block is never reported. Size the
-  corpus before writing the rule; `&blk` forwarding, `&:sym`, and blockless-returns-Enumerator
-  signatures are all shapes it must not fire on.
-- [#697](https://github.com/rigortype/rigor/issues/697) stays open: #902 shipped only the
-  loud-not-silent half and a spec PINS that the false positive still fires. The real fix waits on
-  [#660](https://github.com/rigortype/rigor/issues/660). Do not add a fourth protection route.
-- [#722](https://github.com/rigortype/rigor/issues/722) stays open for its last residue only.
-- [#900](https://github.com/rigortype/rigor/issues/900) (`ready-for-human`) — #657's precision half;
-  joining an in-source `include` DERIVES a positive edge and would license a fresh FP on an `else`
-  arm.
-
-## Release planning — the milestones were rebuilt on 2026-09-09
-
-`v0.3.9` (33 issues) is the LAST 0.3.x release: every non-breaking fix, and the deprecation
-announcements for what `v0.4.0` (17 issues) removes — `v0.4.0` is the pre-1.0 hard break (ADR-50
-WD5/WD7: `int<a,b>` gone, effects default-on per ADR-103 WD15, soaked bleeding-edge graduations,
-plugin-contract and type-model changes that need a corpus FP diff). `gh issue list --milestone v0.3.9`
-is the v0.3.9 backlog, ordered roughly: user-visible FPs (#609 external, #917, #909, #633, #617,
-#645), stale-cache runs (#629, #630, #639, #640, #796, #794), CLI/plugin contract additions (#925
-WD1 before the freeze, #920, #921, #928), then the ADR gates (#939 → #940, #941). The shipped
-`v0.3.0`/`v0.3.3`/`v0.3.6`/`v0.3.x` milestones are closed; `v0.4.x` holds the line-level backlog.
+- #424 stays open on its WD16 target (`Propagator.propagate` at gitlab scale). The per-project half
+  is measured and closed: `docs/notes/20260910-effect-collection-profile.md` — +11.3 % wall on
+  plugin-less redmine, the second walk is ~36 % of the delta and the shareable descent ~12 %, so the
+  ≤ 5 % bound is unreachable without changing what collection proves (a No-Go input for #409).
+- Filed this session, `ready-for-human`: #959 (TrustPolicy refuses every plugin read under a symlinked
+  project root, silently), #953 (literal-lambda call forms), #963 (#633 residue: block-self shapes,
+  plugin-supplied methods).
+- Still open on v0.3.9 and human-gated: #928, #796, #794, #476, #378; #697 waits on #660.
 
 ## How to enter
 
-1. Nothing is uncommitted and no PR of this session's is open. Other sessions merge to master
-   throughout, so re-derive any file:line at current HEAD.
-2. `gh issue list --label ready-for-agent` is the backlog. #909, #915, #710-adjacent census work and
-   #530 are unblocked. From the audit, **#939 → #940 is the highest-leverage pair**: nothing compares
-   an ADR's own `Status:` header to its README row, and no spec parses that header at all. #939 adds
-   the gate, #940 is the ~20-ADR sweep it makes checked rather than asserted. #918-#924 are the
-   audit's remaining live defects, each reproducible through the CLI.
-3. Remote CI as the gate with NO local `make verify` is the default worth repeating: targeted specs
-   plus rubocop locally, rebase onto master immediately before pushing. Three batches ran that way.
-4. Two harness traps this cycle paid for: `FixtureHarness` under-detects versus the CLI on a flat
-   fixture with no `sig/` (use a project fixture when the point is the diagnostic), and a `case`
-   assigned to a local never consults per-pattern certainty (write the `case` inline).
-5. A spec's failure-path lambda only runs on failure — a green suite proves nothing about its message.
-   #661 gap 1 shipped a `NameError` there for months.
+1. Nothing is uncommitted and no PR of this session's is open. Re-derive file:line at current HEAD.
+2. The lane contract that worked: worktree per lane, targeted specs + rubocop only, `git push` then
+   END (no CI polling — 15 lanes with `gh run watch` loops exhausted the 5000/h GitHub API budget
+   twice; poll once a minute per PR via `statusCheckRollup`). To add a commit to a lane's branch,
+   reset to the remote tip and cherry-pick; a rebase-then-push is non-fast-forward and force is
+   blocked.
+3. Three things every engine lane tripped on: the `sig/` provenance residue pin
+   (`spec/rigor/sig_gen/provenance_spec.rb`) moves whenever a hand-written line lands OR inference
+   changes what sig-gen would emit — #965's `@x ||= new` reading moved three `.default` readers to
+   `sig.skipped.untyped-return` until the unbound case kept the rvalue; a new precision fixture needs
+   its golden (`UPDATE_SNAPSHOTS=<fixture>`); and a spec that enables a bundled plugin by gem name is
+   order-dependent unless it registers the class itself (`Rigor::Plugin.unregister!` + no-op `require`).
+4. `gh issue list --label ready-for-agent` is the backlog; the v0.4.0 milestone is the pre-1.0 break.

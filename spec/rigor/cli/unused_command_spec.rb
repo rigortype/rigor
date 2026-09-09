@@ -73,6 +73,60 @@ RSpec.describe Rigor::CLI::UnusedCommand do
     end
   end
 
+  # Issue #882 — ADR-102 WD6's ownership test is "does something OUTSIDE the project already declare this
+  # name?", and the environment answering it was built from `libraries:` alone. A gem whose signatures reach
+  # the project through an installed `rbs collection` (or the bundle's per-gem `sig/`) was therefore invisible
+  # to the test, so reopening one of its classes registered a project declaration nothing references — the
+  # exact artifact WD6 exists to suppress, on a report whose adjudicated precision is 7.0%.
+  describe "ownership against the project's dependency sources" do
+    def install_collection(dir, gem_name, version, rbs)
+      gem_dir = File.join(dir, ".gem_rbs_collection", gem_name, version)
+      FileUtils.mkdir_p(gem_dir)
+      File.write(File.join(gem_dir, "#{gem_name}.rbs"), rbs)
+      File.write(File.join(dir, "rbs_collection.lock.yaml"), <<~YAML)
+        ---
+        path: ".gem_rbs_collection"
+        gems:
+        - name: #{gem_name}
+          version: '#{version}'
+          source:
+            type: git
+            name: ruby/gem_rbs_collection
+            remote: https://github.com/ruby/gem_rbs_collection.git
+            revision: abc
+            repo_dir: gems
+        gemfile_lock_path: Gemfile.lock
+      YAML
+    end
+
+    it "keeps a class the rbs collection declares out of the candidate list" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, ".rigor.yml"), <<~YAML)
+          paths:
+            - lib
+          rbs_collection:
+            lockfile: rbs_collection.lock.yaml
+            auto_detect: false
+        YAML
+        install_collection(dir, "legacybase", "1.0", "class LegacyBase\nend\n")
+        File.write(File.join(dir, "lib/legacy_base.rb"), "class LegacyBase\n  def helper = 1\nend\n")
+        # The discrimination control: same shape, same absence of references, declared by nobody but the
+        # project. It must still be reported, or the example would pass on an environment that knows
+        # everything just as happily as on one that knows the collection.
+        File.write(File.join(dir, "lib/loner.rb"), "class Loner\nend\n")
+        backdate(dir)
+
+        status, report, = run_in(dir)
+
+        expect(status).to eq(0)
+        names = report.fetch("candidates").map { |c| c.fetch("name") }
+        expect(names).to include("Loner")
+        expect(names).not_to include("LegacyBase")
+      end
+    end
+  end
+
   describe "the per-file scan cache" do
     it "serves the second run without re-scanning an unchanged file, with an identical report" do
       Dir.mktmpdir do |dir|

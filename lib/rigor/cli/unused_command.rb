@@ -219,15 +219,23 @@ module Rigor
       # declaration, which produced three of redmine's artifacts from a single initializer. A name the bundled
       # (non-project) environment already knows is not ours to call unused. The project's own `sig/` is
       # deliberately excluded from this environment, so a project class that ships a signature stays owned.
+      # That exclusion is the ONLY thing withheld: the dependency-discovery axes (issue #882, the shape of
+      # #821) must be passed, because "outside the project" is exactly what they describe. Without the
+      # bundle's per-gem `sig/` and an installed `rbs collection`, a gem-declared class the project reopens
+      # is unknown to this environment, reads as project-owned, and lands in the candidate list — a false
+      # positive in a report whose measured precision cannot afford one.
       #
       # The cache store makes the environment a Marshal restore instead of a cold RBS build on every
       # invocation — the same ADR-54 slot `rigor check` reads, keyed apart by this environment's own
-      # (sig-less) descriptor. The report only ever asks "is this name known", which the cached
+      # (sig-less) descriptor. The discovered bundle and collection directories ride in the loader's
+      # signature paths, so the descriptor digests them and this slot still cannot be served a run whose
+      # dependency sources differ. The report only ever asks "is this name known", which the cached
       # environment answers identically: the one thing the cache degrades is `RBS::Location`, and no
       # location is read here.
       def foreign_predicate(configuration)
         env = Environment.for_project(libraries: configuration.libraries, signature_paths: [],
-                                      cache_store: cache_store(configuration))
+                                      cache_store: cache_store(configuration),
+                                      **ProjectEnvironment.dependency_discovery_options(configuration))
         ->(fqn) { !env.singleton_for_name(fqn).nil? }
       rescue StandardError
         ->(_fqn) { false }

@@ -1,0 +1,1 @@
+- **[cli]** `rigor playground` no longer drops its first argument — `--port=` is honoured again, and a bare `rigor playground` starts instead of raising. ([#906](https://github.com/rigortype/rigor/pull/906))

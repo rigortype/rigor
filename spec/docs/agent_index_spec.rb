@@ -21,6 +21,7 @@
 # a decision, so the gate is part of ADR-97 rather than a follow-up to it.
 
 require "spec_helper"
+require "tmpdir"
 
 AGENT_INDEX_AGENTS_MD = File.expand_path("../../AGENTS.md", __dir__)
 AGENT_INDEX_ADR_README = File.expand_path("../../docs/adr/README.md", __dir__)
@@ -53,6 +54,32 @@ AGENT_INDEX_ADR_ROW = /^\| ADR-(\d+) \| \[.+?\]\((\d+-[^)]+\.md)\) \| (.*?) \|\s
 # The status vocabulary docs/adr/README.md's "How to Read" declares.
 AGENT_INDEX_STATUS_WORD = /\A(?:Accepted|Proposed|Superseded)\b/
 
+# An ADR's own `Status:` header, in the two shapes the corpus writes it: a bare `Status: …` line, and
+# ADR-60's list item `- Status: …`. The header runs to the first blank line — a paragraph, not a line.
+AGENT_INDEX_ADR_STATUS_HEADER = /\A(?:- )?(?:\*\*)?Status(?:\*\*)?:\s*/
+
+# Landing and non-landing vocabulary, read per sentence over both sources. Deliberately small: only
+# words that state progress. A sentence carrying both is read clause by clause instead, because
+# "WD1 implemented; WD2 deferred" is one sentence with two verdicts.
+AGENT_INDEX_LANDED_WORDS = /\b(?:implemented|implements|landed|shipped|ships|complete|completed|done|in force)\b/i
+AGENT_INDEX_OPEN_WORDS =
+  /\b(?:deferred|open|pending|queued|remain|remains|remaining|unimplemented|paused|parked|gated)\b/i
+# "not yet implemented" is a non-landing claim wearing a landing verb, and "partially implemented" is
+# neither verdict — both sources say "partial" about the same item and would otherwise read as a
+# disagreement (ADR-58 WD1). Anything ambiguous is dropped rather than guessed: this gate exists to
+# catch two sources contradicting each other, and a firing on agreeing prose teaches authors to
+# route around it.
+AGENT_INDEX_NEGATED_LANDING = /\b(?:not|never|no)\s+(?:yet\s+)?(?:implemented|landed|shipped)/i
+AGENT_INDEX_AMBIGUOUS_PROGRESS = /\bpartial/i
+
+# The working-decision / slice identifiers both sources name: `WD1`, `WD1–WD6`, `WD1+WD2`, `slice 4`,
+# `slices 1-4`, `slices A + B`. A slice name is a bare number or a single capital letter, never a
+# following word — `slices this` is prose, not slice S.
+AGENT_INDEX_WD_RANGE = /\bWD\s?(\d+)\s*[-–—]\s*WD\s?(\d+)/i
+AGENT_INDEX_WD_LIST = /\bWD(\d+(?:\s*\+\s*WD?\d+)*)/i
+AGENT_INDEX_SLICE_RANGE = /\bslices?\s+(\d+)\s*[-–—]\s*(\d+)/i
+AGENT_INDEX_SLICE_LIST = /\bslices?\s+((?:\d+|[A-Z])(?:\s*\+\s*(?:\d+|[A-Z]))*)\b/i
+
 # Progress vocabulary that belongs in the README's status column, never in the AGENTS.md premise topic. An
 # index entry names a subject; it does not track implementation state (which drifts — a second copy of
 # the status is exactly what went stale on ADR-48 and ADR-73 before ADR-97).
@@ -72,6 +99,65 @@ module AgentIndexHelpers
 
       { number: m[1].to_i, slug: m[2], topic: m[3].strip }
     end
+  end
+
+  # The `Status:` paragraph of one ADR file, header prefix stripped. `nil` when the file has no such
+  # header at all — the state nothing in the repo could see before #939.
+  def adr_status_header(path)
+    lines = File.readlines(path, encoding: "utf-8").map(&:chomp)
+    start = lines.index { |line| line.match?(AGENT_INDEX_ADR_STATUS_HEADER) }
+    return nil unless start
+
+    paragraph = []
+    lines[start..].each do |line|
+      break if line.strip.empty?
+
+      paragraph << line
+    end
+    paragraph.join(" ").sub(AGENT_INDEX_ADR_STATUS_HEADER, "")
+  end
+
+  def adr_status_headers
+    Dir[AGENT_INDEX_ADR_GLOB].to_h { |path| [File.basename(path)[/\A\d+/].to_i, adr_status_header(path)] }
+  end
+
+  def adr_status_word(text)
+    text&.delete("*")&.[](AGENT_INDEX_STATUS_WORD)
+  end
+
+  # The WD / slice identifiers named in one clause, normalized so `slices 1-4` and `slice 1 + slice 4`
+  # compare as the same vocabulary on both sides.
+  def adr_progress_ids(clause)
+    ids = []
+    clause.scan(AGENT_INDEX_WD_RANGE) { |low, high| ids.concat((low.to_i..high.to_i).map { |n| "WD#{n}" }) }
+    clause.scan(AGENT_INDEX_WD_LIST) { |group,| group.scan(/\d+/) { |n| ids << "WD#{n}" } }
+    clause.scan(AGENT_INDEX_SLICE_RANGE) { |low, high| ids.concat((low.to_i..high.to_i).map { |n| "slice #{n}" }) }
+    clause.scan(AGENT_INDEX_SLICE_LIST) do |group,|
+      group.split(/\s*\+\s*/).each { |name| ids << "slice #{name.upcase}" }
+    end
+    ids.uniq
+  end
+
+  # Split one status text into the identifiers it records as landed and the ones it records as still
+  # open. A sentence with a single verdict lends it to every identifier it names (ADR-90 writes
+  # "Implemented: … (WD1); … (WD2); … (WD3)"); a sentence with both is read clause by clause.
+  def adr_progress_claims(text)
+    landed = []
+    still_open = []
+    text.delete("*").split(/(?<=\.)\s+(?=[A-Z(`])/).each do |sentence|
+      clauses = if sentence.match?(AGENT_INDEX_LANDED_WORDS) && sentence.match?(AGENT_INDEX_OPEN_WORDS)
+                  sentence.split(/;\s+/)
+                else
+                  [sentence]
+                end
+      clauses.each do |clause|
+        next if clause.match?(AGENT_INDEX_NEGATED_LANDING) || clause.match?(AGENT_INDEX_AMBIGUOUS_PROGRESS)
+
+        landed.concat(adr_progress_ids(clause)) if clause.match?(AGENT_INDEX_LANDED_WORDS)
+        still_open.concat(adr_progress_ids(clause)) if clause.match?(AGENT_INDEX_OPEN_WORDS)
+      end
+    end
+    { landed: landed.uniq.sort, open: (still_open - landed).uniq.sort }
   end
 
   def adr_readme_entries
@@ -190,6 +276,118 @@ RSpec.describe "ADR index budgets (ADR-97)" do
     it "lists the ADRs in ascending order" do
       numbers = readme.map { |e| e[:number] }
       expect(numbers).to eq(numbers.sort)
+    end
+  end
+
+  # The ADR corpus ran two mutually ungated status sources: each ADR's own `Status:` header, and its
+  # row in docs/adr/README.md. The 2026-09-09 corpus audit
+  # (docs/notes/20260909-adr-corpus-audit.md § 4) found that this is the structural cause of its
+  # largest finding category — roughly twenty ADRs still recording as unbuilt something that shipped.
+  # Neither source was ever compared to the other, so both were free to drift; nothing in spec/ even
+  # parsed the header, and ADR-60 had been written in a different shape with nothing noticing.
+  #
+  # These axes compare the two sources against each other. They do not (and cannot) check either
+  # against the implementation — an ADR and its row that are stale in the same direction still pass,
+  # which is what the #940 sweep is for. The comparison is deliberately conservative: it fails on a
+  # contradiction, not on a difference in detail, because the README row is a capped status cell
+  # (ADR-97 WD2) and the header is a paragraph — the row naming fewer working decisions than the
+  # header is economy, not drift.
+  describe "each ADR's Status: header against its docs/adr/README.md row" do
+    let(:headers) { adr_status_headers }
+    let(:rows) { readme.to_h { |entry| [entry[:number], entry[:status]] } }
+
+    it "gives every ADR a parseable Status: header" do
+      missing = headers.select { |_number, text| text.nil? || text.strip.empty? }.keys
+      expect(missing).to be_empty,
+                         "Every ADR states its own status, as `Status: …` or `- Status: …` before the " \
+                         "first blank line. Without a header there is nothing for its README row to " \
+                         "agree with. Missing: #{missing.map { |n| "ADR-#{n}" }.join(', ')}"
+    end
+
+    it "opens both sources with the same status word" do
+      disagreements = headers.filter_map do |number, text|
+        next if text.nil?
+
+        from_header = adr_status_word(text)
+        from_row = adr_status_word(rows[number].to_s)
+        next if from_header && from_header == from_row
+
+        "  ADR-#{number}: header says #{(from_header || text[0, 40]).inspect}, " \
+          "README row says #{(from_row || rows[number].to_s[0, 40]).inspect}"
+      end
+      expect(disagreements).to be_empty,
+                               "An ADR's Status: header and its README row are the corpus's two status " \
+                               "sources and must agree on Accepted / Proposed / Superseded:\n" \
+                               "#{disagreements.join("\n")}"
+    end
+
+    it "never credits a working decision or slice in the README that the ADR does not record as landed" do
+      overclaimed = headers.filter_map do |number, text|
+        next if text.nil?
+
+        extra = adr_progress_claims(rows[number].to_s)[:landed] - adr_progress_claims(text)[:landed]
+        next if extra.empty?
+
+        "  ADR-#{number}: README row records #{extra.join(', ')} as landed; the ADR's own header does not"
+      end
+      expect(overclaimed).to be_empty,
+                             "The index row credits work the ADR itself does not claim. Advance the ADR's " \
+                             "Status: header, or drop the claim from the row:\n#{overclaimed.join("\n")}"
+    end
+
+    it "never records the same working decision or slice as landed in one source and open in the other" do
+      contradictions = headers.flat_map do |number, text|
+        next [] if text.nil?
+
+        header_claims = adr_progress_claims(text)
+        row_claims = adr_progress_claims(rows[number].to_s)
+        (row_claims[:open] & header_claims[:landed]).map do |id|
+          "  ADR-#{number}: the ADR's header records #{id} as landed; the README row records it as open"
+        end + (header_claims[:open] & row_claims[:landed]).map do |id|
+          "  ADR-#{number}: the README row records #{id} as landed; the ADR's header records it as open"
+        end
+      end
+      expect(contradictions).to be_empty,
+                                "The two status sources contradict each other on which work has landed. " \
+                                "Fix whichever is stale — do not soften the wording:\n" \
+                                "#{contradictions.join("\n")}"
+    end
+  end
+
+  # The axes above pass on today's corpus, so they can only stay honest if the parser they run on is
+  # itself pinned: a header shape it silently failed to read would make every comparison vacuous.
+  describe "the Status: header parser" do
+    def write_adr(dir, body)
+      path = File.join(dir, "999-fixture.md")
+      File.write(path, body)
+      path
+    end
+
+    it "reads the bare-line and the list-item header shapes alike" do
+      Dir.mktmpdir do |dir|
+        bare = write_adr(dir, "# ADR-999\n\nStatus: **Accepted, 2026-01-01.** Body.\n\nMore.\n")
+        expect(adr_status_word(adr_status_header(bare))).to eq("Accepted")
+
+        listed = write_adr(dir, "# ADR-999\n\n- Status: Accepted (2026-01-01)\n\nMore.\n")
+        expect(adr_status_word(adr_status_header(listed))).to eq("Accepted")
+      end
+    end
+
+    it "returns nothing for an ADR with no Status: header" do
+      Dir.mktmpdir do |dir|
+        expect(adr_status_header(write_adr(dir, "# ADR-999\n\nNo status anywhere.\n"))).to be_nil
+      end
+    end
+
+    it "separates landed identifiers from open ones within a sentence" do
+      claims = adr_progress_claims("Accepted — WD1-WD3 implemented; WD4 deferred; slices 1+2 landed.")
+      expect(claims[:landed]).to eq(["WD1", "WD2", "WD3", "slice 1", "slice 2"])
+      expect(claims[:open]).to eq(["WD4"])
+    end
+
+    it "claims nothing from prose that states neither a landing nor a deferral" do
+      expect(adr_progress_claims("Accepted, 2026-01-01. WD1 partially implemented; nothing else yet."))
+        .to eq({ landed: [], open: [] })
     end
   end
 

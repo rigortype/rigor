@@ -1,7 +1,8 @@
 # ADR-57 — Opening the implicit-self call return-adoption gate (ADR-24 WD3 revisit)
 
 Status: **Accepted — gate opened 2026-06-12 (slices 1–3); overridable-
-method adoption gate added 2026-06-13 (see Addendum).** The
+method adoption gate added 2026-06-13 (see Addendum); WD3 (module constants in
+the cross-file discovery seed) implemented 2026-07-10.** The
 adjudication arc completed: every gate-open firing class was classified
 and the artifacts fixed at their root (slices 1–3), the residual reduced
 to genuine-or-win, and the gate opened permanently per WD2.

@@ -1,6 +1,6 @@
 # ADR-82 — `Dynamic[T]` provenance wiring: breaking the catch-all on real apps
 
-Status: **WD1+WD2+WD3+WD6+WD7+WD8 implemented 2026-07-06; WD9 (external-gem constant ownership) implemented 2026-07-11.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
+Status: **Accepted, 2026-07-06 — WD1+WD2+WD3+WD6+WD7+WD8 implemented 2026-07-06; WD9 (external-gem constant ownership) implemented 2026-07-11.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
 provenance side-channel and surfaced it through `coverage --protection`
 tractability labels, but a field measurement on Mastodon shows the labels are
 **uninformative on a real Rails app**: 84% of unprotected dispatch sites carry

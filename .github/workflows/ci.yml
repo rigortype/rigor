@@ -494,14 +494,42 @@ jobs:
           echo "rigor self-check found errors — see diagnostic output above"
           exit 1
 
+  # ── 4b. Acceptance gates over a cold analysis ───────────────────
+  # Four gates that each need a full, uncached analysis and are otherwise
+  # unrelated to one another. They used to be steps on the self-check matrix
+  # guarded by `if: matrix.cache == 'cold'`, on the stated grounds that their
+  # results are deterministic and need no warm/cold cross-check — which is
+  # precisely why they do not belong to that matrix. Parked there they made a
+  # job named "Self-check (cold)" spend 17% of itself on the self-check and
+  # 83% on this, serialised: 27s of check against 23s + 12s + 74s + 22s of
+  # gates, for a 164-196s job while its warm sibling finished in 44s.
+  #
+  # As their own job the four still run once, still against a fresh checkout
+  # with no `.rigor/cache` to restore from (which is all "cold" ever meant
+  # here), and no longer sit behind the self-check. One job rather than four
+  # because ~137s already clears the Tests matrix's ~180s floor; split it
+  # further only if that floor moves.
+  acceptance-gates:
+    name: Acceptance gates (cold analysis)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
       # Precision gate: `rigor coverage --threshold 0.58 lib` fails when the
       # type-inference precision ratio on Rigor's own source drops below 58 %.
       # See the Makefile's `coverage` target for how that number is calibrated.
-      # The cold variant runs this so the gate exercises the full analysis path
-      # without any cached assistance; the warm variant skips it to avoid
-      # double-counting in CI time.
       - name: Run precision coverage gate
-        if: matrix.cache == 'cold'
         run: make coverage
 
       # Plugin-contract gate (ADR-43): the bundled plugin / example LIB
@@ -509,10 +537,8 @@ jobs:
       # resolution makes a plugin's inherited contract calls
       # (`manifest.…`, `io_boundary.…`) resolve against `Plugin::Base`'s
       # RBS, so misuse of the contract surface surfaces here as
-      # `call.undefined-method`. Cold variant only — the result is
-      # deterministic and needs no warm/cold cross-check.
+      # `call.undefined-method`.
       - name: Run plugin-contract check
-        if: matrix.cache == 'cold'
         run: make check-plugins
 
       # Incremental-analysis acceptance gate (ADR-46): the incremental
@@ -520,9 +546,9 @@ jobs:
       # `--verify-incremental` re-analyzes a subset and serves the rest
       # from the per-file cache, then asserts the merge equals a full
       # `--no-cache` analysis — a mismatch would mean a stale, manufactured
-      # diagnostic. Cold variant only; the result is deterministic.
+      # diagnostic. The longest of the four at ~74s: it runs roughly three
+      # analyses per target, over two targets.
       - name: Run incremental-analysis gate
-        if: matrix.cache == 'cold'
         run: make check-incremental
 
       # Mutation-cache acceptance gate (#134 slice 3): the per-file
@@ -532,10 +558,8 @@ jobs:
       # it — the number the cache serves is the number `--threshold` gates
       # a build on. The gate also asserts the warm arm really was served
       # from cache, so it cannot pass vacuously the day the cache disables
-      # itself. Cold variant only, like the gate above: deterministic, and
-      # it warms its own snapshot.
+      # itself. It warms its own snapshot.
       - name: Run mutation-cache gate
-        if: matrix.cache == 'cold'
         run: make check-mutation-cache
 
   # ── 5. Warm-vs-cold diagnostic diff ─────────────────────────────
@@ -617,7 +641,7 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [changes, test, shard-coverage, excluded-specs, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge]
+    needs: [changes, test, shard-coverage, excluded-specs, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -632,6 +656,7 @@ jobs:
           SELF_CHECK_RESULT: ${{ needs.self-check.result }}
           SELF_CHECK_DIFF_RESULT: ${{ needs.self-check-diff.result }}
           SELF_CHECK_BLEEDING_EDGE_RESULT: ${{ needs.self-check-bleeding-edge.result }}
+          ACCEPTANCE_GATES_RESULT: ${{ needs.acceptance-gates.result }}
         run: |
           failed=0
           # Change detection must always succeed — it is what decides
@@ -642,7 +667,7 @@ jobs:
           fi
           # A gated job that was skipped (Markdown-only PR) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT"; do
+          for job_result in "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

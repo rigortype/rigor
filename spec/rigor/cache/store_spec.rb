@@ -612,10 +612,17 @@ RSpec.describe Rigor::Cache::Store do
     it "derives the temp filename's random suffix from SecureRandom.hex(4) (16 hex chars)" do
       allow(SecureRandom).to receive(:hex).and_call_original
       store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
-      expect(SecureRandom).to have_received(:hex).with(4)
+      # `at_least`: the marker is published through the same temp-file-then-rename helper, so a single fetch
+      # over a fresh root draws two suffixes. The claim is where the suffix comes from, not how many.
+      expect(SecureRandom).to have_received(:hex).with(4).at_least(:once)
     end
 
     it "leaves no .tmp file behind when the rename itself fails" do
+      # Repair the marker first: it is published by rename too, so an unqualified stub would fail the
+      # constructor's repair and this example would never reach the ENTRY write it is about.
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: { warm: true }, descriptor: descriptor
+      ) { "warm" }
       allow(File).to receive(:rename).and_raise(Errno::ENOSPC)
 
       expect do
@@ -646,6 +653,119 @@ RSpec.describe Rigor::Cache::Store do
         producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
       ) { :should_not_run }
       expect(final).to match(/\Avalue-\d+\z/)
+    end
+  end
+
+  # Issue #807. Constructing a Store repairs `schema_version.txt`, and its reader is another PROCESS's
+  # constructor, which holds no lock. An in-place write let that reader see the file empty, decide the marker
+  # disagreed, and clear the whole cache root — under, among others, a sibling between its own existence
+  # check and its read, which surfaced as `Errno::ENOENT` out of `#read_entry`. Two `rigor check` runs over
+  # one fresh `.rigor/cache` are enough.
+  describe "concurrent marker repair (issue #807)" do
+    # Built once on the main thread and only then handed to the racing threads: `let` memoization is not
+    # thread-safe, so no example may reach `descriptor` from inside one.
+    def reader_over(desc)
+      lambda do |store, n, produce|
+        store.fetch_or_compute(
+          producer_id: "p", generation_cap: :unbounded, params: { n: n }, descriptor: desc
+        ) { "#{produce}-#{n}" }
+      end
+    end
+
+    # Releases `count` threads at once, each constructing its own Store over `root` and then reading every
+    # entry, and collects whatever escaped them.
+    def race_constructors(root, read, entries, count)
+      errors = []
+      mutex = Mutex.new
+      gate = Queue.new
+      threads = Array.new(count) do
+        Thread.new do
+          gate.pop
+          store = described_class.new(root: root)
+          entries.times { |n| read.call(store, n, "recomputed") }
+        rescue StandardError => e
+          mutex.synchronize { errors << e }
+        end
+      end
+      sleep 0.05 # let every thread reach the gate, so the repairs really do coincide
+      count.times { gate << :go }
+      threads.each(&:join)
+      errors
+    end
+
+    it "publishes the marker by rename, so a concurrent reader never sees it empty" do
+      renamed = []
+      allow(File).to receive(:rename).and_wrap_original do |original, from, to|
+        renamed << to
+        original.call(from, to)
+      end
+
+      described_class.new(root: cache_root)
+                     .fetch_or_compute(
+                       producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+                     ) { :v }
+
+      marker = File.join(cache_root, "schema_version.txt")
+      expect(renamed).to include(marker)
+      expect(File.read(marker).strip).to eq(described_class.schema_marker_value)
+      expect(Dir.glob("#{marker}.tmp.*")).to be_empty
+    end
+
+    it "treats an EMPTY marker as a missing one rather than clearing the root" do
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :first }
+      key = descriptor.cache_key_for(producer_id: "p", params: {})
+      entry_path = File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry")
+      File.write(File.join(cache_root, "schema_version.txt"), "")
+
+      result = described_class.new(root: cache_root).fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :second }
+
+      expect(File.exist?(entry_path)).to be(true)
+      expect(result).to eq(:first)
+      expect(File.read(File.join(cache_root, "schema_version.txt")).strip)
+        .to eq(described_class.schema_marker_value)
+    end
+
+    it "reads an entry unlinked between the existence check and the open as a miss" do
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :first }
+      fresh = described_class.new(root: cache_root)
+      # What a sibling's `clear_cache_root!` (or an eviction sweep) does to a file this reader has already
+      # stat'd. It must read as the same miss a never-written entry does, not escape as `Errno::ENOENT`.
+      allow(File).to receive(:binread).and_raise(Errno::ENOENT)
+
+      called = 0
+      result = fresh.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) do
+        called += 1
+        :second
+      end
+
+      expect(called).to eq(1)
+      expect(result).to eq(:second)
+    end
+
+    it "survives many stores constructed over one root left stale by an earlier release" do
+      entries = 250
+      root = File.join(tmpdir, "upgrade-race")
+      read = reader_over(descriptor)
+      seed = described_class.new(root: root)
+      entries.times { |n| read.call(seed, n, "seed") }
+      # Every process starting now finds a stale marker and takes the clear-the-root path, so each one's
+      # clear races the others' reads. Pre-fix this raised `Errno::ENOENT` out of `#read_entry` on 12 of 13
+      # measured runs; the three examples above pin the same fix deterministically.
+      File.write(File.join(root, "schema_version.txt"), "0.0.0.0.0\n")
+
+      errors = race_constructors(root, read, entries, 48)
+
+      expect(errors).to be_empty, "raised: #{errors.map(&:inspect).uniq.first(3).join(', ')}"
+      expect(File.read(File.join(root, "schema_version.txt")).strip)
+        .to eq(described_class.schema_marker_value)
     end
   end
 

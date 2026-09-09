@@ -207,10 +207,14 @@ module Rigor
           ["rigor-plugin-tune",
            "Rails is in your Gemfile.lock but no Rails plugins are enabled — wire them so " \
            "ActiveRecord / routes / i18n calls resolve (a bigger win here than community RBS)."]
-        elsif state.fetch(:gems) && !state.fetch(:rbs_collection)
-          ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
+        # ADR-73's second `rbs-setup` priority-softening case (2026-09-10): CI wiring is presence-only and
+        # side-effect-free, while community-RBS install is network-bound (`rbs collection install` hits
+        # rubygems.org). A configured project earns the cheap, local win first — checked ahead of the RBS
+        # gap rather than after it.
         elsif state.fetch(:ci) != :wired
           ["rigor-ci-setup", "Rigor is configured but not wired into CI — lock in the regression guard."]
+        elsif state.fetch(:gems) && !state.fetch(:rbs_collection)
+          ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
         # A present baseline is deliberately NOT a recommendation trigger. A baseline is a healthy, finished onboarding
         # state, not a problem to work off; pushing every baselined project to "reduce it" turns a working build into a
         # chore and tempts scattering `# rigor:disable` through the code to make a number go down — means over ends.

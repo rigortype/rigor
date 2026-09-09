@@ -201,13 +201,23 @@ analysis.
   headline over-recommended. **Landed 2026-06-20:** a configured Rails
   project with no Rails plugins enabled now recommends `rigor-plugin-tune`
   ahead of `rbs-setup` (presence-only — Rails in `Gemfile.lock` + no
-  `rigor-rails-*` plugin in the config; the strap case). The remaining
-  cases — deprioritise when the no-RBS gems are all `development`/`test`,
-  and prefer `ci`/`baseline` on a configured project before a
-  network-bound `rbs collection install` — need to know whether the
-  untyped gems actually hurt *this* project's analysis, so they fold into
-  the headline check-awareness work above rather than more presence
-  heuristics.
+  `rigor-rails-*` plugin in the config; the strap case). **Second case
+  landed 2026-09-10** (#938): a configured project with CI not wired now
+  recommends `rigor-ci-setup` ahead of `rbs-setup` even when the gem
+  gap is also present — CI wiring is presence-only and side-effect-free,
+  while `rbs collection install` is network-bound, so the cheap local win
+  is checked first (`ProjectStateProbe#recommended_name_and_reason`,
+  `lib/rigor/cli/skill_describe.rb`). The remaining case — deprioritise
+  `rbs-setup` when the no-RBS gems are all `development`/`test` — is
+  **declined as a presence-only heuristic**: the probe never identifies
+  *which* gems lack community RBS (`gems` / `rbs_collection` are project-wide
+  booleans, not a per-gem set), and Bundler groups live in the `Gemfile`,
+  not `Gemfile.lock` — the file the probe already parses. Reconstructing
+  per-gem RBS coverage and group membership without running `rbs collection`
+  is exactly the weaker, guessable signal WD2 declines to route on; it
+  still belongs with the check-awareness work (the `--deep` probe already
+  runs a real analysis and could report which Dynamic-typed calls trace to
+  a dev/test-only gem), not with more presence heuristics.
 - **Broken-`sig/` blind spot (clear-win, queued).** `describe` reports
   "sig/ present" even when the RBS env fails to build (a
   `DuplicatedDeclarationError` → `RBS classes available: 0` → hollow

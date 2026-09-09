@@ -4,4 +4,4 @@ assertions:
   '1': 5 | Array[2 | Dynamic[top] | Integer]
   '2': Array[1 | Dynamic[top] | Integer] | Array[2 | 3 | Dynamic[top] | Integer]
   '3': 5 | Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
-  '4': '"s" | 5'
+  '4': 5 | String

@@ -320,7 +320,10 @@ module Rigor
         @err.puts "Install it with: gem install rigor-playground"
         return EXIT_USAGE
       end
-      Rigor::CLI::PlaygroundCommand.new(@argv[1..], @out, @err).run
+      # `run` shifts the verb off `@argv` before dispatching, so the handler receives the arguments
+      # already. Slicing here dropped the first one — `rigor playground --port=4000` served the
+      # default port, and a bare `rigor playground` passed `nil` into a command that iterates it.
+      Rigor::CLI::PlaygroundCommand.new(@argv, @out, @err).run
     end
 
     def run_skill
@@ -383,11 +386,13 @@ module Rigor
                      (opt-in; effects update/check/diff/explain)
           explain    Print the description of one or all CheckRules
           diff       Compare current diagnostics to a saved baseline JSON
+          baseline   Manage the baseline file (baseline generate/regenerate/dump/drift/prune)
           sig-gen    Emit RBS skeletons inferred from .rb sources
           lsp        Run the Rigor Language Server (LSP) over stdio
           mcp        Run the Rigor MCP server over stdio
           triage     Summarise diagnostics: distribution, hotspots, hints
           coverage   Report type-precision coverage (precise vs Dynamic ratio)
+          unused     Report unreferenced classes, modules and constants as removal candidates
           plugins    Report activation status of every configured plugin
           plugin     Browse bundled plugin source as worked examples (list/path/print/root)
           playground Start the browser playground (requires rigor-playground gem)

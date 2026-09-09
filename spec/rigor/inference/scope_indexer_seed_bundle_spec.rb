@@ -104,14 +104,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
   # `module Shop; class Widget` in b.rb records `["Shop"]`. Both spellings render the class name they share,
   # so nothing else in the index distinguishes them. Each site names an ancestor — `Compact` an `include`,
   # `Widget` a superclass — because #708's review made that the condition for recording a chain at all: a
-  # site that names no ancestor has none for its cref to govern.
+  # site that names no ancestor has none for its cref to govern. Issue #728 keys the recorded chain by that
+  # ancestor NAME, so the assertion asks for the name each site wrote.
   it "records the header nesting each spelling is written in" do
     Dir.mktmpdir do |dir|
       paths = write_project(dir)
       table = described_class.discovered_project_index_for_paths(paths)[:def_index][:header_nestings]
 
-      expect(table["Shop::Compact"]).to eq([])
-      expect(table["Shop::Widget"]).to eq(["Shop"])
+      expect(table["Shop::Compact"]["Enumerable"]).to eq([])
+      expect(table["Shop::Widget"]["Base"]).to eq(["Shop"])
     end
   end
 

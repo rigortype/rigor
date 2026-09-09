@@ -84,7 +84,12 @@ module Rigor
       # `[]`, deserialises cleanly, and would send every unchanged file's top-level helper back to the peel
       # on a warm run while a cold run resolved at the top level — the `--verify-incremental` divergence 14
       # was bumped for, in the same table.
-      SCHEMA = 17
+      # 18: issue #728 re-keys each seed bundle's `header_nestings` VALUE from one chain per class to one
+      # chain per ancestor NAME the class's sites wrote, plus an unkeyed chain holding the old union. A
+      # pre-18 blob's Array value is not a Hash and the resolver's per-name lookup would raise on it, so the
+      # gate has to reject it — and even a reader that tolerated the old shape would serve the per-class
+      # union for every unchanged file, which is the answer this issue exists to stop giving.
+      SCHEMA = 18
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

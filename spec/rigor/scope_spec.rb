@@ -551,25 +551,49 @@ RSpec.describe Rigor::Scope do
   # SUBCLASS'S declaration header is written in, which the discovery pre-pass records per class, and
   # never by peeling the subclass's qualified name: the two spellings render the identical name.
   describe "#ancestor_name_candidates" do
+    def unkeyed = Rigor::Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING
+
     def scope_with(header_nestings)
       Rigor::Scope.empty.with_discovery(
         Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_header_nestings: header_nestings)
       )
     end
 
+    # A class whose sites agree: every ancestor name it writes shares one chain.
+    def scope_for(class_name, entries, names)
+      bucket = { unkeyed => entries }
+      names.each { |name| bucket[name] = entries }
+      scope_with({ class_name => bucket })
+    end
+
     it "offers only the bare name for a compact declaration written at the top level" do
-      scope = scope_with({ "Admin::Widget" => [] })
+      scope = scope_for("Admin::Widget", [], %w[Base])
       expect(scope.ancestor_name_candidates("Admin::Widget", "Base")).to eq(%w[Base])
     end
 
     it "offers the enclosing namespace first for the nested spelling of the same class" do
-      scope = scope_with({ "Admin::Widget" => %w[Admin] })
+      scope = scope_for("Admin::Widget", %w[Admin], %w[Base])
       expect(scope.ancestor_name_candidates("Admin::Widget", "Base")).to eq(["Admin::Base", "Base"])
     end
 
     it "walks a multi-keyword nesting innermost first" do
-      scope = scope_with({ "A::B::C" => ["A::B", "A"] })
+      scope = scope_for("A::B::C", ["A::B", "A"], %w[R])
       expect(scope.ancestor_name_candidates("A::B::C", "R")).to eq(["A::B::R", "A::R", "R"])
+    end
+
+    # #728 — the two spellings of one class resolve their OWN ancestor names, in their own crefs. The
+    # per-class chain this replaces gave `Base` the reopen's `["Outer"]` and answered `Outer::Base`.
+    it "answers each ancestor name in the chain of the site that wrote it" do
+      scope = scope_with({ "Foo" => { unkeyed => %w[Outer], "Base" => [], "Helper" => %w[Outer] } })
+      expect(scope.ancestor_name_candidates("Foo", "Base")).to eq(%w[Base])
+      expect(scope.ancestor_name_candidates("Foo", "Helper")).to eq(["Outer::Helper", "Helper"])
+    end
+
+    # A name no declaration site wrote — the mixin an outside `Recv.class_eval { include M }` attributes
+    # here — keeps the per-class union, so it is unchanged rather than degraded.
+    it "falls back to the unkeyed chain for an ancestor name no site recorded" do
+      scope = scope_with({ "Foo" => { unkeyed => %w[Outer], "Base" => [] } })
+      expect(scope.ancestor_name_candidates("Foo", "Helper")).to eq(["Outer::Helper", "Helper"])
     end
 
     # The fallback, and the reason an unrecorded class is unchanged rather than degraded: peeling the
@@ -577,7 +601,7 @@ RSpec.describe Rigor::Scope do
     it "peels the qualified name when no header nesting was recorded, answering the nested spelling" do
       unrecorded = described_class.empty.ancestor_name_candidates("A::B::C", "R")
       expect(unrecorded).to eq(["A::B::R", "A::R", "R"])
-      expect(unrecorded).to eq(scope_with({ "A::B::C" => ["A::B", "A"] }).ancestor_name_candidates("A::B::C", "R"))
+      expect(unrecorded).to eq(scope_for("A::B::C", ["A::B", "A"], %w[R]).ancestor_name_candidates("A::B::C", "R"))
     end
 
     it "peels to the bare name alone for a single-segment class" do

@@ -3,6 +3,7 @@ class Rigor::Plugin::IoBoundary
   def read_file: (untyped) -> String
   def file?: (untyped) -> bool
   def directory?: (untyped) -> bool
+  def list_directory: (untyped) -> Array[String]
   def open_url: (untyped url) -> String
   # Returns a frozen `Rigor::Cache::Descriptor` (no RBS yet -> untyped).
   def cache_descriptor: () -> untyped

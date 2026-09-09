@@ -111,7 +111,10 @@ RSpec.describe "rigor-dry-struct integration" do
 
     it "promotes the synthesised reader's return type via :dry_type_aliases" do # rubocop:disable RSpec/ExampleLength
       Rigor::Plugin.unregister!
-      Dir.mktmpdir do |dir|
+      Dir.mktmpdir do |raw_dir|
+        # #630 — rigor-dry-types now scans through the `IoBoundary`, whose `TrustPolicy` roots come from
+        # the symlink-resolved `Dir.pwd`; `Dir.mktmpdir`'s `/tmp/...` alias sits outside them on macOS.
+        dir = File.realpath(raw_dir)
         File.write(File.join(dir, "types.rb"), types_module)
         File.write(File.join(dir, "demo.rb"), demo_source)
         FileUtils.mkdir_p(File.join(dir, "sig"))

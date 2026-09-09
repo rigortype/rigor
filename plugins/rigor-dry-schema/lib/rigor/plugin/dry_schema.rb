@@ -130,7 +130,8 @@ module Rigor
       # `paths:`, parse errors degrade silently.
       def prepare(services)
         type_aliases = services.fact_store.read(plugin_id: "dry-types", name: :dry_type_aliases) || {}
-        table = SchemaScanner.scan(paths: scannable_paths(services), type_aliases: type_aliases)
+        table = SchemaScanner.scan(paths: scannable_paths(services), io_boundary: io_boundary,
+                                   type_aliases: type_aliases)
         return if table.empty?
 
         services.fact_store.publish(
@@ -164,11 +165,13 @@ module Rigor
         shapes[name] = entry.nil? ? nil : ResultShape.build(entry)
       end
 
+      # ADR-45 WD1b (#613 / #630) — the classification probes go through the boundary, so an entry that
+      # is not there yet (or stops being a directory) is a recorded dependency of the scan's input set.
       def scannable_paths(services)
         @scannable_paths ||= services.configuration.paths.flat_map do |entry|
-          if File.directory?(entry)
+          if io_boundary.directory?(entry)
             Dir.glob(File.join(entry, "**", "*.rb"), sort: true)
-          elsif File.file?(entry) && entry.end_with?(".rb")
+          elsif io_boundary.file?(entry) && entry.end_with?(".rb")
             [entry]
           else
             []

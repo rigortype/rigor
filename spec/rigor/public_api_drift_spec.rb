@@ -451,6 +451,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     cache_descriptor()
     directory?(req:path)
     file?(req:path)
+    list_directory(req:path)
     open_url(req:url)
     plugin_id()
     policy()

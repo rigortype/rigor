@@ -468,7 +468,12 @@ RSpec.describe "rigor-dry-schema integration" do
     Rigor::Plugin.unregister!
     plugin_entries = with_dry_types ? %w[rigor-dry-types rigor-dry-schema] : ["rigor-dry-schema"]
 
+    # #630 — the scanners now read through the `IoBoundary`, whose `TrustPolicy` roots are derived from
+    # `Dir.pwd` (already symlink-resolved). `Dir.mktmpdir` hands back the UNRESOLVED `/tmp/...` alias on
+    # macOS, so a fixture path built from it would sit outside the policy's roots and every read would be
+    # denied. Name the project the same way the policy does.
     Dir.mktmpdir do |dir|
+      dir = File.realpath(dir)
       File.write(File.join(dir, "schema.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "dry_schema.rbs"), dry_schema_rbs)
@@ -483,7 +488,12 @@ RSpec.describe "rigor-dry-schema integration" do
     captured_store = capture_fact_store!
     plugin_entries = with_dry_types ? %w[rigor-dry-types rigor-dry-schema] : ["rigor-dry-schema"]
 
+    # #630 — the scanners now read through the `IoBoundary`, whose `TrustPolicy` roots are derived from
+    # `Dir.pwd` (already symlink-resolved). `Dir.mktmpdir` hands back the UNRESOLVED `/tmp/...` alias on
+    # macOS, so a fixture path built from it would sit outside the policy's roots and every read would be
+    # denied. Name the project the same way the policy does.
     Dir.mktmpdir do |dir|
+      dir = File.realpath(dir)
       File.write(File.join(dir, "schema.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "dry_schema.rbs"), dry_schema_rbs)

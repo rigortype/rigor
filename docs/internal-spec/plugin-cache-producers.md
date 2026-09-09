@@ -103,7 +103,13 @@ file appears; `#file?(path)` / `#directory?(path)` record the same
 existence dependency for a probe the producer never read
 (`FileEntry.present` / `FileEntry.absent`, WD1b / #613) — a producer
 that gates its work on `File.file?` instead records nothing and is
-served past the file's appearance; `#open_url(url)` records a `ConfigEntry`
+served past the file's appearance; `#list_directory(path)` records a
+`GlobEntry` over `path/*` (ADR-45 WD1c / #629) — the listing
+fingerprint for a producer that answers "which of these candidate
+files exists here?", one row per consulted directory instead of one
+per candidate path, and stale on any addition, removal or edit under
+it. Those `GlobEntry` rows join the producer's evaluated `watch:`
+globs in the dependency descriptor; `#open_url(url)` records a `ConfigEntry`
 keyed `"url:#{url}"` whose `value_hash` is the response body's
 SHA-256. A `ConfigEntry` (URL read) in the dependency descriptor
 makes the entry never-fresh — a producer that fetched a URL

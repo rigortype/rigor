@@ -25,7 +25,13 @@ module Rigor
 
       # Dynamic return rule for attached FFI functions
       # Gated on known FFI library receivers and attached function names
-      dynamic_return receivers: -> { producer_value(:ffi_catalog)&.libraries || [] },
+      #
+      # Issue #701 — both receiver kinds are declared because the block below already resolved
+      # `Nominal` and `Singleton` alike: `attach_function` installs the binding on the library module
+      # itself (`MyLib.strlen`) and `include`ing that module makes the same name an instance call, so
+      # neither kind is an accident. The kind-aware gate makes that intent explicit rather than relying
+      # on a `receivers:` entry answering for both.
+      dynamic_return receivers: -> { both_receiver_kinds(producer_value(:ffi_catalog)&.libraries) },
                      methods: -> { producer_value(:ffi_catalog)&.function_method_names || [] } do |call_node, scope|
         catalog = producer_value(:ffi_catalog)
         next nil if catalog.nil?
@@ -51,7 +57,11 @@ module Rigor
 
       # Dynamic return rule for FFI struct field accessors
       # Gated on known FFI struct class names and field names
-      dynamic_return receivers: -> { producer_value(:ffi_catalog)&.struct_names || [] },
+      #
+      # Issue #701 — both kinds again, for the same reason: the block resolves the receiver itself and
+      # answers only for a name the discovered layout carries, so restricting the gate to instances
+      # would narrow a shipped rule on a shape nothing in the corpus has adjudicated.
+      dynamic_return receivers: -> { both_receiver_kinds(producer_value(:ffi_catalog)&.struct_names) },
                      methods: -> { producer_value(:ffi_catalog)&.struct_field_names || [] } do |call_node, scope|
         catalog = producer_value(:ffi_catalog)
         next nil if catalog.nil?
@@ -113,6 +123,16 @@ module Rigor
         root = config["root"] || Dir.pwd
         @target = TargetDetector.detect(root: root, config: config)
         @exceptions = config["exceptions"] || []
+      end
+
+      private
+
+      # Every discovered name in both `dynamic_return receivers:` kinds (#701), for the two rules whose
+      # blocks accept an instance and a class receiver alike.
+      #
+      # @param names — discovered class / module names, or nil when the catalog producer did not run
+      def both_receiver_kinds(names)
+        Array(names).flat_map { |name| [name, "singleton(#{name})"] }
       end
     end
   end

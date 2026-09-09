@@ -40,6 +40,13 @@ module Rigor
     #
     #   Rigor::Plugin.register(MyRailsPlugin)
     class Base # rubocop:disable Metrics/ClassLength
+      # Issue #701 — the kind wrapper a `dynamic_return receivers:` entry may carry, spelled as RBS spells a
+      # class object and as the `call.undefined-method` message prints one, so an author writes the gate the
+      # way the diagnostic they are answering names the receiver. Declared on the class rather than inside
+      # `class << self` because both the load-time validator and the per-dispatch gate read it.
+      SINGLETON_RECEIVER_PATTERN = /\Asingleton\((.+)\)\z/
+      private_constant :SINGLETON_RECEIVER_PATTERN
+
       class << self
         # Declares the plugin's manifest. Called once at class definition time — the resulting {Manifest} is
         # cached on the class so {Rigor::Plugin::Loader} reads it without constructing the plugin.
@@ -241,8 +248,21 @@ module Rigor
         #   end
         #
         # `receivers:` is a non-empty Array of class names; the engine calls the block only when the call's
-        # receiver type's class equals or inherits from one of them (via `Environment#class_ordering`). It
-        # MAY be omitted — then the rule is receiver-independent and fires on `methods:` alone.
+        # receiver type's class equals or inherits from one of them (via `Environment#class_ordering`) AND
+        # is of the kind the entry names. It MAY be omitted — then the rule is receiver-independent and
+        # fires on `methods:` alone.
+        #
+        # Issue #701 — an entry carries the receiver KIND in RBS's own spelling. `"Widget"` matches an
+        # INSTANCE receiver; `"singleton(Widget)"` matches the class object itself; a rule that wants both
+        # lists both:
+        #
+        #   dynamic_return receivers: ["Widget"], methods: [:price]                  # Widget#price
+        #   dynamic_return receivers: ["singleton(Widget)"], methods: [:build]       # Widget.build
+        #   dynamic_return receivers: ["Widget", "singleton(Widget)"]                # either
+        #
+        # An instance rule that also answered on the class typed a call the plugin never modelled, and since
+        # #653 a plugin's answer suppresses `call.undefined-method` — so the class-level miss went silent on
+        # the say-so of a rule written for the instance.
         #
         # `methods:` is an Array of Symbol method names. When provided, the block is skipped unless
         # `call_node.name` is in the list — declarative and cheaper than an in-block guard (the engine
@@ -260,6 +280,9 @@ module Rigor
         #     # fires when the receiver class is one a `prepare`-time scan
         #     # found; the block does the precise per-call lookup
         #   end
+        #
+        # A callable's entries carry the kind the same way — `-> { names.map { "singleton(#{_1})" } }` for a
+        # discovered set of class-level receivers.
         #
         # The callable runs through `instance_exec`, so it reads the plugin's own `#prepare`-built indexes.
         # It MUST be idempotent and post-`#prepare`-safe — reference a lazily-built / memoised index (as
@@ -376,11 +399,23 @@ module Rigor
           # ADR-52 slice 3 — a run-time callable is resolved per instance after `#prepare`; its shape is
           # checked at resolution time.
           return if receivers.respond_to?(:call)
-          return if receivers.is_a?(Array) && !receivers.empty? && receivers.all? { |r| r.is_a?(String) && !r.empty? }
+          return if receivers.is_a?(Array) && !receivers.empty? &&
+                    receivers.all? { |r| valid_dynamic_return_receiver?(r) }
 
           raise ArgumentError,
                 "Plugin::Base.dynamic_return receivers: must be a non-empty Array of class-name Strings " \
-                "or a callable, got #{receivers.inspect}"
+                "(\"Foo\" for an instance receiver, \"singleton(Foo)\" for the class itself) or a " \
+                "callable, got #{receivers.inspect}"
+        end
+
+        # Issue #701 — the entry grammar: a non-empty class name, optionally wrapped in RBS's own
+        # `singleton(...)`. A bare `singleton()` is rejected rather than read as a class literally named
+        # that, so a typo in the kind wrapper fails at load instead of never matching.
+        def valid_dynamic_return_receiver?(entry)
+          return false unless entry.is_a?(String) && !entry.empty?
+          return SINGLETON_RECEIVER_PATTERN.match?(entry) if entry.start_with?("singleton(")
+
+          true
         end
 
         def validate_dynamic_return_methods!(methods)
@@ -397,7 +432,8 @@ module Rigor
         end
 
         private :validate_dynamic_return_gate!, :validate_dynamic_return_receivers!,
-                :validate_dynamic_return_methods!, :validate_dynamic_return_file_methods!
+                :validate_dynamic_return_methods!, :validate_dynamic_return_file_methods!,
+                :valid_dynamic_return_receiver?
 
         # ADR-37 slice 2 — declares a predicate/assertion narrowing contribution, method-gated. The narrow
         # successor to the `post_return_facts` slot of the deleted `flow_contribution_for` hook (ADR-52 WD3):
@@ -545,19 +581,15 @@ module Rigor
 
       # ADR-37 slice 2 — the return type contributed by this plugin's {.dynamic_return} rules for a call, or
       # nil. The engine calls this from `MethodDispatcher`; a rule fires only when `receiver_type`'s class
-      # equals or inherits from one of its declared `receivers:`. First non-nil wins (declaration order).
-      # Failures isolate to nil.
+      # equals or inherits from one of its declared `receivers:` AND is of that entry's kind (#701). First
+      # non-nil wins (declaration order). Failures isolate to nil.
       def dynamic_return_type(call_node:, scope:, receiver_type:)
         rules = self.class.dynamic_returns
         return nil if rules.empty? || receiver_type.nil?
 
-        # `class_name` is nil for a receiver carrier with no nominal class (a refinement dimension, an
-        # inferred shape) — fine for a receiver-less (methods-only) rule (ADR-52 WD2), which gates on the
-        # method name alone and reads the receiver shape inside its own block.
-        class_name = dynamic_return_receiver_class_name(receiver_type)
         environment = scope&.environment
         rules.each do |rule|
-          next unless dynamic_return_rule_applies?(rule, call_node, class_name, environment, scope)
+          next unless dynamic_return_rule_applies?(rule, call_node, receiver_type, environment, scope)
 
           result = instance_exec(call_node, scope, &rule[:block])
           return result if result
@@ -835,7 +867,9 @@ module Rigor
 
       # ADR-37 slice 2 — the class name to match a `dynamic_return` `receivers:` entry against, from a
       # receiver `Type`. Covers the instance (`Nominal[X]`) and class (`Singleton[X]`) shapes; other carriers
-      # decline (nil → no match).
+      # decline (nil → no match). Which of the two KINDS the name is then matched as is
+      # {#dynamic_return_receiver_matches?}'s question — the `Result` / `Maybe` carriers are instances of
+      # their class, like `Nominal`.
       def dynamic_return_receiver_class_name(receiver_type)
         case receiver_type
         when Rigor::Type::Nominal, Rigor::Type::Singleton then receiver_type.class_name
@@ -847,7 +881,7 @@ module Rigor
       # The gate for one `dynamic_return` rule. Method-name gate first — a Symbol-array probe vs the receiver
       # ancestry resolution below (ADR-52 WD1); both are pure predicates, so order only affects cost. A
       # receiver-less rule (ADR-52 WD2) skips the ancestry check entirely and fires on the method name alone.
-      def dynamic_return_rule_applies?(rule, call_node, class_name, environment, scope)
+      def dynamic_return_rule_applies?(rule, call_node, receiver_type, environment, scope)
         return false if rule[:methods] && !resolved_dynamic_return_methods(rule).include?(call_node.name)
 
         if rule[:file_methods]
@@ -857,11 +891,29 @@ module Rigor
           return false unless resolved_dynamic_return_file_methods(rule, path).include?(call_node.name)
         end
 
-        receivers = resolved_dynamic_return_receivers(rule)
-        return true if receivers.nil?
+        entries = resolved_dynamic_return_receiver_entries(rule)
+        return true if entries.nil?
+
+        dynamic_return_receiver_matches?(entries, receiver_type, environment)
+      end
+
+      # Issue #701 — the receiver gate, kind included. An entry written for an instance (`"Widget"`) must not
+      # answer for the class object: the block was never given the class-level call to model, and since #653
+      # its answer would suppress that call's `call.undefined-method`, hiding a genuine miss on the plugin's
+      # say-so. A rule that wants the class object declares `"singleton(Widget)"`, and one that wants both
+      # lists both.
+      #
+      # A nil class name is a carrier with no nominal class (a refinement dimension, an inferred shape); a
+      # receiver-gated rule cannot speak about it and declines. A receiver-less rule (ADR-52 WD2) never
+      # reaches here.
+      def dynamic_return_receiver_matches?(entries, receiver_type, environment)
+        class_name = dynamic_return_receiver_class_name(receiver_type)
         return false if class_name.nil?
 
-        receivers.any? { |c| class_matches_receiver?(class_name, c, environment) }
+        singleton = receiver_type.is_a?(Rigor::Type::Singleton)
+        entries.any? do |name, singleton_entry|
+          singleton_entry == singleton && class_matches_receiver?(class_name, name, environment)
+        end
       end
 
       # ADR-52 slice 4 — the rule's method-name set. A static Array is returned as-is (`#include?` over
@@ -907,6 +959,24 @@ module Rigor
         # `||=` is a no-op there (never a FrozenError).
         (@dynamic_return_runtime_cache ||= {})[rule] ||=
           Array(instance_exec(&receivers)).map { |c| c.to_s.dup.freeze }.freeze
+      end
+
+      # Issue #701 — the resolved `receivers:` entries as `[class_name, singleton?]` pairs, or nil for a
+      # receiver-less rule. Memoised per rule beside the callable resolution above, so the kind is parsed
+      # once per run rather than once per dispatch (this sits on the per-dispatch plugin path).
+      def resolved_dynamic_return_receiver_entries(rule)
+        receivers = resolved_dynamic_return_receivers(rule)
+        return nil if receivers.nil?
+
+        (@dynamic_return_runtime_cache ||= {})[[:receiver_entries, rule]] ||=
+          receivers.map { |entry| parse_dynamic_return_receiver(entry) }.freeze
+      end
+
+      def parse_dynamic_return_receiver(entry)
+        match = SINGLETON_RECEIVER_PATTERN.match(entry)
+        return [match[1].freeze, true].freeze if match
+
+        [entry, false].freeze
       end
 
       # True when `class_name` equals or inherits from `constraint`, matched through

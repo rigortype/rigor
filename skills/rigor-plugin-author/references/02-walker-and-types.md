@@ -194,6 +194,16 @@ dynamic_return receivers: ["Money"] do |call_node, scope|
   Rigor::Type::Combinator.nominal_of("Money")
 end
 
+# A `receivers:` entry names the receiver KIND too. `"Money"` matches an
+# INSTANCE receiver; the class object itself is `"singleton(Money)"`,
+# spelled as RBS spells it; a rule for both lists both. Write the kind
+# the rule actually models: a plugin answer suppresses that call site's
+# `call.undefined-method`, so an instance rule that also answered on the
+# class would silence a genuine miss on the class-level call.
+dynamic_return receivers: ["singleton(Money)"], methods: [:from_cents] do |call_node, scope|
+  Rigor::Type::Combinator.nominal_of("Money")
+end
+
 # Post-return NARROWING FACTS, gated on the call's method name.
 # Return an Array of facts (or nil). Used for assertion / predicate
 # narrowing (`assert_kind_of(Foo, x)` ⇒ x is Foo afterwards).

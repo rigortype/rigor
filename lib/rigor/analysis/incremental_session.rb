@@ -803,20 +803,24 @@ module Rigor
       end
 
       # ADR-46 slice 3 — the consumers to re-check because a symbol that appeared in a changed file resolves
-      # a prior missed lookup. Maps each appeared `"ClassName#method"` to the negative-dependency key it
-      # would satisfy (`toplevel:foo` for a top-level def, `method:C#m` otherwise), then unions the recorded
-      # negative-dependents of those keys.
+      # a prior missed lookup, and (issue #639) because a class DECLARATION appeared or vanished. Maps each
+      # appeared `"ClassName#method"` to the negative-dependency key it would satisfy (`toplevel:foo` for a
+      # top-level def, `method:C#m` otherwise), then unions the recorded negative-dependents of those keys.
       def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
-        appeared_classes = Incremental.appeared_classes(changed, @class_decls, new_class_decls)
+        # Issue #639 — a class DISAPPEARING satisfies the `class:` kind too, now that a resolved bare
+        # reference records the edge and not only a failed one; removed files join the diff for it.
+        moved_classes = Incremental.changed_class_declarations(
+          changed + removed, @class_decls, new_class_decls
+        )
         # Issue #644 — a constant whose PUBLICATION moved satisfies the `constant:` kind, keyed on the same
-        # last segment the consumer recorded. REMOVED files join the diff here and nowhere else: deleting a
-        # second declarer restores the precise answer, and no other producer input can see that.
+        # last segment the consumer recorded. Removed files join this diff (as they do the class one above):
+        # deleting a second declarer restores the precise answer, and no other producer input can see that.
         moved_constants = Incremental.changed_constant_publications(
           changed + removed, @constant_decls, new_constant_decls
         )
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
-        keys.concat(appeared_classes.map { |klass| "class:#{klass.split('::').last}" })
+        keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents)
       end

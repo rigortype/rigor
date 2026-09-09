@@ -187,7 +187,9 @@ firing, fix it at its root, do not route around it.
 sig.skipped.untyped-return` answers `Unknown rule`. So the skip-reason table lives in
 `references/03-gap-protocol.md`, a
 second home for ids the CLI should own. Small follow-up: extend `rigor explain` to the `sig.skipped.*`
-ids, or document them in the manual.
+ids, or document them in the manual. **Closed ([#936](https://github.com/rigortype/rigor/issues/936)):**
+`rigor explain` carries a second catalogue for the skip reasons, gated so every id the classifier can
+produce is answerable.
 
 ### WD5 — Provenance travels with the answer
 

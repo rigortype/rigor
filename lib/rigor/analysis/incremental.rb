@@ -120,6 +120,22 @@ module Rigor
         appeared.freeze
       end
 
+      # Issue #639 — the SYMMETRIC reading of {appeared_classes}: the names whose declaration in a file
+      # appeared OR VANISHED. Appearance alone answered the miss side, which was the only side recording a
+      # `class:` edge; a bare reference that RESOLVED now records one too, and what invalidates it is the
+      # declaration going away. `paths` MUST therefore include REMOVED files — a removed file has no
+      # after-state, so its whole before-set vanished — which is the same reason
+      # {changed_constant_publications} diffs over `changed + removed`.
+      def changed_class_declarations(paths, decls_before, decls_after)
+        moved = Set.new
+        paths.each do |path|
+          before = decls_before[path] || Set.new
+          after  = decls_after[path]  || Set.new
+          moved.merge(after ^ before)
+        end
+        moved.freeze
+      end
+
       # Issue #644 — the qualified constant names whose PUBLICATION could have moved in this edit: the names
       # whose per-file census descriptor differs between the before- and after-state of any file in `paths`.
       # The value-constant twin of {appeared_classes}, and deliberately NOT its analogue — a class either

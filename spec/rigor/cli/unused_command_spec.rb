@@ -174,4 +174,51 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
   end
+
+  # ADR-102 WD5 — the refusal is the soundness boundary made visible, and the ADR requires a spec to
+  # pin it: the failure mode of silently absorbing `--incremental` is a confidently-wrong candidate
+  # list, which no later run reports as an error.
+  describe "`--incremental` (ADR-102 WD5)" do
+    def run_raw(dir, *argv)
+      out = StringIO.new
+      err = StringIO.new
+      status = Dir.chdir(dir) { described_class.new(argv: argv, out: out, err: err).run }
+      [status, out.string, err.string]
+    end
+
+    it "refuses `--incremental` with a non-zero exit and an explanatory message" do
+      Dir.mktmpdir do |dir|
+        write_project(dir)
+        status, out, err = run_raw(dir, "--incremental")
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(status).not_to eq(0)
+        expect(err).to include("does not support --incremental")
+        expect(err).to include("whole-project")
+        expect(out).to be_empty
+      end
+    end
+
+    it "refuses it wherever it appears in the argument list" do
+      Dir.mktmpdir do |dir|
+        write_project(dir)
+        status, _out, err = run_raw(dir, "--format=json", "--incremental", "lib")
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to include("does not support --incremental")
+      end
+    end
+
+    # The control: the refusal must be specific to the rejected flag, not a broken option parser.
+    it "still runs a whole-project report when the flag is absent" do
+      Dir.mktmpdir do |dir|
+        write_project(dir)
+        status, payload, err = run_in(dir)
+
+        expect(status).to eq(0)
+        expect(err).not_to include("--incremental")
+        expect(payload).to have_key("candidates")
+      end
+    end
+  end
 end

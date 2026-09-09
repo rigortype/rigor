@@ -1119,6 +1119,21 @@ module Rigor
     end
     private :record_class_dependency
 
+    # Issue #639 — the EXISTENCE edge for a bare class reference, `class:<last segment>`, the hit-side twin of
+    # the miss-side key `Inference::ExpressionTyper` already records. ADR-46 slice 1c left the existence hit
+    # edgeless on the reasoning that a file merely referencing `Post` depends on `Post`'s methods, not on its
+    # bare existence; that stops holding the moment the DECLARING FILE IS DELETED, because existence is then
+    # exactly what changed and a reference-only consumer had recorded nothing to be re-checked by.
+    #
+    # NAME-keyed rather than a positive edge to the declaring file, which is the distinction the ADR's cost
+    # argument turns on: the declared-class set of a file does not move when a method body in it is edited,
+    # so a bare referent is re-checked when the class appears or disappears and at no other time. A file edge
+    # would have re-checked every bare referent of every class the file declares on any edit to it.
+    def record_class_existence(class_name)
+      segment = class_name.to_s.delete_prefix("::").split("::").last
+      Analysis::DependencyRecorder.read_name(:class, segment) if segment
+    end
+
     # Issue #644 — the positive ADR-46 edge for a cross-file VALUE constant. `Reflection.constant_type_at`
     # calls this the moment a candidate resolves through `in_source_constants`, so the reader depends on the
     # file that wrote the constant: editing the literal, or deleting the file, re-checks the reader. Recorded

@@ -1,0 +1,1 @@
+- **[incremental]** A warm `--incremental` run now re-checks a file that merely references a class when the file declaring that class is deleted, instead of continuing to report the class as if it still existed. ([#958](https://github.com/rigortype/rigor/pull/958))

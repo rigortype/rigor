@@ -417,4 +417,65 @@ RSpec.describe Rigor::CLI::DoctorCommand do
       expect(status).to eq(0)
     end
   end
+
+  # ADR-25 carry-over — the plain `bundle install` layout cannot be DETECTED (the gem home belongs to the
+  # project's Ruby and ADR-27 forbids running its toolchain), so doctor names the state instead. The failure
+  # it replaces is silent: gem-shipped `sig/` simply never loads and nothing says why.
+  describe "bundle layout (ADR-25)" do
+    def finding(payload, id)
+      payload.fetch("checks").find { |c| c.fetch("id") == id }
+    end
+
+    def write_project
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - clean.rb\n")
+    end
+
+    it "warns when a Gemfile.lock exists but no bundle root is resolvable" do
+      write_project
+      File.write("Gemfile.lock", "GEM\n  remote: https://rubygems.org/\n  specs:\n    rake (13.0.0)\n")
+
+      status, out, = run(["--format=json"])
+      payload = JSON.parse(out)
+      row = finding(payload, "bundle_layout")
+
+      expect(row).not_to be_nil
+      expect(row.fetch("status")).to eq("warn")
+      expect(row.fetch("message")).to include("default gem home")
+      expect(row.fetch("hint")).to include("bundler.bundle_path:")
+      # A layout finding is advisory: the Ruby default is a correct install, so it must not fail the run.
+      expect(status).to eq(0)
+    end
+
+    # The control: the check must stay quiet on the layouts discovery already handles, or it is noise on
+    # every correctly-configured project.
+    it "stays silent when an in-tree vendor/bundle is present" do
+      write_project
+      File.write("Gemfile.lock", "GEM\n  remote: https://rubygems.org/\n  specs:\n    rake (13.0.0)\n")
+      FileUtils.mkdir_p(File.join("vendor", "bundle"))
+
+      _status, out, = run(["--format=json"])
+
+      expect(finding(JSON.parse(out), "bundle_layout")).to be_nil
+    end
+
+    it "stays silent when `bundler.bundle_path:` points at a real directory" do
+      write_project
+      File.write("Gemfile.lock", "GEM\n  remote: https://rubygems.org/\n  specs:\n    rake (13.0.0)\n")
+      FileUtils.mkdir_p("elsewhere")
+      File.write(".rigor.yml", "paths:\n  - clean.rb\nbundler:\n  bundle_path: elsewhere\n")
+
+      _status, out, = run(["--format=json"])
+
+      expect(finding(JSON.parse(out), "bundle_layout")).to be_nil
+    end
+
+    it "stays silent on a project that does not use Bundler at all" do
+      write_project
+
+      _status, out, = run(["--format=json"])
+
+      expect(finding(JSON.parse(out), "bundle_layout")).to be_nil
+    end
+  end
 end

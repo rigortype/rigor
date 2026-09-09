@@ -262,6 +262,7 @@ RSpec.describe "plugins/rigor-activerecord" do
         ActiveRecord::Schema.define do
           create_table :users do |t|
             t.string :name
+            t.string :email
             t.text   :prefs
             t.string :avatar
           end
@@ -305,6 +306,56 @@ RSpec.describe "plugins/rigor-activerecord" do
       }
       _result, index = run_ar_with_index("User.find(1)\n", models: models, schema: override_schema)
       expect(index.find("User").column("name").ruby_type).to eq("String")
+    end
+
+    # ADR-82 WD4 — the plugin recognises the reader (the schema declares the column) and knows it cannot
+    # type it, which is exactly the `framework_dsl_boundary` cause: a macro-generated attribute whose value
+    # crosses a DSL boundary and stays dynamic. Answering `Dynamic[top]` rather than declining is what makes
+    # the engine attribute it; declining left the site in the generic catch-all and the whole
+    # `enable_plugin` tractability category reading as empty on real apps.
+    it "answers Dynamic[top] for a macro-typed column so the site is attributed to the DSL boundary" do
+      _result, index = run_ar_with_index("User.find(1)\n", models: override_models, schema: override_schema)
+      runner_plugin = Rigor::Plugin::Activerecord.allocate
+      runner_plugin.instance_variable_set(:@model_index, index)
+
+      call_node = Prism.parse("user.prefs").value.statements.body.first
+      double_scope = Object.new
+      double_scope.define_singleton_method(:type_of) { |_node| Rigor::Type::Combinator.nominal_of("User") }
+      double_scope.define_singleton_method(:environment) { nil }
+      type = runner_plugin.dynamic_return_type(
+        call_node: call_node, scope: double_scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
+
+      expect(type).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    # The control: answering the untypable column must not coarsen the columns the plugin CAN type.
+    it "still narrows a plain scalar column to its nominal type" do
+      _result, index = run_ar_with_index("User.find(1)\n", models: override_models, schema: override_schema)
+      runner_plugin = Rigor::Plugin::Activerecord.allocate
+      runner_plugin.instance_variable_set(:@model_index, index)
+
+      call_node = Prism.parse("user.email").value.statements.body.first
+      double_scope = Object.new
+      double_scope.define_singleton_method(:type_of) { |_node| Rigor::Type::Combinator.nominal_of("User") }
+      double_scope.define_singleton_method(:environment) { nil }
+      type = runner_plugin.dynamic_return_type(
+        call_node: call_node, scope: double_scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
+
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    # Provenance-only: the site's TYPE is what dispatch would have widened to anyway, so the diagnostic
+    # stream over a project that reads a macro-typed column must not move.
+    it "leaves the diagnostic stream unchanged on a project that reads a macro-typed column" do
+      source = "user = User.find(1)\nuser.prefs.fetch(:theme)\nuser.email.downcase\n"
+      diags = run_ar(source, models: override_models, schema: override_schema).diagnostics
+
+      expect(diags.map(&:rule)).not_to include("call.undefined-method")
+      expect(diags.map(&:rule)).not_to include("call.possible-nil-receiver")
     end
 
     it "still validates existence of a type-overridden column (`where(col:)`)" do
@@ -1932,7 +1983,10 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(type).to eq(bool_union)
     end
 
-    it "declines for a json / jsonb (`Object`-typed) column" do
+    # ADR-82 WD4 — was a decline. The plugin still contributes NO narrower type than dispatch would
+    # produce, but it now says so explicitly: `Dynamic[top]` is the plugin ANSWERING, which is what makes
+    # the engine attribute the site to `framework_dsl_boundary`.
+    it "answers Dynamic[top] for a json / jsonb (`Object`-typed) column" do
       models = {
         "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
         "app/models/account.rb" => "class Account < ApplicationRecord\nend\n"
@@ -1947,7 +2001,7 @@ RSpec.describe "plugins/rigor-activerecord" do
       _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
       type = column_contribution(index: index, source: "account.preferences", receiver_class: "Account")
 
-      expect(type).to be_nil
+      expect(type).to eq(Rigor::Type::Combinator.untyped)
     end
 
     it "declines for a method that is neither a column nor an association" do

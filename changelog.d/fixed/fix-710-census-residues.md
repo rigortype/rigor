@@ -1,0 +1,1 @@
+- **[constants]** A `Klass = Class.new { self::X = 7 }` no longer stops a plain `X = 5` in another file publishing its value, and a constant write through a dynamic base (`[Foo].each { |k| k::X = 1 }`) no longer makes `flow.always-truthy-condition` fire on a constant the file never declared ([#895](https://github.com/rigortype/rigor/pull/895)).

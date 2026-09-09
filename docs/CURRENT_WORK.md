@@ -26,32 +26,17 @@ cut happens only when the user invokes `/rigor-release-prep`.
 
 ## 2026-09-09 batch 4 — six lanes, all landed
 
-- [#916](https://github.com/rigortype/rigor/pull/916) closed #673. `ActiveSupport::TimeWithZone` is a
-  declared `::Time` SUBCLASS, which buys its readers without the union #632 measured as collapsing
-  every downstream chain. Argument checking now admits keyword-bearing signatures, but only a
-  CLASS-refuted argument fires there — unrestricted it produced two new verdicts on correct code
-  across six projects. By-product true positive: `rigor-sorbet`'s `translate_shape` handed an Array
-  to `hash_shape_of`, so every `sig { returns({…}) }` degraded to `Dynamic[top]` through the plugin's
-  rescue, contradicting its documented never-fails contract.
-- [#914](https://github.com/rigortype/rigor/pull/914) closed #661's three gaps. The overlay parity
-  guard now names the drifted selector instead of raising `NameError` from its failure lambda (a
-  lambda body only runs on failure, which is why a green suite never caught it); widening it to
-  compare SIGNATURES was declined, because the overlay is legitimately the more conservative copy.
-  `a <=> b` on an inherited `Kernel#<=>` reads `Integer?` rather than the identity comparison's `0?`,
-  which had been narrowing `n.negative? if n` to a `bot` branch.
-- [#912](https://github.com/rigortype/rigor/pull/912) closed #668 and #663. A dynamic constant target
-  is filed under a `*::LIMIT` wildcard key, not the bare last segment — the one name such a write can
-  never reach. `IncrementalSnapshot::SCHEMA` 18 → 19, because a pre-19 blob's bare key deserialises
-  cleanly and would serve the pre-fix answer warm. For #663 the rule is "any writer outside the
-  listed set", not the issue's literal `sources.size > 1`.
-- [#910](https://github.com/rigortype/rigor/pull/910) closed #898 — `extend` survives to `Scope`
-  (recorded since #526, thrown away inside the indexer). Per module the question is `M <= target`:
-  `:equal` / `:subclass` / `:unknown` withhold the `Bot`, `:superclass` and `:disjoint` keep it. The
-  first cut used "not `:disjoint`" and silently retracted `case Widget when Integer` — now pinned.
-- [#907](https://github.com/rigortype/rigor/pull/907) — the #693 SIZING, and its conclusion was
-  **not worth doing**. See below.
-- Batch 3 (#899, #901, #902, #903, #904, #905), batch 2 (#892–#897) and batch 1 (#864–#891) are in
-  the git log; each closed the issue it names.
+- [#916](https://github.com/rigortype/rigor/pull/916) closed #673: `TimeWithZone` is a declared `::Time`
+  subclass; keyword-bearing signatures are argument-checked, but only a CLASS-refuted argument fires.
+  By-product true positive: `rigor-sorbet`'s `translate_shape` degraded every `sig { returns({…}) }`.
+- [#914](https://github.com/rigortype/rigor/pull/914) closed #661: the overlay parity guard names the
+  drifted selector (its failure lambda used to raise `NameError`); inherited `Kernel#<=>` reads `Integer?`.
+- [#912](https://github.com/rigortype/rigor/pull/912) closed #668/#663: dynamic constant targets file
+  under a `*::LIMIT` wildcard key; `IncrementalSnapshot::SCHEMA` 18 → 19.
+- [#910](https://github.com/rigortype/rigor/pull/910) closed #898: `extend` reaches `Scope`; per module
+  `M <= target` decides whether the `Bot` is withheld (`:equal`/`:subclass`/`:unknown`) or kept.
+- [#907](https://github.com/rigortype/rigor/pull/907) — the #693 sizing; conclusion **not worth doing**.
+- Batches 1–3 (#864–#905) are in the git log; each closed the issue it names.
 
 ## The #693 measurement, and why it matters more than the fix would have
 

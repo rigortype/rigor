@@ -1,0 +1,1 @@
+- **[engine]** A class reopened under a rooted header that includes a module no longer resolves its superclass through the reopen's namespace: each ancestor name is now resolved in the nesting of the declaration site that wrote it, as Ruby does ([#896](https://github.com/rigortype/rigor/pull/896)).

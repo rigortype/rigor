@@ -144,6 +144,49 @@ RSpec.describe Rigor::Plugin::Registry do
       registry = described_class.new(plugins: [ts])
       expect(registry.type_node_resolvers).to eq([pick, omit])
     end
+
+    # Issue #806 — the reader is demanded from `Environment#build_name_scope` during Environment
+    # CONSTRUCTION, where nothing rescues; before the guard a raising manifest aborted the whole run.
+    describe "a plugin whose manifest read raises (#806)" do
+      # A `Plugin::Base` subclass that never declared a manifest — `Base.manifest` with no fields raises
+      # `ArgumentError`. This is the shape the loader's own validation is supposed to keep out, which is
+      # why the defect is latent rather than reachable from a `.rigor.yml` today.
+      let(:manifest_less_plugin_class) { Class.new(Rigor::Plugin::Base) }
+
+      let(:registry) do
+        healthy = build_plugin("ts-utilities", [resolver], services)
+        described_class.new(plugins: [manifest_less_plugin_class.new(services: services), healthy])
+      end
+      let(:resolver) { resolver_class.new }
+
+      it "does not raise, and still aggregates the healthy plugins' resolvers" do
+        expect { registry }.not_to raise_error
+        expect(registry.type_node_resolvers).to eq([resolver])
+      end
+
+      it "records the failure on the load-error channel, naming the plugin" do
+        expect(registry).to be_any_load_errors
+        error = registry.load_errors.last
+        expect(error).to be_a(Rigor::Plugin::LoadError)
+        expect(error.plugin_ref.to_s).to eq(manifest_less_plugin_class.to_s)
+        expect(error.message).to include("raised while reading its manifest", "ArgumentError")
+        expect(error.cause_class).to eq(ArgumentError)
+      end
+
+      it "keeps the loader's own errors ahead of the manifest ones" do
+        loader_error = Rigor::Plugin::LoadError.new("boom", plugin_ref: "rigor-earlier")
+        registry = described_class.new(
+          plugins: [manifest_less_plugin_class.new(services: services)], load_errors: [loader_error]
+        )
+
+        expect(registry.load_errors.map(&:plugin_ref).map(&:to_s))
+          .to eq(["rigor-earlier", manifest_less_plugin_class.to_s])
+      end
+
+      it "lets Environment construct over it (the #806 crash site)" do
+        expect { Rigor::Environment.new(plugin_registry: registry) }.not_to raise_error
+      end
+    end
   end
 
   describe "#signature_paths (ADR-25)" do

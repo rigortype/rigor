@@ -843,8 +843,10 @@ A subclass overrides one method:
   no-op.
 
 The engine aggregates every loaded plugin's resolvers — in
-**plugin-registration order** (`Registry#type_node_resolvers` flat-maps
-across plugins) — into a single `Rigor::TypeNode::ResolverChain`, which
+**plugin-registration order** (`Registry#type_node_resolvers`, compiled
+at registry construction from the same guarded manifest read its
+`compile_aggregates` siblings use) — into a single
+`Rigor::TypeNode::ResolverChain`, which
 consults them in order and returns the **first non-`nil`** answer. The
 chain is composed once per `Analysis::Runner.run`; when no plugin
 contributes a resolver the engine short-circuits (no `NameScope` is
@@ -881,7 +883,7 @@ and exposed as `Analysis::Runner#plugin_registry`.
 | `#plugins` | Loaded `Rigor::Plugin::Base` instances in deterministic order. |
 | `#ids` | `Array<String>` of manifest ids, parallel to `#plugins`. |
 | `#find(id)` | Lookup by id; `nil` when absent. |
-| `#load_errors` | `Array<Rigor::Plugin::LoadError>` collected during loading. |
+| `#load_errors` | `Array<Rigor::Plugin::LoadError>` collected during loading, followed by any raised by a plugin's manifest read at registry construction. |
 | `#empty?` / `#any_load_errors?` | Predicates. |
 
 `Registry::EMPTY` is the singleton frozen empty registry the
@@ -968,7 +970,20 @@ genuinely mixed installations that anchoring cannot see.
 ## Failure isolation (per ADR-2 § "Plugin Trust and I/O Policy")
 
 Loading runs every plugin entry independently; a failure on one
-entry does not abort the others. Each failure is collected as a
+entry does not abort the others. Registry construction then reads
+each loaded plugin's manifest once, behind the same per-plugin
+isolation: a plugin whose `#manifest` raises contributes nothing to
+the construction-time aggregates (`type_node_resolvers`,
+`open_receivers`, `additional_initializers`) and its raise is
+collected as a further `LoadError` — appended after the loader's own,
+and referring to the plugin CLASS, since `manifest.id` is exactly what
+could not be read. Aggregating there rather than on demand is
+load-bearing: `Environment#build_name_scope` demands
+`Registry#type_node_resolvers` during Environment construction, which
+nothing rescues, so a lazy read would abort the run rather than
+degrade it.
+
+Each failure is collected as a
 `LoadError` on the resulting registry, then surfaced by
 `Analysis::Runner#run` as an `:error` `Diagnostic` with:
 

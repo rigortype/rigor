@@ -199,3 +199,8 @@ md-only なら `make test-binpacker` / `make test-ractor-pool` をスキップ�
   — `--group-by filesize` が「大きいが速い」ファイルで崩れる問題(binpacker 採用の前史)。
 - [2026-06-23 binpacker parallel-suite trial](20260623-binpacker-parallel-suite-trial.md)
   — binpacker 導入トライアルと CI 変動の初期観測。
+- [2026-09-09 CI wall time 371s → 220s](20260909-ci-wall-time-shard-rebalance.md)
+  — 上の「カテゴリ別ジョブ分割の検討（否定的）」を**限定する**後続測定。均衡プール内の spec を割る
+  議論としては本ノートの結論は有効なまま。一方 `test_exclude` で**もともと binpacker の
+  スケジューリング外**にある仕事がマトリクスの片腕に置かれていたケースは想定外で、そこに 145s、
+  クリティカルパスの 127s が隠れていた(テストジョブ数は不変なので max-of-N も増えない)。

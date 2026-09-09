@@ -53,7 +53,7 @@ module Rigor
             configuration: @configuration, environment: @environment, prebuilt: @project_scan,
             cache_store: nil, collect_stats: false, discovery_seed: @discovery_seed
           ).run_source(source: source, path: path),
-          context: "DiagnosticOracle re-analysis of #{path}"
+          context: "DiagnosticOracle re-analysis of #{path}", environment: @environment
         )
       end
     end

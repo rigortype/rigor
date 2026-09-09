@@ -111,8 +111,19 @@ module Rigor
             cache_store: context.cache_store, workers: workers
           ),
           seed_bundles: Protection::DiscoverySeed.bundles(paths: paths),
-          discovery_seed: seed
+          discovery_seed: seed,
+          rebuild_session: -> { rebuilt_session(context) }
         )
+      end
+
+      # Issue #790 — how the oracle replaces an Environment a mutant degraded. {LanguageServer::ProjectContext}
+      # already has the operation: `invalidate!` drops the cached environment AND the project scan together,
+      # which is the pair the oracle measures over, and the next reader rebuilds both. Under
+      # {MutationForkScan} this runs in a forked child against its copy-on-write context, so one file's
+      # defect never costs the parent or its siblings a rebuild.
+      def rebuilt_session(context)
+        context.invalidate!
+        [context.environment, context.project_scan]
       end
 
       # The scope {Protection::Mutator} judges a mutation site's receiver against, derived from the same seed

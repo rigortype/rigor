@@ -69,20 +69,22 @@ module Rigor
       #   judged with the knowledge that admitted it (issue #260's amended decision). The table is not
       #   refreshed per mutant — the collector is a whole-project pre-pass, and one mutated method body does
       #   not justify re-running it thousands of times.
+      # @param rebuild_session — issue #790 — a callable returning a FRESH `[environment, project_scan]`
+      #   pair, invoked after a run this oracle refused for an analyzer defect. nil means the caller has no
+      #   way to rebuild; see {#recovering} for what the oracle then does instead.
+      # rubocop:disable Metrics/ParameterLists -- the eight are independent collaborators the caller builds
+      # once each; an options object would only put a name in front of the same list.
       def initialize(configuration:, environment:, project_scan:, paths:, dependents:, seed_bundles:,
-                     discovery_seed: nil)
+                     discovery_seed: nil, rebuild_session: nil)
+        # rubocop:enable Metrics/ParameterLists
         @configuration = configuration
-        @environment = environment
-        @project_scan = project_scan
         @paths = paths
         @dependents = dependents
         @seed_bundles = seed_bundles
         @discovery_seed = discovery_seed
+        @rebuild_session = rebuild_session
         @param_inferred_types = discovery_seed && discovery_seed[:param_inferred_types]
-        @single = DiagnosticOracle.new(
-          configuration: configuration, environment: environment, project_scan: project_scan,
-          discovery_seed: discovery_seed
-        )
+        adopt_session(environment, project_scan)
       end
 
       # The clean baselines a mutant must add a diagnostic to: the mutated file's (the shipped oracle's own,
@@ -90,21 +92,25 @@ module Rigor
       # never per mutant. The dependents' half is bound through the same buffer machinery a mutant is, so the
       # clean and mutant runs of the closure differ in exactly one input — the bytes.
       def baseline(source:, path:)
-        Baseline.new(
-          own: @single.baseline(source: source, path: path),
-          dependents: dependents_signatures(source, path)
-        )
+        recovering do
+          Baseline.new(
+            own: @single.baseline(source: source, path: path),
+            dependents: dependents_signatures(source, path)
+          )
+        end
       end
 
       # Killed iff the mutant introduces a diagnostic the baseline did not carry — in the mutated file (the
       # shipped verdict), or, failing that, in any dependent of it (what this feature adds).
       def killed?(mutant_source:, path:, baseline:)
-        return true if @single.killed?(mutant_source: mutant_source, path: path, baseline: baseline.own)
+        recovering do
+          next true if @single.killed?(mutant_source: mutant_source, path: path, baseline: baseline.own)
 
-        dependents = @dependents[path] || []
-        return false if dependents.empty?
+          dependents = @dependents[path] || []
+          next false if dependents.empty?
 
-        dependents_signatures(mutant_source, path).any? { |sig| !baseline.dependents.include?(sig) }
+          dependents_signatures(mutant_source, path).any? { |sig| !baseline.dependents.include?(sig) }
+        end
       end
 
       # The file set a kill is looked for in: the mutated file plus its measured dependents.
@@ -113,6 +119,45 @@ module Rigor
       end
 
       private
+
+      # Issue #790 — a refused mutant is one mutant; a POISONED Environment is every mutant after it.
+      #
+      # The #784 seam records its failure on the Environment and {Environment::HktRegistryHolder} memoises
+      # the degraded registry, while {Environment::FailureSlot} is first-write-wins. So the one mutant that
+      # made the scan raise leaves an Environment that reports `rbs.coverage.hkt-scan-failed` on every later
+      # run and never re-attempts the scan — the row lands on BOTH sides of the next mutant's set
+      # difference, and every later mutant is measured over the degraded universe. Pre-#788 the raise
+      # propagated instead of being memoised, so the next demand retried the build and the poisoning did not
+      # exist; recovering it is this method.
+      #
+      # REBUILD rather than reset the slots. A reset would be cheaper, but it has to enumerate every holder
+      # the degraded registry fed — the memo itself, the failure slot, and the constant-type cache whose
+      # entries were folded under it — and a holder added to {Rigor::Environment} later would silently not
+      # be reset, with nothing to go red. The cost objection a reset answers is a rebuild PER MUTANT; this
+      # one is paid only after a defect is actually observed, which on a healthy sweep is never.
+      #
+      # With no `rebuild_session:` the oracle keeps the poisoned Environment and every later mutant is
+      # refused by the same guard. That is the deliberate fallback: a sweep that reports `harness_errors`
+      # says it could not measure, where the pre-#790 behaviour said "survived" about a universe it had
+      # silently degraded.
+      def recovering
+        yield
+      rescue AnalyzerCrashed => e
+        adopt_session(*@rebuild_session.call) if e.analyzer_defect? && @rebuild_session
+        raise
+      end
+
+      # The delegated single-file oracle is rebuilt with the pair, not handed the new Environment after the
+      # fact: it holds its own reference, and an oracle whose two halves disagree about which Environment
+      # they measure over is the same split-universe bug one layer down.
+      def adopt_session(environment, project_scan)
+        @environment = environment
+        @project_scan = project_scan
+        @single = DiagnosticOracle.new(
+          configuration: @configuration, environment: environment, project_scan: project_scan,
+          discovery_seed: @discovery_seed
+        )
+      end
 
       # The diagnostic signatures the dependents of `path` report while `source` stands in for it. Empty (and
       # analysis-free) when nothing depends on the file — 120 of Rigor's own 349 `lib` files.
@@ -186,7 +231,7 @@ module Rigor
             configuration: @configuration, environment: @environment, prebuilt: @project_scan,
             cache_store: nil, collect_stats: false, buffer: buffer, discovery_seed: seed, analyze_only: paths
           ).run(paths),
-          context: "ClosureKillOracle closure analysis of #{paths.join(', ')}"
+          context: "ClosureKillOracle closure analysis of #{paths.join(', ')}", environment: @environment
         )
       end
     end

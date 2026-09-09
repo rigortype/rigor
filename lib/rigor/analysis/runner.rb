@@ -389,6 +389,9 @@ module Rigor
         # (sequential + fork-worker) through `project_scope_seed_tables`. Empty unless the project lists
         # `pre_eval:` files that declare publishable constants, so a project without one is byte-identical.
         @project_pre_eval_constants = {}.freeze
+        # Issue #663 — the listed set {#publishable_pre_eval_constants} asks "is this writer one of ours?"
+        # against; a function of the configuration alone, so it outlives every discovery rebuild.
+        @pre_eval_path_set = nil
         # ADR-84 WD2 — per-run identity token for the user-method return memo's bucket (see
         # Scope::DiscoveryIndex#run_generation). Minted fresh in `run_analysis` so the memo never serves an
         # entry across a run boundary (LSP re-check, ADR-62 warm loop); nil until the first run so
@@ -1814,12 +1817,6 @@ module Rigor
         tables[:published_constant_names] = names unless names.empty?
       end
 
-      # Issue #644 — the seeded `in_source_constants` table, joining the two cross-file constant producers.
-      # The whole-project literal table wins over a `pre_eval:` publication of the same name: both describe
-      # the same assignment, the literal table pins the value the write actually carries while ADR-17's
-      # widener erases it to the class, and listing a file under `pre_eval:` must never LOSE precision. The
-      # per-file table still wins over both (`ScopeIndexer.index`'s merge) — same-file stays the most
-      # specific authority.
       # Issue #644 — the LAST SEGMENTS of the published table, the run-wide half of
       # `Scope#published_constant?`. Seeded on EVERY run (unlike `constant_sources`, which only a recording
       # run needs) because {CheckRules::PublishedConstantGuard} asks the question on every `if` / `unless`.
@@ -1828,11 +1825,57 @@ module Rigor
           @project_constant_values.keys.to_set { |name| name.split("::").last }.freeze
       end
 
+      # Issue #644 — the seeded `in_source_constants` table, joining the two cross-file constant producers.
+      # The whole-project literal table wins over a `pre_eval:` publication of the same name: both describe
+      # the same assignment, the literal table pins the value the write actually carries while ADR-17's
+      # widener erases it to the class, and listing a file under `pre_eval:` must never LOSE precision. The
+      # per-file table still wins over both (`ScopeIndexer.index`'s merge) — same-file stays the most
+      # specific authority.
       def merged_seed_constants
-        return @project_constant_values if @project_pre_eval_constants.empty?
-        return @project_pre_eval_constants if @project_constant_values.empty?
+        pre_eval = publishable_pre_eval_constants
+        return @project_constant_values if pre_eval.empty?
+        return pre_eval if @project_constant_values.empty?
 
-        @project_pre_eval_constants.merge(@project_constant_values).freeze
+        pre_eval.merge(@project_constant_values).freeze
+      end
+
+      # Issue #663 — the `pre_eval:` publication with every name an UNLISTED file also assigns retracted.
+      # Without this a listed `X = :a` answered `Symbol` at every reader while a sibling `X = "str"` decided
+      # the runtime value half the time: a confident wrong type, not lost precision, and the one asymmetry
+      # #644's precedence work left standing. The retraction costs the opt-in nothing where it earns its
+      # keep — a name only listed files write is untouched, and where the literal table also publishes it
+      # already won (above).
+      #
+      # Conflict is read off #644's write attribution, which censuses every assigning form, so a name the
+      # listed file's own typed walk widened is retracted by an unlisted `X += 1` or `A, X = 1, 2` as
+      # readily as by a plain reassignment. Among LISTED files the rule is unchanged: `PreEvalConstants`
+      # widens first and drops only on disagreement, so two listed files writing `1` and `2` still publish
+      # `Integer` rather than being retracted for being two.
+      def publishable_pre_eval_constants
+        return @project_pre_eval_constants if @project_pre_eval_constants.empty?
+
+        listed = pre_eval_path_set
+        kept = @project_pre_eval_constants.reject { |name, _| unlisted_constant_writer?(name, listed) }
+        kept.size == @project_pre_eval_constants.size ? @project_pre_eval_constants : kept.freeze
+      end
+
+      # True when some file outside `listed` assigns `name`. The wildcard key is consulted alongside the
+      # name's own attribution ([#668](https://github.com/rigortype/rigor/issues/668)): a `k::X = 7` names
+      # no target, and a listed file kept out of `paths:` (ADR-17 WD5 permits it) contributes no censused
+      # name of its own for the wildcard's paths to have been folded into.
+      def unlisted_constant_writer?(name, listed)
+        segment = name.split("::").last
+        writers = @project_constant_sources[name]
+        wildcard = @project_constant_sources["#{Inference::ScopeIndexer::DYNAMIC_TARGET_PREFIX}#{segment}"]
+        [writers, wildcard].any? do |paths|
+          paths&.any? { |path| !listed.include?(File.expand_path(path)) }
+        end
+      end
+
+      # The listed `pre_eval:` files, expanded so a census path and a configured one compare as the same
+      # file whichever spelling each arrived in.
+      def pre_eval_path_set
+        @pre_eval_path_set ||= @configuration.pre_eval.to_set { |path| File.expand_path(path) }
       end
 
       # ADR-46 — seed the instance + singleton `"path:line"` def-source tables (each only when non-empty).

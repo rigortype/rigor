@@ -163,6 +163,9 @@ RSpec.describe "pre_eval: constant publication" do
     end
   end
 
+  # This block is also what pins the shape of #663's retraction below: the rule there is "a writer outside
+  # the LISTED set retracts", not "a second writer retracts", precisely so the agreeing pair here keeps
+  # publishing `Integer` under `PreEvalConstants`' own widen-then-compare rule.
   describe "the multi-file write rule (widen on conflict)" do
     def two_publisher_receiver(second_value)
       messages = Dir.mktmpdir("rigor-pre-eval-conflict-") do |tmpdir|
@@ -191,6 +194,67 @@ RSpec.describe "pre_eval: constant publication" do
 
     it "drops the name entirely when two publishers disagree" do
       expect(two_publisher_receiver('"two"')).to be_nil
+    end
+  end
+
+  # Issue #663 — a `pre_eval:` publication answered even when a file OUTSIDE the listed set assigned the
+  # same name a different, incompatible value. At runtime the winner is whichever file loaded last, so the
+  # reader got a confident WRONG type where the honest answer is gradual — not lost precision, and the one
+  # asymmetry #644's precedence work left standing. #644's write attribution (`constant_sources`, a census
+  # over EVERY constant assignment rather than only the publishable ones) is what can now see it.
+  describe "the unlisted-writer retraction" do
+    # `decls.rb` is listed; `other.rb` never is. The reader sits in a third file so what it reads is the
+    # PUBLISHED answer rather than a same-file table. `paths:` covers `lib/` either way, so `decls.rb` is
+    # censused alongside its sibling unless `listed_outside_paths:` moves it out of the analysed tree.
+    def cross_receiver(declared, other: nil, listed_outside_paths: false)
+      Dir.mktmpdir("rigor-pre-eval-663-") do |tmpdir|
+        lib = File.join(tmpdir, listed_outside_paths ? "boot" : "lib")
+        uses = File.join(tmpdir, "lib")
+        FileUtils.mkdir_p(lib)
+        FileUtils.mkdir_p(uses)
+        File.write(File.join(lib, "decls.rb"), declared)
+        File.write(File.join(uses, "other.rb"), other) if other
+        File.write(File.join(uses, "uses.rb"), "SHARED.probe_663\n")
+        Dir.chdir(tmpdir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: Rigor::Configuration.new(
+              "paths" => [uses], "pre_eval" => [File.join(lib, "decls.rb")]
+            ),
+            cache_store: nil
+          )
+          messages = guarded_run(runner).diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
+          receiver_for(messages, "probe_663")
+        end
+      end
+    end
+
+    # The issue's repro. `Symbol` before the fix, from the listed file alone.
+    it "retracts a listed name an unlisted file assigns a different value" do
+      expect(cross_receiver("SHARED = :a\n", other: "SHARED = \"str\"\n")).to be_nil
+    end
+
+    # The rule is #644's, not `PreEvalConstants`' widen-then-compare: an unlisted write retracts on the
+    # existence of a second WRITER, whatever its rvalue, because the census records a form's reach rather
+    # than the value it carries. An unlisted `SHARED += 1` decides the runtime value exactly as a plain
+    # reassignment does.
+    it "retracts on an unlisted write whose form carries no value at all" do
+      expect(cross_receiver("SHARED = [1, 2]\n", other: "SHARED += 1\n")).to be_nil
+    end
+
+    # Must-still-succeed, and the arm that keeps the opt-in worth taking: a name only the listed file writes
+    # still answers from `pre_eval:`. `Array` is the discriminating value — the #644 literal table declines
+    # a mutable literal, so nothing but `pre_eval:` can be answering here.
+    it "still publishes a listed name no unlisted file writes" do
+      expect(cross_receiver("SHARED = [1, 2]\n")).to eq("Array")
+      expect(cross_receiver("SHARED = [1, 2]\n", other: "KEPT = :kept\n")).to eq("Array")
+    end
+
+    # ADR-17 WD5 permits listing a file under `pre_eval:` and NOT under `paths:`. Such a file contributes no
+    # censused name of its own, so a rule counting writers would see ONE — the unlisted sibling — and keep
+    # publishing. What the rule asks instead is whether any writer is outside the listed set.
+    it "retracts for a listed file kept out of `paths:`, whose own write the census never sees" do
+      expect(cross_receiver("SHARED = :a\n", other: "SHARED = \"str\"\n", listed_outside_paths: true)).to be_nil
+      expect(cross_receiver("SHARED = [1, 2]\n", listed_outside_paths: true)).to eq("Array")
     end
   end
 

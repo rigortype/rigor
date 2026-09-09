@@ -47,6 +47,12 @@ module Rigor
       # seed bundle through `Marshal` unchanged.
       CONSTANT_UNPUBLISHABLE = :unpublishable
 
+      # Issue #668 — the census key a constant write through a base no name reaches is filed under:
+      # `*::LIMIT` for `k::LIMIT = 7`. `*` is not a constant character, so the key can never collide with a
+      # name a program writes, while its LAST SEGMENT is the real one — which is what the ADR-46 `constant:`
+      # edge and {Analysis::Incremental.changed_constant_publications} key on, so both keep working unchanged.
+      DYNAMIC_TARGET_PREFIX = "*::"
+
       module_function
 
       # Build the scope index for a Prism program subtree.
@@ -4161,9 +4167,12 @@ module Rigor
       # ordinary body, the receiver inside a `class_eval` block, and the constant a `Klass = Class.new { … }`
       # assigns the block's class to ({#meta_new_block_owner}). Where that `self` is {OPAQUE_SELF}, and for
       # any other dynamic receiver (`klass::BAR = …`), the target is "some class, then `::BAR`" and the name
-      # falls back to the bare last segment — the one spelling that class could make it, `Object`. Suppressing
-      # a top-level name is gradual typing, which is the safe direction here; the VALUE is what such a write
-      # must not contribute ({#constant_path_write_literal}), and the fallback name is withheld from the
+      # falls back to the WILDCARD {DYNAMIC_TARGET_PREFIX} key, which {#finalize_constant_writes} expands
+      # into a retraction of every censused name with that last segment
+      # ([#668](https://github.com/rigortype/rigor/issues/668)). The bare last segment — the pre-#668
+      # fallback — was the single name such a write can never create, so filing it there suppressed the one
+      # name the form cannot touch and left published every name it can. The VALUE is what such a write must
+      # not contribute either ({#constant_path_write_literal}), and the fallback name is withheld from the
       # local-declaration exemption ({#local_constant_name_set}).
       def constant_path_write_name(target, qualified_prefix, self_owner = nil)
         full = Source::ConstantPath.qualified_name_or_nil(target)
@@ -4171,14 +4180,21 @@ module Rigor
 
         base = target.name&.to_s
         return nil if base.nil?
-        return base unless target.parent.is_a?(Prism::SelfNode)
+        return dynamic_target_key(base) unless target.parent.is_a?(Prism::SelfNode)
 
-        self_write_name(qualified_prefix, self_owner, base) || base
+        self_write_name(qualified_prefix, self_owner, base) || dynamic_target_key(base)
+      end
+
+      def dynamic_target_key(segment) = "#{DYNAMIC_TARGET_PREFIX}#{segment}"
+
+      # The last segment a wildcard census key stands for, or nil for an ordinary qualified name.
+      def dynamic_target_segment(name)
+        name.delete_prefix(DYNAMIC_TARGET_PREFIX) if name.start_with?(DYNAMIC_TARGET_PREFIX)
       end
 
       # The publishable literal a path write contributes — none, whenever its base is not statically
       # nameable ([#705](https://github.com/rigortype/rigor/issues/705)). `[Foo].each { |k| k::X = 1 }`
-      # renders as the bare `X`, and publishing `1` under it handed every reader of the top-level `X` a value
+      # renders under the wildcard key, and publishing `1` there handed every reader of a project `X` a value
       # the program never has: `X == 2` folded to `false`, and in the WRITING file — where
       # `Scope#local_constant_names` exempts the name from #644's withholding guard —
       # `flow.always-truthy-condition` then fired on correct code.
@@ -4210,9 +4226,9 @@ module Rigor
       # retracts the publishable descriptor whatever either rvalue was — neither arm of an in-file
       # reassignment is ever published, and the name still counts as written.
       #
-      # `nameable` is false only for the bare-name fallback {#constant_path_write_name} takes when nothing
-      # names the write's base. Such a name belongs in `writes` — another file's value for it is not to be
-      # trusted — and NOT in `declared`, which answers the opposite question
+      # `nameable` is false only for the wildcard fallback {#constant_path_write_name} takes when nothing
+      # names the write's base. Such a key belongs in `writes` — another file's value for a name it reaches
+      # is not to be trusted — and NOT in `declared`, which answers the opposite question
       # ([#710](https://github.com/rigortype/rigor/issues/710)). The two are separate tables rather than one
       # richer descriptor because a name can be written both ways in one file, and then the file DID declare
       # it however the two writes are ordered.
@@ -4272,18 +4288,49 @@ module Rigor
       # fold time) so the fold stays order-independent, which is what lets the ADR-85 incremental path re-fold
       # a changed file's contribution in place.
       #
+      # A {DYNAMIC_TARGET_PREFIX} key is not a name and never publishes; it is expanded by
+      # {#apply_dynamic_target_writes} into a retraction over the names it could have written.
+      #
       # @return `[{name => Type}, {name => Set[path]}]`.
       def finalize_constant_writes(writes)
         values = {}
         sources = {}
+        dynamic = {}
         writes.each do |name, by_path|
-          sources[name] = by_path.keys.to_set.freeze
+          segment = dynamic_target_segment(name)
+          next dynamic[segment] = by_path.keys.to_set if segment
+
+          sources[name] = by_path.keys.to_set
           next unless by_path.size == 1
 
           descriptor = by_path.values.first
           values[name] = Type::Combinator.constant_of(descriptor.first) if descriptor.is_a?(Array)
         end
+        apply_dynamic_target_writes(values, sources, dynamic)
         [values, sources]
+      end
+
+      # Issue #668 — expands each wildcard census key. `k::LIMIT = 7` can create `Anything::LIMIT`, so it
+      # retracts every censused name whose last segment is `LIMIT` and joins the writing file to that name's
+      # attribution; the bare `LIMIT` is retracted along with the rest, being the one name the analyzer
+      # cannot rule out either (`k` may be `Object`). Over-retracting makes readers gradual, which is the
+      # direction the census's whole decline list takes; leaving a name published that a dynamic write may
+      # already have replaced is the single failure the census exists to prevent.
+      #
+      # The wildcard key survives into the attribution so a producer with no censused name of its own — a
+      # `pre_eval:` publication for a file outside `paths:` — can still see the conflict
+      # ({Analysis::Runner#publishable_pre_eval_constants}).
+      def apply_dynamic_target_writes(values, sources, dynamic)
+        return if dynamic.empty?
+
+        sources.each do |name, paths|
+          writers = dynamic[name.split("::").last]
+          next if writers.nil?
+
+          paths.merge(writers)
+          values.delete(name)
+        end
+        dynamic.each { |segment, paths| sources[dynamic_target_key(segment)] = paths }
       end
 
       # Merges one file's `class → method → DefNode` map into the cross-file `def_nodes` index and records each method's

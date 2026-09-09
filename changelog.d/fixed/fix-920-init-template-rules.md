@@ -1,0 +1,1 @@
+- **[cli]** `rigor init`'s generated `.rigor.yml` now lists every shipped rule id in its `disable:` comment instead of a stale 7-of-31 subset, and points at `rigor explain <rule>` for detail. ([#947](https://github.com/rigortype/rigor/pull/947))

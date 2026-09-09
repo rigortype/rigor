@@ -2536,4 +2536,35 @@ RSpec.describe Rigor::CLI do
       end
     end
   end
+
+  # #920 — the template once hand-listed 7 of `ALL_RULES`'s 31 entries under "The shipped rules are"; a rule
+  # landing without a template update silently reintroduces that drift. Running `init` for real (not reading the
+  # template constant) is the only way to catch the CLI's actual `rigor explain`-eligible id set going stale.
+  describe "init" do
+    it "lists every ALL_RULES id, and only ALL_RULES ids, as rule identifiers in the written config" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+
+        status, = run_cli("init", "--path=#{path}")
+        expect(status).to eq(0)
+
+        written = File.read(path)
+        rule_block = written[/each one catches\):\n(.*?)\n\s*#\s*A bare family token/m, 1]
+        listed_ids = rule_block.scan(/[a-z]+(?:\.[a-z][a-z-]*)+/).uniq
+
+        expect(listed_ids.sort).to eq(Rigor::Analysis::CheckRules::ALL_RULES.sort)
+      end
+    end
+
+    it "still writes YAML that round-trips through Configuration.load" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+
+        status, = run_cli("init", "--path=#{path}")
+        expect(status).to eq(0)
+
+        expect { Rigor::Configuration.load(path) }.not_to raise_error
+      end
+    end
+  end
 end

@@ -1,0 +1,1 @@
+- **[engine]** A straight-line in-place mutation on a variable whose type is a union (`out = flag ? 5 : [2]; out << 2`) now widens every collection member of that union, so the mutated array or hash no longer keeps the literal size the mutation just invalidated. ([#951](https://github.com/rigortype/rigor/pull/951))

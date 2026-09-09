@@ -220,8 +220,11 @@ RSpec.describe "rigor-dry-types integration" do
     # Lays out `<project>/models/` (the analyzed `paths:`) + a sibling `sig/` so `Dry.Types()` resolves, then
     # yields the project / models / cache roots. Mirrors the pundit cross-process fixture layout.
     def with_project
-      Dir.mktmpdir do |project_dir|
+      Dir.mktmpdir do |raw_project_dir|
         Dir.mktmpdir do |cache_root|
+          # #630 — the scanner reads through the `IoBoundary`, whose `TrustPolicy` roots come from the
+          # symlink-resolved `Dir.pwd`; `Dir.mktmpdir`'s `/tmp/...` alias would sit outside them on macOS.
+          project_dir = File.realpath(raw_project_dir)
           models_dir = File.join(project_dir, "models")
           FileUtils.mkdir_p(models_dir)
           FileUtils.mkdir_p(File.join(project_dir, "sig"))
@@ -295,6 +298,14 @@ RSpec.describe "rigor-dry-types integration" do
     end
   end
 
+  # #630 — the scanners read through the `IoBoundary`, whose `TrustPolicy` roots are derived from
+  # `Dir.pwd` (already symlink-resolved). `Dir.mktmpdir` hands back the UNRESOLVED `/tmp/...` alias on
+  # macOS, so a fixture path built from it would sit outside the policy's roots and every read would be
+  # denied. Name the project the way the policy does.
+  def resolved_mktmpdir(&)
+    Dir.mktmpdir { |dir| yield File.realpath(dir) }
+  end
+
   # Runs the plugin against a single-file project and returns the `:dry_type_aliases` fact value (or `nil` if
   # the plugin didn't publish it). Captures the per-run `Plugin::Services` instance via `wrap_original` so we
   # can read the fact store after `prepare(services)` ran — same pattern as the rigor-rails-routes integration spec.
@@ -307,7 +318,7 @@ RSpec.describe "rigor-dry-types integration" do
       services
     end
 
-    Dir.mktmpdir do |dir|
+    resolved_mktmpdir do |dir|
       File.write(File.join(dir, "types.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "dry_types.rbs"), dry_types_rbs)

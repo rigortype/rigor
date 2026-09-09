@@ -2,6 +2,8 @@
 
 require "yaml"
 
+require_relative "../plugin_gap_advisory"
+
 module Rigor
   class CLI
     # The presence-only project-state probe behind `rigor skill describe` (ADR-73 WD2). It stats files and opens only
@@ -17,14 +19,6 @@ module Rigor
       # RBS into the signature paths, so its presence is the signal that the gem-RBS gap has been addressed.
       RBS_COLLECTION_LOCKFILE = "rbs_collection.lock.yaml"
 
-      # `Gemfile.lock` substrings that mark a Rails app, and the bundled Rails-family plugin ids — used to spot a
-      # configured Rails project that has not enabled any Rails plugin (a `rigor-plugin-tune` cue).
-      RAILS_LOCK_MARKERS = %w[railties actionpack activerecord actioncable].freeze
-      RAILS_PLUGIN_MARKERS = %w[
-        rigor-activerecord rigor-actionpack rigor-actionmailer rigor-activejob
-        rigor-rails-routes rigor-rails-i18n rigor-actioncable rigor-activestorage rigor-rails
-      ].freeze
-
       def initialize(root)
         @root = root
       end
@@ -38,7 +32,7 @@ module Rigor
           sig: File.directory?(File.join(@root, "sig")),
           gems: File.file?(File.join(@root, "Gemfile.lock")),
           rbs_collection: File.file?(File.join(@root, RBS_COLLECTION_LOCKFILE)),
-          rails_unconfigured: rails_unconfigured?(config),
+          plugins_unconfigured: plugins_unconfigured?(config),
           ci: ci_state,
           editor: editor_state,
           mcp: mcp_state
@@ -47,24 +41,26 @@ module Rigor
 
       private
 
-      # True when Rails is in `Gemfile.lock` but the (present) config enables no Rails plugin — so `rigor-plugin-tune`
-      # (wiring the ActiveRecord / routes / i18n plugins) buys more than community RBS would (the 20260620 field trial's
-      # strap case). Only fires on an already-configured project; an un-configured Rails app routes to
-      # `rigor-project-init`, which selects the plugins itself.
-      def rails_unconfigured?(config)
+      # ADR-96 WD2 — true when the project depends on gems that bundled plugins model and enables none of those
+      # plugins, so `rigor-plugin-tune` buys more than community RBS would (the 20260620 field trial's strap
+      # case). Reads each plugin's `target_gems:` rather than the Rails-only table it replaces, so the cue
+      # covers every framework Rigor ships a plugin for. Only fires on an already-configured project; an
+      # un-configured app routes to `rigor-project-init`, which selects the plugins itself.
+      def plugins_unconfigured?(config)
         return false if config.nil?
 
-        lock = File.join(@root, "Gemfile.lock")
-        return false unless File.file?(lock) && file_mentions_any?(lock, RAILS_LOCK_MARKERS)
-
-        !file_mentions_any?(File.join(@root, config), RAILS_PLUGIN_MARKERS)
+        plugins = configured_plugins(File.join(@root, config))
+        PluginGapAdvisory.unconfigured?(project_root: @root, plugins: plugins)
       end
 
-      def file_mentions_any?(path, markers)
-        content = File.read(path)
-        markers.any? { |marker| content.include?(marker) }
+      # The probe reads the config file itself rather than {Rigor::Configuration}: it must stay a
+      # presence-only probe, and `Configuration.load` applies defaults (including the ADR-93 auto-wired
+      # `rigor-rbs-inline` entry) that have nothing to do with the question asked here.
+      def configured_plugins(path)
+        data = YAML.safe_load_file(path, permitted_classes: [], aliases: true)
+        data.is_a?(Hash) ? Array(data["plugins"]) : []
       rescue StandardError
-        false
+        []
       end
 
       # `:wired` (a CI config mentions `rigor`), `:unwired` (a CI config exists but does not), or `:none`.
@@ -203,14 +199,18 @@ module Rigor
       def recommended_name_and_reason(state)
         if state.fetch(:config).nil?
           ["rigor-project-init", "this project has no Rigor configuration yet — start here."]
-        elsif state.fetch(:rails_unconfigured)
+        elsif state.fetch(:plugins_unconfigured)
           ["rigor-plugin-tune",
-           "Rails is in your Gemfile.lock but no Rails plugins are enabled — wire them so " \
-           "ActiveRecord / routes / i18n calls resolve (a bigger win here than community RBS)."]
-        elsif state.fetch(:gems) && !state.fetch(:rbs_collection)
-          ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
+           "your Gemfile declares gems Rigor ships plugins for and none is enabled — wire them so " \
+           "those framework calls resolve (a bigger win here than community RBS)."]
+        # ADR-73's second `rbs-setup` priority-softening case (2026-09-10): CI wiring is presence-only and
+        # side-effect-free, while community-RBS install is network-bound (`rbs collection install` hits
+        # rubygems.org). A configured project earns the cheap, local win first — checked ahead of the RBS
+        # gap rather than after it.
         elsif state.fetch(:ci) != :wired
           ["rigor-ci-setup", "Rigor is configured but not wired into CI — lock in the regression guard."]
+        elsif state.fetch(:gems) && !state.fetch(:rbs_collection)
+          ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
         # A present baseline is deliberately NOT a recommendation trigger. A baseline is a healthy, finished onboarding
         # state, not a problem to work off; pushing every baselined project to "reduce it" turns a working build into a
         # chore and tempts scattering `# rigor:disable` through the code to make a number go down — means over ends.

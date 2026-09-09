@@ -43,6 +43,7 @@ module Rigor
     class Statesman < Rigor::Plugin::Base
       manifest(
         id: "statesman",
+        target_gems: ["statesman"],
         version: "0.1.0",
         description: "Validates state-machine transition references against declared states.",
         config_schema: {

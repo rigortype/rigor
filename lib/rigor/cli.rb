@@ -21,6 +21,21 @@ module Rigor
   class CLI # rubocop:disable Metrics/ClassLength
     EXIT_USAGE = 64
 
+    # Issue [#609](https://github.com/rigortype/rigor/issues/609) — a run the analyzer could not finish.
+    # Distinct from `1` (the analysis ran and reported diagnostics) so a CI step can tell "your code has
+    # findings" from "Rigor died and this report is not an account of anything".
+    EXIT_INTERNAL_ERROR = 70
+
+    # The exceptions that mean "the process is out of a resource, and the backtrace names nothing
+    # actionable": `SystemStackError` from an ancestry walk that never terminates, `NoMemoryError` from a
+    # runaway allocation. Neither is a `StandardError`, so every rescue between here and the raise site
+    # declines them by design — the whole point of those rescues is to convert a per-file or per-plugin
+    # failure into a diagnostic, and a process running out of stack is not per-file. Left uncaught they
+    # abort with Ruby's own ~40-frame dump, which is non-zero (so a CI gate does catch it) but says
+    # neither that Rigor is at fault nor that the report on disk is empty. `Interrupt`, `SignalException`
+    # and `SystemExit` stay out: those are the user's answer, not a failure.
+    FATAL_ERRORS = [SystemStackError, NoMemoryError].freeze
+
     # The published location of `schemas/rigor-config.schema.json`, written into the `.rigor.yml` that
     # `rigor init` generates so an editor validates the file as the user types.
     #
@@ -96,9 +111,27 @@ module Rigor
       # register presets have loaded) would each need their own rescue at their own point.
       @err.puts("rigor: #{e.message}")
       EXIT_USAGE
+    rescue *FATAL_ERRORS => e
+      report_fatal_error(e)
+      EXIT_INTERNAL_ERROR
     end
 
     private
+
+    # One `rigor:` line naming the failure, then the innermost frames — enough to route a bug report,
+    # without the full dump the raise would otherwise print. The "no report" sentence is the part a user
+    # acts on: the crash usually happens with a redirect in place, so the artifact a CI step goes on to
+    # read is an empty file rather than a missing one.
+    def report_fatal_error(error)
+      @err.puts("rigor: analysis aborted: #{error.class}: #{error.message}")
+      Array(error.backtrace).first(FATAL_BACKTRACE_FRAMES).each { |frame| @err.puts("  from #{frame}") }
+      @err.puts("  Rigor could not finish this run, so its report is EMPTY rather than clean — do not")
+      @err.puts("  read this exit status as a passing check.")
+      @err.puts("  This is a defect in Rigor; please report it at https://github.com/rigortype/rigor/issues.")
+    end
+
+    FATAL_BACKTRACE_FRAMES = 5
+    private_constant :FATAL_BACKTRACE_FRAMES
 
     def dispatch(command)
       handler = HANDLERS[command]

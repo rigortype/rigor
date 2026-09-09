@@ -423,7 +423,12 @@ RSpec.describe "rigor-dry-validation integration" do
     plugin_entries << "rigor-dry-types" if with_dry_types
 
     Rigor::Plugin.unregister!
+    # #630 — the scanners now read through the `IoBoundary`, whose `TrustPolicy` roots are derived from
+    # `Dir.pwd` (already symlink-resolved). `Dir.mktmpdir` hands back the UNRESOLVED `/tmp/...` alias on
+    # macOS, so a fixture path built from it would sit outside the policy's roots and every read would be
+    # denied. Name the project the same way the policy does.
     Dir.mktmpdir do |dir|
+      dir = File.realpath(dir)
       File.write(File.join(dir, "contracts.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "dry_validation.rbs"), dry_validation_rbs)
@@ -439,7 +444,12 @@ RSpec.describe "rigor-dry-validation integration" do
 
     Rigor::Plugin.unregister!
     captured_store = capture_fact_store!
+    # #630 — the scanners now read through the `IoBoundary`, whose `TrustPolicy` roots are derived from
+    # `Dir.pwd` (already symlink-resolved). `Dir.mktmpdir` hands back the UNRESOLVED `/tmp/...` alias on
+    # macOS, so a fixture path built from it would sit outside the policy's roots and every read would be
+    # denied. Name the project the same way the policy does.
     Dir.mktmpdir do |dir|
+      dir = File.realpath(dir)
       File.write(File.join(dir, "contracts.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "dry_validation.rbs"), dry_validation_rbs)
@@ -493,7 +503,12 @@ RSpec.describe "rigor-dry-validation integration" do
       services
     end
 
+    # #630 — the scanners now read through the `IoBoundary`, whose `TrustPolicy` roots are derived from
+    # `Dir.pwd` (already symlink-resolved). `Dir.mktmpdir` hands back the UNRESOLVED `/tmp/...` alias on
+    # macOS, so a fixture path built from it would sit outside the policy's roots and every read would be
+    # denied. Name the project the same way the policy does.
     Dir.mktmpdir do |dir|
+      dir = File.realpath(dir)
       File.write(File.join(dir, "contracts.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "dry_validation.rbs"), dry_validation_rbs)

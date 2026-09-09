@@ -61,7 +61,7 @@ Positive:
 
 Negative / carry-over:
 - The gem grows by the manual (markdown — modest). The full corpus deliberately stays out (WD1).
-- **Two `llms.txt` copies** (site + gem) need sync discipline — mitigated by treating the manual as the single source both index; a generator (or a doc-check spec) keeping them aligned is a follow-up.
+- **Two `llms.txt` copies** (site + gem) need sync discipline — mitigated by treating the manual as the single source both index; a generator (or a doc-check spec) keeping them aligned is a follow-up. **Landed 2026-09-10** (#938) for the gem copy's manual-chapter half: the divergence this note predicted had happened (chapters 18-19 shipped, the gem `docs/llms.txt` still ended at 17), so `spec/docs/llms_txt_drift_spec.rb` now fails if `docs/llms.txt`'s `## Manual` section omits a chapter `docs/manual/*.md` packages, or names one that no longer exists. A regenerating generator was the first-choice option; declined here because `llms.txt`'s manual lines carry hand-written one-line descriptions (the site copy's own editorial voice) that a mechanical regeneration would need to either template away or leave stale in the opposite direction — the drift gate closes the acceptance criterion (no chapter can silently go missing) without that tradeoff. The site copy and the handbook section are out of scope for this gate: the handbook already reads live from `rigor docs --list handbook` rather than naming chapters by hand, so it cannot drift the same way, and the site copy is not part of this repository's build.
 - `rigor docs` + the `llms.txt` vocabulary become **public surface frozen at v1.0 under [ADR-50](50-release-engineering-and-stability-strategy.md) WD1**.
 
 ## Relationship to other ADRs

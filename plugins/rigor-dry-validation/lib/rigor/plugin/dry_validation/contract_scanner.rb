@@ -23,16 +23,18 @@ module Rigor
         module_function
 
         # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param io_boundary — the plugin's {Rigor::Plugin::IoBoundary}; every source read goes
+        #   through it (#630) so each scanned file is a recorded cache dependency.
         # @return frozen, sorted list of recognized contract class FQNs (e.g.
         #   `["App::NewUserContract", "Types::EmailContract"]`).
-        def scan(paths:)
+        def scan(paths:, io_boundary:)
           contracts = []
-          paths.each { |path| contracts.concat(scan_file(path)) }
+          paths.each { |path| contracts.concat(scan_file(path, io_boundary)) }
           contracts.uniq.sort.freeze
         end
 
-        def scan_file(path)
-          source = File.read(path)
+        def scan_file(path, io_boundary)
+          source = io_boundary.read_file(path)
           parse_result = Prism.parse(source, filepath: path)
           return [] unless parse_result.errors.empty?
 
@@ -54,20 +56,20 @@ module Rigor
         #   `{json: <shape>}` (only the recognised key(s) are present; a contract with neither present
         #   contributes nothing). Each `<shape>` is exactly {DrySchema::SchemaScanner.collect_schema_shape}'s
         #   `{required:, optional:, unmodelled:}` return.
-        def scan_schema_blocks(paths:, type_aliases: {})
+        def scan_schema_blocks(paths:, io_boundary:, type_aliases: {})
           return {} unless Rigor::Plugin.registered_for("dry-schema")
 
           table = {}
           paths.each do |path|
-            scan_file_schema_blocks(path, type_aliases).each do |fqn, shapes|
+            scan_file_schema_blocks(path, io_boundary, type_aliases).each do |fqn, shapes|
               table[fqn] ||= shapes
             end
           end
           table.freeze
         end
 
-        def scan_file_schema_blocks(path, type_aliases)
-          source = File.read(path)
+        def scan_file_schema_blocks(path, io_boundary, type_aliases)
+          source = io_boundary.read_file(path)
           parse_result = Prism.parse(source, filepath: path)
           return {} unless parse_result.errors.empty?
 

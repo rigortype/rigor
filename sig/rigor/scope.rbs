@@ -157,6 +157,7 @@ module Rigor
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
     def user_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([untyped, String] | [nil, nil])
     def discovered_method_through_ancestors?: (String | Symbol? class_name, String | Symbol method_name, Symbol kind, ?name_memo: Hash[untyped, untyped]) -> bool
+    def external_ancestor_name_candidates: (String | Symbol class_name, ?name_memo: Hash[untyped, untyped]) -> Array[Array[String]]
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
     def ancestor_name_candidates: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 

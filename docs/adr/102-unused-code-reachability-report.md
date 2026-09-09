@@ -145,7 +145,7 @@ not. WD2, WD4 and WD5 are structural and have no trigger short of a redesign.
 | Reference counting ("zero references ⇒ unused") | The naive form measured 99.7 % FP on Rigor's own `lib`; every correction in the source article was a missing root, not a missing reference. |
 | Widen `paths:` as the mitigation | Measured: +1 / −3 / +2. Declarations widen with references. |
 | Hardcode Rails knowledge in the core | Contradicts ADR-2's plugin boundary; the two highest-yield rules are framework conventions, which is exactly what plugins are for. |
-| Consume rubydex's cross-reference index | ADR-21 Track 3 already conditions this on the LSP roadmap; the declaration substrate Rigor needs is already present. |
+| Consume rubydex's cross-reference index | ADR-21 Track 3 already conditions this on the LSP roadmap; the declaration substrate Rigor needs is already present — which **partially supersedes ADR-21 Track 3**'s premise that Rigor lacks a cross-file declaration index. |
 | Value constants at launch | Spurious by construction until #352 lands. |
 | Unused *methods* | Deferred to [#351](https://github.com/rigortype/rigor/issues/351). Rigor can reach it where a type-free indexer cannot, but the tier inherits this one's problems at ten times the volume and needs an API-boundary definition first. |
 

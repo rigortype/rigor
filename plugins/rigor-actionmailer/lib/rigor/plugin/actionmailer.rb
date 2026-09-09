@@ -43,6 +43,7 @@ module Rigor
     class Actionmailer < Rigor::Plugin::Base
       manifest(
         id: "actionmailer",
+        target_gems: ["actionmailer"],
         # Bumped 2026-05-28 — extended RESERVED_CLASS_METHODS to include `respond_to?` / `public_send` /
         # `send` / `__send__` / `method` and friends so dynamic-dispatch idioms
         # (`Mailer.respond_to?(action)` / `Mailer.public_send(action)`) stop firing `unknown-action`

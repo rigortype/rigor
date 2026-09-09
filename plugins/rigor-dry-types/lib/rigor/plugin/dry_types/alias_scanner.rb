@@ -43,10 +43,12 @@ module Rigor
         module_function
 
         # @param paths — absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param io_boundary — the plugin's {Rigor::Plugin::IoBoundary}; every source read goes
+        #   through it (#630) so each scanned file is a recorded cache dependency.
         # @return frozen `{aliased_name => underlying_class_name}` map. Empty
         #   when no `include Dry.Types()` declaration is found.
-        def scan(paths:)
-          results = paths.flat_map { |path| scan_file(path) }
+        def scan(paths:, io_boundary:)
+          results = paths.flat_map { |path| scan_file(path, io_boundary) }
           modules = results.map { |r| r[:module_name] }.uniq
           return {}.freeze if modules.empty?
 
@@ -75,8 +77,8 @@ module Rigor
         end
         private_class_method :canonical_table
 
-        def scan_file(path)
-          source = File.read(path)
+        def scan_file(path, io_boundary)
+          source = io_boundary.read_file(path)
           parse_result = Prism.parse(source, filepath: path)
           return [] unless parse_result.errors.empty?
 

@@ -76,6 +76,14 @@ any improvement to `rigor check --format json` is immediately visible via
   initiated by an AI agent.
 - `lsp` — a different protocol, not a tool.
 
+> **Status (2026-09-10): this partition is closed against a 2026-05-27 CLI.**
+> `lib/rigor/cli.rb`'s `HANDLERS` has grown several read-only verbs since —
+> `type-scan`, `effects`, `unused` ([ADR-102](102-unused-code-reachability-report.md)),
+> `describe`, `docs`, `doctor` — none of which has an MCP tool or an entry in the
+> "Excluded" list above, which still names only the four write-side commands this
+> WD knew about. Re-adjudicate the seven-tool set against the current CLI verb
+> surface before treating it as complete.
+
 ### WD6 — `isError` maps to EXIT_USAGE (64), not to "analysis found problems"
 
 A `rigor check` run that finds diagnostics exits 1 — this is normal analysis output,

@@ -44,6 +44,7 @@ module Rigor
 
       manifest(
         id: "dry-monads",
+        target_gems: ["dry-monads"],
         version: "0.1.0",
         description: "Lightweight HKT support for dry-monads Result and Maybe carriers",
         hkt_registrations: [RESULT_REGISTRATION, MAYBE_REGISTRATION],

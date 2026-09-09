@@ -147,7 +147,10 @@ ratchet-stopper than a per-entry budget, because it removes the default of
 
 Restore the column its own "How to Read" already specifies: `Accepted` /
 `Proposed` / `Superseded` plus a parenthetical for in-flight implementation
-(which WD/slice landed, what remains, a version or PR). 200 characters fits the
+(which WD/slice landed, what remains, a version or PR) — or, per the README's
+partial-supersession note, `partially superseded by ADR-N (§ X / WDn)` when
+only a section stands corrected and the whole-document status word does not
+change. 200 characters fits the
 longest legitimate case with room to spare; the pre-ADR-40 rows median 19. The
 criteria, rationale, rejected alternatives, code anchors and measurements stay in
 the ADR body, which is canonical and was already carrying all of them. The cell is

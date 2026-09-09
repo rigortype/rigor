@@ -50,6 +50,7 @@ module Rigor
     class Graphql < Rigor::Plugin::Base
       manifest(
         id: "graphql",
+        target_gems: ["graphql"],
         version: "0.1.0",
         description: "Recognises `class T < GraphQL::Schema::{Object,Enum,InputObject,Mutation}` " \
                      "subclasses; publishes the per-type field-type table, the per-enum value " \
@@ -59,7 +60,7 @@ module Rigor
       )
 
       def prepare(services)
-        scanned = TypeScanner.scan(paths: scannable_paths(services))
+        scanned = TypeScanner.scan(paths: scannable_paths(services), io_boundary: io_boundary)
         publish_if_present(services, :graphql_type_table, scanned.fetch(:types))
         publish_if_present(services, :graphql_enum_table, scanned.fetch(:enums))
         publish_if_present(services, :graphql_input_object_table, scanned.fetch(:input_objects))
@@ -78,11 +79,13 @@ module Rigor
         services.fact_store.publish(plugin_id: manifest.id, name: name, value: value)
       end
 
+      # ADR-45 WD1b (#613 / #630) — the classification probes go through the boundary, so an entry that
+      # is not there yet (or stops being a directory) is a recorded dependency of the scan's input set.
       def scannable_paths(services)
         @scannable_paths ||= services.configuration.paths.flat_map do |entry|
-          if File.directory?(entry)
+          if io_boundary.directory?(entry)
             Dir.glob(File.join(entry, "**", "*.rb"), sort: true)
-          elsif File.file?(entry) && entry.end_with?(".rb")
+          elsif io_boundary.file?(entry) && entry.end_with?(".rb")
             [entry]
           else
             []

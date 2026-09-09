@@ -461,7 +461,12 @@ RSpec.describe "rigor-graphql integration" do
       services
     end
 
+    # #630 — the scanners now read through the `IoBoundary`, whose `TrustPolicy` roots are derived from
+    # `Dir.pwd` (already symlink-resolved). `Dir.mktmpdir` hands back the UNRESOLVED `/tmp/...` alias on
+    # macOS, so a fixture path built from it would sit outside the policy's roots and every read would be
+    # denied. Name the project the same way the policy does.
     Dir.mktmpdir do |dir|
+      dir = File.realpath(dir)
       File.write(File.join(dir, "types.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "graphql.rbs"), graphql_rbs)

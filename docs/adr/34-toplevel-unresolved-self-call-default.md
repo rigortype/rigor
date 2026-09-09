@@ -318,6 +318,15 @@ the Playground integration.
 
 ## Open questions
 
+> **Status (2026-09-10):** both open questions below name
+> `ProjectPatchedMethods` / ADR-9's `flow_contribution_for` as the mechanism
+> a Rake or `bin/*` toplevel-DSL registration would use. That hook was
+> **deleted pre-1.0 by [ADR-52 WD3](52-compiled-plugin-contribution-dispatch.md)**
+> (2026-06-11) — a plugin defining it now raises at registration
+> (`lib/rigor/plugin/registry.rb`). Neither question has been re-answered
+> against the successor surface (`dynamic_return` / `narrowing_facts`); a
+> `pre_eval:` snippet is the still-live alternative path (a) already names.
+
 - **Rake task files (`Rakefile`, `lib/tasks/*.rake`).** These are
   toplevel-but-DSL: `task :foo => :bar do ... end` reads as
   unresolved-toplevel calls (`task`, `desc`, `namespace`, …)

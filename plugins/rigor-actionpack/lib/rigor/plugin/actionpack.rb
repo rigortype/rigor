@@ -55,6 +55,7 @@ module Rigor
     class Actionpack < Rigor::Plugin::Base
       manifest(
         id: "actionpack",
+        target_gems: ["actionpack"],
         # ADR-37: the four phases (helper / filter / render / strong-params) run per-call over the
         # engine-owned walk; the enclosing controller is read from the node-rule `NodeContext`
         # ancestors. Nested-module qualification is preserved — `module Admin; class
@@ -144,7 +145,8 @@ module Rigor
         diagnostics_for(
           Analyzer.render_violations_for(
             call_node: node, ancestors: context.ancestors, path: path,
-            view_search_roots: @view_search_paths, controller_index: producer_value(:controller_index)
+            view_search_roots: @view_search_paths, io_boundary: io_boundary,
+            controller_index: producer_value(:controller_index)
           ),
           path: path, node: node
         )

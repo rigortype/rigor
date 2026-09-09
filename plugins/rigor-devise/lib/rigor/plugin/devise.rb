@@ -60,6 +60,7 @@ module Rigor
     class Devise < Rigor::Plugin::Base
       manifest(
         id: "devise",
+        target_gems: ["devise"],
         version: "0.1.0",
         description: "Recognises Devise's `devise :strategy` DSL via ADR-16 Tier B.",
         trait_registries: [

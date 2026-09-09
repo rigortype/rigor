@@ -54,6 +54,7 @@ module Rigor
     class Sidekiq < Rigor::Plugin::Base
       manifest(
         id: "sidekiq",
+        target_gems: ["sidekiq"],
         # Bumped 2026-08-16 — publishes `:reachability_roots` for `rigor unused` (ADR-102 WD3): the workers
         # a schedule file enqueues by name, which no `perform_async` call site writes down.
         # Bumped 2026-09-01 (#534 item 4) — the enqueue methods return the jid `String`.

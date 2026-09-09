@@ -394,6 +394,23 @@ the trial-then-freeze spine, the comprehensive gate ships **advisory**
 
 ### WD7 — Deprecation + graduation cadence
 
+**Status note (2026-09-10, #938).** The "own dedicated CHANGELOG section"
+below is **superseded by ADR-105's fragment mechanism**: every entry now
+lands as a `changelog.d/<section>/<slug>.md` fragment, gated by
+`spec/docs/changelog_fragments_spec.rb`'s fixed six-section grammar (Keep a
+Changelog's `added changed deprecated removed fixed security`), and the
+`rigor-release-prep` skill consolidates those into `CHANGELOG.md` verbatim
+— deliberately with **no** `Performance` / `Internal` / seventh section,
+having drifted there once already (six stray `### Performance` sections
+before that rule was written). Adding `bleeding_edge` as a section would
+mean widening that fixed set, the fragment spec's grammar, and the skill's
+consolidation step for a single WD2 feature id's worth of entries — real,
+cross-cutting surface for a dedicated-section want that a keyed bullet
+inside the existing sections already serves (a fragment can name the WD2
+feature id in its own text today). The direction stands as a documentation
+decision; a concrete design is deferred until a `bleeding_edge:` feature
+actually needs one.
+
 A bleeding-edge feature (WD2) graduates to default-on — by being removed
 from the overlay — at a **semver major** release, after a **~4-week soak**
 as the guideline minimum. The soak is a floor, not a schedule: a feature

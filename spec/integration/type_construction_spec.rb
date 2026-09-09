@@ -199,6 +199,47 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #645 — the straight-line seam's UNION half. `widen_for_mutator` declined a `Union`
+  # receiver outright, so a literal member kept the arity a mutation had just falsified.
+  describe "fixtures/mutation_widening_union_receiver.rb — a Union receiver widens memberwise" do
+    let(:harness) { harness_for("mutation_widening_union_receiver") }
+
+    # The discriminating half: each `assert_type` names the memberwise answer, so a union that
+    # went through unwidened (the pre-fix `5 | [2]`) fails here rather than going quiet.
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Must-not-fire / must-still-fire in one assertion: the arity reads that follow a mutation on a
+    # union binding are undecided, and the one on a binding nothing mutated still folds.
+    it "silences the stale arity folds without silencing the genuine one" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
+    end
+  end
+
+  # Issue #643 — the receiver is an ELEMENT READ (`c[0] << 5`), so the mutated binding is an rvalue
+  # temp and the straight-line seam named nothing. The element's pin is now widened inside its
+  # container.
+  describe "fixtures/element_read_mutation_widening.rb — an element read as the mutator receiver" do
+    let(:harness) { harness_for("element_read_mutation_widening") }
+
+    # The discriminating half: each `assert_type` names the answer after the element widened, so a
+    # container that went through with its element still pinned fails here rather than going quiet.
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Must-not-fire / must-still-fire in one assertion: the element reads that follow a mutation
+    # are undecided, and the one on a container nothing mutated still folds.
+    it "silences the stale element folds without silencing the genuine one" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
+    end
+  end
+
   describe "fixtures/mutation_join_declared_sig/ — the join stays inside a hand-written signature" do
     let(:harness) { harness_for("mutation_join_declared_sig") }
 

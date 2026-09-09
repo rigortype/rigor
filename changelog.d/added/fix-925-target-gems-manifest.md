@@ -1,0 +1,1 @@
+- **[plugins]** Plugin manifests now declare `target_gems:`, and `rigor doctor` / `rigor skill describe` use it to name, per plugin, a bundled plugin that models a gem your project depends on but is not enabled — replacing the Rails-only check that went quiet as soon as any one Rails plugin was configured. ([#949](https://github.com/rigortype/rigor/pull/949))

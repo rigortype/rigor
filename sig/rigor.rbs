@@ -24,6 +24,7 @@ module Rigor
 
   class CLI
     EXIT_USAGE: Integer
+    EXIT_INTERNAL_ERROR: Integer
 
     def self.start: (?Array[String] argv, ?out: untyped, ?err: untyped) -> Integer
 

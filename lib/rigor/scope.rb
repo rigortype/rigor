@@ -893,6 +893,50 @@ module Rigor
       [nil, nil]
     end
 
+    # Issue #633 — the ancestors a project class reaches that the project itself does NOT declare: the
+    # `< StandardError` / `< Array` superclasses and the `include Comparable` mixins the two walks above
+    # deliberately drop, gathered breadth-first over the project ancestry so an inherited edge counts too.
+    #
+    # Each entry is the CANDIDATE LIST for one as-written name ({#ancestor_name_candidates}: the nesting
+    # spellings first, the bare name last), not a resolved class — resolving it means asking the RBS
+    # environment, which this frozen-index walk does not read. The caller takes the first candidate its own
+    # oracle knows and ignores the rest, the same "most-qualified first" order the project-side resolution
+    # uses.
+    def external_ancestor_name_candidates(class_name, name_memo: {})
+      groups = []
+      queue = [class_name.to_s]
+      seen = {}
+      visited = 0
+      until queue.empty?
+        current = queue.shift
+        next if current.nil? || seen[current]
+
+        seen[current] = true
+        visited += 1
+        break if visited > ANCESTOR_WALK_LIMIT
+
+        collect_external_ancestors(current, queue, groups, name_memo)
+      end
+      groups
+    end
+
+    # One node of {#external_ancestor_name_candidates}: the project-declared ancestors continue the walk,
+    # everything else is reported as a candidate list.
+    def collect_external_ancestors(current, queue, groups, name_memo)
+      raw_names = includes_of(current).dup
+      raw_super = superclass_of(current)
+      raw_names << raw_super if raw_super
+      raw_names.each do |raw|
+        resolved = resolve_ancestor_class_name(current, raw, name_memo)
+        if resolved
+          queue.push(resolved)
+        else
+          groups << ancestor_name_candidates(current, raw)
+        end
+      end
+    end
+    private :collect_external_ancestors
+
     # The BFS node cap; a hierarchy past it gives up rather than walking unboundedly (ADR-41 WD4).
     ANCESTOR_WALK_LIMIT = 100
 

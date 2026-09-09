@@ -1,0 +1,1307 @@
+{
+  "date": "2026-09-09",
+  "targets": {
+    "concurrent-ruby": {
+      "files": 178,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 6,
+          "with_read": 4,
+          "with_consuming_read": 4,
+          "cross_method": 4,
+          "recoverable": 4,
+          "movable": 2
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/concurrent-ruby/concurrent/synchronization/object.rb",
+          "line": 85,
+          "owner": "Concurrent::Synchronization::Object",
+          "name": "@__atomic_fields__",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Concurrent::Synchronization::Object",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/concurrent-ruby/concurrent/synchronization/object.rb",
+          "line": 120,
+          "owner": "Concurrent::Synchronization::Object",
+          "name": "@__atomic_fields__",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Concurrent::Synchronization::Object",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": []
+    },
+    "dependabot-core": {
+      "files": 540,
+      "subdirs": [
+        "common",
+        "bundler",
+        "npm_and_yarn",
+        "python",
+        "go_modules"
+      ],
+      "summary": {
+        "c_anonymous_class_ivar": {
+          "sites": 9,
+          "with_read": 9,
+          "with_consuming_read": 4,
+          "cross_method": 3,
+          "recoverable": 2
+        },
+        "b_singleton_ivar": {
+          "sites": 8,
+          "with_read": 6,
+          "with_consuming_read": 6,
+          "recoverable": 3,
+          "cross_method": 5,
+          "movable": 3
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "b_singleton_ivar",
+          "file": "common/lib/dependabot/experiments.rb",
+          "line": 14,
+          "owner": "Dependabot::Experiments",
+          "name": "@experiments",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Dependabot::Experiments",
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "common/lib/dependabot/registry_client.rb",
+          "line": 66,
+          "owner": "Dependabot::RegistryClient",
+          "name": "@cached_errors",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Dependabot::RegistryClient",
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "common/lib/dependabot/workspace.rb",
+          "line": 34,
+          "owner": "Dependabot::Workspace",
+          "name": "@active_workspace",
+          "rvalue": "instantiation",
+          "spelling": "self_def",
+          "enclosing": "Dependabot::Workspace",
+          "reads": 4,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": []
+    },
+    "faraday": {
+      "files": 33,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 12,
+          "recoverable": 5
+        }
+      },
+      "movable_rows": [],
+      "colliding_rows": []
+    },
+    "gitlab": {
+      "files": 11344,
+      "subdirs": [
+        "app",
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 321,
+          "recoverable": 81,
+          "with_read": 77,
+          "with_consuming_read": 38,
+          "cross_method": 16,
+          "movable": 8,
+          "collides": 1
+        },
+        "c_anonymous_class_ivar": {
+          "sites": 4,
+          "recoverable": 2,
+          "with_read": 2,
+          "with_consuming_read": 2,
+          "cross_method": 1,
+          "movable": 1
+        },
+        "a_class_body_cvar": {
+          "sites": 11,
+          "recoverable": 11,
+          "with_read": 11,
+          "with_consuming_read": 11,
+          "cross_method": 11,
+          "movable": 11
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "b_singleton_ivar",
+          "file": "app/graphql/resolvers/base_resolver.rb",
+          "line": 12,
+          "owner": "Resolvers::BaseResolver",
+          "name": "@requires_argument",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Resolvers::BaseResolver",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "app/graphql/resolvers/base_resolver.rb",
+          "line": 20,
+          "owner": "Resolvers::BaseResolver",
+          "name": "@calls_gitaly",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Resolvers::BaseResolver",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/api/base.rb",
+          "line": 30,
+          "owner": "API::Base",
+          "name": "@skip_global_organization_setup",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "API::Base",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "c_anonymous_class_ivar",
+          "file": "lib/gitlab/ci/config/interpolation/config.rb",
+          "line": 44,
+          "owner": "lib/gitlab/ci/config/interpolation/config.rb:42",
+          "name": "@visited",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": "Gitlab::Ci::Config::Interpolation::Config",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/gitlab/gitaly_client.rb",
+          "line": 276,
+          "owner": "Gitlab::GitalyClient",
+          "name": "@channels",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Gitlab::GitalyClient",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/gitlab/memory/reports/heap_dump.rb",
+          "line": 9,
+          "owner": "Gitlab::Memory::Reports::HeapDump",
+          "name": "@write_heap_dump",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "Gitlab::Memory::Reports::HeapDump",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/metrics/methods.rb",
+          "line": 11,
+          "owner": "Gitlab::Metrics::Methods",
+          "name": "@@_metric_provider_mutex",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/metrics/methods.rb",
+          "line": 12,
+          "owner": "Gitlab::Metrics::Methods",
+          "name": "@@_metrics_provider_cache",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 4,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/gitlab/query_limiting.rb",
+          "line": 24,
+          "owner": "Gitlab::QueryLimiting",
+          "name": "@suppressed",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Gitlab::QueryLimiting",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/gitlab/sidekiq_middleware/pause_control/workers_map.rb",
+          "line": 13,
+          "owner": "Gitlab::SidekiqMiddleware::PauseControl::WorkersMap",
+          "name": "@workers",
+          "rvalue": "instantiation",
+          "spelling": "singleton_class",
+          "enclosing": "Gitlab::SidekiqMiddleware::PauseControl::WorkersMap",
+          "reads": 3,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/action_cable_blocker.rb",
+          "line": 10,
+          "owner": "Gitlab::Testing::ActionCableBlocker",
+          "name": "@@num_active_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/action_cable_blocker.rb",
+          "line": 11,
+          "owner": "Gitlab::Testing::ActionCableBlocker",
+          "name": "@@block_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/request_blocker_middleware.rb",
+          "line": 10,
+          "owner": "Gitlab::Testing::RequestBlockerMiddleware",
+          "name": "@@num_active_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/request_blocker_middleware.rb",
+          "line": 11,
+          "owner": "Gitlab::Testing::RequestBlockerMiddleware",
+          "name": "@@block_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/request_blocker_middleware.rb",
+          "line": 12,
+          "owner": "Gitlab::Testing::RequestBlockerMiddleware",
+          "name": "@@slow_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/request_inspector_middleware.rb",
+          "line": 8,
+          "owner": "Gitlab::Testing::RequestInspectorMiddleware",
+          "name": "@@log_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/request_inspector_middleware.rb",
+          "line": 9,
+          "owner": "Gitlab::Testing::RequestInspectorMiddleware",
+          "name": "@@logged_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/request_inspector_middleware.rb",
+          "line": 10,
+          "owner": "Gitlab::Testing::RequestInspectorMiddleware",
+          "name": "@@inject_headers",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/gitlab/testing/robots_blocker_middleware.rb",
+          "line": 7,
+          "owner": "Gitlab::Testing::RobotsBlockerMiddleware",
+          "name": "@@block_requests",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/release_highlights/validator.rb",
+          "line": 25,
+          "owner": "ReleaseHighlights::Validator",
+          "name": "@all_errors",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "ReleaseHighlights::Validator",
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": [
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/gitlab/database/connection_timer.rb",
+          "line": 22,
+          "owner": "Gitlab::Database::ConnectionTimer",
+          "name": "@interval",
+          "rvalue": "constant",
+          "spelling": "singleton_class",
+          "enclosing": "Gitlab::Database::ConnectionTimer",
+          "reads": 0,
+          "consuming_reads": 0,
+          "foreign_consuming_methods": 0,
+          "recoverable": true,
+          "movable": false,
+          "collides": true
+        }
+      ]
+    },
+    "haml": {
+      "files": 51,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 1,
+          "recoverable": 1
+        }
+      },
+      "movable_rows": [],
+      "colliding_rows": []
+    },
+    "kramdown": {
+      "files": 55,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 4,
+          "with_read": 2
+        },
+        "a_class_body_cvar": {
+          "sites": 1,
+          "recoverable": 1,
+          "with_read": 1,
+          "with_consuming_read": 1,
+          "cross_method": 1,
+          "movable": 1
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/kramdown/parser/kramdown.rb",
+          "line": 315,
+          "owner": "Kramdown::Parser::Kramdown",
+          "name": "@@parsers",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 4,
+          "consuming_reads": 4,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": []
+    },
+    "liquid": {
+      "files": 63,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "a_class_body_cvar": {
+          "sites": 2,
+          "recoverable": 2,
+          "with_read": 2,
+          "with_consuming_read": 1,
+          "cross_method": 1,
+          "movable": 1
+        },
+        "b_singleton_ivar": {
+          "sites": 5,
+          "with_read": 4,
+          "recoverable": 1,
+          "with_consuming_read": 1,
+          "cross_method": 1,
+          "movable": 1
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/liquid/condition.rb",
+          "line": 42,
+          "owner": "Liquid::Condition",
+          "name": "@@method_literals",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/liquid/strainer_template.rb",
+          "line": 46,
+          "owner": "Liquid::StrainerTemplate",
+          "name": "@filter_methods",
+          "rvalue": "instantiation",
+          "spelling": "singleton_class",
+          "enclosing": "Liquid::StrainerTemplate",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": []
+    },
+    "mail": {
+      "files": 111,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "a_class_body_cvar": {
+          "sites": 5,
+          "recoverable": 4,
+          "with_read": 4,
+          "with_consuming_read": 3,
+          "cross_method": 3,
+          "movable": 3
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/mail.rb",
+          "line": 22,
+          "owner": "Mail",
+          "name": "@@autoloads",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/mail/mail.rb",
+          "line": 188,
+          "owner": "Mail",
+          "name": "@@delivery_notification_observers",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 4,
+          "consuming_reads": 4,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/mail/mail.rb",
+          "line": 189,
+          "owner": "Mail",
+          "name": "@@delivery_interceptors",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 5,
+          "consuming_reads": 4,
+          "foreign_consuming_methods": 3,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": []
+    },
+    "mastodon": {
+      "files": 1325,
+      "subdirs": [
+        "app",
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 22,
+          "with_read": 4,
+          "with_consuming_read": 3,
+          "recoverable": 14,
+          "cross_method": 1
+        }
+      },
+      "movable_rows": [],
+      "colliding_rows": []
+    },
+    "parser": {
+      "files": 56,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 8,
+          "recoverable": 8
+        }
+      },
+      "movable_rows": [],
+      "colliding_rows": []
+    },
+    "rails": {
+      "files": 2829,
+      "subdirs": [
+        "activerecord",
+        "activesupport",
+        "actionpack",
+        "actionview",
+        "activejob",
+        "activemodel",
+        "activestorage",
+        "actionmailer",
+        "actioncable"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 152,
+          "recoverable": 58,
+          "with_read": 52,
+          "with_consuming_read": 26,
+          "cross_method": 18,
+          "movable": 4,
+          "collides": 2
+        },
+        "c_anonymous_class_ivar": {
+          "sites": 22,
+          "with_read": 5,
+          "with_consuming_read": 5,
+          "cross_method": 4,
+          "collides": 2,
+          "recoverable": 15,
+          "movable": 2
+        },
+        "a_class_body_cvar": {
+          "sites": 18,
+          "with_read": 11,
+          "recoverable": 9,
+          "with_consuming_read": 5,
+          "cross_method": 5,
+          "movable": 5
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "c_anonymous_class_ivar",
+          "file": "actionpack/test/dispatch/routing_assertions_test.rb",
+          "line": 360,
+          "owner": "actionpack/test/dispatch/routing_assertions_test.rb:357",
+          "name": "@config",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": "WithRoutingResetTest",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "actionview/lib/action_view/digestor.rb",
+          "line": 7,
+          "owner": "ActionView::Digestor",
+          "name": "@@digest_mutex",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "activerecord/lib/active_record/filter_attribute_handler.rb",
+          "line": 7,
+          "owner": "ActiveRecord::FilterAttributeHandler",
+          "name": "@sensitive_attribute_declaration_listeners",
+          "rvalue": "instantiation",
+          "spelling": "singleton_class",
+          "enclosing": "ActiveRecord::FilterAttributeHandler",
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "activerecord/lib/active_record/fixtures.rb",
+          "line": 541,
+          "owner": "ActiveRecord::FixtureSet",
+          "name": "@@all_cached_fixtures",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "activerecord/test/models/post.rb",
+          "line": 219,
+          "owner": "Post",
+          "name": "@log",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Post",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "activesupport/lib/active_support/editor.rb",
+          "line": 44,
+          "owner": "ActiveSupport::Editor",
+          "name": "@current",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "ActiveSupport::Editor",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "activesupport/lib/active_support/execution_context.rb",
+          "line": 48,
+          "owner": "ActiveSupport::ExecutionContext",
+          "name": "@after_change_callbacks",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "ActiveSupport::ExecutionContext",
+          "reads": 4,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "activesupport/lib/active_support/testing/parallelization.rb",
+          "line": 14,
+          "owner": "ActiveSupport::Testing::Parallelization",
+          "name": "@@before_fork_hooks",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "activesupport/lib/active_support/testing/parallelization.rb",
+          "line": 22,
+          "owner": "ActiveSupport::Testing::Parallelization",
+          "name": "@@after_fork_hooks",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "activesupport/lib/active_support/testing/parallelization.rb",
+          "line": 30,
+          "owner": "ActiveSupport::Testing::Parallelization",
+          "name": "@@run_cleanup_hooks",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "c_anonymous_class_ivar",
+          "file": "activesupport/test/json/encoding_test.rb",
+          "line": 284,
+          "owner": "activesupport/test/json/encoding_test.rb:281",
+          "name": "@people",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": "TestJSONEncoding",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": [
+        {
+          "shape": "c_anonymous_class_ivar",
+          "file": "actioncable/test/server/base_test.rb",
+          "line": 46,
+          "owner": "actioncable/test/server/base_test.rb:44",
+          "name": "@server",
+          "rvalue": "opaque",
+          "spelling": null,
+          "enclosing": "BaseTest",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": false,
+          "movable": false,
+          "collides": true
+        },
+        {
+          "shape": "c_anonymous_class_ivar",
+          "file": "actionpack/test/dispatch/server_timing_test.rb",
+          "line": 104,
+          "owner": "actionpack/test/dispatch/server_timing_test.rb:102",
+          "name": "@app",
+          "rvalue": "opaque",
+          "spelling": null,
+          "enclosing": "ServerTimingTest",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": false,
+          "movable": false,
+          "collides": true
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "activesupport/lib/active_support/key_generator.rb",
+          "line": 18,
+          "owner": "ActiveSupport::KeyGenerator",
+          "name": "@hash_digest_class",
+          "rvalue": "opaque",
+          "spelling": "singleton_class",
+          "enclosing": "ActiveSupport::KeyGenerator",
+          "reads": 0,
+          "consuming_reads": 0,
+          "foreign_consuming_methods": 0,
+          "recoverable": false,
+          "movable": false,
+          "collides": true
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "activesupport/lib/active_support/key_generator.rb",
+          "line": 25,
+          "owner": "ActiveSupport::KeyGenerator",
+          "name": "@hash_digest_class",
+          "rvalue": "constant",
+          "spelling": "singleton_class",
+          "enclosing": "ActiveSupport::KeyGenerator",
+          "reads": 0,
+          "consuming_reads": 0,
+          "foreign_consuming_methods": 0,
+          "recoverable": true,
+          "movable": false,
+          "collides": true
+        }
+      ]
+    },
+    "redmine": {
+      "files": 346,
+      "subdirs": [
+        "app",
+        "lib"
+      ],
+      "summary": {
+        "a_class_body_cvar": {
+          "sites": 15,
+          "recoverable": 12,
+          "with_read": 10,
+          "with_consuming_read": 8,
+          "cross_method": 7,
+          "movable": 7
+        },
+        "b_singleton_ivar": {
+          "sites": 36,
+          "with_read": 26,
+          "with_consuming_read": 17,
+          "cross_method": 10,
+          "recoverable": 17,
+          "movable": 5
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "b_singleton_ivar",
+          "file": "app/models/webhook_payload.rb",
+          "line": 38,
+          "owner": "WebhookPayload",
+          "name": "@events",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "WebhookPayload",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/redmine/access_control.rb",
+          "line": 26,
+          "owner": "Redmine::AccessControl",
+          "name": "@permissions",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "Redmine::AccessControl",
+          "reads": 6,
+          "consuming_reads": 5,
+          "foreign_consuming_methods": 5,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/redmine/activity.rb",
+          "line": 24,
+          "owner": "Redmine::Activity",
+          "name": "@@available_event_types",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/redmine/activity.rb",
+          "line": 25,
+          "owner": "Redmine::Activity",
+          "name": "@@default_event_types",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/redmine/activity.rb",
+          "line": 26,
+          "owner": "Redmine::Activity",
+          "name": "@@plugins_event_classes",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/redmine/activity.rb",
+          "line": 27,
+          "owner": "Redmine::Activity",
+          "name": "@@providers",
+          "rvalue": "instantiation",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/redmine/hook.rb",
+          "line": 22,
+          "owner": "Redmine::Hook",
+          "name": "@@listener_classes",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 2,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/redmine/menu_manager.rb",
+          "line": 255,
+          "owner": "Redmine::MenuManager",
+          "name": "@items",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "Redmine::MenuManager",
+          "reads": 2,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/redmine/plugin.rb",
+          "line": 155,
+          "owner": "Redmine::Plugin",
+          "name": "@registered_plugins",
+          "rvalue": "literal",
+          "spelling": "self_def",
+          "enclosing": "Redmine::Plugin",
+          "reads": 1,
+          "consuming_reads": 1,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/redmine/scm/base.rb",
+          "line": 30,
+          "owner": "Redmine::Scm::Base",
+          "name": "@scms",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "Redmine::Scm::Base",
+          "reads": 4,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/redmine/search.rb",
+          "line": 23,
+          "owner": "Redmine::Search",
+          "name": "@@available_search_types",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 2,
+          "consuming_reads": 2,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "a_class_body_cvar",
+          "file": "lib/redmine/wiki_formatting.rb",
+          "line": 26,
+          "owner": "Redmine::WikiFormatting",
+          "name": "@@formatters",
+          "rvalue": "literal",
+          "spelling": null,
+          "enclosing": null,
+          "reads": 8,
+          "consuming_reads": 8,
+          "foreign_consuming_methods": 6,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": []
+    },
+    "rigor": {
+      "files": 674,
+      "subdirs": [
+        "lib",
+        "plugins"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 29,
+          "recoverable": 12,
+          "with_read": 8,
+          "with_consuming_read": 6,
+          "cross_method": 2,
+          "movable": 2
+        }
+      },
+      "movable_rows": [
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/rigor/effects/entry_points.rb",
+          "line": 132,
+          "owner": "Rigor::Effects::EntryPoints",
+          "name": "@presets",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "Rigor::Effects::EntryPoints",
+          "reads": 6,
+          "consuming_reads": 6,
+          "foreign_consuming_methods": 5,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        },
+        {
+          "shape": "b_singleton_ivar",
+          "file": "lib/rigor/plugin/first_party.rb",
+          "line": 52,
+          "owner": "Rigor::Plugin::FirstParty",
+          "name": "@memo",
+          "rvalue": "literal",
+          "spelling": "singleton_class",
+          "enclosing": "Rigor::Plugin::FirstParty",
+          "reads": 3,
+          "consuming_reads": 3,
+          "foreign_consuming_methods": 1,
+          "recoverable": true,
+          "movable": true,
+          "collides": false
+        }
+      ],
+      "colliding_rows": []
+    },
+    "rubocop-ast": {
+      "files": 101,
+      "subdirs": [
+        "lib"
+      ],
+      "summary": {
+        "b_singleton_ivar": {
+          "sites": 1,
+          "with_read": 1,
+          "with_consuming_read": 1,
+          "cross_method": 1
+        }
+      },
+      "movable_rows": [],
+      "colliding_rows": []
+    }
+  }
+}

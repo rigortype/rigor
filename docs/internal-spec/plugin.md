@@ -570,8 +570,8 @@ project's source.
   `rigor-activerecord` / `rigor-actionpack` / `rigor-actionmailer` /
   `rigor-factorybot` use it.
 - `Rigor::Plugin::Isolation` — the **selectable isolation strategy** for
-  the invocation, chosen by `RIGOR_PLUGIN_ISOLATION` (the `exe/rigor`
-  launcher maps `.rigor.yml`'s `plugins_isolation:` onto it). One
+  the invocation, chosen by `RIGOR_PLUGIN_ISOLATION` alone. There is no
+  `.rigor.yml` key for it ([#911](https://github.com/rigortype/rigor/issues/911)). One
   `call(feature:, receiver:, method:, args:)` interface over three
   backends, **`process` the default**:
   - `process` (default) — a single forked **persistent worker** (forked

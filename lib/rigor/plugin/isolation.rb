@@ -7,8 +7,8 @@ module Rigor
     # ADR-39 slice 5 — the selectable isolation strategy for target-library invocation. A plugin invokes a
     # pure method on a trusted target library (e.g. `ActiveSupport::Inflector.pluralize("post")`) through
     # {.call}; how much the invocation is isolated from Rigor's own process is a **configurable strategy**
-    # (`RIGOR_PLUGIN_ISOLATION` env; the `exe/rigor` launcher maps `.rigor.yml`'s `plugins_isolation:` onto it
-    # before re-exec). Three backends behind one interface:
+    # (the `RIGOR_PLUGIN_ISOLATION` env — there is no `.rigor.yml` key for it, see issue #911). Three
+    # backends behind one interface:
     #
     # - `none` — load into the main space and call directly. Lowest cost; no isolation. Used as the fallback
     #   where fork is unavailable; fine because the invoked library is trusted + pure.

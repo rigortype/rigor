@@ -65,8 +65,13 @@ in-place extensions to Ruby's built-in classes:
 - `Enumerable` — `#index_by`, `#index_with`, `#pluck`, `#pick`,
   `#exclude?`, `#including`, `#excluding`, `#without`, `#sole`
 - `Object` (universal) — `#blank?`, `#present?`, `#presence`,
-  `#try`, `#try!`, `#acts_like?` plus the `NilClass` / `TrueClass`
-  / `FalseClass` specialisations
+  `#try`, `#try!`, `#acts_like?`, `#to_param`, `#to_query`,
+  `#duplicable?`, `#instance_values`, `#instance_variable_names` plus
+  the `NilClass` / `TrueClass` / `FalseClass` specialisations
+- `ActiveSupport::TimeWithZone` — declared as a subclass of `Time`,
+  which is what `Time.current` and the `Duration#ago` family answer, so
+  `#time_zone`, `#time`, `#period` and `#comparable_time` resolve
+  without the rest of the chain losing its `Time` typing
 
 ## Why it exists
 

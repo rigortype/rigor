@@ -92,13 +92,14 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   ActiveSupport::Duration#in_months ActiveSupport::Duration#in_seconds ActiveSupport::Duration#in_weeks
   ActiveSupport::Duration#in_years ActiveSupport::Duration#iso8601 ActiveSupport::Duration#parts
   ActiveSupport::Duration#to_f ActiveSupport::Duration#to_i
+  ActiveSupport::TimeWithZone#time_zone
   Array#compact_blank Array#exclude? Array#fifth Array#forty_two Array#fourth Array#from
   Array#in_groups Array#in_groups_of Array#inquiry Array#second Array#split Array#third Array#to
   Array.wrap
   Enumerable#compact_blank Enumerable#exclude? Enumerable#excluding Enumerable#including
   Enumerable#index_by Enumerable#index_with Enumerable#maximum Enumerable#minimum Enumerable#pick
   Enumerable#pluck Enumerable#sole Enumerable#without
-  FalseClass#blank? FalseClass#present?
+  FalseClass#blank? FalseClass#present? FalseClass#to_param
   Float#byte Float#bytes Float#day Float#days Float#gigabyte Float#gigabytes Float#hour Float#hours
   Float#kilobyte Float#kilobytes Float#megabyte Float#megabytes Float#minute Float#minutes
   Float#month Float#months Float#second Float#seconds Float#week Float#weeks Float#year Float#years
@@ -111,8 +112,9 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   Integer#minutes Integer#month Integer#months Integer#multiple_of? Integer#ordinal
   Integer#ordinalize Integer#petabyte Integer#petabytes Integer#second Integer#seconds
   Integer#terabyte Integer#terabytes Integer#week Integer#weeks Integer#year Integer#years
-  NilClass#blank? NilClass#duplicable? NilClass#presence NilClass#present? NilClass#try NilClass#try!
-  Object#acts_like? Object#blank? Object#in? Object#presence Object#present?
+  NilClass#blank? NilClass#duplicable? NilClass#presence NilClass#present? NilClass#to_param
+  NilClass#try NilClass#try!
+  Object#acts_like? Object#blank? Object#duplicable? Object#in? Object#presence Object#present?
   String#at String#camelcase String#camelize String#classify String#dasherize String#deconstantize
   String#demodulize String#ends_with? String#exclude? String#first String#foreign_key String#from
   String#html_safe String#html_safe? String#humanize String#indent String#inquiry String#last
@@ -120,7 +122,7 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   String#starts_with? String#strip_heredoc String#tableize String#titlecase String#titleize
   String#to String#truncate String#truncate_bytes String#truncate_words String#underscore
   String#upcase_first
-  TrueClass#blank? TrueClass#present?
+  TrueClass#blank? TrueClass#present? TrueClass#to_param
   ERB::Util.html_escape_once
 ].freeze
 

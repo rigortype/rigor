@@ -129,8 +129,29 @@ singletons `.days_in_month`, `.days_in_year`, `.rfc3339`, `.use_zone`,
 `.find_zone` / `.find_zone!` and `.zone_default`.
 
 Where a return cannot honestly be named it is widened rather than
-guessed: `#in_time_zone` answers an `ActiveSupport::TimeWithZone`, which
-this bundle does not model, so it reads `untyped`.
+guessed: `#in_time_zone` answers an `ActiveSupport::TimeWithZone` under a
+zone and the receiver's own class when none is configured, so it reads
+`untyped` rather than picking one of the two.
+
+`ActiveSupport::TimeWithZone` itself **is** modelled, as a subclass of
+`Time` — which is what `Time.current` and the whole `1.hour.ago` family
+answer:
+
+```ruby
+Time.current.time_zone       # the zone (untyped)
+Time.current.comparable_time # Time
+Time.current.to_fs(:db)      # String — Time's own surface, inherited
+1.hour.ago.time_zone         # the same class from the Duration family
+Time.now.time_zone           # still call.undefined-method — a plain
+                             # Time really does not have it
+```
+
+Rails overrides `TimeWithZone#is_a?` to answer true for `::Time` and
+forwards everything it does not define to the wrapped `Time`, so the
+subclass says what a `Time` return said and adds the four readers a TWZ
+has of its own. A `Time | TimeWithZone` union was measured instead and
+rejected: it fires nothing, but types the whole downstream chain
+`Dynamic[top]`.
 
 What is left out is twelve names, measured against a real
 `require "active_support/all"`: ten instance and two singleton, every one

@@ -163,6 +163,34 @@ class Object
   # exception to the try-shaped-dispatch rule above (design note § 11.2).
   %a{pure}
   def in?: (untyped) -> bool
+
+  # Issue #673 — `core_ext/object/to_query`, `core_ext/object/duplicable` and
+  # `core_ext/object/instance_variables` all hang off `Object`, so every
+  # RBS-known receiver reaches them; declaring them only on `Hash` (as
+  # `to_param` / `to_query` were) or only on `NilClass` (as `duplicable?` /
+  # `instance_values` were) left `"x".to_param`, `1.duplicable?` and friends a
+  # `call.undefined-method` on ordinary Rails code.
+  #
+  # `to_param` is `to_s`; `to_query(key)` interpolates two `CGI.escape` results.
+  # `key` is `untyped` because the body only calls `to_param` on it, and both
+  # `:name` and `"user[name]"` are ordinary call sites. Neither is `%a{pure}`:
+  # both dispatch `to_param` on a value whose own override is invisible here,
+  # the same reason `Hash#to_query` below carries no envelope.
+  def to_param: () -> String
+  def to_query: (untyped key) -> String
+
+  # `bool` and not `true`: `Object#duplicable?` answers true, but the
+  # `Singleton` (and, on a Ruby where methods are not duplicable, `Method` /
+  # `UnboundMethod`) overrides answer false. `-> true` on the universal
+  # receiver would make every `if x.duplicable?` an always-truthy branch —
+  # a false positive on the only shape anybody writes.
+  %a{pure}
+  def duplicable?: () -> bool
+
+  # Keys without the leading `@` for `instance_values`, with it for
+  # `instance_variable_names`.
+  def instance_values: () -> Hash[String, untyped]
+  def instance_variable_names: () -> Array[String]
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -185,6 +213,13 @@ class NilClass
   %a{pure}
   def duplicable?: () -> true
   def instance_values: () -> Hash[String, untyped]
+  # `core_ext/object/to_query` overrides `to_param` on the three singleton
+  # values to return `self` rather than `Object#to_param`'s `to_s`, so the
+  # `Object` row above would carry a wrong return here. `NilClass#to_query`
+  # is its own method (`CGI.escape(key.to_param)`), still a String.
+  %a{pure}
+  def to_param: () -> nil
+  def to_query: (untyped key) -> String
 end
 
 class TrueClass
@@ -192,6 +227,8 @@ class TrueClass
   def blank?: () -> false
   %a{pure}
   def present?: () -> true
+  %a{pure}
+  def to_param: () -> true
 end
 
 class FalseClass
@@ -199,6 +236,8 @@ class FalseClass
   def blank?: () -> true
   %a{pure}
   def present?: () -> false
+  %a{pure}
+  def to_param: () -> false
 end
 
 # ---------------------------------------------------------------
@@ -501,13 +540,17 @@ module ActiveSupport
     # help there: it protects a Duration receiver, and the diagnostic lands on the `Time` the call
     # RETURNS. #658 declared that surface and #670 the `Date` / `DateTime` twins, so the chains resolve.
     #
-    # `() -> Time` is the correct class, not a compromise. Under a zone these answer an
-    # `ActiveSupport::TimeWithZone` (verified by calling them), and Rails overrides `TimeWithZone#is_a?`
-    # to answer true for `::Time` — so `Time` is the class Rails ITSELF tells callers the value is, and
-    # `Time.current` above already answers `Time` for the same reason. A `Time | TimeWithZone` union was
-    # measured and rejected: it draws no `undefined-method`, but types every downstream call
-    # `Dynamic[top]` (`iso8601`, `beginning_of_day`, `to_date`, `- 1.day`), which is worth no more than
-    # leaving them undeclared while still firing a parameter mismatch on the TimeWithZone arm.
+    # `() -> TimeWithZone` since #673, where the class these actually build under a zone (verified by
+    # calling them) was finally declared — as a `::Time` SUBCLASS, so nothing a `Time` return bought is
+    # given up: every `Time` instance method still resolves on the result, every `Time`-typed parameter
+    # still accepts it, and the four TWZ-only readers (`time_zone`, `time`, `period`, `comparable_time`)
+    # stop being a false `call.undefined-method` on `1.hour.ago`. It was `() -> Time` before that, on the
+    # ground that Rails overrides `TimeWithZone#is_a?` to answer true for `::Time` — true, and the
+    # subclass is the same claim made where the analyser can also see the extra readers. A
+    # `Time | TimeWithZone` UNION was measured and rejected: it draws no `undefined-method`, but types
+    # every downstream call `Dynamic[top]` (`iso8601`, `beginning_of_day`, `to_date`, `- 1.day`), which is
+    # worth no more than leaving them undeclared while still firing a parameter mismatch on the
+    # TimeWithZone arm.
     #
     # The with-an-argument form stays `(untyped) -> untyped` on purpose, and this is not caution: the
     # runtime return depends on the argument's class AND on whether the duration carries a date-scale
@@ -520,17 +563,17 @@ module ActiveSupport
     # what stops `created_at > 7.days.ago` folding to a constant. They are already attributed `nondet.time`
     # in `lib/rigor/plugin/activesupport_core_ext/effects.rb` — annotating them here would duplicate an
     # envelope the manifest already owns, and risk the two disagreeing.
-    def ago: () -> Time
+    def ago: () -> TimeWithZone
            | (untyped time) -> untyped
-    def until: () -> Time
+    def until: () -> TimeWithZone
              | (untyped time) -> untyped
-    def before: () -> Time
+    def before: () -> TimeWithZone
               | (untyped time) -> untyped
-    def since: () -> Time
+    def since: () -> TimeWithZone
              | (untyped time) -> untyped
-    def from_now: () -> Time
+    def from_now: () -> TimeWithZone
                 | (untyped time) -> untyped
-    def after: () -> Time
+    def after: () -> TimeWithZone
              | (untyped time) -> untyped
 
     # `to_i` returns `@value.to_i` — always Integer, whether `@value` itself is Integer (`1.day`) or Float
@@ -574,6 +617,48 @@ module ActiveSupport
     %a{pure}
     def parts: () -> Hash[Symbol, Integer | Float]
   end
+
+  # ---------------------------------------------------------------
+  # ActiveSupport::TimeWithZone — issue #673
+  # ---------------------------------------------------------------
+  #
+  # `Time.current` and the `Duration#ago` family above really answer a `TimeWithZone` under a zone, and
+  # this class was not modelled at all, so the four readers a TWZ has and a `Time` does not —
+  # `time_zone`, `time`, `period`, `comparable_time` — were a false `call.undefined-method` on every
+  # `Time.current` receiver. Declaring them on `Time` instead would have been wrong: a plain `Time`
+  # genuinely lacks all four, and the diagnostic would stop firing where it is correct.
+  #
+  # `< ::Time` rather than a `Time | TimeWithZone` union at the producers. The union was measured during
+  # #632 and rejected — it types every downstream call `Dynamic[top]`. Inheritance is both cheaper and
+  # more honest: Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`, so `Time` is the class
+  # Rails itself tells callers a TWZ is, and TWZ's `method_missing` forwards every name it does not
+  # define to the wrapped `::Time`, which is exactly what inheriting `Time`'s surface models. A TWZ
+  # therefore satisfies every `Time`-typed parameter, and chains keep resolving instead of collapsing.
+  #
+  # The cost, taken deliberately: `Time.current` answers a plain `Time` when `Time.zone` is nil, so
+  # `Time.current.time_zone` in a zone-less activesupport-only project is a real `NoMethodError` this
+  # now types. Rails sets `config.time_zone` ("UTC") by default, so the shape is rare, and the false
+  # positive it replaces fired on correct Rails code.
+  class TimeWithZone < ::Time
+    # `Time`'s own `initialize` takes the `(year, month, …)` parts; inheriting it would make
+    # `TimeWithZone.new(utc, zone)` — how Rails constructs one — a `call.argument-type-mismatch`.
+    # `untyped` because the zone and period carriers (`ActiveSupport::TimeZone`,
+    # `TZInfo::TimezonePeriod`) are not declared anywhere in this bundle.
+    def initialize: (untyped utc_time, untyped time_zone, ?untyped local_time, ?untyped period) -> void
+
+    # The `attr_reader`; an `ActiveSupport::TimeZone`, undeclared here.
+    %a{pure}
+    def time_zone: () -> untyped
+
+    # The wall-clock `::Time` in the zone. `utc` / `getutc` / `getgm` / `gmtime` are `Time`'s own names
+    # and stay inherited; `comparable_time` is the alias of `utc` that `Time` does not carry. Neither is
+    # `%a{pure}`: both memoise into an ivar on first call.
+    def time: () -> ::Time
+    def comparable_time: () -> ::Time
+
+    # A `TZInfo::TimezonePeriod`, undeclared here. Memoised like `time`, so not `%a{pure}`.
+    def period: () -> untyped
+  end
 end
 
 # ---------------------------------------------------------------
@@ -584,7 +669,11 @@ class Time
   # NOT %a{pure}: already attributed nondet.time/global.read/global.write
   # by `lib/rigor/plugin/activesupport_core_ext/effects.rb` (issue #387).
   # Duplicating an RBS envelope here risks the two disagreeing.
-  def self.current: () -> Time
+  #
+  # `Time.zone ? Time.zone.now : Time.now` — an `ActiveSupport::TimeWithZone` under a zone, which since
+  # #673 is declared as a `::Time` subclass so the four TWZ-only readers resolve without the rest of the
+  # chain losing its `Time` typing. See that class's own note for the zone-less cost.
+  def self.current: () -> ActiveSupport::TimeWithZone
   def self.zone: () -> untyped # ActiveSupport::TimeZone | nil
   def self.zone=: (String | Symbol | untyped) -> untyped
 

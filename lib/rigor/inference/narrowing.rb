@@ -2048,13 +2048,25 @@ module Rigor
         # shapes at once. Because the repair lives in the shared derivation, `is_a?`, `case`/`when`, `===`
         # and the constant typer were fixed together rather than one guard shape at a time. A scope no
         # declaration walk built still falls back to the peel; see {Reflection.lexical_nesting_chain}.
+        #
+        # A path whose head and tail have DIFFERENT owners is the one shape no `<prefix>::<full path>`
+        # candidate can name (#656), so the whole-path loop falls through to the segment-wise walk
+        # before it gives up: `A::B` guarded inside `P::Guard` with `P::A < P::Base` is `P::Base::B`,
+        # which the loop above only ever reached as the top-level `A::B` — a real but different class,
+        # and every reader call on the narrowed receiver was then checked against it. The walk is
+        # {Reflection.resolve_constant_path_name}, shared with the constant typer so the guard and the
+        # value it guards cannot name two classes, and it takes this scope's acceptance test so a
+        # candidate is still adopted only when the environment or discovery knows it as a class.
         def resolve_class_name_lexically(bare_name, scope)
           chain = lexical_nesting_for(scope)
           chain.each do |prefix|
             candidate = "#{prefix}::#{bare_name}"
             return candidate if class_known_to_scope?(scope, candidate)
           end
-          bare_name
+          walked = Reflection.resolve_constant_path_name(bare_name, scope) do |candidate|
+            class_known_to_scope?(scope, candidate)
+          end
+          walked || bare_name
         end
 
         # Combines the environment's RBS-known set with the scope's in-source
@@ -2509,6 +2521,11 @@ module Rigor
         # through {#rooted_class_predicate_name}, which layers #614's extra decline on top of the
         # same walk. A rooted `::Foo` names the top level and never a lexically nearer shadow, so
         # it keeps the un-walked spelling. nil for any non-constant shape, as before.
+        #
+        # PUBLIC, alone among the helpers in this block (#655): `case`/`when`'s VALUE side lives in
+        # `ExpressionTyper` and matched on the as-written spelling, so the two halves of one `case`
+        # disagreed — the flow side narrowed through this walk while the value side resolved the
+        # pattern against whatever the environment knew under that literal name.
         def lexical_class_name(node, scope)
           bare_name = static_class_name(node)
           return nil if bare_name.nil?
@@ -2516,6 +2533,7 @@ module Rigor
 
           resolve_class_name_lexically(bare_name, scope)
         end
+        public :lexical_class_name
 
         # ----- narrow_class / narrow_not_class helpers -----
 

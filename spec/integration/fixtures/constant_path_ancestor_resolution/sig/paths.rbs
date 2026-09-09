@@ -1,0 +1,41 @@
+# The marker methods are declared here rather than only in `demo.rb` so that a
+# wrong constant resolution surfaces as `call.undefined-method` — the diagnostic
+# https://github.com/rigortype/rigor/issues/656 actually reports. The rule
+# declines on a receiver whose class RBS does not know, so every class that
+# appears as a resolved or narrowed receiver has to be declared, and no two of
+# them may share a method name or the wrong answer would type-check.
+
+class A
+  class B
+    def toplevel_only: () -> String
+  end
+end
+
+module P
+  class Base
+    class B
+      def base_b: () -> String
+    end
+  end
+
+  module Mixin
+    class M
+      def mixin_m: () -> String
+    end
+  end
+
+  class A < Base
+  end
+
+  class Includer
+    include Mixin
+  end
+
+  class Base2
+    class Head
+      class Leaf
+        def leaf: () -> String
+      end
+    end
+  end
+end

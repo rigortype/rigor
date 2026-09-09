@@ -205,6 +205,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     nominal_for_name(req:class_name,key:scope)
     project_declared_class?(req:class_name,key:scope,key:environment)
     rbs_class_known?(req:class_name,key:scope,key:environment)
+    resolve_constant_path_name(req:name,req:scope,block:known)
     resolve_constant_type(req:name,key:scope,key:rooted)
     singleton_definition(req:class_name,key:scope,key:environment)
     singleton_for_name(req:class_name,key:scope)

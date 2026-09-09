@@ -39,6 +39,8 @@ module Rigor
     def discovered_method_visibilities: () -> Hash[String, Hash[Symbol, Symbol]]
     def discovered_superclasses: () -> Hash[String, String]
     def discovered_includes: () -> Hash[String, Array[String]]
+    # sig-gen gap: #898 — sig-gen skips the endless-def reader (untyped return), so the table shape is hand-written.
+    def discovered_extends: () -> Hash[String, Array[String]]
     def discovered_class_sources: () -> Hash[String, Set[String]]
     def constant_sources: () -> Hash[String, Set[String]]
     def published_constant_names: () -> Set[String]
@@ -75,6 +77,8 @@ module Rigor
       attr_reader discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]]
       attr_reader discovered_superclasses: Hash[String, String]
       attr_reader discovered_includes: Hash[String, Array[String]]
+      # sig-gen gap: #898 — `Data.define` members carry no type, as for every other row in this class.
+      attr_reader discovered_extends: Hash[String, Array[String]]
       attr_reader discovered_class_sources: Hash[String, Set[String]]
       attr_reader constant_sources: Hash[String, Set[String]]
       attr_reader published_constant_names: Set[String]
@@ -90,7 +94,7 @@ module Rigor
 
       EMPTY: DiscoveryIndex
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?run_generation: Object?) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_extends: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?run_generation: Object?) -> DiscoveryIndex
     end
 
     class IndexedKey
@@ -169,6 +173,9 @@ module Rigor
     def data_member_layout: (String | Symbol class_name) -> Array[Symbol]?
     def struct_member_layout: (String | Symbol class_name) -> { members: Array[Symbol], keyword_init: bool }?
     def includes_of: (String | Symbol class_name) -> Array[String]
+    # sig-gen gap: #898 — sig-gen proposes `Array[untyped] | []` off the empty-table early return, so the
+    # element type is hand-written, matching {#includes_of}.
+    def singleton_extends_of: (String | Symbol class_name) -> Array[String]
     def indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Type::t?
     def with_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key, Type::t type) -> Scope
     def without_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Scope

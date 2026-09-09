@@ -893,7 +893,10 @@ module Rigor
       # unresolvable name and not for a shadowed one.
       def case_when_pattern_certainty(subject_type, pattern_node)
         class_name = Narrowing.lexical_class_name(pattern_node, scope)
-        return Narrowing.class_pattern_certainty(subject_type, class_name, environment: scope.environment) if class_name
+        if class_name
+          return Narrowing.class_pattern_certainty(subject_type, class_name, environment: scope.environment,
+                                                                             scope: scope)
+        end
 
         literal = literal_pattern_value(pattern_node)
         return Narrowing.value_pattern_certainty(subject_type, literal[:value]) if literal

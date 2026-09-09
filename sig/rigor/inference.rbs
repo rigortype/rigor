@@ -104,12 +104,12 @@ module Rigor
       def self?.narrow_non_nil: (Type::t type) -> Type::t
       def self?.narrow_equal: (Type::t type, untyped literal) -> Type::t
       def self?.narrow_not_equal: (Type::t type, untyped literal) -> Type::t
-      def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
-      def self?.narrow_not_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
+      def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?) -> Type::t
+      def self?.narrow_not_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?) -> Type::t
       def self?.narrow_not_refinement: (Type::t current_type, Type::t refinement_type) -> Type::t
       def self?.narrow_for_fact: (Type::t current, untyped fact, untyped environment) -> Type::t
       def self?.predicate_certainty: (Type::t? type) -> (:truthy | :falsey | nil)
-      def self?.class_pattern_certainty: (Type::t subject_type, String class_name, environment: Environment) -> (:yes | :no | :maybe)
+      def self?.class_pattern_certainty: (Type::t subject_type, String class_name, environment: Environment, ?scope: Scope?) -> (:yes | :no | :maybe)
       def self?.value_pattern_certainty: (Type::t subject_type, untyped pattern_value) -> (:yes | :no | :maybe)
       def self?.predicate_scopes: (untyped node, Scope scope) -> [Scope, Scope]
       def self?.case_when_scopes: (untyped subject, Array[untyped] conditions, Scope scope) -> [Scope, Scope]

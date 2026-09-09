@@ -41,7 +41,10 @@ module Rigor
     module Narrowing
       TRUSTED_EQUALITY_LITERAL_CLASSES = [String, Symbol, Integer, TrueClass, FalseClass, NilClass].freeze
       SINGLETON_LITERAL_CLASSES = [TrueClass, FalseClass, NilClass].freeze
-      ClassNarrowingContext = Data.define(:exact, :polarity, :environment)
+      # `scope` is the analysed file's seeded scope where the caller has one, and nil otherwise (the
+      # Fact-shaped and RSpec-matcher entries hold an environment but no scope). Only the #898 singleton
+      # path reads it, and only to withhold a `Bot`, so a nil scope is the pre-#898 answer exactly.
+      ClassNarrowingContext = Data.define(:exact, :polarity, :environment, :scope)
       # A recognised `=~` regex pattern operand: the pattern `source` string and whether it was
       # compiled in extended (`//x`) mode. Extraction from a literal `RegularExpressionNode` and from
       # a value-pinned `Constant[Regexp]` share this carrier so the participation walk and the
@@ -139,9 +142,11 @@ module Rigor
       # counterpart of the scope narrowing {.case_when_scopes} performs for the same condition
       # shape, kept here so the branch a `case` expression's type drops and the clause whose
       # body scope goes dead derive from one judgment.
-      def class_pattern_certainty(subject_type, class_name, environment:)
-        truthy_bot = narrow_class(subject_type, class_name, environment: environment).is_a?(Type::Bot)
-        falsey_bot = narrow_not_class(subject_type, class_name, environment: environment).is_a?(Type::Bot)
+      def class_pattern_certainty(subject_type, class_name, environment:, scope: nil)
+        truthy_bot = narrow_class(subject_type, class_name, environment: environment,
+                                                            scope: scope).is_a?(Type::Bot)
+        falsey_bot = narrow_not_class(subject_type, class_name, environment: environment,
+                                                                scope: scope).is_a?(Type::Bot)
 
         return :no if truthy_bot && !falsey_bot
         return :yes if !truthy_bot && falsey_bot
@@ -309,8 +314,9 @@ module Rigor
       # preserved; disjoint hierarchies collapse to `Bot`. Classes the environment cannot
       # resolve fall back to the conservative answer (the type unchanged) so the analyzer never
       # asserts narrowing it cannot prove.
-      def narrow_class(type, class_name, exact: false, environment: Environment.default)
-        context = ClassNarrowingContext.new(exact: exact, polarity: :positive, environment: environment)
+      def narrow_class(type, class_name, exact: false, environment: Environment.default, scope: nil)
+        context = ClassNarrowingContext.new(exact: exact, polarity: :positive, environment: environment,
+                                            scope: scope)
         narrow_class_dispatch(type, class_name, context)
       end
 
@@ -318,8 +324,9 @@ module Rigor
       # Inhabitants that DO satisfy the predicate are removed; inhabitants that do not are
       # preserved. Conservative on Top/Dynamic/Bot (preserved unchanged) because the analyzer
       # cannot prove the negative without a richer carrier.
-      def narrow_not_class(type, class_name, exact: false, environment: Environment.default)
-        context = ClassNarrowingContext.new(exact: exact, polarity: :negative, environment: environment)
+      def narrow_not_class(type, class_name, exact: false, environment: Environment.default, scope: nil)
+        context = ClassNarrowingContext.new(exact: exact, polarity: :negative, environment: environment,
+                                            scope: scope)
         narrow_class_dispatch(type, class_name, context)
       end
 
@@ -1995,8 +2002,10 @@ module Rigor
           current = scope.type_of(node.receiver)
           return nil if current.nil?
 
-          truthy_type = narrow_class(current, class_name, exact: exact, environment: scope.environment)
-          falsey_type = narrow_not_class(current, class_name, exact: exact, environment: scope.environment)
+          truthy_type = narrow_class(current, class_name, exact: exact, environment: scope.environment,
+                                                          scope: scope)
+          falsey_type = narrow_not_class(current, class_name, exact: exact, environment: scope.environment,
+                                                              scope: scope)
 
           [
             scope.with_method_chain_narrowing(*address, truthy_type),
@@ -2090,11 +2099,11 @@ module Rigor
           [
             scope.with_local(
               name,
-              narrow_class(current, class_name, exact: exact, environment: scope.environment)
+              narrow_class(current, class_name, exact: exact, environment: scope.environment, scope: scope)
             ),
             scope.with_local(
               name,
-              narrow_not_class(current, class_name, exact: exact, environment: scope.environment)
+              narrow_not_class(current, class_name, exact: exact, environment: scope.environment, scope: scope)
             )
           ]
         end
@@ -2149,8 +2158,10 @@ module Rigor
           current = scope.type_of(chain_arg)
           return nil if current.nil?
 
-          truthy_type = narrow_class(current, class_name, exact: false, environment: scope.environment)
-          falsey_type = narrow_not_class(current, class_name, exact: false, environment: scope.environment)
+          truthy_type = narrow_class(current, class_name, exact: false, environment: scope.environment,
+                                                          scope: scope)
+          falsey_type = narrow_not_class(current, class_name, exact: false, environment: scope.environment,
+                                                              scope: scope)
           [
             scope.with_method_chain_narrowing(*address, truthy_type),
             scope.with_method_chain_narrowing(*address, falsey_type)
@@ -2165,7 +2176,8 @@ module Rigor
           target_class = case_equality_target_class(receiver)
           return nil if target_class.nil?
 
-          narrowed = narrow_class(current, target_class, exact: false, environment: scope.environment)
+          narrowed = narrow_class(current, target_class, exact: false, environment: scope.environment,
+                                                         scope: scope)
           [
             scope.with_local(local_name, narrowed),
             scope.with_local(local_name, current)
@@ -2436,8 +2448,9 @@ module Rigor
 
         def class_when_result(scope, current, target, falsey_acc)
           {
-            truthy: narrow_class(current, target, exact: false, environment: scope.environment),
-            falsey: narrow_not_class(falsey_acc, target, exact: false, environment: scope.environment),
+            truthy: narrow_class(current, target, exact: false, environment: scope.environment, scope: scope),
+            falsey: narrow_not_class(falsey_acc, target, exact: false, environment: scope.environment,
+                                                         scope: scope),
             fully_narrowable: true
           }
         end
@@ -2683,14 +2696,50 @@ module Rigor
         #
         # The approximation answers through `Class`, so a target `Class` cannot be ordered against — a
         # project module, typically — lands on the same `:unknown` #657 collapsed to `Bot`, and `case Widget
-        # when Meta` was reported unreachable where `Widget` had `extend Meta`. Residue this deliberately
-        # leaves: `extend` is not modelled at all, so a target the environment DOES order against `Class`
-        # still collapses, and `extend Comparable` keeps its false positive (#898).
+        # when Meta` was reported unreachable where `Widget` had `extend Meta`.
+        #
+        # Issue #898 — that decline is silent about a target the environment DOES order against `Class`, and
+        # `extend Comparable` is one: both names are in RBS, neither includes the other, so the ordering says
+        # `:disjoint` and the collapse fired on an arm MRI takes (`Widget.is_a?(Comparable)` is true — the
+        # `extend` put `Comparable` in `Widget`'s SINGLETON ancestry, which asking about `Class` cannot see).
+        # {#singleton_extend_declines_bot?} supplies the missing half from the project's own `extend` record.
         def narrow_singleton_to_class(singleton, class_name, context)
           return singleton if subclass_of?("Class", class_name, context)
           return Type::Combinator.untyped if declines_bot?("Class", class_name, context)
+          return Type::Combinator.untyped if singleton_extend_declines_bot?(singleton, class_name, context)
 
           Type::Combinator.bot
+        end
+
+        # Whether the class object's own `extend` record forbids the `Bot` the `Class` approximation would
+        # otherwise authorise (#898). An extended `M` puts every ancestor of `M` in the singleton's
+        # ancestry, so the question per extended module is `M <= target`: `:equal` (`extend Comparable`
+        # under `when Comparable`) and `:subclass` support the arm, and `:unknown` (`extend Meta` under
+        # `when Comparable`, `Meta` being project source the environment never joined to RBS) cannot rule
+        # it out. `:superclass` and `:disjoint` support NOTHING and must keep the collapse — `Integer`
+        # under `when Integer` orders `:superclass` against an extended `Comparable`, and reading that as
+        # support would retract `case Widget when Integer` from every class that extends a core module.
+        #
+        # The answer is `Dynamic[top]`, never the preserved `Singleton[C]`, and the negative edge
+        # ({#narrow_singleton_not_class}) is untouched — so this record is read ONLY to withhold a claim,
+        # never to make one. That asymmetry is deliberate, and it is what keeps the fix honest against an
+        # extend record that is structurally incomplete: `Widget.extend(m)` at a call site, `class << self;
+        # include M; end`, and an `extend` written in a file outside the analysed set are all invisible to
+        # the walk behind {Scope#singleton_extends_of}. A shape that turned this table into a positive
+        # `:subclass` verdict would have to be right about ABSENCE too, and it cannot be. Preserving
+        # `Singleton[C]` would also hand the arm a receiver whose singleton method table has no `clamp` on
+        # it, trading the unreachable-clause false positive for an undefined-method one — the same trap
+        # #657 recorded on the `Constant` carrier.
+        def singleton_extend_declines_bot?(singleton, class_name, context)
+          scope = context.scope
+          return false if context.exact || scope.nil?
+
+          extended = scope.singleton_extends_of(singleton.class_name)
+          return false if extended.empty?
+
+          extended.any? do |module_name|
+            %i[equal subclass unknown].include?(class_ordering(module_name, class_name, context))
+          end
         end
 
         def narrow_singleton_not_class(singleton, class_name, context)

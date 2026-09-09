@@ -27,6 +27,7 @@ module Rigor
       :discovered_superclasses,
       :discovered_header_nestings,
       :discovered_includes,
+      :discovered_extends,
       :discovered_class_sources,
       :constant_sources,
       :published_constant_names,
@@ -101,6 +102,12 @@ module Rigor
         # a name no site recorded under its own key.
         discovered_header_nestings: EMPTY_TABLE,
         discovered_includes: EMPTY_TABLE,
+        # Issue #898 — the singleton-side twin of `discovered_includes`: `{qualified class or module name =>
+        # [module names it `extend`s, as written]}`, built by the same `ScopeIndexer` walk that #526 already
+        # ran to fold an extended module's instance defs onto the extending class's singleton. #526 consumed
+        # the table inside the indexer and threw it away; `Narrowing` needs it to survive onto the scope,
+        # because `Singleton[C]`'s ancestry is exactly what `extend` writes and nothing else records it.
+        discovered_extends: EMPTY_TABLE,
         discovered_class_sources: EMPTY_TABLE,
         # Issue #644 — `{qualified constant name => Set[declaring file]}`, the write attribution behind the
         # cross-file value-constant table. Read only by `Scope#record_constant_dependency` during ADR-46

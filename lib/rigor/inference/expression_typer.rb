@@ -365,18 +365,26 @@ module Rigor
       # and `IndexOperatorWriteNode` is typed through `Scope#type_of`'s own indexed path by
       # `StatementEvaluator#eval_index_write`.
       def type_of_compound_variable_write(node)
-        current = compound_write_current_binding(node) || dynamic_top
+        current = compound_write_current_binding(node)
         rhs = type_of(node.value)
 
         case node
         when Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode,
              Prism::ClassVariableOrWriteNode, Prism::GlobalVariableOrWriteNode
+          # An UNBOUND target is the memoization idiom (`def self.default = @default ||= new`): nothing
+          # has written the variable on any path the analyzer saw, so the stored value is the rvalue.
+          # Reading it as `Dynamic[top] | rhs` would skip every memoized singleton in `sig-gen`
+          # (ADR-5 optimism; three `.default` readers went `sig.skipped.untyped-return` without this).
+          return rhs if current.nil?
+
           Type::Combinator.union(Narrowing.narrow_truthy(current), rhs)
         when Prism::LocalVariableAndWriteNode, Prism::InstanceVariableAndWriteNode,
              Prism::ClassVariableAndWriteNode, Prism::GlobalVariableAndWriteNode
+          return rhs if current.nil?
+
           Type::Combinator.union(Narrowing.narrow_falsey(current), rhs)
         else
-          compound_operator_result(current, rhs, node.binary_operator)
+          compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
         end
       end
 

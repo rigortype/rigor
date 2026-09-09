@@ -1195,15 +1195,24 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer).to be_empty
     end
 
-    it "types InstanceVariableOrWriteNode as the value it stores, not the rvalue alone" do
-      # `@x ||= 7` evaluates to `@x` whenever `@x` is already truthy, so an unbound target cannot answer
-      # `Constant[7]` (issue #617 residue (3)). This is `StatementEvaluator#compound_result_type`'s answer;
-      # the two paths must not disagree about what a compound write evaluates to.
+    it "types an UNBOUND InstanceVariableOrWriteNode as the rvalue (the memoization idiom)" do
+      # `def self.default = @default ||= new` — nothing wrote `@default` on any path the analyzer saw,
+      # so the stored value is the rvalue. ADR-5 optimism; the bound case below takes the union.
       type = scope.type_of(parse_expression("@x ||= 7"), tracer: tracer)
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(7))
+      expect(tracer).to be_empty
+    end
+
+    it "types a BOUND InstanceVariableOrWriteNode as the value it stores, not the rvalue alone" do
+      # `@x ||= 7` evaluates to `@x` whenever `@x` is already truthy (issue #617 residue (3)). This is
+      # `StatementEvaluator#compound_result_type`'s answer; the two paths must not disagree.
+      bound = scope.with_ivar(:@x, Rigor::Type::Combinator.nominal_of("String"))
+      type = bound.type_of(parse_expression("@x ||= 7"))
 
       expect(type).to be_a(Rigor::Type::Union)
       expect(type.members).to include(Rigor::Type::Combinator.constant_of(7))
-      expect(tracer).to be_empty
+      expect(type.members).to include(Rigor::Type::Combinator.nominal_of("String"))
     end
 
     it "folds InstanceVariableOrWriteNode to the rvalue when the target is provably falsey" do

@@ -1,0 +1,1 @@
+- **[inference]** A method whose value comes from a helper that `yield`s now takes the block's type: `during_internal_demand { … }` is no longer `untyped` at every position, and `rigor sig-gen` emits a signature for the wrapper idiom instead of declining it ([#897](https://github.com/rigortype/rigor/pull/897)).

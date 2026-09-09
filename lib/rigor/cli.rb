@@ -12,6 +12,7 @@ require_relative "analysis/result"
 require_relative "cli/options"
 require_relative "cli/diagnostic_formats"
 require_relative "ci_detector"
+require_relative "analysis/check_rules/rule_ids"
 
 module Rigor
   # The CLI class is a dispatcher: each `run_*` method delegates to a command-specific class once the command grows
@@ -169,6 +170,30 @@ module Rigor
       @out.puts "  3. Run `rigor check` to analyse your code."
     end
 
+    # Word-wraps `CheckRules::ALL_RULES` into a comma-separated, `#`-commented block for `init_template`, so the
+    # listed rule ids cannot drift from the catalogue the way a hand-picked subset did (#920) — every rule and only
+    # a rule actually in `ALL_RULES` gets named here.
+    def rule_ids_comment
+      prefix = "#                "
+      max_width = 78 - prefix.length
+      ids = Analysis::CheckRules::ALL_RULES
+      lines = []
+      current = +""
+      ids.each_with_index do |id, index|
+        token = "#{id}#{index == ids.length - 1 ? '.' : ','}"
+        if current.empty?
+          current = token
+        elsif current.length + 1 + token.length <= max_width
+          current << " " << token
+        else
+          lines << current
+          current = token
+        end
+      end
+      lines << current unless current.empty?
+      lines.map { |line| "#{prefix}#{line}" }.join("\n")
+    end
+
     # Renders the starter `.rigor.yml` body. The template serialises `Configuration::DEFAULTS` (so the on-disk file
     # round-trips through `Configuration.load`) and prepends a short header that points the user at the keys they are
     # most likely to want to edit.
@@ -187,11 +212,10 @@ module Rigor
         #                See https://github.com/rigortype/rigor/tree/master/plugins
         #                for production plugins (rigor-activerecord, rigor-sorbet, …).
         # - disable:     list of `rigor check` rule identifiers to
-        #                silence project-wide. The shipped rules are
-        #                call.undefined-method, call.wrong-arity,
-        #                call.argument-type-mismatch,
-        #                call.possible-nil-receiver, dump.type,
-        #                assert.type-mismatch, flow.always-raises.
+        #                silence project-wide. Every rule id Rigor
+        #                ships (run `rigor explain <rule>` for what
+        #                each one catches):
+        #{rule_ids_comment}
         #                A bare family token (`call`, `flow`,
         #                `assert`, `dump`, `def`) wildcards every
         #                rule under that prefix. Legacy unprefixed

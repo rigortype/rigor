@@ -199,15 +199,37 @@ trade for speed. Defenses:
      re-analyse `{X} ∪ dependents[X]` on an edit. The negative (`missing`)
      edges are deliberately *not* inverted here — they feed the structural
      tier (slice 3). The positive **class-existence** lookup edge
-     (resolving a bare constant to a project class) is also deliberately
-     left un-instrumented: a class appearing / disappearing / moving is a
+     (resolving a bare constant to a project class) was originally left
+     un-instrumented here: a class appearing / disappearing / moving is a
      *structural* change caught by the declaration fingerprint tier (§4),
      and a file that merely references `Post` depends on `Post`'s
      *methods* (already recorded via `user_def_for`), not on the bare
-     class existence — so the class-lookup edge is redundant for the body
-     tier and its diffuse read sites (`discovered_classes` is read
-     directly, not through one accessor) are not worth a choke-point
-     refactor here.
+     class existence.
+   - **Amended (issue #639).** That reasoning holds for every change to a
+     class except the DELETION of the file declaring it, where existence
+     is precisely what moved and a reference-only consumer — `Post` with
+     no call on it — had recorded nothing at all to be re-checked by. A
+     warm `--incremental` run therefore kept answering `singleton(Post)`
+     where a full run answers the honest unresolved type. The existence
+     hit now records an edge, at the one place the resolution happens
+     (`Reflection.constant_type_at`, calling
+     `Scope#record_class_existence`) rather than at the diffuse
+     `discovered_classes` read sites — so no choke-point refactor was
+     needed after all.
+   - The edge is the NAME-keyed `class:<last segment>` of the structural
+     tier (§4), not a positive edge to the declaring file, and that is
+     what keeps slice 1c's cost argument intact: a file's declared-class
+     set does not move when a method body inside it is edited, so a bare
+     referent is re-checked when the class appears or disappears and at
+     no other time. A file edge would have re-checked every bare referent
+     of every class the file declares on any edit to it. It is the
+     hit-side spelling of a key the miss side already recorded, so the
+     `class:` producer — previously `Incremental.appeared_classes`, which
+     diffed appearances in CHANGED files only — becomes the symmetric
+     `changed_class_declarations` over changed + REMOVED files. Nothing
+     in the snapshot's shape moves with it (`class_decls` already carries
+     the per-file declared sets), so `IncrementalSnapshot::SCHEMA` is
+     unchanged.
    - **Remaining in this slice:** persistence (`deps` / `dependents` +
      per-file diagnostic entries, reusing ADR-45's
      `Cache::Store#fetch_or_validate`) and the mandatory

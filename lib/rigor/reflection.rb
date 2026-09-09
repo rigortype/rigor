@@ -250,11 +250,16 @@ module Rigor
       singleton = env.singleton_for_name(candidate)
       return singleton if singleton
 
+      # Issue #639 — the class-EXISTENCE edge. Without it a reference-only consumer (`Foo` with no call on
+      # it) recorded nothing, so deleting the declaring file left the warm `--incremental` run serving
+      # `singleton(Foo)` where `--no-cache` answers the honest unresolved type. Recorded ahead of the lookup
+      # rather than on the hit: every rung of the ladder spells the same last segment, which is the whole of
+      # the key, so one call covers the candidates instead of a branch around each.
+      scope.record_class_existence(candidate) if Analysis::DependencyRecorder.active?
       in_source_class = scope.discovered_classes[candidate]
       return in_source_class if in_source_class
 
-      in_source_value = scope.in_source_constants[candidate]
-      if in_source_value
+      if (in_source_value = scope.in_source_constants[candidate])
         scope.record_constant_dependency(candidate) if Analysis::DependencyRecorder.active?
         return in_source_value
       end

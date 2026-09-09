@@ -689,6 +689,20 @@ Payload :: Data[
 ]
 ```
 
+The `class:<last segment>` key in `missing` is recorded on the HIT as well
+as on the miss ([#639](https://github.com/rigortype/rigor/issues/639)): a
+consumer that merely REFERENCES a project class — `Post` with no call on it
+— depends on that class existing, and deleting the declaring file otherwise
+leaves it serving the pre-deletion type on a warm `--incremental` run while
+a full run answers the honest unresolved one. Its producer MUST therefore be
+symmetric and MUST diff REMOVED files as well as changed ones: a
+declaration that VANISHED satisfies the key exactly as one that appeared,
+and a removed file's whole before-set vanished. The edge is deliberately
+name-keyed rather than a positive edge to the declaring file, so a body edit
+inside the declaration does not re-check the referent. `class_decls` already
+carries the per-file declared sets, so no row moves and `SCHEMA` is
+unchanged.
+
 Schema history worth pinning: `6` stored the seed bundles as
 `(node_id, name, fingerprint)` def-node handles (ADR-85); `8` added each
 bundle's comment-stripped `code_fingerprint` for the B1 comment-only gate;

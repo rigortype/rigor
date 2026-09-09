@@ -49,6 +49,7 @@ module Rigor
     def published_constant_ivars_for: (String class_name) -> Set[Symbol]
     def published_constant?: (String name) -> bool
     def record_constant_dependency: (String name) -> void
+    def record_class_existence: (String class_name) -> void
     def data_member_layouts: () -> Hash[String, Array[Symbol]]
     def struct_member_layouts: () -> Hash[String, { members: Array[Symbol], keyword_init: bool }]
     def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]

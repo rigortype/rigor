@@ -361,6 +361,8 @@ module Rigor
         # Issue #682 — the `Module.nesting` each class / module declaration HEADER is written in.
         @project_discovered_header_nestings = {}.freeze
         @project_discovered_includes = {}.freeze
+        # Issue #898 — the singleton-side twin of the include table (`extend M` / `extend self`).
+        @project_discovered_extends = {}.freeze
         @project_discovered_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
         # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
@@ -1306,6 +1308,7 @@ module Rigor
         @project_discovered_superclasses = discovery.discovered_superclasses
         @project_discovered_header_nestings = discovery.discovered_header_nestings
         @project_discovered_includes = discovery.discovered_includes
+        @project_discovered_extends = discovery.discovered_extends
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
         @published_constant_name_set = nil
@@ -1753,7 +1756,7 @@ module Rigor
         unless @project_discovered_header_nestings.empty?
           tables[:discovered_header_nestings] = @project_discovered_header_nestings
         end
-        tables[:discovered_includes] = @project_discovered_includes unless @project_discovered_includes.empty?
+        seed_mixin_tables(tables)
         unless @project_discovered_method_visibilities.empty?
           tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
         end
@@ -1762,6 +1765,14 @@ module Rigor
         seed_member_layout_tables(tables)
         seed_dependency_attribution_tables(tables)
         tables
+      end
+
+      # The two mixin tables: the ADR-24 instance-side `include` / `prepend` map and its #898 singleton-side
+      # `extend` twin. Paired here because they are read as one picture of a class's ancestry, and split out
+      # of {#project_scope_seed_tables} to keep it under the complexity budget.
+      def seed_mixin_tables(tables)
+        tables[:discovered_includes] = @project_discovered_includes unless @project_discovered_includes.empty?
+        tables[:discovered_extends] = @project_discovered_extends unless @project_discovered_extends.empty?
       end
 
       # ADR-46 slice 1 / issue #644 — the two SOURCE-ATTRIBUTION tables, read only by the recording accessors

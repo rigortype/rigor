@@ -195,7 +195,11 @@ module Rigor
         # #526 — this file's extends folded against the MERGED instance def-nodes (so `extend M` sees a
         # sibling-file M through the cross-file seed). The project-wide fold in {#finalize_def_index}
         # covers cross-file CONSUMERS; this covers the file that declares the extend.
-        methods_table = fold_per_file_extends(root, def_nodes, singleton_def_nodes, seeded_scope)
+        #
+        # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
+        # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
+        file_extends, extends = merge_extend_tables(default_scope, root)
+        methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope)
 
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
@@ -206,6 +210,7 @@ module Rigor
             discovered_superclasses: superclasses,
             discovered_header_nestings: header_nestings,
             discovered_includes: includes,
+            discovered_extends: extends,
             discovered_method_visibilities: method_visibilities,
             data_member_layouts: data_member_layouts,
             struct_member_layouts: struct_member_layouts
@@ -249,10 +254,20 @@ module Rigor
         merged.freeze
       end
 
+      # Issue #898 — one walk, two consumers: the raw per-file table the #526 method fold reads, and the
+      # same table merged over the cross-file seed for the scope. Returned as a pair so a caller cannot
+      # pair the fold with a table a different parse produced, as {#merge_ancestry_tables} is.
+      def merge_extend_tables(default_scope, root)
+        file_extends = build_discovered_extends(root)
+        merged = default_scope.discovered_extends.merge(
+          file_extends
+        ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
+        [file_extends, merged]
+      end
+
       # The per-file half of the #526 fold: mutable copies of the merged tables take the extends, and the
       # existence table (already seeded onto the scope) is rebuilt only when the fold touched it.
-      def fold_per_file_extends(root, def_nodes, singleton_def_nodes, seeded_scope)
-        extends = build_discovered_extends(root)
+      def fold_per_file_extends(extends, def_nodes, singleton_def_nodes, seeded_scope)
         methods_table = seeded_scope.discovered_methods
         return methods_table if extends.empty?
 

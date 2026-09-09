@@ -49,6 +49,7 @@ module Rigor
     def discovered_method_visibilities = @discovery.discovered_method_visibilities
     def discovered_superclasses = @discovery.discovered_superclasses
     def discovered_includes = @discovery.discovered_includes
+    def discovered_extends = @discovery.discovered_extends
     def discovered_class_sources = @discovery.discovered_class_sources
     # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
     def constant_sources = @discovery.constant_sources
@@ -798,6 +799,32 @@ module Rigor
     def includes_of(class_name)
       record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
       @discovery.discovered_includes[class_name.to_s] || []
+    end
+
+    # Issue #898 — the module names `extend`ed onto `class_name`'s SINGLETON, as written, gathered up the
+    # as-written superclass chain because a singleton class inherits its superclass's singleton class
+    # (`class Base; extend Comparable; end; class Widget < Base; end` leaves `Widget.is_a?(Comparable)`
+    # true). Empty for a class the project never extends, and for every scope that saw no seeding pass.
+    #
+    # This is EVIDENCE FOR a singleton ancestor, never against one: the walk sees only what a constant
+    # argument to a receiverless `extend` written inside a declaration body spells, so a runtime
+    # `Widget.extend(m)`, a `class << self; include M; end`, and an `extend` in a file outside the analysed
+    # set are all absent from it. Its one consumer ({Inference::Narrowing.narrow_class}) therefore reads it
+    # only to WITHHOLD a `Bot`, and never to assert that a guard matches.
+    def singleton_extends_of(class_name)
+      table = @discovery.discovered_extends
+      return [] if table.empty?
+
+      names = []
+      current = class_name.to_s
+      seen = {}
+      while current && !seen[current] && seen.size <= ANCESTOR_WALK_LIMIT
+        seen[current] = true
+        record_class_dependency(current) if Analysis::DependencyRecorder.active?
+        names.concat(table[current] || [])
+        current = @discovery.discovered_superclasses[current]
+      end
+      names.uniq
     end
 
     # ADR-24 slice 2 — the user-side ancestor walk: resolves `method_name` against `class_name`'s own `def`s,

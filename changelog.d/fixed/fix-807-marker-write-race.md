@@ -1,0 +1,1 @@
+- **[cache]** Two `rigor check` processes sharing one `.rigor/cache` no longer race each other's schema-version marker, so neither clears the cache root out from under the other or fails with `Errno::ENOENT` ([#891](https://github.com/rigortype/rigor/pull/891)).

@@ -8,24 +8,25 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 - **ADR-1** through **ADR-3** define the type model, extension API, and type representation — the analyzer's conceptual core.
 - Higher-numbered ADRs build on the foundation and can be read as needed.
 - Each ADR has a **Status** field: `Accepted`, `Proposed`, or `Superseded`. Accepted ADRs whose implementation is still in flight carry a parenthetical note (e.g. *partially implemented*, *slice N deferred*).
+- No ADR here carries the whole-document `Superseded` status — every supersession in the corpus is **partial**: one working decision, slice, or rejected-alternative row overtaken while the rest of the ADR stands. That does not change the status word. It is marked in place, on both sides, as `> **Partially superseded by [ADR-N](N-slug.md) (§ X / WDn).** <what changed>` — see [ADR-49](49-adr-authoring-guidelines.md)'s axis-6 note.
 
 ## Index
 
 | # | Title | Status |
 | --- | --- | --- |
-| ADR-0 | [Foundation and Core Architecture of Rigor](0-concept.md) | Accepted |
+| ADR-0 | [Foundation and Core Architecture of Rigor](0-concept.md) | Accepted (Smart Initialization/Gemfile.lock auto-suggest was never built; rigor init writes a static template) |
 | ADR-1 | [Type Model and RBS Superset Strategy](1-types.md) | Accepted |
 | ADR-2 | [Extension API Strategy](2-extension-api.md) | Accepted |
 | ADR-3 | [Type Representation](3-type-representation.md) | Accepted |
 | ADR-4 | [Type Inference Engine](4-type-inference-engine.md) | Accepted |
 | ADR-5 | [Robustness Principle](5-robustness-principle.md) | Accepted |
-| ADR-6 | [Cache Persistence Backend](6-cache-persistence-backend.md) | Accepted |
+| ADR-6 | [Cache Persistence Backend](6-cache-persistence-backend.md) | Accepted (§5 no-eviction superseded by ADR-54 WD3 — 256 MB default LRU cap) |
 | ADR-7 | [v0.1.0 Slice Decisions](7-v0.1.0-slice-decisions.md) | Accepted |
 | ADR-8 | [Steep-Inspired Improvements](8-steep-inspired-improvements.md) | Accepted |
 | ADR-9 | [Cross-Plugin API](9-cross-plugin-api.md) | Accepted (implemented in v0.1.1) |
 | ADR-10 | [Dependency Source Inference](10-dependency-source-inference.md) | Accepted |
 | ADR-11 | [Sorbet Input Adapter](11-sorbet-input-adapter.md) | Accepted |
-| ADR-12 | [dry-rb Packaging](12-dry-rb-packaging.md) | Accepted |
+| ADR-12 | [dry-rb Packaging](12-dry-rb-packaging.md) | Accepted (packaging premise partially superseded by ADR-31 — single bundled gem, no subtree split; all five dry-rb plugins shipped) |
 | ADR-13 | [TypeNode Resolver Plugin](13-typenode-resolver-plugin.md) | Accepted |
 | ADR-14 | [RBS Sig Generation](14-rbs-sig-generation.md) | Accepted (slices 1-5 implemented) |
 | ADR-15 | [Ractor Concurrency](15-ractor-concurrency.md) | Accepted (fork backend active; Ractor pool deferred) |
@@ -34,7 +35,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-18 | [Substrate Per-Call-Site Return Type](18-substrate-per-call-site-return-type.md) | Accepted (implemented in v0.1.6) |
 | ADR-19 | [Language Server Packaging](19-language-server-packaging.md) | Accepted (LSP v1 implemented in v0.1.6; v2 + follow-ups across v0.1.x) |
 | ADR-20 | [Lightweight HKT](20-lightweight-hkt.md) | Accepted (slices 1-6 implemented; 4 and 5 in v0.3.7) |
-| ADR-21 | [Rubydex Evaluation](21-rubydex-evaluation.md) | Proposed |
+| ADR-21 | [Rubydex Evaluation](21-rubydex-evaluation.md) | Proposed (Track 3 premise partially superseded by ADR-102 — declaration substrate now present; #143 chose the native route) |
 | ADR-22 | [Baseline and Project Onboarding](22-baseline-and-project-onboarding.md) | Accepted |
 | ADR-23 | [Diagnostic Triage Command](23-diagnostic-triage-command.md) | Accepted (slices 1+2+3+4 implemented) |
 | ADR-24 | [Self Method Call Resolution](24-self-method-call-resolution.md) | Accepted (slice 4 gated `:off` with subclass-aware gating; WD3 in-body adoption gate opened by ADR-57, 2026-06-12) |
@@ -45,9 +46,9 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-29 | [Browser Playground](29-browser-playground.md) | Accepted (server-side playground v0.1.10–0.1.11; in-browser ruby.wasm build shipped 2026-06-14/15) |
 | ADR-30 | [`rigor-ffi` Plugin Shape](30-rigor-ffi-plugin-shape.md) | Accepted |
 | ADR-31 | [Contribution and Supply-chain Policy](31-contribution-and-supply-chain-policy.md) | Accepted (in force) |
-| ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (WD13 gives a `sig/` declaration precedence over an inline one, per member, 2026-09-08) |
-| ADR-33 | [MCP Server Packaging](33-mcp-server.md) | Accepted (implemented in v0.1.10) |
-| ADR-34 | [Toplevel Unresolved Implicit-self Calls Warn by Default](34-toplevel-unresolved-self-call-default.md) | Accepted (implemented in v0.1.13; the ADR-29 Playground default-severity wiring shipped too — its sandbox config sets `severity_profile: strict`) |
+| ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (WD13 gives a `sig/` declaration precedence over an inline one, per member, 2026-09-08; WD2/WD10 default partially superseded by ADR-93) |
+| ADR-33 | [MCP Server Packaging](33-mcp-server.md) | Accepted (implemented in v0.1.10). WD5's seven-tool partition is stale against the current CLI verb surface. |
+| ADR-34 | [Toplevel Unresolved Implicit-self Calls Warn by Default](34-toplevel-unresolved-self-call-default.md) | Accepted (implemented in v0.1.13; ADR-29 Playground `severity_profile: strict` wiring shipped too). Its unresolved questions name `flow_contribution_for`, deleted by ADR-52. |
 | ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slices 1–4 done; slice 5 deferred) |
 | ADR-36 | [Macro-substrate Nested-class Emission Tier (Mangrove `Enum`)](36-mangrove-enum-nested-class-emission.md) | Accepted (Slice A implemented; `is_a?` exhaustiveness deferred) |
 | ADR-37 | [Plugin Interface Segregation (narrow extension protocols)](37-plugin-interface-segregation.md) | Accepted (Slices 1–3 implemented; all bundled walker plugins migrated; `flow_contribution_for` deleted 2026-06-11 per ADR-52 WD3) |
@@ -99,26 +100,26 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-83 | [Dynamic-origin algebra: keep union arms over absorbing into `Dynamic`](83-dynamic-origin-algebra.md) | Accepted (supersedes the value-lattice.md join algebra; spec revised to match engine behavior) |
 | ADR-84 | [Cross-file return-memo scoping and the taint-precise store gate](84-cross-file-return-memo-scoping.md) | Accepted (WD1 landed in PR #79; WD2-WD3 implemented; mail body evals 3355→557) |
 | ADR-85 | [Per-file seed bundles and lazy def-node handles (pre-pass incrementalization)](85-seed-bundles-and-lazy-def-node-handles.md) | Accepted (WD1 in PR #81; WD2-WD3 in PR #82; WD5 in #707; gitlab warm-incremental allocs 16.7M→2.06M) |
-| ADR-86 | [Partial native extensions for residual hot paths (rejected; rigor-rs owns native speed)](86-partial-native-extensions.md) | Accepted (standing rejection of native extensions; rigor-rs owns native speed; WD4 candidate staged) |
-| ADR-87 | [The null-build floor: stat-then-digest validation, zero-change snapshot skip, hit-path boot slimming](87-null-build-floor.md) | Accepted (WD1-WD5 implemented, PR #85; supersedes ADR-54's rejected mtime fast-path) |
+| ADR-86 | [Partial native extensions for residual hot paths (rejected; rigor-rs owns native speed)](86-partial-native-extensions.md) | Accepted (standing rejection of native extensions; rigor-rs owns native speed; WD4 candidate staged; residual-profile attribution partially superseded by ADR-87) |
+| ADR-87 | [The null-build floor: stat-then-digest validation, zero-change snapshot skip, hit-path boot slimming](87-null-build-floor.md) | Accepted (WD1-WD5 implemented, PR #85; supersedes ADR-54's rejected mtime fast-path; partially supersedes ADR-86's residual-profile attribution) |
 | ADR-88 | [Incremental plugin-fact soundness](88-incremental-plugin-fact-soundness.md) | Accepted (WD1-WD4 implemented, PR #89; WD5 deferred) |
 | ADR-89 | [Semantic propagation gates: declaration-shape and observed-key return summaries](89-semantic-propagation-gates.md) | Accepted (WD1 declaration-shape gate + WD2 return-summary gate implemented, PR #90; gitlab 341→1) |
 | ADR-90 | [Target-library resolution from the analyzed project's bundle](90-target-library-resolution-from-project-bundle.md) | Accepted (implemented 2026-07-16; WD1-WD3 landed) |
 | ADR-91 | [Kernel intrinsic fold ownership gate + spelling-parity invariant](91-kernel-intrinsic-fold-ownership-gate.md) | Accepted (implemented 2026-07-16, WD1-WD4; corpus gate byte-identical) |
 | ADR-92 | [Normative status fidelity: the founding-era stratum and the declare-or-mark gate](92-normative-status-fidelity.md) | Accepted (implemented 2026-07-16 WD1-WD5, 2026-07-25 WD6; void verdict resolved to option b) |
 | ADR-93 | [Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec](93-default-rbs-inline-ingestion.md) | Accepted (WD1-WD3 implemented; WD5 engine-anchored resolution 2026-07-19; WD6 2026-09-08) |
-| ADR-94 | [The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor](94-rbs-inline-reader-and-the-rbs-3x-floor.md) | Accepted (migration deferred; rigor-rbs-inline stays the reader) |
+| ADR-94 | [The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor](94-rbs-inline-reader-and-the-rbs-3x-floor.md) | Accepted (migration deferred; rigor-rbs-inline stays the reader; deferral premise refuted by ADR-32 — rbs-inline already requires rbs ~> 4.0) |
 | ADR-95 | [Homebrew distribution: deferred behind the single binary](95-homebrew-tap-deferral.md) | Proposed (deferred, trigger-gated; nothing implemented) |
-| ADR-96 | [Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion](96-plugin-target-gems.md) | Accepted (WD1-WD2 decided but unimplemented, #925; WD3 umbrella expansion proposed) |
+| ADR-96 | [Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion](96-plugin-target-gems.md) | Accepted (WD1-WD2 implemented; umbrella expansion proposed) |
 | ADR-97 | [Index entries are not summaries: the ADR-index budgets and their gate](97-adr-index-budgets.md) | Accepted (implemented 2026-07-17; both ADR indexes compressed to their declared contract and gated by spec/docs/agent_index_spec.rb) |
 | ADR-98 | [Development-flow document roles: handoff, issues, changelog](98-development-flow-document-roles.md) | Accepted (implemented 2026-07-17; backlog migrated to GitHub Issues, ROADMAP.md dissolved, handoff capped and gated) |
 | ADR-99 | [The config schema is a source of truth: `.rigor.yml` tiers and the reserve pipeline](99-config-schema-authority.md) | Accepted (implemented 2026-07-17; schema named a source of truth, `rigor_rs:` reserved, nested + reserved + URL gates added) |
 | ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (direct slice shipped; WD4 transitive case shipped 2026-07-19 as VoidTailSummary; budget ids deferred) |
 | ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions) |
-| ADR-102 | [The unused-code reachability report is a report, not a diagnostic](102-unused-code-reachability-report.md) | Accepted (`rigor unused` shipped in v0.3.4; all eight working decisions settled) |
+| ADR-102 | [The unused-code reachability report is a report, not a diagnostic](102-unused-code-reachability-report.md) | Accepted (`rigor unused` shipped in v0.3.4; all eight working decisions settled; partially supersedes ADR-21 Track 3) |
 | ADR-103 | [Effect labels: an opt-in, snapshot-first effect system](103-effect-labels.md) | Accepted (effect system shipped as the v0.3.4 headline; 13 of 18 implementation issues closed under #376) |
 | ADR-104 | [Boot-slim probe for the effects surfaces](104-effects-boot-slim-probe.md) | Accepted (implemented for the report and the snapshot verbs, with #482's entry split) |
-| ADR-105 | [PR landing flow: sequential merges and changelog fragments](105-pr-landing-flow.md) | Accepted (changelog.d/ mechanism + gate landed with the ADR; norm in AGENTS.md) |
+| ADR-105 | [PR landing flow: sequential merges and changelog fragments](105-pr-landing-flow.md) | Accepted (changelog.d/ mechanism + gate landed with the ADR; sequential-landing norm partially superseded by AGENTS.md Draft discipline, #814) |
 | ADR-106 | [Migrating the spec suite to minitest](106-minitest-migration.md) | Accepted (declined — the suite stays on RSpec; re-evaluation triggers recorded) |
 | ADR-107 | [Checked types and typeless comments in Rigor's own tree](107-checked-types-and-typeless-comments.md) | Accepted (corpus rewrite + contract + G1 gate in #822; G2 `--fail-on=warning` in #827; G3 `sig/` provenance in #835) |
 | ADR-108 | [Type provenance for agents: the `rigor-type-oracle` skill and the adopting project's contract](108-type-provenance-for-agents.md) | Accepted (skill, `rigor-project-init` contract paragraph, and catalogue wiring landed in #826; ADR-107 is the repo-side twin) |

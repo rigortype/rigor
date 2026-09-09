@@ -34,6 +34,7 @@ We will build a new static analysis tool named **Rigor** ("Rigorous Inference fo
 * Rigor will implement aggressive AST and dependency graph caching.
 * The primary goal is to provide instantaneous feedback during coding. We will prioritize a robust **CLI experience first**, deferring LSP (Language Server Protocol) integration to a later phase.
 * **Smart Initialization:** `rigor init` will analyze `Gemfile.lock` to automatically suggest and configure the necessary plugins (e.g., Rails, RSpec) and project directories.
+  > **Status (2026-09-10): not built.** `rigor init` (`lib/rigor/cli.rb#run_init`) writes a static `.rigor.dist.yml` template with no `Gemfile.lock` read anywhere in its path — the engine reads `Gemfile.lock` elsewhere (ADR-72's overlay, `Environment`'s auto-detect), but never for `init`'s own plugin/directory suggestion. No later ADR replaces this premise; it is simply unimplemented, tracked nowhere in the issue backlog as of this note.
 
 ### 5. MVP Target (CLI)
 

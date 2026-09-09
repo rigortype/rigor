@@ -8,6 +8,7 @@ module Rigor
     class FFIRZMQ < Base
       manifest(
         id: "ffi-rzmq",
+        target_gems: ["ffi-rzmq"],
         version: "0.1.0",
         description: "Models ffi-rzmq / LibZMQ wrappers, socket operations, and cross-gem bindings.",
         signature_paths: ["sig"]

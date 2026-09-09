@@ -46,6 +46,7 @@ module Rigor
     class Pundit < Rigor::Plugin::Base
       manifest(
         id: "pundit",
+        target_gems: ["pundit"],
         # Bumped 2026-08-16 — publishes `:reachability_roots` for `rigor unused` (ADR-102 WD3): the policy
         # classes the project's own `authorize` / `policy` / `policy_scope` calls name by convention.
         version: "0.2.0",

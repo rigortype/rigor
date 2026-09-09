@@ -8,6 +8,7 @@ module Rigor
     class RbNaCl < Base
       manifest(
         id: "rbnacl",
+        target_gems: ["rbnacl"],
         version: "0.1.0",
         description: "Rigor type support for RbNaCl libsodium bindings",
         signature_paths: ["sig"],

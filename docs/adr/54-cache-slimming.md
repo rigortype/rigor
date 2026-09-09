@@ -157,12 +157,17 @@ noise — but it scales linearly with `signature_paths:` size
 - **Status ripple:** ADR-7 § Slice 6-D is **partially superseded** — the
   definitions-blob half retires; the env blob and the rejection of
   per-class disk entries stand. ADR-6's format version policy covers the
-  WD2 header bump.
+  WD2 header bump. ADR-6 § 5 is also **partially superseded**: WD3 below
+  ships the "future ADR-amendment" that section deferred to — a 256 MB
+  default LRU eviction cap, replacing the unbounded no-eviction v0.0.8
+  behaviour it records.
 
 ## Relationship to other ADRs
 
 - **ADR-6** — storage backend; owns the on-disk format whose version byte
-  WD2 bumps. Its deferred "cross-machine sharing" row is unaffected.
+  WD2 bumps. Its deferred "cross-machine sharing" row is unaffected. WD3
+  partially supersedes its § 5 (no eviction in v0.0.8) with the 256 MB
+  default LRU cap.
 - **ADR-7** — slice 6-D partially superseded by WD1 (see above).
 - **ADR-15** — the prewarm/Reflection eager-table contract (Phase 2b /
   4b.x) is the binding constraint on WD1's lazy/eager split.

@@ -57,6 +57,7 @@ module Rigor
     class Sorbet < Rigor::Plugin::Base
       manifest(
         id: "sorbet",
+        target_gems: ["sorbet-runtime"],
         version: "0.1.0",
         description: "Ingests Sorbet `sig` blocks as method-signature contributions.",
         config_schema: {

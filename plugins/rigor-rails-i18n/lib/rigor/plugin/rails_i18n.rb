@@ -57,6 +57,7 @@ module Rigor
     class RailsI18n < Rigor::Plugin::Base
       manifest(
         id: "rails-i18n",
+        target_gems: ["i18n"],
         # Bumped 2026-06-23 — view template lazy-key scanning (`t('.key')` inside ERB / Haml / Slim under
         # `view_search_paths`).
         version: "0.3.0",

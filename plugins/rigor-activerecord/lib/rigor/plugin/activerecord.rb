@@ -63,6 +63,7 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
+        target_gems: ["activerecord"],
         # 0.8.0, 2026-09-02 — a model declared `class ::User` is keyed by its de-rooted name (`"User"`) in
         # the {ModelIndex} and the published `:model_index` fact (#583). The version is part of the
         # producer cache KEY: a cached 0.7.0 index still keys such a model `"::User"`, and `ModelIndex#find`

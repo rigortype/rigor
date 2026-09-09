@@ -3,6 +3,7 @@
 require "json"
 
 require_relative "classification"
+require_relative "superclass_spelling"
 
 module Rigor
   module SigGen
@@ -89,7 +90,7 @@ module Rigor
         return "module #{class_name}" if candidate.namespace_kinds[class_name] == :module
 
         superclass = candidate.class_superclasses[class_name]
-        superclass ? "class #{class_name} < #{superclass}" : "class #{class_name}"
+        superclass ? "class #{class_name} < #{SuperclassSpelling.absolute(superclass)}" : "class #{class_name}"
       end
 
       def render_diff(candidates)

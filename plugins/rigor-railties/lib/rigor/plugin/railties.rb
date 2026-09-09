@@ -52,6 +52,7 @@ module Rigor
     class Railties < Rigor::Plugin::Base
       manifest(
         id: "railties",
+        target_gems: ["railties"],
         # Bumped 2026-09-01 (#534 item 2) — the four `Rails.` singleton readers now return lenient
         # nominals instead of `Dynamic[top]`.
         version: "0.2.0",

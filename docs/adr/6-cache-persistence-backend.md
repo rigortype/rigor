@@ -129,6 +129,12 @@ cache check.
 
 ### 5. Eviction
 
+> **Partially superseded by [ADR-54 WD3](54-cache-slimming.md#wd3--default-eviction-cap)
+> (2026-06-10).** The "future ADR-amendment" this section defers to shipped: `cache.max_bytes`
+> defaults to a 256 MB LRU eviction cap, run at the end of every `rigor check`. The rest of
+> this section — no eviction in the v0.0.8 slice, `--clear-cache` as the manual fallback — is
+> historical, not current.
+
 The first implementation does **not** evict. The cache grows
 unbounded; `rigor check --clear-cache` removes the whole
 `.rigor/cache` directory. A future ADR-amendment introduces an
@@ -284,8 +290,9 @@ Negative:
 - Per-file locking semantics are FS-dependent; macOS / Linux are
   the supported targets, Windows requires a follow-up
   evaluation.
-- No size cap in v0.0.8. Users on tiny disks need to clear the
-  cache manually.
+- No size cap in v0.0.8 (superseded by ADR-54 WD3's 256 MB default LRU
+  cap, § 5 above). Users on tiny disks needed to clear the cache
+  manually; they no longer must.
 
 ## Reading order for a returning implementer
 

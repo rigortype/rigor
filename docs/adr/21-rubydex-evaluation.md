@@ -281,6 +281,18 @@ configuration axis (`backend: rigor` (default) vs.
 
 ### Track 3 — Conditional accept as a supplementary tool
 
+> **Partially superseded by [ADR-102](102-unused-code-reachability-report.md)
+> and [#143](https://github.com/rigortype/rigor/issues/143).** This
+> track's premise — that `textDocument/definition` needs an optional
+> rubydex-backed provider because Rigor has no cross-file declaration
+> index — no longer holds: ADR-102 records "the declaration substrate
+> Rigor needs is already present," built for `rigor unused`'s constant
+> reachability. The trigger below fired (Rigor's LSP roadmap committed
+> to `textDocument/definition`), but the chosen route is the native one
+> — #143 specs a `Rigor::Reflection`-side `FILE:LINE` symbol index, not
+> this track's optional rubydex provider. `textDocument/references` and
+> `workspace/symbol` are unaffected; #143 covers only `definition`.
+
 Two LSP surfaces Rigor does not currently implement are exactly
 the shape rubydex was built for:
 

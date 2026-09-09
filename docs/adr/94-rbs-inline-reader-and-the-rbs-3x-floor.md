@@ -9,6 +9,16 @@ reader. WD2's `UntypedFunction` defect was real and independent of the migration
 — but this ADR misidentified its site and its symptom, and re-adjudication found it wider
 than a hand-written `.rbs`. It is fixed; see WD2 for what was actually true.
 
+> **Partially superseded by [ADR-32 WD11](32-rbs-inline-comment-ingestion.md#wd11--the-rbs-inline-gem-stays-the-reader-rbsinlineparser-is-not-yet-a-superset)
+> (2026-07-30).** This ADR's deferral premise — that migrating to
+> `RBS::InlineParser` "costs the rbs 3.x floor" — does not hold: WD11 measured
+> that `rbs-inline` itself already requires `rbs (~> 4.0)`, so every user
+> ADR-93's auto-wire can activate for is already on 4.x. The rbs floor was
+> never the obstacle; WD11 kept the `rbs-inline` gem for a different, still-live
+> reason (`class << self` misattribution and four lost constructs in the
+> built-in parser). Read this ADR's deferral rationale as corrected by WD11,
+> not as still resting on a 3.x floor.
+
 Grounding: [`docs/notes/20260716-dspec-formal-spec-substrate-evaluation.md`](../notes/20260716-dspec-formal-spec-substrate-evaluation.md)
 § "ADR-93 WD1 の実装" and the measurements below.
 

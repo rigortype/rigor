@@ -18,6 +18,27 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(manifest.config_schema).to eq({ "eager_load" => :boolean })
     end
 
+    # ADR-96 WD1 — the gems a plugin models. Not derivable from the id, so it is declared.
+    it "stores target_gems as declared, de-duplicated and frozen" do
+      manifest = described_class.new(
+        id: "factorybot", version: "0.1.0", target_gems: %w[factory_bot factory_bot]
+      )
+
+      expect(manifest.target_gems).to eq(["factory_bot"])
+      expect(manifest.target_gems).to be_frozen
+      expect(manifest.to_h["target_gems"]).to eq(["factory_bot"])
+    end
+
+    it "defaults target_gems to empty for a plugin that models no gem" do
+      expect(described_class.new(id: "rails", version: "0.1.0").target_gems).to eq([])
+    end
+
+    it "rejects a target_gems entry that is not a non-empty String" do
+      expect do
+        described_class.new(id: "rails", version: "0.1.0", target_gems: [:railties])
+      end.to raise_error(ArgumentError, /target_gems must be an Array of non-empty String/)
+    end
+
     it "freezes the manifest after construction" do
       manifest = described_class.new(id: "rails", version: "0.1.0")
       expect(manifest).to be_frozen

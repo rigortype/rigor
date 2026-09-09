@@ -2621,4 +2621,50 @@ RSpec.describe Rigor::CLI do
       end
     end
   end
+
+  # Issue #609 — the reporter's `rigor triage --format json > triage.json` died on a `SystemStackError`
+  # raised deep in the RBS ancestry walk, left a 0-byte report behind, and their CI step read the exit
+  # status as a pass. `SystemStackError` is not a `StandardError`, so every per-file and per-plugin rescue
+  # on the way out declines it by design; what was missing is a top-level answer that names the failure and
+  # says the report is empty rather than clean.
+  describe "a fatal analysis error" do
+    before { require "rigor/cli/check_command" }
+
+    it "exits with the internal-error status and names the failure" do
+      allow(Rigor::CLI::CheckCommand).to receive(:new).and_raise(SystemStackError.new("stack level too deep"))
+
+      status, out, err = run_cli("check", "lib")
+
+      expect(status).to eq(Rigor::CLI::EXIT_INTERNAL_ERROR)
+      expect(status).not_to eq(0)
+      expect(err).to include("rigor: analysis aborted: SystemStackError: stack level too deep")
+      expect(err).to include("EMPTY rather than clean")
+      expect(out).to eq("")
+    end
+
+    it "answers the same way for `triage`" do
+      require "rigor/cli/triage_command"
+      allow(Rigor::CLI::TriageCommand).to receive(:new).and_raise(NoMemoryError.new("failed to allocate memory"))
+
+      status, _out, err = run_cli("triage")
+
+      expect(status).to eq(Rigor::CLI::EXIT_INTERNAL_ERROR)
+      expect(err).to include("rigor: analysis aborted: NoMemoryError")
+    end
+
+    # The counterpart that keeps the rescue narrow: a Ctrl-C is the user's own answer, not a Rigor defect,
+    # and must still reach the shell as one.
+    it "does not swallow an interrupt" do
+      allow(Rigor::CLI::CheckCommand).to receive(:new).and_raise(Interrupt)
+
+      expect { run_cli("check", "lib") }.to raise_error(Interrupt)
+    end
+
+    # And the must-still-succeed side: a run that does NOT raise keeps its own exit status.
+    it "leaves an ordinary run's exit status alone" do
+      status, _out, _err = run_cli("version")
+
+      expect(status).to eq(0)
+    end
+  end
 end

@@ -58,6 +58,7 @@ module Rigor
     class DryTypes < Rigor::Plugin::Base
       manifest(
         id: "dry-types",
+        target_gems: ["dry-types"],
         version: "0.1.0",
         description: "Recognises `module X; include Dry.Types(); end` and publishes the alias table.",
         produces: [:dry_type_aliases]

@@ -37,6 +37,7 @@ module Rigor
     class Activejob < Rigor::Plugin::Base
       manifest(
         id: "activejob",
+        target_gems: ["activejob"],
         # Bumped — publishes `:reachability_roots` for `rigor unused` (ADR-102 WD3): the jobs Solid Queue's
         # recurring schedule runs by name, which no `perform_later` call site writes down.
         #

@@ -976,7 +976,8 @@ A blob written before the carry still loads — Marshal encodes an
 ivar dump and a `marshal_dump` payload differently, and only the
 latter reaches `marshal_load` — so `Store::FORMAT_VERSION` is
 what stops a stale blob from reporting the moved position
-indefinitely (ADR-6's store never evicts).
+indefinitely — the LRU size cap (ADR-54 WD3) evicts by size, not by
+staleness, so a blob under the cap does not age out on its own.
 
 The patch lives in
 `lib/rigor/cache/rbs_environment_marshal_patch.rb` and is

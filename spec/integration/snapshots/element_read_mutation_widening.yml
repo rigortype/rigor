@@ -1,0 +1,9 @@
+---
+locals: {}
+assertions:
+  '1': "[Array[1 | Dynamic[top] | Integer] | Array[2 | Dynamic[top] | Integer]]"
+  '2': Array[Dynamic[top] | Integer]
+  '3': "[Array[1 | Dynamic[top] | Integer], Array[2 | Dynamic[top] | Integer]]"
+  '4': "[[Array[5 | Dynamic[top] | Integer]]]"
+  '5': "[Array[1 | Dynamic[top] | Integer], Array[2 | Dynamic[top] | Integer]]"
+  '6': "[[1]]"

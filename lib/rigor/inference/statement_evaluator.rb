@@ -18,6 +18,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "content_join"
+require_relative "element_read_widening"
 require_relative "indexed_narrowing"
 require_relative "index_write_widening"
 require_relative "method_dispatcher"
@@ -647,10 +648,23 @@ module Rigor
       # join will not consume is pure overhead, and `<<` on a String buffer is one of the commonest calls
       # there is. The content-adder table skips a non-adding mutator (`pop`, `sort!`); `joinable_receiver?`
       # skips a receiver whose current binding is not a literal-shape carrier.
+      # Both mutator-receiver widenings, against one typing of the call's arguments: the bindings the
+      # receiver NAMES ({MutationWidening.widen_after_call}) and, when it names none because the
+      # receiver is an element read into a local, that element's pin inside its container
+      # ({ElementReadWidening.widen_element_read}, issue #643).
+      def widen_mutated_receivers(call_node, current_scope)
+        arg_types = mutator_arg_types(call_node, current_scope)
+        widened = MutationWidening.widen_after_call(call_node: call_node, current_scope: current_scope,
+                                                    arg_types: arg_types)
+        ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened, arg_types: arg_types)
+      end
+
       def mutator_arg_types(call_node, current_scope)
         return MutationWidening::NO_ARG_TYPES unless ContentJoin::CONTENT_ADDERS.include?(call_node.name)
-        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(call_node.receiver,
-                                                                                         current_scope)
+        unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) ||
+               ElementReadWidening.joinable_element_read?(call_node.receiver, current_scope)
+          return MutationWidening::NO_ARG_TYPES
+        end
 
         content_arg_types(call_node, scope)
       end
@@ -1654,8 +1668,7 @@ module Rigor
         # Flow-folding G1 / G2 — widen a local- or instance-variable binding when the call is an in-place mutator on it
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
-        post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope,
-                                                       arg_types: mutator_arg_types(node, post_scope))
+        post_scope = widen_mutated_receivers(node, post_scope)
         # ADR-48 slice 4 — Struct member-setter re-typing. After `s.x = v` on a fold-safe StructInstance local, rebind
         # `s` to a StructInstance with member `:x` replaced by the assigned type, so a later `s.x` folds to `v` and a
         # sibling `s.y` stays precise. `call_type` is the setter's own result (the assigned value type). Sound only for

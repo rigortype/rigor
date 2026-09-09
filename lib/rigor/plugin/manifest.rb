@@ -42,6 +42,12 @@ module Rigor
       # {Rigor::Effects::Label} accepts as a root.
       VALID_EFFECT_ROOT = /\A[a-z][a-z0-9_]*\z/
 
+      # ADR-96 WD1 — the gems a plugin models, spelled exactly as `Gemfile.lock` names them. Not derivable
+      # from the plugin id (`rigor-factorybot` models `factory_bot`, `rigor-rspec` models `rspec-core`), which
+      # is what makes it a declared field; an empty list is the meaningful answer for a plugin that models no
+      # gem at all.
+      attr_reader :target_gems
+
       attr_reader :id, :version, :description, :config_schema, :config_defaults, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
                   :heredoc_templates, :nested_class_templates, :trait_registries,
@@ -52,7 +58,7 @@ module Rigor
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
-        description: nil, config_schema: {},
+        description: nil, config_schema: {}, target_gems: [],
         produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
         trait_registries: [],
@@ -65,6 +71,7 @@ module Rigor
         validate_version!(version)
         validate_config_schema!(config_schema)
         validate_produces!(produces)
+        validate_target_gems!(target_gems)
         validate_owns_receivers!(owns_receivers)
         validate_open_receivers!(open_receivers)
         validate_type_node_resolvers!(type_node_resolvers)
@@ -85,6 +92,7 @@ module Rigor
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
                       hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                       source_rbs_synthesizer)
+        assign_target_gems(target_gems)
         assign_nested_class_templates(nested_class_templates)
         assign_additional_initializers(additional_initializers)
         assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
@@ -118,6 +126,12 @@ module Rigor
         @protocol_contracts = protocol_contracts.dup.freeze
         @source_rbs_synthesizer = source_rbs_synthesizer
       end
+
+      # ADR-96 WD1 — assigned outside assign_fields, which already carries the maximum positional arity.
+      def assign_target_gems(target_gems)
+        @target_gems = target_gems.map { |g| g.to_s.dup.freeze }.uniq.freeze
+      end
+      private :assign_target_gems
 
       # Assigned outside assign_fields (which already carries the maximum positional arity) — set in
       # `initialize` before the final freeze. ADR-36 nested-class emission tier.
@@ -189,6 +203,7 @@ module Rigor
           "description" => description,
           "config_schema" => config_schema.to_h { |k, v| [k, v.to_s] },
           "config_defaults" => config_defaults,
+          "target_gems" => target_gems,
           "produces" => produces.map(&:to_s),
           "consumes" => consumes.map { |c| consumption_hash(c) },
           "owns_receivers" => owns_receivers,
@@ -342,6 +357,13 @@ module Rigor
         return if value.is_a?(Array) && value.all?(&)
 
         raise ArgumentError, "plugin manifest #{field} must be an Array of #{label}, got #{value.inspect}"
+      end
+
+      # ADR-96 WD1 — every entry is a gem name as `Gemfile.lock` spells it. The uniform Array-of-String check
+      # is all the manifest can do: whether the named gem exists is a fact about RubyGems, not about the
+      # manifest, and a typo surfaces as an advisory that never fires rather than as a load failure.
+      def validate_target_gems!(target_gems)
+        validate_array_of!("target_gems", target_gems, "non-empty String") { |g| g.is_a?(String) && !g.empty? }
       end
 
       def validate_produces!(produces)

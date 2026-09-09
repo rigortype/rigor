@@ -6,6 +6,20 @@ Decides the packaging shape for
 Rigor's dry-rb adapter plugins so individual `rigor-dry-*` work can
 start without re-litigating fundamentals.
 
+> **Partially superseded by [ADR-31](31-contribution-and-supply-chain-policy.md)
+> (2026-06-02).** This ADR's packaging premise — each `rigor-dry-*` plugin
+> eventually `git subtree split` into its own published gem — was retired
+> when the per-plugin gemspecs were deleted (`9769f5fa`) and ADR-31 settled
+> distribution on the single bundled `rigortype` gem, with subtree *merge*
+> kept only as a rare reserved import (WD5), never the outbound flow this
+> ADR plans for. The sibling design note this ADR's plugin family draws on,
+> [`docs/design/20260508-rails-plugins-roadmap.md`](../design/20260508-rails-plugins-roadmap.md),
+> already carries the equivalent marker. WD5's "next slice is `rigor-dry-types`"
+> is also stale: all five sequenced dry-rb plugins (`rigor-dry-types`,
+> `-struct`, `-validation`, `-monads`, `-schema`) have shipped. The per-gem
+> tier table, dependency graph, and readiness checklist below remain useful
+> as design history; the subtree-split distribution model is not current.
+
 ## Context
 
 The dry-rb gem family is a tree of complementary gems: `dry-types`,

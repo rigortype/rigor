@@ -95,7 +95,10 @@ module Rigor
       # ordinary top-level write, so every unchanged file would keep publishing the `Foo::LIMIT` the write
       # may already have replaced while a cold run made it gradual — the `--verify-incremental` divergence
       # 14 was bumped for.
-      SCHEMA = 19
+      # 20: issue #722 residue 2 adds each seed bundle's compact-header re-anchor census, without which a
+      # warm fold sees no candidate for an unchanged file and keeps serving the pre-fix `Wrap::Outer::Leaf`
+      # for a `class Outer::Leaf` that reopens `::Outer::Leaf`.
+      SCHEMA = 20
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

@@ -38,6 +38,16 @@ from post-merge `master`; the merge's CI overlaps with developing the next item.
 batching and stacking are reserved for changes the user must adjudicate as a set; deferral
 manufactures stacks and sibling conflicts.*
 
+> **Partially superseded by `AGENTS.md` § "Commit and PR Etiquette"
+> (amended by [#814](https://github.com/rigortype/rigor/pull/814), following the
+> [PR #788 postmortem](../notes/20260908-pr-788-draft-discipline-postmortem.md), 2026-09-08).**
+> "As soon as its gates pass" no longer means "attempt the merge" unconditionally: every PR is
+> now born Draft and stays Draft until `gh pr ready` on the user's explicit chat instruction, and
+> a PR another session opened is off-limits to merge regardless of its gate status. The
+> gates-green criterion and the anti-stacking rationale above are unaffected; only the "attempt
+> the merge" step gained the Draft + ownership gate #814 added after #788 was merged under a
+> stop instruction.
+
 **2. Changelog fragments (the parallel case).** An `[Unreleased]` entry lands as a new file
 `changelog.d/<section>/<slug>.md` — one bullet line in the existing entry grammar (subsystem label,
 full PR link), with the section encoded by the subdirectory (the six Keep a Changelog types,

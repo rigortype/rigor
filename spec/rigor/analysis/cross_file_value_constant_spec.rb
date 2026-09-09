@@ -537,6 +537,82 @@ RSpec.describe "cross-file value constants" do
     end
   end
 
+  # Issue #710 residue 1 — the fallback above is right for a base no name reaches, and `Class.new { … }` is
+  # not one: the block's class is named by the constant write it is the rvalue of, which is the recognition
+  # `meta_new_block_body` already performs for the block-as-method walk. Keying the write there stops it
+  # retracting a SIBLING file's scalar of the same last segment.
+  describe "a `self::` write inside a `Class.new` an enclosing write names" do
+    let(:sibling) { { "c.rb" => "X = 5\nKEPT = :kept\n", "a.rb" => "Rigor.dump_type(X)\nRigor.dump_type(KEPT)\n" } }
+
+    it "keys the write under the constant that names the class, sparing a sibling's scalar" do
+      expect(dumps(sibling.merge("b.rb" => "module N\n  Made = Class.new { self::X = 7 }\nend\n")))
+        .to eq(["5", ":kept"])
+    end
+
+    it "keys a `Struct.new` block's write the same way" do
+      expect(dumps(sibling.merge("b.rb" => "module N\n  Row = Struct.new(:a) do\n    self::X = [1]\n  end\nend\n")))
+        .to eq(["5", ":kept"])
+    end
+
+    # Must-still-retract: where the class really is unnameable the bare fallback — and the retraction it
+    # buys — has to stay, or this change trades one wrong answer for a worse one.
+    it "still retracts for a `class_eval` receiver no name reaches" do
+      expect(dumps(sibling.merge("b.rb" => "class Other\nend\nt = Other\nt.class_eval { self::X = 7 }\n")))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+
+    it "still retracts for an `instance_eval` block, whose `self` is an object" do
+      expect(dumps(sibling.merge("b.rb" => "class Other\nend\nOther.instance_eval { self::X = 7 }\n")))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+
+    # A path write's rvalue is registered under the ANONYMOUS name, not the constant's
+    # (`meta_new_block_body` takes a `ConstantWriteNode` only), so this walk must not name it either.
+    it "still retracts where a constant PATH write holds the `Class.new`" do
+      expect(dumps(sibling.merge("b.rb" => "module N\nend\nN::Made = Class.new { self::X = 7 }\n")))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+
+    it "publishes the write's own value under the name the enclosing write gives it" do
+      expect(dumps("b.rb" => "module N\n  Made = Class.new { self::X = 7 }\nend\n",
+                   "a.rb" => "Rigor.dump_type(N::Made::X)\n"))
+        .to eq(["7"])
+    end
+  end
+
+  # Issue #710 residue 2 — `local_constant_names` is the "this file declared it" exemption from #644's
+  # withholding guard, and it was fed from the same census record. A write through an unnameable base
+  # therefore exempted a name the file never declared: the census must keep it (another file's value for it
+  # is not to be trusted) and the exemption must not.
+  describe "the local-declaration exemption under an unnameable base" do
+    let(:published) { "module Cfg\n  X = true\nend\n" }
+    let(:dynamic_write) { "class Foo\nend\n[Foo].each { |k| k::X = 1 }\n" }
+    let(:reader) { "module Cfg\n  def self.chk = (:a if X)\nend\n" }
+
+    it "does not exempt a name only an unnameable-base write touched" do
+      expect(flow_warnings("c.rb" => published, "b.rb" => "#{dynamic_write}#{reader}")).to be_empty
+    end
+
+    # Must-still-succeed: the exemption still applies to a name the file genuinely assigns, or this change
+    # would pass by having disabled the rule.
+    it "still exempts a name the reading file itself declares" do
+      expect(flow_warnings("c.rb" => published, "b.rb" => "module Cfg\n  X = true\nend\n#{reader}"))
+        .to eq(["b.rb:5"])
+    end
+
+    it "still withholds a published constant from a file that does not write it" do
+      expect(flow_warnings("c.rb" => published, "b.rb" => reader)).to be_empty
+    end
+
+    # And the census half is untouched: the bare name still counts as written, so no sibling value publishes.
+    it "still retracts a sibling file's value for the bare name" do
+      expect(dumps("b.rb" => dynamic_write,
+                   "c.rb" => "X = 5\nKEPT = :kept\n",
+                   "a.rb" => "Rigor.dump_type(X)\nRigor.dump_type(KEPT)\n"))
+        .to eq(["Dynamic[top]", ":kept"])
+    end
+  end
+
   describe "lexical resolution" do
     it "does not let a top-level constant answer a nested read that has its own" do
       files = {

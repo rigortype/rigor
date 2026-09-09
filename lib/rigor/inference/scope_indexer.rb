@@ -1614,17 +1614,23 @@ module Rigor
       end
 
       # The QUALIFIED names this file assigns that the project also published, frozen. Read from the same
-      # {#constant_writes_for_file} census the cross-file table is built from, not from the typed per-file
+      # {#constant_write_census} the cross-file table is built from, not from the typed per-file
       # table: the typed walk cannot see a multi-assign / `self::` / operator-write target, so deriving the
       # exemption from it would be a second source of truth blind to exactly the forms the census exists to
       # catch. Gated on the project having published anything at all, so a project with no cross-file value
       # constants pays no extra walk and allocates nothing; the result is filtered to the published names, so
       # what it holds is bounded by what the exemption can ever be asked about.
+      #
+      # It reads the census's `declared` half rather than its keys ([#710](https://github.com/rigortype/rigor/issues/710)).
+      # The two consumers want opposite answers about a write whose base nothing names: the conflict rule asks
+      # "could another file's value for this name be wrong?" — yes, so the name stays censused — and this
+      # exemption asks "did this file declare it?" — no, `[Foo].each { |k| k::X = 1 }` declares `Foo::X`.
+      # Granting it un-withheld `flow.always-truthy-condition` for a name the file never wrote.
       def local_constant_name_set(root, default_scope)
         published = default_scope.published_constant_names
         return Scope::DiscoveryIndex::EMPTY.local_constant_names if published.empty?
 
-        names = constant_writes_for_file(root).keys.select { |name| published.include?(name.split("::").last) }
+        names = constant_write_census(root).declared.select { |name| published.include?(name.split("::").last) }
         names.empty? ? Scope::DiscoveryIndex::EMPTY.local_constant_names : names.to_set.freeze
       end
 
@@ -1707,17 +1713,34 @@ module Rigor
       # there is still the enclosing declaration's and every walk below this stays as it was).
       #
       # {OPAQUE_SELF} where the new `self` reaches no class or module name: a `class_eval` receiver that is
-      # not a static constant path, an {OPAQUE_SELF_BLOCK_CALLS} body, and the `Class.new { … }` /
-      # `Module.new` / `Struct.new` / `Data.define` block, whose class is named only by a constant write the
-      # walk would have to thread down to it. Declining there costs a resolution the engine never had; naming
-      # the LEXICAL enclosure instead is the guess that fires, because it is the one name Ruby is guaranteed
-      # NOT to have written.
-      def rebound_block_self(node, qualified_prefix, default_scope = nil)
+      # not a static constant path, an {OPAQUE_SELF_BLOCK_CALLS} body, and a `Class.new { … }` /
+      # `Module.new` / `Struct.new` / `Data.define` block no enclosing constant write names. Declining there
+      # costs a resolution the engine never had; naming the LEXICAL enclosure instead is the guess that fires,
+      # because it is the one name Ruby is guaranteed NOT to have written.
+      #
+      # `meta_owner` is the name such a write DOES give the block's class, threaded one hop down by the
+      # caller ({#meta_new_block_owner}) ([#710](https://github.com/rigortype/rigor/issues/710)). It is
+      # supplied only by the publication census; the typed walk returns at a `ConstantWriteNode` without
+      # descending into its rvalue, so no `self::` write inside one reaches that walk at all.
+      def rebound_block_self(node, qualified_prefix, default_scope = nil, meta_owner = nil)
         return nil unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
-        return OPAQUE_SELF if OPAQUE_SELF_BLOCK_CALLS.include?(node.name) || meta_new_constant_rvalue?(node)
+        return OPAQUE_SELF if OPAQUE_SELF_BLOCK_CALLS.include?(node.name)
+        return meta_owner || OPAQUE_SELF if meta_new_constant_rvalue?(node)
         return nil unless SELF_REBINDING_EVAL_CALLS.include?(node.name)
 
         eval_receiver_self(node.receiver, qualified_prefix, default_scope)
+      end
+
+      # Issue #710 — the qualified name a `Klass = Class.new { … }` gives the block's class, or nil when
+      # `node` is not that form. Ruby names the constructed class after the constant it is first assigned to,
+      # so `self::X = 7` in the block writes `Klass::X` and nothing about it is opaque. The recognition is
+      # {#meta_new_block_body}'s, shared with the block-as-method walk, so the two agree on which rvalues a
+      # constant write names — a constant PATH write (`N::Made = Class.new { … }`) is not one of them, and
+      # its block keeps the opaque answer.
+      def meta_new_block_owner(node, qualified_prefix)
+        return nil unless meta_new_block_body(node)
+
+        qualified_write_name(qualified_prefix, node.name.to_s)
       end
 
       # The `self` a `Recv.class_eval { … }` block runs under. An implicit or literal `self` receiver leaves
@@ -3818,10 +3841,20 @@ module Rigor
       #
       # A name written TWICE in one file is unpublishable too, which is what makes a conditional
       # `X = :a if c` / `X = :b` pair gradual rather than pinned to whichever arm the walk saw first.
-      def constant_writes_for_file(root)
-        writes = {}
-        walk_constant_write_census(root, [], writes, Set.new)
-        writes
+      def constant_writes_for_file(root) = constant_write_census(root).writes
+
+      # The tables one file's publication census fills in a single walk, carried together so the walk's two
+      # `self`-tracking parameters stay within the signature budget. `writes` is the census itself; `seen`
+      # the names already recorded, so a repeat write retracts whatever either rvalue was; `declared` the
+      # subset whose write NAMES its target, which is the only half {Scope#local_constant_names} may exempt
+      # ([#710](https://github.com/rigortype/rigor/issues/710)).
+      CensusTables = Data.define(:writes, :seen, :declared)
+      private_constant :CensusTables
+
+      def constant_write_census(root)
+        tables = CensusTables.new(writes: {}, seen: Set.new, declared: Set.new)
+        walk_constant_write_census(root, [], tables)
+        tables
       end
 
       # Mirrors {#walk_constant_writes}'s traversal for the forms it shares — the lexical class/module prefix
@@ -3830,60 +3863,64 @@ module Rigor
       # `||=` constant write, a `ConstantTargetNode` under a `MultiWriteNode` (`A, B = :x, :y`), a `self::X =`
       # whose target renders no qualified name, and the inner write of a chain (`C = D = :x`), which is why a
       # `ConstantWriteNode` descends into its own rvalue instead of returning.
-      def walk_constant_write_census(node, qualified_prefix, writes, seen, self_owner = nil)
+      def walk_constant_write_census(node, qualified_prefix, tables, self_owner = nil, meta_owner = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
-            walk_constant_write_census(node.body, child_prefix, writes, seen) if node.body
+            walk_constant_write_census(node.body, child_prefix, tables) if node.body
             return
           end
         else
-          census_constant_write(node, qualified_prefix, writes, seen, self_owner)
+          census_constant_write(node, qualified_prefix, tables, self_owner)
         end
 
-        rebound = rebound_block_self(node, qualified_prefix)
+        rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner)
+        # A `ConstantWriteNode`'s only child is its rvalue, so this reaches exactly the call whose block the
+        # constant names — and nil everywhere else, leaving every other descent as it was.
+        child_meta_owner = meta_new_block_owner(node, qualified_prefix)
         node.rigor_each_child do |child|
           owner = rebound && child.is_a?(Prism::BlockNode) ? rebound : self_owner
-          walk_constant_write_census(child, qualified_prefix, writes, seen, owner)
+          walk_constant_write_census(child, qualified_prefix, tables, owner, child_meta_owner)
         end
       end
 
       # Censuses `node` when it is any constant-assigning form. Only a plain `ConstantWriteNode` /
       # `ConstantPathWriteNode` can contribute a VALUE; every other form is recorded unpublishable, which
       # suppresses publication of the name exactly as a second file's write would.
-      def census_constant_write(node, qualified_prefix, writes, seen, self_owner = nil)
+      def census_constant_write(node, qualified_prefix, tables, self_owner = nil)
         case node
         when Prism::ConstantWriteNode
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s),
-                                       constant_literal_value(node.value), writes, seen)
+                                       constant_literal_value(node.value), tables)
         when Prism::ConstantPathWriteNode
           record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
-                                       constant_path_write_literal(node, self_owner), writes, seen)
+                                       constant_path_write_literal(node, self_owner), tables,
+                                       nameable: nameable_write_target?(node.target, self_owner))
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
-          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, writes, seen)
+          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, tables)
         when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
           record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
-                                       nil, writes, seen)
+                                       nil, tables, nameable: nameable_write_target?(node.target, self_owner))
         when Prism::MultiWriteNode
-          census_multi_write_constants(node, qualified_prefix, writes, seen, self_owner)
+          census_multi_write_constants(node, qualified_prefix, tables, self_owner)
         end
       end
 
       # `A, B = :x, :y` and `A, *rest = …`. A destructured element's value is a projection of the right-hand
       # side, which this syntactic walk does not evaluate, so every constant target is censused unpublishable.
-      def census_multi_write_constants(node, qualified_prefix, writes, seen, self_owner = nil)
+      def census_multi_write_constants(node, qualified_prefix, tables, self_owner = nil)
         targets = node.lefts + node.rights
         targets << node.rest if node.rest
         targets.each do |target|
           case target
           when Prism::ConstantTargetNode
-            record_constant_write_census(qualified_write_name(qualified_prefix, target.name.to_s), nil, writes, seen)
+            record_constant_write_census(qualified_write_name(qualified_prefix, target.name.to_s), nil, tables)
           when Prism::ConstantPathTargetNode
             record_constant_write_census(constant_path_write_name(target, qualified_prefix, self_owner),
-                                         nil, writes, seen)
+                                         nil, tables, nameable: nameable_write_target?(target, self_owner))
           end
         end
       end
@@ -3896,11 +3933,13 @@ module Rigor
       # censuses key a path write differently until that is settled.
       # `self::BAR = …` names whatever `self` is at that point, which the walk carries in `self_owner`
       # ([#705](https://github.com/rigortype/rigor/issues/705)) — the enclosing lexical namespace in an
-      # ordinary body, the receiver inside a `class_eval` block. Where that `self` is {OPAQUE_SELF}, and for
+      # ordinary body, the receiver inside a `class_eval` block, and the constant a `Klass = Class.new { … }`
+      # assigns the block's class to ({#meta_new_block_owner}). Where that `self` is {OPAQUE_SELF}, and for
       # any other dynamic receiver (`klass::BAR = …`), the target is "some class, then `::BAR`" and the name
       # falls back to the bare last segment — the one spelling that class could make it, `Object`. Suppressing
       # a top-level name is gradual typing, which is the safe direction here; the VALUE is what such a write
-      # must not contribute ({#constant_path_write_literal}).
+      # must not contribute ({#constant_path_write_literal}), and the fallback name is withheld from the
+      # local-declaration exemption ({#local_constant_name_set}).
       def constant_path_write_name(target, qualified_prefix, self_owner = nil)
         full = Source::ConstantPath.qualified_name_or_nil(target)
         return full if full
@@ -3945,10 +3984,18 @@ module Rigor
       # Records one censused write. `seen` carries the names this file has already written, so a repeat write
       # retracts the publishable descriptor whatever either rvalue was — neither arm of an in-file
       # reassignment is ever published, and the name still counts as written.
-      def record_constant_write_census(full, literal, writes, seen)
+      #
+      # `nameable` is false only for the bare-name fallback {#constant_path_write_name} takes when nothing
+      # names the write's base. Such a name belongs in `writes` — another file's value for it is not to be
+      # trusted — and NOT in `declared`, which answers the opposite question
+      # ([#710](https://github.com/rigortype/rigor/issues/710)). The two are separate tables rather than one
+      # richer descriptor because a name can be written both ways in one file, and then the file DID declare
+      # it however the two writes are ordered.
+      def record_constant_write_census(full, literal, tables, nameable: true)
         return if full.nil?
 
-        writes[full] = seen.add?(full) ? (literal || CONSTANT_UNPUBLISHABLE) : CONSTANT_UNPUBLISHABLE
+        tables.declared << full if nameable
+        tables.writes[full] = tables.seen.add?(full) ? (literal || CONSTANT_UNPUBLISHABLE) : CONSTANT_UNPUBLISHABLE
       end
 
       # The frozen-scalar literal fold: `[value]` for a publishable rvalue, nil to decline. The one-element

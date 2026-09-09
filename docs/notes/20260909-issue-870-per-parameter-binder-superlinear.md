@@ -1,7 +1,8 @@
 # The mutually recursive walk PR #547 exposed: characterisation (2026-09-09)
 
 Status: measurement note for [#870](https://github.com/rigortype/rigor/issues/870); names the cause
-[#872](https://github.com/rigortype/rigor/issues/872) has to fix. No engine change lands with this note.
+[#872](https://github.com/rigortype/rigor/issues/872) had to fix. The characterisation landed without an
+engine change; the resolution section below records what #872 then changed.
 
 ## The question
 
@@ -145,7 +146,30 @@ keeps pushing onto it, and `context_tainted?` allocates a suffix slice (`log[eve
 candidate compute. On top of the exponential re-walk that adds a quadratic-in-events allocation term. Both
 disappear once the walk is bounded, but the log's growth is worth bounding on its own.
 
-## Fix direction for #872
+## What #872 did (2026-09-09)
+
+Lever 1 shape (a) landed, in the narrow form that is sound without a component model: **a context-tainted
+result is stored when it is `Dynamic[top]`** (ADR-84 WD6). Inside the component every result is that, so the
+walk collapses; outside it the gate is unchanged. `untyped` is the lattice top and the ADR-5 degradation
+floor, so serving a stored top can only be *less* precise than an untainted recompute — never a type the
+ancestor context invented, and never a diagnostic a fresh evaluation would not raise. Shape (b), the
+per-`(signature, outermost entry)` body-evaluation cap, was not implemented: it bounds the walk only to
+*cap × signatures × outermost entries*, still quadratic on rufo, and it is a real precision budget where the
+exemption is not. Lever 2 landed as well — `context_tainted?` scans the log by index instead of allocating a
+suffix slice.
+
+| Methods | before: wall / evals | after: wall / evals |
+|---|---|---|
+| 8 | 1.7 s / 3,264 | 1.1 s / 28 |
+| 10 | 3.2 s / 13,316 | 1.1 s / 32 |
+| 12 | 6.2 s / 50,812 | 1.2 s / 36 |
+| 14 | 13.9 s / 192,414 | 1.2 s / 40 |
+
+`rufo-0.18.2/lib/rufo/formatter.rb`: > 900 s (killed) → **2.7 s**; the whole gem's `lib` → **2.8 s**.
+`--format json --no-cache` byte-identical over `lib`, `plugins/*/lib`, `examples/*/lib`, liquid, mail,
+redmine and mastodon.
+
+## Fix direction for #872 (as written before the fix)
 
 Two independent levers, either of which bounds the walk; the first is the root, the second is cheap
 insurance.

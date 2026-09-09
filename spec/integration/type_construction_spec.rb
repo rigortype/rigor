@@ -408,6 +408,38 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # #656 — the segment-wise half of the same family. The fixture above only
+  # needed the path's FIRST segment anchored, because one prefix owned the whole
+  # path; here the head and the tail have different owners, so no
+  # `<prefix>::<full path>` candidate can name what Ruby names. `A::B` inside
+  # `P::Guard` with `P::A < P::Base` is `P::Base::B`, and the top-level `A::B`
+  # the engine answered is a real but different class — `undefined method` fired
+  # on the read, the `is_a?` body and the `when` body at once.
+  describe "fixtures/constant_path_ancestor_resolution.rb — a path's segments resolve one at a time" do
+    let(:harness) { harness_for("constant_path_ancestor_resolution") }
+
+    it "resolves `A::B` inside `P::Guard` to `P::Base::B` for the read and both guard shapes" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # Non-vacuity. Half of these assertions are must-still-succeed arms that a
+    # walk doing NOTHING satisfies, and the other half a walk that adopts its
+    # first ancestor candidate unconditionally satisfies; only counting both
+    # halves makes either mean anything.
+    it "still asserts one resolved constant per position" do
+      expect(marked_lines(harness, "assert_type(").size).to eq(7)
+    end
+
+    # The false-positive arm, and the shape the issue reported: the calls that
+    # follow each resolution are declared on the class Ruby names and on no
+    # other, so an off-by-one-owner answer surfaces here as
+    # `call.undefined-method` on correct code.
+    it "leaves no other diagnostic on the resolved receivers" do
+      expect(harness.errors.map { |d| [d.line, d.rule, d.message] }).to be_empty
+    end
+  end
+
   # #652 — the sibling defect of the fixture above, and the one that made this
   # family a DERIVATION bug rather than a per-shape one. Ruby's `Module.nesting`
   # inside a compact `class Admin::CompactController` is that class alone, so a

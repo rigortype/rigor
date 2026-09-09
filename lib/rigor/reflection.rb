@@ -168,9 +168,16 @@ module Rigor
       # § "Implementation Guidelines"). Only project ancestors are walked; an RBS-known superclass
       # contributes no name here (see {.ancestor_constant_scopes}).
       #
+      # Step 2.5 (#656) — the path read SEGMENT BY SEGMENT, which is the only rung that can answer a
+      # path whose head and tail have different owners. See {.resolve_constant_path_name}. It sits
+      # BELOW the whole-path rungs so no read that resolves today moves, and ABOVE step 3 because
+      # beating the top-level whole-string answer is the point: `A::B` inside `P::Guard` with
+      # `P::A < P::Base` is `P::Base::B`, and step 3's `A::B` is a real but different class.
+      #
       # Step 3 — the bare name (top level).
       first_constant_hit(lexical_nesting_chain(scope), name, scope) ||
         ancestor_constant_type(name, scope, enclosing_class_path(scope)) ||
+        constant_path_type(name, scope) ||
         constant_type_at(name, scope)
     end
 
@@ -212,8 +219,12 @@ module Rigor
     # dependabot-core — `docs/notes/20260905-toplevel-def-cref-movable-sites.md`). Rigor reports nothing
     # about them either way, so retracting them would trade a silent wrong answer for a silent absent one at
     # no gain. Making them FIRE is a separate question with its own false-positive budget.
+    #
+    # Issue #656's rung goes LAST here rather than second: for a top-level body Ruby's own first answer
+    # for `A::B` is the top level, and a whole-string hit there already means "`A` owns `B`". The
+    # segment-wise walk only has something to add once that misses.
     def toplevel_first_constant_type(name, scope)
-      constant_type_at(name, scope) || caller_derived_constant_type(name, scope)
+      constant_type_at(name, scope) || caller_derived_constant_type(name, scope) || constant_path_type(name, scope)
     end
     private_class_method :toplevel_first_constant_type
 
@@ -493,3 +504,7 @@ module Rigor
     end
   end
 end
+
+# Loaded last: the segment-wise path walk reopens the module above and reads its private candidate
+# lookups, so the facade has to exist first.
+require_relative "reflection/constant_path"

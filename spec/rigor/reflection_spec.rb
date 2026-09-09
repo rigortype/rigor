@@ -184,6 +184,76 @@ RSpec.describe Rigor::Reflection do
       end
     end
 
+    # #656 — the same lookup one segment at a time. The block above resolves a BARE name through the
+    # ancestors; a PATH needs it per segment, because the head and the tail can have different owners
+    # and then no `<prefix>::<full path>` candidate names what Ruby names. The shape throughout is
+    # `A::B` read inside `P::Guard` with `P::A < P::Base`, which MRI 4.0.5 answers `P::Base::B` while
+    # a top-level `A::B` also exists — a real but DIFFERENT class, which the engine went on to
+    # type-check against.
+    describe "path segments (#656)" do
+      # `P::A` is the head's lexical answer; `P::Base` and `P::Mixin` own the tail. The ancestor name
+      # is recorded AS WRITTEN (`"Base"` inside `module P`), which is what a real discovery pre-pass
+      # produces, so the candidate order is the one `Scope#ancestor_name_candidates` decides.
+      def guard_scope(in_source: {}, superclasses: { "P::A" => "Base" }, includes: {})
+        discovered = %w[P P::Guard P::A P::Base P::Mixin A].to_h do |name|
+          [name, Rigor::Type::Combinator.singleton_of(name)]
+        end
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: in_source,
+          discovered_classes: discovered,
+          discovered_superclasses: superclasses,
+          discovered_includes: includes
+        )
+        Rigor::Scope.empty
+                    .with_self_type(Rigor::Type::Combinator.nominal_of("P::Guard"))
+                    .with_lexical_nesting(["P::Guard", "P"])
+                    .with_discovery(index)
+      end
+
+      let(:from_ancestor) { Rigor::Type::Combinator.constant_of(42) }
+      let(:from_toplevel) { Rigor::Type::Combinator.constant_of("top-level") }
+
+      it "resolves the tail through the head's superclass over a shadowing top-level path" do
+        scope = guard_scope(in_source: { "P::Base::B" => from_ancestor, "A::B" => from_toplevel })
+        expect(described_class.resolve_constant_type("A::B", scope: scope)).to eq(from_ancestor)
+      end
+
+      # The `include` edge, which is not a variation for completeness: every movable site the issue's
+      # survey found on a real project arrives through one, and a superclass-only walk finds none.
+      it "resolves the tail through a module the head includes" do
+        scope = guard_scope(superclasses: {}, includes: { "P::A" => ["Mixin"] },
+                            in_source: { "P::Mixin::B" => from_ancestor, "A::B" => from_toplevel })
+        expect(described_class.resolve_constant_type("A::B", scope: scope)).to eq(from_ancestor)
+      end
+
+      # The control that keeps the two above honest. With no ancestor owning the tail the walk must
+      # find nothing and the top-level answer must survive unchanged — a walk that adopted its first
+      # candidate would pass every other example here.
+      it "still answers the top-level path when no ancestor owns the tail" do
+        scope = guard_scope(in_source: { "A::B" => from_toplevel })
+        expect(described_class.resolve_constant_type("A::B", scope: scope)).to eq(from_toplevel)
+      end
+
+      # Declining is the answer when the walk is ambiguous: an unknown tail stays gradual rather than
+      # becoming a guess drawn from a namespace Ruby never consults.
+      it "resolves nothing when no source owns the tail anywhere" do
+        expect(described_class.resolve_constant_type("A::B", scope: guard_scope)).to be_nil
+      end
+
+      # A value constant cannot own the segment after it, so the head declines rather than building a
+      # namespace prefix out of it.
+      it "does not walk through a head that names a value rather than a namespace" do
+        scope = guard_scope(in_source: { "P::VALUE" => from_toplevel, "P::Base::B" => from_ancestor })
+        expect(described_class.resolve_constant_type("VALUE::B", scope: scope)).to be_nil
+      end
+
+      # #614's rule outranks the walk: `::A::B` names the top level wherever it is written.
+      it "leaves a rooted path at the top level" do
+        scope = guard_scope(in_source: { "P::Base::B" => from_ancestor, "A::B" => from_toplevel })
+        expect(described_class.resolve_constant_type("A::B", scope: scope, rooted: true)).to eq(from_toplevel)
+      end
+    end
+
     # #614 — `::Foo` is Ruby's escape hatch out of the lexical ladder. The name reaching the resolver is
     # un-rooted (`"Rails"`), so the marker is a separate argument; without it the walk answered the
     # lexically nearer shadow.

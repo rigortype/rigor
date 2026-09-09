@@ -104,6 +104,10 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
   let(:configuration) { Rigor::Configuration.load(nil) }
   let(:context) { Rigor::LanguageServer::ProjectContext.new(configuration: configuration) }
 
+  # The #790 examples' injection state, in one mutable hash rather than two ivars: the stub's block reads it
+  # on every call and the example flips `:raises` between runs, so it has to be shared, not rebound.
+  let(:scan) { { calls: 0, raises: false } }
+
   # `discovery_seed:` is what `discovery-seeded-mutation-sites` supplies. nil (the default here) is the
   # closure feature adopted ALONE: the mutated file's verdict is then the shipped single-file oracle's,
   # unchanged, and the closure is the only thing this class adds.
@@ -237,6 +241,97 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
   def crash_every_check_rule!
     allow(Rigor::Analysis::CheckRules).to receive(:diagnose)
       .and_raise(RuntimeError, "injected check-rule crash (issue #686 gate)")
+  end
+
+  # Issue #790 — the OTHER way a mutant makes a run say nothing about the code, and the one #788 created.
+  # `Environment#hkt_registry` rescues whatever the implicit scan over RBS `type` aliases raises, records
+  # it, and degrades to the pre-scan registry, so the run comes back READABLE with one
+  # `rbs.coverage.hkt-scan-failed` row — the shape `Result#crashed?` deliberately does not see. Mutant #776
+  # was exactly this.
+  #
+  # `scan[:calls]` is the non-vacuity instrument, and it is the measurement the issue's report turned on:
+  # {Rigor::Environment::HktRegistryHolder} memoises, so a sweep that "recovered" without replacing the
+  # Environment is indistinguishable from one that did — except that the scan was never re-attempted.
+  def stub_hkt_scan!
+    allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_wrap_original do |original, *args, **kwargs|
+      scan[:calls] += 1
+      raise "injected HKT scan failure (issue #790 gate)" if scan[:raises]
+
+      original.call(*args, **kwargs)
+    end
+  end
+
+  # An oracle over an Environment nothing has analysed through yet, which is load-bearing rather than
+  # tidiness: the HKT registry is demanded on the FIRST analysis and memoised, so an oracle sharing this
+  # file's `let(:context)` has already answered the scan by the time an example stubs it — the stub would
+  # never be consulted and the example would pass having measured nothing.
+  #
+  # `recoverable:` is the `rebuild_session:` half. {Rigor::LanguageServer::ProjectContext#invalidate!} is
+  # what the CLI wires too: it drops the environment and the project scan together, which is the pair the
+  # oracle measures over.
+  def virgin_oracle(paths, dependents:, recoverable:)
+    ctx = Rigor::LanguageServer::ProjectContext.new(configuration: configuration)
+    described_class.new(
+      configuration: configuration, environment: ctx.environment, project_scan: ctx.project_scan,
+      paths: paths, dependents: dependents,
+      seed_bundles: Rigor::Protection::DiscoverySeed.bundles(paths: paths),
+      rebuild_session: recoverable ? -> { rebuilt(ctx) } : nil
+    )
+  end
+
+  def rebuilt(ctx)
+    ctx.invalidate!
+    [ctx.environment, ctx.project_scan]
+  end
+
+  def closure_dependents
+    { "lib/account.rb" => ["lib/service.rb"], "lib/service.rb" => [] }
+  end
+
+  # Issue #790, first half — the oracle armed only `Result#crashed?`, so this run was scored as an ordinary
+  # measurement: every rule fired, the diagnostics read fine, and the type universe they were produced over
+  # was silently missing whatever the scan would have registered. The `killed?` at the end is the
+  # must-still-succeed control — an oracle that refused everything would satisfy the raise for free.
+  it "refuses a mutant whose run degraded the analyzer's own type universe" do
+    paths = write_fixture
+    stub_hkt_scan!
+    refusing = virgin_oracle(paths, dependents: closure_dependents, recoverable: false)
+
+    scan[:raises] = true
+    expect { refusing.baseline(source: account_source, path: "lib/account.rb") }
+      .to raise_error(Rigor::Protection::AnalyzerCrashed, /implicit HKT scan/) { |e| expect(e).to be_analyzer_defect }
+
+    scan[:raises] = false
+    healthy = virgin_oracle(paths, dependents: closure_dependents, recoverable: false)
+    baseline = healthy.baseline(source: account_source, path: "lib/account.rb")
+    expect(baseline.own).to be_empty
+    expect(healthy.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(true)
+  end
+
+  # Issue #790, second half — one poisoned mutant must not decide the sweep. The failure is recorded on the
+  # Environment the oracle keeps for every mutant and the degraded registry is memoised there, so before
+  # this the scan was never re-attempted: mutant N+1 ran over the same degraded universe and carried the
+  # identical row on BOTH sides of its set difference.
+  #
+  # Every assertion here is one the pre-fix oracle fails: the scan count does not move, and both halves of
+  # the baseline carry the row rather than being empty.
+  it "scores the next mutant over a fresh Environment, not the one a mutant degraded" do
+    paths = write_fixture
+    stub_hkt_scan!
+    oracle = virgin_oracle(paths, dependents: closure_dependents, recoverable: true)
+
+    scan[:raises] = true
+    expect { oracle.baseline(source: account_source, path: "lib/account.rb") }
+      .to raise_error(Rigor::Protection::AnalyzerCrashed) { |e| expect(e).to be_analyzer_defect }
+    degraded_at = scan[:calls]
+
+    scan[:raises] = false
+    baseline = oracle.baseline(source: account_source, path: "lib/account.rb")
+
+    expect(scan[:calls]).to be > degraded_at
+    expect(baseline.own).to be_empty
+    expect(baseline.dependents).to be_empty
+    expect(oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(true)
   end
 
   # The acceptance criterion the issue calls the trap: the mutated file is treated as changed everywhere the run

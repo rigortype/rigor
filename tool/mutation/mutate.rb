@@ -53,18 +53,59 @@ module RigorMutation
 
   # Builds the warm session once: config + ProjectContext (RBS environment + whole-project ProjectScan memoised).
   # Progress goes to stderr so a sweep's `--json` stdout stays clean.
-  module Session
-    module_function
+  #
+  # Issue #790 — and rebuilds it when a mutant degrades it. Post-#788 a mutant that makes the HKT registry build
+  # raise no longer aborts: {Rigor::Environment} records the failure and MEMOISES the degraded registry, so
+  # every later mutant in the sweep runs over a universe missing the type constructors the RBS `type` aliases
+  # and the loaded plugins would have contributed — and carries the same `rbs.coverage.hkt-scan-failed` row on
+  # both sides of its comparison. One mutant's defect then reads as every later mutant's verdict.
+  #
+  # Rebuild rather than reset the Environment's slots: a reset has to enumerate every holder the degraded
+  # registry fed (the memo, the failure slot, the constant-type cache folded under it) and a holder added later
+  # would silently not be reset. The cost that argument is usually about is a rebuild PER MUTANT; this one is
+  # paid only after a defect is observed, which on a healthy sweep is never.
+  class Session
+    attr_reader :config, :ctx
 
-    def build(config_path)
-      config = Rigor::Configuration.load(config_path)
+    def initialize(config_path)
+      @config_path = config_path
+      build!
+    end
+
+    # The pre-severity record of a shared analyzer build that raised, as a one-line detail, or nil.
+    #
+    # Read INSTEAD of trusting the run's diagnostics alone: the `rbs.coverage.hkt-scan-failed` row is
+    # severity-stamped like any other, so a project whose `severity_overrides:` resolves `rbs` (or the exact
+    # rule id) to `off` never sees it in a result — and the harness that exists to find analyzer defects must
+    # not be the one thing a config can hide one from. {Rigor::Environment} records the failure before any
+    # severity resolution.
+    def analyzer_defect_detail
+      error_class, message, frame, stage = @ctx.environment.hkt_scan_failure
+      return nil if error_class.nil?
+
+      "#{stage} HKT registry build raised #{error_class}: #{message}#{" at #{frame}" if frame}"
+    end
+
+    # @return true when the session was degraded and has been replaced.
+    def refresh_after_defect!
+      detail = analyzer_defect_detail
+      return false if detail.nil?
+
+      warn "analyzer defect — rebuilding the session (#{detail})"
+      build!
+      true
+    end
+
+    private
+
+    def build!
+      @config = Rigor::Configuration.load(@config_path)
       t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      ctx = Rigor::LanguageServer::ProjectContext.new(configuration: config)
-      ctx.environment
-      ctx.project_scan
+      @ctx = Rigor::LanguageServer::ProjectContext.new(configuration: @config)
+      @ctx.environment
+      @ctx.project_scan
       elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t) * 1000).round(1)
       warn "cold setup (env + project scan): #{elapsed} ms"
-      [config, ctx]
     end
   end
 
@@ -73,9 +114,14 @@ module RigorMutation
   class Analyzer
     Result = Struct.new(:path, :records, :baseline_size, :dropped, keyword_init: true)
 
-    def initialize(config:, ctx:, operators:, type_filter:)
-      @config = config
-      @ctx = ctx
+    # Issue #790 — a named class so a reader of the `error:` field can tell "Rigor broke while measuring this
+    # mutant" from the ordinary harness failures the same rescue folds in.
+    class AnalyzerDegraded < StandardError; end
+
+    # The session is held rather than its `config` / `ctx` unpacked: a mutant that degrades the analyzer
+    # replaces both mid-run (issue #790), and an Analyzer holding the old pair would keep measuring over it.
+    def initialize(session:, operators:, type_filter:)
+      @session = session
       @operators = operators
       @type_filter = type_filter
     end
@@ -90,7 +136,7 @@ module RigorMutation
       return nil if raw.empty?
 
       dropped = 0
-      raw, dropped = mutator.filter_by_type(raw, environment: @ctx.environment, path: path) if @type_filter
+      raw, dropped = mutator.filter_by_type(raw, environment: @session.ctx.environment, path: path) if @type_filter
       muts = sample(raw, seed, limit)
       return nil if muts.empty?
 
@@ -108,12 +154,23 @@ module RigorMutation
 
     # cache_store: nil + prebuilt: scan ⇒ the run cache is bypassed and the
     # mutant is always re-analysed against the in-memory bytes.
+    #
+    # Issue #790 — a run made over a degraded analyzer is not a measurement of the mutant, so it raises here
+    # rather than returning diagnostics `evaluate` would score. Both surfaces are asked: the row
+    # `CrashSignature.analyzer_defect?` names, and the Environment's own pre-severity record, which a
+    # `severity_overrides:` that turns the row off cannot hide.
     def analyse(mutant_source, path)
+      ctx = @session.ctx
       runner = Rigor::Analysis::Runner.new(
-        configuration: @config, environment: @ctx.environment, prebuilt: @ctx.project_scan,
+        configuration: @session.config, environment: ctx.environment, prebuilt: ctx.project_scan,
         cache_store: nil, collect_stats: false
       )
-      runner.run_source(source: mutant_source, path: path)
+      result = runner.run_source(source: mutant_source, path: path)
+      defect = result.diagnostics.find { |d| Rigor::Analysis::CrashSignature.analyzer_defect?(d) }
+      detail = defect&.message || @session.analyzer_defect_detail
+      raise AnalyzerDegraded, detail if detail
+
+      result
     end
 
     def evaluate(source, path, mut, baseline)
@@ -128,7 +185,9 @@ module RigorMutation
       record(mut, status, elapsed, new_diags.map(&:rule).uniq,
              expected_hit: new_diags.any? { |d| d.rule == mut.expected_rule })
     rescue StandardError => e
-      # A harness-level failure on one mutant must not abort the run.
+      # A harness-level failure on one mutant must not abort the run — and when the failure degraded the
+      # shared session, the NEXT mutant must not inherit it (issue #790).
+      @session.refresh_after_defect!
       record(mut, :invalid, 0.0, [], error: "#{e.class}: #{e.message}")
     end
 
@@ -211,8 +270,7 @@ module RigorMutation
     end
 
     def run
-      config, ctx = Session.build(@config_path)
-      result = Analyzer.new(config: config, ctx: ctx, operators: @operators, type_filter: @type_filter)
+      result = Analyzer.new(session: Session.new(@config_path), operators: @operators, type_filter: @type_filter)
                        .run_file(@target, seed: @seed, limit: @limit)
       abort("no type-relevant mutations for #{@target} (try --no-type-filter)") if result.nil?
 
@@ -264,8 +322,7 @@ module RigorMutation
     def run
       files = Paths.expand(@paths)
       abort("no .rb files under: #{@paths.join(' ')}") if files.empty?
-      config, ctx = Session.build(@config_path)
-      analyzer = Analyzer.new(config: config, ctx: ctx, operators: @operators, type_filter: @type_filter)
+      analyzer = Analyzer.new(session: Session.new(@config_path), operators: @operators, type_filter: @type_filter)
 
       records = []
       files.each_with_index do |path, i|
@@ -358,7 +415,7 @@ module RigorMutation
     def run
       files = Paths.expand(@paths)
       abort("no .rb files under: #{@paths.join(' ')}") if files.empty?
-      config, ctx = Session.build(@config_path)
+      @session = Session.new(@config_path)
 
       findings = []
       analysed = 0
@@ -367,7 +424,7 @@ module RigorMutation
         source = File.read(path, encoding: Encoding::UTF_8)
         sample(Mutator.new(source, operators: Mutator::ALL_OPERATORS).mutations).each do |mut|
           analysed += 1
-          findings.concat(fuzz_one(config, ctx, source, path, mut))
+          findings.concat(fuzz_one(source, path, mut))
         end
       end
       report(findings, files.size, analysed)
@@ -380,33 +437,53 @@ module RigorMutation
       @per_file ? shuffled.first(@per_file) : shuffled
     end
 
-    def fuzz_one(config, ctx, source, path, mut)
+    def fuzz_one(source, path, mut)
       mutant = mut.apply(source)
       return [] unless Prism.parse(mutant).success?
 
-      diags = Timeout.timeout(@timeout) { analyse(config, ctx, mutant, path).diagnostics }
-      # Issue #784 — a mutant that breaks a shared analyzer build (the HKT scan; #776 was one) no longer
-      # surfaces as a per-file `internal analyzer error` row but as one readable `rbs.coverage.*` row that
-      # `CrashSignature.analyzer_defect?` singles out. To the fuzz it is the same finding: Rigor broke.
-      crashes = diags.select do |d|
-        d.message.to_s.start_with?(CRASH_PREFIX) || Rigor::Analysis::CrashSignature.analyzer_defect?(d)
+      diags = Timeout.timeout(@timeout) { analyse(mutant, path).diagnostics }
+      crashes = crash_details(diags)
+      unless crashes.empty?
+        # Issue #790 — the defect that made this mutant a finding is memoised on the shared Environment, so
+        # every later mutant would carry the same row on both sides of its comparison and be reported as a
+        # finding of its own. Replace the session before the next one.
+        @session.refresh_after_defect!
+        return crashes.map { |detail| finding(:crash, path, mut, detail) }
       end
-      return crashes.map { |d| finding(:crash, path, mut, d.message) } unless crashes.empty?
       return [] unless @repeat
 
-      again = Timeout.timeout(@timeout) { analyse(config, ctx, mutant, path).diagnostics }
+      again = Timeout.timeout(@timeout) { analyse(mutant, path).diagnostics }
       return [] if same_diagnostics?(diags, again)
 
       [finding(:nondeterministic, path, mut, "diagnostics differ across two identical runs")]
     rescue Timeout::Error
       [finding(:hang, path, mut, "exceeded #{@timeout}s")]
     rescue StandardError => e
+      @session.refresh_after_defect!
       [finding(:harness_error, path, mut, "#{e.class}: #{e.message}")]
     end
 
-    def analyse(config, ctx, mutant_source, path)
+    # Issue #784 — a mutant that breaks a shared analyzer build (the HKT scan; #776 was one) no longer
+    # surfaces as a per-file `internal analyzer error` row but as one readable `rbs.coverage.*` row that
+    # `CrashSignature.analyzer_defect?` singles out. To the fuzz it is the same finding: Rigor broke.
+    #
+    # Issue #790 — that row is severity-stamped like every other diagnostic, so a project whose
+    # `severity_overrides:` resolves `rbs` (or the exact rule id) to `off` hides it from the harness that
+    # exists to find it. The Environment's own record predates severity resolution and still answers. It is
+    # consulted only when no row reported the defect, so one defect stays one finding.
+    def crash_details(diags)
+      rows = diags.select do |d|
+        d.message.to_s.start_with?(CRASH_PREFIX) || Rigor::Analysis::CrashSignature.analyzer_defect?(d)
+      end
+      return rows.map { |d| d.message.to_s } unless rows.empty?
+
+      [@session.analyzer_defect_detail].compact
+    end
+
+    def analyse(mutant_source, path)
+      ctx = @session.ctx
       Rigor::Analysis::Runner.new(
-        configuration: config, environment: ctx.environment, prebuilt: ctx.project_scan,
+        configuration: @session.config, environment: ctx.environment, prebuilt: ctx.project_scan,
         cache_store: nil, collect_stats: false
       ).run_source(source: mutant_source, path: path)
     end

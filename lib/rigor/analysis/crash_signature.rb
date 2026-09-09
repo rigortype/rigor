@@ -87,12 +87,13 @@ module Rigor
       # user — every rule fired — but NOT a valid measurement of Rigor itself, so a harness that scores
       # Rigor's behaviour should treat one of these as a crash finding the way it treats `:check_rule`, or
       # a mutant that re-breaks the HKT scan (#776 was one) scores as a measurement over a silently degraded
-      # universe. What consults it today: `tool/mutation`'s fuzz crash detector — on the severity-resolved
-      # stream, so a `severity_overrides: rbs: off` hides the row from it. What does NOT yet: the ADR-69
-      # kill oracle (`Protection::AnalysisGuard` reads `Result#crashed?`, which excludes every
-      # `:rbs_build` row), and both harnesses still reuse one Environment across mutants, which memoises
-      # the degraded registry after the first defect. Arming the oracle, inspecting the pre-severity row,
-      # and resetting the Environment are issue #790.
+      # universe. Both Rigor-measuring harnesses consult it (#790): `tool/mutation`'s fuzz crash detector
+      # and {Protection::AnalysisGuard}, the ADR-69 kill oracles' refusal. Neither reads it alone — the row
+      # is severity-stamped like any other, so `severity_overrides:` can drop it from a run's diagnostics
+      # entirely, and each harness also reads {Rigor::Environment#hkt_scan_failure}, the pre-severity record
+      # the row is derived from. Both also replace their Environment after a defect: the registry build is
+      # memoised and the failure slot is first-write-wins, so an Environment that degraded once stays
+      # degraded for every later mutant.
       ANALYZER_DEFECT_RULES = %w[
         rbs.coverage.hkt-scan-failed
       ].freeze

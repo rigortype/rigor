@@ -98,9 +98,10 @@ module InternalAnalyzerErrorGuard
   # each produce one on purpose, and how many other fixtures collide with Rigor's bundled RBS has not been
   # measured. Arming it is its own change, with that measurement in front of it. The #784 rung is the one
   # `:rbs_build` row whose cause is Rigor rather than the user's `sig/` ({CrashSignature.analyzer_defect?});
-  # a harness that measures RIGOR (the kill oracles, the mutation fuzz) is the tier that should refuse it
-  # (the fuzz does; the oracle's arming is #790) — this guard measures whether a SPEC's assertion ran, and
-  # it did.
+  # a harness that measures RIGOR (the kill oracles through {Rigor::Protection::AnalysisGuard}, the mutation
+  # fuzz) is the tier that refuses it, and since #790 both do — this guard measures whether a SPEC's
+  # assertion ran, and it did. The distinction is the whole reason the two tiers are separate: the same row
+  # invalidates a measurement of Rigor and leaves a spec's own assertion perfectly readable.
   def self.crash?(diagnostic, allow_plugin_crash: false)
     case Rigor::Analysis::CrashSignature.reason(diagnostic)
     when :check_rule then true

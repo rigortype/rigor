@@ -89,6 +89,24 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
+  describe ".changed_class_declarations" do
+    it "reports a class that appeared and one that vanished from the same file" do
+      before = { "b.rb" => Set["Kept", "Gone"] }
+      after  = { "b.rb" => Set["Kept", "New"] }
+      expect(described_class.changed_class_declarations(["b.rb"], before, after)).to eq(Set["Gone", "New"])
+    end
+
+    it "treats a REMOVED file's whole before-set as vanished" do
+      before = { "b.rb" => Set["Foo"] }
+      expect(described_class.changed_class_declarations(["b.rb"], before, {})).to eq(Set["Foo"])
+    end
+
+    it "reports nothing for a file whose declared set did not move" do
+      decls = { "b.rb" => Set["Foo"] }
+      expect(described_class.changed_class_declarations(["b.rb"], decls, decls)).to eq(Set.new)
+    end
+  end
+
   describe ".negative_closure" do
     it "unions the negative-dependents of the satisfied keys" do
       negdeps = { "toplevel:helper" => Set["a.rb", "c.rb"], "method:Post#archive" => Set["d.rb"] }

@@ -485,6 +485,61 @@ RSpec.describe "plugins/rigor-sidekiq" do
       end
     end
 
+    # Issue #640 — the same staleness one producer over. `worker_index` watches `app/workers/**/*.rb`, a root
+    # OUTSIDE `paths:`, and the run descriptor was built from the analysed files plus the files the boundary
+    # actually READ — neither of which can carry a worker that does not exist yet. The producer recomputed (its
+    # own key carries the glob) while the run entry was served from cache, so a project could add a worker and
+    # keep seeing the pre-worker diagnostics. Each example pairs the counter read with the DIAGNOSTIC the
+    # re-analysis owes, so a miss that re-analysed the wrong thing cannot pass.
+    LATE_WORKER = <<~RUBY # rubocop:disable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
+      module Sidekiq
+        module Job; end
+      end
+      class LateWorker
+        include Sidekiq::Job
+        def perform(a, b)
+          [a, b]
+        end
+      end
+    RUBY
+
+    # The plugin's own rows only — the run also carries engine diagnostics that say nothing about whether the
+    # worker index was re-read.
+    def worker_rules(result)
+      result.diagnostics.map(&:rule).grep(/\A(worker-call|wrong-arity)\z/).sort
+    end
+
+    it "re-analyzes the warm run once a worker is ADDED under a watched root outside `paths:`" do
+      with_project do |dir, cache_root|
+        File.write(File.join(dir, "demo.rb"), "LateWorker.perform_async(1)\n")
+        cold, cold_counters = run_warm(dir, cache_root)
+        expect(cold_counters).to eq(hits: 0, misses: 1)
+        expect(worker_rules(cold)).to eq([])
+
+        materialize_files(dir, "app/workers/late_worker.rb" => LATE_WORKER)
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+        expect(worker_rules(warm)).to include("wrong-arity")
+      end
+    end
+
+    # The companion direction. This one the boundary rows already covered — the removed worker is a file the
+    # index READ, so #577's absence row reaches it — and it is kept as the standing guard that composing the
+    # globs did not cost the removal edge.
+    it "re-analyzes the warm run once a worker under a watched root is REMOVED" do
+      with_project do |dir, cache_root|
+        File.write(File.join(dir, "demo.rb"), "WelcomeEmailWorker.perform_async(1, 'ja', 3)\n")
+        cold, cold_counters = run_warm(dir, cache_root)
+        expect(cold_counters).to eq(hits: 0, misses: 1)
+        expect(worker_rules(cold)).to include("wrong-arity")
+
+        File.unlink(File.join(dir, "app", "workers", "welcome_email_worker.rb"))
+        warm, counters = run_warm(dir, cache_root)
+        expect(counters).to eq(hits: 0, misses: 1)
+        expect(worker_rules(warm)).to eq([])
+      end
+    end
+
     it "re-analyzes the warm run once `config/sidekiq.yml` is REMOVED" do
       with_project do |dir, cache_root|
         materialize_files(dir, "config/sidekiq.yml" => SIDEKIQ_SCHEDULE_YAML)

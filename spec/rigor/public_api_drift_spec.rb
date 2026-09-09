@@ -105,6 +105,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     published_constant_names()
     published_constant_sourced()
     published_constant_sourced?(req:kind,req:name)
+    record_class_existence(req:class_name)
     record_constant_dependency(req:name)
     record_dynamic_origin(req:node,req:cause)
     record_optimistic_origin(req:node,req:cause)

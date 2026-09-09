@@ -197,6 +197,7 @@ module Rigor
             # `call.undefined-method`, `call.wrong-arity`, argument-type checking — look the method up in
             # the environment themselves rather than reading this tier's answer.
             return nil if RbsExtended.inferred_return?(method_definition)
+            return SPACESHIP_ENVELOPE if inherited_identity_spaceship?(method_definition, class_name, kind, method_name)
 
             type_vars = build_type_vars(environment, class_name, receiver_args)
             translate_return_type(
@@ -216,6 +217,46 @@ module Rigor
             # Defensive: if RBS' definition builder raises on a broken hierarchy (e.g., partially loaded
             # user signatures), the dispatcher MUST stay fail-soft.
             nil
+          end
+
+          # Issue #661 — `Kernel#<=>: (untyped other) -> 0?` is the IDENTITY comparison: `0` when the two
+          # are the same object, `nil` otherwise, and correct as written for a bare `Object`. Reached by
+          # inheritance it stops being a statement about the call. `1.day <=> 2.days` typed as `0?`, and a
+          # `Money` whose signature says `include Comparable` — whose whole contract is that the includer
+          # defines `<=>` — typed the same, because neither declares `<=>` of its own and every class
+          # inherits Kernel's.
+          #
+          # `0?` is a VALUE claim, so the cost is not confined to the expression: narrowing
+          # `n = a <=> b; n.negative? if n` reads the truthy arm as the literal `0`, folds `0.negative?`
+          # to false, and answers `bot` for a branch the runtime takes on every ordered pair. That is one
+          # `clause.unreachable` away from a false positive on correct code.
+          #
+          # Widened rather than declined: `Integer?` is the envelope Ruby's own `<=>` convention states and
+          # the one upstream rbs writes wherever a class DOES declare the operator (`Array`, `Module`,
+          # `Complex`). It is a supertype of `0?`, so this only ever removes a conclusion — and it removes
+          # exactly the conclusions that rested on the receiver not overriding an operator its signature
+          # was never required to mention (ADR-5: a partially-declared class is not a closed world).
+          #
+          # Bounded to the three classes that OWN the identity comparison, where the claim is the truth
+          # about the receiver rather than an artifact of inheritance, and to `<=>` alone — the general
+          # question of what an inherited Object/Kernel signature may assert about a subclass is much
+          # larger, and `to_s` / `hash` / `inspect` do not carry a value-precise return to lose.
+          SPACESHIP_IDENTITY_OWNERS = %w[Kernel Object BasicObject].to_set.freeze
+          private_constant :SPACESHIP_IDENTITY_OWNERS
+
+          SPACESHIP_ENVELOPE = Type::Combinator.union(
+            Type::Combinator.nominal_of("Integer"),
+            Type::Combinator.constant_of(nil)
+          ).freeze
+          private_constant :SPACESHIP_ENVELOPE
+
+          def inherited_identity_spaceship?(method_definition, class_name, kind, method_name)
+            return false unless method_name == :<=>
+            return false unless kind == :instance
+            return false if SPACESHIP_IDENTITY_OWNERS.include?(class_name.to_s.delete_prefix("::"))
+            return false unless method_definition.respond_to?(:defined_in)
+
+            SPACESHIP_IDENTITY_OWNERS.include?(method_definition.defined_in.to_s.delete_prefix("::"))
           end
 
           # Maps a Rigor::Type receiver to a `[class_name, kind, type_args]` triple where `kind` is either

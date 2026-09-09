@@ -107,6 +107,7 @@ module Rigor
         Prism::SingletonClassNode => :eval_singleton_class,
         Prism::CallNode => :eval_call,
         Prism::BlockNode => :eval_block,
+        Prism::LambdaNode => :eval_lambda,
         Prism::ReturnNode => :eval_return,
         Prism::NextNode => :eval_next,
         Prism::BreakNode => :eval_break,
@@ -2124,8 +2125,7 @@ module Rigor
         classification = classify_closure_escape(node)
         return post_scope if classification == :non_escaping
 
-        post_scope = drop_captured_narrowing(node.block, post_scope)
-        post_scope = widen_escaping_content_captures(node.block, post_scope)
+        post_scope = escaping_closure_captures(node.block, post_scope)
         post_scope.with_fact(
           Analysis::FactStore::Fact.new(
             bucket: :dynamic_origin,
@@ -2735,6 +2735,32 @@ module Rigor
         sub_eval(node.body, scope)
       end
 
+      # Issue #878 — `->() { }` and `lambda { }` build the same object, so they MUST type the same. The `lambda`
+      # spelling is an ordinary call carrying a `Prism::BlockNode` and reaches {#eval_call}; the `->` spelling is a
+      # node of its own, and without an entry here it was only ever typed as an expression (`Proc`) with its body left
+      # un-evaluated. The body's reads and literals still reported — the rule walker falls back to the enclosing
+      # method's scope — but a write made INSIDE the body joined no scope, so every later read in the body kept the
+      # pre-write type.
+      #
+      # The body is run under the same entry scope `lambda { }` gets ({#build_block_entry_scope}, which binds the
+      # parameters and enters `self` opaque), and the continuation gets the same escaping-closure treatment: a lambda
+      # literal is a value that outlives the expression, exactly like the Proc `lambda` returns, so the outer locals it
+      # can rebind lose their narrowing rather than being written back through ADR-56's non-escaping fixpoint. Both
+      # halves are widenings — the two spellings now agree in both directions instead of `->` being the precise one.
+      def eval_lambda(node)
+        lambda_type = scope.type_of(node, tracer: tracer)
+        sub_eval(node.body, build_block_entry_scope(nil, node)) unless node.body.nil?
+
+        [lambda_type, escaping_closure_captures(node, scope)]
+      end
+
+      # The continuation effects of an escaping closure body: the outer locals it can rebind drop their narrowing, and
+      # the ones it content-mutates are floored. Shared by the two spellings — a block on an escaping call
+      # ({#record_closure_escape_if_any}) and a lambda literal ({#eval_lambda}) — so they cannot drift.
+      def escaping_closure_captures(closure_node, post_scope)
+        widen_escaping_content_captures(closure_node, drop_captured_narrowing(closure_node, post_scope))
+      end
+
       # Builds the entry scope for a block body. The block sees the outer scope's locals (Ruby's lexical scoping rule)
       # and adds bindings for every named block parameter on top. Parameter types come from the receiving method's RBS
       # signature when one is available; the rest default to `Dynamic[Top]`.
@@ -2763,7 +2789,11 @@ module Rigor
         params_root.locals.map(&:name)
       end
 
+      # A lambda literal has no receiving method, so it passes no call node and every parameter defaults to
+      # `Dynamic[Top]` — the same answer `lambda { |y| }` gets, where the implicit-self receiver yields no signature.
       def expected_block_param_types_for(call_node)
+        return [] if call_node.nil?
+
         receiver_type = call_node.receiver ? scope.type_of(call_node.receiver, tracer: tracer) : nil
         return [] if receiver_type.nil?
 

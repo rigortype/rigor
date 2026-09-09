@@ -38,6 +38,9 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
         def take_tos: (_Stringish value) -> void
         def take_tostr: (_ToStr value) -> void
         def take_opt_kw: (Integer value, ?name: String) -> void
+        def take_kwsplat: (Integer value, **untyped opts) -> void
+        def take_req_kw: (Integer value, name: String) -> void
+        def take_rest: (Integer value, *Integer more) -> void
         def plain_pick: (String value) -> void
                       | (Integer value) -> void
         %a{rigor:v1:param: value is non-empty-string}
@@ -389,12 +392,47 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
     end
   end
 
-  describe "argument_check_eligible?" do
-    it "declines a method whose overload carries an optional keyword" do
-      # `take_opt_kw`'s `?name:` makes `optional_keywords` non-empty, so the whole method is ineligible and
-      # its blatantly wrong `nil` positional is never checked. The `take_int(nil)` example above is the
-      # adjacent must-still-fire: identical call shape, identical param type, no keyword.
+  # Issue #673 rewrote this envelope. A keyword parameter used to make the WHOLE signature ineligible, so
+  # the positional arguments of every keyword-bearing signature in the bundle went unchecked:
+  # `time.beginning_of_week("monday")` fired while `time.next_week("monday")` — `(?Symbol, ?same_time:
+  # bool)`, the same runtime error — did not. Keywords cannot shift a positional argument's index, and a
+  # call that PASSES keywords never reaches the signature at all (`plain_positional_call?` rejects a
+  # `KeywordHashNode` first), so the class-refutation half is now checked. The nullability half stays
+  # behind the old envelope: see `keyword_bearing?`'s note in check_rules.rb for the two corpus witnesses.
+  describe "argument_check_eligible? (#673)" do
+    it "checks the positional arguments of an optional-keyword signature" do
+      diagnostics = arg_mismatches(%(Sink.new.take_opt_kw("x")\n))
+
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to eq(
+        "argument type mismatch at parameter `value' of `take_opt_kw' on Sink: expected Integer, got \"x\""
+      )
+    end
+
+    it "checks them for a keyword-splat signature too" do
+      expect(arg_mismatches(%(Sink.new.take_kwsplat("x")\n)).size).to eq(1)
+    end
+
+    it "checks them for a required-keyword signature too" do
+      expect(arg_mismatches(%(Sink.new.take_req_kw("x")\n)).size).to eq(1)
+    end
+
+    # The staged half. A `nil` positional against a keyword-bearing signature stays silent, because the two
+    # verdicts the widening produced on correct corpus code both rested on nullability rather than class.
+    it "still declines a nil positional on a keyword-bearing signature" do
       expect(arg_mismatches(%(Sink.new.take_opt_kw(nil)\n))).to be_empty
+    end
+
+    # ...and the carve-out is scoped to keyword-bearing signatures, not applied to the rule at large:
+    # `take_int` has no keywords and its `nil` verdict is unchanged.
+    it "keeps firing on a nil positional when the signature carries no keyword" do
+      expect(arg_mismatches(%(Sink.new.take_int(nil)\n)).size).to eq(1)
+    end
+
+    # A rest positional is still a disqualifier, and for a reason keywords never had: arguments past it do
+    # not bind to a later positional parameter, so `params[index]` would read the wrong contract.
+    it "still declines a signature with a rest positional" do
+      expect(arg_mismatches(%(Sink.new.take_rest("x")\n))).to be_empty
     end
   end
 

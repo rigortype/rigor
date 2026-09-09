@@ -29,6 +29,18 @@ RSpec.describe Rigor::CLI do
     expect(out).to include("type-of")
   end
 
+  # `baseline` and `unused` were both dispatchable, documented in the manual, and absent from this
+  # list — nothing compared the two, so `rigor help` answered for 23 of the 25 verbs.
+  it "documents every dispatchable verb in the help text" do
+    _status, out, _err = run_cli("help")
+
+    undocumented = described_class::HANDLERS.keys.reject do |verb|
+      out.lines.any? { |line| line.match?(/\A {2}#{Regexp.escape(verb)}\s/) }
+    end
+
+    expect(undocumented).to be_empty
+  end
+
   it "reports unknown commands as usage errors" do
     status, _out, err = run_cli("nope")
 

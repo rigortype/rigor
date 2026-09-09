@@ -383,11 +383,13 @@ module Rigor
                      (opt-in; effects update/check/diff/explain)
           explain    Print the description of one or all CheckRules
           diff       Compare current diagnostics to a saved baseline JSON
+          baseline   Manage the baseline file (baseline generate/regenerate/dump/drift/prune)
           sig-gen    Emit RBS skeletons inferred from .rb sources
           lsp        Run the Rigor Language Server (LSP) over stdio
           mcp        Run the Rigor MCP server over stdio
           triage     Summarise diagnostics: distribution, hotspots, hints
           coverage   Report type-precision coverage (precise vs Dynamic ratio)
+          unused     Report unreferenced classes, modules and constants as removal candidates
           plugins    Report activation status of every configured plugin
           plugin     Browse bundled plugin source as worked examples (list/path/print/root)
           playground Start the browser playground (requires rigor-playground gem)

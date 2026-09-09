@@ -27,17 +27,17 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-11 | [Sorbet Input Adapter](11-sorbet-input-adapter.md) | Accepted |
 | ADR-12 | [dry-rb Packaging](12-dry-rb-packaging.md) | Accepted |
 | ADR-13 | [TypeNode Resolver Plugin](13-typenode-resolver-plugin.md) | Accepted |
-| ADR-14 | [RBS Sig Generation](14-rbs-sig-generation.md) | Accepted |
+| ADR-14 | [RBS Sig Generation](14-rbs-sig-generation.md) | Accepted (slices 1-5 implemented) |
 | ADR-15 | [Ractor Concurrency](15-ractor-concurrency.md) | Accepted (fork backend active; Ractor pool deferred) |
 | ADR-16 | [Macro Expansion](16-macro-expansion.md) | Accepted |
 | ADR-17 | [Monkey Patch Pre-Evaluation](17-monkey-patch-pre-evaluation.md) | Accepted (slices 1-4 implemented; 5-6 open) |
 | ADR-18 | [Substrate Per-Call-Site Return Type](18-substrate-per-call-site-return-type.md) | Accepted (implemented in v0.1.6) |
 | ADR-19 | [Language Server Packaging](19-language-server-packaging.md) | Accepted (LSP v1 implemented in v0.1.6; v2 + follow-ups across v0.1.x) |
-| ADR-20 | [Lightweight HKT](20-lightweight-hkt.md) | Accepted (partial implementation) |
+| ADR-20 | [Lightweight HKT](20-lightweight-hkt.md) | Accepted (slices 1-6 implemented; 4 and 5 in v0.3.7) |
 | ADR-21 | [Rubydex Evaluation](21-rubydex-evaluation.md) | Proposed |
 | ADR-22 | [Baseline and Project Onboarding](22-baseline-and-project-onboarding.md) | Accepted |
 | ADR-23 | [Diagnostic Triage Command](23-diagnostic-triage-command.md) | Accepted (slices 1+2+3+4 implemented) |
-| ADR-24 | [Self Method Call Resolution](24-self-method-call-resolution.md) | Accepted (slice 4 gated; WD3 in-body adoption gate opened by ADR-57, 2026-06-12) |
+| ADR-24 | [Self Method Call Resolution](24-self-method-call-resolution.md) | Accepted (slice 4 gated `:off` with subclass-aware gating; WD3 in-body adoption gate opened by ADR-57, 2026-06-12) |
 | ADR-25 | [Plugin Contributed RBS](25-plugin-contributed-rbs.md) | Accepted |
 | ADR-26 | [ActiveRecord Relation Typing](26-activerecord-relation-typing.md) | Accepted |
 | ADR-27 | [Tool Distribution and Installation Model](27-tool-distribution-model.md) | Accepted (partially implemented; Nix flake, container image, and CI templates shipped; single binary deferred) |
@@ -51,32 +51,32 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slices 1–4 done; slice 5 deferred) |
 | ADR-36 | [Macro-substrate Nested-class Emission Tier (Mangrove `Enum`)](36-mangrove-enum-nested-class-emission.md) | Accepted (Slice A implemented; `is_a?` exhaustiveness deferred) |
 | ADR-37 | [Plugin Interface Segregation (narrow extension protocols)](37-plugin-interface-segregation.md) | Accepted (Slices 1–3 implemented; all bundled walker plugins migrated; `flow_contribution_for` deleted 2026-06-11 per ADR-52 WD3) |
-| ADR-38 | [Plugin-declared Additional Initializers](38-additional-initializers.md) | Accepted (def-form implemented; block-form deferred) |
+| ADR-38 | [Plugin-declared Additional Initializers](38-additional-initializers.md) | Accepted (def-form and block-form additional initializers implemented) |
 | ADR-39 | [Plugins may invoke their target library's safe methods directly](39-plugin-target-library-invocation.md) | Accepted (Plugin::Inflector + 3 consumers migrated; slice 3 deferred) |
 | ADR-40 | [`config_schema` declared defaults (`{kind:, default:}`)](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
-| ADR-41 | [Inference budget design (wiring, on-hit policy, measurement-gated defaults)](41-inference-budget-design.md) | Proposed (spec table unwired; Layer 1 doc hygiene + Layer 2 measurement-gated wiring queued) |
+| ADR-41 | [Inference budget design (wiring, on-hit policy, measurement-gated defaults)](41-inference-budget-design.md) | Proposed (Layer 1 doc/spec hygiene landed; Layer 2 budget wiring demand-deferred) |
 | ADR-42 | [Plugin-contributed binary-operator return types (coerce-direction)](42-plugin-binary-operator-return-types.md) | Proposed (low priority, demand-gated; self/left-operand case already works via dynamic_return) |
 | ADR-43 | [RBS-complete ancestor resolution (allow-list inherited-method dispatch)](43-rbs-complete-ancestor-resolution.md) | Accepted (fully landed, WD1–WD6; make check-plugins gate wired into verify + CI) |
 | ADR-44 | [Per-dispatch / per-narrow allocation churn (Scope, CallContext)](44-dispatch-allocation-churn.md) | Accepted (body-scope collapse + allocation hygiene landed; mutable pooling rejected; field-regrouping downgraded) |
 | ADR-45 | [Unchanged-project fast path (run-result cache)](45-unchanged-project-fast-path.md) | Accepted (record-and-validate run cache landed; naive pre-analysis fingerprint rejected as unsound) |
 | ADR-46 | [Incremental analysis via a cross-file dependency graph](46-incremental-dependency-graph.md) | Accepted (slices 1–4 landed incl. file add/remove; --incremental gated by --verify-incremental in CI) |
 | ADR-47 | [Narrowing-driven clause reachability (`flow.unreachable-clause`)](47-narrowing-driven-clause-reachability.md) | Accepted (WD1–WD3a landed, v0.1.17; WD4 16-corpus sweep zero-firing; WD5 version-guard arms landed; WD3b deferred) |
-| ADR-48 | [Struct / Data value folding (member-shape carriers)](48-data-struct-value-folding.md) | Accepted (Data.define slices 1–4 landed v0.1.17; Struct slices 1–3 landed, slice 4 deferred) |
+| ADR-48 | [Struct / Data value folding (member-shape carriers)](48-data-struct-value-folding.md) | Accepted (Data.define slices 1–4 landed v0.1.17; Struct slices 1-5 landed) |
 | ADR-49 | [ADR authoring guidelines (a rubric for necessary-and-sufficient ADRs)](49-adr-authoring-guidelines.md) | Accepted (in force; living rubric) |
 | ADR-50 | [Release engineering and stability strategy (v0.2.0 → v1.0.0)](50-release-engineering-and-stability-strategy.md) | Proposed (v0.2.0 release-engineering trial; v1.0.0 hard contract freeze) |
-| ADR-51 | [CI-native diagnostic output formats](51-ci-diagnostic-output-formats.md) | Accepted (partially implemented in v0.1.18) |
+| ADR-51 | [CI-native diagnostic output formats](51-ci-diagnostic-output-formats.md) | Accepted (implemented in v0.1.18) |
 | ADR-52 | [Compiled plugin contribution dispatch](52-compiled-plugin-contribution-dispatch.md) | Accepted (slices 1-6 implemented; full WD surface complete, remaining work demand-driven) |
 | ADR-53 | [Scope discovery-index separation + check-rule walk consolidation](53-scope-discovery-index-separation.md) | Accepted (Track A and Track B both complete) |
 | ADR-54 | [Cache slimming: definitions-blob retirement, payload compression, default eviction](54-cache-slimming.md) | Accepted (WD1-WD4 implemented; cache footprint ~33.7MB to ~2MB per project) |
 | ADR-55 | [Recursive-method return-type precision](55-recursive-return-precision.md) | Accepted (slice 1 and slice 2 both implemented) |
 | ADR-56 | [Block-captured local write-back and loop-body fixpoint](56-block-captured-local-mutation.md) | Accepted (slices A and B implemented 2026-06-11; slice C implemented 2026-06-12) |
-| ADR-57 | [Opening the implicit-self call return-adoption gate](57-self-call-return-adoption.md) | Accepted (gate opened 2026-06-12; WD3 module-singleton seed fix landed 2026-07-10) |
-| ADR-58 | [Instance-variable field typing](58-ivar-field-typing.md) | Accepted (WD1 partial, WD1b queued; WD2 already-realized; WD3/WD5 implemented; `||=` seed deferred) |
+| ADR-57 | [Opening the implicit-self call return-adoption gate](57-self-call-return-adoption.md) | Accepted (gate opened 2026-06-12; WD3 module-singleton seed fix landed 2026-07-10; singleton ancestry v0.3.7) |
+| ADR-58 | [Instance-variable field typing](58-ivar-field-typing.md) | Accepted (WD1 partial, WD1b demand-gated; WD2 already-realized; WD3/WD5 implemented; `||=` seed deferred) |
 | ADR-59 | [Spec assertions are not implementation signatures](59-spec-assertions-are-not-signatures.md) | Accepted (strong form rejected; three weak forms recorded, demand-gated) |
 | ADR-60 | [Pre-freeze plugin contract consolidation](60-pre-freeze-plugin-contract-consolidation.md) | Accepted (2026-06-13) |
 | ADR-61 | [Agent-friendly diagnostic statistics (structured selector axis)](61-agent-friendly-diagnostic-statistics.md) | Accepted (implemented 2026-06-13; precision-additive) |
-| ADR-62 | [Mutation-testing the analyzer (false-negative / teeth measurement)](62-mutation-testing-teeth-measurement.md) | Accepted (harness + first fixes landed 2026-06-13; remaining backlog demand-gated) |
-| ADR-63 | [User-facing type-protection coverage](63-type-protection-coverage.md) | Accepted (Tier 1 and Tier 2 both implemented 2026-06-14) |
+| ADR-62 | [Mutation-testing the analyzer (false-negative / teeth measurement)](62-mutation-testing-teeth-measurement.md) | Accepted (harness + fixes landed 2026-06-13; the arity guard landed 2026-09-03; remaining backlog demand-gated) |
+| ADR-63 | [User-facing type-protection coverage](63-type-protection-coverage.md) | Accepted (Tier 1 and Tier 2 both implemented 2026-06-14; WD5's uplift skill shipped) |
 | ADR-64 | [Non-nil argument-type-mismatch and the coerce barrier](64-non-nil-argument-type-mismatch.md) | Accepted (non-nil channel built and gated for multi-overload methods) |
 | ADR-65 | [Diagnostic evidence tier and documentation URL](65-diagnostic-evidence-tier-and-doc-url.md) | Accepted (implemented 2026-06-15; doc URL amended 2026-08-23) |
 | ADR-66 | [Discriminated-union member typing (tag-keyed narrowing)](66-discriminated-union-member-typing.md) | Proposed (not implemented; demand-gated) |
@@ -106,17 +106,17 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-90 | [Target-library resolution from the analyzed project's bundle](90-target-library-resolution-from-project-bundle.md) | Accepted (implemented 2026-07-16; WD1-WD3 landed) |
 | ADR-91 | [Kernel intrinsic fold ownership gate + spelling-parity invariant](91-kernel-intrinsic-fold-ownership-gate.md) | Accepted (implemented 2026-07-16, WD1-WD4; corpus gate byte-identical) |
 | ADR-92 | [Normative status fidelity: the founding-era stratum and the declare-or-mark gate](92-normative-status-fidelity.md) | Accepted (implemented 2026-07-16 WD1-WD5, 2026-07-25 WD6; void verdict resolved to option b) |
-| ADR-93 | [Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec](93-default-rbs-inline-ingestion.md) | Accepted (WD5 engine-anchored bundled-plugin resolution added 2026-07-19, slice queued) |
+| ADR-93 | [Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec](93-default-rbs-inline-ingestion.md) | Accepted (WD1-WD3 implemented; WD5 engine-anchored resolution 2026-07-19; WD6 2026-09-08) |
 | ADR-94 | [The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor](94-rbs-inline-reader-and-the-rbs-3x-floor.md) | Accepted (migration deferred; rigor-rbs-inline stays the reader) |
 | ADR-95 | [Homebrew distribution: deferred behind the single binary](95-homebrew-tap-deferral.md) | Proposed (deferred, trigger-gated; nothing implemented) |
-| ADR-96 | [Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion](96-plugin-target-gems.md) | Accepted (WD1-WD2 committed; WD3 umbrella expansion proposed) |
+| ADR-96 | [Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion](96-plugin-target-gems.md) | Accepted (WD1-WD2 decided but unimplemented, #925; WD3 umbrella expansion proposed) |
 | ADR-97 | [Index entries are not summaries: the ADR-index budgets and their gate](97-adr-index-budgets.md) | Accepted (implemented 2026-07-17; both ADR indexes compressed to their declared contract and gated by spec/docs/agent_index_spec.rb) |
 | ADR-98 | [Development-flow document roles: handoff, issues, changelog](98-development-flow-document-roles.md) | Accepted (implemented 2026-07-17; backlog migrated to GitHub Issues, ROADMAP.md dissolved, handoff capped and gated) |
 | ADR-99 | [The config schema is a source of truth: `.rigor.yml` tiers and the reserve pipeline](99-config-schema-authority.md) | Accepted (implemented 2026-07-17; schema named a source of truth, `rigor_rs:` reserved, nested + reserved + URL gates added) |
-| ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (direct slice shipped; WD4 transitive design added 2026-07-19; transitive slice queued; budget ids deferred) |
+| ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (direct slice shipped; WD4 transitive case shipped 2026-07-19 as VoidTailSummary; budget ids deferred) |
 | ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions) |
-| ADR-102 | [The unused-code reachability report is a report, not a diagnostic](102-unused-code-reachability-report.md) | Proposed (decisions for the `rigor unused` slices; all eight working decisions settled) |
-| ADR-103 | [Effect labels: an opt-in, snapshot-first effect system](103-effect-labels.md) | Proposed (design note landed 2026-08-16; nothing implemented; four items open at Proposed) |
+| ADR-102 | [The unused-code reachability report is a report, not a diagnostic](102-unused-code-reachability-report.md) | Accepted (`rigor unused` shipped in v0.3.4; all eight working decisions settled) |
+| ADR-103 | [Effect labels: an opt-in, snapshot-first effect system](103-effect-labels.md) | Accepted (effect system shipped as the v0.3.4 headline; 13 of 18 implementation issues closed under #376) |
 | ADR-104 | [Boot-slim probe for the effects surfaces](104-effects-boot-slim-probe.md) | Accepted (implemented for the report and the snapshot verbs, with #482's entry split) |
 | ADR-105 | [PR landing flow: sequential merges and changelog fragments](105-pr-landing-flow.md) | Accepted (changelog.d/ mechanism + gate landed with the ADR; norm in AGENTS.md) |
 | ADR-106 | [Migrating the spec suite to minitest](106-minitest-migration.md) | Accepted (declined — the suite stays on RSpec; re-evaluation triggers recorded) |

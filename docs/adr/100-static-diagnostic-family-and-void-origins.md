@@ -2,13 +2,11 @@
 
 Status: **Accepted, 2026-07-18.** Fixes the *shape* of the reserved `static.*`
 family so its first identifier does not box it in, and specifies the `void_origins`
-side-table that the spec's mandated "use of void value" diagnostic needs. Nothing
-is implemented yet: the direct-author-declared-`void` slice is the first
-implementation and is `ready-for-agent` once this lands; the transitive case and
-the `static.incomplete-inference.*` budget identifiers ([#158](https://github.com/rigortype/rigor/issues/158) / [ADR-41](41-inference-budget-design.md)) are deferred.
-**Amended 2026-07-19** — the direct slice has since shipped (#187/#192); the WD4
-addendum below names the transitive case's tier and mechanism, unblocking its
-implementation slice. The budget identifiers stay deferred.
+side-table that the spec's mandated "use of void value" diagnostic needs. The
+direct-author-declared-`void` slice shipped (#187/#192), and the transitive /
+ancestor-fallback case WD4 designs shipped on 2026-07-19 as
+`Inference::VoidTailSummary`. The `static.incomplete-inference.*` budget
+identifiers ([#158](https://github.com/rigortype/rigor/issues/158) / [ADR-41](41-inference-budget-design.md)) stay deferred.
 
 Grounding: [#162](https://github.com/rigortype/rigor/issues/162); [special-types.md](../type-specification/special-types.md) § `void` (the "use of void value" MUST); [diagnostic-policy.md](../type-specification/diagnostic-policy.md) § the `static.*` reservation; [ADR-92](92-normative-status-fidelity.md) (which resolved `void → top` and carried option (a) forward as unfinished design); [ADR-75](75-dynamic-provenance.md) (the provenance-as-side-channel precedent this mirrors).
 

@@ -2136,12 +2136,21 @@ Unrelated
   # HEADER is written in, so the two spellings of one qualified name are distinguishable afterwards, which
   # is exactly what the peel it replaces could not do.
   describe ".build_superclass_tables" do
+    def unkeyed = Rigor::Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING
+
     def header_nestings(source)
       described_class.build_superclass_tables(parse(source)).last
     end
 
+    # #728 — the chain the ancestor spelled `raw` resolves in. `raw` defaults to the UNKEYED entry, the
+    # union over every ancestor-naming site, which is what a name no site wrote falls back to.
+    def chain_for(source, class_name, raw = unkeyed)
+      header_nestings(source).fetch(class_name)[raw]
+    end
+
     it "records an empty header nesting for a compact declaration written at the top level" do
-      expect(header_nestings("class Admin::Widget < Base; end")).to eq({ "Admin::Widget" => [] })
+      expect(header_nestings("class Admin::Widget < Base; end"))
+        .to eq({ "Admin::Widget" => { unkeyed => [], "Base" => [] } })
     end
 
     it "records the enclosing namespace for the nested spelling of the same class" do
@@ -2149,17 +2158,17 @@ Unrelated
   class Widget < Base; end
 end
 ")
-      expect(table).to eq({ "Admin::Widget" => ["Admin"] })
+      expect(table).to eq({ "Admin::Widget" => { unkeyed => ["Admin"], "Base" => ["Admin"] } })
     end
 
     it "records one entry per declaration keyword for a doubly nested declaration" do
-      table = header_nestings("module A
+      source = "module A
   module B
     class C < Base; end
   end
 end
-")
-      expect(table["A::B::C"]).to eq(["A::B", "A"])
+"
+      expect(chain_for(source, "A::B::C", "Base")).to eq(["A::B", "A"])
     end
 
     # #708 review — a site that writes NO ancestor name has no ancestor for its cref to govern, so it
@@ -2169,20 +2178,20 @@ end
       expect(header_nestings("module Admin\n  class Widget; end\nend\n")).to eq({})
     end
 
-    it "records a site whose only ancestor name is a mixin call" do
-      table = header_nestings("module Admin\n  class Widget\n    include Trackable\n  end\nend\n")
-      expect(table["Admin::Widget"]).to eq(["Admin"])
+    it "records a site whose only ancestor name is a mixin call, keyed by the module it names" do
+      source = "module Admin\n  class Widget\n    include Trackable\n  end\nend\n"
+      expect(chain_for(source, "Admin::Widget", "Trackable")).to eq(["Admin"])
     end
 
     # #708 — a rooted header resets the class's NAME but not the cref its superclass name resolves in:
     # Ruby evaluates `Base` there at `Module.nesting == [Outer]`.
     it "keys a rooted declaration by its reset name and keeps the enclosing cref for its ancestors" do
-      table = header_nestings("module Outer
+      source = "module Outer
   class ::Rooted::Bar < Base; end
 end
-")
-      expect(table["Rooted::Bar"]).to eq(["Outer"])
-      expect(table).not_to have_key("Outer::Rooted::Bar")
+"
+      expect(chain_for(source, "Rooted::Bar", "Base")).to eq(["Outer"])
+      expect(header_nestings(source)).not_to have_key("Outer::Rooted::Bar")
     end
 
     it "still records the as-written superclass beside it" do
@@ -2193,21 +2202,41 @@ end
     # Rails' own `ActiveRecord::Relation` is the corpus case: the library declares it inside
     # `module ActiveRecord` and a test file reopens it as the compact `class ActiveRecord::Relation`.
     # Last-writer-wins hands the library site the test file's EMPTY chain and its nine `include`s stop
-    # resolving — the false-positive direction. The reopen names no ancestor, so it now records no chain
-    # at all and the declaring site's survives by construction rather than by a merge rule.
+    # resolving — the false-positive direction. The reopen names no ancestor, so it records no chain at all
+    # and the declaring site's survives by construction rather than by a merge rule.
     it "keeps the declaring site's chain when a later site reopens the class and names no ancestor" do
-      table = header_nestings(
-        "module Admin\n  class Widget\n    include Trackable\n  end\nend\nclass Admin::Widget; end\n"
-      )
-      expect(table["Admin::Widget"]).to eq(["Admin"])
+      source = "module Admin\n  class Widget\n    include Trackable\n  end\nend\nclass Admin::Widget; end\n"
+      expect(chain_for(source, "Admin::Widget", "Trackable")).to eq(["Admin"])
+      expect(chain_for(source, "Admin::Widget")).to eq(["Admin"])
     end
 
-    it "unions two sites that BOTH name an ancestor, most-qualified first" do
-      table = header_nestings(
-        "module A\n  module B\n    class C < Base; end\n  end\nend\n" \
-        "module A\n  class B::C\n    include M\n  end\nend\n"
-      )
-      expect(table["A::B::C"]).to eq(["A::B", "A"])
+    # #728 — the defect the per-name keying exists for, at the table. Both sites name an ancestor, so both
+    # are recorded; a single chain per class then gives the top-level site's `Base` the reopen's `["Outer"]`
+    # and resolves it as `Outer::Base`, which is a WRONG class rather than a wider list.
+    it "gives each site's ancestor name that site's own chain when the sites disagree" do
+      source = "class Foo < Base; end\nmodule Outer\n  class ::Foo\n    include Helper\n  end\nend\n"
+      expect(chain_for(source, "Foo", "Base")).to eq([])
+      expect(chain_for(source, "Foo", "Helper")).to eq(["Outer"])
+    end
+
+    # The unkeyed entry stays the pre-#728 per-class union, because it is what answers a name neither site
+    # wrote — the mixin `walk_class_includes` attributes to a class from outside its declaration.
+    it "unions every ancestor-naming site under the unkeyed entry" do
+      source = "class Foo < Base; end\nmodule Outer\n  class ::Foo\n    include Helper\n  end\nend\n"
+      expect(chain_for(source, "Foo")).to eq(["Outer"])
+    end
+
+    it "unions two sites that write the SAME ancestor name, most-qualified first" do
+      source = "module A\n  module B\n    class C\n      include M\n    end\n  end\nend\n" \
+               "module A\n  class B::C\n    include M\n  end\nend\n"
+      expect(chain_for(source, "A::B::C", "M")).to eq(["A::B", "A"])
+    end
+
+    # A mixin call the walk cannot render an argument for still marks the site as ancestor-naming, so the
+    # site's chain reaches the unkeyed entry that such a name is answered from.
+    it "records a chain for a site whose only mixin argument is dynamic" do
+      source = "module A\n  class Widget\n    include helper_module\n  end\nend\n"
+      expect(chain_for(source, "A::Widget")).to eq(["A"])
     end
   end
 

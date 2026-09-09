@@ -52,6 +52,11 @@ module Rigor
       # either kind.
       METHOD_KIND_BOTH = :both
 
+      # Issue #728 — the key a `discovered_header_nestings` bucket stores its class-wide chain under, beside
+      # the per-ancestor-name entries. `nil` is used because every other key in a bucket is an ancestor name
+      # as written, and no ancestor name can be nil.
+      UNKEYED_HEADER_NESTING = nil
+
       # The shared all-empty index `Scope.empty` (and every scope that never sees a seeding pass) points at — one
       # allocation per process.
       EMPTY = new(
@@ -86,6 +91,12 @@ module Rigor
         # name — the peel is the nested spelling's answer, and it searched an `Admin::Base` that a compact
         # `class Admin::Widget < Base` written at the top level never reaches. An absent entry means "not
         # recorded" and keeps the peel, so a scope that never saw a declaration walk is unchanged.
+        #
+        # Issue #728 — the value is keyed by the ancestor NAME the site wrote, because a class's declaration
+        # sites need not share a cref: `class Foo < Base` at the top level and `class ::Foo; include Helper`
+        # inside `module Outer` resolve `Base` and `Helper` in different ones, and a single chain per class
+        # gave `Outer` to both. {UNKEYED_HEADER_NESTING} holds the union over every ancestor-naming site, for
+        # a name no site recorded under its own key.
         discovered_header_nestings: EMPTY_TABLE,
         discovered_includes: EMPTY_TABLE,
         discovered_class_sources: EMPTY_TABLE,

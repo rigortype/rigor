@@ -2489,7 +2489,8 @@ module Rigor
       # prefix without resetting Ruby's nesting ([#708](https://github.com/rigortype/rigor/issues/708)).
       def record_declaration_ancestry(node, nesting, child_prefix, accumulator)
         full = child_prefix.join("::")
-        add_header_nesting(accumulator[:header_nestings], full, nesting) if declares_ancestor_name?(node)
+        names = declared_ancestor_names(node)
+        add_header_nesting(accumulator[:header_nestings], full, nesting, names) if names
         return unless node.is_a?(Prism::ClassNode)
 
         accumulator[:superclasses][full] = recorded_ancestor_name(node.superclass) if node.superclass
@@ -2513,8 +2514,10 @@ module Rigor
         "::#{name}"
       end
 
-      # Whether this declaration SITE writes an ancestor name — a superclass in its header, or a mixin call
-      # in its own body. Only such a site contributes a header nesting.
+      # The ancestor names this declaration SITE writes — the superclass in its header, and every mixin
+      # argument in its own body — or nil when the site writes none. Only a site that writes one
+      # contributes a header nesting, and the names are what key it: Ruby resolves each ancestor name in
+      # the cref of the site that WROTE it, and a class's sites need not agree on that cref.
       #
       # Issue #708's review: a per-CLASS union of every site's chain is wrong for a rooted reopen inside
       # another namespace. `class ::Foo; def extra = 1; end` written in `module Outer` contributed `["Outer"]`
@@ -2522,69 +2525,126 @@ module Rigor
       # Ruby never looks at, ahead of the right one, on a site that named no ancestor at all. A site that
       # writes no ancestor name has no ancestor for its cref to govern, so it has nothing to say here.
       #
+      # Issue #728: dropping those sites was necessary and not sufficient. When the rooted reopen genuinely
+      # names a mixin — `class ::Foo; include Helper; end` in `module Outer` — the site is recorded, and a
+      # per-class union then hands its `["Outer"]` to `Foo`'s superclass `Base` as well, which is the same
+      # `Outer::Base` on the same repro. Keying by the written name is what separates them: `Base` resolves
+      # in the empty chain of the top-level site that wrote `< Base`, `Helper` in the `["Outer"]` chain of
+      # the site that wrote `include Helper`, which is what Ruby does for each independently.
+      #
       # This keeps what the union was FOR. It was added because last-writer-wins let one rails TEST file
       # reopening `ActiveRecord::Relation` compactly beat the library declaration, costing the class all nine
-      # of its `include`d modules; that reopen writes no ancestor name either, so it now contributes nothing
+      # of its `include`d modules; that reopen writes no ancestor name either, so it contributes nothing
       # rather than winning — the protection comes from the recording rule instead of from a merge rule.
-      # Two sites that BOTH write ancestor names still union, which is the conservative reading of an
-      # ambiguity one table cannot represent.
       #
       # The mixin scan counts only a call whose `self` is the declaration itself, so it stops at every
       # construct that rebinds `self`: a nested `class` / `module` (that body's calls belong to the nested
       # class), a `class << self` body, and a block `#rebound_block_self` classifies as rebinding — the
       # `Class.new` / `Module.new` / `Struct.new` / `Data.define` and `class_eval` family. An `include`
       # written in any of those attaches to something other than this class, so treating it as this site's
-      # ancestor name reinstates exactly the defect above with a different spelling.
+      # ancestor name reinstates exactly the defect above with a different spelling. {#walk_class_includes}
+      # classifies the same shapes the same way since [#749](https://github.com/rigortype/rigor/pull/749),
+      # so the two walks agree on which site owns a mixin.
       #
-      # It stays structural rather than exhaustive: `self.include M` and `send(:include, M)` record nothing
-      # and fall back to the peel, which is this walk's pre-#682 answer and never a new firing — and the
-      # includes walk misses those two as well, so the class's ancestry agrees. For the REBINDING shapes it
-      # does not: `walk_class_includes` still charges an `include` written in a `class << self` body or a
-      # `Class.new` block to the enclosing class, where Ruby attaches it elsewhere. This scan is right and
-      # that one is wrong; the divergence is [#728](https://github.com/rigortype/rigor/issues/728).
-      def declares_ancestor_name?(node)
-        return true if node.is_a?(Prism::ClassNode) && node.superclass
-
+      # It stays structural rather than exhaustive: `self.include M` and `send(:include, M)` are recorded by
+      # neither walk, so the class's ancestry agrees. `Recv.class_eval { include M }` is the one shape where
+      # they diverge in the surviving direction — the includes walk names `Recv`, this one cannot see the
+      # site from `Recv`'s own declaration — and that is what {#add_header_nesting}'s unkeyed entry answers.
+      def declared_ancestor_names(node)
+        names = []
+        superclass = node.is_a?(Prism::ClassNode) ? node.superclass : nil
+        if superclass
+          recorded = recorded_ancestor_name(superclass)
+          names << recorded if recorded
+        end
         body = node.body
-        body ? mixin_call_in_body?(body) : false
+        mixin = body ? collect_mixin_names(body, names) : false
+        return names if superclass || mixin
+
+        nil
       end
 
-      def mixin_call_in_body?(node)
+      # Appends each mixin argument this body names to `names`, and answers whether it writes a mixin call
+      # at all — a `include some_method` writes one while naming nothing renderable, and the site still owns
+      # a chain for the names it does write. Arguments are rendered exactly as {#record_mixin_call} renders
+      # them, so a name recorded here is the same String the includes table stores and the resolver asks for.
+      def collect_mixin_names(node, names)
         return false unless node.is_a?(Prism::Node)
         return false if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) ||
                         node.is_a?(Prism::SingletonClassNode)
-        return true if node.is_a?(Prism::CallNode) && node.receiver.nil? && MIXIN_CALL_NAMES.include?(node.name)
 
+        found = mixin_call?(node)
+        record_mixin_names(node, names) if found
         rebinds = rebound_block_self(node, EMPTY_PREFIX)
         node.rigor_each_child do |child|
           next if rebinds && child.is_a?(Prism::BlockNode)
 
-          return true if mixin_call_in_body?(child)
+          found = true if collect_mixin_names(child, names)
         end
-        false
+        found
       end
 
-      # Adds one declaration site's header nesting to the per-class table, UNIONING it with what a
-      # previous site recorded, most-qualified first. A class reopened under two spellings has two header
-      # nestings while the ancestor names its sites write collapse into ONE table, so taking either site's
-      # chain alone drops a candidate the other one had — and dropping a candidate drops an ancestor edge,
-      # the false-positive direction. Rails is the corpus case: `activerecord` declares
-      # `ActiveRecord::Relation` inside `module ActiveRecord` and one test file reopens it as the compact
-      # `class ActiveRecord::Relation`, so last-writer-wins cost the library class nine included modules.
-      # The union is the conservative reading of an ambiguity the per-class table cannot represent: it
-      # degrades such a class to the pre-fix candidate list rather than to a shorter one.
-      def add_header_nesting(table, name, entries)
-        existing = table[name]
-        return table[name] = entries.freeze if existing.nil?
-        return if entries.all? { |entry| existing.include?(entry) }
+      def mixin_call?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? && MIXIN_CALL_NAMES.include?(node.name)
+      end
 
-        table[name] = (existing | entries).sort_by { |entry| [-entry.split("::").size, entry] }.freeze
+      def record_mixin_names(node, names)
+        node.arguments&.arguments&.each do |arg|
+          mod = Source::ConstantPath.qualified_name(arg)
+          names << mod if mod
+        end
+      end
+
+      # Adds one declaration site's header nesting to the per-class table, under each ancestor NAME the site
+      # wrote plus one unkeyed entry.
+      #
+      # Issue #728 — the keyed entries are the answer proper: `Foo`'s superclass `Base` and the `Helper` a
+      # rooted reopen of `Foo` includes are resolved in different crefs by Ruby, and a per-class chain can
+      # only give them the same one. Two sites that write the SAME name still union, most-qualified first,
+      # since one table cannot say which of two spellings a later reader meant.
+      #
+      # The unkeyed entry ({Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING}) is that union over every
+      # ancestor-naming site, and it
+      # answers an ancestor name no site recorded under its own key — a mixin the includes walk attributes
+      # to a class from OUTSIDE its declaration (`Recv.class_eval { include M }`), or a dynamic `include`
+      # argument this walk cannot render. It is the pre-#728 answer, so such a name is unchanged rather than
+      # degraded, and a shorter list there would drop an ancestor edge, the false-positive direction.
+      def add_header_nesting(table, name, entries, ancestor_names)
+        bucket = { Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING => entries }
+        ancestor_names.each { |raw| bucket[raw] = entries }
+        merge_header_nesting_bucket(table, name, bucket)
       end
 
       # {#add_header_nesting} over a whole table, for the per-file and cross-file merges.
       def merge_header_nestings(target, incoming)
-        incoming.each { |name, entries| add_header_nesting(target, name, entries) }
+        incoming.each { |name, bucket| merge_header_nesting_bucket(target, name, bucket) }
         target
+      end
+
+      # Merges one class's bucket into the table WITHOUT mutating what is already there: a per-file table is
+      # merged into a shallow `dup` of the cross-file seed, whose buckets the seed still owns.
+      def merge_header_nesting_bucket(table, name, incoming)
+        existing = table[name]
+        return table[name] = frozen_bucket(incoming) if existing.nil?
+
+        merged = existing.dup
+        incoming.each do |raw, entries|
+          previous = merged[raw]
+          merged[raw] = previous.nil? ? entries.freeze : union_header_nesting(previous, entries)
+        end
+        table[name] = merged.freeze
+      end
+
+      def frozen_bucket(bucket)
+        return bucket if bucket.frozen?
+
+        bucket.each_value(&:freeze).freeze
+      end
+
+      def union_header_nesting(existing, entries)
+        return existing if entries.all? { |entry| existing.include?(entry) }
+
+        (existing | entries).sort_by { |entry| [-entry.split("::").size, entry] }.freeze
       end
 
       # #319 — `Class.new(Parent) do ... end` names its superclass in the first positional. Recording it under the

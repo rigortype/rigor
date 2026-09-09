@@ -813,6 +813,9 @@ module Rigor
     # The BFS node cap; a hierarchy past it gives up rather than walking unboundedly (ADR-41 WD4).
     ANCESTOR_WALK_LIMIT = 100
 
+    EMPTY_HEADER_NESTING = [].freeze
+    private_constant :EMPTY_HEADER_NESTING
+
     def ancestor_walk_gave_up
       Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
       [nil, nil]
@@ -929,9 +932,24 @@ module Rigor
       return [raw.delete_prefix("::")] if raw.start_with?("::")
 
       recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
-      entries = recorded || peeled_header_nesting(subclass_qualified)
+      entries = recorded ? recorded_header_nesting(recorded, raw) : peeled_header_nesting(subclass_qualified)
       entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s
     end
+
+    # Issue #728 — the chain of the declaration site that WROTE `raw`, which is the cref Ruby resolves that
+    # one name in. A class's sites need not agree: `class Foo < Base` at the top level and a rooted
+    # `class ::Foo; include Helper; end` inside `module Outer` are two sites of `Foo`, and the union of
+    # their chains put `Outer::Base` — a class Ruby never looks at — ahead of `::Base` for the superclass
+    # the top-level site wrote. That is a WRONG CLASS, not a wider candidate list.
+    #
+    # The unkeyed entry is the union, and answers a name no site recorded under its own key: an `include`
+    # attributed to this class from OUTSIDE its declaration (`Recv.class_eval { include M }`, which
+    # `Inference::ScopeIndexer#walk_class_includes` names but the header walk cannot see), or a dynamic
+    # mixin argument. It is the pre-#728 answer, so those are unchanged rather than degraded.
+    def recorded_header_nesting(bucket, raw)
+      bucket[raw] || bucket[DiscoveryIndex::UNKEYED_HEADER_NESTING] || EMPTY_HEADER_NESTING
+    end
+    private :recorded_header_nesting
 
     # The pre-#682 reading of a qualified class name: every proper prefix of it, innermost first, as if the
     # class had been declared one `module` keyword per segment.

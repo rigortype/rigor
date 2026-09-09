@@ -68,6 +68,31 @@ class Object
 
   # `core_ext/object/inclusion` — `x.in?([a, b])` / `x.in?(1..10)`.
   def in?: (untyped) -> bool
+
+  # Issue #673 — `core_ext/object/to_query`, `core_ext/object/duplicable` and
+  # `core_ext/object/instance_variables` all hang off `Object`, so every
+  # RBS-known receiver reaches them; declaring them only on `Hash` (as
+  # `to_param` / `to_query` were) or only on `NilClass` (as `duplicable?` /
+  # `instance_values` were) left `"x".to_param`, `1.duplicable?` and friends a
+  # `call.undefined-method` on ordinary Rails code.
+  #
+  # `to_param` is `to_s`; `to_query(key)` interpolates two `CGI.escape` results.
+  # `key` is `untyped` because the body only calls `to_param` on it, and both
+  # `:name` and `"user[name]"` are ordinary call sites.
+  def to_param: () -> String
+  def to_query: (untyped key) -> String
+
+  # `bool` and not `true`: `Object#duplicable?` answers true, but the
+  # `Singleton` (and, on a Ruby where methods are not duplicable, `Method` /
+  # `UnboundMethod`) overrides answer false. `-> true` on the universal
+  # receiver would make every `if x.duplicable?` an always-truthy branch —
+  # a false positive on the only shape anybody writes.
+  def duplicable?: () -> bool
+
+  # Keys without the leading `@` for `instance_values`, with it for
+  # `instance_variable_names`.
+  def instance_values: () -> Hash[String, untyped]
+  def instance_variable_names: () -> Array[String]
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -80,16 +105,24 @@ class NilClass
   def try!: (*untyped) -> nil
   def duplicable?: () -> true
   def instance_values: () -> Hash[String, untyped]
+  # `core_ext/object/to_query` overrides `to_param` on the three singleton
+  # values to return `self` rather than `Object#to_param`'s `to_s`, so the
+  # `Object` row above would carry a wrong return here. `NilClass#to_query`
+  # is its own method (`CGI.escape(key.to_param)`), still a String.
+  def to_param: () -> nil
+  def to_query: (untyped key) -> String
 end
 
 class TrueClass
   def blank?: () -> false
   def present?: () -> true
+  def to_param: () -> true
 end
 
 class FalseClass
   def blank?: () -> true
   def present?: () -> false
+  def to_param: () -> false
 end
 
 # ---------------------------------------------------------------
@@ -272,23 +305,25 @@ module ActiveSupport
     # `GEM_OVERLAY_OPEN_RECEIVERS` cannot suppress since it protects a Duration receiver, not a `Time`
     # one. #658 declared that surface and #670 the `Date` / `DateTime` twins, so the chains resolve now.
     #
-    # `Time` is the right class rather than a compromise: under a zone these answer an
-    # `ActiveSupport::TimeWithZone`, and Rails overrides `TimeWithZone#is_a?` to answer true for
-    # `::Time`. A `Time | ActiveSupport::TimeWithZone` union was measured and rejected — it types every
-    # downstream call `Dynamic[top]`. The with-an-argument form stays `untyped` because the runtime
-    # return depends on the argument's class AND on whether the duration carries a date-scale part
-    # (`(1.month).ago(Date.today)` answers a `Date`; `(30.minutes).ago(Date.today)` a `TimeWithZone`).
-    def ago: () -> Time
+    # Since #673 the no-argument form answers `ActiveSupport::TimeWithZone`, the class these really
+    # build off `::Time.current` under a zone, declared below as a `::Time` SUBCLASS. That keeps every
+    # `Time`-typed chain and parameter working while `1.hour.ago.time_zone` stops being a false
+    # `call.undefined-method`. A `Time | ActiveSupport::TimeWithZone` union was measured and rejected —
+    # it types every downstream call `Dynamic[top]`. The with-an-argument form stays `untyped` because
+    # the runtime return depends on the argument's class AND on whether the duration carries a
+    # date-scale part (`(1.month).ago(Date.today)` answers a `Date`; `(30.minutes).ago(Date.today)` a
+    # `TimeWithZone`).
+    def ago: () -> TimeWithZone
            | (untyped time) -> untyped
-    def until: () -> Time
+    def until: () -> TimeWithZone
              | (untyped time) -> untyped
-    def before: () -> Time
+    def before: () -> TimeWithZone
               | (untyped time) -> untyped
-    def since: () -> Time
+    def since: () -> TimeWithZone
              | (untyped time) -> untyped
-    def from_now: () -> Time
+    def from_now: () -> TimeWithZone
                 | (untyped time) -> untyped
-    def after: () -> Time
+    def after: () -> TimeWithZone
              | (untyped time) -> untyped
 
     # `to_i` / its `in_seconds` alias return `@value.to_i` — always Integer.
@@ -315,6 +350,54 @@ module ActiveSupport
     # Float` is what stays honest without costing the common `parts[:days] * 2` chain anything.
     def parts: () -> Hash[Symbol, Integer | Float]
   end
+
+  # ---------------------------------------------------------------
+  # ActiveSupport::TimeWithZone — issue #673
+  # ---------------------------------------------------------------
+  #
+  # `Time.current` and the `Duration#ago` family really answer a `TimeWithZone`
+  # under a zone, and this class was not modelled at all, so the four readers a
+  # TWZ has and a `Time` does not — `time_zone`, `time`, `period`,
+  # `comparable_time` — were `call.undefined-method` on every `Time.current`
+  # receiver. Declaring them on `Time` would have been wrong: a plain `Time`
+  # genuinely lacks them.
+  #
+  # `< ::Time` rather than a `Time | TimeWithZone` union at the producers. The
+  # union was measured during #632 and rejected — it types every downstream
+  # call `Dynamic[top]`. Inheritance is the cheaper shape AND the honest one
+  # here: Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`, so
+  # `Time` is the class Rails itself tells callers a TWZ is, and TWZ's
+  # `method_missing` forwards every name it does not define to the wrapped
+  # `::Time` — which is exactly what inheriting `Time`'s surface models. A TWZ
+  # therefore also satisfies every `Time`-typed parameter, and a chain through
+  # `Time.current` keeps resolving instead of collapsing.
+  #
+  # The cost, taken deliberately: `Time.current` answers a plain `Time` when
+  # `Time.zone` is nil, so `Time.current.time_zone` in a zone-less
+  # activesupport-only project is a real `NoMethodError` this now types. Rails
+  # sets `config.time_zone` ("UTC") by default, so the shape is rare, and the
+  # false positive it replaces fired on correct Rails code — which AGENTS.md
+  # ranks above the worst-case static reading.
+  class TimeWithZone < ::Time
+    # `Time`'s own `initialize` takes the `(year, month, …)` parts; inheriting
+    # it would make `TimeWithZone.new(utc, zone)` — how Rails constructs one —
+    # a `call.argument-type-mismatch`. `untyped` because the zone and period
+    # carriers (`ActiveSupport::TimeZone`, `TZInfo::TimezonePeriod`) are not
+    # declared anywhere in this overlay.
+    def initialize: (untyped utc_time, untyped time_zone, ?untyped local_time, ?untyped period) -> void
+
+    # The `attr_reader`; an `ActiveSupport::TimeZone`, undeclared here.
+    def time_zone: () -> untyped
+
+    # The wall-clock `::Time` in the zone. `utc` / `getutc` / `getgm` /
+    # `gmtime` are `Time`'s own names and stay inherited; `comparable_time` is
+    # the alias of `utc` that `Time` does not carry.
+    def time: () -> ::Time
+    def comparable_time: () -> ::Time
+
+    # A `TZInfo::TimezonePeriod`, undeclared here.
+    def period: () -> untyped
+  end
 end
 
 # ---------------------------------------------------------------
@@ -322,7 +405,10 @@ end
 # ---------------------------------------------------------------
 
 class Time
-  def self.current: () -> Time
+  # `Time.zone ? Time.zone.now : Time.now` — an `ActiveSupport::TimeWithZone` under a zone, which
+  # since #673 is declared as a `::Time` subclass so the four TWZ-only readers resolve without the
+  # rest of the chain losing its `Time` typing. See the class's own note for the zone-less cost.
+  def self.current: () -> ActiveSupport::TimeWithZone
   def self.zone: () -> untyped # ActiveSupport::TimeZone | nil
   def self.zone=: (String | Symbol | untyped) -> untyped
 

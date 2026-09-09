@@ -2411,8 +2411,10 @@ module Rigor
         #   overload requires the dispatcher's full
         #   acceptance plumbing.
         # - The selected overload must have NO
-        #   rest_positionals, NO required keywords, NO
-        #   trailing positionals.
+        #   rest_positionals and NO trailing positionals —
+        #   the two shapes under which argument N no longer
+        #   binds to positional parameter N. Keyword
+        #   parameters do not disqualify it (#673).
         # - The call must use plain positional arguments
         #   (no splat / kw / block-pass / forwarded).
         # - Per-argument: skip when EITHER side is `Dynamic`
@@ -2504,11 +2506,44 @@ module Rigor
         # (a single-concrete-class argument every overload rejects). See
         # {#multi_overload_argument_mismatch}.
         def argument_mismatch(method_types, call_node, scope, param_overrides)
-          if method_types.size == 1
-            first_argument_mismatch(method_types.first, call_node, scope, param_overrides)
-          else
-            multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides)
+          mismatch =
+            if method_types.size == 1
+              first_argument_mismatch(method_types.first, call_node, scope, param_overrides)
+            else
+              multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides)
+            end
+          return nil if mismatch && keyword_bearing?(method_types) && nil_tainted?(mismatch[:actual])
+
+          mismatch
+        end
+
+        # Issue #673 widened {#argument_check_eligible?} to admit keyword-bearing signatures, whose
+        # POSITIONAL arguments had gone unchecked. The widening is staged, and this is the half held
+        # back: on such a signature only an argument refuted on its CLASS fires; one carrying `nil`
+        # does not.
+        #
+        # Measured, not assumed. Across redmine, mastodon, tdiary-core, faraday, liquid and
+        # rubocop-ast the widening produced exactly two new verdicts, both on correct code and both
+        # resting on nullability: `Addrinfo.foreach(host, nil, nil, :STREAM)` (redmine — a nil service
+        # is legal at runtime; rbs declares the parameter `String | ::Integer`) and
+        # `Nokogiri::HTML5(html)` guarded by `return if html.nil?` one line above (mastodon — the guard
+        # is on a method call, so the type stays `Dynamic[top]?`). Zero class-refuted new verdicts were
+        # false. Nullability is the property a hand-written signature most often over-declares, so it
+        # stays behind the old envelope until it has evidence of its own.
+        #
+        # Signatures WITHOUT keywords are untouched: `"a" + nil` fires exactly as before.
+        def keyword_bearing?(method_types)
+          method_types.any? do |method_type|
+            function = method_type.type
+            next false unless function.respond_to?(:required_keywords)
+
+            !function.required_keywords.empty? || !function.optional_keywords.empty? ||
+              !function.rest_keywords.nil?
           end
+        end
+
+        def nil_tainted?(actual)
+          nil_member?(actual) || (actual.is_a?(Type::Union) && union_contains_nil?(actual))
         end
 
         # Multi-overload argument-type-mismatch. The dispatcher's per-overload
@@ -2912,17 +2947,29 @@ module Rigor
           Inference::Acceptance.accepts(param_type, non_nil, mode: :gradual).yes?
         end
 
+        # What this rule needs is that argument N binds to positional
+        # parameter N, so the only disqualifiers are the two shapes that
+        # break that mapping: a rest positional (arguments past it belong
+        # to the rest, not to a later parameter) and trailing positionals
+        # (the last arguments bind backwards from the end).
+        #
+        # Issue #673 — a keyword parameter used to disqualify the whole
+        # signature, which silently unchecked the POSITIONAL arguments of
+        # every keyword-bearing signature in the bundle:
+        # `time.beginning_of_week("monday")` fired while
+        # `time.next_week("monday")`, `(?Symbol, ?same_time: bool)`, did not,
+        # though both raise the same way at runtime. Keywords cannot shift a
+        # positional argument's index, and a call that PASSES keywords never
+        # reaches here at all — `plain_positional_call?` rejects a
+        # `KeywordHashNode` argument (`**opts` included) before the signature
+        # is consulted.
         def argument_check_eligible?(function)
           # See `arity_eligible?`: `UntypedFunction` lacks
           # the per-arity accessors. Treat it as ineligible
           # for argument-type-mismatch diagnostics.
           return false unless function.respond_to?(:required_keywords)
 
-          function.rest_positionals.nil? &&
-            function.required_keywords.empty? &&
-            function.optional_keywords.empty? &&
-            function.rest_keywords.nil? &&
-            function.trailing_positionals.empty?
+          function.rest_positionals.nil? && function.trailing_positionals.empty?
         end
 
         def translate_param_type(rbs_type, environment)

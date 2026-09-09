@@ -215,8 +215,10 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       result = run_plugin(source: source)
       arity = result.diagnostics.select { |d| d.qualified_rule == "call.wrong-arity" }
 
+      # `on ActiveSupport::TimeWithZone` and not `on Time` since #673: `Time.current` answers the
+      # zone-aware subclass, which inherits this row.
       expect(arity.map(&:message)).to eq(
-        ["wrong number of arguments to `beginning_of_day' on Time (given 2, expected 0)"]
+        ["wrong number of arguments to `beginning_of_day' on ActiveSupport::TimeWithZone (given 2, expected 0)"]
       )
       expect(dumps(result)).to eq(["dump_type: Time"] * 3)
     end
@@ -237,7 +239,8 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
 
       expect(mismatches.map(&:message)).to eq(
-        [%(argument type mismatch at parameter `days' of `days_ago' on Time: expected Numeric, got "3")]
+        [%(argument type mismatch at parameter `days' of `days_ago' on ActiveSupport::TimeWithZone: ) +
+         %(expected Numeric, got "3")]
       )
       expect(dumps(result)).to eq(["dump_type: String"] * 2)
     end
@@ -256,6 +259,108 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
 
       expect(undefined_methods(result)).to be_empty
       expect(dumps(result)).to eq(["dump_type: Integer", "dump_type: Integer", "dump_type: Time"])
+    end
+  end
+
+  # Issue #673 — two more gaps from the #658 review, on the same "a closed class plus an undeclared Rails
+  # extension" shape but reached from opposite ends.
+  #
+  # `ActiveSupport::TimeWithZone` is what `Time.current` and the `Duration#ago` family really answer under
+  # a zone, and it was not modelled at all, so its four own readers were `call.undefined-method` on every
+  # `Time.current` receiver. Declaring them on `Time` would be the wrong fix — a plain `Time` genuinely
+  # lacks them — and a `Time | TimeWithZone` union at the producers was measured during #632 to type every
+  # downstream call `Dynamic[top]`. TWZ is declared a `::Time` SUBCLASS instead, which buys the readers and
+  # keeps the chain.
+  #
+  # The `Object` core-ext rows are the broad end: `to_param` / `to_query` were declared only on `Hash`,
+  # `duplicable?` / `instance_values` only on `NilClass`, and ActiveSupport defines all of them plus
+  # `instance_variable_names` on `Object`, so EVERY RBS-known receiver reported the false positive.
+  describe "TimeWithZone and the Object core-ext surface (#673)" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
+    end
+
+    it "resolves the TWZ-only readers on Time.current without widening the rest of the chain" do
+      source = <<~RUBY
+        t = Time.current
+        Rigor.dump_type(t)
+        Rigor.dump_type(t.time)
+        Rigor.dump_type(t.comparable_time)
+        Rigor.dump_type(t.to_fs(:db))
+        Rigor.dump_type(t.beginning_of_day)
+        Rigor.dump_type(t.days_ago(3).quarter)
+        t.time_zone
+        t.period
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(
+        [
+          "dump_type: ActiveSupport::TimeWithZone", "dump_type: Time", "dump_type: Time",
+          "dump_type: String", "dump_type: Time", "dump_type: Integer"
+        ]
+      )
+    end
+
+    it "carries the same class through the Duration ago family" do
+      source = <<~RUBY
+        Rigor.dump_type(1.hour.ago)
+        Rigor.dump_type(7.days.from_now.time_zone)
+        Rigor.dump_type(1.hour.ago.to_fs(:db))
+        Rigor.dump_type(7.days.ago.to_date)
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(
+        [
+          "dump_type: ActiveSupport::TimeWithZone", "dump_type: Dynamic[top]",
+          "dump_type: String", "dump_type: Date"
+        ]
+      )
+    end
+
+    # The must-still-fire pin for gap 1. `Time.now` is a plain `Time`, which really has none of the four,
+    # so the subclass must not have leaked them onto `Time` itself.
+    it "still reports the TWZ-only readers on a plain Time receiver" do
+      result = run_plugin(source: "Time.now.time_zone\nTime.now.comparable_time\nTime.current.nope_not_here\n")
+
+      expect(undefined_methods(result).size).to eq(3)
+      expect(undefined_methods(result).join).to include("time_zone", "comparable_time", "nope_not_here")
+    end
+
+    it "resolves the five Object core-ext methods on receivers that are not Hash or nil" do
+      source = <<~RUBY
+        Rigor.dump_type("abc".to_param)
+        Rigor.dump_type("abc".to_query("k"))
+        Rigor.dump_type(1.duplicable?)
+        Rigor.dump_type(:sym.instance_values)
+        Rigor.dump_type([1, 2].instance_variable_names)
+        Rigor.dump_type(nil.to_param)
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(
+        [
+          "dump_type: String", "dump_type: String", "dump_type: bool",
+          "dump_type: Hash[String, Dynamic[top]]", "dump_type: Array[String]", "dump_type: nil"
+        ]
+      )
+    end
+
+    # `Object` is every class's ancestor, so a duplicate declaration among the new rows would collapse the
+    # entire environment and every absence assertion in this block would pass on the wreck.
+    it "keeps unrelated core methods resolving and a typo firing" do
+      result = run_plugin(source: %(Rigor.dump_type("abc".upcase)\n"abc".no_such_method_here\n))
+
+      expect(dumps(result)).to eq(["dump_type: \"ABC\""])
+      expect(undefined_methods(result).size).to eq(1)
     end
   end
 
@@ -577,16 +682,17 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     # `Time` moved the false positive from the Duration receiver onto the returned `Time` — where
     # `open_receivers: ["ActiveSupport::Duration"]` has no reach.
     #
-    # `Time` is the honest class rather than a compromise: under a zone these answer an
-    # `ActiveSupport::TimeWithZone`, and Rails overrides `TimeWithZone#is_a?` to answer true for `::Time`.
-    # A `Time | ActiveSupport::TimeWithZone` union was measured and rejected — it fires nothing but types
+    # `ActiveSupport::TimeWithZone` since #673, which declared that class as a `::Time` SUBCLASS: under a
+    # zone these really answer a TWZ, and Rails overrides `TimeWithZone#is_a?` to answer true for
+    # `::Time`, so the subclass says what the old `Time` return said and adds the four TWZ-only readers.
+    # A `Time | ActiveSupport::TimeWithZone` UNION was measured and rejected — it fires nothing but types
     # the whole downstream chain `Dynamic[top]`, which buys no more than leaving the methods undeclared.
     describe "the Duration ago family (#659)" do
       def undefined_methods(result)
         result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
       end
 
-      it "types all six zero-arg spellings as Time" do
+      it "types all six zero-arg spellings as the zone-aware Time subclass" do
         source = <<~RUBY
           Rigor.dump_type(30.minutes.ago)
           Rigor.dump_type(30.minutes.until)
@@ -598,7 +704,7 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         result = run_plugin(source: source)
 
         expect(undefined_methods(result)).to be_empty
-        expect(dumps(result)).to eq(Array.new(6, "dump_type: Time"))
+        expect(dumps(result)).to eq(Array.new(6, "dump_type: ActiveSupport::TimeWithZone"))
       end
 
       # The point of declaring them at all: the chain has to keep resolving past the `Time`. Each of

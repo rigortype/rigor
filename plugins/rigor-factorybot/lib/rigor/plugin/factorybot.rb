@@ -69,7 +69,7 @@ module Rigor
         consumes: [
           { plugin_id: "activerecord", name: :model_index, optional: true }
         ],
-        produces: [:reachability_references]
+        produces: %i[reachability_references factory_index]
       )
 
       producer :factory_index, watch: -> { [[@factory_search_paths, "**/*.rb"]] } do |_params|
@@ -100,6 +100,12 @@ module Rigor
       def prepare(services)
         index = producer_value(:factory_index)
         return if index.nil? || index.empty?
+
+        # The producer value and the ADR-9 fact are different channels (#921) — `producer_value` is this
+        # plugin's own cached computation, read back via `producer_value` above; `fact_store.publish` is
+        # what makes it visible to another plugin's `read_fact`, which is how rigor-rspec binds
+        # `create(:name)` to the factory's model class.
+        services.fact_store.publish(plugin_id: manifest.id, name: :factory_index, value: index)
 
         references = index.entries.values.filter_map do |entry|
           { name: entry.model_class, role: :test } if entry.model_class

@@ -1,0 +1,1 @@
+- **[plugins]** `rigor-rbnacl` now registers itself and contributes its bundled RBS, so `RbNaCl::SecretBox#encrypt` / `#decrypt` type as `String`; the plugin had shipped inert, and its advertised signatures were never loaded. ([#908](https://github.com/rigortype/rigor/pull/908))

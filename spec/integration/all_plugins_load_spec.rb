@@ -82,6 +82,26 @@ RSpec.describe "bundled plugins and examples all load (structural guard)" do
       end
 
       unless ALL_PLUGINS_META_GEM_IDS.include?(File.basename(dir).sub(/\Arigor-/, ""))
+        # Lexical on purpose. The example below scans `Rigor::Plugin.constants` so it survives another
+        # spec's `Rigor::Plugin.unregister!` — but that makes it blind to the one thing the loader needs,
+        # a `Rigor::Plugin.register` call in the gem's own body. `rigor-rbnacl` shipped without one and
+        # defined its class anyway, so it passed that example while `plugins: [rigor-rbnacl]` failed with
+        # "plugin did not register or could not be matched to a registered class". A grep over the gem's
+        # sources is order-independent and catches exactly that.
+        it "calls Rigor::Plugin.register in its own sources" do
+          sources = Dir[File.join(dir, "lib", "**", "*.rb")]
+          # Both shipped spellings: the qualified top-level call, and the bare `register(Klass)` a plugin
+          # written inside `module Rigor; module Plugin` uses. Anchored at line start so the sentence
+          # naming the method in a gem-entry comment does not count as a call.
+          registering = sources.select { |file| File.read(file).match?(/^[ \t]*(?:Rigor::Plugin\.)?register\(/) }
+
+          expect(registering).not_to(
+            be_empty,
+            "expected one of #{sources.size} file(s) under #{File.join(dir, 'lib')} to call " \
+            "Rigor::Plugin.register — without it the loader cannot activate this plugin"
+          )
+        end
+
         it "registers a Plugin::Base subclass carrying a valid manifest" do
           require entry_for(dir)
           klass = plugin_class_for(id_for(dir))

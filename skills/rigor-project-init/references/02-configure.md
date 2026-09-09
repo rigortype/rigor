@@ -114,10 +114,11 @@ severity_profile: lenient
 
 ### Existing `sig/` directory
 
-If the project already has a `sig/` directory (from Steep, `rbs_rails`,
-or handwritten annotations), wire it into `signature_paths:` so Rigor
-consumes it. Phase 5 (sig uplift) can be skipped, but the paths must
-still be declared — Rigor does not auto-detect `sig/`:
+A plain `<project root>/sig` directory needs no wiring: with
+`signature_paths:` unset, Rigor auto-detects it and loads it recursively.
+Phase 5 (sig uplift) can be skipped. Declare `signature_paths:` when the
+layout is something else — several trees, or a `sig/` that is not at the
+project root:
 
 ```yaml
 signature_paths:
@@ -125,9 +126,12 @@ signature_paths:
   - sig/generated
 ```
 
+Declaring the key REPLACES the auto-detected `sig`, so list it too if you
+want it. `signature_paths: []` is the way to opt out of project RBS
+entirely — including a `sig/` that `rigor sig-gen --write` created.
+
 List only directories that contain `.rbs` files or subdirectories of
-them. Rigor walks each path recursively. If the sig layout is a single
-flat `sig/` directory, use `- sig` instead.
+them. Rigor walks each path recursively.
 
 A strict-mode plain-Ruby gem is shorter:
 

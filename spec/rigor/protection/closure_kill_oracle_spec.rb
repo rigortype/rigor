@@ -104,6 +104,10 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
   let(:configuration) { Rigor::Configuration.load(nil) }
   let(:context) { Rigor::LanguageServer::ProjectContext.new(configuration: configuration) }
 
+  # The #790 examples' injection state, in one mutable hash rather than two ivars: the stub's block reads it
+  # on every call and the example flips `:raises` between runs, so it has to be shared, not rebound.
+  let(:scan) { { calls: 0, raises: false } }
+
   # `discovery_seed:` is what `discovery-seeded-mutation-sites` supplies. nil (the default here) is the
   # closure feature adopted ALONE: the mutated file's verdict is then the shipped single-file oracle's,
   # unchanged, and the closure is the only thing this class adds.
@@ -245,15 +249,13 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
   # `rbs.coverage.hkt-scan-failed` row — the shape `Result#crashed?` deliberately does not see. Mutant #776
   # was exactly this.
   #
-  # `@scan_calls` is the non-vacuity instrument, and it is the measurement the issue's report turned on:
+  # `scan[:calls]` is the non-vacuity instrument, and it is the measurement the issue's report turned on:
   # {Rigor::Environment::HktRegistryHolder} memoises, so a sweep that "recovered" without replacing the
   # Environment is indistinguishable from one that did — except that the scan was never re-attempted.
   def stub_hkt_scan!
-    @scan_calls = 0
-    @scan_raises = false
     allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_wrap_original do |original, *args, **kwargs|
-      @scan_calls += 1
-      raise "injected HKT scan failure (issue #790 gate)" if @scan_raises
+      scan[:calls] += 1
+      raise "injected HKT scan failure (issue #790 gate)" if scan[:raises]
 
       original.call(*args, **kwargs)
     end
@@ -295,11 +297,11 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     stub_hkt_scan!
     refusing = virgin_oracle(paths, dependents: closure_dependents, recoverable: false)
 
-    @scan_raises = true
+    scan[:raises] = true
     expect { refusing.baseline(source: account_source, path: "lib/account.rb") }
       .to raise_error(Rigor::Protection::AnalyzerCrashed, /implicit HKT scan/) { |e| expect(e).to be_analyzer_defect }
 
-    @scan_raises = false
+    scan[:raises] = false
     healthy = virgin_oracle(paths, dependents: closure_dependents, recoverable: false)
     baseline = healthy.baseline(source: account_source, path: "lib/account.rb")
     expect(baseline.own).to be_empty
@@ -318,15 +320,15 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     stub_hkt_scan!
     oracle = virgin_oracle(paths, dependents: closure_dependents, recoverable: true)
 
-    @scan_raises = true
+    scan[:raises] = true
     expect { oracle.baseline(source: account_source, path: "lib/account.rb") }
       .to raise_error(Rigor::Protection::AnalyzerCrashed) { |e| expect(e).to be_analyzer_defect }
-    degraded_at = @scan_calls
+    degraded_at = scan[:calls]
 
-    @scan_raises = false
+    scan[:raises] = false
     baseline = oracle.baseline(source: account_source, path: "lib/account.rb")
 
-    expect(@scan_calls).to be > degraded_at
+    expect(scan[:calls]).to be > degraded_at
     expect(baseline.own).to be_empty
     expect(baseline.dependents).to be_empty
     expect(oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(true)

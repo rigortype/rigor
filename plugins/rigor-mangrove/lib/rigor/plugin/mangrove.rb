@@ -56,6 +56,7 @@ module Rigor
     class Mangrove < Rigor::Plugin::Base
       manifest(
         id: "mangrove",
+        target_gems: ["mangrove"],
         version: "0.2.0",
         description: "Instantiates Mangrove Result/Option carrier generics at unwrap call sites, " \
                      "sharpening `unwrap!` / `unwrap_in` / `unwrap_or` from `untyped` to the carried type; " \

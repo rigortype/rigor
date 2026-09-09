@@ -300,6 +300,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     protocol_contracts()
     signature_paths()
     source_rbs_synthesizer()
+    target_gems()
     to_h()
     trait_registries()
     type_node_resolvers()

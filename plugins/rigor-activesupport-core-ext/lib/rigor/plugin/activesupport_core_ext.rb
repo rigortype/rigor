@@ -42,6 +42,7 @@ module Rigor
     class ActivesupportCoreExt < Rigor::Plugin::Base
       manifest(
         id: "activesupport-core-ext",
+        target_gems: ["activesupport"],
         # Bumped 2026-09-02 (#632) — `ActiveSupport::Duration`'s reader surface (`ago`/`to_i`/`iso8601`/…)
         # is now declared, open_receivers-protected; see the class comment above.
         version: "0.4.0",

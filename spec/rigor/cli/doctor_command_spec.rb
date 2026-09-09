@@ -151,26 +151,42 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     end
   end
 
-  describe "Rails plugin check" do
-    it "fails when Gemfile.lock has railties but config has no Rails plugin" do
+  # ADR-96 WD2 — the advisory reads each bundled plugin's `target_gems:`, so it covers every framework
+  # Rigor ships a plugin for rather than only Rails.
+  describe "plugin gap check" do
+    it "fails when locked gems have bundled plugins and none of them is enabled" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\n")
       File.write("Gemfile.lock", "GEM\n  specs:\n    railties (8.0.0)\n")
 
       status, out, = run([])
       expect(status).to eq(1)
-      expect(out).to include("rails_plugins")
+      expect(out).to include("plugin_gap")
       expect(out).to include("FAIL")
-      expect(out).to include("Rails detected but no Rails plugins enabled")
+      expect(out).to include("none is enabled")
+      expect(out).to include("rigor-railties")
     end
 
-    it "does not flag rails_plugins when a Rails plugin is enabled" do
+    it "warns per unenabled plugin once another matching plugin is enabled" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\nplugins:\n  - rigor-activerecord\n")
-      File.write("Gemfile.lock", "GEM\n  specs:\n    railties (8.0.0)\n")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    activerecord (8.0.0)\n    railties (8.0.0)\n")
 
-      _status, out, = run([])
-      expect(out).not_to include("rails_plugins")
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).to include("WARN")
+      expect(out).to include("rigor-railties models it")
+      expect(out).not_to include("rigor-activerecord models it")
+    end
+
+    it "stays silent when every plugin modelling a locked gem is enabled" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\nplugins:\n  - rigor-sidekiq\n")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    sidekiq (7.3.0)\n")
+
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).not_to include("plugin_gap")
     end
   end
 

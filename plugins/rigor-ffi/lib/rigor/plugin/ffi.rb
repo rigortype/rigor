@@ -13,6 +13,7 @@ module Rigor
     class FFI < Base
       manifest(
         id: "ffi",
+        target_gems: ["ffi"],
         # Bumped 2026-09-10 (#918) — declares `config_schema` for the two `.rigor.yml` surfaces ADR-30
         # WD4 (`exceptions`) and WD6 (`target`) already read off `config` but the manifest never
         # published, so both keys were rejected by `Manifest#validate_config` as unknown.

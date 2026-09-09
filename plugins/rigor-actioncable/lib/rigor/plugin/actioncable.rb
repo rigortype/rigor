@@ -65,6 +65,7 @@ module Rigor
     class Actioncable < Rigor::Plugin::Base
       manifest(
         id: "actioncable",
+        target_gems: ["actioncable"],
         # Bumped 2026-09-02 (#621) — channel keys and base-class names are de-rooted at the producer and a
         # reopened class's actions and streams are UNIONed rather than clobbered, so a cached 0.1.0 index
         # can be missing a whole channel (`< ::ApplicationCable::Channel`) or half its stream names.

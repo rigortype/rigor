@@ -78,6 +78,7 @@ module Rigor
     class DrySchema < Rigor::Plugin::Base
       manifest(
         id: "dry-schema",
+        target_gems: ["dry-schema"],
         version: "0.1.0",
         description: "Recognises `Dry::Schema.{Params,JSON,define} { ... }` declarations " \
                      "and publishes the per-schema typed-key table.",

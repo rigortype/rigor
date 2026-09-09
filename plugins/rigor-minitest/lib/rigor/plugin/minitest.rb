@@ -37,6 +37,7 @@ module Rigor
     class Minitest < Rigor::Plugin::Base
       manifest(
         id: "minitest",
+        target_gems: ["minitest"],
         version: "0.1.0",
         description: "Narrows locals through Minitest / Test::Unit `assert_*` / `refute_*` " \
                      "and Minitest/spec `_(x).must_*` / `.wont_*` matchers.",

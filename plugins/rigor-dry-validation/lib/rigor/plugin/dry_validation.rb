@@ -44,6 +44,7 @@ module Rigor
     class DryValidation < Rigor::Plugin::Base
       manifest(
         id: "dry-validation",
+        target_gems: ["dry-validation"],
         version: "0.1.0",
         description: "Recognises `class T < Dry::Validation::Contract` subclasses, publishes the " \
                      "contract FQN set, and (with rigor-dry-schema loaded) refines each contract's " \

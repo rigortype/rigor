@@ -52,6 +52,7 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
+        target_gems: %w[actionpack railties],
         # Bumped 2026-05-28 — GitLab FOSS sweep adds: (a) `draw_all :name` support (action_dispatch-draw_all
         # gem; single-file load semantics matching `draw :name`); (b) keyword-style `scope(path:
         # ':project_id', as: :project)` — path read from the `:path` keyword, not only from the positional

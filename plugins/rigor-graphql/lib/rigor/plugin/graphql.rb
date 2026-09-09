@@ -50,6 +50,7 @@ module Rigor
     class Graphql < Rigor::Plugin::Base
       manifest(
         id: "graphql",
+        target_gems: ["graphql"],
         version: "0.1.0",
         description: "Recognises `class T < GraphQL::Schema::{Object,Enum,InputObject,Mutation}` " \
                      "subclasses; publishes the per-type field-type table, the per-enum value " \

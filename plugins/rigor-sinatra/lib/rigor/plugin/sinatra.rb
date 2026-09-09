@@ -51,6 +51,7 @@ module Rigor
     class Sinatra < Rigor::Plugin::Base
       manifest(
         id: "sinatra",
+        target_gems: ["sinatra"],
         version: "0.1.0",
         description: "Recognises Sinatra's class-level route DSL via ADR-16 Tier A.",
         block_as_methods: [

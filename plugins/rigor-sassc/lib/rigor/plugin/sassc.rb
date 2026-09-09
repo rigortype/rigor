@@ -8,6 +8,7 @@ module Rigor
     class SassC < Base
       manifest(
         id: "sassc",
+        target_gems: ["sassc"],
         version: "0.1.0",
         description: "Models SassC native bindings, nominal pointer typedefs, and struct unions.",
         signature_paths: ["sig"]

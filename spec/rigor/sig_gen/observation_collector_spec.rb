@@ -197,4 +197,24 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
       expect(obs[["Calc", :m]].first.positional.first.erase_to_rbs).to eq('"ok"')
     end
   end
+
+  # Issue #821 — the collector shares the generator's environment gap: built with `libraries:` /
+  # `signature_paths:` only, it typed observed arguments against a universe missing the project's gems.
+  it "builds the environment from the configuration's dependency-discovery inputs" do
+    write_fixture("lib/calc.rb", "class Calc\n  def greet(n); n; end\nend\n")
+    spec = write_fixture("spec/calc_spec.rb", "Calc.new.greet(\"Alice\")\n")
+    captured = nil
+    allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|
+      captured ||= kwargs
+      original.call(**kwargs)
+    end
+
+    collector(paths: [spec]).collect
+
+    expect(captured).to include(
+      bundler_bundle_path: nil, bundler_auto_detect: true, bundler_lockfile: nil,
+      rbs_collection_lockfile: nil, rbs_collection_auto_detect: true
+    )
+    expect(captured[:source_files]).to eq([spec])
+  end
 end

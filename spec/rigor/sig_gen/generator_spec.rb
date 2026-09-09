@@ -1386,4 +1386,80 @@ end
       expect(emitted(candidates)).to eq([["Base", :target_class]])
     end
   end
+
+  # Issue #821 — the generator built its environment with `libraries:` / `signature_paths:` only, so a
+  # superclass declared by an installed `rbs collection` (or by the bundle's per-gem `sig/`, or by a plugin)
+  # was invisible to it while `rigor check` on the same config resolved it. The #735 skip guard above then
+  # declined every class descending from one — on a Rails project, every model, with printed advice
+  # ("run `rbs collection install`") that had already been followed.
+  describe "#run against a superclass only the rbs collection declares" do
+    def install_collection(gem_name, version, rbs)
+      gem_dir = File.join(tmpdir, ".gem_rbs_collection", gem_name, version)
+      FileUtils.mkdir_p(gem_dir)
+      File.write(File.join(gem_dir, "#{gem_name}.rbs"), rbs)
+      lockfile = File.join(tmpdir, "rbs_collection.lock.yaml")
+      File.write(lockfile, <<~YAML)
+        ---
+        path: ".gem_rbs_collection"
+        gems:
+        - name: #{gem_name}
+          version: '#{version}'
+          source:
+            type: git
+            name: ruby/gem_rbs_collection
+            remote: https://github.com/ruby/gem_rbs_collection.git
+            revision: abc
+            repo_dir: gems
+        gemfile_lock_path: Gemfile.lock
+      YAML
+      lockfile
+    end
+
+    def collection_generator(paths:, lockfile:)
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "paths" => paths,
+          "rbs_collection" => { "lockfile" => lockfile, "auto_detect" => false }
+        )
+      )
+      described_class.new(configuration: configuration, paths: paths)
+    end
+
+    it "emits the subclass instead of skipping it" do
+      lockfile = install_collection("legacybase", "1.0", "class LegacyBase\nend\n")
+      path = write_fixture("lib/widget.rb", <<~RUBY)
+        class Widget < LegacyBase
+          def price = 100
+        end
+      RUBY
+
+      gen = collection_generator(paths: [path], lockfile: lockfile)
+      candidates = gen.run
+
+      expect(gen.unresolvable_superclasses).to eq({})
+      emitted = candidates.select { |c| c.classification == Rigor::SigGen::Classification::NEW_METHOD }
+      expect(emitted.map { |c| [c.class_name, c.method_name] }).to eq([["Widget", :price]])
+    end
+
+    it "builds the environment from the configuration's dependency-discovery inputs" do
+      # The regression guard proper: the keyword set, not just its effect. `rigor check` reads these five
+      # axes off the same configuration (`ProjectEnvironment.dependency_discovery_options`); a generator that
+      # passes fewer decides what it may emit against a smaller type universe than the run that consumes it.
+      lockfile = install_collection("legacybase", "1.0", "class LegacyBase\nend\n")
+      path = write_fixture("lib/widget.rb", "class Widget\n  def price = 100\nend\n")
+      captured = nil
+      allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|
+        captured ||= kwargs
+        original.call(**kwargs)
+      end
+
+      collection_generator(paths: [path], lockfile: lockfile).run
+
+      expect(captured).to include(
+        rbs_collection_lockfile: lockfile, rbs_collection_auto_detect: false,
+        bundler_bundle_path: nil, bundler_auto_detect: true, bundler_lockfile: nil
+      )
+      expect(captured[:source_files]).to eq([path])
+    end
+  end
 end

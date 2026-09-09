@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../environment"
+require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../plugin"
@@ -136,11 +137,7 @@ module Rigor
           rbs_extended_reporter: @rbs_extended_reporter,
           boundary_cross_reporter: @boundary_cross_reporter,
           source_rbs_synthesis_reporter: @source_rbs_synthesis_reporter,
-          bundler_bundle_path: configuration.bundler_bundle_path,
-          bundler_auto_detect: configuration.bundler_auto_detect,
-          bundler_lockfile: configuration.bundler_lockfile,
-          rbs_collection_lockfile: configuration.rbs_collection_lockfile,
-          rbs_collection_auto_detect: configuration.rbs_collection_auto_detect,
+          **ProjectEnvironment.dependency_discovery_options(configuration),
           synthetic_method_index: @synthetic_method_index,
           project_patched_methods: @project_patched_methods,
           source_files: @source_files

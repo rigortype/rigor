@@ -15,7 +15,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/statement_evaluator"
 require_relative "prism_colorizer"
 require_relative "command"
-require_relative "probe_environment"
+require_relative "../project_environment"
 
 module Rigor
   class CLI
@@ -132,10 +132,10 @@ module Rigor
 
       # The plugin-aware environment for the annotated file, so a `#=> <type>` matches what `rigor check`
       # infers on that line — including types synthesized from the file's own inline RBS annotations (the file
-      # is threaded as the synthesizer's `source_files:`; see {ProbeEnvironment}).
+      # is threaded as the synthesizer's `source_files:`; see {ProjectEnvironment}).
       def base_scope(configuration, file)
         Scope.empty(
-          environment: ProbeEnvironment.build(configuration: configuration, source_files: [file])
+          environment: ProjectEnvironment.build(configuration: configuration, source_files: [file])
         )
       end
 

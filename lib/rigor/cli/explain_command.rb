@@ -4,6 +4,7 @@ require "json"
 require "optionparser"
 
 require_relative "../analysis/rule_catalog"
+require_relative "../sig_gen/skip_reason_catalog"
 require_relative "command"
 
 module Rigor
@@ -28,6 +29,12 @@ module Rigor
         end
 
         token = @argv.shift
+        skip_reason = SigGen::SkipReasonCatalog.resolve(token)
+        if skip_reason
+          render_skip_reason(skip_reason, options.fetch(:format))
+          return 0
+        end
+
         entries = Analysis::RuleCatalog.resolve(token)
         if entries.empty?
           @err.puts("Unknown rule: #{token}")
@@ -68,6 +75,32 @@ module Rigor
         @out.puts("")
         @out.puts("Run `rigor explain <rule>` for the full description.")
         @out.puts("Family wildcards (`call`, `flow`, `assert`, `dump`, `def`) print every rule under that prefix.")
+        @out.puts("")
+        @out.puts("`rigor sig-gen` skip reasons:")
+        @out.puts("")
+        SigGen::SkipReasonCatalog.all.each do |entry|
+          @out.puts("  #{entry.id.ljust(33)} #{entry.summary}")
+        end
+      end
+
+      def render_skip_reason(entry, format)
+        if format == "json"
+          @out.puts(JSON.pretty_generate(entry.to_h))
+          return
+        end
+
+        @out.puts(entry.id)
+        @out.puts("=" * entry.id.length)
+        @out.puts("")
+        @out.puts(entry.summary)
+        @out.puts("")
+        @out.puts("A `rigor sig-gen` skip reason, not a diagnostic rule: it reports a signature that was NOT")
+        @out.puts("written, so it has no severity and nothing to suppress.")
+        @out.puts("")
+        @out.puts(entry.explanation)
+        @out.puts("")
+        @out.puts("What to do:")
+        @out.puts("  #{entry.next_step}")
       end
 
       def render_entries(entries, format)

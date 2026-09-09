@@ -26,7 +26,12 @@ resolved into `RbsLoader`'s `signature_paths`:
    *indiscriminate*: it admits every non-skipped gem's `sig/`, not a
    chosen set. A project that runs a plain `bundle install` (gems in
    the system / rbenv gem dir) gets nothing without an explicit
-   `bundle_path:`.
+   `bundle_path:`. That layout cannot be detected — the gem home
+   belongs to the *project's* Ruby, which ADR-27 keeps Rigor from
+   asking — so `rigor doctor` names it instead
+   ([#936](https://github.com/rigortype/rigor/issues/936)): a
+   `bundle_layout` warning fires when a `Gemfile.lock` exists and no
+   bundle root resolves, so the state stops being silent.
 3. **`rbs_collection:`** — parses `rbs_collection.lock.yaml`.
 
 A `Plugin::Base` plugin can contribute diagnostics

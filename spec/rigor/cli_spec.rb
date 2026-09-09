@@ -1566,6 +1566,60 @@ RSpec.describe Rigor::CLI do
 
       expect(out).to include("explain")
     end
+
+    # ADR-108 WD4 — every `sig.skipped.*` id `rigor sig-gen` can print must be answerable by the command
+    # whose job is answering ids. This is the gate: a new skip reason added to the generator without a
+    # catalogue entry fails here rather than shipping an `Unknown rule` for an id Rigor itself emitted.
+    describe "`sig.skipped.*` ids (ADR-108 WD4)" do
+      it "explains every id the sig-gen classifier can produce" do
+        Rigor::SigGen::Classification::SKIP_DIAGNOSTIC_IDS.each_value do |id|
+          status, out, err = run_cli("explain", id)
+
+          expect(status).to eq(0), "`rigor explain #{id}` exited #{status}: #{err}"
+          expect(out).to include(id)
+          expect(out).to include("What to do:")
+        end
+      end
+
+      it "renders one JSON object, not a rule array, under --format=json" do
+        status, out, _err = run_cli("explain", "--format=json", "sig.skipped.untyped-return")
+
+        expect(status).to eq(0)
+        payload = JSON.parse(out)
+        expect(payload).to include("id" => "sig.skipped.untyped-return", "kind" => "sig_skip_reason")
+        expect(payload["next_step"]).to be_a(String)
+      end
+
+      it "routes the reader away from writing the type by hand" do
+        _status, out, _err = run_cli("explain", "sig.skipped.untyped-return")
+
+        expect(out).to include("rigor annotate")
+        expect(out).not_to include("Authored severity")
+      end
+
+      it "lists the skip reasons in the no-argument index" do
+        _status, out, _err = run_cli("explain")
+
+        expect(out).to include("`rigor sig-gen` skip reasons:")
+        expect(out).to include("sig.skipped.user-authored")
+      end
+
+      # The control: adding a second catalogue must not make an unknown id resolvable, and must not
+      # disturb the rule answers the command already gave.
+      it "still reports an unknown sig.skipped id as a usage error" do
+        status, _out, err = run_cli("explain", "sig.skipped.no-such-reason")
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to include("Unknown rule: sig.skipped.no-such-reason")
+      end
+
+      it "still answers a diagnostic rule id from the rule catalog" do
+        status, out, _err = run_cli("explain", "call.undefined-method")
+
+        expect(status).to eq(0)
+        expect(out).to include("Authored severity")
+      end
+    end
   end
 
   describe "sig-gen (ADR-14 slice 1)" do

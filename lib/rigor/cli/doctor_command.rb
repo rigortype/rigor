@@ -7,6 +7,7 @@ require_relative "../configuration"
 require_relative "../config_audit"
 require_relative "../analysis/baseline"
 require_relative "../analysis/result"
+require_relative "../environment/bundle_sig_discovery"
 require_relative "../plugin"
 require_relative "../plugin/loader"
 require_relative "../plugin/services"
@@ -36,6 +37,7 @@ module Rigor
       CHECK_RAILS = "rails_plugins"
       CHECK_GEMFILE = "gemfile_install"
       CHECK_PLUGIN_SKEW = "plugin_skew"
+      CHECK_BUNDLE_LAYOUT = "bundle_layout"
 
       RAILS_LOCK_MARKERS = %w[railties actionpack activerecord actioncable].freeze
       RAILS_PLUGIN_MARKERS = %w[
@@ -78,6 +80,9 @@ module Rigor
 
         # 8. A bundled plugin loaded from a different rigortype installation than the engine (#194 slice 3).
         findings.concat(check_plugin_skew(registry))
+
+        # 9. The project's gems are installed somewhere Rigor cannot see (ADR-25 carry-over).
+        findings.concat(check_bundle_layout(configuration))
 
         report(findings, options.fetch(:format))
         findings.any? { |f| f[:status] == :fail } ? 1 : 0
@@ -247,6 +252,46 @@ module Rigor
         File.realpath(path)
       rescue StandardError
         File.expand_path(path)
+      end
+
+      # ADR-25 carry-over — the plain `bundle install` layout. {Environment::BundleSigDiscovery} detects a
+      # bundle root only from paths the PROJECT records: `.bundle/config`'s `BUNDLE_PATH`, an in-tree
+      # `vendor/bundle`, or the user-global Bundler config. The default layout records none of those — the
+      # gems live in the active Ruby's `GEM_HOME`, which is a property of the project's toolchain, and
+      # ADR-27 keeps Rigor from running that toolchain to ask. So detection is not a bounded probe Rigor can
+      # add; what it CAN do is stop the state being silent. Without this the user sees gem-shipped `sig/`
+      # simply not taking effect, with nothing anywhere naming the reason.
+      #
+      # Warn, never fail: the layout is the Ruby default and is perfectly correct — only ~3% of gems ship
+      # `sig/` at all, so most projects lose nothing by it.
+      def check_bundle_layout(configuration)
+        return [] unless File.file?(File.join(Dir.pwd, "Gemfile.lock"))
+        return [] if resolved_bundle_root(configuration)
+
+        [
+          {
+            check: CHECK_BUNDLE_LAYOUT,
+            status: :warn,
+            message: "Gems are installed in the active Ruby's default gem home, which Rigor cannot locate — " \
+                     "no gem-shipped `sig/` is being discovered",
+            hint: "Rigor reads your project as data and never runs its toolchain, so it can only find a " \
+                  "bundle whose location the project records (`.bundle/config`'s `BUNDLE_PATH`, an in-tree " \
+                  "`vendor/bundle`, or your global Bundler config). Point it at the install root with " \
+                  "`bundler.bundle_path:` in `.rigor.yml`, run `bundle config set --local path vendor/bundle` " \
+                  "and reinstall, or supply signatures with `rbs collection install` instead."
+          }
+        ]
+      end
+
+      def resolved_bundle_root(configuration)
+        Environment::BundleSigDiscovery.resolve_bundle_path(
+          bundle_path: configuration.bundler_bundle_path,
+          project_root: Dir.pwd,
+          auto_detect: configuration.bundler_auto_detect
+        )
+      rescue StandardError
+        # A doctor check must never be the thing that breaks the command it is diagnosing.
+        nil
       end
 
       def check_baseline(configuration, result)

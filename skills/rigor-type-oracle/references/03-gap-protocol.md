@@ -50,8 +50,9 @@ Read stderr for the count, `--format=json` for the per-method reason.
 | `sig.skipped.complex-shape` | Reserved; the generator does not produce it today. | If you ever see one, it is worth reporting as a surprise. |
 | `skipped_outside_sig_root` | A `--write` target outside the configured signature paths. | Configuration, not inference. |
 
-`rigor explain` does **not** cover these ids — it documents diagnostic
-rules. This table is the reference.
+`rigor explain <id>` answers each of these ids directly (the command
+carries a second catalogue for the skip reasons alongside the
+diagnostic rules); this table is the summary.
 
 ### `equivalent`, and silence
 

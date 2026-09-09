@@ -443,6 +443,12 @@ rigor explain [rule]
 or a family wildcard (`call`, `flow`, `def`, `assert`, `dump`).
 `--format=json` is available. Exit `64` for an unknown rule.
 
+It also answers the `sig.skipped.*` identifiers `rigor sig-gen`
+prints when it declines to write a signature — `rigor explain
+sig.skipped.untyped-return` says what the skip means and what to do
+instead. Those are not diagnostic rules, so they are rendered without
+a severity or a suppression line.
+
 ## `rigor diff`
 
 Compare the current diagnostics against a saved baseline JSON
@@ -495,6 +501,8 @@ not overwrite) is never a silent absence: under `--format=json`
 it is a `skipped` row of the `candidates` array with its
 `sig.skipped.*` identifier in `skip_reason`, and in text mode a
 one-line stderr summary counts the skipped methods per reason.
+`rigor explain sig.skipped.untyped-return` (or any of the other skip
+identifiers) explains what the reason means and what to do about it.
 
 ## `rigor lsp`
 
@@ -590,6 +598,12 @@ unused**; the rest were reachable by means static analysis cannot
 see. That is why this is a separate command and never a `rigor check`
 diagnostic — see
 [ADR-102](../adr/102-unused-code-reachability-report.md).
+
+`rigor unused` refuses `--incremental` and exits non-zero rather
+than quietly running a full pass. Reachability is only sound over a
+whole-project run: with files served from the incremental cache a
+constant would be reported as unused merely because the file that
+references it was not re-scanned. Re-run without the flag.
 
 Reachability is computed from **roots**, not by counting references,
 so a cluster of classes that only reference each other is still

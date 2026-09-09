@@ -1,0 +1,1 @@
+- **[rigor check]** A call whose block leaves through `break value` now types as that value joined with the call's own result, so a predicate shaped `ops.all? { |o| break false unless o; true }` no longer reads as unconditionally true and no longer draws a `flow.always-truthy-condition` on the correct code around it. ([#865](https://github.com/rigortype/rigor/pull/865))

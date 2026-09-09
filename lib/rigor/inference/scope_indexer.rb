@@ -1522,17 +1522,33 @@ module Rigor
         when Prism::ConstantReadNode
           constant_mutation_candidates(receiver.name.to_s, nesting, census[:constants])
         when Prism::ConstantPathNode
-          # The lexical candidates a PATH spelling reaches, for the same reason the bare arm above takes
-          # them: `Holder::TABLE[:k] = 1` inside `module Admin` mutates whatever `Holder::TABLE` resolves
-          # to there, and since [#690](https://github.com/rigortype/rigor/issues/690) the write accumulator
-          # keys that entry `Admin::Holder::TABLE`. Recording only the as-written name left the mutated
-          # constant matched by nothing and its closed empty shape intact — the very fold #540 exists to
-          # retract. Over-recording only widens, which is the direction this census is allowed to err in.
-          full = Source::ConstantPath.qualified_name_or_nil(receiver)
-          constant_mutation_candidates(full, nesting, census[:constants]) if full
+          path_mutation_candidates(receiver, nesting, census[:constants])
         when Prism::ClassVariableReadNode
           census[:cvars][qualified_prefix.join("::")] << receiver.name unless qualified_prefix.empty?
         end
+      end
+
+      # The lexical candidates a PATH spelling reaches, for the same reason the bare arm takes them:
+      # `Holder::TABLE[:k] = 1` inside `module Admin` mutates whatever `Holder::TABLE` resolves to there,
+      # and since [#690](https://github.com/rigortype/rigor/issues/690) the write accumulator keys that
+      # entry `Admin::Holder::TABLE`. Recording only the as-written name left the mutated constant matched
+      # by nothing and its closed empty shape intact — the very fold #540 exists to retract. Over-recording
+      # only widens, which is the direction this census is allowed to err in.
+      #
+      # A ROOTED receiver is the one spelling that reaches no lexical candidate at all, so widening them is
+      # not erring in the allowed direction but discarding precision the code hands over
+      # ([#703](https://github.com/rigortype/rigor/issues/703)): `::Table::ROWS[k] = 1` names the top-level
+      # constant unconditionally, so the sibling `Admin::Table::ROWS` a bare spelling would also reach is
+      # untouched and keeps its empty-shape fold. This is the exemption #690 established on the WRITE side
+      # ({#constant_path_write_key}), which the two arms have to agree on: the strict render drops the root
+      # marker, so the rooted and unrooted spellings are indistinguishable by name alone.
+      def path_mutation_candidates(receiver, nesting, into)
+        full = Source::ConstantPath.qualified_name_or_nil(receiver)
+        return if full.nil?
+
+        return into << full if Source::ConstantPath.rooted?(receiver)
+
+        constant_mutation_candidates(full, nesting, into)
       end
 
       # The receiver a node mutates, or nil when the node is not a mutation.
@@ -1734,11 +1750,15 @@ module Rigor
       # Issue #710 — the qualified name a `Klass = Class.new { … }` gives the block's class, or nil when
       # `node` is not that form. Ruby names the constructed class after the constant it is first assigned to,
       # so `self::X = 7` in the block writes `Klass::X` and nothing about it is opaque. The recognition is
-      # {#meta_new_block_body}'s, shared with the block-as-method walk, so the two agree on which rvalues a
-      # constant write names — a constant PATH write (`N::Made = Class.new { … }`) is not one of them, and
-      # its block keeps the opaque answer.
+      # {#meta_new_block_body}'s, shared with the block-as-method walk.
+      #
+      # A constant PATH write (`N::Made = Class.new { … }`) keeps the opaque answer even though that recognition
+      # now takes it ([#703](https://github.com/rigortype/rigor/issues/703)). This census keys a path write AS
+      # WRITTEN ({#constant_path_write_name}) rather than through the nesting, so naming the block's class here
+      # would publish a `self::X = …` inside it under a name Ruby does not give it; declining suppresses the
+      # name instead, which is the gradual direction. Moving it belongs with moving the census's own path key.
       def meta_new_block_owner(node, qualified_prefix)
-        return nil unless meta_new_block_body(node)
+        return nil unless node.is_a?(Prism::ConstantWriteNode) && meta_new_block_body(node)
 
         qualified_write_name(qualified_prefix, node.name.to_s)
       end
@@ -1967,7 +1987,7 @@ module Rigor
           end
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
       # Combined `walk_methods` + `walk_def_nodes` descent. The two walks had identical class / module / singleton-class
       # / meta-block traversals and both stopped at `DefNode`; the only divergences are leaf actions (recorded into the
       # right accumulator) and the original `walk_methods` returning at `AliasMethodNode` (its symbol-only children
@@ -1995,9 +2015,9 @@ module Rigor
               return
             end
           end
-        when Prism::ConstantWriteNode
-          if meta_new_block_body(node)
-            child_prefix = qualified_prefix + [node.name.to_s]
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+          child_prefix = meta_new_body_prefix(node, qualified_prefix)
+          if child_prefix
             record_meta_members(node.value, child_prefix, methods_acc)
             walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc,
                                        source_path)
@@ -2110,7 +2130,7 @@ module Rigor
           Source::ConstantPath.qualified_name(expression.target)
         end
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
 
       # v0.1.2 — when a `Const = Data.define(*sym) do ... end` / `Const = Struct.new(*sym) do ... end` constant write
       # carries a block, the block body holds method overrides whose canonical class is `Const`. Survey item (e)
@@ -2118,8 +2138,15 @@ module Rigor
       # ADR-16 Tier A "block-as-method" idiom at constant-write position. Returns the block body node (a
       # `Prism::StatementsNode`) when the rvalue matches; nil otherwise. Used by `walk_methods` / `walk_def_nodes` to
       # push `Const` onto the qualified prefix before recursing.
+      #
+      # Issue [#703](https://github.com/rigortype/rigor/issues/703) — a PATH write is the same idiom.
+      # `Holder::Thing = Struct.new(:a) do … end` inside a module is ordinary Ruby, and declining it here lost the
+      # factory registration, the member layout and the block's own defs together: the constant answered
+      # `singleton(Struct)` and its instance `Struct`, a class RBS knows, so every member read and every override
+      # call fired `call.undefined-method` on code Ruby runs. The name the write gives the class is
+      # {#meta_new_child_prefix}'s, so every walk that pushes it agrees.
       def meta_new_block_body(node)
-        return nil unless node.is_a?(Prism::ConstantWriteNode)
+        return nil unless node.is_a?(Prism::ConstantWriteNode) || node.is_a?(Prism::ConstantPathWriteNode)
 
         rvalue = node.value
         return nil unless rvalue.is_a?(Prism::CallNode)
@@ -2129,6 +2156,36 @@ module Rigor
                           class_new_call?(rvalue)
 
         rvalue.block&.body
+      end
+
+      # The qualified prefix a meta-new constant write names its class under, given the lexical prefix the write
+      # sits in — the segments every scope-free pre-pass pushes before descending into the block, and the key
+      # {#record_meta_new_constant?} files the discovered class under. Nil for a target that is neither form.
+      #
+      # A PATH write takes exactly what a compact `class Holder::Thing` header at the same position takes
+      # ({Source::ConstantPath.declaration_prefix}), rooted reset included. These pre-passes run before any scope
+      # exists, so the namespace cannot be resolved the way {#constant_path_write_key} resolves it for the typed
+      # table — but the two land on the same name anyway, because registering `Admin::Holder::Thing` here is what
+      # makes `Admin::Holder` a namespace {#resolved_write_namespace} knows.
+      #
+      # Where the namespace is NOT under the enclosure — a top-level `Loner` written as `Loner::Made = Struct.new(…)`
+      # inside `module Admin` — that qualification is a guess, and {#synthesize_namespace_prefixes} then answers a
+      # read of `Loner` there with the `Admin::Loner` it invented. That is the same answer the equivalent
+      # `class Loner::Made` header has always produced, from the same two functions: the two spellings of one
+      # declaration stay consistent rather than one of them carrying a second approximation of its own.
+      def meta_new_child_prefix(node, qualified_prefix)
+        case node
+        when Prism::ConstantWriteNode
+          qualified_prefix + [node.name.to_s]
+        when Prism::ConstantPathWriteNode
+          Source::ConstantPath.declaration_prefix(qualified_prefix, node.target)
+        end
+      end
+
+      # {#meta_new_child_prefix} for the walks that only care about a write carrying a BLOCK — nil where the rvalue
+      # opens none, so a block-less `Thing = Struct.new(:a)` keeps falling through to the ordinary child descent.
+      def meta_new_body_prefix(node, qualified_prefix)
+        meta_new_block_body(node) && meta_new_child_prefix(node, qualified_prefix)
       end
 
       # `class Foo < Data.define(:a, :b)` / `class Bar < Struct.new(:x)` synthesizes reader methods (`a`, `b`, `x`) on
@@ -2306,9 +2363,9 @@ module Rigor
               return
             end
           end
-        when Prism::ConstantWriteNode
-          if meta_new_block_body(node)
-            child_prefix = qualified_prefix + [node.name.to_s]
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+          child_prefix = meta_new_body_prefix(node, qualified_prefix)
+          if child_prefix
             walk_singleton_body(meta_new_block_body(node), child_prefix, false, accumulator)
             return
           end
@@ -2722,8 +2779,9 @@ module Rigor
             walk_data_member_layouts(node.body, child_prefix, accumulator) if node.body
             return
           end
-        when Prism::ConstantWriteNode
-          record_data_member_layout(accumulator, qualified_prefix + [node.name.to_s], node.value)
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+          child_prefix = meta_new_child_prefix(node, qualified_prefix)
+          record_data_member_layout(accumulator, child_prefix, node.value) if child_prefix
         end
 
         node.rigor_each_child do |child|
@@ -2772,8 +2830,9 @@ module Rigor
             walk_struct_member_layouts(node.body, child_prefix, accumulator) if node.body
             return
           end
-        when Prism::ConstantWriteNode
-          record_struct_member_layout(accumulator, qualified_prefix + [node.name.to_s], node.value)
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+          child_prefix = meta_new_child_prefix(node, qualified_prefix)
+          record_struct_member_layout(accumulator, child_prefix, node.value) if child_prefix
         end
 
         node.rigor_each_child do |child|
@@ -3001,9 +3060,9 @@ module Rigor
               return current_visibility
             end
           end
-        when Prism::ConstantWriteNode
-          if meta_new_block_body(node)
-            child_prefix = qualified_prefix + [node.name.to_s]
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+          child_prefix = meta_new_body_prefix(node, qualified_prefix)
+          if child_prefix
             walk_method_visibilities(meta_new_block_body(node), child_prefix, false, :public, accumulator)
             return current_visibility
           end
@@ -4240,7 +4299,7 @@ module Rigor
         case node
         when Prism::ModuleNode, Prism::ClassNode
           return if record_class_or_module?(node, qualified_prefix, identity_table, discovered)
-        when Prism::ConstantWriteNode
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
           return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         end
 
@@ -4270,13 +4329,20 @@ module Rigor
       # - `Const = Data.define(*Symbol) [do ... end]`
       # - `Const = Struct.new(*Symbol [, keyword_init: ...]) [do ... end]`
       #
+      # Issue [#703](https://github.com/rigortype/rigor/issues/703) — and their `Holder::Const = …` spellings, which
+      # name a class just as unconditionally. Until this arm took them, `Holder::Thing.new(1)` fell to the default
+      # `Class#new` envelope on `singleton(Struct)` and handed every reader a bare `Struct`.
+      #
       # The block body, if present, is recursed into so any nested class/module declarations in the override block (rare
       # but legal) still feed the discovered table.
       def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         factory_call = resolve_meta_factory_call(node.value)
         return false unless factory_call
 
-        full = (qualified_prefix + [node.name.to_s]).join("::")
+        child_prefix = meta_new_child_prefix(node, qualified_prefix)
+        return false if child_prefix.nil?
+
+        full = child_prefix.join("::")
         discovered[full] = Type::Combinator.singleton_of(full)
         record_declarations(node.value, qualified_prefix, identity_table, discovered)
         true

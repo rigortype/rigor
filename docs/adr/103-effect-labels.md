@@ -1,6 +1,6 @@
 # ADR-103 — Effect labels: an opt-in, snapshot-first effect system
 
-Status: **Proposed, 2026-08-16.** Records the decisions reached while designing the effect system in
+Status: **Accepted, 2026-08-16 — implemented; the effect system shipped as the v0.3.4 headline (`rigor effects`, `rigor effects update`, `rigor effects check`), with 13 of the 18 implementation issues under [#376](https://github.com/rigortype/rigor/issues/376) closed.** Records the decisions reached while designing the effect system in
 [`docs/design/20260816-effect-labels.md`](../design/20260816-effect-labels.md) (the design note;
 its § 13 lists the choices, this ADR fixes them as working decisions; WD13, coexistence with
 `rigor check`, was added the same day; WD14, the pre-implementation decisions, and WD15, the

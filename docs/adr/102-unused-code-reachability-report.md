@@ -1,6 +1,6 @@
 # ADR-102 — The unused-code reachability report is a report, not a diagnostic
 
-Status: **Proposed, 2026-08-15.** Nothing implemented. Fixes the decisions the
+Status: **Accepted, 2026-08-15 — implemented; `rigor unused` shipped in v0.3.4.** Fixes the decisions the
 `rigor unused` slices build against ([#344](https://github.com/rigortype/rigor/issues/344)
 umbrella; [#347](https://github.com/rigortype/rigor/issues/347) tracer bullet). All eight
 working decisions are settled — WD5 and WD8 were carried open for one revision and closed

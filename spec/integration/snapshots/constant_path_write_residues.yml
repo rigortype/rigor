@@ -1,0 +1,16 @@
+---
+locals: {}
+assertions:
+  '1': singleton(Admin::Holder::Thing)
+  '2': 'Admin::Holder::Thing(a: 1)'
+  '3': '"y"'
+  '4': singleton(Admin::Bare)
+  '5': 'Admin::Bare(a: 1)'
+  '6': '"y"'
+  '7': singleton(Holder::Rooted)
+  '8': 'Holder::Rooted(r: 2)'
+  '9': '"r"'
+  '10': 'true'
+  '11': bool
+  '12': bool
+  '13': bool

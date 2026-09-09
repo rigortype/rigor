@@ -357,7 +357,7 @@ RSpec.describe Rigor::SigGen::Writer do
       writer.write("lib/s.rb", [method_in_child])
       output = File.read(File.join(tmpdir, "sig/s.rbs"))
 
-      expect(output).to match(/class GitAdapter < AbstractAdapter\b/)
+      expect(output).to match(/class GitAdapter < ::AbstractAdapter\b/)
     end
 
     it "never emits a superclass on a `module` wrapper segment" do
@@ -376,7 +376,64 @@ RSpec.describe Rigor::SigGen::Writer do
 
       expect(output).to include("module Wrapper\n")
       expect(output).not_to include("module Wrapper < Bogus")
-      expect(output).to match(/class Leaf < Base\b/)
+      expect(output).to match(/class Leaf < ::Base\b/)
+    end
+
+    # Issue #609 — the shape that made `AncestorBuilder#singleton_ancestors` recurse until the stack was
+    # exhausted on a 3,277-file Rails app. `Views::Help::Show < Help::Show` is unambiguous in the source
+    # (Ruby resolved `Help::Show` at top level), but RBS resolves a nested declaration's superclass
+    # RELATIVELY: under `module Views; module Help`, a bare `Help::Show` re-points at `::Views::Help::Show`
+    # — the class being declared. The `::` is what keeps the emitted name the one the generator's
+    # resolvability guards actually checked.
+    it "anchors a superclass whose first segment collides with an enclosing namespace (#609)" do
+      shadowed = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/s.rb", class_name: "Views::Help::Show",
+        method_name: :page_icon, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def page_icon: () -> String",
+        namespace_kinds: { "Views" => :module, "Views::Help" => :module, "Views::Help::Show" => :class },
+        class_superclasses: { "Views::Help::Show" => "Help::Show" }
+      )
+
+      writer.write("lib/s.rb", [shadowed])
+      output = File.read(File.join(tmpdir, "sig/s.rbs"))
+
+      expect(output).to match(/class Show < ::Help::Show\b/)
+      expect(output).not_to match(/class Show < Help::Show\b/)
+    end
+
+    # The counterpart: anchoring must not eat the type arguments `generic_superclass_spelling` attaches, or
+    # `< ::Array` comes back as the `InvalidTypeApplicationError` #735 fixed.
+    it "keeps the type arguments on an anchored generic superclass" do
+      generic = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/s.rb", class_name: "Entries",
+        method_name: :each, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def each: () -> void",
+        class_superclasses: { "Entries" => "Array[untyped]" }
+      )
+
+      writer.write("lib/s.rb", [generic])
+      output = File.read(File.join(tmpdir, "sig/s.rbs"))
+
+      expect(output).to include("class Entries < ::Array[untyped]")
+    end
+
+    # An already-anchored token (`MetaClassShape::SUPERCLASSES`) must not grow a second `::`.
+    it "leaves an already-absolute superclass token alone" do
+      value_class = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/s.rb", class_name: "Point",
+        method_name: :x, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def x: () -> Integer",
+        class_superclasses: { "Point" => "::Data" }
+      )
+
+      writer.write("lib/s.rb", [value_class])
+      output = File.read(File.join(tmpdir, "sig/s.rbs"))
+
+      expect(output).to match(/class Point < ::Data\b/)
+      expect(output).not_to include("::::Data")
     end
 
     it "emits ` < Super` when appending a brand-new class to an existing sig file" do
@@ -392,7 +449,7 @@ RSpec.describe Rigor::SigGen::Writer do
       writer.write("lib/foo.rb", [new_subclass])
       output = File.read(File.join(tmpdir, "sig/foo.rbs"))
 
-      expect(output).to match(/class Child < Base\b/)
+      expect(output).to match(/class Child < ::Base\b/)
     end
 
     it "injects a missing class shell into the nearest existing ancestor when updating an existing sig" do

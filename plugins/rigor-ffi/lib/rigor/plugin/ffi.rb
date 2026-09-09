@@ -13,9 +13,20 @@ module Rigor
     class FFI < Base
       manifest(
         id: "ffi",
-        version: "0.1.0",
+        # Bumped 2026-09-10 (#918) — declares `config_schema` for the two `.rigor.yml` surfaces ADR-30
+        # WD4 (`exceptions`) and WD6 (`target`) already read off `config` but the manifest never
+        # published, so both keys were rejected by `Manifest#validate_config` as unknown.
+        version: "0.2.0",
         description: "Models FFI library bindings, struct layouts, callbacks, carrier types, and ffx target compatibility.",
-        signature_paths: ["sig"]
+        signature_paths: ["sig"],
+        config_schema: {
+          # WD4 — typedef alias names the nominal-opaque-pointer heuristic should treat as a transparent
+          # `:pointer` alias even though they match the `_ptr$` / `_handle$` naming pattern.
+          "exceptions" => { kind: :array, default: [] },
+          # WD6 — forces ffx-target detection instead of the `extconf.rb` / `Gemfile.lock` cascade.
+          # `"auto"` (the default) keeps the cascade; `"ffi"` / `"ffx"` pin the target outright.
+          "target" => { kind: :string, default: "auto" }
+        }
       )
 
       producer :ffi_catalog do

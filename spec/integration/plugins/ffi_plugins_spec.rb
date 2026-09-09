@@ -143,4 +143,71 @@ RSpec.describe "FFI plugin family" do
       expect(Rigor::Plugin::FFIRZMQ.manifest.id).to eq("ffi-rzmq")
     end
   end
+
+  # Issue #918 — WD4's `exceptions` and WD6's `target` are read from `config` inside the plugin, but the
+  # manifest declared no `config_schema`, so `Manifest#validate_config` rejected both as unknown before a
+  # single line of the plugin's own logic ever ran. These drive the real `Rigor::Analysis::Runner`
+  # against a `.rigor.yml`-shaped plugin entry (not the bare unit calls above) to prove the config keys
+  # both validate AND change the produced type.
+  describe "configuration (#918)" do
+    include Rigor::IntegrationSupport::PluginHelpers
+
+    let(:plugin_class) { Rigor::Plugin::FFI }
+    let(:typedef_source) do
+      <<~RUBY
+        module MyLib
+          extend FFI::Library
+          typedef :pointer, :my_ptr
+          attach_function :open, [], :my_ptr
+        end
+
+        Rigor.dump_type(MyLib.open)
+      RUBY
+    end
+    let(:pointer_source) do
+      <<~RUBY
+        module MyLib
+          extend FFI::Library
+          attach_function :open, [], :pointer
+        end
+
+        Rigor.dump_type(MyLib.open)
+      RUBY
+    end
+
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    it "treats a typedef alias as the nominal opaque-pointer type by default (WD4)" do
+      result = run_plugin(source: typedef_source)
+      expect(dumps(result)).to eq(["dump_type: MyLib::MyPtr"])
+    end
+
+    it "widens the nominal exception back to FFI::Pointer once `exceptions` names it (WD4)" do
+      result = run_plugin(
+        source: typedef_source,
+        plugin_entry: { "gem" => "rigor-ffi", "config" => { "exceptions" => ["my_ptr"] } }
+      )
+      expect(dumps(result)).to eq(["dump_type: FFI::Pointer"])
+    end
+
+    it "returns FFI::Pointer for the ffi-gem target by default" do
+      result = run_plugin(source: pointer_source)
+      expect(dumps(result)).to eq(["dump_type: FFI::Pointer"])
+    end
+
+    it "returns Integer instead once `target: ffx` is forced through config (WD6)" do
+      result = run_plugin(
+        source: pointer_source,
+        plugin_entry: { "gem" => "rigor-ffi", "config" => { "target" => "ffx" } }
+      )
+      expect(dumps(result)).to eq(["dump_type: Integer"])
+    end
+
+    it "rejects an unknown config key instead of silently ignoring it" do
+      errors = Rigor::Plugin::FFI.manifest.validate_config({ "bogus" => true })
+      expect(errors).to include(a_string_matching(/unknown config key "bogus"/))
+    end
+  end
 end

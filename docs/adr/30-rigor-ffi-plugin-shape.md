@@ -195,7 +195,9 @@ The nominal carrier honors the
 - **Return** — return types declared as the nominal alias stay
   strict `Nominal[<alias>]`.
 
-A per-project `.rigor.yml` exception list (`rigor_ffi: { nominal_typedef_exceptions: ["log_target_ptr"] }`)
+A per-project `.rigor.yml` exception list (the plugin's own
+`config_schema`-declared `exceptions:` key, e.g.
+`plugins: [{gem: rigor-ffi, config: {exceptions: ["log_target_ptr"]}}]`)
 lets a project opt a typedef back to transparent if the heuristic
 misfires.
 
@@ -247,10 +249,11 @@ ffx detection cascades through three sources, top-down:
    resolved dependency, the project is considered an ffx target.
    Reuses the bundler-parsing path already present for
    `BundleSigDiscovery` (v0.1.5).
-3. **Explicit configuration.** `.rigor.yml` may set
-   `rigor_ffi: { target: ffx }` to force the detection. Last
-   resort, present for environments where neither `extconf.rb`
-   nor `Gemfile.lock` is authoritative.
+3. **Explicit configuration.** `.rigor.yml` may set the
+   `config_schema`-declared `target:` key
+   (`plugins: [{gem: rigor-ffi, config: {target: ffx}}]`) to force
+   the detection. Last resort, present for environments where
+   neither `extconf.rb` nor `Gemfile.lock` is authoritative.
 
 Detection results are cached at the project-context level (cleared
 when the relevant input file changes, per ADR-6's cache invalidation

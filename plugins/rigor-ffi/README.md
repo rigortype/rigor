@@ -27,6 +27,21 @@ plugins/rigor-ffi/
     └── demo.rb
 ```
 
+## Configuration
+
+```yaml
+plugins:
+  - gem: rigor-ffi
+    config:
+      exceptions: ["log_target_ptr"]  # default: []
+      target: ffx                     # default: "auto"
+```
+
+- `exceptions` — typedef alias names the nominal-opaque-pointer heuristic (WD4) should keep as a
+  transparent `:pointer` alias even though they match the `_ptr$` / `_handle$` naming pattern.
+- `target` — `"auto"` (default) runs the `extconf.rb` / `Gemfile.lock` cascade (WD6); `"ffi"` / `"ffx"`
+  pin the target outright.
+
 ## Features
 
 - **AST literal walking**: Recognizes `attach_function`, `callback`, `typedef`, `enum`, `bitmask`, and `layout`.

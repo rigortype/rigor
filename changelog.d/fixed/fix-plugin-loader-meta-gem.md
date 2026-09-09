@@ -1,0 +1,1 @@
+- **[plugins]** A plugin gem that pulls in another plugin — every FFI-family plugin requires `rigor-ffi` — is no longer mistaken for a convenience meta-gem, so `plugins: [rigor-sassc]` (or `rigor-ethon`, `rigor-ffi-rzmq`, `rigor-rbnacl`) loads on its own instead of failing with advice that would activate the wrong plugin. ([#908](https://github.com/rigortype/rigor/pull/908))

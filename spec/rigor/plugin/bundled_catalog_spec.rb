@@ -20,4 +20,18 @@ RSpec.describe Rigor::Plugin::BundledCatalog do
       .to include("rigor-railties", "rigor-rails-routes")
     expect(described_class.for_gem("no-such-gem")).to be_empty
   end
+
+  describe "independence from the live registry" do
+    # `require` is idempotent, so a plugin loaded by an earlier spec and then dropped by
+    # `Rigor::Plugin.unregister!` is absent from the registry while still loaded. An index built from the
+    # registry at that moment lacked it, and `rigor doctor` then read the project's own enabled plugin as
+    # a gap and failed — only on the CI shard where the spec order produced that state.
+    it "lists a bundled plugin that is loaded but no longer registered" do
+      described_class.entries
+      Rigor::Plugin.unregister!
+      described_class.reset!
+
+      expect(described_class.for_gem("activerecord").map(&:gem_name)).to include("rigor-activerecord")
+    end
+  end
 end

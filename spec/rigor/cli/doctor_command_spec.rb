@@ -154,6 +154,20 @@ RSpec.describe Rigor::CLI::DoctorCommand do
   # ADR-96 WD2 — the advisory reads each bundled plugin's `target_gems:`, so it covers every framework
   # Rigor ships a plugin for rather than only Rails.
   describe "plugin gap check" do
+    # These examples enable a real bundled plugin by gem name. `require` is a once-per-process no-op and the
+    # suite pervasively calls `Rigor::Plugin.unregister!`, so whether the Loader can resolve
+    # `rigor-activerecord` depends on which spec ran first — the `plugins` check then reports a load error
+    # and the exit status is 1 on one CI shard and 0 on another. Register the classes the way a fresh
+    # process's require would have, so the examples measure the gap advisory and nothing else.
+    before do
+      Rigor::Plugin::BundledCatalog.entries
+      { "rigor-activerecord" => [Rigor::Plugin::Activerecord, "activerecord"],
+        "rigor-sidekiq" => [Rigor::Plugin::Sidekiq, "sidekiq"] }.each do |gem_name, (klass, id)|
+        Rigor::Plugin.register(klass) unless Rigor::Plugin.registered_for(id)
+        Rigor::Plugin.record_gem_registration(gem_name, [id])
+      end
+    end
+
     it "fails when locked gems have bundled plugins and none of them is enabled" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\n")

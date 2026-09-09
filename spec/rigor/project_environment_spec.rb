@@ -134,11 +134,17 @@ RSpec.describe Rigor::ProjectEnvironment do
     # restatement of what the file already says unambiguously: the helper is splatted in, and no discovery
     # keyword is spelled by hand.
     #
-    # `pool_coordinator.rb` is deliberately absent — it is covered behaviourally above, and its separate
-    # `prewarm_rbs_cache_for_pool` still spells the axes literally, so the no-literal half would not hold.
+    # `pool_coordinator.rb` builds twice — the runner environment pinned behaviourally above and
+    # `prewarm_rbs_cache_for_pool` — so the whole file is read here too: that second build spelled the five
+    # axes literally, correct on the day it was written and one added axis away from divergence, which is
+    # what issue #882 retired along with `CLI::UnusedCommand`'s missing axes. Every file that reaches
+    # `Environment.for_project` outside {ProjectEnvironment} itself is now in this list; the helper's own
+    # `minimal` fail-soft floor is the one deliberate omission of the axes in the codebase.
     {
       "Analysis::WorkerSession" => "lib/rigor/analysis/worker_session.rb",
-      "LanguageServer::ProjectContext" => "lib/rigor/language_server/project_context.rb"
+      "LanguageServer::ProjectContext" => "lib/rigor/language_server/project_context.rb",
+      "Analysis::Runner::PoolCoordinator" => "lib/rigor/analysis/runner/pool_coordinator.rb",
+      "CLI::UnusedCommand" => "lib/rigor/cli/unused_command.rb"
     }.each do |label, path|
       it "is splatted into #{label}'s environment build" do
         source = File.read(File.expand_path("../../#{path}", __dir__))

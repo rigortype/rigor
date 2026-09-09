@@ -90,8 +90,12 @@ Dir[File.expand_path("integration/**/support/**/*.rb", __dir__)].each { |f| requ
 
 RSpec.configure do |config|
   config.include RunnerHelpers, type: :runner
+  # `runner_check_rules_spec.rb` is the CheckRules half of `runner_spec.rb`, split out because one spec FILE is
+  # binpacker's scheduling unit and the combined file exceeded what a single CI worker may hold. Both halves drive
+  # the same `RunnerHelpers#analyze` harness, so both earn the metadata. `runner_pool_spec.rb` deliberately does
+  # not match: it is excluded from the default suite and owns its own process (see below).
   config.define_derived_metadata(
-    file_path: %r{/spec/rigor/analysis/runner_spec\.rb\z}
+    file_path: %r{/spec/rigor/analysis/runner(?:_check_rules)?_spec\.rb\z}
   ) do |meta|
     meta[:type] = :runner
   end

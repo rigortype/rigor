@@ -111,7 +111,14 @@ test-integration-plugins:
 # whole suite.
 BINPACKER_FLAGS ?=
 
+# `mkdir -p tmp`: binpacker's timing writer mkpaths its own directory, but
+# `Report#write` is a bare `File.write`, so `--report tmp/…` raises ENOENT when
+# `tmp/` does not exist — and `tmp/` is gitignored, so it does not on a fresh
+# checkout. In CI the directory existed only as a side effect of the timing
+# cache restoring into it; the first real cache miss since sharding landed
+# (bumping the key to v2) took the whole matrix down with every spec passing.
 test-binpacker:
+	@mkdir -p tmp
 	bundle exec binpacker run $(BINPACKER_FLAGS)
 
 lint:

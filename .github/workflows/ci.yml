@@ -145,12 +145,24 @@ jobs:
       # own slice: binpacker APPENDS samples and compacts to the three most
       # recent per test, so a shard's write leaves its siblings' entries
       # untouched.
+      #
+      # `v2` is a manual generation token, bumped to discard the history.
+      # binpacker weighs a file by summing the median of every `[file, name]`
+      # entry it holds, and `compact!` prunes samples per test but never the
+      # tests themselves — so an entry for a test that no longer exists under
+      # that path is charged to the file forever. Splitting a spec file is
+      # exactly that: `runner_spec.rb` kept the 225 example entries that moved
+      # to `runner_check_rules_spec.rb` and stayed predicted at 163.9s while
+      # running 88.7s, and the new file, having no history, fell back to
+      # filesize at 0.3s against 66.5s actual (run 34274577832 — shard 1
+      # deviation 43.6%). Bump this token whenever a spec file is split,
+      # renamed, or deleted; one run then re-measures from filesize weighting.
       - name: Restore binpacker timing file
         uses: actions/cache@v6
         with:
           path: tmp/binpacker.timings
-          key: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ matrix.shard }}
-          restore-keys: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-
+          key: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ matrix.shard }}
+          restore-keys: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-
 
       - name: Run tests
         run: >-

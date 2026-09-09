@@ -1,0 +1,1 @@
+- **[check]** `call.wrong-arity` no longer reports the arguments to `.new` on a class whose loaded RBS declares no constructor, such as `Gem::Specification.new("mygem", "1.0.0")` — an absent `initialize` declaration is no longer read as a declared nullary one. ([#946](https://github.com/rigortype/rigor/pull/946))

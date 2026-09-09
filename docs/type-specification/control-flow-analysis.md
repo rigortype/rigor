@@ -67,6 +67,16 @@ A `return`, `next`, or `break` produces no value at its own position; its type i
 
 An arm on a branch the analysis has proved unreachable is never taken and contributes nothing. Dropping a *reachable* arm reports the fall-through as if it were the whole answer, which reads as precision the program does not have: `ops.all? { |o| next false unless o; true }` types as `true`, the predicate folds to a constant, and correct code is warned about ([#841](https://github.com/rigortype/rigor/issues/841)) — and the same shape written with `break` warns the same way when the arm never reaches the call ([#853](https://github.com/rigortype/rigor/issues/853)).
 
+## Yield value
+
+`yield` runs the block the CALLER supplied, so its value is that block's value. The three exits above carry a value *out* of a construct; this is the one that carries a value back *in*.
+
+- When a method body is re-typed on behalf of a known call site — the inter-procedural return inference — a `yield` in that body MUST type as the value type of the block written at that call site, computed in the call site's own scope. When no caller is known (the analysis of a `def` in its own right), `yield` MUST type as `untyped`.
+- The block's value reaches the caller's return only by ordinary evaluation of the callee's body, never by recognising that a method yields: `def wrap; yield; end` returns it, `def announce; yield; "done"; end` returns `"done"`, and a `rescue` arm or a conditional `yield` unions the way any other body would. Inferring a wrapper's return from the presence of a `yield` would invent a type wherever the wrapper substitutes its own value.
+- A `yield` written inside a block, a lambda, or a loop still names the enclosing **method**'s block, so those constructs are not boundaries here (unlike the retargeting they perform for `next` / `break`). A nested `def`, `class`, `module`, or `class << self` body begins a new method-block binding, and a `yield` inside one MUST NOT read the outer call's block.
+
+Without this, a method whose whole value comes from a yielding helper is `untyped` at every position, `sig-gen` declines it, and every caller inherits the opacity — while the same logic written inline is typed. Since the wrapper is what a scoped concern (`with_run`, save/restore, instrumentation) is normally written as, the loss followed the better structure ([#720](https://github.com/rigortype/rigor/issues/720)).
+
 ## Supported narrowing sources
 
 Supported narrowing sources include:

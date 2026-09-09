@@ -201,7 +201,7 @@ module Rigor
         Prism::NextNode => :type_of_jump,
         Prism::RetryNode => :type_of_jump,
         Prism::RedoNode => :type_of_jump,
-        Prism::YieldNode => :type_of_dynamic_top,
+        Prism::YieldNode => :type_of_yield,
         Prism::SuperNode => :type_of_dynamic_top,
         Prism::ForwardingArgumentsNode => :type_of_non_value,
         Prism::WhileNode => :type_of_loop,
@@ -287,6 +287,32 @@ module Rigor
         slot[1].transform_values(&:values)
       end
 
+      # Issue #720 — the value the block passed by the call site currently being re-typed evaluates to, or
+      # `nil` outside such a frame. Read by {#type_of_yield}.
+      #
+      # A thread-local rather than a `Scope` field for the same reason the `return` / `next` / `break` sinks
+      # are: `yield` names the frame's caller, not a binding, and the body is walked through scopes the
+      # inference rebuilds freely. It is installed unconditionally — with `nil` — at every user-method
+      # inference frame, so a callee reached WITHOUT a block from inside a yielding body cannot read its
+      # caller's block.
+      YIELD_VALUE_KEY = :__rigor_yield_value_type__
+      private_constant :YIELD_VALUE_KEY
+
+      def self.current_yield_value_type
+        Thread.current[YIELD_VALUE_KEY]
+      end
+
+      # Runs `block` with `type` installed as the frame's yield value, restoring the previous frame on exit.
+      def self.with_yield_value_type(type)
+        previous = Thread.current[YIELD_VALUE_KEY]
+        Thread.current[YIELD_VALUE_KEY] = type
+        begin
+          yield
+        ensure
+          Thread.current[YIELD_VALUE_KEY] = previous
+        end
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -370,6 +396,19 @@ module Rigor
 
       def type_of_dynamic_top(_node)
         dynamic_top
+      end
+
+      # Issue #720 — `yield` evaluates the block the CALLER passed, so its value is that block's value. The
+      # caller is only known when this body is being re-typed on behalf of one call site
+      # ({#infer_user_method_return} installs the frame); on the main walk over a `def` no caller exists and
+      # the answer stays `Dynamic[top]`.
+      #
+      # Nothing about the yield's arguments is checked here. The block's return type was computed at the call
+      # site under the parameter bindings the call implies, so it already answers "what does this block
+      # evaluate to for this caller"; a `yield` that passes different arguments than the block's parameters
+      # accept is a separate (arity) question this frame does not decide.
+      def type_of_yield(_node)
+        ExpressionTyper.current_yield_value_type || dynamic_top
       end
 
       # `defined?(expr)` returns `String | nil` per Ruby semantics — a description of the expression's
@@ -1179,12 +1218,12 @@ module Rigor
       # and fired `undefined method 'upcase' for nil` on correct code. The candidate is still looked up
       # first — that lookup is a hash probe and owns the ADR-46 cross-file dependency edge — and
       # {#self_type_answers?} then vetoes the bind for a name the enclosing class answers itself.
-      def try_local_def_dispatch(node, receiver, arg_types)
+      def try_local_def_dispatch(node, receiver, arg_types, block_type = nil)
         local_def = node.receiver.nil? ? scope.bindable_top_level_def_for(node.name) : nil
         return nil unless local_def
         return nil if self_type_answers?(node.name)
 
-        local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
+        local_inference = infer_top_level_user_method(local_def, receiver, arg_types, block_type)
         return local_inference if local_inference
 
         # The local def matches by name but the inference was disqualified — the parameter shape is too
@@ -1458,7 +1497,7 @@ module Rigor
         literal_send = try_literal_send(node, receiver)
         return literal_send if literal_send
 
-        local_def_result = try_local_def_dispatch(node, receiver, arg_types)
+        local_def_result = try_local_def_dispatch(node, receiver, arg_types, block_type)
         return local_def_result if local_def_result
 
         # v0.0.6 phase 2 — per-element block fold for Tuple receivers. When `[a, b, c].map { |x| f(x) }` and
@@ -1483,16 +1522,16 @@ module Rigor
         )
         return result if result
 
-        dispatch_miss_result(node, receiver, arg_types)
+        dispatch_miss_result(node, receiver, arg_types, block_type)
       end
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
       # order; extracted from {#call_dispatch_type_for} whole.
-      def dispatch_miss_result(node, receiver, arg_types)
+      def dispatch_miss_result(node, receiver, arg_types, block_type = nil)
         # v0.0.2 #5 — inter-procedural inference for user-defined methods. When dispatch misses but the
         # receiver is a user class with a `def` body, re-type the body with the call's argument types bound
         # and return the body's last-expression type.
-        user_inference = try_user_method_inference(receiver, node, arg_types)
+        user_inference = try_user_method_inference(receiver, node, arg_types, block_type: block_type)
         return user_inference if user_inference
 
         # Module-singleton call resolution (ADR-57 follow-up) — when the receiver is `Singleton[Foo]` (a
@@ -1500,7 +1539,7 @@ module Rigor
         # `module_function` body, re-type that body with the call args bound. Sits after the RBS dispatch
         # tier, so foreign / RBS-known singletons (`Math.sqrt`) keep their catalog answer; only
         # project-defined singleton methods reach here.
-        singleton_inference = try_project_singleton_inference(receiver, node, arg_types)
+        singleton_inference = try_project_singleton_inference(receiver, node, arg_types, block_type: block_type)
         return singleton_inference if singleton_inference
 
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and no positive rule resolves the call,
@@ -1703,8 +1742,8 @@ module Rigor
       # `scope.self_type` (or implicit `Object`) as the receiver carrier so the body's own self is
       # consistent with the call site's. Returns nil when the parameter shape disqualifies the def, when the
       # body is empty, or when a recursion cycle is detected.
-      def infer_top_level_user_method(def_node, receiver, arg_types)
-        infer_user_method_return(def_node, receiver, arg_types)
+      def infer_top_level_user_method(def_node, receiver, arg_types, block_type = nil)
+        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
       rescue StandardError
         nil
       end
@@ -1814,14 +1853,15 @@ module Rigor
           try_project_singleton_inference(receiver, node, inner_args, method_name: inner_name)
       end
 
-      def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name)
+      def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name, block_type: nil)
         return nil unless user_inference_receiver?(receiver)
 
         def_node, owner = resolve_user_def_with_owner(receiver.class_name, method_name)
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types,
-                                          self_fold_safe: fold_safe_call_receiver?(call_node, receiver))
+                                          self_fold_safe: fold_safe_call_receiver?(call_node, receiver),
+                                          yield_type: block_type)
         return result if result.nil?
 
         degrade_if_overridable(result, owner, method_name, :instance)
@@ -1892,13 +1932,14 @@ module Rigor
       # The OWNER — not the receiver class — is what the overridable gate keys on, exactly as the instance
       # side does: adopting `Base`'s literal return is unsound when a subclass redefines the method, and
       # after this change the resolved body is routinely not the receiver's own.
-      def try_singleton_method_inference(receiver, call_node, arg_types, method_name: call_node.name)
+      def try_singleton_method_inference(receiver, call_node, arg_types, method_name: call_node.name,
+                                         block_type: nil)
         return nil unless receiver.is_a?(Type::Singleton)
 
         def_node, owner = resolve_singleton_def_with_owner(receiver.class_name, method_name)
         return nil if def_node.nil?
 
-        result = infer_user_method_return(def_node, receiver, arg_types)
+        result = infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
         return result if result.nil?
 
         degrade_if_overridable(result, owner, method_name, :singleton)
@@ -1926,9 +1967,11 @@ module Rigor
       # body the project itself wrote. Which of the two tiers applies is decided by the receiver carrier —
       # `Singleton[Foo]` when the constant names a class or module, `Nominal[…]` when it holds an ordinary
       # object (#320) — so the two are mutually exclusive and consulting both is one resolution attempt.
-      def try_project_singleton_inference(receiver, call_node, arg_types, method_name: call_node.name)
-        try_singleton_method_inference(receiver, call_node, arg_types, method_name: method_name) ||
-          try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: method_name)
+      def try_project_singleton_inference(receiver, call_node, arg_types, method_name: call_node.name,
+                                          block_type: nil)
+        kwargs = { method_name: method_name, block_type: block_type }
+        try_singleton_method_inference(receiver, call_node, arg_types, **kwargs) ||
+          try_singleton_object_constant_inference(receiver, call_node, arg_types, **kwargs)
       end
 
       # #320 — resolves a call whose receiver is a constant holding an ordinary object with a `class << Const`
@@ -1936,13 +1979,14 @@ module Rigor
       # that object, so the receiver carrier is passed through unchanged. Own-constant only, and only for a
       # name the project actually recorded — a miss degrades to today's `Dynamic[top]`, never a false
       # resolution. `Singleton` receivers never reach here: {#try_singleton_method_inference} owns them.
-      def try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: call_node.name)
+      def try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: call_node.name,
+                                                  block_type: nil)
         return nil unless receiver.is_a?(Type::Nominal)
 
         def_node = SingletonObjectConstant.def_node_for(call_node, receiver, method_name, scope)
         return nil if def_node.nil?
 
-        infer_user_method_return(def_node, receiver, arg_types)
+        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
       rescue StandardError
         nil
       end
@@ -1976,7 +2020,8 @@ module Rigor
         # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
         # is a pure function of the same frozen index trio — the sibling resolver it walks reads nothing
         # else.
-        by_super[scope.discovered_includes] ||= { name: {}, user_def: {}, self_pure: {}.compare_by_identity }
+        by_super[scope.discovered_includes] ||=
+          { name: {}, user_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }
       end
 
       def resolve_user_def_through_ancestors(class_name, method_name)
@@ -2309,9 +2354,15 @@ module Rigor
       # the body both qualify. It does NOT need its own memo-key slot here — the bit is observable on the
       # built `body_scope`, which is where every downstream consumer (the memo key, the recursion context)
       # reads it from, so the two can never disagree.
-      def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false)
+      #
+      # `yield_type` (issue #720) is the OTHER call-site-varying input, and unlike `self_fold_safe` it is
+      # not observable on the body scope, so it does need its own memo-key slot. It is dropped for a def
+      # that cannot reach a `yield` — nearly all of them — which keeps the key shape constant for the
+      # methods the memo actually carries and confines the extra dimension to yielding callees.
+      def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil)
         return nil if def_node.body.nil?
 
+        yield_type = nil unless yield_type && body_yields?(def_node)
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types,
                                                   self_fold_safe: self_fold_safe)
         return nil if body_scope.nil?
@@ -2344,28 +2395,68 @@ module Rigor
         # outermost method and thereafter the old `summaries.empty?` gate disabled the memo for every nested
         # call, re-walking the shared sub-readers combinatorially (~932k body evaluations for ~20 tiny
         # methods). The computation itself lives in `compute_user_method_return`.
-        unless memo_candidate?(stack, plain_signature)
-          trace_memo_refusal(stack, plain_signature)
-          return compute_user_method_return(def_node, body_scope, stack, summaries,
+        # Issue #720 — the frame the body's `yield`s read, installed for the whole inference (the memo key
+        # below reads it back from here rather than taking a second parameter, so key and frame cannot
+        # disagree). It is installed even when nil, which is what stops a blockless callee reached from
+        # inside a yielding body from inheriting the outer caller's block.
+        ExpressionTyper.with_yield_value_type(yield_type) do
+          unless memo_candidate?(stack, plain_signature)
+            trace_memo_refusal(stack, plain_signature)
+            next compute_user_method_return(def_node, body_scope, stack, summaries,
                                             receiver, arg_types, plain_signature)
-        end
+          end
 
-        # INVARIANT (ADR-46 recording soundness, ADR-84 WD2) — the deep cross-file dependency edges (the
-        # reads a callee body's dispatches perform through the instrumented `Scope` accessors) are recorded,
-        # per consumer, only as a side effect of evaluating that body, and a memo hit serves the return
-        # WITHOUT re-evaluating it. Since the bucket is run-scoped, hits CROSS consumer-file boundaries, so
-        # every cross-file hit is PAIRED WITH CACHE-AND-REPLAY of the callee's read-set: under recording,
-        # the first evaluation of a key captures the recorder events of its body walk
-        # (`DependencyRecorder.capture` — observe-and-forward, so the first consumer's own record is
-        # untouched) onto the entry, and a hit replays that set into the current consumer's accumulator
-        # (`DependencyRecorder.replay`, which re-applies the per-consumer self-read filter). A memo hit is
-        # thereby edge-equivalent to a fresh body evaluation for EVERY consumer. The naive alternative —
-        # bypassing the memo while the recorder is active — measured >200x wall on analyzer-shaped files
-        # (ActiveStorage video_analyzer.rb's subtree, 0.43s -> >90s; PR #79) and stays rejected. Pinned by
-        # spec/rigor/inference/return_memo_recording_spec.rb (cross-file replay completeness) and
-        # dependency_recorder_spec.rb's transitive deep-edge example.
-        consult_and_store_return_memo(def_node, body_scope, stack, summaries,
-                                      receiver, arg_types, plain_signature)
+          # INVARIANT (ADR-46 recording soundness, ADR-84 WD2) — the deep cross-file dependency edges (the
+          # reads a callee body's dispatches perform through the instrumented `Scope` accessors) are recorded,
+          # per consumer, only as a side effect of evaluating that body, and a memo hit serves the return
+          # WITHOUT re-evaluating it. Since the bucket is run-scoped, hits CROSS consumer-file boundaries, so
+          # every cross-file hit is PAIRED WITH CACHE-AND-REPLAY of the callee's read-set: under recording,
+          # the first evaluation of a key captures the recorder events of its body walk
+          # (`DependencyRecorder.capture` — observe-and-forward, so the first consumer's own record is
+          # untouched) onto the entry, and a hit replays that set into the current consumer's accumulator
+          # (`DependencyRecorder.replay`, which re-applies the per-consumer self-read filter). A memo hit is
+          # thereby edge-equivalent to a fresh body evaluation for EVERY consumer. The naive alternative —
+          # bypassing the memo while the recorder is active — measured >200x wall on analyzer-shaped files
+          # (ActiveStorage video_analyzer.rb's subtree, 0.43s -> >90s; PR #79) and stays rejected. Pinned by
+          # spec/rigor/inference/return_memo_recording_spec.rb (cross-file replay completeness) and
+          # dependency_recorder_spec.rb's transitive deep-edge example.
+          consult_and_store_return_memo(def_node, body_scope, stack, summaries,
+                                        receiver, arg_types, plain_signature)
+        end
+      end
+
+      # Issue #720 — the constructs that own a `yield` written inside them, so a scan for "can this def's
+      # body reach a `yield` that names THIS def's block?" must stop at them. A nested `def` / `class` /
+      # `module` / `class << self` starts a new method-block binding; a block or a lambda does NOT — `yield`
+      # inside `[1, 2].each { yield }` still calls the enclosing method's block, which is precisely the
+      # `each`-wrapper idiom this fix has to keep seeing.
+      YIELD_BOUNDARY_NODES = Set[
+        Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+      ].freeze
+      private_constant :YIELD_BOUNDARY_NODES
+
+      # Whether `def_node`'s body can reach a `yield`, memoised by def-node identity: it gates the
+      # per-call-site memo dimension above and would otherwise be re-walked once per call site of every
+      # user method. It rides in {#class_graph_buckets} for LIFETIME, not for correctness — a pure
+      # function of the AST depends on none of the tables that bucket keys on, but a store that is
+      # replaced with the analysis generation cannot outlive the nodes it holds.
+      def body_yields?(def_node)
+        cache = class_graph_buckets[:yields]
+        return cache[def_node] if cache.key?(def_node)
+
+        cache[def_node] = yield_reachable?(def_node.body)
+      end
+
+      def yield_reachable?(node)
+        return false if node.nil?
+        return true if node.is_a?(Prism::YieldNode)
+
+        node.rigor_each_child do |child|
+          next if YIELD_BOUNDARY_NODES.include?(child.class)
+
+          return true if yield_reachable?(child)
+        end
+        false
       end
 
       # The candidate-frame memo path: consult the current run generation's bucket, and on a miss compute
@@ -2393,9 +2484,14 @@ module Rigor
         # was foldable and `Dynamic[top]` when it was not. Without it in the key the first call site to
         # reach a def would poison every later one with the other polarity. It is read off the body scope
         # rather than passed in, so the key cannot drift from the scope that produced the result.
+        # Issue #720 — the FOURTH such dimension, and it is read off the installed frame rather than
+        # passed in for the same reason: a yielding callee's return depends on the block THIS call site
+        # hands it, so two call sites passing differently-typed blocks must not share an entry. It is nil
+        # for every def that cannot reach a `yield`, which is where the memo's mass is.
         memo_key = [receiver.describe(:short),
                     arg_types.map { |type| type.describe(:short) },
-                    body_scope.struct_fold_safe?(:self)]
+                    body_scope.struct_fold_safe?(:self),
+                    ExpressionTyper.current_yield_value_type&.describe(:short)]
         if (entry = per_def[memo_key])
           BudgetTrace.hit(BudgetTrace::MEMO_HITS)
           Analysis::DependencyRecorder.replay(entry.read_set) if Analysis::DependencyRecorder.active?

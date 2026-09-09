@@ -92,7 +92,9 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/base.rbs" => 26,
   "sig/rigor/plugin/blueprint.rbs" => 3,
   "sig/rigor/plugin/fact_store.rbs" => 2,
-  "sig/rigor/plugin/io_boundary.rbs" => 4,
+  # -2 (#720): `file?` / `directory?` are `probe(path) { … }`, and the block's `bool` now reaches the
+  # caller, so sig-gen generates what the two hand-written declarations say.
+  "sig/rigor/plugin/io_boundary.rbs" => 2,
   "sig/rigor/plugin/load_error.rbs" => 3,
   "sig/rigor/plugin/loader.rbs" => 4,
   "sig/rigor/plugin/manifest.rbs" => 21,

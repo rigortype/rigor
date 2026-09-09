@@ -1484,6 +1484,7 @@ module Rigor
 
           method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
           return nil if method_def.nil?
+          return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
 
           arity_envelope = compute_arity_envelope(method_def)
           return nil if arity_envelope.nil?
@@ -1493,6 +1494,25 @@ module Rigor
           return nil if actual.between?(min, max)
 
           build_arity_diagnostic(path, call_node, class_name, min, max, actual)
+        end
+
+        # Issue #917 — no loaded RBS declares a constructor for this class. The definition builder
+        # synthesizes `.new` from the nearest `initialize` in the ancestry, and when nothing declares
+        # one that is `BasicObject#initialize: () -> void`, so `.new` derives a nullary envelope that
+        # is an artifact of the fallback rather than a statement about the class. `Gem::Specification`
+        # is declared in full by the vendored rubygems sigs except for its constructor, and every
+        # argument at the real one was reported. The rule needs "this class declares a nullary
+        # constructor", and only a `defined_in` naming a class other than `BasicObject` is that
+        # evidence — except on `BasicObject` and `Object` themselves, where the declaration is their
+        # own and `.new` really does take no arguments.
+        def undeclared_constructor?(class_name, call_node, kind, method_def)
+          return false unless kind == :singleton && call_node.name == :new
+          return false unless method_def.respond_to?(:defined_in)
+
+          defined_in = method_def.defined_in
+          return false unless defined_in.nil? || strip_root(defined_in.to_s) == "BasicObject"
+
+          !%w[BasicObject Object].include?(strip_root(class_name))
         end
 
         # True for the outer `.new` of a chained `Struct.new(...).new`:

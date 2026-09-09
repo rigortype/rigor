@@ -1,0 +1,1 @@
+- **[engine]** A version guard written with the rooted spelling — `::RUBY_VERSION`, `::RUBY_ENGINE`, `Gem::Version.new(::RUBY_VERSION)` — now folds exactly as its bare twin does, so the arm that cannot run on the checking Ruby no longer reports. ([#883](https://github.com/rigortype/rigor/pull/883))

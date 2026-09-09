@@ -207,5 +207,68 @@ RSpec.describe "dead version-guard arms" do
       expect(verdict_for('Foo::VERSION >= "3.1"')).to be_nil
       expect(verdict_for("defined?(Ractor)")).to be_nil
     end
+
+    # issue #877 — `::` only makes the top-level lookup explicit, so each rooted spelling must answer what
+    # its bare twin answers. Prism spells the root as a path node, which used to route these to the curated
+    # `X::VERSION` tier and decline them.
+    describe "the rooted spelling" do
+      it "decides the rooted twin of every bare case" do
+        expect(verdict_for('::RUBY_VERSION >= "0.0"')).to eq(:truthy)
+        expect(verdict_for('::RUBY_VERSION >= "99.0"')).to eq(:falsey)
+        expect(verdict_for('::RUBY_ENGINE == "jruby"')).to eq(:falsey)
+        expect(verdict_for('::RUBY_ENGINE != "jruby"')).to eq(:truthy)
+        expect(verdict_for('::Psych::VERSION >= "0.0"')).to eq(:truthy)
+      end
+
+      it "reaches the Gem::Version wrapping through a rooted inner operand" do
+        expect(verdict_for('Gem::Version.new(::RUBY_VERSION) < Gem::Version.new("2.7")')).to eq(:falsey)
+        expect(verdict_for('::Gem::Version.new(::RUBY_VERSION) >= ::Gem::Version.new("2.7")')).to eq(:truthy)
+      end
+
+      # must-still-fire: the set stays closed, so a rooted name outside it is as unfoldable as the bare one
+      it "declines a rooted constant outside the foldable set" do
+        expect(verdict_for('::Foo::VERSION >= "3.1"')).to be_nil
+        expect(verdict_for('::RUBY_PLATFORM == "java"')).to be_nil
+        expect(verdict_for('::RUBY_ENGINE > "jruby"')).to be_nil
+      end
+    end
+  end
+
+  # The issue's own repro: the rooted arm reported while its bare twin was silent.
+  describe "the rooted repro (#877)" do
+    def undefined_method_diagnostics(source)
+      diagnostics_for(source).select { |d| d.rule == "call.undefined-method" }
+    end
+
+    it "elides the dead arm of a rooted guard, as it does the bare one" do
+      source = <<~RUBY
+        def bare
+          "abc".frobnicate_bare if RUBY_VERSION < "2.7."
+        end
+
+        def rooted
+          "abc".frobnicate_rooted if ::RUBY_VERSION < "2.7."
+        end
+
+        def rooted_engine
+          "abc".frobnicate_rengine if ::RUBY_ENGINE == "jruby"
+        end
+
+        def rooted_gem_version
+          "abc".frobnicate_gem if Gem::Version.new(::RUBY_VERSION) < Gem::Version.new("2.7")
+        end
+      RUBY
+      expect(undefined_method_diagnostics(source)).to be_empty
+    end
+
+    # discrimination — the same call in a LIVE rooted arm still reports
+    it "still reports the call when the rooted guard is live" do
+      diags = undefined_method_diagnostics(<<~RUBY)
+        def live
+          "abc".frobnicate_live if ::RUBY_VERSION > "2.7."
+        end
+      RUBY
+      expect(diags.map(&:method_name)).to eq(["frobnicate_live"])
+    end
   end
 end

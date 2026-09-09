@@ -65,6 +65,29 @@ RSpec.describe Rigor::ConfigAudit do
     end
   end
 
+  # Issue #697 — the one axis whose subject resolves to SOMETHING: a bundled plugin's `sig/`
+  # reached through `signature_paths:` loads the RBS without the manifest, so ADR-26
+  # `open_receivers:` never applies and the plugin's deliberately partial declarations report
+  # working code as undefined.
+  describe "a bundled plugin's sig/ reached through signature_paths:" do
+    let(:plugin_sig) { Rigor::SignaturePathAudit.bundled_plugin_sig_dirs.fetch("rigor-activerecord") }
+
+    it "flags it with kind :bundled_plugin_signature_path and names the fix" do
+      warnings = audit("signature_paths" => [plugin_sig])
+
+      route = warnings.find { |w| w.kind == :bundled_plugin_signature_path }
+      expect(route).not_to be_nil
+      expect(route.message).to include("Add \"rigor-activerecord\" to `plugins:`")
+      expect(route.to_h).to include("kind" => "bundled_plugin_signature_path", "gem" => "rigor-activerecord")
+    end
+
+    it "stays silent when plugins: already names the plugin" do
+      warnings = audit("signature_paths" => [plugin_sig], "plugins" => ["rigor-activerecord"])
+
+      expect(warnings.select { |w| w.kind == :bundled_plugin_signature_path }).to be_empty
+    end
+  end
+
   describe "libraries" do
     it "flags an unknown RBS library name" do
       warnings = audit("libraries" => ["this_library_does_not_exist_xyz"])

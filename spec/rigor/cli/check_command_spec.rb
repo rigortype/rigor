@@ -200,6 +200,42 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(sig.fetch("path")).to end_with("no_such_sig")
   end
 
+  # Issue #697 — the interim fix is the warning and nothing else. The `call.undefined-method`
+  # row it explains STILL fires: teaching the check rules to recognise this route would be a
+  # fourth way for a class to be open-receiver protected, which is #660's question. This
+  # example pins both halves together so a later change cannot quietly turn the warning into
+  # a cure and leave the message telling users to edit a config that already works.
+  it "warns when signature_paths: reaches a bundled plugin's sig/ that plugins: does not name, " \
+     "and still reports the false positive it explains" do
+    sig = Rigor::SignaturePathAudit.bundled_plugin_sig_dirs.fetch("rigor-activerecord")
+    Dir.mkdir("sig")
+    File.write("sig/app.rbs", "class Post\n  def rel: () -> ActiveRecord::Relation\nend\n")
+    File.write("code.rb", "Post.new.rel.published_since_last_week\n")
+    File.write(".rigor.yml", "signature_paths:\n  - #{sig}\n  - ./sig\n")
+
+    status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--workers=0", "--format=json",
+                            "--config", ".rigor.yml", "code.rb"])
+
+    expect(err).to include("Add \"rigor-activerecord\" to `plugins:`")
+    route = JSON.parse(out).fetch("config_warnings").find { |w| w["kind"] == "bundled_plugin_signature_path" }
+    expect(route).to include("gem" => "rigor-activerecord")
+    expect(status).to eq(1)
+    expect(JSON.parse(out).fetch("diagnostics").map { |d| d["rule"] }).to include("call.undefined-method")
+  end
+
+  it "stays silent about the bundled plugin's sig/ when plugins: names it" do
+    sig = Rigor::SignaturePathAudit.bundled_plugin_sig_dirs.fetch("rigor-activerecord")
+    File.write("code.rb", "x = 1\n")
+    File.write(".rigor.yml", "plugins:\n  - rigor-activerecord\nsignature_paths:\n  - #{sig}\n")
+
+    _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--workers=0", "--format=json",
+                             "--config", ".rigor.yml", "code.rb"])
+
+    expect(err).not_to include("to `plugins:`")
+    warnings = JSON.parse(out)["config_warnings"] || []
+    expect(warnings.map { |w| w["kind"] }).not_to include("bundled_plugin_signature_path")
+  end
+
   it "warns when a configured libraries: entry is not an available RBS library" do
     File.write("a.rb", "x = 1\n")
     File.write(".rigor.yml", "libraries:\n  - this_library_does_not_exist_xyz\n")

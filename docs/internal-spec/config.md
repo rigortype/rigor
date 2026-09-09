@@ -67,11 +67,22 @@ the snapshot expands it, because presets are registered by plugins and the plugi
 configuration being validated. Load time checks the entry's shape; the registry is only complete once
 analysis begins. The two halves are `Configuration#coerce_effects_reach` and
 `Rigor::Effects::EntryPoints.resolve!`, and the CLI renders both the same way. Tier 3 is for a
-value that is well-formed but **silently resolves to nothing** — a missing signature path, an unknown
-library name, an inert suppression, an unrecognised top-level key; the class of mistake whose only
-symptom is confusing and downstream.
+value that is well-formed but **does not do what it appears to do** — the class of mistake whose only
+symptom is confusing and downstream. Usually it resolves to nothing: a missing signature path, an
+unknown library name, an inert suppression, an unrecognised top-level key.
 Tier 3 warns and never errors, because a partial or forward-looking config is a valid setup, and it
 never fires on an unset default.
+
+One tier-3 finding widens "resolves to nothing" by a step, to a value that resolves to *part* of what
+it looks like: a `signature_paths:` entry naming a **bundled plugin's own `sig/`** while `plugins:`
+does not name that plugin. The RBS loads and the manifest does not, so the ADR-26 `open_receivers:`
+membership that manifest carries never applies, and the plugin's deliberately partial declarations are
+read as complete. The symptom is tier 3's usual one — a cluster of high-confidence
+`call.undefined-method` on code that runs — which is why it is reported the same way. It is reported
+and **not repaired**: teaching the check rules to recognise this route would add a fourth path to
+open-receiver protection, which is the question
+[#660](https://github.com/rigortype/rigor/issues/660) is open to settle. The finding names the plugin
+and the one edit that fixes it; the diagnostics it explains keep firing until then.
 
 Tiers 1 and 3 overlap on unrecognised **top-level** keys, and both are needed: tier 1 catches the
 mistake as it is typed but only for a user whose editor loads the schema, while tier 3 always runs.

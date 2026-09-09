@@ -18,6 +18,11 @@ module Rigor
   # never written. This module surfaces each such entry up front so the cause is visible
   # instead of inferred.
   #
+  # {.bundled_plugin_signature_path_warnings} widens that by one step, to a value that
+  # resolves to *part* of what it looks like. It belongs here because the symptom is the
+  # same one — a cluster of `call.undefined-method` on working code, traceable to a config
+  # line nothing in the output names.
+  #
   # Every check is held to the same bar that {SignaturePathAudit} set: it mirrors the
   # loader's own acceptance test, so a warning means the loader really did load nothing, and
   # it never fires on a setup that works. In particular the rule-token check only flags a
@@ -27,8 +32,8 @@ module Rigor
   # a typo.
   module ConfigAudit
     # One config-level finding. `kind` discriminates the source key (`:signature_path`,
-    # `:library`, `:disabled_rule`, `:severity_override`, `:bundler_bundle_path`,
-    # `:bundler_lockfile`, `:rbs_collection_lockfile`); `fields` carries the kind-specific
+    # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`,
+    # `:bundler_bundle_path`, `:bundler_lockfile`, `:rbs_collection_lockfile`); `fields` carries the kind-specific
     # structured data merged into {#to_h} for JSON consumers.
     Warning = Data.define(:kind, :message, :fields) do
       def to_h
@@ -41,6 +46,7 @@ module Rigor
     def self.warnings(configuration, project_root: Dir.pwd)
       unknown_key_warnings(configuration) +
         signature_path_warnings(configuration) +
+        bundled_plugin_signature_path_warnings(configuration) +
         library_warnings(configuration) +
         rule_token_warnings(configuration) +
         explicit_path_warnings(configuration, project_root)
@@ -95,6 +101,27 @@ module Rigor
           message: entry.message,
           fields: { "path" => entry.path, "status" => entry.status.to_s, "rbs_file_count" => entry.rbs_file_count }
         )
+      end
+    end
+
+    # The one member of this module whose subject is a configured value that resolves to
+    # *something*: a `signature_paths:` entry loading a bundled plugin's own `sig/` while
+    # `plugins:` never names that plugin (issue #697). The RBS arrives, its manifest does not,
+    # and the declarations that manifest marks deliberately partial (ADR-26 `open_receivers:`)
+    # are then read as complete — so the symptom is this module's usual one, a cluster of
+    # high-confidence `call.undefined-method` firings on code that runs, with nothing pointing
+    # at the config line that caused them.
+    #
+    # It is a warning and not a fix on purpose. Teaching the check rules to recognise this
+    # route would be a fourth way for a class to be open-receiver protected, and settling
+    # where that membership belongs is [#660](https://github.com/rigortype/rigor/issues/660)'s
+    # question; until it is answered, the honest move is to make the misconfiguration loud
+    # rather than to grow the mechanism. The false positive itself still fires.
+    def self.bundled_plugin_signature_path_warnings(configuration)
+      routes = SignaturePathAudit.bundled_plugin_routes(configuration.signature_paths, configuration.plugins)
+      routes.map do |route|
+        Warning.new(kind: :bundled_plugin_signature_path, message: route.message,
+                    fields: { "path" => route.path, "gem" => route.gem })
       end
     end
 

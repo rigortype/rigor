@@ -93,6 +93,16 @@ rigor: severity_overrides: "flow.bogus" is not a recognized rule id; the overrid
 rigor: bundler.lockfile: "./missing/Gemfile.lock" does not exist
 ```
 
+One warning covers the mirror-image mistake — a path that loads, but only
+half of what you wanted. A bundled plugin ships its RBS *and* a manifest
+recording which of those classes it declares only partially; `plugins:`
+loads both, while pointing `signature_paths:` at the plugin's `sig/` loads
+only the RBS, so calls your own code defines get reported as undefined:
+
+```
+rigor: signature_paths: "…/plugins/rigor-activerecord/sig" loads the signatures of the bundled plugin "rigor-activerecord", which `plugins:` does not name — … Add "rigor-activerecord" to `plugins:` instead of naming its `sig/` in `signature_paths:`.
+```
+
 The unrecognised-key check covers **top-level** keys, and skips
 the namespaces reserved for other implementations (see below).
 A typo *inside* a group — `cache: { pth: … }` — is caught by

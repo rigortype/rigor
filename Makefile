@@ -188,7 +188,7 @@ check-json:
 	bundle exec exe/rigor check --format=json lib
 
 # Report type-precision coverage for `lib/`.
-# Exits non-zero when the precision ratio drops below 57 %.
+# Exits non-zero when the precision ratio drops below 58 %.
 #
 # Recalibrated 2026-08-31. The original 43 % was measured on 2026-05-26 and
 # never moved; by v0.3.6 `lib` read 58.96 %, so the gate carried ~16 points

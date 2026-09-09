@@ -2371,8 +2371,10 @@ module Rigor
       # context influenced `result`, which a standalone recompute would not reproduce; at-or-above-entry
       # events are the compute's own deterministic machinery (its own converged fixpoint, sub-cycles that
       # opened and closed inside the bracket) and do not block the store. A top-of-stack compute (entry
-      # depth 0) is standalone by construction. A hit under ADR-46 recording replays the entry's captured
-      # read-set into the current consumer (see the INVARIANT comment at the call site).
+      # depth 0) is standalone by construction. ADR-84 WD6 adds one exemption on top: a tainted result that
+      # is already `Dynamic[top]` is stored anyway — see `top_result?`. A hit under ADR-46 recording
+      # replays the entry's captured read-set into the current consumer (see the INVARIANT comment at the
+      # call site).
       def consult_and_store_return_memo(def_node, body_scope, stack, summaries,
                                         receiver, arg_types, plain_signature)
         per_def = (return_memo_bucket[def_node] ||= {})
@@ -2400,7 +2402,7 @@ module Rigor
 
         if summary_consult_count != consults_before
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_CONSULT_TAINTED)
-        elsif context_tainted?(event_mark, entry_depth)
+        elsif context_tainted?(event_mark, entry_depth) && !top_result?(result)
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
         else
           per_def[memo_key] = MemoEntry.new(result: result, read_set: read_set,
@@ -2421,11 +2423,44 @@ module Rigor
       # `event_mark`) referenced a frame below `entry_depth`. The log is cleared when the guard stack drains
       # (only possible mid-bracket for a top-of-stack compute, whose events are deterministic anyway), so a
       # missing / shorter log reads as untainted.
+      #
+      # Scanned by index rather than over `log[event_mark..]`: the log is append-only for the whole
+      # outermost entry, so the suffix slice allocated an array per candidate compute — a term quadratic in
+      # the event count, and the `ary_ensure_room_for_push` / GC-sweep profile issue #870 sampled.
       def context_tainted?(event_mark, entry_depth)
         log = Thread.current[TRANSIENT_EVENT_DEPTHS_KEY]
         return false if log.nil? || log.size <= event_mark
 
-        log[event_mark..].any? { |depth| depth < entry_depth }
+        index = event_mark
+        size = log.size
+        while index < size
+          return true if log[index] < entry_depth
+
+          index += 1
+        end
+        false
+      end
+
+      # ADR-84 WD6 (issue #872) — the top-result exemption to the WD3 store gate.
+      #
+      # WD3 refuses a store whenever the bracket saw a below-entry transient event, because such a result
+      # embeds an ancestor's in-flight state and a standalone recompute need not reproduce it. Inside a
+      # strongly connected component of mutually recursive methods that holds for nearly every frame — each
+      # nested compute re-enters a signature already on the guard stack and the guard site logs at the
+      # ancestor's shallower position — so nothing in the component is ever memoised and every call edge
+      # re-walks its whole callee subtree. Issue #870's fixture measured 18,412 of 18,436 memo misses
+      # computing a result and discarding it, and rufo 0.18.2's `formatter.rb` did not finish in 25 minutes.
+      #
+      # The exemption: when the computed result is `Dynamic[top]` the entry carries no context-dependent
+      # information to serve. `untyped` is the lattice top and the ADR-5 degradation floor — the only way a
+      # standalone recompute can differ is by being MORE precise, so serving the stored top can never
+      # surface a type the ancestor context invented, and can never raise a diagnostic that a fresh
+      # evaluation would not (nothing is reported off `untyped`). The cost is a possible missed diagnostic
+      # where the untainted recompute would have been precise; the corpus evidence that this does not
+      # happen in practice is the byte-identical `--format json` runs over `lib`, `plugins/*/lib`,
+      # `examples/*/lib` and the survey projects recorded on issue #872.
+      def top_result?(result)
+        result.equal?(Type::Combinator.untyped)
       end
 
       # ADR-84 WD2 — the memo-miss compute, wrapped in a `DependencyRecorder.capture` window when ADR-46

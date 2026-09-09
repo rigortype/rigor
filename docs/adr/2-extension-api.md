@@ -284,7 +284,7 @@ Extension compatibility should initially be managed through Ruby gem version dep
 
 ## Feedback from the Resulting Type Specification
 
-Reconstructing `docs/types.md` exposes several extension API requirements that are not optional for the ideal type model:
+Reconstructing the type specification (`docs/type-specification/structural-interfaces-and-object-shapes.md` and `docs/type-specification/rbs-extended.md`) exposes several extension API requirements that are not optional for the ideal type model:
 
 - Extensions need to return flow contributions, not just types. A contribution should be able to describe truthy facts, falsey facts, post-return assertion facts, normal return type, exceptional or non-returning effects, receiver and argument mutations, and fact invalidations.
 - `Scope` must be edge-aware. Plugin facts must participate in the same short-circuiting machinery as built-in guards so `&&`, `||`, `unless`, `elsif`, `case`, and pattern matching can refine scopes before later operands or arms are analyzed.
@@ -334,7 +334,7 @@ Working response: Rigor ships an opinionated core catalog of common standard-lib
 
 Concern: ADR-1 and ADR-2 both mention flow-effect bundle fields, which risks drift.
 
-Working response: ADR-1 owns the semantic schema: fields, target-path meaning, certainty rules, and scope transitions. ADR-2 owns plugin packaging, registration, service lifetime, and provenance. `docs/types.md` carries the detailed normative product specification both ADRs reference.
+Working response: ADR-1 owns the semantic schema: fields, target-path meaning, certainty rules, and scope transitions. ADR-2 owns plugin packaging, registration, service lifetime, and provenance. `docs/type-specification/rbs-extended.md` carries the detailed normative directive specification both ADRs reference.
 
 ### Reflection Rebuilds Are Slice-Based
 

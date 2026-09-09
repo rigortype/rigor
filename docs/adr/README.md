@@ -136,8 +136,8 @@ When making a significant architectural decision:
 
 ## Relationship to Other Documents
 
-- **`docs/types.md`** — Type specification quick guide. When ADR-1 and `docs/types.md` discuss the same area, `docs/types.md` is authoritative for *what the analyzer does*; ADR-1 is authoritative for *why*.
-- **`docs/type-specification/`** — Normative type specification, split into topical documents.
+- **`docs/type-specification/`** — Normative type specification, split into topical documents (index: `docs/type-specification/README.md`). When an ADR and a specification document discuss the same area, the specification is authoritative for *what the analyzer does*; the ADR is authoritative for *why*.
+- **`docs/types.md`** — Informational quick guide to the type model; it binds nothing.
 - **`docs/internal-spec/`** — Analyzer-internal contracts (engine surface, type-object public API).
 - **`docs/handbook/`** — End-user handbook, written for Ruby programmers without prior static-typing background.
 - **`AGENTS.md`** — Development contract for agents working in this repository.

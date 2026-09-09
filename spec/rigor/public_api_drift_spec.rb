@@ -62,6 +62,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     environment()
     eql?(req:other)
     evaluate(req:node,key:tracer)
+    external_ancestor_name_candidates(req:class_name,key:name_memo)
     fact_store()
     facts_for(key:target,key:bucket)
     forget_match_globals()

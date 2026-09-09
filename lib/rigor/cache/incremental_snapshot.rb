@@ -89,7 +89,13 @@ module Rigor
       # pre-18 blob's Array value is not a Hash and the resolver's per-name lookup would raise on it, so the
       # gate has to reject it — and even a reader that tolerated the old shape would serve the per-class
       # union for every unchanged file, which is the answer this issue exists to stop giving.
-      SCHEMA = 18
+      # 19: issue #668 re-keys a constant write through a base no name reaches — `k::LIMIT = 7` — from the
+      # bare last segment to the wildcard `*::LIMIT`, in `constant_decls` and in each seed bundle's
+      # `constant_writes` census alike. A pre-19 blob's `LIMIT` key deserialises cleanly and reads as an
+      # ordinary top-level write, so every unchanged file would keep publishing the `Foo::LIMIT` the write
+      # may already have replaced while a cold run made it gradual — the `--verify-incremental` divergence
+      # 14 was bumped for.
+      SCHEMA = 19
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

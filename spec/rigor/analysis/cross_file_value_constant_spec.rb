@@ -614,8 +614,11 @@ RSpec.describe "cross-file value constants" do
   # Issue #705 — `self::LIMIT = …` names whatever `self` is, and a `class_eval`-family block swaps `self` for
   # the receiver while leaving `Module.nesting` alone. Charging the lexical enclosure gets BOTH halves wrong at
   # once: the name the write did touch keeps publishing a value a second writer replaced, and the name it did
-  # not stops publishing one nothing conflicts with. Both halves are asserted, and the two declines are paired
+  # not stops publishing one nothing conflicts with. Both halves are asserted, and the declines are paired
   # with the ordinary block that must still charge the enclosure.
+  #
+  # Where the block's `self` is OPAQUE the second half no longer holds, by #668: such a write reaches every
+  # namespace, so retracting the enclosure's name too is not a mis-keying but the honest answer.
   describe "`self::` under a block that rebinds `self`" do
     # `module N` in the reader's project, plus the `KEPT` control that proves a `Dynamic[top]` is this rule
     # and not the whole table failing.
@@ -637,8 +640,16 @@ RSpec.describe "cross-file value constants" do
         .to eq(["50", ":kept"])
     end
 
-    it "does not charge the enclosure for a `class_eval` whose receiver names no class" do
-      expect(eval_duel("module N\n  target = Other\n  target.class_eval { self::LIMIT = 7 }\nend\n", "N::LIMIT"))
+    # Superseded by #668, in the direction that issue argues for. The receiver names no class, so `self` is
+    # opaque and the write reaches SOME namespace's `LIMIT` — the enclosing `N` included. The census files it
+    # under the wildcard, which retracts every `LIMIT` rather than the enclosure alone, so what this example
+    # now discriminates is that the retraction is not the lexical-enclosure keying #705 removed: a name with
+    # a different last segment is untouched by the same write.
+    it "retracts every `LIMIT` for a `class_eval` whose receiver names no class, and only `LIMIT`" do
+      opaque = "module N\n  target = Other\n  target.class_eval { self::LIMIT = 7 }\nend\n"
+      expect(eval_duel(opaque, "N::LIMIT")).to eq(["Dynamic[top]", ":kept"])
+      expect(dumps("b.rb" => "class Other\nend\nmodule N\n  OTHER = 50\nend\nKEPT = :kept\n", "c.rb" => opaque,
+                   "a.rb" => "Rigor.dump_type(N::OTHER)\nRigor.dump_type(KEPT)\n"))
         .to eq(["50", ":kept"])
     end
 
@@ -780,6 +791,53 @@ RSpec.describe "cross-file value constants" do
                    "c.rb" => "X = 5\nKEPT = :kept\n",
                    "a.rb" => "Rigor.dump_type(X)\nRigor.dump_type(KEPT)\n"))
         .to eq(["Dynamic[top]", ":kept"])
+    end
+  end
+
+  # Issue #668 — a DYNAMIC constant target (`k::LIMIT = 7`, whose left side is a runtime expression) can
+  # create `Anything::LIMIT` and can never create the top-level `LIMIT`. Filing it under the bare last
+  # segment therefore suppressed the one name the form cannot write while leaving published every name it
+  # can — the stale-value failure the census was built to prevent, arrived at through the fallback meant to
+  # be its safe direction. The wildcard key retracts the whole family instead: more readers go gradual, and
+  # none keeps a value such a write may already have replaced.
+  describe "a dynamic constant target" do
+    # The issue's repro. Requiring `b` then `c`, Ruby has `LIMIT == :top` and `Foo::LIMIT == 7`; the
+    # pre-#668 answers were `Dynamic[top]` for the first (suppressed, though nothing dynamic can write it)
+    # and `50` for the second (published, though it was just overwritten). The precise answer was the wrong
+    # one, which is what makes this worth more than a precision nit.
+    let(:repro) do
+      { "b.rb" => "module Foo\n  LIMIT = 50\nend\nLIMIT = :top\n",
+        "c.rb" => "k = Foo\nk::LIMIT = 7\n",
+        "a.rb" => "Rigor.dump_type(LIMIT)\nRigor.dump_type(Foo::LIMIT)\n" }
+    end
+
+    it "answers gradual for the namespaced name the write can reach, and for the bare one" do
+      expect(dumps(repro)).to eq(["Dynamic[top]", "Dynamic[top]"])
+    end
+
+    # The retraction is scoped to the segment the write names, not to every constant: an over-approximation
+    # this wide would take the whole table down with one `k::X = 1` anywhere in a project.
+    it "retracts nothing whose last segment the write does not name" do
+      expect(dumps("b.rb" => "module Foo\n  OTHER = 50\nend\nKEPT = :kept\n",
+                   "c.rb" => "k = Foo\nk::LIMIT = 7\n",
+                   "a.rb" => "Rigor.dump_type(Foo::OTHER)\nRigor.dump_type(KEPT)\n"))
+        .to eq(["50", ":kept"])
+    end
+
+    # Must-still-succeed: the same project WITHOUT the dynamic write publishes, so the two arms above cannot
+    # pass by publication having stopped working for a namespaced name.
+    it "still publishes the single-declarer `Foo::LIMIT = 50`" do
+      expect(dumps("b.rb" => "module Foo\n  LIMIT = 50\nend\nLIMIT = :top\n",
+                   "a.rb" => "Rigor.dump_type(LIMIT)\nRigor.dump_type(Foo::LIMIT)\n"))
+        .to eq([":top", "50"])
+    end
+
+    # A dynamic write is not a declaration, so it publishes nothing of its own under any name — and with no
+    # censused name sharing its segment there is nothing for it to retract either.
+    it "publishes and retracts nothing in a project with no matching last segment" do
+      expect(dumps("b.rb" => "class Foo\nend\nk = Foo\nk::LIMIT = 7\nKEPT = :kept\n",
+                   "a.rb" => "Rigor.dump_type(KEPT)\n"))
+        .to eq([":kept"])
     end
   end
 

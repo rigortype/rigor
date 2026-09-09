@@ -2,12 +2,12 @@
 
 Status: **Accepted, 2026-07-17. WD1 and WD2 implemented 2026-09-10 (#925).** `target_gems:`
 is a validated manifest field declared by the 34 bundled plugins that model a gem, read
-through `Plugin::BundledCatalog`; `rigor doctor` and `rigor skill describe` route their
-gap advisory through `Rigor::PluginGapAdvisory` and the two Rails-only constant tables are
+through `Plugin::BundledCatalog`; `rigor doctor` and `rigor skill describe` route their gap
+advisory through `Rigor::PluginGapAdvisory` and the two Rails-only constant tables are
 deleted. The advisory generalised the preserved `:fail` with them: it fires when the project
 locks gems Rigor models and enables **none** of the plugins that model them — today's Rails
 condition, stated over every framework rather than one. **WD3 (presence-gated umbrella
-expansion) remains proposed and gated on WD2** — see "Why WD2 must precede WD3". WD5 settles
+expansion) remains proposed**, on the sequencing argument below. WD5 settles
 `plugins/rigor-rails/`'s status without deciding its future: the dead Gemfile framing
 comes out of the docs now, the meta-gem itself stays.
 

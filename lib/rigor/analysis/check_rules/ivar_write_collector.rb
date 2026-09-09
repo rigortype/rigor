@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "rule_walk"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 
@@ -17,7 +18,11 @@ module Rigor
       #
       # Skipped on purpose:
       #
-      # - Singleton-method bodies (`def self.foo`). Their ivars live on the class object, not on instances.
+      # - Singleton-method bodies, in either spelling: `def self.foo`, and (issue #909) any `def` lexically
+      #   inside a `class << self` body. Their ivars live on the class object, not on instances.
+      # - Bodies of an anonymous-class factory block (`Class.new do … end`, `Module.new`, `Struct.new`,
+      #   `Data.define`). The class they define is not the enclosing one, so its ivars are a third store
+      #   again (issue #909).
       # - Class-body ivar writes outside any def — the `Module#@var` surface is a separate slice the engine
       #   doesn't yet model.
       # - Nested classes / modules / defs inside a method body are barriers, mirroring the indexer's
@@ -33,7 +38,7 @@ module Rigor
         # shared full DFS that prune becomes the `:inside_def` gate; the enclosing class / module name stack
         # the legacy walk threaded as `qualified_prefix` is now `context.qualified_prefix`.
         NODE_CLASSES = [Prism::DefNode].freeze
-        RULE_WALK_GATES = [:inside_def].freeze
+        RULE_WALK_GATES = %i[inside_def detached_ivar_facet].freeze
 
         # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:}>]]`. Empty
         # when the tree has no qualifying writes.
@@ -66,6 +71,9 @@ module Rigor
 
         def walk(node, qualified_prefix)
           return unless node.is_a?(Prism::Node)
+          # The legacy walk's mirror of {RuleWalk}'s `detached_ivar_facet` context (issue #909); the two
+          # walks share the predicate so the permanent equivalence spec keeps holding.
+          return if RuleWalk.detached_ivar_facet?(node)
 
           case node
           when Prism::ClassNode, Prism::ModuleNode

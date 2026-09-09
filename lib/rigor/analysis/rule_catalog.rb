@@ -642,7 +642,10 @@ module Rigor
             "Later write is `nil` — the `@cache = nil` clear-idiom is allowlisted.",
             "Either side is Union / Dynamic / IntegerRange / a shape-varied carrier.",
             "Writes live in different classes that happen to share an ivar name.",
-            "Writes are in `def self.foo` (singleton) bodies — those track separately."
+            "Writes are in a singleton body — `def self.foo` or a `class << self` def — those track " \
+            "separately.",
+            "Writes are in a `def` inside an anonymous-class factory block (`Class.new do … end`, " \
+            "`Module.new`, `Struct.new`, `Data.define`): that body defines another class."
           ],
           suppression: "`# rigor:disable ivar-write-mismatch` on the offending write.",
           severity_authored: :error,

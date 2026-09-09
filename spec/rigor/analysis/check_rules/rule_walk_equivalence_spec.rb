@@ -156,6 +156,25 @@ module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curate
         end
       end
     RUBY
+    "ivar writes skipped under a singleton class and an anonymous-class factory block" => <<~RUBY,
+      class Detached
+        def instance_write
+          @d = 1
+        end
+
+        class << self
+          def singleton_write
+            @d = "two"
+          end
+        end
+
+        Inner = Class.new do
+          def initialize
+            @d = :three
+          end
+        end
+      end
+    RUBY
     "ivar writes inside a nested def are not double-collected" => <<~RUBY,
       class Holder
         def outer

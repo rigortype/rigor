@@ -552,11 +552,14 @@ block and loop form; `block_path_stays_precise` and the
 drop (or reading the seed from `post_scope` again) turns the
 must-not-fire examples red and nothing else.
 
-What this does NOT touch: the straight-line seam's `Difference`
-branch, where `widen_for_mutator` widens `non-empty-array[T]` to its
-base without joining the mutator's argument (`if xs.any?; xs << 1` reads
-`Array[String]`). That is #560's family reached through a fourth door,
-and a separate change.
+What this did NOT touch: the straight-line seam's `Difference`
+branch, where `widen_for_mutator` widened `non-empty-array[T]` to its
+base without joining the mutator's argument (`if xs.any?; xs << 1` read
+`Array[String]`). That was #560's family reached through a fourth door,
+and it landed as that separate change (issue #936): the arm now joins the
+added content over the refinement's base and retracts the empty witness
+only for the mutators that can empty the receiver, so an append reads
+`non-empty-array[String | Integer]` and `xs.clear` still reads `Array[String]`.
 
 ### WD2.10 — The per-element fold sees a rebound capture at its converged binding (2026-09-02, issue #587)
 

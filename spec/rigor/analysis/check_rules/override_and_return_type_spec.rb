@@ -514,6 +514,33 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         RUBY
         expect(vis_diags(result).first&.message).to include("overrides NS::Base#greet")
       end
+
+      # #732 — the resolver asks `Scope#known_user_class?`, it does not re-implement it. The copy this
+      # rule carried read three discovery tables; #723 widened the scope's with a fourth
+      # (`discovered_methods`) and left the copy behind, so a parent whose only project-side content is a
+      # CLASS method resolved to a project class for dispatch and to nothing here — the walk ended before
+      # reaching `Base`, and this reports nothing at all pre-fix.
+      it "resolves a parent whose only project-side content is a class method" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def self.build = :built
+          end
+
+          class Sub < Base
+            def name = 42
+          end
+        RUBY
+          class Base
+            def self.build: () -> Symbol
+            def name: () -> String
+          end
+
+          class Sub < Base
+            def name: () -> Integer
+          end
+        RBS
+        expect(diags_for(result, "def.override-return-widened").first&.message).to include("overrides Base#name")
+      end
     end
   end
 

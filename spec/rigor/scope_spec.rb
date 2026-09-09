@@ -584,4 +584,40 @@ RSpec.describe Rigor::Scope do
       expect(described_class.empty.ancestor_name_candidates("Widget", "Base")).to eq(%w[Base])
     end
   end
+
+  # #723 / #732 — the predicate that filters those candidates, and the reason it is owned HERE. Every
+  # ancestor-name resolver asks it: `compute_ancestor_class_name` for dispatch and the constant ladder,
+  # `ExpressionTyper`'s gem-provenance probe, and the override rules' `resolve_override_ancestor_name`,
+  # which carried a copy of this body reading only the first three tables until #732 replaced it with this
+  # call. Each table admits a class on its OWN, so the fork was observable on exactly one shape.
+  describe "#known_user_class?" do
+    def scope_with_discovery(**tables)
+      described_class.empty.with_discovery(Rigor::Scope::DiscoveryIndex::EMPTY.with(**tables))
+    end
+
+    it "admits a class the project declares a superclass for" do
+      scope = scope_with_discovery(discovered_superclasses: { "Base" => "Object" })
+      expect(scope.known_user_class?("Base")).to be(true)
+    end
+
+    it "admits a class the project declares an instance def in" do
+      expect(scope_with_discovery(discovered_def_nodes: { "Base" => {} }).known_user_class?("Base")).to be(true)
+    end
+
+    it "admits a class the project declares an include in" do
+      expect(scope_with_discovery(discovered_includes: { "Base" => %w[Mixin] }).known_user_class?("Base")).to be(true)
+    end
+
+    # The divergent shape. `class Base; def self.build = :built; end` records no instance def node, no
+    # superclass and no include, so this is the only table that says the project defines anything under the
+    # name at all — and a resolver reading the other three ends its walk one hop early.
+    it "admits a class whose only project content is a class method" do
+      scope = scope_with_discovery(discovered_methods: { "Base" => { build: :singleton } })
+      expect(scope.known_user_class?("Base")).to be(true)
+    end
+
+    it "refuses a name no discovery table mentions" do
+      expect(described_class.empty.known_user_class?("String")).to be(false)
+    end
+  end
 end

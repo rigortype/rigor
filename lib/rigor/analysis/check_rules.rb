@@ -3191,9 +3191,15 @@ module Rigor
           names
         end
 
+        # Issue #732 — the predicate is asked of the SCOPE, not re-implemented here. This rule kept its own
+        # three-table copy until #723 widened the scope's with `discovered_methods` and left this one behind,
+        # so the two disagreed about exactly one shape (a project class with no instance def, no superclass
+        # and no include — `class Base; def self.build = :built; end`) with nothing observing the fork. #682
+        # made `Scope` the single owner of the candidate ORDER; this makes it the single owner of the
+        # predicate that filters those candidates too.
         def resolve_override_ancestor_name(scope, subclass_qualified, raw_ancestor)
           resolved = scope.ancestor_name_candidates(subclass_qualified, raw_ancestor)
-                          .find { |candidate| known_user_class?(scope, candidate) }
+                          .find { |candidate| scope.known_user_class?(candidate) }
           return resolved if resolved
 
           # ADR-46 slice 3 — the override checker reads the class graph
@@ -3205,12 +3211,6 @@ module Rigor
           # widening picks it up.
           DependencyRecorder.read_missing(:class, raw_ancestor.to_s.split("::").last) if DependencyRecorder.active?
           nil
-        end
-
-        def known_user_class?(scope, name)
-          scope.discovered_superclasses.key?(name) ||
-            scope.discovered_def_nodes.key?(name) ||
-            scope.discovered_includes.key?(name)
         end
 
         def build_override_visibility_diagnostic(path, def_node, parent_class, parent_visibility, override_visibility)

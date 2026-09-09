@@ -40,11 +40,26 @@ module Rigor
 
         CLASS_OR_MODULE_NODE_CLASSES = [Prism::ClassNode, Prism::ModuleNode].freeze
 
+        # Issue #909 — the receivers whose block form opens a class body that is NOT the lexically enclosing
+        # class: `Class.new do … end`, `Module.new`, `Struct.new`, `Data.define`. A `def` in such a block
+        # belongs to the anonymous class the call returns, so its ivar writes are a different store from the
+        # enclosing class's.
+        DETACHED_CLASS_FACTORIES = {
+          Class: %i[new],
+          Module: %i[new],
+          Struct: %i[new],
+          Data: %i[define]
+        }.freeze
+        private_constant :DETACHED_CLASS_FACTORIES
+
+        EMPTY_METHODS = [].freeze
+        private_constant :EMPTY_METHODS
+
         # The immutable per-node descent context. Recomputed for each child from its parent's context as the
         # walk descends; collectors read only the fields they declared a need for.
-        Context = Data.define(:in_loop_or_block, :qualified_prefix, :inside_def) do
+        Context = Data.define(:in_loop_or_block, :qualified_prefix, :inside_def, :detached_ivar_facet) do
           def self.root
-            new(in_loop_or_block: false, qualified_prefix: [], inside_def: false)
+            new(in_loop_or_block: false, qualified_prefix: [], inside_def: false, detached_ivar_facet: false)
           end
         end
 
@@ -58,9 +73,13 @@ module Rigor
         # - `:inside_def` (`inside_def`) — lexically inside a `DefNode`; IvarWrite collects only at a `def`
         #   that sits directly in a class / module body (its legacy walk `return`s at the first `def` it
         #   meets, so a nested def is never reached).
+        # - `:detached_ivar_facet` (`detached_ivar_facet`) — under a `class << self` body or an
+        #   anonymous-class factory block, where the enclosing class name does not name the ivar store the
+        #   body writes to.
         GATE_CONTEXT_PREDICATES = {
           loop_or_block: :in_loop_or_block,
-          inside_def: :inside_def
+          inside_def: :inside_def,
+          detached_ivar_facet: :detached_ivar_facet
         }.freeze
 
         # A per-node driver over a fixed collector set: holds the compiled `node_class => [[collector,
@@ -124,12 +143,28 @@ module Rigor
                                LOOP_OR_BLOCK_NODE_CLASSES.any? { |klass| node.is_a?(klass) }
             inside_def = context.inside_def || node.is_a?(Prism::DefNode)
             qualified_prefix = extend_prefix(node, context.qualified_prefix)
+            detached_ivar_facet = context.detached_ivar_facet || detached_ivar_facet?(node)
 
             Context.new(
               in_loop_or_block: in_loop_or_block,
               qualified_prefix: qualified_prefix,
-              inside_def: inside_def
+              inside_def: inside_def,
+              detached_ivar_facet: detached_ivar_facet
             )
+          end
+
+          # True for a node whose descendants write ivars to a store the enclosing class name does not name:
+          # a `class << self` body (the class object's own ivars) or a call that builds an anonymous class
+          # from a block. Every singleton-class body counts, `class << Konstant` included: whichever object's
+          # singleton it opens, it is not the instance facet the enclosing prefix names.
+          def detached_ivar_facet?(node)
+            return true if node.is_a?(Prism::SingletonClassNode)
+            return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+
+            receiver = node.receiver
+            return false unless receiver.is_a?(Prism::ConstantReadNode)
+
+            DETACHED_CLASS_FACTORIES.fetch(receiver.name, EMPTY_METHODS).include?(node.name)
           end
 
           private

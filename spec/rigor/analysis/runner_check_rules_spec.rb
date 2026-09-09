@@ -3342,6 +3342,98 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(diag.message).to include("String")
       end
 
+      # Issue #909 — the class object's ivars and an instance's are different stores, and both spellings of a
+      # singleton def must say so.
+      it "does not flag a `class << self` write that diverges from the instance facet" do
+        result = analyze(<<~RUBY)
+          class SingletonMix
+            def initialize
+              @state = "idle"
+            end
+
+            class << self
+              def configure
+                @state = 42
+              end
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "does not flag the `def self.x` spelling of the same divergence" do
+        result = analyze(<<~RUBY)
+          class SingletonMix
+            def initialize
+              @state = "idle"
+            end
+
+            def self.configure
+              @state = 42
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "still flags a genuine instance-side divergence inside a class that also opens `class << self`" do
+        result = analyze(<<~RUBY)
+          class SingletonMix
+            def initialize
+              @state = "idle"
+            end
+
+            def reset
+              @state = 42
+            end
+
+            class << self
+              def configure
+                @state = :configured
+              end
+            end
+          end
+        RUBY
+        expect(ivar_diags(result).size).to eq(1)
+        expect(ivar_diags(result).first.message).to include("Integer")
+      end
+
+      # Issue #909 — `Class.new do … end` defines a class of its own; its ivars are not the enclosing
+      # class's.
+      it "does not flag a write inside an anonymous-class factory block" do
+        result = analyze(<<~RUBY)
+          class Outer
+            def initialize
+              @own = "outer"
+            end
+
+            Inner = Class.new do
+              def initialize
+                @own = 42
+              end
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "still flags a divergence inside a plain (non-class-building) block" do
+        result = analyze(<<~RUBY)
+          class Outer
+            def initialize
+              @own = "outer"
+            end
+
+            def each_thing
+              [1].each do |n|
+                @own = n
+              end
+            end
+          end
+        RUBY
+        expect(ivar_diags(result).size).to eq(1)
+      end
+
       it "is suppressible via `# rigor:disable ivar-write-mismatch`" do
         result = analyze(<<~RUBY)
           class Foo

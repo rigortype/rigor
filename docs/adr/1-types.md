@@ -3,14 +3,15 @@
 Status: **Accepted; implemented and shipped.**
 
 The type model is live across the
-analyzer; `docs/type-specification/` and `docs/types.md` are
+analyzer; `docs/type-specification/`, indexed by
+[`docs/type-specification/README.md`](../type-specification/README.md), is
 authoritative for *what* the analyzer does, this ADR for *why*.
 
-ADR-1 records type-model design decisions and their rationale. The companion document `docs/types.md` is the type specification: it defines how the analyzer behaves at the level of normalization, narrowing, erasure, signature handling, and diagnostic surfaces. When the two documents discuss the same area:
+ADR-1 records type-model design decisions and their rationale. The companion corpus `docs/type-specification/`, indexed by [`README.md`](../type-specification/README.md), is the type specification: it defines how the analyzer behaves at the level of normalization, narrowing, erasure, signature handling, and diagnostic surfaces. When the two documents discuss the same area:
 
-- `docs/types.md` is authoritative for *what the analyzer does*, including concrete rules, defaults, and budgets.
+- `docs/type-specification/` (per-topic, via [`README.md`](../type-specification/README.md)) is authoritative for *what the analyzer does*, including concrete rules, defaults, and budgets.
 - ADR-1 is authoritative for *why a decision was taken* and for the design boundaries that scope follow-up work.
-- If the two documents diverge in observable behavior, treat `docs/types.md` as the binding text and update ADR-1 to match. ADR-1 should not silently restate a behavior contract that lives in the spec.
+- If the two documents diverge in observable behavior, treat the relevant `docs/type-specification/` document (see [`README.md`](../type-specification/README.md)) as the binding text and update ADR-1 to match. ADR-1 should not silently restate a behavior contract that lives in the spec.
 
 ADR-1 also defers to ADR-2 for plugin extension API design. ADR-1 only fixes the analyzer-side surface that ADR-2 must attach to (Scope queries, fact contributions, capability roles, mutation summaries, diagnostic identifier prefixes); concrete plugin lifecycle, configuration, and merging rules are normative in ADR-2.
 
@@ -486,7 +487,7 @@ When the three sources differ, the resolution order is:
 2. rbs-inline documentation wins for inline-syntax questions that the RBS prose does not address.
 3. Steep 2.0 behavior wins only when neither RBS prose nor rbs-inline documentation specifies the behavior.
 
-Where Steep diverges from a higher-priority source, Rigor follows the higher-priority source and treats the divergence as documented behavior. Such cases should be called out individually in `docs/types.md` so users migrating from Steep see the difference instead of discovering it through a diagnostic.
+Where Steep diverges from a higher-priority source, Rigor follows the higher-priority source and treats the divergence as documented behavior. Such cases should be called out individually in [`docs/type-specification/README.md`](../type-specification/README.md) (Compatibility hierarchy) so users migrating from Steep see the difference instead of discovering it through a diagnostic.
 
 Rigor should read existing rbs-inline and Steep-compatible annotations as official type sources. It should not rewrite them, warn only because they are complex, or require `# rbs_inline: enabled`. Only the rbs-inline configuration directives such as `# rbs_inline: enabled` and `# rbs_inline: disabled` are ignored; the rbs-inline annotation comments themselves (for example `#: String`, `# @rbs`, parameter annotations) are always parsed and used as type sources whenever present.
 
@@ -624,7 +625,7 @@ Many Ruby code bases are dominated by `Dynamic[top]` until plugins, generated st
 
 This is the analyzer's baseline before framework- or library-specific plugins ship. Plugin-specific behavior remains deferred to ADR-2.
 
-When this ADR refers to "v1," it means the *first user-visible product release* of the Rigor analyzer. v1 is a shipping milestone, not the entire type-model specification. The full specification described in this ADR and `docs/types.md` is normative for the long-term analyzer; v1 ships a deliberately scoped slice of that specification so the first release does not over-promise. The boundary is:
+When this ADR refers to "v1," it means the *first user-visible product release* of the Rigor analyzer. v1 is a shipping milestone, not the entire type-model specification. The full specification described in this ADR and [`docs/type-specification/overview.md`](../type-specification/overview.md) is normative for the long-term analyzer; v1 ships a deliberately scoped slice of that specification so the first release does not over-promise. The boundary is:
 
 - The full specification — fact-stability buckets, capability-role catalog, mutation summary set, Dynamic[T] algebra, type operators, RBS::Extended schema — is normative. Internal data structures may be present in v1 even when the user-visible narrowing surface does not yet exploit them.
 - The v1 narrowing surface is the subset of derivation rules that are turned on for end users in the first release.
@@ -700,14 +701,14 @@ Advanced types may be attached to ordinary RBS declarations, members, and overlo
 
 `RBS::Extended` is Rigor's name for the convention of carrying its metadata inside ordinary RBS `%a{...}` annotations under a reserved key namespace. The reserved keys for the first version are `rigor:v1:<directive>` payloads. Other tools' annotations under unrelated keys are not consumed by Rigor and pass through analysis unchanged. Rigor never rewrites another tool's `%a{...}` annotations during erasure.
 
-The canonical directive form is a versioned `rigor:v1:` key followed by a payload. The schema lives in `docs/types.md` `RBS::Extended Annotations`; ADR-1 defines design decisions and uses `docs/types.md` as the single source of truth for the directive grammar. The canonical predicate example referenced from this ADR is:
+The canonical directive form is a versioned `rigor:v1:` key followed by a payload. The schema lives in [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md); ADR-1 defines design decisions and uses `docs/type-specification/rbs-extended.md` as the single source of truth for the directive grammar. The canonical predicate example referenced from this ADR is:
 
 ```rbs
 %a{rigor:v1:predicate-if-true value is String}
 def string?: (untyped value) -> bool
 ```
 
-Predicate targets are initially limited to RBS parameter names and `self`. RBS parameter names use the `_var-name_ ::= /[a-z]\w*/` grammar, so Rigor does not need to encode arbitrary Ruby Symbol names in directive identifiers. Hyphenated directive names such as `predicate-if-true` are safe because they are parsed from the annotation payload by Rigor. Other directive spellings live in `docs/types.md`.
+Predicate targets are initially limited to RBS parameter names and `self`. RBS parameter names use the `_var-name_ ::= /[a-z]\w*/` grammar, so Rigor does not need to encode arbitrary Ruby Symbol names in directive identifiers. Hyphenated directive names such as `predicate-if-true` are safe because they are parsed from the annotation payload by Rigor. Other directive spellings live in [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md).
 
 The version prefix is part of the compatibility contract. Rigor-generated annotations must use `rigor:v1:`. Unversioned `rigor:` directives should be invalid for now rather than silently treated as v1. Unsupported future versions such as `rigor:v2:` are preserved by ordinary RBS tooling, but Rigor should report unsupported metadata when it analyzes the node.
 
@@ -727,7 +728,7 @@ Multiple annotations on the same node are combined by directive kind, target, an
 
 Type guard and assertion effects should be modeled as flow effects, not as ordinary return types. This keeps signatures RBS-compatible while still allowing TypeScript-style narrowing, PHPStan-style assertion behavior, and Python `TypeGuard`/`TypeIs`-style predicates.
 
-ADR-1 owns the semantic schema for flow effect bundles: the field set, target-path meaning, certainty rules, and how effects change scopes. ADR-2 owns the extension API packaging, registration, service lifetime, and plugin provenance for those bundles. The product specification in `docs/types.md` is the detailed normative table both ADRs should reference.
+ADR-1 owns the semantic schema for flow effect bundles: the field set, target-path meaning, certainty rules, and how effects change scopes. ADR-2 owns the extension API packaging, registration, service lifetime, and plugin provenance for those bundles. The product specification in [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md) is the detailed normative table both ADRs should reference.
 
 ### Erasure Must Be Conservative
 
@@ -737,7 +738,7 @@ Erasure can lose precision. It must not become narrower than the internal type.
 
 ### Hash Shape Erasure
 
-Hash shapes carry more information than RBS records and `Hash[K, V]` can express. Rigor's erasure rule preserves what RBS can spell and falls back deterministically when it cannot. The detailed algorithm lives in `docs/types.md`; the strategic decisions are:
+Hash shapes carry more information than RBS records and `Hash[K, V]` can express. Rigor's erasure rule preserves what RBS can spell and falls back deterministically when it cannot. The detailed algorithm lives in [`docs/type-specification/rbs-erasure.md`](../type-specification/rbs-erasure.md); the strategic decisions are:
 
 - Exact closed shapes erase to RBS records when every key can be represented by RBS record syntax. Required entries become required record fields, optional entries become optional fields when spellable, and values erase recursively.
 - Optional-key absence is not a stored `nil`. Rigor must not add `nil` to a value type merely because a key is optional.
@@ -752,7 +753,7 @@ Key and value export budgets are configured separately because hash keys carry m
 
 ## Feedback from the Resulting Type Specification
 
-Reconstructing `docs/types.md` as the ideal type model adds several requirements that this ADR should carry forward:
+Reconstructing [`docs/type-specification/structural-interfaces-and-object-shapes.md`](../type-specification/structural-interfaces-and-object-shapes.md) as the ideal type model adds several requirements that this ADR should carry forward:
 
 - Structural typing should be explicit but limited. RBS classes and modules remain nominal; RBS interfaces and Rigor object shapes are the bridge for Ruby duck typing.
 - IO-like compatibility should be modeled through inferred capability roles, not by treating unrelated nominal classes as subtypes or by requiring ad hoc unions at every call site.
@@ -838,7 +839,7 @@ Negative:
 
 ## Resulting Specification
 
-The current draft specification is maintained in `docs/types.md`.
+The current draft specification is maintained in [`docs/type-specification/`](../type-specification/README.md).
 
 ## Background Research Notes
 

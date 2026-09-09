@@ -7,10 +7,10 @@ auto-wire with the `enabled: false` opt-out, and WD3's `rbs.coverage.inline-anno
 routing hint. The `overview.md` § "Compatibility hierarchy" marker now records the resolved
 state (conforming wherever `rbs-inline` is present; the standalone residual carried by WD3) per
 [ADR-92](92-normative-status-fidelity.md).
-**Amended 2026-07-19** — WD5 (below) closes the engine↔plugin version-skew hazard
+**Amended 2026-07-19** — WD5 (below) is implemented and closes the engine↔plugin version-skew hazard
 [#194](https://github.com/rigortype/rigor/issues/194) surfaced in WD2's gem-name require:
 bundled-plugin resolution anchors to the engine.
-**Amended 2026-09-08** — WD6 (below) closes
+**Amended 2026-09-08** — WD6 (below) is implemented and closes
 [#823](https://github.com/rigortype/rigor/issues/823): WD1's file gate stopped the `untyped`
 skeletons at the file boundary but not inside an annotated file, where they still displaced every
 unannotated sibling's inferred type. A defaulted type slot now carries

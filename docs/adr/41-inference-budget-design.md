@@ -4,8 +4,10 @@ Status: **Proposed, 2026-06-03.** Records the target design for Rigor's
 inference budgets after a survey established that the spec's `budgets:`
 table is normative-for-v1 but largely **unwired**, and that the
 categories that drive real cost on large apps are exactly the unwired
-ones. Nothing here is implemented yet; the work is sequenced as Layer 1
-(doc/spec hygiene) and Layer 2 (wire the load-bearing budgets) below.
+ones. The work is sequenced as Layer 1 (doc/spec hygiene) and Layer 2
+(wire the load-bearing budgets) below: Layer 1 landed, and Layer 2 is
+demand-deferred — the large-app cost cliff that motivated it turned out
+to be a retained-string leak, not a budget (see "Net effect on Layer 2").
 
 Grounding:
 [`docs/notes/20260603-inference-budget-reality-survey.md`](../notes/20260603-inference-budget-reality-survey.md)

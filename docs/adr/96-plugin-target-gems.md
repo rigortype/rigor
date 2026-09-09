@@ -1,7 +1,8 @@
 # ADR-96 — Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion
 
 Status: **Accepted, 2026-07-17.** WD1 (the `target_gems:` manifest field) and WD2 (the
-plugin-gap advisory) are the committed slices; **WD3 (presence-gated umbrella expansion)
+plugin-gap advisory) are decided but remain unimplemented
+([#925](https://github.com/rigortype/rigor/issues/925)); **WD3 (presence-gated umbrella expansion)
 is proposed and gated on WD2** — see "Why WD2 must precede WD3". WD5 settles
 `plugins/rigor-rails/`'s status without deciding its future: the dead Gemfile framing
 comes out of the docs now, the meta-gem itself stays.

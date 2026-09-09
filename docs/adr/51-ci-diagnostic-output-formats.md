@@ -1,6 +1,6 @@
 # ADR-51 — CI-native diagnostic output formats
 
-Status: **Accepted, 2026-06-06; partially implemented (v0.1.18).** Six
+Status: **Accepted, 2026-06-06; implemented in v0.1.18** — every format below, `teamcity` and `junit` included, ships in `CLI::DiagnosticFormats::FORMATS`. Six
 CI-native renderings of the existing diagnostic stream land behind
 `rigor check --format`: **`sarif`** (SARIF 2.1.0, the cross-platform
 anchor), **`github`** (GitHub Actions workflow commands), **`gitlab`**
@@ -240,7 +240,7 @@ opt-out, so it does not regress the false-positive-discipline posture.
 | SARIF only (defer GitHub/GitLab) | Rejected | SARIF leaves both zero-friction paths (GitHub annotations without upload; GitLab's only MR surface) on the table — WD1. |
 | `--output FILE` flag | Deferred | `>` redirect covers file output; the flag is an additive ergonomic with no contract impact, addable on demand. |
 | reviewdog native `rdjson` / `rdjsonl` | Deferred | reviewdog already consumes the shipped `sarif` *and* `checkstyle`, so its whole reporter matrix is reachable without it. `rdjson`'s extra payload is code suggestions + multiline ranges — Rigor produces neither today. Revisit if Rigor gains fix-its. |
-| TeamCity service messages | Deferred | PHPStan ships `teamcity`; demand-gated for Rigor (no observed TeamCity user). |
+| TeamCity service messages | Shipped in the same cut | Originally demand-gated (no observed TeamCity user); implemented alongside the other five formats. |
 | Rich SARIF rule metadata (`shortDescription`, `helpUri`) | Deferred | Id-only `tool.driver.rules` is valid SARIF and avoids coupling the formatter to the `CheckRule` registry; enrich when the GitHub Security-tab UX demands it. |
 | Exit-code mode (e.g. always 0 in report mode) | Rejected | A consumer wanting the gate green uses `continue-on-error` / `if: always()`; baking it into the format would couple presentation to gating policy. |
 

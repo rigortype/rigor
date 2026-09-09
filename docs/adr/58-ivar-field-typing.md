@@ -1,8 +1,9 @@
 # ADR-58 — Instance-variable field typing: declaration-sourced nil policy, homogeneous-write reads, ctor definite assignment
 
 Status: **Accepted, 2026-06-12.** WD1 partially implemented (binding-
-provenance subset, 2026-06-12; method-return-transit residual queued as
-WD1b — see WD1 status). WD2 resolved as already-realized
+provenance subset, 2026-06-12; the method-return-transit residual, WD1b, was
+re-adjudicated to demand-gated earned conservatism — see the WD1b
+adjudication under WD2). WD2 resolved as already-realized
 (2026-06-12 — the flow-insensitive write-union already produces
 `join(writes) | nil`; corpus yield ~zero, bounded by untyped-param /
 recursive-return Dynamic sources per the WD2 status). WD3 implemented

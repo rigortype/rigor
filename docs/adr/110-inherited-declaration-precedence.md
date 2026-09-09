@@ -199,7 +199,9 @@ return to `Dynamic[top]`. Those are correct declarations being disqualified for 
 [ADR-43](43-rbs-complete-ancestor-resolution.md) § "the crux" is why this cannot be had cheaply, and WD5
 criterion 4 exists to keep the size of it visible rather than to deny it.
 
-**Carry-over.** The three predicates in WD4 stay unmerged. WD5's measurement is unrun, so the size of the
+**Carry-over.** The three predicates in WD4 stay unmerged. WD5's measurement has since run and the
+Negative's size is recorded there (zero new diagnostics across 25 corpus targets); the paragraph below
+is kept as written at decision time, when the size of the
 Negative above is unknown at the time of writing — this ADR decides the direction and refuses to state a
 number it has not measured.
 

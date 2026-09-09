@@ -2,7 +2,8 @@
 
 Status: **Accepted — Tier 1 (static proxy) IMPLEMENTED 2026-06-14 (`rigor coverage
 --protection`) and Tier 2 (mutation effectiveness) IMPLEMENTED 2026-06-14 (`rigor coverage
---protection --mutation`).** Extends `rigor coverage` with a *protection* dimension: not
+--protection --mutation`).** WD5's act-on-coverage skill layer is implemented too, as
+[`skills/rigor-protection-uplift`](../../skills/rigor-protection-uplift/SKILL.md). Extends `rigor coverage` with a *protection* dimension: not
 "how precise are my types" but "if I introduce a bug, would Rigor catch it" — the
 user-facing surfacing of the ADR-62 teeth work.
 
@@ -84,7 +85,7 @@ so "report + gate" is satisfied without new surface.
   requires `--protection` (usage error otherwise); `--threshold` gates on the effectiveness
   ratio; `--format json` carries `{mode, killed, survived, effectiveness_ratio, files,
   add_a_type_here}`.
-- **WD5 — the act-on-coverage skill layer (proposed; not implemented).** Tiers 1–2
+- **WD5 — the act-on-coverage skill layer (implemented; shipped as [`skills/rigor-protection-uplift`](../../skills/rigor-protection-uplift/SKILL.md)).** Tiers 1–2
   *surface* "add a type here"; they never author the type. The follow-on is an **agent
   skill** (not a new analyzer surface) that closes the loop per unprotected site:
   `coverage --protection` (Tier 1 `add_a_type_here`, optionally Tier-2-confirmed) → **try

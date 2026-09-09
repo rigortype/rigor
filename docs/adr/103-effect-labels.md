@@ -148,6 +148,14 @@ judgment time. It emits no diagnostic and never enters `rigor check`'s stream. S
 may be promoted into envelopes (`--promote`). It ships in the first slice, ahead of any envelope
 syntax. (§ 9.4.)
 
+**`--promote` declined for now, 2026-09-10
+([#936](https://github.com/rigortype/rigor/issues/936)).** It is not a snapshot verb but a
+config-writing one: it must decide which observations are stable enough to freeze, edit the user's
+`effects.envelopes` stanza in place, and answer for what happens when a promoted envelope later
+disagrees with observation. That is a design question with its own false-positive surface — a
+wrongly-promoted envelope is a contract nothing re-derives — and it belongs in a slice with the
+envelope syntax it writes, not in a residue batch.
+
 ### WD8 — Diagnostics: family shape first, opt-in, cache-aware
 
 Reserve `effect.*` in the diagnostic-policy taxonomy before any id ships ([ADR-100](100-static-diagnostic-family-and-void-origins.md)

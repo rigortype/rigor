@@ -102,6 +102,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 9,
   "sig/rigor/scope.rbs" => 113,
+  "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 9,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,

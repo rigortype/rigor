@@ -139,6 +139,14 @@ Working decisions to settle in the ADR body before implementation:
   set so the engine's control-flow narrowing (the deferred `is_a?`
   surface) can later treat the variant set as exhaustive. Emitting the
   fact is in scope; consuming it for narrowing is not.
+  **Still deferred, re-declined 2026-09-10
+  ([#936](https://github.com/rigortype/rigor/issues/936)):** the emitted
+  structure is flat (`synthetic_method_index.rb` records `class_names` with
+  no parent link), so the fact needs a new parent→variant carrier threaded
+  through the substrate, the fact store and `Environment#class_ordering`
+  before it can be emitted at all — well past the small-residue budget the
+  issue was scoped to, and it wants its own slice with the ADR-47
+  consumption half in view.
 - **WD4 — Demand-gating.** Like Tier D today, ship the value class +
   validation first; wire the pre-pass + dispatcher integration when a
   bundled consumer (`rigor-mangrove` Enum slice) is built against it.

@@ -1,0 +1,14 @@
+class Rigor::SigGen::SkipReasonCatalog::Entry < ::Data
+  def id: () -> untyped
+  def summary: () -> untyped
+  def explanation: () -> untyped
+  def next_step: () -> untyped
+  def self.new: (id: untyped, summary: untyped, explanation: untyped, next_step: untyped) -> instance | (untyped id, untyped summary, untyped explanation, untyped next_step) -> instance
+  def self.[]: (id: untyped, summary: untyped, explanation: untyped, next_step: untyped) -> instance | (untyped id, untyped summary, untyped explanation, untyped next_step) -> instance
+  def to_h: () -> Hash[String, untyped]
+end
+
+module Rigor::SigGen::SkipReasonCatalog
+  def self?.resolve: (untyped) -> Rigor::SigGen::SkipReasonCatalog::Entry?
+  def self?.all: () -> Array[Rigor::SigGen::SkipReasonCatalog::Entry]
+end

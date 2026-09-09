@@ -513,15 +513,23 @@ module Rigor
         return bool_type if predicate
 
         inner = ruby_type_to_type(column.ruby_type)
-        return nil if inner.nil?
+        return Rigor::Type::Combinator.untyped if inner.nil?
 
         column.array? ? Rigor::Type::Combinator.nominal_of("Array", type_args: [inner]) : inner
       end
 
-      # Maps a `SchemaTable::Column#ruby_type` string to a Rigor type. `"Object"` (json / jsonb /
-      # unrecognised column types) declines — `Nominal[Object]` would be NARROWER than the RBS-erased
-      # envelope and could surface false `call.undefined-method` on a value whose real shape the plugin
-      # cannot model.
+      # Maps a `SchemaTable::Column#ruby_type` string to a Rigor type. `"Object"` (json / jsonb / a
+      # `serialize`d or `mount_uploader`ed column / an unrecognised SQL type) declines — `Nominal[Object]`
+      # would be NARROWER than the RBS-erased envelope and could surface false `call.undefined-method` on a
+      # value whose real shape the plugin cannot model.
+      #
+      # ADR-82 WD4 — the caller turns that decline into an explicit `Dynamic[top]` rather than passing the
+      # call on. The two are the same type at the site (dispatch widens an unresolved reader to Dynamic
+      # anyway), but only the plugin ANSWERING makes the engine record `framework_dsl_boundary`: this is a
+      # macro-generated attribute whose value crosses a DSL boundary and stays dynamic, which is exactly the
+      # cause WD4 defined and left unattributed. Answering here is honest in the way WD4 requires — the
+      # plugin knows the reader exists (the schema declares the column) and knows it cannot type it — where
+      # guessing "framework boundary" for any unresolved receiver would not be.
       def ruby_type_to_type(ruby_type)
         case ruby_type
         when "bool" then bool_type

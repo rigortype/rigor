@@ -337,6 +337,14 @@ ones a type actually catches.
 > point Rigor at it with `bundler.bundle_path:`. Until you do, these
 > holes keep the generic `engine_gap` cause instead of `add_rbs` —
 > the label is missing, never wrong.
+>
+> A project with **no `Gemfile.lock`** is not left out: Rigor falls
+> back to the gems it can see installed — the project's Bundler
+> install tree if one resolves, otherwise the running Ruby's gems —
+> and attributes constants against those. Ownership is still
+> established by reading the gem's own entry file, so the fallback
+> widens which gems can be claimed and never whether an unowned
+> constant is.
 
 Provenance is precision-additive only: it never changes a type, fires
 no diagnostic, and never affects severity or the protection ratio.

@@ -13,6 +13,7 @@ require_relative "environment/constant_type_cache_holder"
 require_relative "environment/missing_gem_constant_index"
 require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
+require_relative "environment/installed_gem_set"
 require_relative "environment/rbs_collection_discovery"
 require_relative "plugin/isolation"
 require_relative "environment/rbs_coverage_report"
@@ -332,7 +333,7 @@ module Rigor
         missing_gems, overlay_paths = missing_gems_and_overlay_paths(
           locked: locked, default_libraries: merged_libraries, bundle_sig_paths: gem_sig_paths,
           rbs_collection_paths: collection_paths, plugin_registry: plugin_registry,
-          signature_paths: resolved_paths
+          signature_paths: resolved_paths, bundle_root: bundle_root
         )
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths +
                                  collection_paths + overlay_paths
@@ -415,18 +416,39 @@ module Rigor
       # and consumed twice: as `[gem_name, version]` pairs for the ADR-82 WD9 constant-ownership index, and
       # as the eligible-gem set for the ADR-72 overlay resolution. Returns `[pairs, overlay_paths]`.
       def missing_gems_and_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
-                                         rbs_collection_paths:, plugin_registry:, signature_paths: [])
-        return [[], []] if locked.empty?
+                                         rbs_collection_paths:, plugin_registry:, signature_paths: [],
+                                         bundle_root: nil)
+        if locked.empty?
+          return unlocked_missing_gems(default_libraries, bundle_sig_paths, rbs_collection_paths, bundle_root)
+        end
 
-        rows = RbsCoverageReport.classify(
-          locked_gems: locked, default_libraries: default_libraries,
-          bundle_sig_paths: bundle_sig_paths, rbs_collection_paths: rbs_collection_paths
-        ).select { |row| row.source == :missing }
+        rows = missing_rows(locked, default_libraries, bundle_sig_paths, rbs_collection_paths)
         overlays = gem_overlay_paths(
           missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry,
           signature_paths: signature_paths
         )
         [rows.map { |row| [row.gem_name, row.version] }, overlays]
+      end
+
+      # Issue #530 — a project with no `Gemfile.lock` still has gems on disk, and before this it handed the
+      # ADR-82 WD9 index nothing, so every constant reaching into an RBS-less gem kept the generic cause and
+      # the whole boundary reported as `engine_gap` rather than `add_rbs`. The installed set stands in for
+      # the locked one ({InstalledGemSet} says why that stays honest), and only for the provenance index:
+      # the second element is always empty because the ADR-72 overlays change what type-checks and so remain
+      # gated on the project's own declaration.
+      def unlocked_missing_gems(default_libraries, bundle_sig_paths, rbs_collection_paths, bundle_root)
+        installed = InstalledGemSet.gems(bundle_path: bundle_root)
+        return [[], []] if installed.empty?
+
+        rows = missing_rows(installed, default_libraries, bundle_sig_paths, rbs_collection_paths)
+        [rows.map { |row| [row.gem_name, row.version] }, []]
+      end
+
+      def missing_rows(gems, default_libraries, bundle_sig_paths, rbs_collection_paths)
+        RbsCoverageReport.classify(
+          locked_gems: gems, default_libraries: default_libraries,
+          bundle_sig_paths: bundle_sig_paths, rbs_collection_paths: rbs_collection_paths
+        ).select { |row| row.source == :missing }
       end
 
       # ADR-72 — resolve the bundled RBS overlay directories to load for this project. A gem is eligible when

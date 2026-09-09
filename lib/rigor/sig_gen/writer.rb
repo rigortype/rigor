@@ -4,6 +4,7 @@ require "fileutils"
 require "rbs"
 
 require_relative "classification"
+require_relative "superclass_spelling"
 require_relative "write_result"
 
 module Rigor
@@ -258,7 +259,7 @@ module Rigor
         return "" unless keyword == :class
 
         superclass = supers[qualified]
-        superclass ? " < #{superclass}" : ""
+        superclass ? " < #{SuperclassSpelling.absolute(superclass)}" : ""
       end
 
       # Per ADR-14 gap-#3 (a) the keyword for a segment comes from `namespace_kinds` when known. The default for

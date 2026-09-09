@@ -1,9 +1,13 @@
 # ADR-96 — Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion
 
-Status: **Accepted, 2026-07-17.** WD1 (the `target_gems:` manifest field) and WD2 (the
-plugin-gap advisory) are decided but remain unimplemented
-([#925](https://github.com/rigortype/rigor/issues/925)); **WD3 (presence-gated umbrella expansion)
-is proposed and gated on WD2** — see "Why WD2 must precede WD3". WD5 settles
+Status: **Accepted, 2026-07-17. WD1 and WD2 implemented 2026-09-10 (#925).** `target_gems:`
+is a validated manifest field declared by the 34 bundled plugins that model a gem, read
+through `Plugin::BundledCatalog`; `rigor doctor` and `rigor skill describe` route their gap
+advisory through `Rigor::PluginGapAdvisory` and the two Rails-only constant tables are
+deleted. The advisory generalised the preserved `:fail` with them: it fires when the project
+locks gems Rigor models and enables **none** of the plugins that model them — today's Rails
+condition, stated over every framework rather than one. **WD3 (presence-gated umbrella
+expansion) remains proposed**, on the sequencing argument below. WD5 settles
 `plugins/rigor-rails/`'s status without deciding its future: the dead Gemfile framing
 comes out of the docs now, the meta-gem itself stays.
 
@@ -101,12 +105,20 @@ This is a public plugin-contract addition and freezes at v1.0 under
 [ADR-50](50-release-engineering-and-stability-strategy.md) WD1. It lands in the ADR-60
 pre-freeze window for the same reason ADR-60's own changes did.
 
-### WD2 — the plugin-gap advisory (the committed slice)
+### WD2 — the plugin-gap advisory (implemented)
 
 `rigor doctor` and `rigor skill describe` read `target_gems:` instead of their
-copy-pasted constants, and report **per plugin**: this gem is locked, this plugin exists
-for it, it is not in `plugins:`. Generalising beyond Rails is not extra work — it is what
-deleting the Rails-specific tables leaves behind.
+copy-pasted constants, and report **per plugin**: this gem is a dependency, this plugin
+exists for it, it is not in `plugins:`. Generalising beyond Rails is not extra work — it is
+what deleting the Rails-specific tables leaves behind.
+
+The match is against the lockfile's `DEPENDENCIES` section — the gems the project chose —
+and never its resolved graph, because `minitest`, `i18n`, `activesupport` and `ffi` are
+transitive in nearly every Rails lock and advising on them would fire on correct
+configuration. A direct dependency on an umbrella gem also stands in for the constituents
+its members model (a Rails app declares `rails`, never `activerecord`), from a small
+explicit table in the advisory rather than from whatever the umbrella happens to resolve
+to.
 
 Severity is **`:warn`, not `:fail`**. Not adopting a plugin is a legitimate choice, and a
 choice must not fail the command forever; `doctor` exits non-zero only on `:fail`. The

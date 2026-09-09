@@ -47,6 +47,7 @@ module Rigor
     class ShouldaMatchers < Rigor::Plugin::Base
       manifest(
         id: "shoulda-matchers",
+        target_gems: ["shoulda-matchers"],
         version: "0.1.0",
         description: "Validates shoulda-matchers matchers (validate_presence_of / belong_to / " \
                      "have_many / have_db_column / ...) against :model_index from " \

@@ -39,6 +39,7 @@ module Rigor
     class RspecRails < Rigor::Plugin::Base
       manifest(
         id: "rspec-rails",
+        target_gems: ["rspec-rails"],
         version: "0.1.0",
         description: "Validates rspec-rails behavioral matchers (have_http_status floor)."
       )

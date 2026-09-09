@@ -51,6 +51,7 @@ module Rigor
     class Hanami < Rigor::Plugin::Base
       manifest(
         id: "hanami",
+        target_gems: ["hanami"],
         version: "0.1.0",
         description: "Enforces the Hanami::Action protocol: #handle(request, response) → void.",
         config_schema: {

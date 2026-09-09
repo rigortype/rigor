@@ -37,6 +37,7 @@ module Rigor
     class Activestorage < Rigor::Plugin::Base
       manifest(
         id: "activestorage",
+        target_gems: ["activestorage"],
         # Bumped 2026-09-02 (#621) — attachment owners are keyed by their de-rooted name and a reopened
         # class's attachments are UNIONed rather than clobbered, so a cached 0.1.0 index can be missing the
         # attachments the merge restores.

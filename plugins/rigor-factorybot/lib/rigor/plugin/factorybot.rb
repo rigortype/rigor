@@ -58,6 +58,7 @@ module Rigor
     class Factorybot < Rigor::Plugin::Base
       manifest(
         id: "factorybot",
+        target_gems: ["factory_bot"],
         # Bumped 2026-08-16 — publishes `:reachability_references` for `rigor unused` (ADR-102 WD3 / #350).
         version: "0.3.0",
         description: "Validates FactoryBot.create / build / attributes_for call shapes; " \

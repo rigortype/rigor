@@ -48,6 +48,7 @@ module Rigor
     class Rspec < Rigor::Plugin::Base
       manifest(
         id: "rspec",
+        target_gems: ["rspec-core"],
         version: "0.3.0",
         description: "Validates RSpec `let` / `subject` declarations within each scope; " \
                      "narrows expect(x).to <matcher> assertions downstream in `it` bodies; " \

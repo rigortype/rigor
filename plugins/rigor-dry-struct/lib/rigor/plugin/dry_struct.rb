@@ -51,6 +51,7 @@ module Rigor
     class DryStruct < Rigor::Plugin::Base
       manifest(
         id: "dry-struct",
+        target_gems: ["dry-struct"],
         version: "0.2.0",
         description: "Recognises dry-struct `attribute :name, T` DSL via ADR-16 Tier C; " \
                      "promotes the reader's return type through ADR-18's `returns_from_arg:` " \

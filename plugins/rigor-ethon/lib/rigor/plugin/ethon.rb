@@ -8,6 +8,7 @@ module Rigor
     class Ethon < Base
       manifest(
         id: "ethon",
+        target_gems: ["ethon"],
         version: "0.1.0",
         description: "Models Ethon / Libcurl options, dynamic return types, and multi-loop operations.",
         signature_paths: ["sig"]

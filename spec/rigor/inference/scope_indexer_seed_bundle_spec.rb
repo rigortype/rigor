@@ -266,6 +266,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
   # Issue #724 Gate — removing any one of all plain tables from the fold must fail equivalence,
   # ensuring that no table is checked vacuously.
   describe "equivalence gate discrimination (#724)" do
+    # Issue #722 — the compact header inside `module Wrap` is what makes `compact_headers` non-empty, so
+    # stripping that table is discriminating like every other. No top-level `Nest` is declared, so the
+    # header is a CANDIDATE the whole-project adjudication declines: the recorded keys stay put and the
+    # rest of this fixture's expectations are untouched.
     def discrimination_fixture_source
       <<~RUBY
         class Parent
@@ -281,6 +285,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         end
         DataStruct = Data.define(:a, :b)
         NormalStruct = Struct.new(:x, :y)
+        module Wrap
+          class Nest::Leaf
+            def leaf_m = 3
+          end
+        end
       RUBY
     end
 

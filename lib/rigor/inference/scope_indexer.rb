@@ -69,11 +69,20 @@ module Rigor
       #   cap-N intermediate constants. Off for the check path.
       # @return identity-comparing
       #   table whose default value is `default_scope`.
+      # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
+      # nothing-to-re-anchor walk allocates none.
+      EMPTY_RENAMES = {}.freeze
+
       def index(root, default_scope:, converged_loop_recording: false) # rubocop:disable Metrics/AbcSize
         # Slice A-declarations. Build the declaration overrides first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through `Scope#with_local` / `#with_fact` / `#with_self_type`
         # propagates it across every derived scope.
-        declared_types, discovered_classes = build_declaration_artifacts(root)
+        # Issue #722 residue 2 — the project's settled declaration names are the oracle the file's own
+        # compact headers are re-anchored against. `discovered_class_sources` would be the more direct
+        # reading, but it is seeded only under `--record-dependencies`; this table is the one every run
+        # carries, and the fold has already applied its own re-anchoring to it.
+        declared_types, discovered_classes =
+          build_declaration_artifacts(root, default_scope.discovered_classes.keys.to_set)
         # Merge the indexer's findings on top of whatever the base scope already carries so callers that seed cross-file
         # class knowledge (e.g. the ADR-14 `SigGen::ObservationCollector` pre-walking project `lib/` before scanning
         # `spec/`) keep their seeds alongside the per-file declarations the indexer itself discovers. Indexer-found
@@ -3694,7 +3703,28 @@ module Rigor
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
-        { classes: classes.freeze, def_index: finalize_def_index(acc) }
+        finalize_project_index(classes, acc)
+      end
+
+      # The shared tail of the two whole-project discovery walks: settles the def-index and re-anchors the
+      # `classes` table it accumulated beside it.
+      def finalize_project_index(classes, acc)
+        def_index = finalize_def_index(acc)
+        { classes: rename_compact_classes(classes, def_index[:compact_header_renames]).freeze,
+          def_index: def_index }
+      end
+
+      # Issue #722 residue 2 — the `classes` table is accumulated beside the def-index rather than inside it,
+      # so it is re-anchored here from the renames the fold settled. The value is rebuilt, not moved: it is a
+      # `Singleton[…]` of the key, and a moved key with the old singleton inside would type `Outer::Leaf` as
+      # `Wrap::Outer::Leaf` at every reference.
+      def rename_compact_classes(classes, renames)
+        return classes if renames.nil? || renames.empty?
+
+        classes.each_with_object({}) do |(name, type), out|
+          renamed = rename_compact_name(renames, name)
+          out[renamed] = renamed == name ? type : Type::Combinator.singleton_of(renamed)
+        end
       end
 
       # ADR-85 WD2 — the incremental cross-file discovery pass. The bundle-driven twin of
@@ -3742,7 +3772,7 @@ module Rigor
           # Skip files that fail to parse / read; the per-file analyzer surfaces the parse error separately.
           next
         end
-        { classes: classes.freeze, def_index: finalize_def_index(acc), bundles: bundles }
+        finalize_project_index(classes, acc).merge(bundles: bundles)
       end
 
       # Builds ONE file's isolated def-index contribution (live `Prism::DefNode`s) by folding it into a fresh
@@ -3809,6 +3839,9 @@ module Rigor
         accumulate_module_lists(acc[:includes], file_index[:includes])
         accumulate_module_lists(acc[:extends], file_index[:extends] || {})
         file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
+        # Issue #722 residue 2 — a pre-#722 seed bundle carries no candidates; the SCHEMA bump makes such a
+        # blob a cold rebuild, but default so any in-flight fold stays total.
+        acc[:compact_headers].merge!(file_index[:compact_headers] || {})
         acc[:data_member_layouts].merge!(file_index[:data_member_layouts])
         acc[:struct_member_layouts].merge!(file_index[:struct_member_layouts])
       end
@@ -3847,6 +3880,9 @@ module Rigor
           method_visibilities: file_index[:method_visibilities],
           methods: file_index[:methods],
           class_source_names: file_index[:class_sources].keys,
+          # Issue #722 residue 2 — plain data, so the bundle stays Marshal-clean and a warm incremental file
+          # re-anchors its compact headers the way a cold walk of it does.
+          compact_headers: file_index[:compact_headers],
           # Issue #644 — the file's publication census (`name => [literal] | :unpublishable`; the path is
           # the bundle key). Plain data, so the bundle stays Marshal-clean.
           constant_writes: file_index[:constant_writes].transform_values { |by_path| by_path.values.first },
@@ -3874,6 +3910,7 @@ module Rigor
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
+          compact_headers: bundle[:compact_headers] || {},
           # Issue #644 — a pre-#644 bundle carries no census; the SCHEMA bump makes such a blob a cold
           # rebuild, but default so any in-flight fold stays total.
           constant_writes: (bundle[:constant_writes] || {}).transform_values { |descriptor| { path => descriptor } },
@@ -3911,12 +3948,19 @@ module Rigor
           singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
           superclasses: {}, header_nestings: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {},
           class_sources: {},
+          # Issue #722 residue 2 — compact-header re-anchor candidates, adjudicated in {#finalize_def_index}.
+          compact_headers: {},
           constant_writes: {},
           data_member_layouts: {}, struct_member_layouts: {} }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
       def finalize_def_index(acc)
+        # Issue #722 residue 2 — settle the compact-header keys FIRST: every whole-project pass below reads
+        # class-keyed tables, and the renames are only knowable now that `class_sources` spans the project.
+        renames = compact_header_renames(acc[:compact_headers] || {}, acc[:class_sources].keys.to_set)
+        apply_compact_header_renames!(acc, renames) unless renames.empty?
+        acc[:compact_header_renames] = renames
         # Issue #644 — resolve the cross-file constant-reassignment rule here, where the whole project's
         # write census is known, and turn the surviving literals into their published `Type::Constant`.
         acc[:constant_values], acc[:constant_sources] = finalize_constant_writes(acc[:constant_writes])
@@ -3975,7 +4019,8 @@ module Rigor
         merge_header_nestings(acc[:header_nestings], header_nestings)
         accumulate_module_lists(acc[:includes], includes)
         accumulate_module_lists(acc[:extends], build_discovered_extends(root))
-        record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes)
+        record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes,
+                             acc[:compact_headers])
         merge_constant_literal_tables(acc, root, path)
         merge_class_keyed_index_tables(acc, root, file_methods)
         merge_member_layout_tables(acc, root)
@@ -4015,9 +4060,9 @@ module Rigor
       # ancestry edges. {Scope#superclass_of} / {Scope#includes_of} record this set when resolving the edge during
       # dependency recording (ADR-46). The class-declaration walk (`collect_class_decls`) catches bodyless / def-less
       # reopenings the other three builders miss.
-      def record_class_sources(class_sources, path, root, superclasses, includes, file_def_nodes)
+      def record_class_sources(class_sources, path, root, superclasses, includes, file_def_nodes, compacts = nil)
         names = Set.new
-        collect_class_decls(root, [], decls = {})
+        collect_class_decls(root, [], decls = {}, compacts)
         names.merge(decls.keys)
         names.merge(superclasses.keys)
         names.merge(includes.keys)
@@ -4348,7 +4393,7 @@ module Rigor
 
       # Cross-file counterpart of `record_declarations` — registers every `class` / `module` declaration under its
       # qualified name and descends into the body (so `module Foo; class Bar` registers both `Foo` and `Foo::Bar`).
-      def collect_class_decls(node, qualified_prefix, accumulator)
+      def collect_class_decls(node, qualified_prefix, accumulator, compacts = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -4357,13 +4402,114 @@ module Rigor
           if child_prefix
             full = child_prefix.join("::")
             accumulator[full] = Type::Combinator.singleton_of(full)
-            return collect_class_decls(node.body, child_prefix, accumulator) if node.body
+            record_compact_header(compacts, qualified_prefix, node.constant_path, full) if compacts
+            return collect_class_decls(node.body, child_prefix, accumulator, compacts) if node.body
           end
         when Prism::ConstantWriteNode
           record_class_new_constant_decl(node, qualified_prefix, accumulator)
         end
 
-        node.rigor_each_child { |child| collect_class_decls(child, qualified_prefix, accumulator) }
+        node.rigor_each_child { |child| collect_class_decls(child, qualified_prefix, accumulator, compacts) }
+      end
+
+      # Issue [#722](https://github.com/rigortype/rigor/issues/722) residue 2 — records what a COMPACT header
+      # written inside an enclosing namespace would name if its leading segment fell through to the top level.
+      # `class Outer::Leaf` inside `module Wrap` is keyed `Wrap::Outer::Leaf` by the per-node
+      # {Source::ConstantPath.declaration_prefix}, but Ruby resolves the leading `Outer` by ORDINARY constant
+      # lookup: it reopens `::Outer::Leaf` unless `Wrap::Outer` exists. Whether it exists is a whole-project
+      # fact, so the candidate is recorded here and adjudicated once the fold knows every declared name
+      # ({#compact_header_renames}).
+      #
+      # @param compacts — `{recorded name => [namespace the header needs, name it falls through to]}`.
+      def record_compact_header(compacts, qualified_prefix, constant_path, full)
+        return if qualified_prefix.empty?
+        return unless constant_path.is_a?(Prism::ConstantPathNode)
+        return if Source::ConstantPath.rooted?(constant_path)
+
+        rendered = Source::ConstantPath.qualified_name(constant_path)
+        return unless rendered&.include?("::")
+
+        compacts[full] = [(qualified_prefix + [rendered.split("::").first]).join("::"), rendered]
+      end
+
+      # Issue #722 residue 2 — the whole-project adjudication of {#record_compact_header}'s candidates:
+      # `{name the walk recorded => name Ruby actually reopens}`.
+      #
+      # A candidate moves only when the project ANSWERS BOTH halves of Ruby's lookup: the namespace the
+      # nesting would supply (`Wrap::Outer`) is declared nowhere, and the top level the segment falls through
+      # to (`Outer`) IS declared. The second half is the false-positive bound, not a convenience — a
+      # `Wrap::Outer` that merely never appears in project source (a gem, an RBS-only class) is a namespace
+      # that DOES exist at runtime, and re-anchoring on its absence would answer with a wrong class where
+      # today's mis-keying only answers with silence.
+      #
+      # `declared_names` is the RAW declared set (`class_sources`), never the table
+      # {#synthesize_namespace_prefixes} has run over: that synthesis invents `Wrap::Outer` from
+      # `Wrap::Outer::Leaf` itself, so consulting it would make every candidate look already-resolved.
+      def compact_header_renames(compacts, declared_names)
+        compacts.each_with_object({}) do |(recorded, (required_namespace, reanchored)), out|
+          next if declared_names.include?(required_namespace)
+          next unless declared_names.include?(reanchored.split("::").first)
+
+          out[recorded] = reanchored
+        end
+      end
+
+      # Rewrites `name` when it is, or is nested under, a re-anchored compact header. Nested declarations
+      # ride the same move: `class Outer::Leaf` inside `module Wrap` carrying a `class Inner` filed the inner
+      # class under `Wrap::Outer::Leaf::Inner`, and it reopens `::Outer::Leaf::Inner` for the same reason.
+      def rename_compact_name(renames, name)
+        return name if renames.empty?
+
+        string = name.to_s
+        renamed = renames[string]
+        return renamed if renamed
+
+        renames.each do |recorded, reanchored|
+          return "#{reanchored}#{string[recorded.length..]}" if string.start_with?("#{recorded}::")
+        end
+        string
+      end
+
+      # Re-keys one class-keyed table. A rename lands a declaration on a key the table may ALREADY hold —
+      # which is the whole point: `class Outer::Leaf` written twice, once at the top level and once inside
+      # `module Wrap`, is one class with both bodies. So the arriving contribution is COMBINED with the
+      # sitting one under the table's own fold semantics rather than replacing it; a plain `transform_keys`
+      # dropped the top-level body's methods outright.
+      def rekey_class_table(table, renames)
+        table.each_with_object({}) do |(name, value), out|
+          renamed = rename_compact_name(renames, name)
+          sitting = out[renamed]
+          out[renamed] = sitting.nil? ? value : combine_rekeyed_entries(sitting, value)
+        end
+      end
+
+      # The per-shape combine {#rekey_class_table} applies. Every class-keyed table's value is a Hash of
+      # per-member entries, a Set or Array of names, or a single scalar fact (a superclass name, a member
+      # layout); the first two union, and a scalar keeps the entry already sitting, matching the first-wins
+      # fold `class_sources` and the `"path:line"` source tables use.
+      def combine_rekeyed_entries(sitting, arriving)
+        case sitting
+        when Hash then sitting.merge(arriving)
+        when Set, Array then sitting | arriving
+        else sitting
+        end
+      end
+
+      # Applies {#compact_header_renames} to every class-keyed table of a folded def-index accumulator, plus
+      # the nesting chains whose entries are class names. Runs before {#finalize_def_index}'s own whole-project
+      # passes so those see the settled keys.
+      def apply_compact_header_renames!(acc, renames)
+        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources superclasses header_nestings
+           includes extends method_visibilities methods class_sources data_member_layouts
+           struct_member_layouts constant_writes].each do |key|
+          acc[key] = rekey_class_table(acc[key], renames)
+        end
+        acc[:header_nestings] = acc[:header_nestings].transform_values do |chain|
+          chain.map { |entry| rename_compact_name(renames, entry) }
+        end
+        acc[:def_nestings].transform_values! do |chain|
+          chain&.map { |entry| rename_compact_name(renames, entry) }
+        end
       end
 
       # T1 (template-corpora survey) — record a class-creating constant write (`Const = Class.new(Super)`, the bare
@@ -4436,11 +4582,28 @@ module Rigor
       # remain real references (resolved through the ordinary lexical walk), so we annotate ONLY the topmost path node.
       # Nested declarations contribute their fully qualified path: `class A::B; class C; ...` produces `A::B` for the
       # outer and `A::B::C` for the inner.
-      def build_declaration_artifacts(root)
+      # @param declared_names — the project's RAW declared-class names, the oracle
+      #   {#compact_header_renames} adjudicates this file's compact headers against.
+      def build_declaration_artifacts(root, declared_names = nil)
         identity_table = {}.compare_by_identity
         discovered = {}
-        record_declarations(root, [], identity_table, discovered)
+        record_declarations(root, [], identity_table, discovered,
+                            file_compact_header_renames(root, declared_names))
         [identity_table.freeze, synthesize_namespace_prefixes(discovered).freeze]
+      end
+
+      # Issue #722 residue 2 — this file's share of the fold's re-anchoring, adjudicated against the project
+      # names the fold has already settled. Empty (so the per-node answer stands) whenever the caller has no
+      # project table to consult: a `Scope.empty` probe sees one file and cannot know what else declares
+      # `Wrap::Outer`, and guessing there is the false positive the whole rule is bounded to avoid.
+      def file_compact_header_renames(root, declared_names)
+        return EMPTY_RENAMES if declared_names.nil? || declared_names.empty?
+
+        compacts = {}
+        collect_class_decls(root, [], {}, compacts)
+        return EMPTY_RENAMES if compacts.empty?
+
+        compact_header_renames(compacts, declared_names)
       end
 
       # Issue #528 — every proper prefix of a discovered COMPACT class name is a namespace module that
@@ -4468,30 +4631,35 @@ module Rigor
         discovered.merge(additions)
       end
 
-      def record_declarations(node, qualified_prefix, identity_table, discovered)
+      def record_declarations(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ModuleNode, Prism::ClassNode
-          return if record_class_or_module?(node, qualified_prefix, identity_table, discovered)
+          return if record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames)
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
           return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         end
 
         node.rigor_each_child do |child|
-          record_declarations(child, qualified_prefix, identity_table, discovered)
+          record_declarations(child, qualified_prefix, identity_table, discovered, renames)
         end
       end
 
-      def record_class_or_module?(node, qualified_prefix, identity_table, discovered)
+      def record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES)
         child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
         return false unless child_prefix
 
-        full = child_prefix.join("::")
+        # Issue #722 residue 2 — the per-file twin of the fold's re-anchoring. The file's own declaration
+        # table merges OVER the project seed, so without this a compact header would re-publish the key the
+        # fold already moved and a reference written INSIDE the enclosing namespace would resolve to it
+        # again. The adjudication itself is the project's: `renames` arrives already settled.
+        full = rename_compact_name(renames, child_prefix.join("::"))
+        child_prefix = full.split("::")
         singleton = Type::Combinator.singleton_of(full)
         identity_table[node.constant_path] = singleton
         discovered[full] = singleton
-        record_declarations(node.body, child_prefix, identity_table, discovered) if node.body
+        record_declarations(node.body, child_prefix, identity_table, discovered, renames) if node.body
         true
       end
 

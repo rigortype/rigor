@@ -168,7 +168,16 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors.first.message).to include("did not register any plugin")
     end
 
+    # A gem that registers its OWN id alongside another's is not ambiguous — see the sibling example below.
+    # The meta-gem case is a gem none of whose registered ids is its own, which is what `rigor-rails` is.
     it "surfaces multi-registration ambiguity as a load error" do
+      plugins = ["rigor-pair"]
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("plugins" => plugins))
+      services = Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection,
+        type: Rigor::Type::Combinator,
+        configuration: configuration
+      )
       requirer = lambda { |_name|
         Rigor::Plugin.register(plugin_class_a)
         Rigor::Plugin.register(plugin_class_b)
@@ -184,6 +193,23 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(message).to include("convenience meta-gem")
       expect(message).to match(/list the individual plugin gems/i)
       expect(message).to include("`id:`")
+    end
+
+    # The FFI family (`rigor-sassc`, `rigor-ethon`, `rigor-ffi-rzmq`, `rigor-rbnacl`) each `require
+    # "rigor-ffi"` for the shared binding analyzer, so listing one of them ALONE registered two plugins and
+    # was rejected as a meta-gem — with advice ("list `rigor-ffi`") that activates the wrong plugin. It
+    # only reproduced when nothing had loaded `rigor-ffi` first, which is why the suite never saw it.
+    it "resolves a gem that also registers a dependency's plugin to its own id" do
+      requirer = lambda { |_name|
+        Rigor::Plugin.register(plugin_class_b)
+        Rigor::Plugin.register(plugin_class_a)
+        true
+      }
+
+      registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
+
+      expect(registry.load_errors).to be_empty
+      expect(registry.ids).to eq(["alpha"])
     end
 
     it "resolves an explicit `id:` even when the gem registers multiple plugins" do

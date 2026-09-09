@@ -19,8 +19,9 @@
 #
 # The same collapse lived in the `Tuple` / `HashShape` and `Singleton` carriers, which ask the ordering
 # about `Array` / `Hash` / `Class` — the second describe block below covers those. The singleton residue
-# (`extend` is not modelled, so a target the environment DOES order against `Class` still collapses) is
-# #898.
+# (`extend` is not modelled, so a target the environment DOES order against `Class` still collapses) was
+# #898, closed by reading the project's own `extend` record; that half lives in
+# `spec/integration/unreachable_clause_singleton_extend_spec.rb`.
 
 require "spec_helper"
 require "fileutils"

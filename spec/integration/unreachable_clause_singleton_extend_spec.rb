@@ -117,6 +117,9 @@ RSpec.describe "a class object's own extend record on the positive edge (#898)" 
     RUBY
   end
 
+  # #899's `:unknown` decline already covered this shape (a project module is unorderable against `Class`),
+  # so it does not discriminate the fix — it pins the `extend self` RECORDING, which is the half that would
+  # go silently missing if the walk behind `discovered_extends` lost that form.
   it "reads `extend self`, which puts the module in its own singleton ancestry" do
     expect(rules_for(<<~RUBY)).to be_empty
       module Meta

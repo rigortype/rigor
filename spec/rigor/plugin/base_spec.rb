@@ -605,6 +605,92 @@ RSpec.describe Rigor::Plugin::Base do
       end
     end
 
+    describe "receiver kinds in receivers: (#701)" do
+      def call(source) = Prism.parse(source).value.statements.body.first
+
+      let(:instance_rule) do
+        Class.new(described_class) do
+          manifest(id: "dr-kind-inst", version: "0.1.0")
+          dynamic_return receivers: ["Widget"], methods: [:price] do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("Money")
+          end
+        end.new(services: services)
+      end
+
+      let(:singleton_rule) do
+        Class.new(described_class) do
+          manifest(id: "dr-kind-singleton", version: "0.1.0")
+          dynamic_return receivers: ["singleton(Widget)"], methods: [:price] do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("Money")
+          end
+        end.new(services: services)
+      end
+
+      let(:both_kinds_rule) do
+        Class.new(described_class) do
+          manifest(id: "dr-kind-both", version: "0.1.0")
+          dynamic_return receivers: ["Widget", "singleton(Widget)"], methods: [:price] do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("Money")
+          end
+        end.new(services: services)
+      end
+
+      def answer_for(plugin, receiver_type)
+        plugin.dynamic_return_type(
+          call_node: call("x.price"), scope: Rigor::Scope.empty, receiver_type: receiver_type
+        )
+      end
+
+      it "answers for the instance receiver a bare class-name entry names" do
+        expect(answer_for(instance_rule, Rigor::Type::Combinator.nominal_of("Widget")))
+          .to eq(Rigor::Type::Combinator.nominal_of("Money"))
+      end
+
+      it "declines the class object for a bare class-name entry" do
+        expect(answer_for(instance_rule, Rigor::Type::Combinator.singleton_of("Widget"))).to be_nil
+      end
+
+      it "answers for the class object a singleton(...) entry names" do
+        expect(answer_for(singleton_rule, Rigor::Type::Combinator.singleton_of("Widget")))
+          .to eq(Rigor::Type::Combinator.nominal_of("Money"))
+      end
+
+      it "declines the instance for a singleton(...) entry" do
+        expect(answer_for(singleton_rule, Rigor::Type::Combinator.nominal_of("Widget"))).to be_nil
+      end
+
+      it "answers for both kinds when the rule declares both" do
+        expect(answer_for(both_kinds_rule, Rigor::Type::Combinator.nominal_of("Widget")))
+          .to eq(Rigor::Type::Combinator.nominal_of("Money"))
+        expect(answer_for(both_kinds_rule, Rigor::Type::Combinator.singleton_of("Widget")))
+          .to eq(Rigor::Type::Combinator.nominal_of("Money"))
+      end
+
+      it "carries the kind through a run-time callable" do
+        plugin = Class.new(described_class) do
+          manifest(id: "dr-kind-callable", version: "0.1.0")
+          def names = ["singleton(Widget)"]
+
+          dynamic_return receivers: -> { names }, methods: [:price] do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("Money")
+          end
+        end.new(services: services)
+
+        expect(answer_for(plugin, Rigor::Type::Combinator.singleton_of("Widget")))
+          .to eq(Rigor::Type::Combinator.nominal_of("Money"))
+        expect(answer_for(plugin, Rigor::Type::Combinator.nominal_of("Widget"))).to be_nil
+      end
+
+      it "rejects an unclosed singleton( wrapper at load" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "dr-kind-bad", version: "0.1.0")
+            dynamic_return(receivers: ["singleton(Widget"]) { nil }
+          end
+        end.to raise_error(ArgumentError, /singleton\(Foo\)/)
+      end
+    end
+
     describe "run-time receivers: callable (ADR-52 slice 3)" do
       let(:plugin_runtime) do
         Class.new(described_class) do

@@ -365,7 +365,8 @@ the block carries logic and runs through `instance_exec`:
   `Array` of class names, or a `-> { … }` callable resolved once per run
   after `#prepare`, ADR-52 slice 3) the engine calls the block only when
   the call's receiver type's class equals or inherits from a declared
-  entry (matched via `Environment#class_ordering`). `methods:` (an
+  entry (matched via `Environment#class_ordering`) **and** the receiver
+  is of the kind that entry names. `methods:` (an
   `Array` of Symbol/String names, or a run-time callable, ADR-52 slice 4)
   gates on `call_node.name`; `file_methods:` (a callable receiving the
   path, memoised per `(rule, path)`, ADR-52 slice 5a) is its per-file
@@ -374,6 +375,28 @@ the block carries logic and runs through `instance_exec`:
   wins. The engine invokes it through `#dynamic_return_type(call_node:,
   scope:, receiver_type:)`. `rigor-mangrove` (unwrap → carried
   `type_args[0]`) is the worked consumer.
+  - **A `receivers:` entry names a receiver KIND, not just a class**
+    (issue #701). A bare class name — `"Widget"` — matches an INSTANCE
+    receiver: `Type::Nominal[Widget]`, and the `Type::Result` /
+    `Type::Maybe` carriers, which are instances of their class. The
+    class object itself is written in RBS's own spelling,
+    `"singleton(Widget)"`, and matches `Type::Singleton[Widget]`. A rule
+    that deliberately wants both declares both entries
+    (`["Widget", "singleton(Widget)"]`); `rigor-ffi` is the bundled
+    consumer, because `attach_function` installs a binding the library
+    module answers to under either kind. Inheritance is matched on the
+    class name in both kinds, so `"singleton(ActiveRecord::Base)"`
+    covers `singleton(User)` exactly as the bare entry covers `User`. A
+    receiver carrier with no nominal class (a refinement dimension, an
+    inferred shape) matches no entry at all. `singleton(` opening an
+    entry that does not close is rejected at load, so a mistyped kind
+    wrapper fails loudly instead of silently never matching. **This is
+    the difference between an instance rule and a class-level answer**:
+    before #701 an entry matched both kinds, so a rule written for
+    `Widget#price` also answered `Widget.price` — and, since the #653
+    suppression below, silenced that call's genuine
+    `call.undefined-method` on the strength of a type the plugin was
+    never asked to produce.
   - **Binary operators are ordinary calls here.** Ruby's `a + b` parses
     to a `Prism::CallNode` named `:+`, so it reaches this hook like any
     other call: a `dynamic_return(receivers: ["Money"])` rule can branch
@@ -433,15 +456,17 @@ the block carries logic and runs through `instance_exec`:
       supersedes ADR-2. It is recorded so the two documents stop
       contradicting each other in silence.
     - **The suppression is only as sound as the plugin's own receiver
-      gate.** `receivers:` matches a class NAME and does not
-      discriminate `Singleton[C]` from `Nominal[C]`, so an ordinary
-      instance-method rule (`receivers: ["Widget"], methods: [:price]`)
-      also answers `Widget.price`, and this record then silences a
-      genuine `undefined method 'price' for singleton(Widget)` on the
-      plugin's say-so. The receiver-kind gap is pre-existing and
-      tracked separately; no bundled plugin is exposed today (the three
-      `receivers:` rules without a `Nominal` guard are actionpack's,
-      whose classes ship no RBS).
+      gate**, which is why that gate carries the receiver KIND (issue
+      #701, above). While a `receivers:` entry matched a class NAME
+      alone, an ordinary instance-method rule (`receivers: ["Widget"],
+      methods: [:price]`) also answered `Widget.price`, and this record
+      then silenced a genuine `undefined method 'price' for
+      singleton(Widget)` on the plugin's say-so — for a call the plugin
+      had already mis-typed. An instance entry no longer answers there,
+      so the class-level miss reaches `RbsDispatch` and is reported. A
+      rule that declares `"singleton(Widget)"` does suppress it, and
+      that is the point: the plugin has then said, explicitly, that it
+      models the class-level call.
     - The two rules that read a RESOLVED SIGNATURE (`call.wrong-arity`,
       `call.argument-type-mismatch`) are **not** covered by this record
       today: at a plugin-answered site they still validate the call

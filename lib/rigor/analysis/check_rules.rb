@@ -714,7 +714,7 @@ module Rigor
           # because the real type is empty (the real `DRb` has
           # `start_service`), so enumerating it to prove a call
           # "undefined" would be a false positive.
-          return nil if unenumerable_receiver?(class_name, scope)
+          return nil if unenumerable_receiver?(receiver_type, class_name, scope)
 
           # Slice 7 phase 12 — suppress when the user has
           # declared the method in source (`def` /
@@ -973,10 +973,32 @@ module Rigor
         # the scalar rule enumerated `Module`'s own RBS instead and reported them.
         #
         # Kept beside `unbounded_receiver_surface?` rather than folded into it: that predicate has eight
-        # other callers (arity, the `raise` verdicts), and widening all of them is a separate change with
-        # its own evidence to gather.
-        def unenumerable_receiver?(class_name, scope)
-          METACLASS_ARMS.include?(class_name) || unbounded_receiver_surface?(class_name, scope)
+        # other callers, and #742 had no evidence that any of them spoke on these receivers.
+        #
+        # Issue #879 supplied it for exactly one — `call.wrong-arity`, which decided `v.hexdigest(1, 2, 3)`
+        # against `Digest::Instance`'s declaration on the same run where `v.no_such_method_zzz` was declined
+        # as unenumerable. One receiver, one run, two answers about whether that surface can be read. The
+        # reporter could make no other caller speak: `raise` on a module- or `Class`-typed operand is silent,
+        # and `Class`-typed `.new` with a wrong arity is silent too, so the other seven stay on
+        # `unbounded_receiver_surface?` until something demonstrates otherwise.
+        #
+        # Arity takes {#unenumerable_receiver_shape?}, not this whole predicate: ADR-26's open receivers are
+        # handled for the signature-reading rules by {#unauthoritative_inherited_signature?}, which is
+        # deliberately narrower — a method the open class DECLARES itself keeps its arity check.
+        def unenumerable_receiver?(receiver_type, class_name, scope)
+          unenumerable_receiver_shape?(receiver_type, class_name, scope) ||
+            unbounded_receiver_surface?(class_name, scope)
+        end
+
+        # The receiver shapes whose method surface cannot be enumerated at all, whatever the environment
+        # declares: a generic metaclass value, and an instance-side mixin-module type — an instance of some
+        # unknown class that includes the module, which may declare the name with any arity of its own
+        # (#739's reasoning, applied to the signature rather than to the method's existence).
+        #
+        # Instance-side only, for #739's reason: `Singleton[M]` on a namespace module is a real, enumerable
+        # surface, and `M.helper(1, 2, 3)` must keep firing.
+        def unenumerable_receiver_shape?(receiver_type, class_name, scope)
+          METACLASS_ARMS.include?(class_name) || module_mixin_receiver?(receiver_type, scope)
         end
 
         # Issue #746 — a class that includes a module the environment does not know. `SudoMode::Form`
@@ -1438,6 +1460,12 @@ module Rigor
           receiver_type = scope.type_of(call_node.receiver)
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
+
+          # Issue #879 — the receiver whose surface `call.undefined-method` already refuses to enumerate.
+          # Deciding an arity against a declaration this rule cannot prove the receiver actually runs is the
+          # same unsoundness in signature form: the includer may declare the name with a wider arity, and
+          # then the call is correct code.
+          return nil if unenumerable_receiver_shape?(receiver_type, class_name, scope)
 
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
           # `Struct.new(:a, :b).new(...)` chained: the inner

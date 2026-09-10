@@ -457,14 +457,26 @@ module Rigor
           when RbsExtended::ConformanceChecker::IncompatibleSignature
             build_incompatible_signature_diagnostic(record)
           else # UnresolvedInterface
-            build_reporter_diagnostic(
-              record.location,
-              rule: "dynamic.rbs-extended.unresolved",
-              message: "`#{record.class_name}` declares `conforms-to #{record.interface_name}` but " \
-                       "interface `#{record.interface_name}` is not loaded. Check for a typo or add " \
-                       "the `sig`/library that declares it to the RBS load path."
-            )
+            build_unresolved_conformance_diagnostic(record)
           end
+        end
+
+        # Issue #928 — `:warning`, not the `:info` the other `dynamic.rbs-extended.unresolved` producers
+        # stamp. Those report that an inference fell back; this one reports that an assertion the author
+        # deliberately wrote is checking NOTHING, and the whole point of `conforms-to` is to be checked. It
+        # is not unsolicited either: only a project that wrote the directive can see it. Now that the
+        # capability-role catalog ships, the remaining way to reach this row is a name that does not exist.
+        def build_unresolved_conformance_diagnostic(record)
+          path, line, column = location_fields(record.location)
+          Diagnostic.new(
+            path: path, line: line, column: column,
+            message: "`#{record.class_name}` declares `conforms-to #{record.interface_name}` but " \
+                     "interface `#{record.interface_name}` is not loaded. Check for a typo or add " \
+                     "the `sig`/library that declares it to the RBS load path.",
+            severity: :warning,
+            rule: "dynamic.rbs-extended.unresolved",
+            source_family: :builtin
+          )
         end
 
         def build_unsatisfied_conformance_diagnostic(record)

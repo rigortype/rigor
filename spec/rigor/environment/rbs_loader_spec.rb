@@ -220,6 +220,72 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "capability-role catalog (data/capability_roles/)" do
+    # Issue #928 — the consumer (`%a{rigor:v1:conforms-to _ClosableStream}`) shipped before the catalog did,
+    # so a directive written by following the specification asserted nothing at all.
+    let(:env) { described_class.build_env_for(libraries: [], signature_paths: []) }
+
+    it "exposes a non-empty catalog sig path set" do
+      expect(described_class.capability_role_sig_paths).not_to be_empty
+      expect(described_class.capability_role_sig_paths).to all(be_a(Pathname))
+    end
+
+    it "declares every role ADR-1 names, plus the specification's `_Closable` running example" do
+      names = env.interface_decls.keys.map(&:to_s)
+      expect(names).to include(
+        "::_Closable", "::_RewindableStream", "::_ClosableStream", "::_FileDescriptorBacked", "::_Callable"
+      )
+    end
+
+    it "declares exactly the members the specification's table lists for each role" do
+      members = lambda do |name|
+        entry = env.interface_decls.fetch(RBS::TypeName.parse(name))
+        entry.decl.members.grep(RBS::AST::Members::MethodDefinition).map { |m| m.name.to_s }.sort
+      end
+
+      expect(members.call("::_RewindableStream")).to eq(%w[read rewind])
+      expect(members.call("::_ClosableStream")).to eq(%w[close closed?])
+      expect(members.call("::_FileDescriptorBacked")).to eq(%w[fileno])
+      expect(members.call("::_Callable")).to eq(%w[call])
+      expect(members.call("::_Closable")).to eq(%w[close])
+    end
+
+    it "is not generic — `_Callable[**A, R]` is not RBS grammar, so the shipped role takes no parameters" do
+      entry = env.interface_decls.fetch(RBS::TypeName.parse("::_Callable"))
+      expect(entry.decl.type_params).to be_empty
+    end
+
+    context "when the project declares an interface of the same name" do
+      # The catalog is added per DECLARATION, after the project's own signatures, so a project that already
+      # owns `_Closable` keeps its own — and keeps the four roles it did not declare. Every other bundled
+      # source is what `from_loader` builds the env FROM, so a colliding project file is quarantined there
+      # instead; a top-level name as ordinary as `_Closable` must not cost a project its whole `sig/` file.
+      let(:sig_dir) { Pathname(Dir.mktmpdir) }
+      let(:env) { described_class.build_env_for(libraries: [], signature_paths: [sig_dir]) }
+
+      before do
+        File.write(sig_dir.join("roles.rbs"), <<~RBS)
+          interface _Closable
+            def close: () -> untyped
+            def flush: () -> untyped
+          end
+        RBS
+      end
+
+      after { FileUtils.remove_entry(sig_dir) }
+
+      it "keeps the project's own declaration" do
+        entry = env.interface_decls.fetch(RBS::TypeName.parse("::_Closable"))
+        names = entry.decl.members.grep(RBS::AST::Members::MethodDefinition).map { |m| m.name.to_s }.sort
+        expect(names).to eq(%w[close flush])
+      end
+
+      it "still ships the roles the project did not declare" do
+        expect(env.interface_decls.keys.map(&:to_s)).to include("::_ClosableStream", "::_Callable")
+      end
+    end
+  end
+
   describe "core overlay (data/core_overlay/)" do
     # `Numeric#to_f`/`to_i`/`to_r` are not declared on the abstract `Numeric` by upstream `ruby/rbs` (only on the
     # concrete subclasses), but Rigor widens arithmetic chains to `Numeric`, so the overlay reopens the class to supply

@@ -1,0 +1,36 @@
+# Rigor's capability-role catalog (ADR-1 § "Capability roles",
+# docs/type-specification/structural-interfaces-and-object-shapes.md).
+#
+# These are the roles Rigor itself ships, as opposed to the stdlib interfaces (`_Reader`, `_ToStr`, …)
+# it reuses from upstream RBS. They exist so a `%a{rigor:v1:conforms-to _ClosableStream}` directive
+# written by following the specification resolves in a default run instead of failing soft.
+#
+# Parameter and return types are deliberately the loosest honest reading: a role says which members a
+# value answers, and narrowing them here would reject conforming classes rather than describe them.
+
+# The specification's running example: the one-member lifetime contract.
+interface _Closable
+  def close: () -> untyped
+end
+
+interface _RewindableStream
+  def read: (*untyped) -> String?
+
+  def rewind: () -> untyped
+end
+
+interface _ClosableStream
+  def close: () -> untyped
+
+  def closed?: () -> bool
+end
+
+interface _FileDescriptorBacked
+  def fileno: () -> Integer
+end
+
+# Not generic: `_Callable[**A, R]` as ADR-1 first drafted it is not RBS grammar (`**A` has no meaning
+# in a type-parameter list). A generic form is a future extension, gated on RBS gaining the syntax.
+interface _Callable
+  def call: (*untyped) -> untyped
+end

@@ -2001,6 +2001,29 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag).not_to be_nil
       expect(diag.message).to include("_NotDeclared")
       expect(diag.message).to include("not loaded")
+      # Issue #928 — `:warning`, not the `:info` the rule's other producers stamp: this row says an
+      # assertion the author deliberately wrote is checking nothing.
+      expect(diag.severity).to eq(:warning)
+    end
+
+    it "resolves each bundled capability role instead of reporting it unresolved" do
+      %w[_RewindableStream _ClosableStream _FileDescriptorBacked _Callable _Closable].each do |role|
+        sig = { "roles.rbs" => <<~RBS }
+          %a{rigor:v1:conforms-to #{role}}
+          class BundledRoleDemo
+            def read: (*untyped) -> String?
+            def rewind: () -> untyped
+            def close: () -> untyped
+            def closed?: () -> bool
+            def fileno: () -> Integer
+            def call: (*untyped) -> untyped
+          end
+        RBS
+        result = analyze("x = 1\n", sig: sig)
+        rows = result.diagnostics.select { |d| d.rule.start_with?("dynamic.rbs-extended", "rbs_extended") }
+
+        expect(rows).to be_empty, "expected #{role} to resolve and be satisfied, got #{rows.map(&:message)}"
+      end
     end
 
     it "flags a provided method whose return type widens the interface contract" do

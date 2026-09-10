@@ -61,6 +61,7 @@ module Rigor
       def self.reset_default!: () -> void
       def self.build_env_for: (libraries: Array[String], signature_paths: Array[String | _ToPath]) -> untyped
       def self.vendored_gem_sig_paths: () -> Array[Pathname]
+      def self.capability_role_sig_paths: () -> ([Pathname] | [])
       def self.vendored_gem_names: () -> Array[String]
 
       def initialize: (?libraries: Array[String], ?signature_paths: Array[String | _ToPath], ?cache_store: untyped?) -> void

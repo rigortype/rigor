@@ -580,7 +580,10 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(diagnostic.message).to include("return type is not a subtype")
     end
 
-    it "flags an UnresolvedInterface record on the dynamic/info channel, naming the unresolved interface" do
+    # Issue #928 — the rule id stays the shared `dynamic.rbs-extended.unresolved`, but this producer stamps
+    # `:warning` where the others stamp `:info`: the row says a directive the author wrote is checking
+    # nothing, and it is visible only to a project that wrote one.
+    it "flags an UnresolvedInterface record as a :warning, naming the unresolved interface" do
       record = Rigor::RbsExtended::ConformanceChecker::UnresolvedInterface.new(
         class_name: "MyClass", interface_name: "_Nope", location: nil
       )
@@ -588,7 +591,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       diagnostic = build_aggregator(conformance_results_snapshot: [record]).conforms_to_diagnostics.first
 
       expect(diagnostic.rule).to eq("dynamic.rbs-extended.unresolved")
-      expect(diagnostic.severity).to eq(:info)
+      expect(diagnostic.severity).to eq(:warning)
       expect(diagnostic.message).to include("MyClass")
       expect(diagnostic.message).to include("_Nope")
     end

@@ -76,7 +76,8 @@ module Rigor
       def self.file_entries(loader, comparator: :digest)
         roots = loader.signature_paths +
                 Rigor::Environment::RbsLoader.vendored_gem_sig_paths +
-                Rigor::Environment::RbsLoader.core_overlay_sig_paths
+                Rigor::Environment::RbsLoader.core_overlay_sig_paths +
+                Rigor::Environment::RbsLoader.capability_role_sig_paths
         roots.flat_map do |root|
           next [] unless root.directory?
 

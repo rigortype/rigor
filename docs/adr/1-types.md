@@ -344,7 +344,9 @@ Rigor-specific roles introduced for the first milestone (each one ships with an 
 | `_RewindableStream` | Stream-like objects that can be replayed from the start | `read`, `rewind` |
 | `_ClosableStream` | Stream-like objects whose lifetime can be closed | `close`, `closed?` |
 | `_FileDescriptorBacked` | Real OS-backed streams that justify diagnostics requiring an actual `IO` | `fileno` |
-| `_Callable[**A, R]` | Anything that responds to `call`, distinct from `_ToProc` | `call(*A) -> R` |
+| `_Callable` | Anything that responds to `call`, distinct from `_ToProc` | `call` |
+
+`_Callable` is **not** generic. It was first drafted as `_Callable[**A, R]`, which is not RBS grammar — `**A` has no meaning in a type-parameter list — so the shipped role takes no parameters; a generic form is a future extension, gated on RBS gaining the syntax.
 
 Plugins may add roles, additional conformance facts, role-specific exclusions, and uncertain conformance, but they cannot silently replace either the reused RBS interfaces or the Rigor-specific roles in this catalog.
 

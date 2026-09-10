@@ -60,6 +60,21 @@ green at the last integration run):
 - #973 (#915): `class << self; include M; end` records as an extend; RBS-declared `extend` reaches
   narrowing through `Environment#singleton_extended_modules`; `IncrementalSnapshot::SCHEMA` 21.
 
+## 2026-09-11 — the human-gated v0.3.9 items, adjudicated and landed
+
+Adjudicated with the user (grilling round): #928, #796+#794, #959 stay on v0.3.9 and shipped; #697,
+#424, #476 moved to v0.4.0; #378 closed as already settled (steins#468/#469, `mutate.instance`).
+Each PR passed a Fable adversarial review before merge; two reviews sent a PR back first.
+
+- #976 (#928): the five capability roles ship as bundled RBS (`data/capability_roles/`), project
+  declarations win per declaration on a name clash, unresolved `conforms-to` interface is `:warning`.
+- #977 (#959): `plugin_trust.read-refused` `:info`, one per plugin, when the `IoBoundary` refused a
+  read; `getcwd` is symlink-resolved, so the hint is about the refused path's spelling, not the cwd.
+- #978 (#796 + #794): the snapshot carries `definition-build-failed` and the HKT-scan outcome and
+  replays them on a narrowed closure; SCHEMA 22; a `virtual:` buffer in the closure drops its entry.
+  The durable false negative that drop leaves is #980 (v0.4.0, `ready-for-human`).
+- Review by-products filed: #979 (a NEW `sig/*.rbs` file does not invalidate the run cache).
+
 ## Open threads
 
 - #424 stays open on its WD16 target (`Propagator.propagate` at gitlab scale). The per-project half
@@ -69,7 +84,7 @@ green at the last integration run):
 - Filed this session, `ready-for-human`: #959 (TrustPolicy refuses every plugin read under a symlinked
   project root, silently), #953 (literal-lambda call forms), #963 (#633 residue: block-self shapes,
   plugin-supplied methods).
-- Still open on v0.3.9 and human-gated: #928, #796, #794, #476, #378; #697 waits on #660.
+- Still open on v0.3.9: #979 (`ready-for-agent`) and #424's WD16 half; #697 waits on #660 (v0.4.0).
 
 ## How to enter
 

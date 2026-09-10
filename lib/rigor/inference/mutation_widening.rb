@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "../source/node_children"
 require_relative "content_join"
+require_relative "mutation_rejoin"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
 require_relative "string_mutation"
@@ -136,8 +137,7 @@ module Rigor
 
       # True when `receiver` names at least one variable whose CURRENT binding is a literal-shape
       # carrier — the only pre-state {#widen_for_mutator} joins into. Callers use it to skip typing a
-      # mutator's arguments when nothing will consume them: `buf << x` on a String and `arr << x` on an
-      # already-nominal Array are the common cases, and `Scope#type_of` memoizes nothing.
+      # mutator's arguments when nothing will consume them, and `Scope#type_of` memoizes nothing.
       def joinable_receiver?(receiver, scope)
         return false if receiver.nil?
 
@@ -163,6 +163,9 @@ module Rigor
         case type
         when Type::Tuple, Type::HashShape then true
         when Type::Constant then StringMutation.constant?(type)
+        # A re-openable nominal counts since issue #580: skipping it made the one-way door
+        # self-fulfilling, since the arm never saw the arg types it grows from.
+        when Type::Nominal then MutationRejoin.regrowable_carrier?(type)
         when Type::Difference then type.removes_empty_witness?
         when Type::Union then type.members.any? { |m| shape_carrier?(m) }
         else false
@@ -257,7 +260,7 @@ module Rigor
         widened = widen_for_mutator(current, method_name, values: values, arg_types: arg_types)
         return scope if widened.nil?
 
-        scope.public_send(builder, read.name, widened)
+        MutationRejoin.rebind(scope, builder, read.name, widened, pre_state: current, kind: getter)
       end
 
       # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning
@@ -269,15 +272,16 @@ module Rigor
       private_constant :VALUE_REWRITING_MUTATORS
 
       # Returns the widened type for a binding whose receiver is about to be mutated by
-      # `method_name`, or `nil` when no widening applies (binding is not a literal-shape
-      # carrier, OR the method is not a mutator for that shape, OR the binding is already a
-      # nominal — no precision to lose).
+      # `method_name`, or `nil` when no widening applies (binding is not a carrier the mutation
+      # stands for, OR the method is not a mutator for that shape, OR the carrier is a PRECISE
+      # nominal, whose element set is a claim this seam may not grow — see {MutationRejoin.regrowable_carrier?}).
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
 
         return nil if type.nil?
 
         case type
+        when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
         when Type::Tuple
           return nil unless ARRAY_MUTATORS.include?(method_name)
 

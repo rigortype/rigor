@@ -133,10 +133,18 @@ end
 # 'upcase' for Integer` on all three mutator forms. The gradual floor is
 # what keeps them honest — and it costs the stale folds nothing, because
 # a union carrying Dynamic cannot constant-fold either. ---
+# Issue #580 — and the LATER stores are visible now. The widening used
+# to be a one-way door: the first store replaced the literal carrier
+# with a `Nominal` and `widen_for_mutator` had no `Nominal` arm, so
+# `a.push("s")` below joined nothing and the carrier closed at
+# `Array[Dynamic[top] | Integer]` with the `String` arm simply absent.
+# The floor stays on — a store this seam has not reached yet is still
+# unseen — but every store it HAS reached is in the union.
 def b1_push
   a = []
   a.push(1)
   a.push("s")
+  assert_type("Array[Dynamic[top] | Integer | String]", a)
   a.last.upcase
 end
 
@@ -144,6 +152,7 @@ def b1_shovel
   b = []
   b << 1
   b << "s"
+  assert_type("Array[Dynamic[top] | Integer | String]", b)
   b.last.upcase
 end
 
@@ -151,7 +160,45 @@ def b1_index_write
   c = []
   c[0] = 1
   c[1] = "s"
+  assert_type("Array[Dynamic[top] | Integer | String]", c)
   c.last.upcase
+end
+
+# The Hash twin, the issue's own step table. `h['b'] = "s"` and
+# `h['c'] = []` were both invisible; the value parameter carried the
+# first store's Hash arm alone.
+def b1_hash_steps
+  h = {}
+  h["a"] = {}
+  h["b"] = "s"
+  h["c"] = []
+  assert_type(
+    "Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top], Dynamic[top]] | String]", h
+  )
+  h
+end
+
+# The must-NOT-widen control. `Temple#compile_html` in the companion
+# project fixture is the declared-signature half; this is the same
+# boundary at a carrier whose pinning survived a first store. `:multi`
+# is a claim the author's literal made, so the foreign `Array[…]` the
+# next store adds takes the gradual floor instead of growing the
+# element set — which is what kept haml at zero
+# `def.return-type-mismatch` (PR #561).
+pinned_seed = [:multi]
+pinned_seed << :static
+pinned_seed << [:static, "x"]
+assert_type("Array[:multi | Dynamic[top] | Symbol]", pinned_seed)
+
+# …and a re-joined carrier whose parameter was PROVED stays proved:
+# `Hash.new(0)`'s value side is the default-arg fold's answer, and only
+# the key side is open. Growing both cost the counter idiom its
+# `Integer`.
+def counter_stays_precise
+  h = Hash.new(0)
+  h[:x] += 1
+  assert_type("Integer", h[:x])
+  h[:x]
 end
 
 # --- and the must-still-succeed sibling that keeps the floor from being

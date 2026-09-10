@@ -137,7 +137,7 @@ module Rigor
             end
           # Issues #796 / #794 — a narrowed run's own demand set is a SUBSET of the full run's, so the two
           # rows below are folded in after it, whichever backend produced the per-file stream.
-          replayed_restored_run_level_rows?
+          replayed_restored_run_level_rows?(closure: files)
           result
         end
 
@@ -180,7 +180,9 @@ module Rigor
             env = resolve_sequential_environment(source_files: project_files)
           end
           snapshot_project_signature_state(signature_state_environment(resolve))
-          snapshot_effect_annotation_carrier(annotation_carrier_environment(resolve)&.rbs_loader)
+          snapshot_effect_annotation_carrier(
+            annotation_carrier_environment(resolve, in_hand: !env.nil?)&.rbs_loader
+          )
           # `env` rather than `resolve.call`: read the demand the snapshots above just made when they built
           # an environment, and force nothing when they did not.
           record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
@@ -196,10 +198,18 @@ module Rigor
           plugin_signature_paths? || project_signature_paths? ? resolve.call : nil
         end
 
-        # Issue #794 — the same, for the #441 carrier: `virtual_rbs` is EXACTLY the plugin-synthesized set,
-        # so a registry with no synthesizer means an empty carrier whether or not an environment is built.
-        def annotation_carrier_environment(resolve)
+        # Issue #794 — the same, for the #441 carrier. The carrier is a filter over the loader's
+        # `virtual_rbs`, and an environment whose loader can hold none of it answers the same empty carrier
+        # a nil environment does. Two ways it can hold some: a plugin registry that declares a synthesizer
+        # (`Environment.collect_virtual_rbs` short-circuits to `[]` without one — and ADR-93 auto-wires
+        # `rigor-rbs-inline`, so this is the shape almost every project is in), or an environment ALREADY in
+        # hand, whose loader is free to read and may carry virtual buffers from a route this coordinator
+        # never saw (a restored env cache, a caller-supplied override). Only the third shape — no
+        # synthesizer AND no environment yet — declines, which is the #794 saving: nothing is built to
+        # discover an emptiness the registry already proves.
+        def annotation_carrier_environment(resolve, in_hand: false)
           return nil if @record_effects
+          return resolve.call if in_hand
 
           registry = plugin_registry
           return nil unless registry.respond_to?(:source_rbs_synthesizers)
@@ -214,13 +224,55 @@ module Rigor
         # single tuple whoever demanded it, so `||=` keeps this run's own answer when it has one. Returns
         # true when a replay was available, which is what tells {#serve_empty_closure} it owes no HKT demand
         # of its own — and so no environment.
-        def replayed_restored_run_level_rows?
+        #
+        # @param closure — the files this run analyses; see {#stale_replayed_failure?}.
+        def replayed_restored_run_level_rows?(closure: nil)
           rows = @restored_run_level_rows
           return false if rows.nil?
 
-          record_definition_build_failures(rows.definition_build_failures)
+          replayable = Array(rows.definition_build_failures).reject do |failure|
+            stale_replayed_failure?(failure, closure)
+          end
+          record_definition_build_failures(replayable)
           record_hkt_scan_failure(rows.hkt_scan_failure)
           true
+        end
+
+        # A replayed definition-build failure the snapshot's own fingerprint cannot vouch for. The
+        # fingerprint digests the three signature sources it can read WITHOUT an environment — `sig:`,
+        # `Gemfile.lock` / `rbs_collection.lock.yaml`, and the configuration — but NOT the virtual RBS a
+        # source-RBS synthesizer derives from `.rb` files (under ADR-93's auto-wired `rigor-rbs-inline`,
+        # every `#:` annotation). So a duplicate declaration can be REMOVED from a `.rb` file without moving
+        # the fingerprint, and the replayed row would outlive its own cause: the edited file enters the
+        # closure, its analysis demands nothing that would re-derive the row, and the run reports a
+        # collision between files that no longer collide.
+        #
+        # The narrowed run cannot re-derive the row either (#696 forbids Rigor demanding a definition the
+        # analysis did not), so the honest answer is to DROP it and under-report rather than assert a
+        # diagnostic on a program that may now be correct — false positives outrank worst-case reading. The
+        # cost is bounded to the row's own conflicting buffers: a collision between two files neither of
+        # which this run touches still replays.
+        def stale_replayed_failure?(failure, closure)
+          return false if closure.nil?
+
+          buffers = failure.is_a?(Array) ? failure[3] : nil
+          return false if buffers.nil?
+
+          closure_paths = closure.to_set { |path| File.expand_path(path.to_s) }
+          Array(buffers).any? do |name|
+            path = virtual_buffer_path(name)
+            !path.nil? && closure_paths.include?(File.expand_path(path))
+          end
+        end
+
+        # The source file behind a `virtual:<plugin id>:<path>` buffer name
+        # (`Environment.collect_virtual_rbs`), or nil for any other buffer — a `sig:` file, a bundled `.rbs`
+        # — which the fingerprint does cover and which therefore never goes stale under a replay.
+        def virtual_buffer_path(name)
+          parts = name.to_s.split(":", 3)
+          return nil unless parts.length == 3 && parts.first == "virtual"
+
+          parts.last
         end
 
         def analyze_files_sequentially(files, environment)

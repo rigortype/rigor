@@ -838,18 +838,37 @@ Exactly two live here, and the list is closed:
   [#696](https://github.com/rigortype/rigor/issues/696) binds the reported set to that
   demand and forbids a Rigor-owned demand from contributing — so a run whose closure is
   empty demands nothing and reports nothing, and a `--verify-incremental` partition
-  reports a subset of the full run's. It is fresh under the global fingerprint because
-  the FAILURE is a function of the signature set alone (`sig:` covers every `.rbs` under
-  `signature_paths:`, `gems:` / `rbs_collection:` the rest); only which of those failures
-  was DEMANDED varies, and replaying the last full run's demand set is what makes the row
-  invocation-independent, which is the property #696 exists to protect.
+  reports a subset of the full run's. The FAILURE itself is a function of the signature
+  set, and only which of those failures was DEMANDED varies — replaying the last full
+  run's demand set is what makes the row invocation-independent, the property #696 exists
+  to protect. But the signature set has THREE sources and the fingerprint reaches only
+  two of them:
+
+  | source | fingerprint slot | covered? |
+  | --- | --- | --- |
+  | every `.rbs` under `signature_paths:` | `sig:` (content digest, per file) | yes |
+  | gem / collection RBS | `gems:`, `rbs_collection:` (lockfile digests) | yes |
+  | virtual RBS — what a plugin's source-RBS synthesizer derives from `.rb` files, which under [ADR-93](../adr/93-default-rbs-inline-ingestion.md)'s auto-wired `rigor-rbs-inline` is every `#:` / `# @rbs` annotation | none | **no** |
+
+  Digesting the third would mean running every synthesizer over every source file, which
+  is an environment build in all but name — and the fingerprint exists to gate the
+  snapshot load BEFORE one. So a duplicate declaration can be removed from a `.rb` file
+  without moving the fingerprint, and a replayed row would outlive its cause. The replay
+  therefore DROPS any entry whose conflicting buffers name a `virtual:` buffer of a file
+  in this run's closure (`PoolCoordinator#stale_replayed_failure?`): the edited file is
+  exactly the one whose contribution may no longer collide, this run cannot re-derive the
+  row (#696 forbids the demand), and under-reporting beats asserting a diagnostic on a
+  program that may now be correct.
 - **`hkt_scan_failure`** — the `rbs.coverage.hkt-scan-failed` outcome tuple
   ([#784](https://github.com/rigortype/rigor/issues/784)). The scan has ONE outcome per
-  environment, and the environment is a function of the same fingerprinted inputs, so a
-  replayed outcome is exactly as fresh as everything else served warm. Replaying it is
-  what lets a nothing-changed recheck skip resolving an environment at all
-  ([#794](https://github.com/rigortype/rigor/issues/794)): it was the last demand on that
-  path that nothing else needed.
+  environment, so a replayed outcome is exactly as fresh as the environment it was
+  scanned from — which is to say: as fresh as the fingerprint, with the same virtual-RBS
+  blind spot as the row above, since the loader the scan reads carries the synthesized
+  buffers too. Unlike a definition-build failure it is a single tuple naming no buffers,
+  so there is nothing to attribute to a closure and no drop to make; the staleness stands
+  and is listed below. Replaying it is what lets a nothing-changed recheck skip resolving
+  an environment at all ([#794](https://github.com/rigortype/rigor/issues/794)): it was
+  the last demand on that path that nothing else needed.
 
 Every other `.rigor.yml`-level row stays uncached and is regenerated per run:
 `synthesized-namespace`, `quarantined-signature`, `environment-build-failed`,
@@ -862,12 +881,28 @@ it fails that test.
 
 The replay is supplied to a NARROWED run only (a recheck's closure, an empty
 closure, a `--verify-incremental` partition); a full run derives both for itself and
-overwrites the section. Its one residual staleness is a demand that vanished without
-moving the fingerprint — the last `.rb` file referencing a broken class is deleted, so
-a fresh full run would demand nothing and report nothing while the replay still
-reports. It survives to the next cold run and is the price of #796's option 1; the
-alternative (replaying the prior demand SET against a freshly resolved environment)
-buys the same answer for the cost this section exists to avoid.
+overwrites the section, so every staleness below is bounded by the next cold or full
+run. Three residuals stand, stated plainly:
+
+1. **A demand that vanished.** The last `.rb` file referencing a broken class is
+   deleted; a fresh full run would demand nothing and report nothing, while the replay
+   still reports. Nothing in the fingerprint moved. This is the price of #796's option 1
+   — the alternative (replaying the prior demand SET against a freshly resolved
+   environment) buys the same answer for exactly the cost this section exists to avoid.
+2. **A virtual-RBS change outside the closure drop.** The drop above covers the shape
+   that matters (the collision is fixed in a file the run analyses) and the fingerprint
+   covers `sig:`; what neither covers is a virtual-RBS edit that changes the row without
+   touching a named conflicting buffer, or the `hkt_scan_failure` tuple, which names no
+   buffers at all. Both survive until a full run.
+3. **The drop itself under-reports.** A collision between two files, one of which this
+   run's closure contains, loses its row for that run rather than risking a false
+   positive — the same answer master gave before #796, and no worse.
+
+`--verify-incremental` does not bind any of this: `IncrementalSession#reanalyze_subset`
+replays the rows off the SAME process's freshly computed baseline, so it verifies the
+union logic and never the persisted snapshot. The cross-process oracle that does bind it
+is `spec/rigor/analysis/incremental_session_spec.rb` — two `Cache::Store`s over one
+snapshot directory, a `.rb` edit between them, compared against a `--no-cache` full run.
 
 ## Bundled RBS producer contract
 

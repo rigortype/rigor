@@ -705,7 +705,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 13`)
+### `Payload` (current `SCHEMA = 22`)
 
 ```
 Payload :: Data[
@@ -717,7 +717,8 @@ Payload :: Data[
   plugin_fact_digest,                         # ADR-88 plugin-fact surface fingerprint (see below)
   return_summaries,                           # ADR-89 observed-key return summaries (see below)
   param_table,                                # ADR-67 WD6c the inferred-param seed table the run analysed under
-  effect_collections, effects_identity        # ADR-103 the effects sidecar and its own identity (see below)
+  effect_collections, effects_identity,       # ADR-103 the effects sidecar and its own identity (see below)
+  run_level_rows                              # the two run-level rows a narrowed run replays (see below)
 ]
 ```
 
@@ -744,7 +745,11 @@ sidecar (ADR-103 WD13); `13` added `constant_decls` (the per-file
 constant PUBLICATION CENSUS — `{name => [literal] | :unpublishable}`, whose
 diff drives the `constant:` edge's producer) and gave each seed bundle a
 `constant_writes` census of its own
-([#644](https://github.com/rigortype/rigor/issues/644)). A blob
+([#644](https://github.com/rigortype/rigor/issues/644)); `14`–`21` are
+seed-bundle grammar bumps, each recorded against its issue in the numbered
+comment on `IncrementalSnapshot::SCHEMA`; `22` added `run_level_rows`
+([#796](https://github.com/rigortype/rigor/issues/796),
+[#794](https://github.com/rigortype/rigor/issues/794)). A blob
 from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
 
@@ -815,6 +820,54 @@ writes `{}` / `nil`, and behaves exactly as it did before the slot existed.
 
 The contract in full — both slots, the two identities, and what each invalidates — is
 [`effect-summaries.md` § Caching](effect-summaries.md).
+
+### Run-level rows the snapshot carries
+
+A run-level row is one produced once per run off the environment and its reporters,
+not by any file's analysis. **No run-level row is served from the per-file cache** —
+`IncrementalSession` caches only `Runner#per_file_diagnostics`, so every run
+regenerates every one of them
+([#788](https://github.com/rigortype/rigor/pull/788)). `run_level_rows` does not
+weaken that promise: it is not a diagnostic cache but a record of two INPUTS a
+narrowed run cannot observe, replayed so that the run can produce the rows itself.
+
+Exactly two live here, and the list is closed:
+
+- **`definition_build_failures`** — the reported `rbs.coverage.definition-build-failed`
+  details. Its producer is the ANALYSIS's own demand for a class's method surface, and
+  [#696](https://github.com/rigortype/rigor/issues/696) binds the reported set to that
+  demand and forbids a Rigor-owned demand from contributing — so a run whose closure is
+  empty demands nothing and reports nothing, and a `--verify-incremental` partition
+  reports a subset of the full run's. It is fresh under the global fingerprint because
+  the FAILURE is a function of the signature set alone (`sig:` covers every `.rbs` under
+  `signature_paths:`, `gems:` / `rbs_collection:` the rest); only which of those failures
+  was DEMANDED varies, and replaying the last full run's demand set is what makes the row
+  invocation-independent, which is the property #696 exists to protect.
+- **`hkt_scan_failure`** — the `rbs.coverage.hkt-scan-failed` outcome tuple
+  ([#784](https://github.com/rigortype/rigor/issues/784)). The scan has ONE outcome per
+  environment, and the environment is a function of the same fingerprinted inputs, so a
+  replayed outcome is exactly as fresh as everything else served warm. Replaying it is
+  what lets a nothing-changed recheck skip resolving an environment at all
+  ([#794](https://github.com/rigortype/rigor/issues/794)): it was the last demand on that
+  path that nothing else needed.
+
+Every other `.rigor.yml`-level row stays uncached and is regenerated per run:
+`synthesized-namespace`, `quarantined-signature`, `environment-build-failed`,
+`signature-standdown`, the `conforms-to` results, the plugin `prepare` /
+pool-degraded rows. Each is read off state the run's own environment already
+carries when it builds one, and none of them depends on which files were analysed
+— so there is nothing for a replay to add, and caching one would be caching a
+diagnostic rather than an unobservable input. A new row joins this section only if
+it fails that test.
+
+The replay is supplied to a NARROWED run only (a recheck's closure, an empty
+closure, a `--verify-incremental` partition); a full run derives both for itself and
+overwrites the section. Its one residual staleness is a demand that vanished without
+moving the fingerprint — the last `.rb` file referencing a broken class is deleted, so
+a fresh full run would demand nothing and report nothing while the replay still
+reports. It survives to the next cold run and is the price of #796's option 1; the
+alternative (replaying the prior demand SET against a freshly resolved environment)
+buys the same answer for the cost this section exists to avoid.
 
 ## Bundled RBS producer contract
 

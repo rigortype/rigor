@@ -2303,4 +2303,125 @@ end
       end
     end
   end
+
+  # Issues #796 / #794 — the two run-level rows a NARROWED run cannot re-derive from the files it analyses,
+  # and the snapshot section that carries them from the full run that could. `definition-build-failed` is
+  # produced by the ANALYSIS's own demand for a class's method surface, which an empty closure never makes
+  # and which #696 forbids Rigor making on its behalf; `hkt-scan-failed` is produced by an environment that a
+  # nothing-changed recheck otherwise builds for that one row alone. Both are fresh under the global
+  # fingerprint, which already covers the whole signature set and configuration they are functions of.
+  describe "the run-level rows the snapshot carries (#796, #794)" do
+    # `DupDemo#read` is declared twice, so building the class's definition collapses; `app.rb` is the only
+    # thing that DEMANDS that definition, which is exactly what makes the row invisible to a run whose
+    # closure is empty. `notes.rb` demands nothing, so it is the partition member that excludes `app.rb`.
+    def write_definition_failure_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "app.rb"), "DupDemo.new.read\n")
+      File.write(File.join(dir, "notes.rb"), "x = 1\n")
+      File.write(File.join(dir, "sig", "dup.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+      File.write(File.join(dir, "sig", "dup2.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+    end
+
+    def definition_failure_config(dir)
+      Rigor::Configuration.new("paths" => [dir], "signature_paths" => [File.join(dir, "sig")])
+    end
+
+    def definition_rows(diagnostics)
+      diagnostics.select { |d| d.qualified_rule == "rbs.coverage.definition-build-failed" }.map(&:message)
+    end
+
+    def hkt_messages(diagnostics)
+      diagnostics.select { |d| d.qualified_rule == "rbs.coverage.hkt-scan-failed" }.map(&:message)
+    end
+
+    # A fresh `Store` per call, because a warm run is a second PROCESS: `Store#fetch_or_compute` memoises per
+    # instance, so a shared one would hand the second run the environment the first one built.
+    def incremental_runner(config, dir, cache_root, snapshot, fingerprint)
+      lambda do
+        store = Rigor::Cache::Store.new(root: cache_root)
+        guarded_run_incremental(described_class.new(configuration: config, paths: [dir], cache_store: store),
+                                snapshot: snapshot, fingerprint: fingerprint)
+      end
+    end
+
+    it "reports the cold run's definition-build-failed row on a warm nothing-changed run (#796)" do
+      Dir.mktmpdir do |dir|
+        write_definition_failure_fixture(dir)
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, cold_warm = run.call
+        warm, warm_warm = run.call
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+
+        expect([cold_warm, warm_warm]).to eq([false, true])
+        expect(definition_rows(cold).size).to eq(1)
+        expect([definition_rows(warm), definition_rows(full)]).to eq([definition_rows(cold)] * 2)
+      end
+    end
+
+    it "drops the row and rebuilds both rows once the duplicate declaration is gone (#796)" do
+      Dir.mktmpdir do |dir|
+        write_definition_failure_fixture(dir)
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+        run.call
+        run.call
+
+        # The must-still-fire arm: a moved signature set moves the fingerprint, so nothing is replayed and
+        # the row is re-derived from an environment this run resolves for itself.
+        File.delete(File.join(dir, "sig", "dup2.rbs"))
+        allow(Rigor::Environment).to receive(:for_project).and_call_original
+        fixed, warm = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir)).call
+
+        expect(warm).to be(false)
+        expect(definition_rows(fixed)).to be_empty
+        expect(Rigor::Environment).to have_received(:for_project).at_least(:once)
+      end
+    end
+
+    it "agrees with the full-run oracle on a --verify-incremental partition that excludes the demand (#796)" do
+      Dir.mktmpdir do |dir|
+        write_definition_failure_fixture(dir)
+        config = definition_failure_config(dir)
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        guarded_baseline(session)
+
+        partition = guarded_reanalyze_subset(session, [File.join(dir, "notes.rb")])
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+
+        expect(definition_rows(full).size).to eq(1)
+        expect(definition_rows(partition)).to eq(definition_rows(full))
+      end
+    end
+
+    context "when the HKT registry scan raises (#794)" do
+      before do
+        allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_raise(NameError, "simulated scan bug")
+      end
+
+      it "replays the cold run's hkt-scan-failed row on a warm nothing-changed run, resolving no environment" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "app.rb"), "JSON.parse(\"{}\")\n")
+          config = configuration(dir)
+          cache_root = File.join(dir, ".rigor", "cache")
+          snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+          run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+          cold, = run.call
+          allow(Rigor::Environment).to receive(:for_project).and_call_original
+          warm, warm_warm = run.call
+
+          expect(warm_warm).to be(true)
+          expect(hkt_messages(cold).size).to eq(1)
+          expect(hkt_messages(warm)).to eq(hkt_messages(cold))
+          expect(Rigor::Environment).not_to have_received(:for_project)
+        end
+      end
+    end
+  end
 end

@@ -9,6 +9,7 @@ require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../cache/rbs_descriptor"
 require_relative "../cache/file_digest"
+require_relative "../cache/incremental_snapshot"
 require_relative "run_cache_key"
 require_relative "path_expansion"
 require_relative "../plugin"
@@ -73,6 +74,18 @@ module Rigor
                   # every run wherever it is positioned, and slicing the run's full stream by path cached the
                   # file-positioned ones (`effect.annotations-unchecked`, `source-rbs-*`).
                   :per_file_diagnostics
+
+      # Issues #796 / #794 — the two run-level rows a NARROWED run cannot re-derive from the files it
+      # analyses: the `definition-build-failed` set (whose producer is the analysis's own demand, and #696
+      # forbids Rigor demanding in its place) and the HKT-scan outcome (whose producer is an environment a
+      # nothing-changed recheck otherwise has no reason to build). {IncrementalSession} persists what a full
+      # run answers here and hands it back to the next narrowed run.
+      def run_level_rows
+        Cache::IncrementalSnapshot::RunLevelRows.new(
+          definition_build_failures: @snapshots.definition_build_failures,
+          hkt_scan_failure: @snapshots.hkt_scan_failure
+        )
+      end
 
       # ADR-46 — the per-file cross-file read records this run captured (empty unless
       # `record_dependencies: true`). Sequential analysis records into `@file_dependencies` via
@@ -256,8 +269,12 @@ module Rigor
                      buffer: nil, prebuilt: nil, environment: nil,
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
-                     discovery_seed: nil, no_tolerated_effects: false)
+                     discovery_seed: nil, no_tolerated_effects: false,
+                     restored_run_level_rows: nil)
         @configuration = configuration
+        # Issues #796 / #794 — the previous full run's run-level rows, supplied only by
+        # {IncrementalSession} on a narrowed run; see {PoolCoordinator#replay_restored_run_level_rows}.
+        @restored_run_level_rows = restored_run_level_rows
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
         @plugin_requirer = plugin_requirer
@@ -1516,7 +1533,8 @@ module Rigor
           synthetic_method_index: -> { @synthetic_method_index },
           project_patched_methods: -> { @project_patched_methods },
           project_scope_seed: -> { project_scope_seed_tables },
-          analyze_file: ->(path, environment) { analyze_file(path, environment) }
+          analyze_file: ->(path, environment) { analyze_file(path, environment) },
+          restored_run_level_rows: @restored_run_level_rows
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
           configuration: @configuration,

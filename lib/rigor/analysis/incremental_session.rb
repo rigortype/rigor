@@ -112,7 +112,7 @@ module Rigor
         # and a missing invalidation edge is impossible by construction — the reason this is a table diff
         # and not the caller→callee edge recording #204 first sketched.
         @param_table = {}
-        reset_effect_state
+        reset_carried_state
         # ADR-88 WD1 — the plugin fact-surface digest computed for THIS invocation (nil until a
         # `#run_incremental` pass runs / a plugin-free project) and the reporting flags a caller (the CLI
         # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
@@ -174,6 +174,7 @@ module Rigor
         @effects_identity = current_effects_identity
         @cache = per_file(runner.per_file_diagnostics)
         @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
+        @run_level_rows = runner.run_level_rows
         diagnostics
       end
 
@@ -197,7 +198,8 @@ module Rigor
         # The freshly collected table is handed to the runner so the run seeds from the SAME table the diff
         # was decided on (and the collector runs once per recheck, not twice).
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
-                              param_inferred_types: fresh_params)
+                              param_inferred_types: fresh_params,
+                              restored_run_level_rows: @run_level_rows)
         fresh = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
         reused = (current & previous) - affected.to_a
@@ -425,7 +427,8 @@ module Rigor
         affected = subset.to_set
         # ADR-67 WD6c lift — seed the subset run from the baseline's own table so the verification engine
         # exercises the exact seeds the served cache entries were computed under (and skips a re-collect).
-        runner = build_runner(analyze_only: affected, param_inferred_types: @param_table)
+        runner = build_runner(analyze_only: affected, param_inferred_types: @param_table,
+                              restored_run_level_rows: @run_level_rows)
         fresh = run_runner(runner).diagnostics
         reused = @analyzed - affected.to_a
         fresh + reused.flat_map { |path| @cache[path] || [] }
@@ -562,6 +565,9 @@ module Rigor
         restore_structural_declarations(payload)
         @return_summaries  = payload.return_summaries || {}
         @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
+        # Issues #796 / #794 — absent (nil) in a snapshot written before schema 22 is impossible (the SCHEMA
+        # gate rejects one), so nil here means the writing run genuinely had nothing to say.
+        @run_level_rows    = payload.run_level_rows
         # ADR-103 WD13 / #382 — the effects sidecar rides its own identity, so a snapshot whose summaries
         # were collected under a different vocabulary / catalogue / `effects:` block restores as EMPTY
         # rather than as stale rows. {#run_incremental} turns that emptiness into a full baseline, because
@@ -595,7 +601,8 @@ module Rigor
           return_summaries: marshal_safe_return_summaries,
           param_table: marshal_safe_param_table,
           effect_collections: marshal_safe_effect_collections,
-          effects_identity: @effects_identity
+          effects_identity: @effects_identity,
+          run_level_rows: @run_level_rows
         )
       end
 
@@ -607,6 +614,15 @@ module Rigor
       def reset_effect_state
         @effect_collections = {}
         @effects_identity = nil
+      end
+
+      # The state this session carries ACROSS processes in the snapshot rather than deriving each run: the
+      # effects sidecar above, and (issues #796 / #794) the run-level rows the last FULL run answered — the
+      # `definition-build-failed` set and the HKT-scan outcome, nil until a full run has produced them, and
+      # handed to every narrowed run this session builds, none of which can derive them from its own files.
+      def reset_carried_state
+        reset_effect_state
+        @run_level_rows = nil
       end
 
       # Whether the effects half of a restored snapshot permits reuse. Collection off is vacuously true —
@@ -699,6 +715,9 @@ module Rigor
           @digests[path] = pack_digest(path)
         end
         absorb_dependency_graph(runner)
+        # Issues #796 / #794 — the recheck's own snapshots already carry the replayed rows folded together
+        # with anything its closure demanded for itself, so this is the same union the next run replays.
+        @run_level_rows = runner.run_level_rows
         refresh_return_summaries(runner, analyze_set)
         refresh_effect_collections(runner, analyze_set)
       end

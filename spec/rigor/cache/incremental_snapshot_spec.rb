@@ -28,7 +28,12 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       param_table: { ["Foo", :bar, :instance] => { value: "Integer-stand-in" } },
       # ADR-103 WD13 / #382 — the effects sidecar and the identity it was collected under.
       effect_collections: { "b.rb" => Rigor::Effects::FileCollection.empty("b.rb") },
-      effects_identity: "effects-identity-abc"
+      effects_identity: "effects-identity-abc",
+      # Issues #796 / #794 — the run-level rows a narrowed run replays instead of re-deriving.
+      run_level_rows: described_class::RunLevelRows.new(
+        definition_build_failures: [["DupDemo", "RBS::DuplicatedMethodDefinitionError", "read", ["dup.rbs"]]],
+        hkt_scan_failure: ["NameError", "boom", "lib/rigor/x.rb:1", :overlay]
+      )
     )
   end
 
@@ -53,6 +58,15 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       snapshot.save(fingerprint: "fp1", payload: sample_payload)
       loaded = snapshot.load(fingerprint: "fp1")
       expect(loaded.seed_bundles).to eq("b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} })
+    end
+  end
+
+  it "round-trips the issue #796 / #794 run-level rows" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      snapshot.save(fingerprint: "fp1", payload: sample_payload)
+      loaded = snapshot.load(fingerprint: "fp1")
+      expect(loaded.run_level_rows).to eq(sample_payload.run_level_rows)
     end
   end
 

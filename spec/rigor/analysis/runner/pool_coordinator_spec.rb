@@ -56,7 +56,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     project_patched_methods: nil,
     project_scope_seed: {},
     analyze_file: ->(_path, _environment) { [] },
-    record_dependencies: false
+    record_dependencies: false,
+    restored_run_level_rows: nil
   )
     described_class.new(
       configuration: configuration, cache_store: cache_store, explain: explain, workers: workers,
@@ -67,8 +68,17 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       synthetic_method_index: -> { synthetic_method_index },
       project_patched_methods: -> { project_patched_methods },
       project_scope_seed: -> { project_scope_seed }, analyze_file: analyze_file,
-      record_dependencies: record_dependencies
+      record_dependencies: record_dependencies, restored_run_level_rows: restored_run_level_rows
     )
+  end
+
+  # A registry in the shape ADR-93 puts almost every project in: `rigor-rbs-inline` is auto-wired, so
+  # `source_rbs_synthesizers` is non-empty and virtual RBS — and with it a non-empty effect-annotation
+  # carrier — is possible. `Registry::EMPTY` (the `build_coordinator` default) is the opted-out shape, where
+  # `Environment.collect_virtual_rbs` returns `[]` before it walks a single file.
+  def synthesizing_registry
+    instance_double(Rigor::Plugin::Registry, signature_paths: [],
+                                             source_rbs_synthesizers: [[:plugin, ->(_path) {}]])
   end
 
   describe "#pool_mode?" do
@@ -317,7 +327,42 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       allow(Rigor::Environment).to receive(:for_project).and_return(resolved)
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
 
-      build_coordinator(snapshots: snapshots).analyze_files([], project_files: ["a.rb"])
+      build_coordinator(snapshots: snapshots, plugin_registry: synthesizing_registry).analyze_files(
+        [], project_files: ["a.rb"]
+      )
+
+      expect(snapshots.effect_annotation_carrier).to eq([annotated])
+    end
+
+    # Issue #794 — the saving the gate above buys. `virtual_rbs` is exactly what the registry's synthesizers
+    # produced, so a project with no synthesizer, no `signature_paths:` and nothing plugin-deferred has an
+    # empty carrier and empty signature state whatever environment it builds — and therefore builds none.
+    # The counterpart is the example above: with a synthesizer declared, the environment IS resolved.
+    it "builds no environment for an empty run whose registry declares no synthesizer (#794)" do
+      allow(Rigor::Environment).to receive(:for_project)
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+      rows = Rigor::Cache::IncrementalSnapshot::RunLevelRows.new(definition_build_failures: [],
+                                                                 hkt_scan_failure: nil)
+
+      build_coordinator(snapshots: snapshots, restored_run_level_rows: rows).analyze_files(
+        [], project_files: ["a.rb"]
+      )
+
+      expect(Rigor::Environment).not_to have_received(:for_project)
+      expect(snapshots.effect_annotation_carrier).to eq([])
+    end
+
+    # The environment the caller already handed in costs nothing to read, so the synthesizer gate is not
+    # asked at all: its loader may carry virtual buffers by a route this coordinator never saw (a restored
+    # env cache, an override), and declining on an empty registry would drop them.
+    it "reads the carrier off an environment already in hand whatever the registry declares (#794)" do
+      annotated = ["lib/demo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"]
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [],
+                                                              virtual_rbs: [annotated])
+      override = instance_double(Rigor::Environment, hkt_registry: nil, hkt_scan_failure: nil, rbs_loader: loader)
+      snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+
+      build_coordinator(snapshots: snapshots, environment_override: override).analyze_files([])
 
       expect(snapshots.effect_annotation_carrier).to eq([annotated])
     end

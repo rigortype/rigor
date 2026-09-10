@@ -2303,4 +2303,241 @@ end
       end
     end
   end
+
+  # Issues #796 / #794 — the two run-level rows a NARROWED run cannot re-derive from the files it analyses,
+  # and the snapshot section that carries them from the full run that could. `definition-build-failed` is
+  # produced by the ANALYSIS's own demand for a class's method surface, which an empty closure never makes
+  # and which #696 forbids Rigor making on its behalf; `hkt-scan-failed` is produced by an environment that a
+  # nothing-changed recheck otherwise builds for that one row alone. Both are fresh under the global
+  # fingerprint, which already covers the whole signature set and configuration they are functions of.
+  describe "the run-level rows the snapshot carries (#796, #794)" do
+    # The inline examples below register `Plugin::RbsInline` by hand; clear the global registry on both
+    # sides so neither a leftover registration nor this group's own reaches another example.
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    # `DupDemo#read` is declared twice, so building the class's definition collapses; `app.rb` is the only
+    # thing that DEMANDS that definition, which is exactly what makes the row invisible to a run whose
+    # closure is empty. `notes.rb` demands nothing, so it is the partition member that excludes `app.rb`.
+    def write_definition_failure_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "app.rb"), "DupDemo.new.read\n")
+      File.write(File.join(dir, "notes.rb"), "x = 1\n")
+      File.write(File.join(dir, "sig", "dup.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+      File.write(File.join(dir, "sig", "dup2.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+    end
+
+    def definition_failure_config(dir)
+      Rigor::Configuration.new("paths" => [dir], "signature_paths" => [File.join(dir, "sig")])
+    end
+
+    def definition_rows(diagnostics)
+      diagnostics.select { |d| d.qualified_rule == "rbs.coverage.definition-build-failed" }.map(&:message)
+    end
+
+    def hkt_messages(diagnostics)
+      diagnostics.select { |d| d.qualified_rule == "rbs.coverage.hkt-scan-failed" }.map(&:message)
+    end
+
+    # A fresh `Store` per call, because a warm run is a second PROCESS: `Store#fetch_or_compute` memoises per
+    # instance, so a shared one would hand the second run the environment the first one built.
+    def incremental_runner(config, dir, cache_root, snapshot, fingerprint)
+      lambda do
+        store = Rigor::Cache::Store.new(root: cache_root)
+        guarded_run_incremental(described_class.new(configuration: config, paths: [dir], cache_store: store),
+                                snapshot: snapshot, fingerprint: fingerprint)
+      end
+    end
+
+    it "reports the cold run's definition-build-failed row on a warm nothing-changed run (#796)" do
+      Dir.mktmpdir do |dir|
+        write_definition_failure_fixture(dir)
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, cold_warm = run.call
+        warm, warm_warm = run.call
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+
+        expect([cold_warm, warm_warm]).to eq([false, true])
+        expect(definition_rows(cold).size).to eq(1)
+        expect([definition_rows(warm), definition_rows(full)]).to eq([definition_rows(cold)] * 2)
+      end
+    end
+
+    it "drops the row and rebuilds both rows once the duplicate declaration is gone (#796)" do
+      Dir.mktmpdir do |dir|
+        write_definition_failure_fixture(dir)
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+        run.call
+        run.call
+
+        # The must-still-fire arm: a moved signature set moves the fingerprint, so nothing is replayed and
+        # the row is re-derived from an environment this run resolves for itself.
+        File.delete(File.join(dir, "sig", "dup2.rbs"))
+        allow(Rigor::Environment).to receive(:for_project).and_call_original
+        fixed, warm = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir)).call
+
+        expect(warm).to be(false)
+        expect(definition_rows(fixed)).to be_empty
+        expect(Rigor::Environment).to have_received(:for_project).at_least(:once)
+      end
+    end
+
+    it "agrees with the full-run oracle on a --verify-incremental partition that excludes the demand (#796)" do
+      Dir.mktmpdir do |dir|
+        write_definition_failure_fixture(dir)
+        config = definition_failure_config(dir)
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        guarded_baseline(session)
+
+        partition = guarded_reanalyze_subset(session, [File.join(dir, "notes.rb")])
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+
+        expect(definition_rows(full).size).to eq(1)
+        expect(definition_rows(partition)).to eq(definition_rows(full))
+      end
+    end
+
+    # ADR-93 auto-wires `rigor-rbs-inline` from `Configuration.load` only, never from a bare
+    # `Configuration.new`, so a unit-constructed configuration has to list it to reach the shape a real
+    # project runs in — which is the whole point of the two examples below.
+    def inline_config(dir)
+      Rigor::Configuration.new(
+        "paths" => [dir],
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    end
+
+    # The suite calls `Rigor::Plugin.unregister!` pervasively while `require` is a once-per-process no-op, so
+    # the default requirer would leave the registry empty for whichever example runs second and synthesize
+    # nothing. Registering the class directly is the suite's standing answer (see
+    # `spec/rigor/effects/envelope_rbs_inline_spec.rb`).
+    def inline_requirer
+      ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) }
+    end
+
+    # {#incremental_runner}'s sibling for an inline-annotated project: a fresh `Store` per call (a warm run
+    # is a second PROCESS) plus the requirer above.
+    def inline_incremental_runner(config, dir, cache_root, snapshot, fingerprint)
+      lambda do
+        store = Rigor::Cache::Store.new(root: cache_root)
+        session = described_class.new(configuration: config, paths: [dir], cache_store: store,
+                                      plugin_requirer: inline_requirer)
+        guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+      end
+    end
+
+    def inline_full_run(config)
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil,
+                                           plugin_requirer: inline_requirer)
+      guarded_run(runner).diagnostics
+    end
+
+    # High 2 of the PR's adversarial review — `#reanalyze_subset` replays the rows off the SAME process's
+    # fresh baseline, so a `--verify-incremental` partition verifies the union logic and nothing about the
+    # PERSISTED snapshot. Only a second `Store` over the same snapshot directory can see a replayed row
+    # outlive its cause, so the oracle below is cross-process by construction: two sessions, an edit to a
+    # `.rb` file between them, and the `--no-cache` full run as the answer both must agree with.
+    #
+    # The duplicate is declared INLINE (ADR-93's auto-wired `rigor-rbs-inline` turns each `#:` into a
+    # `virtual:` buffer), which is precisely the signature source the snapshot fingerprint cannot digest
+    # without building an environment — so the edit that fixes the program moves no fingerprint and the
+    # replay is what has to notice.
+    it "agrees with the full-run oracle after a .rb edit removes an inline duplicate (#796)" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), <<~RUBY)
+          class InlineDup
+            #: () -> String
+            def read
+              "a"
+            end
+          end
+          InlineDup.new.read
+        RUBY
+        b = File.join(dir, "b.rb")
+        File.write(b, "class InlineDup\n  #: () -> String\n  def read\n    \"b\"\n  end\nend\n")
+        config = inline_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = inline_incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, = run.call
+        expect(definition_rows(cold).size).to eq(1)
+
+        File.write(b, "class InlineDup\n  def read\n    \"b\"\n  end\nend\n")
+        fixed, warm = run.call
+        full = inline_full_run(config)
+
+        expect(warm).to be(true)
+        expect(definition_rows(full)).to be_empty
+        expect(definition_rows(fixed)).to eq(definition_rows(full))
+      end
+    end
+
+    # The must-still-fire counterpart: the same cross-process shape in the other direction. A duplicate that
+    # APPEARS in an edited `.rb` is derived by the run that analyses it, so nothing here depends on the drop
+    # above being conservative.
+    it "reports an inline duplicate introduced by a .rb edit between processes (#796)" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), <<~RUBY)
+          class InlineDup
+            #: () -> String
+            def read
+              "a"
+            end
+          end
+          InlineDup.new.read
+        RUBY
+        b = File.join(dir, "b.rb")
+        File.write(b, "class InlineDup\n  def read\n    \"b\"\n  end\nend\n")
+        config = inline_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = inline_incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, = run.call
+        expect(definition_rows(cold)).to be_empty
+
+        File.write(b, "class InlineDup\n  #: () -> String\n  def read\n    \"b\"\n  end\nend\n")
+        broken, warm = run.call
+        full = inline_full_run(config)
+
+        expect(warm).to be(true)
+        expect(definition_rows(full).size).to eq(1)
+        expect(definition_rows(broken)).to eq(definition_rows(full))
+      end
+    end
+
+    context "when the HKT registry scan raises (#794)" do
+      before do
+        allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_raise(NameError, "simulated scan bug")
+      end
+
+      it "replays the cold run's hkt-scan-failed row on a warm nothing-changed run, resolving no environment" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "app.rb"), "JSON.parse(\"{}\")\n")
+          config = configuration(dir)
+          cache_root = File.join(dir, ".rigor", "cache")
+          snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+          run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+          cold, = run.call
+          allow(Rigor::Environment).to receive(:for_project).and_call_original
+          warm, warm_warm = run.call
+
+          expect(warm_warm).to be(true)
+          expect(hkt_messages(cold).size).to eq(1)
+          expect(hkt_messages(warm)).to eq(hkt_messages(cold))
+          expect(Rigor::Environment).not_to have_received(:for_project)
+        end
+      end
+    end
+  end
 end

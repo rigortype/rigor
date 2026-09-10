@@ -101,7 +101,12 @@ module Rigor
       # 21: issue #915 widens the seed bundle's `extends` table to a singleton-body `include` / `prepend`;
       # a pre-21 bundle for an unchanged file would keep the narrower record and still report the
       # `case Widget when M` arm unreachable.
-      SCHEMA = 21
+      # 22: issues #796 / #794 add `run_level_rows` — the cold run's `definition-build-failed` set and its
+      # HKT-scan outcome, the two rows a narrowed run cannot re-derive from the files it analyses. A pre-22
+      # blob has no such section and would deserialise it as nil, which reads as "nothing cached" and is
+      # therefore not misread — but a snapshot written by an engine that did not yet REPLAY them was also
+      # written by one whose narrowed runs under-reported, so the gate rejects it and the next run is cold.
+      SCHEMA = 22
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -153,11 +158,21 @@ module Rigor
       # collection was off). It is a SEPARATE gate from the global `fingerprint`: the `effects:` block is
       # deliberately absent from `Configuration#to_h`, so turning collection on invalidates no diagnostics,
       # and a vocabulary / catalogue / `effects:` change must invalidate the summaries alone.
+      # Issues #796 / #794 — the run-level rows a narrowed run replays instead of re-deriving; see
+      # docs/internal-spec/cache.md § "Run-level rows the snapshot carries" for why exactly these two are
+      # fresh under the fingerprint and why no other `.rigor.yml`-level row may join them.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
                             :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,
                             :return_summaries, :param_table,
-                            :effect_collections, :effects_identity)
+                            :effect_collections, :effects_identity, :run_level_rows)
+
+      # Issues #796 / #794 — the two run-level rows the snapshot carries. `definition_build_failures` is the
+      # reported per-class detail list ({Environment::RbsLoader#definition_build_failures}); `hkt_scan_failure`
+      # is the `[error_class, first_line, frame, stage]` tuple ({Rigor::Environment#hkt_scan_failure}), nil
+      # when the scan succeeded — which is why the presence of this object, not the tuple, is what says a
+      # replay is available.
+      RunLevelRows = Data.define(:definition_build_failures, :hkt_scan_failure)
 
       # The global fingerprint that gates a snapshot load: a digest of the inputs whose change requires a full
       # rebuild — the engine version + schema, the engine's own SOURCE when the version does not pin it, the
@@ -276,7 +291,8 @@ module Rigor
           return_summaries: data[:return_summaries] || {},
           param_table: data[:param_table] || {},
           effect_collections: data[:effect_collections] || {},
-          effects_identity: data[:effects_identity]
+          effects_identity: data[:effects_identity],
+          run_level_rows: data[:run_level_rows]
         )
       end
       private :payload_from
@@ -300,7 +316,8 @@ module Rigor
           return_summaries: payload.return_summaries,
           param_table: payload.param_table,
           effect_collections: payload.effect_collections,
-          effects_identity: payload.effects_identity
+          effects_identity: payload.effects_identity,
+          run_level_rows: payload.run_level_rows
         )
         blob = Zlib::Deflate.deflate(raw)
         tmp = "#{@path}.#{Process.pid}.tmp"

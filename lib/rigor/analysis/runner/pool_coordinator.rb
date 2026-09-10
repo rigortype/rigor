@@ -43,7 +43,8 @@ module Rigor
                        boundary_cross_reporter:, source_rbs_synthesis_reporter:,
                        snapshots:, plugin_registry:, dependency_source_index:,
                        synthetic_method_index:, project_patched_methods:,
-                       analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false)
+                       analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false,
+                       restored_run_level_rows: nil)
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
@@ -71,6 +72,10 @@ module Rigor
           @project_patched_methods_reader = project_patched_methods
           @project_scope_seed_reader = project_scope_seed
           @analyze_file = analyze_file
+          # Issues #796 / #794 — the previous full run's run-level rows, handed down by
+          # {Analysis::IncrementalSession} on a NARROWED run only (a recheck's closure, a
+          # `--verify-incremental` partition). A full run leaves this nil and derives everything itself.
+          @restored_run_level_rows = restored_run_level_rows
         end
 
         # ADR-46 — the per-file cross-file read records the fork pool captured this run (empty unless
@@ -107,46 +112,11 @@ module Rigor
         # returns — holding it as long-lived state added memory pressure that surfaced as a Bus Error
         # during the spec suite under Ruby 4.0 + rbs 4.0.2.
         # @param project_files — issue #784 — the WHOLE project's analyzed file set
-        #   (`expansion.fetch(:files)`), independent of any `analyze_only` narrowing of `files`. Read only
-        #   when `files` is empty, to decide whether anyone could have demanded the HKT registry at all.
+        #   (`expansion.fetch(:files)`), independent of any `analyze_only` narrowing of `files`; see
+        #   {#serve_empty_closure} for what an empty `files` does with it.
         def analyze_files(files, environment: nil, project_files: nil)
           if files.empty?
-            # Issue #784 — an EMPTY analyze set still owes the run its HKT-scan row: the per-file cache never
-            # holds it (`IncrementalSession` caches only `Runner#per_file_diagnostics`, so every run-level row
-            # is regenerated every run), so returning here without recording flips a red project green — and
-            # the shipping `--incremental` path reaches this branch with NO environment in hand on every
-            # warm recheck that changed nothing (`CheckCommand#run_incremental_check` builds its session
-            # without one). So: an environment already in hand is consulted; otherwise one is resolved over
-            # the project's OWN file list — not `[]`, which would drop every plugin-synthesized virtual RBS
-            # (`Environment.collect_virtual_rbs` short-circuits on an empty list) and scan a different type
-            # universe from the one a full run analyses — and only when the project HAS files: with none,
-            # nobody could have demanded a registry, and an empty project keeps paying no env build. Keyed
-            # on the project's files rather than on `analyze_only`, because a recheck over an EMPTY project
-            # narrows to `Set[]`, which is non-nil.
-            env = environment || @environment_override
-            if project_files && !project_files.empty?
-              env ||= resolve_sequential_environment(source_files: project_files)
-            end
-            # #788 rounds 6 and 9 — everything the run owes from its environment that no per-file analysis
-            # produces is taken here, the way `analyze_files_sequentially` takes it: the project-signature
-            # state (`synthesized-namespace`, `quarantined-signature`, `environment-build-failed`, the
-            # conformance results), the effect-annotation carrier the residual pass reads, and the HKT-scan
-            # outcome. Now that run-level rows are never served from the per-file cache, this branch is the
-            # only producer on a warm recheck that changed nothing — leaving any of them out turned a red
-            # project green on its second `--incremental` run (the inline-only `effect.annotations-unchecked`
-            # went 1 → 0; a quarantined `signature_paths:` file went 1 → 0; a `conforms-to` class whose
-            # definition build fails went 1 → 0). Same ORDER as the sequential path, because the order is
-            # the contract: the conformance scan inside the signature-state snapshot demands the definition
-            # of every `rigor:v1:conforms-to` class — a user-authored, invocation-independent demand that
-            # #696 counts — so the definition-build failures are read AFTER it and BEFORE the HKT demand,
-            # exactly where `analyze_files_sequentially` reads them relative to its own. What this branch
-            # cannot regenerate is the part of that set the per-file ANALYSIS demanded (#796). This also
-            # retires the #441 "`.rbs` lane only when the run analyses nothing" boundary: its cost premise
-            # (no environment on this path) stopped holding the moment the branch above resolved one.
-            snapshot_project_signature_state(env)
-            snapshot_effect_annotation_carrier(env&.rbs_loader)
-            record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
-            record_hkt_scan_failure(hkt_scan_outcome(env))
+            serve_empty_closure(environment, project_files)
             return []
           end
           # Issue #784 / #793 — `files` is what this run ANALYSES; `source_files` is what its environment
@@ -157,11 +127,152 @@ module Rigor
           # whose trigger lived in an excluded file's synthesized RBS fired on the full run and vanished on
           # the subset. Every environment and worker this run builds now takes the whole project.
           source_files = project_files || files
-          return dispatch_pool(files, source_files: source_files) if pool_mode?
+          result =
+            if pool_mode?
+              dispatch_pool(files, source_files: source_files)
+            else
+              analyze_files_sequentially(
+                files, environment || resolve_sequential_environment(source_files: source_files)
+              )
+            end
+          # Issues #796 / #794 — a narrowed run's own demand set is a SUBSET of the full run's, so the two
+          # rows below are folded in after it, whichever backend produced the per-file stream.
+          replayed_restored_run_level_rows?(closure: files)
+          result
+        end
 
-          analyze_files_sequentially(
-            files, environment || resolve_sequential_environment(source_files: source_files)
+        # Issue #784 — an EMPTY analyze set still owes the run its run-level rows: the per-file cache never
+        # holds them (`IncrementalSession` caches only `Runner#per_file_diagnostics`), so returning here
+        # without recording flips a red project green — and the shipping `--incremental` path reaches this
+        # branch with NO environment in hand on every warm recheck that changed nothing
+        # (`CheckCommand#run_incremental_check` builds its session without one).
+        #
+        # #788 rounds 6 and 9 — everything the run owes from its environment that no per-file analysis
+        # produces is taken here, the way `analyze_files_sequentially` takes it: the project-signature state
+        # (`synthesized-namespace`, `quarantined-signature`, `environment-build-failed`, the conformance
+        # results), the effect-annotation carrier the residual pass reads, and the HKT-scan outcome. Leaving
+        # any of them out turned a red project green on its second `--incremental` run. Same ORDER as the
+        # sequential path, because the order is the contract: the conformance scan inside the
+        # signature-state snapshot demands the definition of every `rigor:v1:conforms-to` class — a
+        # user-authored, invocation-independent demand that #696 counts — so the definition-build failures
+        # are read AFTER it and BEFORE the HKT outcome.
+        #
+        # Issue #794 — the environment is resolved LAZILY, by the two snapshots that need one and only when
+        # their own gates say so: a project with no `signature_paths:`, no plugin-deferred signatures and no
+        # source-RBS synthesizer now reaches the end of this branch without building an environment at all,
+        # where #788 built one unconditionally to make the HKT demand. Issue #796 — what this branch cannot
+        # derive is the part of the definition-build set the per-file ANALYSIS demanded, and #696 forbids a
+        # Rigor-owned demand from standing in for it; the previous full run's set is replayed instead.
+        # @param project_files — issue #784 — the WHOLE project's analyzed file set
+        #   (`expansion.fetch(:files)`), independent of any `analyze_only` narrowing. Read here to decide
+        #   whether anyone could have demanded anything at all: with no files, nobody could have, and an
+        #   empty project keeps paying no env build. Keyed on the project's files rather than on
+        #   `analyze_only`, because a recheck over an EMPTY project narrows to `Set[]`, which is non-nil.
+        def serve_empty_closure(environment, project_files)
+          env = environment || @environment_override
+          # Resolved over the project's OWN file list — not `[]`, which would drop every plugin-synthesized
+          # virtual RBS (`Environment.collect_virtual_rbs` short-circuits on an empty list) and scan a
+          # different type universe from the one a full run analyses.
+          resolve = lambda do
+            next env if env
+            next nil if project_files.nil? || project_files.empty?
+
+            env = resolve_sequential_environment(source_files: project_files)
+          end
+          snapshot_project_signature_state(signature_state_environment(resolve))
+          snapshot_effect_annotation_carrier(
+            annotation_carrier_environment(resolve, in_hand: !env.nil?)&.rbs_loader
           )
+          # `env` rather than `resolve.call`: read the demand the snapshots above just made when they built
+          # an environment, and force nothing when they did not.
+          record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
+          return if replayed_restored_run_level_rows?
+
+          record_hkt_scan_failure(hkt_scan_outcome(resolve.call))
+        end
+
+        # Issue #794 — the signature-state snapshot's own gates, asked BEFORE an environment exists. Both
+        # answers are loader-free (the configuration and the plugin registry), and with neither gate open
+        # {#snapshot_project_signature_state} writes the same empty state a nil environment gives it.
+        def signature_state_environment(resolve)
+          plugin_signature_paths? || project_signature_paths? ? resolve.call : nil
+        end
+
+        # Issue #794 — the same, for the #441 carrier. The carrier is a filter over the loader's
+        # `virtual_rbs`, and an environment whose loader can hold none of it answers the same empty carrier
+        # a nil environment does. Two ways it can hold some: a plugin registry that declares a synthesizer
+        # (`Environment.collect_virtual_rbs` short-circuits to `[]` without one — and ADR-93 auto-wires
+        # `rigor-rbs-inline`, so this is the shape almost every project is in), or an environment ALREADY in
+        # hand, whose loader is free to read and may carry virtual buffers from a route this coordinator
+        # never saw (a restored env cache, a caller-supplied override). Only the third shape — no
+        # synthesizer AND no environment yet — declines, which is the #794 saving: nothing is built to
+        # discover an emptiness the registry already proves.
+        def annotation_carrier_environment(resolve, in_hand: false)
+          return nil if @record_effects
+          return resolve.call if in_hand
+
+          registry = plugin_registry
+          return nil unless registry.respond_to?(:source_rbs_synthesizers)
+          return nil if registry.source_rbs_synthesizers.empty?
+
+          resolve.call
+        end
+
+        # Issues #796 / #794 — fold the previous full run's run-level rows into this narrowed run's
+        # snapshots. The definition-build set is UNIONed (`#record_definition_build_failures` dedupes by
+        # class), so a class this run demanded for itself and the replayed set agree; the HKT outcome is a
+        # single tuple whoever demanded it, so `||=` keeps this run's own answer when it has one. Returns
+        # true when a replay was available, which is what tells {#serve_empty_closure} it owes no HKT demand
+        # of its own — and so no environment.
+        #
+        # @param closure — the files this run analyses; see {#stale_replayed_failure?}.
+        def replayed_restored_run_level_rows?(closure: nil)
+          rows = @restored_run_level_rows
+          return false if rows.nil?
+
+          replayable = Array(rows.definition_build_failures).reject do |failure|
+            stale_replayed_failure?(failure, closure)
+          end
+          record_definition_build_failures(replayable)
+          record_hkt_scan_failure(rows.hkt_scan_failure)
+          true
+        end
+
+        # A replayed definition-build failure the snapshot's own fingerprint cannot vouch for. The
+        # fingerprint digests the three signature sources it can read WITHOUT an environment — `sig:`,
+        # `Gemfile.lock` / `rbs_collection.lock.yaml`, and the configuration — but NOT the virtual RBS a
+        # source-RBS synthesizer derives from `.rb` files (under ADR-93's auto-wired `rigor-rbs-inline`,
+        # every `#:` annotation). So a duplicate declaration can be REMOVED from a `.rb` file without moving
+        # the fingerprint, and the replayed row would outlive its own cause: the edited file enters the
+        # closure, its analysis demands nothing that would re-derive the row, and the run reports a
+        # collision between files that no longer collide.
+        #
+        # The narrowed run cannot re-derive the row either (#696 forbids Rigor demanding a definition the
+        # analysis did not), so the honest answer is to DROP it and under-report rather than assert a
+        # diagnostic on a program that may now be correct — false positives outrank worst-case reading. The
+        # cost is bounded to the row's own conflicting buffers: a collision between two files neither of
+        # which this run touches still replays.
+        def stale_replayed_failure?(failure, closure)
+          return false if closure.nil?
+
+          buffers = failure.is_a?(Array) ? failure[3] : nil
+          return false if buffers.nil?
+
+          closure_paths = closure.to_set { |path| File.expand_path(path.to_s) }
+          Array(buffers).any? do |name|
+            path = virtual_buffer_path(name)
+            !path.nil? && closure_paths.include?(File.expand_path(path))
+          end
+        end
+
+        # The source file behind a `virtual:<plugin id>:<path>` buffer name
+        # (`Environment.collect_virtual_rbs`), or nil for any other buffer — a `sig:` file, a bundled `.rbs`
+        # — which the fingerprint does cover and which therefore never goes stale under a replay.
+        def virtual_buffer_path(name)
+          parts = name.to_s.split(":", 3)
+          return nil unless parts.length == 3 && parts.first == "virtual"
+
+          parts.last
         end
 
         def analyze_files_sequentially(files, environment)

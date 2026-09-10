@@ -101,6 +101,27 @@ RSpec.describe Rigor::Environment do
     end
   end
 
+  # Issue #915 — the declaration side of a class object's singleton ancestry.
+  describe "#singleton_extended_modules" do
+    let(:env) { described_class.default }
+
+    it "reports the modules RBS puts in a class object's singleton ancestry" do
+      # `Integer.is_a?(Kernel)` is true in MRI: the singleton chain reaches `Object`, which includes
+      # `Kernel`. Core RBS declares no `extend` on `Integer`, so this is the inherited half.
+      expect(env.singleton_extended_modules("Integer")).to include("Kernel")
+    end
+
+    it "reports modules only, so the singleton's class chain stays out" do
+      expect(env.singleton_extended_modules("Integer"))
+        .not_to include("Class", "Module", "Object", "BasicObject")
+    end
+
+    it "is empty for an unknown class and on an RBS-blind Environment" do
+      expect(env.singleton_extended_modules("ThisClassDoesNotExist123")).to eq([])
+      expect(described_class.new.singleton_extended_modules("Integer")).to eq([])
+    end
+  end
+
   describe "#class_ordering" do
     it "answers built-in hierarchy questions through the registry/RBS chain" do
       env = described_class.default

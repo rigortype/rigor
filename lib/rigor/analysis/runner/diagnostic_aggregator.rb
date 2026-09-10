@@ -896,6 +896,56 @@ module Rigor
           end
         end
 
+        # Issue #959 — surfaces the {Plugin::IoBoundary} refusal history each loaded plugin accumulated over
+        # the whole run (prepare AND every per-file call: `#io_boundary` is memoised per plugin instance, so
+        # one boundary sees both). `TrustPolicy#allow_read?` stays `File.expand_path`-only per ADR-2 — a
+        # project rooted under a symlink (macOS' `/tmp` → `/private/tmp` is the common case) can have every
+        # plugin read fall outside its own read roots with nothing said about it. One `:info` row per plugin
+        # that hit this, never one per path, naming the count and the first path so the row stays legible on
+        # a plugin that walked a whole out-of-scope subtree.
+        #
+        # Positioned here, in `#pre_file_diagnostics`'s post-analysis sibling list (called from
+        # `Runner#assemble_run_diagnostics`, which only runs on an ADR-45 cache MISS): the refusal history is
+        # a function of the plugin code and the resolved paths for THIS configuration, so it is deterministic
+        # across runs of the same inputs and the row that lands in a miss's cached diagnostics blob is the
+        # row a later warm HIT correctly re-serves — the same regeneration contract every other stream
+        # aggregated in `#pre_file_diagnostics` / `#assemble_run_diagnostics` already relies on (see
+        # `docs/type-specification/diagnostic-policy.md` § "Run-level rows and the record-and-validate
+        # cache"). It is also never routed through `IncrementalSession`'s per-file cache (`#788`): that cache
+        # holds only `Runner#per_file_diagnostics`, and this row is not part of that stream.
+        #
+        # Scope: `plugin_registry` here is the coordinator-side registry, which only actually RUNS `#prepare`
+        # / per-file analysis in sequential mode (`--workers` unset, the default) — a pooled run (`--workers
+        # N`) prepares and analyses on per-worker `WorkerSession` registries this reader never sees, so a
+        # refusal confined to a pooled worker's slice is not reported. Left out deliberately: draining it
+        # needs a fourth marshalled channel beside `drain_reporters` / `drain_dependencies` / `drain_effects`
+        # in `Runner::PoolCoordinator`, and the default (unpooled) path already covers the reported bug.
+        def plugin_trust_refusal_diagnostics
+          return [] if plugin_registry.empty?
+
+          plugin_registry.plugins.filter_map { |plugin| plugin_trust_refusal_diagnostic(plugin) }
+        end
+
+        def plugin_trust_refusal_diagnostic(plugin)
+          summary = plugin.io_boundary.refusal_summary
+          return nil if summary.nil?
+
+          plugin_id = plugin.manifest.id
+          Diagnostic.new(
+            path: ".rigor.yml", line: 1, column: 1,
+            message: "plugin #{plugin_id.inspect} had #{summary[:count]} read(s) refused by the trust " \
+                     "policy; first refused path: #{summary[:first_path].inspect}, outside read root " \
+                     "#{summary[:nearest_root].inspect}. If the project root is a symlink (macOS' /tmp is " \
+                     "one), re-run from the real path (`cd \"$(pwd -P)\"`), or add a `plugins_io.allowed_paths:` " \
+                     "entry in .rigor.yml covering the path.",
+            severity: :info,
+            rule: "plugin_trust.read-refused",
+            source_family: :builtin
+          )
+        rescue StandardError
+          nil
+        end
+
         def build_reporter_diagnostic(source_location, rule:, message:)
           path, line, column = location_fields(source_location)
           Diagnostic.new(

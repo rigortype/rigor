@@ -74,7 +74,13 @@ A plugin may want to read a file (a schema dump) or reach the
 network. Those are gated by the `plugins_io:` config keys —
 the network is `disabled` by default, and a plugin can read
 only the paths you list. See
-[Configuration](03-configuration.md).
+[Configuration](03-configuration.md). If a plugin's read falls
+outside every configured path — most often because the project
+root is a symlink (macOS' `/tmp` is one) — Rigor surfaces a
+`plugin_trust.read-refused` `:info` diagnostic naming the plugin
+and the refused path instead of failing silently; fix it by
+re-running from the real path (`cd "$(pwd -P)"`) or adding the
+path under `plugins_io.allowed_paths:`.
 
 ### Isolation strategy
 

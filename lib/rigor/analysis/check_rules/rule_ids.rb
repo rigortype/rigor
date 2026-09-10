@@ -137,7 +137,7 @@ module Rigor
       # first segment appears here as KNOWN and stays silent: these ids are legitimate suppression /
       # `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load dynamically;
       # aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
-      NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin].freeze
+      NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin plugin_trust].freeze
 
       # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in
       # `Analysis::Runner` / `Runner::DiagnosticAggregator`). A token equal to one of these is treated as

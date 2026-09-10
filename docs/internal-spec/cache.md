@@ -894,9 +894,17 @@ run. Three residuals stand, stated plainly:
    covers `sig:`; what neither covers is a virtual-RBS edit that changes the row without
    touching a named conflicting buffer, or the `hkt_scan_failure` tuple, which names no
    buffers at all. Both survive until a full run.
-3. **The drop itself under-reports.** A collision between two files, one of which this
-   run's closure contains, loses its row for that run rather than risking a false
-   positive — the same answer master gave before #796, and no worse.
+3. **The drop itself under-reports, and the loss persists.** A collision between two
+   virtual buffers, one of which this run's closure contains, loses its row rather than
+   risking a false positive — and because `absorb` persists the reduced set, every
+   warm run thereafter keeps losing it until the fingerprint next moves (`sig:`, a
+   lockfile, the configuration, the engine) or the cache is wiped; a `--no-cache` run
+   reports the row but does not rewrite the snapshot, and `--verify-incremental` says
+   OK, since it never reads the snapshot. The shape that reaches it is a virtual buffer
+   with no demanding Ruby behind it (an embedded `# @rbs!` block, or a synthesizer other
+   than rbs-inline): a `#:`-annotated class body re-demands its own definition on every
+   run and never loses the row. A false negative, not a false positive, and the answer
+   master gave on the edit run before #796; the durable half is the price of option 1.
 
 `--verify-incremental` does not bind any of this: `IncrementalSession#reanalyze_subset`
 replays the rows off the SAME process's freshly computed baseline, so it verifies the

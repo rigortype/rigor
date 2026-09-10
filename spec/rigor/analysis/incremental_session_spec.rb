@@ -924,6 +924,64 @@ end
         expect(sorted(result.diagnostics)).to eq(sorted(full_run(analysis_root(dir))))
       end
     end
+
+    # #960's report shape — the buffer is the changed-set's only witness to its own edit, so the two edits an
+    # editor makes most (change the declaring file; change the file that reads it) are pinned against the
+    # oracle: a whole-project, uncached run over the SAME buffer. The banner's "re-analysed 0 file(s)" was the
+    # symptom; the equality is the contract, whichever side of the dependency edge the buffer sits on.
+    def oracle_run(config, dir, buffer)
+      runner = Rigor::Analysis::Runner.new(
+        configuration: config, cache_store: nil, environment: shared_environment, buffer: buffer
+      )
+      project_diagnostics(guarded_run(runner, [analysis_root(dir)]).diagnostics)
+    end
+
+    it "matches an uncached run of the buffer when the buffer edits the declaring file" do
+      Dir.mktmpdir do |dir|
+        write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+        warm_snapshot(config, dir, snapshot, fp)
+
+        grown = File.join(dir, "grown_buffer.rb")
+        File.write(grown, "class Widget\n  def name\n    \"w\"\n  end\n\n  def self.q\n    1\n  end\nend\n" \
+                          "Rigor.dump_type(Widget.q)\n")
+        binding_to_grown = Rigor::Analysis::BufferBinding.new(
+          logical_path: File.join(dir, "lib", "widget.rb"), physical_path: grown
+        )
+        result = guarded_run_buffer_recheck(buffer_session(config, dir, binding_to_grown), snapshot: snapshot,
+                                                                                           fingerprint: fp)
+
+        expect(result.affected).to include(File.join(dir, "lib", "widget.rb"))
+        expect(sorted(project_diagnostics(result.diagnostics))).to eq(sorted(oracle_run(config, dir, binding_to_grown)))
+        expect(result.diagnostics.map(&:message)).to include(a_string_matching(/dump_type: 1\b/))
+      end
+    end
+
+    it "matches an uncached run of the buffer when the buffer edits the dependent" do
+      Dir.mktmpdir do |dir|
+        write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+        warm_snapshot(config, dir, snapshot, fp)
+
+        reader = File.join(dir, "reader_buffer.rb")
+        File.write(reader, "class Other\n  def go\n    Rigor.dump_type(Widget.new.name)\n  end\nend\n")
+        binding_to_reader = Rigor::Analysis::BufferBinding.new(
+          logical_path: File.join(dir, "lib", "other.rb"), physical_path: reader
+        )
+        result = guarded_run_buffer_recheck(buffer_session(config, dir, binding_to_reader), snapshot: snapshot,
+                                                                                            fingerprint: fp)
+
+        expect(result.affected).to include(File.join(dir, "lib", "other.rb"))
+        expect(result.reused).to include(File.join(dir, "lib", "widget.rb"))
+        expect(sorted(project_diagnostics(result.diagnostics))).to eq(sorted(oracle_run(config, dir,
+                                                                                        binding_to_reader)))
+        expect(result.diagnostics.map(&:message)).to include(a_string_matching(/dump_type: "w"/))
+      end
+    end
   end
 
   describe "#run_incremental plugin-producer cache reuse (WD1)" do

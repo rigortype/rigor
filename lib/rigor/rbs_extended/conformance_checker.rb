@@ -31,8 +31,9 @@ module Rigor
     # - `IncompatibleSignature` — a provided method's signature violates the interface contract (return widened,
     #   or a parameter narrowed). Same rule, signature-specific message.
     # - `UnresolvedInterface` — the named interface is not loaded (a typo, or the defining library / `sig` set is
-    #   not on the RBS load path). Surfaces as `dynamic.rbs-extended.unresolved` `:info`, the fail-soft channel
-    #   the other directive parsers use, so a bad name never silently disables the author's assertion.
+    #   not on the RBS load path). Surfaces as `dynamic.rbs-extended.unresolved` at `:warning` (#928): the
+    #   other directive parsers fail soft to `:info`, but a name the author asserted against must not pass
+    #   silently — the catalog ships, so an unresolved role is a typo or a missing `sig` set.
     #
     # Fail-soft throughout: a class whose own definition cannot be built (RBS error) is skipped rather than
     # reported.

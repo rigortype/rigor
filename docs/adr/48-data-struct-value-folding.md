@@ -39,7 +39,9 @@ positional + `keyword_init:`). The mutation-soundness story is resolved by a
 off a *stored* binding degrades to `Dynamic[top]` (a receiver this expression
 just materialised cannot have been mutated since, so no invalidation is
 needed; a stored binding might have, so it is not folded). "Freshly
-materialised" means `.new` / `[]` / `.with`, NOT any chained call —
+materialised" means `.new` / `[]` / `.with`, or a resolvable factory method
+whose body returns one of those ([#599](https://github.com/rigortype/rigor/issues/599)),
+NOT any chained call —
 [#595](https://github.com/rigortype/rigor/issues/595) corrected that on
 2026-09-02, after a self-returning fluent builder was found serving
 construction-time values post-mutation. This touches
@@ -455,20 +457,35 @@ off a receiver the other gate wrongly called fresh
 (`x.dup_self.with(indent: 9).shout`), so the composed shape survived a fix to
 either half alone.
 
-The cost is a genuinely fresh helper return: `def make = Line.new("x")` then
-`make.text` no longer folds, because the whitelist cannot see through `make`.
-Measured, that costs nothing observable on the struct-heaviest real files in
-the named corpus targets — haml's and hamlit's parsers, faraday's
-`Options`/`Request`, mail's `received_parser` — where a before/after run shows
-an identical diagnostic set and an identical `type-scan` coverage (570
-unrecognized, `CallNode` 461/1966). For the loss to bite, the helper's return
-must already infer to a `StructInstance`, and at these sites it does not. The
-richer fix — consult the callee's inferred return and accept it when it is
-provably not a `self` alias — is tracked as
-[#599](https://github.com/rigortype/rigor/issues/599). Three of this repo's own
-regression guards were written on the factory route and had to be moved onto a
-direct materialisation to stay discriminating, which is the concrete evidence
-for prioritising it.
+The whitelist's own cost was the FACTORY-METHOD idiom: `def make = Line.new("x")`
+then `make.text`, where the return really is fresh and the whitelist could not
+see through `make`. Three of this repo's regression guards were written on that
+route and had to be moved onto a direct materialisation to stay discriminating,
+which is what prioritised the recovery
+([#599](https://github.com/rigortype/rigor/issues/599), landed 2026-09-10).
+
+The gate now has a fourth arm: a chained call whose CALLEE is cheaply resolvable
+and whose body provably returns something it just built. Resolution covers the
+two shapes that cost one table read against the frozen discovery index — a
+receiverless send through `Scope#bindable_top_level_def_for` (the
+confidence-gated accessor, so a call under an unmodelled block `self` still
+declines), and `Const.name` through `Scope#singleton_def_through_ancestors`. An
+INSTANCE-side receiver is refused outright: `x.dup_self` is the #595 bug shape,
+and what `x` holds at the call is exactly what the gate cannot know.
+
+Acceptance is decided on the callee's RETURN POSITION rather than on a
+self-alias scan of its body, which is a deliberate departure from #599's
+sketch. "Cannot return `self`" is not the property freshness needs — a
+factory's `self` is a module or `main`, never the struct, while `def get =
+GLOBAL` over a mutated constant hands back a long-lived instance with no `self`
+anywhere in it. So the body's tail must itself be a materialisation of a
+constant with a recorded member layout (or an inline `Struct.new(…)`), and an
+explicit `return` anywhere in the body refuses, since it hands back an
+expression the tail check never saw. That subsumes the self-alias refusal — a
+body returning `self` has a `SelfNode` tail, not a `.new` — and it needs no
+scan of the caller's locals, whose bindings mean nothing inside the callee.
+The bound on the scan is fail-closed in the #591 sense: a body too large for
+the visit budget is not proven, and unproven is not fresh.
 
 **Slice plan (Struct):** slice 1 = the `StructClass` carrier + `Struct.new`
 recognition; slice 2 = the `StructInstance` carrier + fresh-chain member

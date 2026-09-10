@@ -3011,7 +3011,8 @@ module Rigor
           # Issue #728 — `class << self; include M; end` mixes M into the SINGLETON: it contributes class
           # methods, not the instance surface this table feeds. Descending with no owner keeps any nested
           # declaration walked (a `ClassNode` child sets its own owner) while the mixin calls in the
-          # singleton body record nothing, which is what `extends` is for.
+          # singleton body record nothing, which is what `extends` is for — and since #915 the extend walk
+          # does take them, so the form is recorded rather than dropped.
           current_class = nil
         when Prism::CallNode
           record_mixin_call(node, current_class, accumulator)
@@ -3064,13 +3065,16 @@ module Rigor
       # order-sensitivity (only SUBSEQUENT defs become module functions) is deliberately over-approximated
       # — the extra names only suppress `undefined-method` and enable inference on calls that raise at
       # runtime, both the ADR-5-safe direction.
+      #
+      # Issue #915 — plus `class << self; include M; end`, the same singleton ancestor spelled through the
+      # singleton-class body. It folds like an `extend` because Ruby makes it one.
       def build_discovered_extends(root)
         accumulator = {}
         walk_class_extends(root, [], nil, accumulator)
         accumulator.transform_values { |mods| mods.uniq.freeze }.freeze
       end
 
-      def walk_class_extends(node, qualified_prefix, current_class, accumulator)
+      def walk_class_extends(node, qualified_prefix, current_class, accumulator, in_singleton: false)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -3081,17 +3085,34 @@ module Rigor
             walk_class_extends(node.body, child_prefix, full, accumulator) if node.body
             return
           end
+        when Prism::SingletonClassNode
+          # Issue #915 — `class << self` opens the enclosing declaration's OWN singleton, so an `include`
+          # written in it is the same singleton ancestor an `extend` in the class body would add. Only the
+          # `self` form is followed: `class << obj` names something this walk cannot resolve to a class.
+          # Nested declarations inside the body take the `ClassNode` branch above and reset the flag with
+          # their own owner, so the marker cannot leak past the singleton body it belongs to.
+          in_singleton = node.expression.is_a?(Prism::SelfNode)
+          current_class = nil unless in_singleton
         when Prism::CallNode
-          record_extend_call(node, current_class, accumulator)
+          record_extend_call(node, current_class, accumulator, in_singleton: in_singleton)
         end
 
         node.rigor_each_child do |child|
-          walk_class_extends(child, qualified_prefix, current_class, accumulator)
+          walk_class_extends(child, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
         end
       end
 
-      def record_extend_call(node, current_class, accumulator)
+      # Inside a `class << self` body the mixin calls are the singleton-side ones and `extend` is not:
+      # `class << self; extend M; end` puts M on the singleton's OWN singleton, one level further out than
+      # anything this table describes, and `module_function` in a singleton body is not the scope toggle
+      # {#build_discovered_extends} over-approximates. So the two arms are disjoint rather than additive.
+      def record_extend_call(node, current_class, accumulator, in_singleton: false)
         return unless current_class && node.receiver.nil?
+
+        if in_singleton
+          record_extend_targets(node, current_class, accumulator) if MIXIN_CALL_NAMES.include?(node.name)
+          return
+        end
 
         case node.name
         when :extend then record_extend_targets(node, current_class, accumulator)

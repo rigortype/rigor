@@ -98,7 +98,10 @@ module Rigor
       # 20: issue #722 residue 2 adds each seed bundle's compact-header re-anchor census, without which a
       # warm fold sees no candidate for an unchanged file and keeps serving the pre-fix `Wrap::Outer::Leaf`
       # for a `class Outer::Leaf` that reopens `::Outer::Leaf`.
-      SCHEMA = 20
+      # 21: issue #915 widens the seed bundle's `extends` table to a singleton-body `include` / `prepend`;
+      # a pre-21 bundle for an unchanged file would keep the narrower record and still report the
+      # `case Widget when M` arm unreachable.
+      SCHEMA = 21
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

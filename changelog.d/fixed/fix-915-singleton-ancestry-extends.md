@@ -1,0 +1,1 @@
+- **[inference]** A `case` arm guarded by a module is no longer reported unreachable when the class object reaches that module through `class << self; include M; end` or through an `extend` declared only in the project's own `sig/`. ([#973](https://github.com/rigortype/rigor/pull/973))

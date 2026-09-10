@@ -1767,6 +1767,36 @@ module Rigor
         definition
       end
 
+      # Issue #915 — the MODULE names in `class_name`'s singleton ancestry, as RBS declares it. A
+      # `class C; extend M; end` written in a project's own `sig/` puts `M` there and nothing else in the
+      # environment surface exposes it: {#ancestor_names_for} answers the instance side only.
+      #
+      # Modules only, deliberately. `RBS::DefinitionBuilder#build_singleton` mixes the extended modules in
+      # with the singleton's class chain (`Class`, `Module`, `Object`, `BasicObject`), and the classes there
+      # are already what the `Class` approximation in `Inference::Narrowing` reasons through. The modules
+      # that survive the filter — the declared `extend` targets, plus `Kernel` through `Object` — are each a
+      # true answer to `C.is_a?(M)`.
+      #
+      # Marked as an internal demand for the same reason {#ancestor_names_for} is (issue #696): asking
+      # whether a module sits in an ancestry is not asking whether the class's method surface resolves, and
+      # letting it report would make the reported class list depend on the cache state.
+      #
+      # @return `::`-stripped module names, or `[]` for an unknown class and on any RBS build error.
+      def singleton_extended_module_names(class_name)
+        key = class_name.to_s.delete_prefix("::")
+        during_internal_demand do
+          definition = singleton_definition(key)
+          next [].freeze if definition.nil?
+
+          definition.ancestors.ancestors.filter_map do |ancestor|
+            name = ancestor.name.to_s.delete_prefix("::")
+            name if ancestor.is_a?(::RBS::Definition::Ancestor::Instance) && rbs_module?(name)
+          end.uniq.freeze
+        end
+      rescue ::RBS::BaseError, StandardError
+        [].freeze
+      end
+
       # @return the class method on `class_name`. For example,
       #   `singleton_method(class_name: "Integer", method_name: :sqrt)` returns the definition for
       #   `Integer.sqrt`, while `singleton_method(class_name: "Foo", method_name: :new)` returns Class#new

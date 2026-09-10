@@ -807,9 +807,11 @@ module Rigor
     # true). Empty for a class the project never extends, and for every scope that saw no seeding pass.
     #
     # This is EVIDENCE FOR a singleton ancestor, never against one: the walk sees only what a constant
-    # argument to a receiverless `extend` written inside a declaration body spells, so a runtime
-    # `Widget.extend(m)`, a `class << self; include M; end`, and an `extend` in a file outside the analysed
-    # set are all absent from it. Its one consumer ({Inference::Narrowing.narrow_class}) therefore reads it
+    # argument to a receiverless `extend` (or, since #915, a receiverless `include` / `prepend` inside a
+    # `class << self` body) written inside a declaration body spells, so a runtime `Widget.extend(m)` and an
+    # `extend` in a file outside the analysed set are both absent from it, as is an `extend` declared only
+    # in RBS — that one reaches the same consumer through `Environment#singleton_extended_modules` instead.
+    # Its one consumer ({Inference::Narrowing.narrow_class}) therefore reads it
     # only to WITHHOLD a `Bot`, and never to assert that a guard matches.
     def singleton_extends_of(class_name)
       table = @discovery.discovered_extends

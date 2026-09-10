@@ -33,6 +33,7 @@ module Rigor
     def constant_for_name: (String | Symbol name) -> Type::t?
     def class_known?: (String | Symbol name) -> bool
     def rbs_module?: (String | Symbol name) -> bool
+    def singleton_extended_modules: (String | Symbol name) -> Array[String]
     def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
     def reflection: () -> untyped?
     def missing_rbs_gem_owner: (String | Symbol root_constant_name) -> String?
@@ -74,6 +75,7 @@ module Rigor
       def project_declared_class?: (String | Symbol class_name) -> bool
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
       def ancestor_names_for: (String | Symbol class_name) -> Array[String]
+      def singleton_extended_module_names: (String | Symbol class_name) -> Array[String]
       def constant_type: (String name) -> Type::t?
       def constant_names: () -> Array[String]
       def each_known_class_name: () { (String name) -> void } -> untyped

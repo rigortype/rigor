@@ -1,0 +1,1 @@
+- **[config]** `.rigor.yml` gained `plugins_isolation:`, selecting how a plugin's calls into its target library are isolated (`none` or `process`); `RIGOR_PLUGIN_ISOLATION` overrides it for a single invocation, and `ruby_box` remains environment-only because `Ruby::Box` must be active before Ruby boots. ([#971](https://github.com/rigortype/rigor/pull/971))

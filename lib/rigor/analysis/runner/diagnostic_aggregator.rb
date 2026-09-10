@@ -935,9 +935,9 @@ module Rigor
             path: ".rigor.yml", line: 1, column: 1,
             message: "plugin #{plugin_id.inspect} had #{summary[:count]} read(s) refused by the trust " \
                      "policy; first refused path: #{summary[:first_path].inspect}, outside read root " \
-                     "#{summary[:nearest_root].inspect}. If the project root is a symlink (macOS' /tmp is " \
-                     "one), re-run from the real path (`cd \"$(pwd -P)\"`), or add a `plugins_io.allowed_paths:` " \
-                     "entry in .rigor.yml covering the path.",
+                     "#{summary[:nearest_root].inspect}. Spell the path the way that read root spells it " \
+                     "(a symlink alias such as macOS' /tmp does not match its real path), or add a " \
+                     "`plugins_io.allowed_paths:` entry in .rigor.yml covering the path.",
             severity: :info,
             rule: "plugin_trust.read-refused",
             source_family: :builtin

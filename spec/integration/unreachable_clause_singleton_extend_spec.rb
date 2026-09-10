@@ -29,9 +29,13 @@ require "rigor/analysis/runner"
 require "rigor/configuration"
 
 RSpec.describe "a class object's own extend record on the positive edge (#898)" do
-  def run_files(files)
+  def run_files(files, sig_files = {})
     FileUtils.mkdir_p("lib")
     files.each { |name, source| File.write(File.join("lib", name), source) }
+    unless sig_files.empty?
+      FileUtils.mkdir_p("sig")
+      sig_files.each { |name, source| File.write(File.join("sig", name), source) }
+    end
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
     )
@@ -208,6 +212,154 @@ RSpec.describe "a class object's own extend record on the positive edge (#898)" 
       expect(dumps_for(result)).to eq(
         ["dump_type: singleton(Widget)", "dump_type: Dynamic[top]", "dump_type: singleton(Widget)"]
       )
+    end
+  end
+
+  # Issue #915 — the two ways of putting a module in a singleton ancestry that the #898 record still did not
+  # see. Both feed the same one-directional read: a hit withholds the `Bot`, and nothing here can ever say a
+  # module is ABSENT, so every must-still-fire pin above stays exactly as it was.
+  describe "the other two spellings of a singleton ancestor (#915)" do
+    it "reads `class << self; include M; end` as the extend Ruby makes it" do
+      expect(rules_for(<<~RUBY)).to be_empty
+        class Widget
+          class << self
+            include Comparable
+          end
+        end
+
+        class Holder
+          def probe
+            k = Widget
+            case k
+            when Comparable then k.clamp(1, 2)
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "reads a singleton-body include from a sibling file" do
+      diagnostics = run_files(
+        "widget.rb" => <<~RUBY,
+          class Widget
+            class << self
+              include Comparable
+            end
+          end
+        RUBY
+        "holder.rb" => <<~RUBY
+          class Holder
+            def probe
+              k = Widget
+              case k
+              when Comparable then k.clamp(1, 2)
+              end
+            end
+          end
+        RUBY
+      ).diagnostics.map(&:qualified_rule)
+      expect(diagnostics).to be_empty
+    end
+
+    it "reads an `extend` declared only in the project's own sig/" do
+      # Nothing in the Ruby source spells the extend, so the #898 record is empty here by construction and
+      # the answer can only come from the declaration side.
+      diagnostics = run_files(
+        {
+          "holder.rb" => <<~RUBY
+            class Sprocket; end
+
+            class Holder
+              def probe
+                k = Sprocket
+                case k
+                when Comparable then k.clamp(1, 2)
+                end
+              end
+            end
+          RUBY
+        },
+        "sprocket.rbs" => <<~RBS
+          class Sprocket
+            extend Comparable
+          end
+        RBS
+      ).diagnostics.map(&:qualified_rule)
+      expect(diagnostics).to be_empty
+    end
+
+    describe "the half that must still fire" do
+      it "still reports the arm for a class RBS declares WITHOUT an extend" do
+        # The discriminating control for the declaration side: same sig/, same shape, no `extend` member.
+        diagnostics = run_files(
+          {
+            "holder.rb" => <<~RUBY
+              class Cog; end
+
+              class Holder
+                def probe
+                  k = Cog
+                  case k
+                  when Comparable then k.clamp(1, 2)
+                  end
+                end
+              end
+            RUBY
+          },
+          "cog.rbs" => "class Cog\nend\n"
+        ).diagnostics.map(&:qualified_rule)
+        expect(diagnostics).to eq(["flow.unreachable-clause"])
+      end
+
+      it "does not read an instance-body `include` as an extend" do
+        # The blast radius of widening the walk is #526's method fold, which moves with the record. An
+        # `include` in the CLASS body is instance-side and must stay off the singleton: `Boxed.helper`
+        # raises in MRI, so folding `Helper#helper` onto the singleton would be a wrong answer.
+        result = run_source(<<~RUBY)
+          module Helper
+            def helper = 1
+          end
+
+          class Boxed
+            include Helper
+          end
+
+          class Unboxed
+            class << self
+              include Helper
+            end
+          end
+
+          class Holder
+            def probe
+              Rigor.dump_type(Boxed.helper)
+              Rigor.dump_type(Unboxed.helper)
+            end
+          end
+        RUBY
+        expect(dumps_for(result)).to eq(["dump_type: Dynamic[top]", "dump_type: 1"])
+      end
+
+      it "does not read an `extend` inside a singleton body as the class's own" do
+        # `class << self; extend M; end` puts M on the singleton's OWN singleton, one level further out
+        # than this table describes, so `Widget.is_a?(Comparable)` stays false and the arm stays dead.
+        expect(rules_for(<<~RUBY)).to eq(["flow.unreachable-clause"])
+          class Widget
+            class << self
+              extend Comparable
+            end
+          end
+
+          class Holder
+            def probe
+              k = Widget
+              case k
+              when Comparable then k.clamp(1, 2)
+              end
+            end
+          end
+        RUBY
+      end
     end
   end
 end

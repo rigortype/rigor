@@ -726,6 +726,15 @@ module Rigor
       rbs_loader.rbs_module?(name)
     end
 
+    # Issue #915 — the module names RBS puts in `name`'s SINGLETON ancestry, the declaration-side twin of
+    # `Scope#singleton_extends_of`. `Inference::Narrowing` reads it the same one-directional way: presence
+    # withholds a `Bot`, absence asserts nothing (a class the environment does not know answers `[]`).
+    def singleton_extended_modules(name)
+      return [] unless rbs_loader
+
+      rbs_loader.singleton_extended_module_names(normalize_class_name(name))
+    end
+
     # Compares two class/module names using analyzer-owned class data. Returns `:equal`, `:subclass`,
     # `:superclass`, `:disjoint`, or `:unknown`. The static registry handles built-ins cheaply; the RBS
     # loader handles project/stdlib classes without relying on host Ruby constants being loaded.

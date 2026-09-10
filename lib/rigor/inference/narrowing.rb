@@ -2723,23 +2723,39 @@ module Rigor
         # The answer is `Dynamic[top]`, never the preserved `Singleton[C]`, and the negative edge
         # ({#narrow_singleton_not_class}) is untouched — so this record is read ONLY to withhold a claim,
         # never to make one. That asymmetry is deliberate, and it is what keeps the fix honest against an
-        # extend record that is structurally incomplete: `Widget.extend(m)` at a call site, `class << self;
-        # include M; end`, and an `extend` written in a file outside the analysed set are all invisible to
-        # the walk behind {Scope#singleton_extends_of}. A shape that turned this table into a positive
+        # extend record that is structurally incomplete: `Widget.extend(m)` at a call site and an `extend`
+        # written in a file outside the analysed set are both invisible to the walk behind
+        # {Scope#singleton_extends_of}, and the declaration-side record joined to it below is no more
+        # complete — RBS says nothing about a class it does not declare. A shape that turned this table into a positive
         # `:subclass` verdict would have to be right about ABSENCE too, and it cannot be. Preserving
         # `Singleton[C]` would also hand the arm a receiver whose singleton method table has no `clamp` on
         # it, trading the unreachable-clause false positive for an undefined-method one — the same trap
         # #657 recorded on the `Constant` carrier.
+        #
+        # Issue #915 — two sources, read as one. The source record above sees only what Ruby source spells;
+        # a project that declares `extend M` in its own `sig/` puts the same module in the same singleton
+        # ancestry, and the environment's declaration-side answer
+        # ({Environment#singleton_extended_modules}) is consulted alongside it. Neither is asked to be
+        # complete; each can only add a module that IS there, which is all the one-directional read needs.
         def singleton_extend_declines_bot?(singleton, class_name, context)
-          scope = context.scope
-          return false if context.exact || scope.nil?
+          return false if context.exact
 
-          extended = scope.singleton_extends_of(singleton.class_name)
+          extended = singleton_ancestor_modules(singleton, context)
           return false if extended.empty?
 
           extended.any? do |module_name|
             %i[equal subclass unknown].include?(class_ordering(module_name, class_name, context))
           end
+        end
+
+        def singleton_ancestor_modules(singleton, context)
+          scope = context.scope
+          from_source = scope.nil? ? [] : scope.singleton_extends_of(singleton.class_name)
+          from_rbs = context.environment&.singleton_extended_modules(singleton.class_name) || []
+          return from_source if from_rbs.empty?
+          return from_rbs if from_source.empty?
+
+          from_source | from_rbs
         end
 
         def narrow_singleton_not_class(singleton, class_name, context)

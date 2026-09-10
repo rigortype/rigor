@@ -379,17 +379,34 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(widened.type_args.last.members).to include(nominal("Integer"))
     end
 
-    # The B1 regression, at the unit. Two stores where only the first reaches the join: the second
-    # finds a Nominal pre-state and is declined, so a CLOSED first store is a wrong type for what
-    # the second one put there. The floor is what makes the second store's absence survivable.
-    it "leaves the first store's element type open to a store it cannot see" do
+    # The B1 shape, at the unit. Two stores: the first opens the carrier (the gradual arm), the
+    # second RE-JOINS into it (issue #580) instead of finding a closed door. The floor stays on —
+    # a third store is still unseen — but the arm the second store put there is present now.
+    it "re-joins a later store into a carrier it already widened" do
       first = described_class.widen_for_mutator(
         Rigor::Type::Combinator.tuple_of, :push, arg_types: [constant(1)]
       )
       expect(first.type_args.first.members).to include(Rigor::Type::Combinator.untyped)
-      # …and the second store really is invisible: a Nominal pre-state is declined outright, which
-      # is the half of the mechanism that makes closing unsafe rather than merely imprecise.
-      expect(described_class.widen_for_mutator(first, :push, arg_types: [constant("s")])).to be_nil
+
+      second = described_class.widen_for_mutator(first, :push, arg_types: [constant("s")])
+      expect(second.type_args.first.members).to include(nominal("Integer"), nominal("String"),
+                                                        Rigor::Type::Combinator.untyped)
+    end
+
+    # The must-not-widen control, and the reason the re-join is gated at all: a PRECISE nominal's
+    # element set is a claim a declaration made (haml's `-> Array[:multi]`), not this seam's own
+    # residue, and growing it is the #561 `def.return-type-mismatch` blast radius.
+    it "declines a precise nominal carrier" do
+      declared = Rigor::Type::Combinator.nominal_of("Array", type_args: [constant(:multi)])
+      expect(described_class.widen_for_mutator(declared, :push, arg_types: [constant("s")])).to be_nil
+    end
+
+    # …and a non-adder on an open carrier changes nothing, so it must not rebind the binding at all.
+    it "declines a non-adder on an already-widened carrier" do
+      widened = described_class.widen_for_mutator(
+        Rigor::Type::Combinator.tuple_of, :push, arg_types: [constant(1)]
+      )
+      expect(described_class.widen_for_mutator(widened, :pop)).to be_nil
     end
 
     # Removers and reorderers add nothing: the arity-forget alone, byte-identical to the no-evidence

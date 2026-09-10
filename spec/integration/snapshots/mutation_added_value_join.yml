@@ -13,6 +13,7 @@ locals:
   genuine: "[1, 2]"
   mixed: Array[1 | 2 | Dynamic[top]]
   or_written: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  pinned_seed: Array[:multi | Dynamic[top] | Symbol]
   popped: Array[1 | 2]
   pushed: Array[1 | 2 | Dynamic[top] | Integer]
   refined: Array[1 | 2 | Dynamic[top] | Integer] | non-empty-array[1 | 2 | Dynamic[top]
@@ -36,9 +37,16 @@ assertions:
   '10': Array[1 | 2 | Dynamic[top]]
   '11': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
   '12': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
-  '13': Array[1 | 2 | 3]
-  '14': Array[1 | 2]
-  '15': Array[1 | 2]
-  '16': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
-  '17': Array[1 | 2 | Dynamic[top] | Integer]
-  '18': "[1, 2]"
+  '13': Array[Dynamic[top] | Integer | String]
+  '14': Array[Dynamic[top] | Integer | String]
+  '15': Array[Dynamic[top] | Integer | String]
+  '16': Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top],
+    Dynamic[top]] | String]
+  '17': Array[:multi | Dynamic[top] | Symbol]
+  '18': Integer
+  '19': Array[1 | 2 | 3]
+  '20': Array[1 | 2]
+  '21': Array[1 | 2]
+  '22': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
+  '23': Array[1 | 2 | Dynamic[top] | Integer]
+  '24': "[1, 2]"

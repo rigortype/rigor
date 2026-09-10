@@ -570,8 +570,17 @@ project's source.
   `rigor-activerecord` / `rigor-actionpack` / `rigor-actionmailer` /
   `rigor-factorybot` use it.
 - `Rigor::Plugin::Isolation` — the **selectable isolation strategy** for
-  the invocation, chosen by `RIGOR_PLUGIN_ISOLATION` alone. There is no
-  `.rigor.yml` key for it ([#911](https://github.com/rigortype/rigor/issues/911)). One
+  the invocation, chosen by `.rigor.yml`'s `plugins_isolation:` key or by
+  `RIGOR_PLUGIN_ISOLATION`. **The environment variable wins over the
+  configuration**: it is the operator's one-invocation override (the fork
+  worker misbehaving on one machine, a CI image that cannot fork), and an
+  override a committed file can veto is not an override; it is also the
+  only ordering under which `ruby_box` can work, since `exe/rigor` re-execs
+  with `RUBY_BOX=1` on the variable alone, before any YAML is parsed
+  (ADR-87 / ADR-104 boot-slim). `plugins_isolation: ruby_box` in the
+  configuration is therefore a `ConfigurationError` naming the variable,
+  never a silent fall back to another strategy
+  ([#911](https://github.com/rigortype/rigor/issues/911)). One
   `call(feature:, receiver:, method:, args:)` interface over three
   backends, **`process` the default**:
   - `process` (default) — a single forked **persistent worker** (forked

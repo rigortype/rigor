@@ -101,6 +101,11 @@
         }
       }
     },
+    "plugins_isolation": {
+      "description": "ADR-39 \u00a7 \"Isolation of target-library invocation\" \u2014 how a plugin's direct call into its target library (e.g. ActiveSupport's real inflector) is isolated from Rigor's own process. `process` (the default) runs it in a forked, crash-contained worker, falling back to `none` where fork is unavailable; `none` loads the library into Rigor's own process. `RIGOR_PLUGIN_ISOLATION` overrides this key for a single invocation. `ruby_box` is declared here because it is a strategy the environment variable selects, but it CANNOT be set from this file: it needs `RUBY_BOX=1` before Ruby boots, which the `rigor` launcher re-execs for, and setting it here is a configuration error.",
+      "type": "string",
+      "enum": ["none", "process", "ruby_box"]
+    },
     "plugins_io": {
       "description": "Plugin I/O policy. `network: \"disabled\"` (default) makes `Plugin::IoBoundary#open_url` always raise. `network: \"allowlist\"` (v0.1.2) consults `allowed_url_hosts:` on every fetch — the URL must be HTTPS and the hostname must be on the list. `allowed_paths:` extends the default plugin read root (the project root) with extra absolute or relative paths.",
       "type": "object",

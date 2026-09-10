@@ -81,16 +81,19 @@ only the paths you list. See
 A few plugins call into their target library directly (for
 example to ask ActiveSupport's real inflector how to pluralise a
 class name). That call runs under an **isolation strategy**, set
-with the `RIGOR_PLUGIN_ISOLATION` environment variable:
+with the `plugins_isolation:` configuration key or the
+`RIGOR_PLUGIN_ISOLATION` environment variable:
 
 | Value | Behaviour |
 | --- | --- |
 | `process` (default) | Run the call in a forked, crash-contained worker, so the target library's monkey-patches and any crash never contaminate Rigor. Falls back to `none` where `fork` is unavailable (Windows / JRuby). |
 | `none` | Load the library into Rigor's own process and call it directly. |
-| `ruby_box` | Run inside an experimental `Ruby::Box` sandbox. This needs the `RUBY_BOX=1` start flag, so the `rigor` launcher re-execs itself with it set when you select this strategy. |
+| `ruby_box` | Run inside an experimental `Ruby::Box` sandbox. This needs the `RUBY_BOX=1` start flag, so the `rigor` launcher re-execs itself with it set when you select this strategy. **Environment variable only** — the configuration file is read long after Ruby has booted, so `plugins_isolation: ruby_box` is reported as a configuration error instead. |
 
-The legacy `RIGOR_BOX` environment variable is a back-compat
-alias for `RIGOR_PLUGIN_ISOLATION=ruby_box`. The default
+The environment variable wins over `plugins_isolation:`, so you can
+override a project's committed choice for one invocation. The legacy
+`RIGOR_BOX` environment variable is a back-compat alias for
+`RIGOR_PLUGIN_ISOLATION=ruby_box`. The default
 (`process`) is the right choice for almost everyone; the variable
 exists for the rare platform where forking is unavailable or
 where you want stronger containment.

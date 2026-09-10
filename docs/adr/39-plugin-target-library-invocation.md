@@ -205,8 +205,9 @@ reopens `String` / `Hash` changes the Ruby that Rigor's own code runs
 under) and **gem-version clashes** (Ruby allows one version of a gem per
 process, so the target's version can collide with Rigor's own). How much
 isolation is worth its cost depends on the deployment, so the isolation
-is a **configurable strategy** (the `RIGOR_PLUGIN_ISOLATION` env), with
-three backends behind one interface:
+is a **configurable strategy** (`.rigor.yml`'s `plugins_isolation:`, or
+the `RIGOR_PLUGIN_ISOLATION` env, which wins over it), with three
+backends behind one interface:
 
 | Strategy | Isolation | Crash containment | Cost | Notes |
 | --- | --- | --- | --- | --- |
@@ -359,7 +360,9 @@ reframed from "unify the approximations" to "use the real library."
 5. **Selectable isolation strategy** (see § "Isolation of target-library
    invocation"). `Plugin::Isolation` selects one of three backends behind
    a common `call(feature:, receiver:, method:, args:)` interface by the
-   `RIGOR_PLUGIN_ISOLATION` env, with `process` the **default**
+   `.rigor.yml` `plugins_isolation:` key or the `RIGOR_PLUGIN_ISOLATION`
+   env (the env wins — it is the one-invocation operator override), with
+   `process` the **default**
    (falling back to `none` where `fork` is unavailable). **All three
    landed:**
    - `none` — `require` + `public_send` in the main space (default path).

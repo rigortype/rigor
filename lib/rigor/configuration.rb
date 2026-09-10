@@ -117,6 +117,16 @@ module Rigor
         # `"stat"` (or `RIGOR_CI_DETECT=0`).
         "validation" => "auto"
       },
+      # ADR-39 slice 5 / #911 — the plugin-isolation strategy for target-library invocation. `nil` (the
+      # default) names nothing, leaving the choice to `RIGOR_PLUGIN_ISOLATION` and then to
+      # `Plugin::Isolation::DEFAULT`. The environment variable WINS over this key: it is the
+      # one-invocation operator override (`RIGOR_PLUGIN_ISOLATION=none rigor check` on a platform where
+      # the fork worker misbehaves), and an override a committed file can veto is not an override.
+      # Only `none` and `process` are selectable here — `ruby_box` needs `RUBY_BOX=1` set before Ruby
+      # boots, which is what `exe/rigor` re-execs for, and the launcher deliberately does not parse YAML
+      # before that re-exec (ADR-87 / ADR-104 boot-slim), so naming it here raises instead of silently
+      # resolving to a different strategy.
+      "plugins_isolation" => nil,
       "plugins_io" => {
         "network" => "disabled",
         "allowed_paths" => [],
@@ -212,6 +222,10 @@ module Rigor
     # reservation FINDABLE by the next person adding config validation (#166 is exactly that), and to
     # give the schema-parity spec something to key on: a reserved namespace is by definition absent
     # from DEFAULTS, so the DEFAULTS-driven schema gate can never see it.
+    # The isolation strategies a `.rigor.yml` may name (ADR-39 slice 5 / #911). `ruby_box` is
+    # deliberately absent: it is a boot-time decision the config file is read too late to make.
+    CONFIGURABLE_PLUGIN_ISOLATIONS = %w[none process].freeze
+
     RESERVED_NAMESPACES = %w[rigor_rs].freeze
 
     # Every top-level key a conforming `.rigor.yml` may carry: the keys this implementation owns, plus
@@ -238,6 +252,7 @@ module Rigor
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
                 :cache_validation, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths, :parameter_inference,
+                :plugins_isolation,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides,
@@ -520,6 +535,9 @@ module Rigor
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
       @cache_validation = coerce_cache_validation(cache.fetch("validation", "auto"))
+      @plugins_isolation = coerce_plugins_isolation(
+        data.fetch("plugins_isolation", DEFAULTS.fetch("plugins_isolation"))
+      )
       @plugins_io_network = coerce_network_policy(plugins_io.fetch("network"))
       @plugins_io_allowed_paths = Array(plugins_io.fetch("allowed_paths")).map(&:to_s).freeze
       @plugins_io_allowed_url_hosts = Array(plugins_io.fetch("allowed_url_hosts")).map(&:to_s).freeze
@@ -583,6 +601,7 @@ module Rigor
           "max_bytes" => cache_max_bytes,
           "validation" => cache_validation
         },
+        "plugins_isolation" => plugins_isolation,
         "plugins_io" => {
           "network" => plugins_io_network.to_s,
           "allowed_paths" => plugins_io_allowed_paths,
@@ -964,6 +983,27 @@ module Rigor
     def coerce_cache_validation(value)
       str = value.to_s
       VALID_CACHE_VALIDATIONS.include?(str) ? str : "auto"
+    end
+
+    # Rejects rather than fails soft — a strategy that silently resolves to a different one is exactly
+    # the failure #911 exists to close, and the run's isolation is not a detail the user can be assumed
+    # not to have meant.
+    def coerce_plugins_isolation(value)
+      return nil if value.nil?
+
+      str = value.to_s
+      return str if CONFIGURABLE_PLUGIN_ISOLATIONS.include?(str)
+
+      if str == "ruby_box"
+        raise ConfigurationError,
+              "plugins_isolation: ruby_box cannot be selected from the configuration file — `Ruby::Box` " \
+              "must be active before Ruby boots. Run rigor with RIGOR_PLUGIN_ISOLATION=ruby_box instead " \
+              "(the launcher re-execs itself with RUBY_BOX=1 set)."
+      end
+
+      raise ConfigurationError,
+            "plugins_isolation must be one of #{CONFIGURABLE_PLUGIN_ISOLATIONS.inspect} " \
+            "(`ruby_box` is environment-only), got #{value.inspect}"
     end
 
     def coerce_network_policy(value)

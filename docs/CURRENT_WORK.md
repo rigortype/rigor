@@ -18,7 +18,7 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Where the cycle stands
 
 **v0.3.8 is published**; `[Unreleased]` is empty and `changelog.d/` holds the whole cycle (2026-09-09's
-~30 PRs plus 2026-09-10's batch below). The next cut happens only when the user invokes
+~30 PRs plus 2026-09-10's two batches below). The next cut happens only when the user invokes
 `/rigor-release-prep`.
 
 ## 2026-09-10 — the v0.3.9 milestone sweep, 15 parallel lanes
@@ -45,6 +45,20 @@ green at the last integration run):
   (partial-supersession marker in ADR-49, ten ADRs), #948 (#939 the header-vs-index status gate),
   #956 (#938 residues).
 - Adjudicated without code: #533 closed (6/8 already fixed; item 5 split to #953).
+
+## 2026-09-10, second batch — five `ready-for-agent` lanes, all landed
+
+- #975 (#580): a mutation-widened `Nominal` re-joins later stores, gated in-band on a parameter that
+  already carries a `Dynamic[top]` arm (no provenance slot exists on `Type::Nominal`; the gradual arm
+  IS the mark). `a = []; a.push(1); a.push("s")` reads `Array[Dynamic[top] | Integer | String]`.
+- #972 (#599): factory-method freshness — the gate accepts a chained receiver whose callee is cheaply
+  resolvable and whose RETURN POSITION is a materialisation (not a self-alias scan; documented why).
+- #971 (#911): `.rigor.yml` `plugins_isolation:` (`none` | `process`); ENV wins; `ruby_box` is a
+  configuration error naming the variable.
+- #974 (#534 item 7 only — items 1–4 were already landed; 5 and 6 stay open): the Rails plugins
+  declare their exception hierarchies / namespaces leniently, every class in `open_receivers:`.
+- #973 (#915): `class << self; include M; end` records as an extend; RBS-declared `extend` reaches
+  narrowing through `Environment#singleton_extended_modules`; `IncrementalSnapshot::SCHEMA` 21.
 
 ## Open threads
 

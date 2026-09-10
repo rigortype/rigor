@@ -316,7 +316,7 @@ Working response: assertion markers are fixture-harness syntax. They should use 
 
 Concern: "plugins must not execute application code" is not a complete filesystem, network, failure-isolation, or trust policy.
 
-Working response: the first implementation treats plugins as trusted Ruby gems selected by the user, Gemfile, or project configuration. Network access is disabled by default during analysis, ordinary reads are scoped to project and dependency inputs, and reads outside those inputs require explicit configuration plus cache dependency descriptors. Plugin exceptions become diagnostics at the analyzer boundary. Stronger isolation, such as Ruby::Box or process isolation, remains a future option.
+Working response: the first implementation treats plugins as trusted Ruby gems selected by the user, Gemfile, or project configuration. Network access is disabled by default during analysis, ordinary reads are scoped to project and dependency inputs, and reads outside those inputs require explicit configuration plus cache dependency descriptors. Plugin exceptions become diagnostics at the analyzer boundary. Stronger isolation, such as Ruby::Box or process isolation, remains a future option. `TrustPolicy#allow_read?` resolves paths with `File.expand_path` only (no `realpath`/symlink resolution, a deliberate bound rather than an oversight — issue #959); a read a plugin's own trust scope refuses now also surfaces as a run-level `plugin_trust.read-refused` `:info` diagnostic naming the plugin, the refused path, and the read root it fell outside, so the refusal is visible instead of silent.
 
 ### Trinary `maybe` Is Policy-Aware Uncertainty
 

@@ -14,11 +14,13 @@ RSpec.describe Rigor::Plugin::Isolation do
   around do |example|
     original = ENV.fetch("RIGOR_PLUGIN_ISOLATION", nil)
     original_bundle_root = described_class.target_bundle_root
+    original_configured = described_class.configured_strategy
     described_class::Process.instance_variable_set(:@worker, nil)
     example.run
   ensure
     original.nil? ? ENV.delete("RIGOR_PLUGIN_ISOLATION") : (ENV["RIGOR_PLUGIN_ISOLATION"] = original)
     described_class.target_bundle_root = original_bundle_root
+    described_class.configured_strategy = original_configured
     described_class::Process.instance_variable_set(:@worker, nil)
   end
 
@@ -42,6 +44,43 @@ RSpec.describe Rigor::Plugin::Isolation do
     it "uses the Process backend by default where fork is available", if: Process.respond_to?(:fork) do
       ENV.delete("RIGOR_PLUGIN_ISOLATION")
       expect(described_class.backend).to eq(described_class::Process)
+    end
+  end
+
+  # ADR-39 slice 5 / #911 — the `.rigor.yml` `plugins_isolation:` key the documents described for two
+  # years. The precedence is pinned here because it is the half a reader cannot derive: the environment
+  # variable WINS, since it is the operator's one-invocation override and `exe/rigor` re-execs on it
+  # alone.
+  describe "configuration vs environment precedence" do
+    it "uses the configured strategy when the environment names none" do
+      ENV.delete("RIGOR_PLUGIN_ISOLATION")
+      described_class.configured_strategy = "none"
+
+      expect(described_class.strategy_name).to eq("none")
+      expect(described_class.backend).to eq(described_class::Direct)
+    end
+
+    it "lets the environment variable override the configured strategy" do
+      described_class.configured_strategy = "none"
+      ENV["RIGOR_PLUGIN_ISOLATION"] = "process"
+
+      expect(described_class.strategy_name).to eq("process")
+    end
+
+    # The must-still-fire counterpart of the example above: an env var that names nothing valid must not
+    # swallow the project's choice.
+    it "ignores an unrecognised environment value and keeps the configured strategy" do
+      described_class.configured_strategy = "none"
+      ENV["RIGOR_PLUGIN_ISOLATION"] = "sandbox"
+
+      expect(described_class.strategy_name).to eq("none")
+    end
+
+    it "falls back to the default when neither names a strategy" do
+      ENV.delete("RIGOR_PLUGIN_ISOLATION")
+      described_class.configured_strategy = nil
+
+      expect(described_class.strategy_name).to eq(described_class::DEFAULT)
     end
   end
 

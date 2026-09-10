@@ -143,6 +143,7 @@ module Rigor
         required_by = loaded_ids & Plugin::Inflector::CONSUMER_PLUGIN_IDS
         return nil if required_by.empty?
 
+        Plugin::Isolation.configured_strategy = configuration.plugins_isolation
         Plugin::Isolation.target_bundle_root ||= Environment::BundleSigDiscovery.resolve_bundle_path(
           bundle_path: configuration.bundler_bundle_path,
           project_root: Dir.pwd,

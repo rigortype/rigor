@@ -7,8 +7,8 @@ module Rigor
     # ADR-39 slice 5 — the selectable isolation strategy for target-library invocation. A plugin invokes a
     # pure method on a trusted target library (e.g. `ActiveSupport::Inflector.pluralize("post")`) through
     # {.call}; how much the invocation is isolated from Rigor's own process is a **configurable strategy**
-    # (the `RIGOR_PLUGIN_ISOLATION` env — there is no `.rigor.yml` key for it, see issue #911). Three
-    # backends behind one interface:
+    # (`.rigor.yml`'s `plugins_isolation:` key, or the `RIGOR_PLUGIN_ISOLATION` env, which wins over it —
+    # see {.strategy_name}). Three backends behind one interface:
     #
     # - `none` — load into the main space and call directly. Lowest cost; no isolation. Used as the fallback
     #   where fork is unavailable; fine because the invoked library is trusted + pure.
@@ -98,11 +98,34 @@ module Rigor
       # {#backend}).
       DEFAULT = "process"
 
-      # The configured strategy name (`RIGOR_PLUGIN_ISOLATION`), defaulting to {DEFAULT} for any unset /
-      # unrecognised value.
+      # The strategy the loaded {Rigor::Configuration} named (`plugins_isolation:`), or nil when the
+      # project named none. Handed over as a module ivar for the same reason {target_bundle_root} is: the
+      # invocation happens deep inside a plugin, several layers below anything holding the configuration.
+      def configured_strategy
+        @configured_strategy
+      end
+
+      # Frozen, like {target_bundle_root=}, so a Ractor-pool worker may read it (an unshareable value in a
+      # module ivar is a `Ractor::IsolationError` to read from a non-main Ractor, not only to write).
+      def configured_strategy=(name)
+        @configured_strategy = name.nil? ? nil : name.to_s.dup.freeze
+      end
+
+      # The strategy name in effect, defaulting to {DEFAULT} for any unset / unrecognised value.
+      #
+      # `RIGOR_PLUGIN_ISOLATION` WINS over the configuration (#911). The variable is the operator's
+      # one-invocation override — the thing you reach for when the fork worker misbehaves on this
+      # machine, or when a CI image cannot fork at all — and an override a committed file can veto is not
+      # an override. The config key is the project-wide default the override departs from. It is also the
+      # only ordering under which `ruby_box` works at all: `exe/rigor` re-execs on the variable alone.
       def strategy_name
-        name = ENV["RIGOR_PLUGIN_ISOLATION"].to_s
-        STRATEGIES.include?(name) ? name : DEFAULT
+        from_env = ENV["RIGOR_PLUGIN_ISOLATION"].to_s
+        return from_env if STRATEGIES.include?(from_env)
+
+        from_config = configured_strategy.to_s
+        return from_config if STRATEGIES.include?(from_config)
+
+        DEFAULT
       end
 
       # Invokes `receiver.method(*args)` on a target library, requiring `feature` first, under the configured

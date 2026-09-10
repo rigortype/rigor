@@ -44,6 +44,71 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(out).to include("error(s) in")
   end
 
+  # ADR-39 slice 5 / #911 — `plugins_isolation:` reaches the invocation layer through a real `rigor
+  # check`. The discriminator is the backend a plugin's call would actually take, observed the way a
+  # plugin observes it: `Isolation.call` on `Process.pid` answers with THIS process's pid under `none`
+  # and with the forked worker's under `process`, so the two arms cannot pass each other's assertion.
+  describe "plugins_isolation:" do
+    around do |example|
+      original_env = ENV.fetch("RIGOR_PLUGIN_ISOLATION", nil)
+      original_configured = Rigor::Plugin::Isolation.configured_strategy
+      ENV.delete("RIGOR_PLUGIN_ISOLATION")
+      Rigor::Plugin::Isolation::Process.instance_variable_set(:@worker, nil)
+      example.run
+    ensure
+      original_env.nil? ? ENV.delete("RIGOR_PLUGIN_ISOLATION") : (ENV["RIGOR_PLUGIN_ISOLATION"] = original_env)
+      Rigor::Plugin::Isolation.configured_strategy = original_configured
+      Rigor::Plugin::Isolation::Process.instance_variable_set(:@worker, nil)
+    end
+
+    def invoked_pid
+      Rigor::Plugin::Isolation.call(feature: "English", receiver: "Process", method: :pid, args: [])
+    end
+
+    it "takes the in-process path for `none`" do
+      File.write(".rigor.yml", "paths:\n  - clean.rb\nplugins_isolation: none\n")
+      File.write("clean.rb", "x = 1\n")
+
+      status, = run(["--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"])
+
+      expect(status).to eq(0)
+      expect(Rigor::Plugin::Isolation.strategy_name).to eq("none")
+      expect(Rigor::Plugin::Isolation.backend).to eq(Rigor::Plugin::Isolation::Direct)
+      expect(invoked_pid).to eq(Process.pid)
+    end
+
+    it "takes the forked-worker path for `process`", if: Process.respond_to?(:fork) do
+      File.write(".rigor.yml", "paths:\n  - clean.rb\nplugins_isolation: process\n")
+      File.write("clean.rb", "x = 1\n")
+
+      status, = run(["--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"])
+
+      expect(status).to eq(0)
+      expect(Rigor::Plugin::Isolation.strategy_name).to eq("process")
+      expect(Rigor::Plugin::Isolation.backend).to eq(Rigor::Plugin::Isolation::Process)
+      expect(invoked_pid).not_to eq(Process.pid)
+    end
+
+    it "rejects the environment-only `ruby_box` with a message naming the variable" do
+      File.write(".rigor.yml", "paths:\n  - clean.rb\nplugins_isolation: ruby_box\n")
+      File.write("clean.rb", "x = 1\n")
+
+      expect { run(["--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"]) }
+        .to raise_error(Rigor::ConfigurationError, /RIGOR_PLUGIN_ISOLATION=ruby_box/)
+
+      # ...and the dispatcher, which owns the `ConfigurationError` rescue, renders it as the one-line
+      # `rigor:` message a user actually sees rather than a backtrace (#433).
+      require "rigor/cli"
+      err = StringIO.new
+      status = Rigor::CLI.new(
+        ["check", "--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"], out: StringIO.new, err: err
+      ).run
+
+      expect(status).not_to eq(0)
+      expect(err.string).to include("RIGOR_PLUGIN_ISOLATION=ruby_box")
+    end
+  end
+
   # ADR-67 WD6c lift — `parameter_inference:` composes with `--incremental`: the session diffs the
   # freshly collected param table against the snapshot's copy and re-checks any callee whose seeds moved,
   # so the earlier mutual-exclusion refusal (exit 64) is gone. The cross-run soundness property itself is

@@ -153,7 +153,8 @@ allow-list** of pure methods, inputs derived from source, and **decline
 (return nil / emit nothing) when the library is unavailable — never
 approximate**. How the call is isolated from Rigor (in-process, a forked
 worker, or a `Ruby::Box`) is a configurable strategy the user picks with
-the `RIGOR_PLUGIN_ISOLATION` environment variable; you just call the method.
+`.rigor.yml`'s `plugins_isolation:` key or the `RIGOR_PLUGIN_ISOLATION`
+environment variable (which wins over it); you just call the method.
 
 For the common "did you mean …?" suggestion, use the shared helper
 rather than hand-rolling Levenshtein:

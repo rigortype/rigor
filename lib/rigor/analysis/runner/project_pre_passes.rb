@@ -75,6 +75,11 @@ module Rigor
             bundle_path: @configuration.bundler_bundle_path,
             auto_detect: @configuration.bundler_auto_detect
           )&.to_s
+          # ADR-39 slice 5 / #911 — hand the project's `plugins_isolation:` to the invocation layer before
+          # any plugin `#prepare` runs, for the same reason the bundle root is resolved above: `#prepare`
+          # already calls through {Plugin::Isolation}, so a later assignment would leave prepare-time
+          # calls on a different strategy than the rest of the run.
+          Plugin::Isolation.configured_strategy = @configuration.plugins_isolation
           plugin_registry = load_plugins
           dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
           # ADR-18 slice 3 — plugin prepare MUST run before the synthetic-method scanner so cross-plugin

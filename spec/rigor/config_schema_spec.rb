@@ -6,6 +6,7 @@ require "yaml"
 require "rigor/configuration"
 require "rigor/configuration/severity_profile"
 require "rigor/analysis/check_rules"
+require "rigor/plugin/isolation"
 require "rigor/plugin/trust_policy"
 
 RSpec.describe "Rigor configuration JSON Schema" do
@@ -115,6 +116,20 @@ RSpec.describe "Rigor configuration JSON Schema" do
     expect(enum.to_set(&:to_sym)).to(
       eq(Rigor::Plugin::TrustPolicy::VALID_NETWORK_POLICIES.to_set)
     )
+  end
+
+  # ADR-39 slice 5 / #911. The enum carries all three backends because the environment variable selects
+  # all three; the loader accepts only the two the config file is read in time to choose, and that
+  # asymmetry is deliberate, so both halves are pinned.
+  it "constrains plugins_isolation to the runtime STRATEGIES set" do
+    enum = schema.dig("properties", "plugins_isolation", "enum")
+    expect(enum.to_set).to eq(Rigor::Plugin::Isolation::STRATEGIES.to_set)
+
+    Rigor::Configuration::CONFIGURABLE_PLUGIN_ISOLATIONS.each do |name|
+      expect(Rigor::Configuration.new({ "plugins_isolation" => name }).plugins_isolation).to eq(name)
+    end
+    expect { Rigor::Configuration.new({ "plugins_isolation" => "ruby_box" }) }
+      .to raise_error(Rigor::ConfigurationError, /RUBY_BOX=1|RIGOR_PLUGIN_ISOLATION/)
   end
 
   it "documents allowed_url_hosts under plugins_io" do

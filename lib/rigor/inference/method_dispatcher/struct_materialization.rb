@@ -4,6 +4,8 @@ require "prism"
 
 require_relative "../../type"
 require_relative "../../source/constant_path"
+require_relative "../../source/node_children"
+require_relative "../struct_fold_safety"
 
 module Rigor
   module Inference
@@ -25,6 +27,10 @@ module Rigor
       module StructMaterialization
         module_function
 
+        # Nodes one factory-body scan may visit before it gives up and refuses. A factory is a handful of
+        # nodes; the bound exists so a pathological body cannot turn a per-call-site gate into a walk.
+        FACTORY_BODY_SCAN_BUDGET = 200
+
         # Issue #595 / #525 — the ONE materialisation test. Both places that must answer "was this receiver
         # expression's struct newly built?" go through it: this module's direct member-read gate above, and
         # `ExpressionTyper`'s caller-side `:self`-grant arm. They had forked answers once (the grant arm was
@@ -40,8 +46,85 @@ module Rigor
           case node.name
           when :new, :[] then struct_class_expression?(node.receiver, scope)
           when :with then !hand_written_with?(receiver, scope)
+          else fresh_factory_call?(node, scope)
+          end
+        end
+
+        # Issue #599 — the FACTORY-METHOD idiom, the one shape #595's whitelist knowingly paid for as a
+        # missed error: `def build = Pair.new("hi", [1, 2])` then `build.items`. The whitelist could not see
+        # through `build`, so the chain declined and a typo on it went unreported.
+        #
+        # It is recovered by asking the callee, under two bounds that keep the answer cheap and fail-closed.
+        #
+        # 1. RESOLUTION is one table read on a shape whose target cannot be an arbitrary object: a
+        #    receiverless send resolved through the confidence-gated top-level def table, or `Const.name`
+        #    resolved through the singleton-side ancestor walk. An INSTANCE-side receiver is refused
+        #    outright — `x.dup_self` is the #595 bug shape, and what `x` holds at the call is exactly what
+        #    this gate has no way to know.
+        # 2. ACCEPTANCE is decided on the callee's RETURN POSITION, not on a self-alias scan of its body.
+        #    "Cannot return `self`" is not the property freshness needs: the factory's `self` is the module
+        #    or `main`, never the struct, while `def get = GLOBAL` over a mutated constant returns a
+        #    long-lived instance with no `self` anywhere in it. What the gate needs is that the returned
+        #    object was built BY THIS CALL, so the body's tail must itself be a materialisation
+        #    ({#fresh_materialization_tail?}) and no `return` may hand back anything else. That subsumes the
+        #    self-alias refusal — a body returning `self` has a `SelfNode` tail, not a `.new` — while
+        #    admitting the idiom the issue is about.
+        def fresh_factory_call?(node, scope)
+          return false if scope.nil?
+
+          body = factory_def_body(node, scope)
+          return false unless body.is_a?(Prism::StatementsNode)
+
+          fresh_materialization_tail?(body.body.last, scope) && !early_return?(body)
+        end
+
+        # The two CHEAPLY RESOLVABLE callee shapes, each a single table read against the frozen discovery
+        # index. `bindable_top_level_def_for` is the confidence-gated accessor — the only one the inference
+        # may bind through — so a call inside a block whose `self` is unmodelled declines here as it does
+        # everywhere else. Anything else, an instance-side receiver above all, resolves to nil.
+        def factory_def_body(node, scope)
+          def_node =
+            case node.receiver
+            when nil then scope.bindable_top_level_def_for(node.name)
+            when Prism::ConstantReadNode, Prism::ConstantPathNode
+              owner = Source::ConstantPath.qualified_name_or_nil(node.receiver)
+              owner && scope.singleton_def_through_ancestors(owner, node.name).first
+            end
+          def_node&.body
+        end
+
+        # A materialisation written in the CALLEE's body, judged syntactically. Deliberately narrower than
+        # {#struct_class_expression?}: that predicate's local-variable arm reads the binding off the scope it
+        # is handed, which is the CALLER's — a local of the same name in the callee body is a different
+        # binding entirely, so the arm is dropped rather than answered from the wrong scope.
+        def fresh_materialization_tail?(node, scope)
+          return false unless node.is_a?(Prism::CallNode)
+          return false unless %i[new []].include?(node.name)
+
+          case node.receiver
+          when Prism::ConstantReadNode, Prism::ConstantPathNode
+            name = Source::ConstantPath.qualified_name_or_nil(node.receiver)
+            !name.nil? && !scope.struct_member_layout(name).nil?
+          when Prism::CallNode then inline_struct_factory?(node.receiver)
           else false
           end
+        end
+
+        # An explicit `return` anywhere in the body hands back an expression the tail check never saw, so the
+        # body is refused rather than scanned arm by arm. Nested `def` / `class` / `module` bodies are a
+        # different method's returns; a block's `return` is this method's, so the walk descends into it. The
+        # visit budget is the fail-closed bound: a body too large to scan is not proven, and unproven is not
+        # fresh.
+        def early_return?(node, budget = [FACTORY_BODY_SCAN_BUDGET])
+          return true if node.is_a?(Prism::ReturnNode)
+          return false if Inference::StructFoldSafety.scope_boundary?(node)
+
+          budget[0] -= 1
+          return true if budget[0].negative?
+
+          found = false
+          node.rigor_each_child { |child| found ||= early_return?(child, budget) }
+          found
         end
 
         # `.with` copies the receiver into a new instance — unless the struct wrote its own, which is free to

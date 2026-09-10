@@ -852,35 +852,132 @@ RSpec.describe "Struct.new value folding", type: :runner do
       end
     end
 
-    describe "the measured precision trade" do
-      it "declines a genuinely fresh helper return (the accepted cost)" do
-        # `make` really does hand back a new instance, but the whitelist cannot see through it. Accepted:
-        # a before/after run over haml's and hamlit's parsers, faraday's Options/Request and mail's
-        # received_parser showed an identical diagnostic set and identical `type-scan` coverage, because a
-        # helper return at those sites does not infer to a StructInstance in the first place. The richer
-        # fix (consult the callee's return for a self-alias) is issue #599.
-        expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+    # Issue #599 — the FACTORY-METHOD idiom #595's whitelist knowingly paid for as a missed error. The gate
+    # now asks the callee, on two cheaply resolvable shapes only (a receiverless send through the top-level
+    # def table, `Const.name` through the singleton ancestor walk) and accepts it only when the body's return
+    # position is itself a materialisation. Instance-side receivers stay refused — that is the #595 bug
+    # shape, and the block above is the pin for it.
+    describe "a factory method whose return was just materialised (issue #599)" do
+      it "folds a read off a top-level factory" do
+        # Was the "accepted cost" pin of #595: `make` really does hand back a new instance, and the callee
+        # is one table read away.
+        expect(dumped_types(<<~RUBY)).to eq(["\"x\""])
           #{builder_def}
           def make = Line.new("x", 1)
           dump_type(make.text)
         RUBY
       end
 
-      it "declines the factory-method route, and the direct one still reports the typo" do
-        # The paired form of the trade, over the shape the #293 guards above used to carry. The factory
-        # return is genuinely fresh, but the whitelist cannot see through `parse`, so the chain declines and
-        # a typo on it goes unreported; written as a direct materialisation the same typo still fires. The
-        # loss direction is a missed error, never a diagnostic on correct code — and closing it needs the
-        # callee's return consulted for a `self` alias — issue #599.
-        factory = <<~RUBY
+      it "recovers the #293 pair through the factory route: silence from widening, fire on the typo" do
+        # Both halves over one factory, which is what makes each discriminating. The empty-literal member
+        # widens, so the correct "construct empty, then fill" program draws nothing; the non-empty member
+        # still folds, so a genuine typo on it is reported. Before #599 the silence half passed for the
+        # wrong reason (the whole chain declined) and the typo half could not fire at all.
+        empty = <<~RUBY
+          Pair = Struct.new(:label, :items)
+          def build_empty = Pair.new("hi", [])
+        RUBY
+        filled = <<~RUBY
           Pair = Struct.new(:label, :items)
           def build = Pair.new("hi", [1, 2])
         RUBY
-        via_factory = analyze("#{factory}build.items.first.zzz_undefined")
-        direct = analyze("#{factory}Pair.new(\"hi\", [1, 2]).items.first.zzz_undefined")
+        silent = analyze("#{empty}build_empty.items.first.zzz_undefined")
+        firing = analyze("#{filled}build.items.first.zzz_undefined")
 
-        expect(via_factory.diagnostics.map(&:message).join("\n")).not_to include("zzz_undefined")
-        expect(direct.diagnostics.map(&:message).join("\n")).to include("zzz_undefined")
+        expect(silent.diagnostics.map(&:message).join("\n")).not_to include("zzz_undefined")
+        expect(firing.diagnostics.map(&:message).join("\n")).to include("zzz_undefined")
+      end
+
+      it "folds a read off a singleton factory reached through the ancestor walk" do
+        expect(dumped_types(<<~RUBY)).to eq(["\"a\""])
+          Pair = Struct.new(:label, :items)
+          class Base
+            def self.build = Pair.new("a", [1])
+          end
+          class Maker < Base
+          end
+          dump_type(Maker.build.label)
+        RUBY
+      end
+
+      it "keeps the slice-5 grant firing off a factory return" do
+        # The grant arm shares the predicate, so a whole body's implicit-self member reads recover too.
+        expect(dumped_types(<<~RUBY)).to eq(["\"X\""])
+          #{builder_def}
+          def make = Line.new("x", 1)
+          dump_type(make.shout)
+        RUBY
+      end
+
+      describe "must stay Dynamic — the callee was not proven to build what it returns" do
+        it "refuses an INSTANCE-side receiver, whatever the callee does" do
+          # The #595 bug shape: what `x` holds at the call is exactly what this gate cannot know, so the
+          # resolution shapes stop at the top-level and singleton tables.
+          expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+            #{builder_def}
+            x = Line.new("a", 2)
+            x.text = "z"
+            dump_type(x.dup_self.text)
+          RUBY
+        end
+
+        it "refuses a factory that hands back a long-lived instance" do
+          # The reason acceptance is decided on the return POSITION and not on a self-alias scan: there is
+          # no `self` anywhere in this body, and the object it returns was mutated two statements ago. A
+          # LATENT guard today — the constant read degrades the carrier before the gate is consulted, so the
+          # sibling below is the one that discriminates against a gate accepting any resolvable callee — and
+          # it pins the shape a later constant-folding gain would otherwise turn into a wrong value.
+          expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+            Line = Struct.new(:text)
+            GLOBAL = Line.new("a")
+            def get = GLOBAL
+            GLOBAL.text = "z"
+            dump_type(get.text)
+          RUBY
+        end
+
+        it "refuses a factory whose tail is a local it filled first" do
+          expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+            Line = Struct.new(:text)
+            def make
+              r = Line.new("a")
+              r.text = "z"
+              r
+            end
+            dump_type(make.text)
+          RUBY
+        end
+
+        it "refuses a factory with an early return the tail check never saw" do
+          # Latent for the same reason as the example above; the pin is on the scan, not on today's carrier.
+          expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+            Line = Struct.new(:text)
+            CACHED = Line.new("a")
+            def make(flag)
+              return CACHED if flag
+              Line.new("b")
+            end
+            CACHED.text = "z"
+            dump_type(make(true).text)
+          RUBY
+        end
+
+        it "refuses a sibling reached by implicit self inside a struct body" do
+          # A receiverless send inside a method body must not resolve through the TOP-LEVEL def table onto a
+          # same-named struct method: `dup_self` here is instance-side and returns `self`.
+          expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+            Line = Struct.new(:text) do
+              def dup_self
+                self
+              end
+
+              def peek = dup_self.text
+            end
+            x = Line.new("a")
+            x.text = "z"
+            dump_type(x.peek)
+          RUBY
+        end
       end
     end
 

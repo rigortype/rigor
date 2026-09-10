@@ -167,22 +167,41 @@ Rigor-specific roles added in the first milestone, each shipped with an explicit
 | `_RewindableStream` | Stream-like objects that can be replayed from the start | `read`, `rewind` |
 | `_ClosableStream` | Stream-like objects whose lifetime can be closed | `close`, `closed?` |
 | `_FileDescriptorBacked` | Real OS-backed streams that justify diagnostics requiring an actual `IO` | `fileno` |
-| `_Callable[**A, R]` | Anything that responds to `call`, distinct from `_ToProc` | `call(*A) -> R` |
+| `_Callable` | Anything that responds to `call`, distinct from `_ToProc` | `call` |
+
+`_Callable` is **not** generic. It was first drafted as `_Callable[**A, R]`, which is not RBS grammar — `**A` has no meaning in a type-parameter list — so the shipped role takes no parameters; a generic form is a future extension, gated on RBS gaining the syntax.
 
 Plugins MAY add framework roles, additional conformance facts, role-specific exclusions, and `maybe` conformance, but they MUST NOT silently replace either the reused RBS interfaces or the Rigor-specific roles in this catalog.
 
-The role names and method signatures below are illustrative, not final standard-library signatures:
+These ARE the shipped signatures. Rigor loads them from `data/capability_roles/`, so a default run resolves every role above with no configuration and a `%a{rigor:v1:conforms-to _ClosableStream}` is actually checked. Parameter and return types are deliberately the loosest honest reading — a role says which members a value answers, and narrowing them here would reject conforming classes rather than describe them:
 
 ```rbs
-interface _Reader
-  def read: (*untyped) -> String?
+interface _Closable
+  def close: () -> untyped
 end
 
 interface _RewindableStream
   def read: (*untyped) -> String?
   def rewind: () -> untyped
 end
+
+interface _ClosableStream
+  def close: () -> untyped
+  def closed?: () -> bool
+end
+
+interface _FileDescriptorBacked
+  def fileno: () -> Integer
+end
+
+interface _Callable
+  def call: (*untyped) -> untyped
+end
 ```
+
+`_Reader` above is upstream RBS's, not Rigor's, and is reused unchanged.
+
+The catalog is added to the environment AFTER the project's own `signature_paths:`, one declaration at a time: a project that declares its own `interface _Closable` keeps its own, and still gets the four roles it did not declare. A `conforms-to` naming an interface the environment does not hold is reported — see [diagnostic-policy.md](diagnostic-policy.md).
 
 ```ruby
 def slurp(stream)

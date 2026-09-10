@@ -4,6 +4,9 @@ class Rigor::Plugin::IoBoundary
   def file?: (untyped) -> bool
   def directory?: (untyped) -> bool
   def list_directory: (untyped) -> Array[String]
+  # sig-gen gap: #959 — the generator pins the empty-summary literal (`count: 0, first_path: nil`); the
+  # record's fields are the running count and the first refused path, nil when nothing was refused.
+  def refusal_summary: () -> { count: Integer, first_path: String?, nearest_root: String? }?
   def open_url: (untyped url) -> String
   # Returns a frozen `Rigor::Cache::Descriptor` (no RBS yet -> untyped).
   def cache_descriptor: () -> untyped

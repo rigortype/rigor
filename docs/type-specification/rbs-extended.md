@@ -139,7 +139,7 @@ class MyBuffer
 end
 ```
 
-The directive instructs Rigor to verify the conformance regardless of whether any current call site exercises that requirement, which is useful for libraries that want their structural contract to be a checked design assertion rather than an emergent property of usage. Multiple `conforms-to` directives on the same class are allowed and combine like an intersection of interfaces. Rigor MUST report a diagnostic when a declared `conforms-to` interface is not satisfied; satisfied directives are silent.
+The directive instructs Rigor to verify the conformance regardless of whether any current call site exercises that requirement, which is useful for libraries that want their structural contract to be a checked design assertion rather than an emergent property of usage. Multiple `conforms-to` directives on the same class are allowed and combine like an intersection of interfaces. Rigor MUST report a diagnostic when a declared `conforms-to` interface is not satisfied; satisfied directives are silent. Rigor MUST also report one when the named interface is not in the environment at all — `dynamic.rbs-extended.unresolved`, at `:warning` ([diagnostic-policy.md](diagnostic-policy.md)), because a directive that resolves to nothing asserts nothing. The capability roles the directive is most often written against ship with Rigor and need no configuration ([structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md)).
 
 The directive is purely additive. Implicit structural compatibility continues to apply, and a class that already satisfies the interface continues to type-check without the annotation.
 

@@ -57,6 +57,29 @@ module Rigor
         @glob_entries = {}
         @http_client = http_client
         @mutex = Mutex.new
+        @refusal_count = 0
+        @first_refused_path = nil
+      end
+
+      # Issue #959 — `TrustPolicy#allow_read?` refuses a path purely by `File.expand_path` comparison
+      # (ADR-2's documented bound; no `File.realpath`), so a project rooted under a symlink (macOS'
+      # `/tmp` → `/private/tmp` alias is the common case) can have every plugin read refused with no
+      # visible cause: the boundary answered "not readable" and the plugin swallowed or surfaced only its
+      # own generic error. `#refusal_summary` is the accumulated record `Analysis::Runner::DiagnosticAggregator`
+      # reads once per run to surface ONE `:info` row per plugin that hit this, naming the count, the first
+      # refused path, and the read root it fell outside (so the message can suggest the fix: `cd "$(pwd -P)"`
+      # on a symlinked project root, or a `trust:` / `plugins_io.allowed_paths:` entry).
+      #
+      # @return `nil` when nothing was refused, else `{count:, first_path:, nearest_root:}` — `nearest_root`
+      #   is the policy's first configured read root (the project root in the common case), named as the
+      #   root a reader should compare the refused path against; it is a hint, not a claim that this
+      #   specific root is the nearest by path distance.
+      def refusal_summary
+        @mutex.synchronize do
+          return nil if @refusal_count.zero?
+
+          { count: @refusal_count, first_path: @first_refused_path, nearest_root: @policy.allowed_read_roots.first }
+        end
       end
 
       # Reads the file at `path` after validating it against the policy. Raises {AccessDeniedError} when the
@@ -75,6 +98,7 @@ module Rigor
       def read_file(path)
         absolute = File.expand_path(path.to_s)
         unless @policy.allow_read?(absolute)
+          record_refusal(absolute)
           raise AccessDeniedError.new(
             "plugin #{@plugin_id.inspect} cannot read #{absolute.inspect}: " \
             "path is outside the trusted-read scope",
@@ -137,7 +161,10 @@ module Rigor
       def list_directory(path)
         absolute = File.expand_path(path.to_s)
         entries = Dir.glob(File.join(absolute, "*"))
-        return entries unless @policy.allow_read?(absolute)
+        unless @policy.allow_read?(absolute)
+          record_refusal(absolute)
+          return entries
+        end
 
         record_glob_entry(absolute, "*")
         entries
@@ -197,7 +224,10 @@ module Rigor
       def probe(path)
         absolute = File.expand_path(path.to_s)
         answer = yield(absolute)
-        return answer unless @policy.allow_read?(absolute)
+        unless @policy.allow_read?(absolute)
+          record_refusal(absolute)
+          return answer
+        end
 
         if answer
           record_presence_entry(absolute)
@@ -251,6 +281,17 @@ module Rigor
       def record_glob_entry(root, pattern)
         entry = Cache::Descriptor::GlobEntry.compute(root: root, pattern: pattern)
         @mutex.synchronize { @glob_entries[entry.slot_key] = entry }
+      end
+
+      # Issue #959 — records that `path` fell outside every {TrustPolicy} read root, for {#refusal_summary}.
+      # Only the count and the FIRST path are kept (never the full list): the diagnostic reports one row per
+      # plugin regardless of how many paths it tried, so a plugin that walks a whole out-of-scope subtree
+      # costs one comparison per call here, not an unbounded accumulation.
+      def record_refusal(path)
+        @mutex.synchronize do
+          @refusal_count += 1
+          @first_refused_path ||= path
+        end
       end
 
       def record_url_entry(url, body)

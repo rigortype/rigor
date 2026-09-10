@@ -9,7 +9,8 @@ module Rigor
     # Owns three event streams:
     #
     # - `#unresolved_payloads` — `rigor:v1:*` directive payloads the resolver could not turn into a
-    #   {Rigor::Type}. Surface as `dynamic.rbs-extended.unresolved` `:info` diagnostics.
+    #   {Rigor::Type}. Surface as `dynamic.rbs-extended.unresolved` `:info` diagnostics, except an
+    #   unresolved `conforms-to` interface, which the aggregator stamps `:warning` (#928).
     # - `#lossy_projections` — shape-projection type functions (`pick_of` / `omit_of` / `partial_of` /
     #   `required_of` / `readonly_of`) applied to a carrier that does not preserve shape information (anything
     #   other than `Type::HashShape` / `Type::Tuple`). Surface as `dynamic.shape.lossy-projection` `:info`

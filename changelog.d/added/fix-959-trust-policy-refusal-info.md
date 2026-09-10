@@ -1,0 +1,1 @@
+- **[plugins]** A plugin read refused by the trust policy — most often a project rooted under a symlinked path such as macOS' `/tmp` — now surfaces as a `plugin_trust.read-refused` diagnostic naming the plugin and the refused path, instead of failing silently. ([#977](https://github.com/rigortype/rigor/pull/977))

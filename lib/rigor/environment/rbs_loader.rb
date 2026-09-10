@@ -86,6 +86,13 @@ module Rigor
           env = RBS::Environment.from_loader(rbs_loader)
           project_files = project_sig_files(signature_paths)
           add_project_signatures(env, signature_paths, deferred_signature_paths)
+          # Issue #928 — the capability-role catalog goes in AFTER the project's own signatures, per
+          # declaration, so a project that already declares one of these interface names keeps its own
+          # (`add_capability_role_signatures`). The rest of the bundled RBS cannot be ordered that way (it
+          # is what `from_loader` builds the env FROM), which is why a colliding project file is quarantined
+          # instead — and losing a whole `sig/` file to a name as ordinary as `_Closable` is exactly what
+          # shipping a top-level interface catalog would otherwise cost.
+          add_capability_role_signatures(env)
           # Issue #824 — the project's own signatures are already in `env` at this point, so the inline
           # contribution can be asked the question that keeps the two from colliding: which of its members
           # does a `.rbs` file already declare? Those stand down per member ({.add_virtual_rbs}).
@@ -1061,6 +1068,51 @@ module Rigor
           return [] unless File.directory?(CORE_OVERLAY_SIGS_ROOT)
 
           [Pathname(CORE_OVERLAY_SIGS_ROOT)]
+        end
+
+        # Rigor's capability-role catalog (`data/capability_roles/`) — the structural interfaces ADR-1 and
+        # `docs/type-specification/structural-interfaces-and-object-shapes.md` name as shipped, so a
+        # `%a{rigor:v1:conforms-to _ClosableStream}` written by following the specification resolves in a
+        # default run instead of failing soft to an unresolved-interface row. Public for the same reason
+        # {.core_overlay_sig_paths} is: the cache descriptor digests these files into the env-blob key.
+        CAPABILITY_ROLES_SIGS_ROOT = File.expand_path(
+          "../../../data/capability_roles",
+          __dir__
+        ).freeze
+
+        def capability_role_sig_paths
+          return [] unless File.directory?(CAPABILITY_ROLES_SIGS_ROOT)
+
+          [Pathname(CAPABILITY_ROLES_SIGS_ROOT)]
+        end
+
+        # Adds the catalog to an env that already holds the project's own signatures, one INTERFACE at a
+        # time, skipping any name the env already declares. Granularity is the declaration rather than the
+        # file (the #610 stand-down's unit) because this one file carries five unrelated roles: a project
+        # declaring `_Closable` must not also lose `_ClosableStream`.
+        def add_capability_role_signatures(env)
+          declared = declared_interface_names(env)
+          capability_role_sig_paths.each do |dir|
+            dir.children.sort.each do |file|
+              next unless file.file? && file.extname == ".rbs"
+
+              parsed = parse_signature_file(file.to_s)
+              next if parsed.nil?
+
+              buffer, directives, decls = parsed
+              standing = decls.reject { |decl| declared.include?(decl.name.absolute!) }
+              next if standing.empty?
+
+              add_parsed_decls(env, buffer, directives, standing)
+            end
+          end
+        end
+
+        # @param env — the environment the project's signatures are already in.
+        def declared_interface_names(env)
+          return Set.new unless env.respond_to?(:interface_decls)
+
+          env.interface_decls.keys.to_set
         end
 
         # Bundled signature sources that SUPPLEMENT a stdlib library's own declarations rather than stand

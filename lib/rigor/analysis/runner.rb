@@ -1050,7 +1050,17 @@ module Rigor
         # contributes NO diagnostics and its result leaves through `#effect_table`, never through the
         # stream. Skipped entirely when collection did not run.
         close_effect_graph
-        diagnostics += @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
+        diagnostics + post_analysis_diagnostic_streams
+      end
+
+      # The rbs-coverage build-failure ladder plus every remaining post-analysis stream
+      # `#assemble_run_diagnostics` appends, in their fixed contract order (see the comments at each call
+      # below and at the streams' own definitions). Split out of `#assemble_run_diagnostics` so that
+      # method's `Metrics/AbcSize` stays under budget — every stream here is a plain `DiagnosticAggregator`
+      # reader with no branching of its own, so the split changes nothing about WHEN or in WHAT order they
+      # run.
+      def post_analysis_diagnostic_streams
+        diagnostics = @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_environment_build_failed_diagnostics
         # Issue #696 — after its env-wide twin and before the synthesized-namespace notice: the four
         # `rbs.coverage.*` build conditions surface widest-consequence first, and their relative order is
@@ -1066,8 +1076,14 @@ module Rigor
         diagnostics += @diagnostic_aggregator.conforms_to_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
         diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
-        diagnostics + @diagnostic_aggregator.source_rbs_synthesis_diagnostics
+        diagnostics += @diagnostic_aggregator.source_rbs_synthesis_diagnostics
+        # Issue #959 — read LAST (after `analyze_targets`, which already ran before this method is called),
+        # so every per-file plugin call has had its chance to record a refusal on its (per-plugin-instance
+        # memoised) `IoBoundary`, alongside the prepare-time refusals the same boundary instance may
+        # already carry.
+        diagnostics + @diagnostic_aggregator.plugin_trust_refusal_diagnostics
       end
+      private :post_analysis_diagnostic_streams
 
       # #788 round 7 — runs per-file analysis over `targets` and exposes what it produced as
       # `#per_file_diagnostics`: the `analyze_files` return, stamped with the same severity profile the run's

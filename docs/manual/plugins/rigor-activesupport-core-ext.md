@@ -166,6 +166,15 @@ code that does will see them reported.
 `Date` and `DateTime` are extended by the same ActiveSupport modules and
 do **not** carry this yet — `Date.current.past?` still reports.
 
+## `ActiveSupport::Concern` resolves
+
+`extend ActiveSupport::Concern` is the first line of every concern in a
+Rails app, and the constant used to resolve to nothing. The bundle now
+names the module, along with the three members `extend` puts on the
+extender — `included`, `prepended` and `class_methods` — so
+`included do … end` keeps resolving rather than becoming a report on the
+newly-named module. Everything else `Concern` responds to stays lenient.
+
 ## No diagnostics, no config
 
 The plugin emits no diagnostics and has no configuration knobs. It

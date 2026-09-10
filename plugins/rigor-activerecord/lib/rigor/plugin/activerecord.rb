@@ -64,6 +64,11 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.9.0, 2026-09-10 (#534 item 7) — the bundled signatures gained `sig/active_record/framework.rbs`:
+        # the Active Record exception hierarchy, the `ActiveModel` namespace and `Arel`. No producer payload
+        # changed shape, but the version is the cache key a project sees, and the RBS half of a plugin's
+        # contribution rides the same bundle.
+        #
         # 0.8.0, 2026-09-02 — a model declared `class ::User` is keyed by its de-rooted name (`"User"`) in
         # the {ModelIndex} and the published `:model_index` fact (#583). The version is part of the
         # producer cache KEY: a cached 0.7.0 index still keys such a model `"::User"`, and `ModelIndex#find`
@@ -88,7 +93,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.8.0",
+        version: "0.9.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -105,7 +110,28 @@ module Rigor
         # ADR-26 — `ActiveRecord::Relation` is an "open" receiver: it delegates an unbounded set of
         # user-defined scopes / class methods to its model, so `call.undefined-method` must not fire for
         # it. `CheckRules` reads this manifest field and skips the rule for the class.
-        open_receivers: ["ActiveRecord::Relation"],
+        #
+        # The `sig/active_record/framework.rbs` names (#534 item 7) are open for the narrower reason that
+        # file documents: each is declared so the CONSTANT resolves, and none of them enumerates a method
+        # surface. `RecordInvalid#record`, `StatementInvalid#sql`, `Arel.star` and every other member left
+        # out must stay lenient, so the declaration buys constant resolution and asserts nothing else.
+        open_receivers: [
+          "ActiveRecord::Relation",
+          "ActiveRecord::ActiveRecordError",
+          "ActiveRecord::RecordNotFound",
+          "ActiveRecord::RecordInvalid",
+          "ActiveRecord::RecordNotSaved",
+          "ActiveRecord::RecordNotDestroyed",
+          "ActiveRecord::ReadOnlyRecord",
+          "ActiveRecord::Rollback",
+          "ActiveRecord::StaleObjectError",
+          "ActiveRecord::ConnectionNotEstablished",
+          "ActiveRecord::StatementInvalid",
+          "ActiveRecord::WrappedDatabaseException",
+          "ActiveRecord::RecordNotUnique",
+          "ActiveModel::ValidationError",
+          "Arel"
+        ],
         # ADR-103 WD2 / WD10 (#387) — the effect layer. rigor-activerecord models ActiveRecord, which is
         # part of Rails, so it opens the framework's own `rails.*` root rather than one named after the
         # plugin; `effect_root:` is granted only because the engine bundles this plugin

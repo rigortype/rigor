@@ -525,6 +525,22 @@ end
 # purpose — some are already covered by the separate `dynamic_return` rule for `+`/`-`/`*` below, the rest
 # are simply outside this issue's scope and remain silently `Dynamic` rather than a guess.
 module ActiveSupport
+  # Issue #534 item 7 — `ActiveSupport::Concern` was 87 unresolved constant sites on mastodon, essentially
+  # all of them the `extend ActiveSupport::Concern` line at the top of a concern module. Naming it is a
+  # constant-resolution fix and nothing more: the three members are declared because `extend`ing a module
+  # puts them on the extender's singleton, and leaving them out of a now-RBS-known module is what would
+  # turn `included do … end` into a false `call.undefined-method` in every concern in the project. The
+  # blocks are `(?) -> untyped` because their body is evaluated against the INCLUDING class, which this
+  # signature has no way to name.
+  #
+  # `Concern` is listed in the manifest's `open_receivers:` for the rest of its surface (`append_features`,
+  # `class_methods`' generated `ClassMethods` constant, …).
+  module Concern
+    def included: (?untyped base) ?{ (?) -> untyped } -> untyped
+    def prepended: (?untyped base) ?{ (?) -> untyped } -> untyped
+    def class_methods: () { (?) -> untyped } -> untyped
+  end
+
   class Duration
     # The `ago` family (issue #659). `since(time = ::Time.current)` and `ago(time = ::Time.current)` are
     # the only two real methods; `from_now` / `after` are `alias`es of the first and `until` / `before`

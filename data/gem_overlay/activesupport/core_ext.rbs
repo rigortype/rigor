@@ -296,6 +296,16 @@ end
 # `spec/rigor/environment/activesupport_overlay_parity_spec.rb`); every method not listed here stays
 # undeclared and silently `Dynamic` rather than guessed.
 module ActiveSupport
+  # Issue #534 item 7 — the `ActiveSupport::Concern` twin of the plugin's declaration. The plugin file
+  # carries the reasoning; the short version is that naming the module makes `extend ActiveSupport::Concern`
+  # resolve, and the three members have to come with it so that `included do … end` does not become a false
+  # `call.undefined-method` on a now-RBS-known module.
+  module Concern
+    def included: (?untyped base) ?{ (?) -> untyped } -> untyped
+    def prepended: (?untyped base) ?{ (?) -> untyped } -> untyped
+    def class_methods: () { (?) -> untyped } -> untyped
+  end
+
   class Duration
     # The `ago` family (issue #659). `since(time = ::Time.current)` and `ago(time = ::Time.current)` are
     # the only two real methods; `from_now` / `after` alias the first and `until` / `before` the second,

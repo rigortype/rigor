@@ -43,9 +43,12 @@ module Rigor
       manifest(
         id: "activesupport-core-ext",
         target_gems: ["activesupport"],
+        # Bumped 2026-09-10 (#534 item 7) — `ActiveSupport::Concern` is declared, so `extend
+        # ActiveSupport::Concern` resolves instead of reading as an unresolved constant.
+        #
         # Bumped 2026-09-02 (#632) — `ActiveSupport::Duration`'s reader surface (`ago`/`to_i`/`iso8601`/…)
         # is now declared, open_receivers-protected; see the class comment above.
-        version: "0.4.0",
+        version: "0.5.0",
         description: "RBS bundle for the most-frequently-flagged ActiveSupport core_ext extensions, " \
                      "plus the `ActiveSupport::Duration` type of the numeric time multipliers and its " \
                      "reader surface.",
@@ -56,7 +59,10 @@ module Rigor
         # `call.undefined-method` fire against it. Distinct from the RECEIVER-side FP the multiplier
         # `dynamic_return` gate guards (`Time#day` vs `Duration#day`, in the class comment above) — this is
         # the class's OWN unenumerable member set.
-        open_receivers: ["ActiveSupport::Duration"],
+        # `ActiveSupport::Concern` (#534 item 7) is here for the same reason at a different scale: the
+        # declaration names `included` / `prepended` / `class_methods` so `extend ActiveSupport::Concern`
+        # resolves, and everything else the module really responds to must stay lenient.
+        open_receivers: ["ActiveSupport::Duration", "ActiveSupport::Concern"],
         # ADR-103 WD10 (#387) — the IMPURE half of ActiveSupport: the clock, the notification bus and
         # `CurrentAttributes`. The `%a{pure}` sweep over the predicate surface is issue #388 and lands in
         # `sig/`, not here. See {Effects}.

@@ -1,0 +1,123 @@
+# Active Record's framework namespaces — issue #534 item 7.
+#
+# The 2026-09-01 corpus opacity sweep counted `ActiveRecord::RecordNotFound` 115 times on
+# mastodon, modal in `rescue` clauses, and `ActiveModel` 165 / `Arel` 35 — every one of them
+# resolving to `untyped` because nothing in the bundle named the constant. This file names them,
+# and nothing more.
+#
+# ## The admission rule: a namespace or a rescued error, never a base class
+#
+# Declaring a constant makes it RBS-KNOWN, and a known class with an incomplete signature turns
+# every member the signature omits into a false `call.undefined-method`. That risk is not
+# uniform, so this file admits exactly two shapes:
+#
+# - **Bare namespace modules.** Nobody dispatches on a module used only as a constant path
+#   (`ActiveModel::Type::Boolean`, `Arel::Nodes`), so an empty declaration asserts nothing.
+# - **Exception classes**, which are dispatched on — as the `=> e` of a rescue — but whose whole
+#   inherited surface is `StandardError`'s, which Rigor's core RBS already carries. Each is listed
+#   in the manifest's `open_receivers:` (ADR-26) as well, so the framework-specific readers this
+#   file does not enumerate (`RecordInvalid#record`, `StatementInvalid#cause`, …) stay lenient.
+#
+# What is deliberately NOT here is every class a project INHERITS from. `ActiveRecord::Base` is
+# the case that matters: declaring it empty would close every model in the project, and turn
+# `Account.where(...)`, `record.save!` and the whole generated column surface into
+# `call.undefined-method` on working Rails code. The plugin types models through its model index
+# instead, and the namespace stays open for it. The same argument keeps `ActiveModel::Model` and
+# the other mixin modules bare rather than populated.
+#
+# The exception hierarchy is transcribed from Rails v8.0.2 `activerecord/lib/active_record/errors.rb`;
+# a class whose superclass could not be stated with certainty was left out rather than guessed,
+# because a wrong superclass is a wrong `rescue` reachability answer.
+
+module ActiveRecord
+  class ActiveRecordError < StandardError
+  end
+
+  class RecordNotFound < ActiveRecordError
+  end
+
+  class RecordInvalid < ActiveRecordError
+  end
+
+  class RecordNotSaved < ActiveRecordError
+  end
+
+  class RecordNotDestroyed < ActiveRecordError
+  end
+
+  class ReadOnlyRecord < ActiveRecordError
+  end
+
+  class Rollback < ActiveRecordError
+  end
+
+  class StaleObjectError < ActiveRecordError
+  end
+
+  class ConnectionNotEstablished < ActiveRecordError
+  end
+
+  class StatementInvalid < ActiveRecordError
+  end
+
+  class WrappedDatabaseException < StatementInvalid
+  end
+
+  class RecordNotUnique < WrappedDatabaseException
+  end
+end
+
+# Active Model ships as its own gem, but `activerecord` depends on it unconditionally, so a project
+# that enables this plugin always has it. There is no `rigor-activemodel`, and inventing one to hold
+# eleven empty modules would be a plugin whose whole content is this file.
+module ActiveModel
+  module Model
+  end
+
+  module API
+  end
+
+  module Validations
+  end
+
+  module Serialization
+  end
+
+  module Conversion
+  end
+
+  module Naming
+  end
+
+  module Attributes
+  end
+
+  module Dirty
+  end
+
+  module SecurePassword
+  end
+
+  module Callbacks
+  end
+
+  module Type
+  end
+
+  class ValidationError < StandardError
+  end
+end
+
+# Arel ships INSIDE the activerecord gem, so this plugin is its owner by the "the row lives in the
+# plugin that owns the gem" rule. `Arel.sql` is the one member the corpus calls; the signature is
+# written to accept anything because its extra binds are positional-or-keyword and an arity claim
+# here would be a false `call.wrong-arity` on a shape this file has no reason to police.
+module Arel
+  module Nodes
+  end
+
+  module Predications
+  end
+
+  def self.sql: (untyped, *untyped, **untyped) -> untyped
+end

@@ -131,6 +131,21 @@ than none, so `Blog::Post`'s column, alias and association checks
 stand down entirely rather than run against a table that might not
 be the real one.
 
+## Framework constants resolve
+
+The bundled signatures also name Active Record's exception hierarchy
+(`ActiveRecordError` and the classes apps rescue: `RecordNotFound`,
+`RecordInvalid`, `RecordNotSaved`, `StatementInvalid`,
+`RecordNotUnique`, `StaleObjectError`, …), the `ActiveModel`
+namespace, and `Arel`. `rescue ActiveRecord::RecordNotFound => e` types
+`e` instead of leaving it opaque.
+
+None of them declares a method surface — the declaration buys constant
+resolution and asserts nothing else, so `e.record` and every other
+member left out stays lenient rather than reported.
+`ActiveRecord::Base` is deliberately **not** declared: closing it would
+close every model in the project.
+
 ## Limitations
 
 - **Direct-superclass match only.** `class Admin < User` where

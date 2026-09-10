@@ -1117,7 +1117,11 @@ module Rigor
         # audit), so declaring even its reader surface makes it RBS-known — and, without this, every member
         # the declaration omits would become a false `call.undefined-method` for every project that locks
         # activesupport, the overwhelming majority of which never opt into the plugin at all.
-        GEM_OVERLAY_OPEN_RECEIVERS = Set["ActiveSupport::Duration"].freeze
+        # `ActiveSupport::Concern` joined it in #534 item 7. `class_methods do … end` synthesizes a
+        # `ClassMethods` constant and `append_features` / `prepend_features` are part of the real surface,
+        # none of which the two-line declaration enumerates — and a concern module is the receiver of that
+        # surface in every Rails app, so the same argument applies with the same force.
+        GEM_OVERLAY_OPEN_RECEIVERS = Set["ActiveSupport::Duration", "ActiveSupport::Concern"].freeze
         private_constant :GEM_OVERLAY_OPEN_RECEIVERS
 
         # ADR-26 — whether `class_name` is declared "open" by a

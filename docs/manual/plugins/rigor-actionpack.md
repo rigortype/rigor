@@ -93,6 +93,24 @@ so *can* fold a condition — and `Mime::NullType`, the value `format`
 returns when there is no format, answers `nil?` with `true` while
 being a real object. Typing it needs a nil-aware answer.
 
+## Framework constants resolve
+
+The plugin ships a small bundled signature naming the
+`ActionController` namespace and the errors controllers rescue —
+`ParameterMissing`, `UnpermittedParameters`, `RoutingError`,
+`BadRequest`, `UnknownFormat`, `InvalidAuthenticityToken` and their
+siblings. A `rescue ActionController::ParameterMissing => e` now types
+`e` as that class instead of leaving it opaque.
+
+The signature names **only** those. `ActionController::Base` and
+`ActionController::API` are left undeclared on purpose: every
+controller in the app inherits from one of them, and an incomplete
+declaration of a superclass turns every member it omits — `render`,
+`before_action`, `head` — into a report on working code. For the same
+reason `ActionController::Parameters` and the `ActionDispatch` readers
+above stay undeclared; their leniency is what makes the `params`
+typing safe.
+
 ## Limitations
 
 - **Implicit-self helpers only.** `*_path` / `*_url` calls with an

@@ -2183,7 +2183,12 @@ RSpec.describe "plugins/rigor-activerecord" do
 
     it "declares the bundled relation RBS and the open receiver in the manifest" do
       expect(plugin_class.manifest.signature_paths).to eq(["sig"])
-      expect(plugin_class.manifest.open_receivers).to eq(["ActiveRecord::Relation"])
+      # The list grew in #534 item 7 with the framework namespaces `sig/active_record/framework.rbs` names;
+      # `Relation` stays first because it is the one entry that is open for a DIFFERENT reason (it delegates
+      # user-defined scopes), and `rails_framework_constants_plugin_spec.rb` covers the rest.
+      expect(plugin_class.manifest.open_receivers.first).to eq("ActiveRecord::Relation")
+      expect(plugin_class.manifest.open_receivers)
+        .to include("ActiveRecord::RecordNotFound", "ActiveRecord::StatementInvalid", "Arel")
     end
 
     it "contributes `ActiveRecord::Relation[Model]` for `Model.where`" do

@@ -69,7 +69,11 @@ module Rigor
         # Bumped 2026-09-02 (#621) — a reopened controller's `def`s are UNIONed rather than clobbered by
         # the later file in the glob, so a cached 1.0.0 index can be missing the filter targets the merge
         # restores.
-        version: "1.1.0",
+        # Bumped 2026-09-10 (#534 item 7) — the plugin gained a bundled `sig/` (ADR-25) naming the
+        # `ActionController` namespace and the errors controllers rescue, so the constants stop resolving
+        # to `untyped`. `ActionController::Parameters` and the `ActionDispatch` readers stay undeclared;
+        # `sig/action_controller.rbs` documents why that absence is load-bearing.
+        version: "1.2.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
@@ -78,6 +82,26 @@ module Rigor
         consumes: [
           { plugin_id: "rails-routes", name: :helper_table, optional: true },
           { plugin_id: "activerecord", name: :model_index, optional: true }
+        ],
+        # ADR-25 (#534 item 7) — the framework-namespace signatures. See `sig/action_controller.rbs` for
+        # the admission rule and, more importantly, for what it refuses to declare.
+        signature_paths: ["sig"],
+        # ADR-26 — every class the bundled signature names is declared so the CONSTANT resolves; none of
+        # them enumerates a method surface, so `ParameterMissing#param` and its siblings must stay
+        # lenient rather than becoming `call.undefined-method` on a rescue body.
+        open_receivers: [
+          "ActionController::ActionControllerError",
+          "ActionController::BadRequest",
+          "ActionController::RoutingError",
+          "ActionController::UrlGenerationError",
+          "ActionController::MethodNotAllowed",
+          "ActionController::NotImplemented",
+          "ActionController::UnknownFormat",
+          "ActionController::InvalidAuthenticityToken",
+          "ActionController::InvalidCrossOriginRequest",
+          "ActionController::MissingExactTemplate",
+          "ActionController::ParameterMissing",
+          "ActionController::UnpermittedParameters"
         ],
         # ADR-103 WD10 / WD14 (#387) — see {Effects} for what each row is and why.
         effect_root: "rails",

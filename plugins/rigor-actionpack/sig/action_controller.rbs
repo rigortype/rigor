@@ -1,0 +1,71 @@
+# Action Pack's framework namespaces — issue #534 item 7.
+#
+# The 2026-09-01 corpus sweep counted `ActionController` 37 times on mastodon as an unresolved
+# constant. This file names the namespace and the errors controllers rescue, and nothing else.
+#
+# ## What must NOT be declared here, and why the list is so short
+#
+# `ActionController::Parameters` is absent on purpose, and it is the most important absence in this
+# plugin. `Rigor::Plugin::Actionpack::REQUEST_CONTEXT_READER_TYPES` types `params` as a *lenient*
+# nominal — a real class name Rigor ships no RBS for — precisely so that `params.require(...)`,
+# `params.to_unsafe_h` and every other member of a surface no signature can complete resolve
+# lenient-to-`Dynamic` instead of drawing `call.undefined-method`. Declaring the class here, even
+# empty, would make it RBS-known and undo that. The same argument covers `ActionDispatch::Request`,
+# `Request::Session`, `Flash::FlashHash`, `Flash::FlashNow` and `Cookies::CookieJar`.
+#
+# `ActionController::Base` and `ActionController::API` are absent for the stronger reason: every
+# controller in a Rails app inherits from one of them, so declaring either empty would close the
+# whole project's controller hierarchy and turn `render`, `before_action`, `head` and the rest into
+# `call.undefined-method` on working code.
+#
+# What is left is exactly the shape that is safe: bare namespace modules nobody dispatches on, and
+# exception classes whose inherited surface is a core Ruby one Rigor already carries. Each error
+# class is listed in the manifest's `open_receivers:` (ADR-26), so the framework-specific readers
+# this file does not enumerate (`ParameterMissing#param`, `UrlGenerationError#routes`, …) stay
+# lenient too.
+#
+# Superclasses transcribed from Rails v8.0.2 (`actionpack/lib/action_controller/metal/exceptions.rb`
+# and `strong_parameters.rb`); `ParameterMissing < KeyError` and `UnpermittedParameters < IndexError`
+# are the two that are NOT under `ActionControllerError`, and getting that wrong would be a wrong
+# `rescue` reachability answer, so both are stated from the source rather than from the pattern.
+
+module ActionController
+  class ActionControllerError < StandardError
+  end
+
+  class BadRequest < ActionControllerError
+  end
+
+  class RoutingError < ActionControllerError
+  end
+
+  class UrlGenerationError < ActionControllerError
+  end
+
+  class MethodNotAllowed < ActionControllerError
+  end
+
+  class NotImplemented < MethodNotAllowed
+  end
+
+  class UnknownFormat < ActionControllerError
+  end
+
+  class InvalidAuthenticityToken < ActionControllerError
+  end
+
+  class InvalidCrossOriginRequest < ActionControllerError
+  end
+
+  class MissingExactTemplate < UnknownFormat
+  end
+
+  # `::KeyError` is generic in core RBS (`KeyError[K, R]`, the receiver and key of the failed lookup),
+  # so the supertype has to be applied. `untyped` on both: Rails raises it from a Parameters lookup and
+  # this signature has no business claiming what `#receiver` / `#key` answer.
+  class ParameterMissing < ::KeyError[untyped, untyped]
+  end
+
+  class UnpermittedParameters < ::IndexError
+  end
+end

@@ -27,7 +27,9 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
   end
 
   it "declares ActiveSupport::Duration open (#632), matching rigor-activerecord's Relation pattern" do
-    expect(plugin_class.manifest.open_receivers).to eq(["ActiveSupport::Duration"])
+    # `ActiveSupport::Concern` joined the list in #534 item 7 for the same ADR-26 reason; its own coverage
+    # is in `rails_framework_constants_plugin_spec.rb`.
+    expect(plugin_class.manifest.open_receivers).to eq(["ActiveSupport::Duration", "ActiveSupport::Concern"])
   end
 
   it "contributes the core_ext sig so ActiveSupport selectors type-check" do

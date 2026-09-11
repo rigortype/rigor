@@ -84,6 +84,7 @@ comparison) appears nowhere else in this index.
 | 2026-08-23 | [Effect labels — ten user stories, adjudicated against the corpus (redmine + mastodon)](20260823-effect-user-stories-corpus.md) |
 | 2026-09-05 | [Top-level `def` cref — sizing the peel before retracting it (issue #716)](20260905-toplevel-def-cref-movable-sites.md) |
 | 2026-09-09 | [Census-walk gaps — sizing three shapes before fixing any of them (issue #693)](20260909-census-walk-gap-movable-sites.md) |
+| 2026-09-12 | [rigor-survey OSS corpus — v0.3.9 pre-cut crash check](20260912-v039-oss-corpus-crash-check.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

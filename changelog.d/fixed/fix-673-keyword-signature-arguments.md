@@ -1,1 +1,0 @@
-- **[rigor check]** `call.argument-type-mismatch` now checks the positional arguments of a method whose signature also takes keyword arguments, which it skipped entirely before — `time.next_week("monday")` reports the same `expected Symbol` mismatch that `time.beginning_of_week("monday")` always did ([#916](https://github.com/rigortype/rigor/pull/916))

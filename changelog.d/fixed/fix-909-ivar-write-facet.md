@@ -1,1 +1,0 @@
-- **[rules]** `def.ivar-write-mismatch` no longer fires on correct Ruby when a `class << self` def, or a def inside a `Class.new do … end` block, writes an instance variable the enclosing class also writes — those are different variables, and the `class << self` spelling now agrees with `def self.x`. ([#945](https://github.com/rigortype/rigor/pull/945))

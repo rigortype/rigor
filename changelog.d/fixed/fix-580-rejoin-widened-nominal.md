@@ -1,1 +1,0 @@
-- **[inference]** A collection mutated more than once now records every store's value type, not just the first: `a = []; a.push(1); a.push("s")` reads `Array[Integer | String | untyped]` instead of dropping the `String`, while a collection whose element type a signature declares is left exactly as declared. ([#975](https://github.com/rigortype/rigor/pull/975))

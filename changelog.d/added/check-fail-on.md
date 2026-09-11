@@ -1,1 +1,0 @@
-- **[cli]** `rigor check --fail-on=SEVERITY` (`error`, `warning`, or `info`) exits non-zero when a diagnostic at or above that severity survives baseline filtering, for CI gates that want a stricter reading than the default `:error`-only exit code. ([#827](https://github.com/rigortype/rigor/pull/827))

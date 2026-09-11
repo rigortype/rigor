@@ -1,1 +1,0 @@
-- **[inference]** `clamp` on a plain `Integer` or `Float` now keeps the bracket it lands in, so `n.clamp(1, 9)` and `n.clamp(1..9)` both type `Integer[1..9]` instead of `1 | 9 | Integer` and `Integer` ([#868](https://github.com/rigortype/rigor/pull/868))

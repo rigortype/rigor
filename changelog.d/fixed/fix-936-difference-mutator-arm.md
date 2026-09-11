@@ -1,1 +1,0 @@
-- **[inference]** An in-place mutation on a collection narrowed to non-empty (`if xs.any?; xs << value`) now records the appended element in the variable's type and keeps the non-empty refinement, instead of dropping both — a read-back of that element no longer produces a spurious always-falsey condition. ([#968](https://github.com/rigortype/rigor/pull/968))

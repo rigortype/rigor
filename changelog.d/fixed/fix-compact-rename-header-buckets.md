@@ -1,1 +1,0 @@
-- **[engine]** A project with a compact class header (`class Outer::Leaf` inside `module Wrap`) no longer reports an internal analyzer error on every other file that declares a class inside a module; the re-anchoring shipped in this cycle broke the header-nesting table it rewrote. ([#985](https://github.com/rigortype/rigor/pull/985))

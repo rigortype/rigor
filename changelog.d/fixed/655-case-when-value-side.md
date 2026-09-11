@@ -1,1 +1,0 @@
-- **[engine]** `case`/`when` resolves its pattern name through the lexical walk on the side that types the expression as well as the side that narrows the subject, so a project class shadowing a name RBS knows at top level no longer drops the arm Ruby actually takes and reports `undefined method` on the result ([#905](https://github.com/rigortype/rigor/pull/905))

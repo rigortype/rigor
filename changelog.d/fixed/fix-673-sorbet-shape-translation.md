@@ -1,1 +1,0 @@
-- **[rigor-sorbet]** A shape type in `sig` position (`sig { returns({name: String, age: Integer}) }`) is translated into a real `HashShape` instead of being dropped, so calls on the returned value type-check against the declared keys ([#916](https://github.com/rigortype/rigor/pull/916))

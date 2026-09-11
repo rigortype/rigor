@@ -1,1 +1,0 @@
-- **[cli]** `rigor doctor`'s plugin-gap advisory no longer depends on which plugins the process happened to register, so an enabled plugin is never reported as a gap. ([#967](https://github.com/rigortype/rigor/pull/967))

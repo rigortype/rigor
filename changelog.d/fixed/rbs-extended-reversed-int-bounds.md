@@ -1,1 +1,0 @@
-- **[rbs-extended]** A `rigor:v1` payload with reversed integer-range bounds such as `int<10, 1>` is now reported as `dynamic.rbs-extended.unresolved` at its annotation instead of aborting analysis of the whole Ruby file with an internal analyzer error. ([#828](https://github.com/rigortype/rigor/pull/828))

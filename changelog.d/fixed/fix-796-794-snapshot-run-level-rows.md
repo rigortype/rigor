@@ -1,1 +1,0 @@
-- **[incremental]** A warm `--incremental` recheck that changed nothing now reports the same `rbs.coverage.definition-build-failed` and `rbs.coverage.hkt-scan-failed` rows the cold run did, and such a recheck no longer resolves an RBS environment just to repeat the HKT scan. ([#978](https://github.com/rigortype/rigor/pull/978))

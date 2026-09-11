@@ -48,6 +48,36 @@ RSpec.describe "a compact header's leading segment (#722 residue 2)" do
     Dir.mktmpdir("rigor-compact-header-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
+  # #984 — the rename pass rewrote each `header_nestings` BUCKET as if it were a chain, so a project with
+  # one compact header and any other class carrying a header nesting (a `class B < C` inside a module)
+  # crashed every file: the next per-file merge and every `recorded_header_nesting` lookup saw an Array
+  # where a bucket was expected. Mastodon reported it on 1,073 of its files.
+  it "does not crash the run when another file carries a header nesting alongside the compact header" do
+    FileUtils.mkdir_p("lib")
+    File.write(File.join("lib", "base.rb"), "class Base\n  def tag = :base\nend\n")
+    File.write(File.join("lib", "compact.rb"),
+               "class Outer; end\nmodule Wrap\n  class Outer::Leaf\n    def added = :added\n  end\nend\n")
+    File.write(File.join("lib", "nested.rb"), <<~RUBY)
+      module Api
+        class Widget < Base
+          def probe = tag
+        end
+      end
+      Rigor.dump_type(Api::Widget.new.probe)
+      Rigor.dump_type(Outer::Leaf.new.added)
+    RUBY
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
+    )
+    diagnostics = guarded_run(
+      Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib]
+    ).diagnostics
+    internal = diagnostics.select { |d| d.message.start_with?("internal analyzer error") }
+    expect(internal.map(&:message)).to eq([])
+    dumps = diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    expect(dumps).to contain_exactly("dump_type: :base", "dump_type: :added")
+  end
+
   it "reopens the top-level class when the nesting supplies no such namespace" do
     expect(dumps_for(<<~RUBY)).to eq(["dump_type: :added", "dump_type: :base"])
       class Outer; end

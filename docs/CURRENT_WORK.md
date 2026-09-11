@@ -73,7 +73,11 @@ Each PR passed a Fable adversarial review before merge; two reviews sent a PR ba
 - #978 (#796 + #794): the snapshot carries `definition-build-failed` and the HKT-scan outcome and
   replays them on a narrowed closure; SCHEMA 22; a `virtual:` buffer in the closure drops its entry.
   The durable false negative that drop leaves is #980 (v0.4.0, `ready-for-human`).
-- Review by-products filed: #979 (a NEW `sig/*.rbs` file does not invalidate the run cache).
+- #981 (#979): one names-only `GlobEntry` per signature root in the run descriptor (`mode: :names`,
+  `Cache::Descriptor::SCHEMA_VERSION` 9), so a NEW `sig/*.rbs` invalidates the run cache while a
+  `touch` or fresh checkout still hits. Two Fable rounds: the first stat-mode row was a High.
+- #982: `Plugin::BundledCatalog` lets a class under `plugins/` win its id over an anonymous spec
+  double; `spec_helper` resets the catalogue per example (the shard flake behind two red runs).
 
 ## Open threads
 
@@ -84,7 +88,7 @@ Each PR passed a Fable adversarial review before merge; two reviews sent a PR ba
 - Filed this session, `ready-for-human`: #959 (TrustPolicy refuses every plugin read under a symlinked
   project root, silently), #953 (literal-lambda call forms), #963 (#633 residue: block-self shapes,
   plugin-supplied methods).
-- Still open on v0.3.9: #979 (`ready-for-agent`) and #424's WD16 half; #697 waits on #660 (v0.4.0).
+- Still open on v0.3.9: only #424's WD16 half; #697 waits on #660 (v0.4.0).
 
 ## How to enter
 

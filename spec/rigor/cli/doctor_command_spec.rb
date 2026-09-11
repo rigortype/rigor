@@ -160,6 +160,7 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     # and the exit status is 1 on one CI shard and 0 on another. Register the classes the way a fresh
     # process's require would have, so the examples measure the gap advisory and nothing else.
     before do
+      Rigor::Plugin::BundledCatalog.reset!
       Rigor::Plugin::BundledCatalog.entries
       { "rigor-activerecord" => [Rigor::Plugin::Activerecord, "activerecord"],
         "rigor-sidekiq" => [Rigor::Plugin::Sidekiq, "sidekiq"] }.each do |gem_name, (klass, id)|

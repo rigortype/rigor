@@ -27,6 +27,7 @@ module Rigor
       BUNDLED_PLUGINS_ROOT = File.join(Loader::ENGINE_ROOT, "plugins")
 
       @entries = nil
+      @load_failures = {}
       @mutex = Mutex.new
 
       class << self
@@ -42,22 +43,36 @@ module Rigor
           entries.select { |entry| entry.target_gems.include?(name) }
         end
 
+        # The bundled plugin gems whose entry file did not load this process, as `gem name => message`.
+        # Empty on a healthy process; a non-empty entry is why a bundled plugin is missing from {entries}.
+        def load_failures
+          entries
+          @mutex.synchronize { @load_failures.dup.freeze }
+        end
+
         # Drops the memo. For specs that stub the engine root only.
+        #
+        # {load_failures} deliberately survives: `require` is idempotent, so a rebuild after a reset no
+        # longer reaches the file that raised and would report a clean process while the entry is still
+        # missing.
         def reset!
           @mutex.synchronize { @entries = nil }
         end
 
         private
 
+        # Bundledness is decided from the paths this module itself resolved and required, never by asking
+        # {FirstParty}: that predicate memoises a `File.file?` answer for the whole process, so one spec
+        # stubbing the engine root fixes every later answer in the suite — and the catalogue would then
+        # silently drop the plugins the advisory exists to name.
         def build_entries
-          require_bundled_plugins
+          bundled = require_bundled_plugins
           loaded_plugin_manifests.filter_map do |manifest|
-            id = manifest.id
-            next unless FirstParty.bundled?(id)
+            gem_name = bundled[manifest.id]
+            next if gem_name.nil?
             next if manifest.target_gems.empty?
 
-            Entry.new(gem_name: "#{FirstParty::GEM_PREFIX}#{id}", plugin_id: id,
-                      target_gems: manifest.target_gems)
+            Entry.new(gem_name: gem_name, plugin_id: manifest.id, target_gems: manifest.target_gems)
           end.sort_by(&:gem_name).freeze
         end
 
@@ -66,27 +81,58 @@ module Rigor
         # then dropped by `Rigor::Plugin.unregister!` (every spec does this) is absent from the registry
         # while still loaded, and an index built from the registry at that moment silently lacks it — the
         # advisory then reads the project's own enabled plugin as a gap and fails `rigor doctor`.
+        #
+        # A plugin class whose source file sits under the bundled `plugins/` tree wins its id outright. The
+        # suite defines throwaway `Class.new(Rigor::Plugin::Base)` plugins that reuse a bundled id (a
+        # `stub_const`-ed fake `activerecord`, for one), and those carry no `target_gems:`; picking one of
+        # them for the id erased the real plugin from the index in whatever `ObjectSpace` order that
+        # process happened to have. An anonymous class is still consulted, but only for an id no bundled
+        # class claims.
         def loaded_plugin_manifests
-          ObjectSpace.each_object(Class).filter_map do |klass|
+          bundled = {}
+          other = {}
+          ObjectSpace.each_object(Class) do |klass|
             next unless klass < Plugin::Base
 
-            klass.manifest
-          rescue ArgumentError
-            nil
-          end.uniq(&:id)
+            manifest = manifest_of(klass)
+            next if manifest.nil?
+
+            (bundled_source?(klass) ? bundled : other)[manifest.id] ||= manifest
+          end
+          other.merge(bundled).values
         end
 
-        # A plugin gem that fails to load is skipped rather than fatal: the catalogue exists to *advise*, and
-        # a broken bundled copy is already reported by `rigor doctor`'s plugin checks for the plugins the
-        # project actually enabled.
+        def manifest_of(klass)
+          klass.manifest
+        rescue ArgumentError
+          nil
+        end
+
+        # Whether `klass` was defined by a file in the engine's own `plugins/` tree. An anonymous class
+        # answers false, and so does one whose constant a spec has since removed — which is exactly the
+        # shadowing case, since `stub_const` restores the name to nil at the end of the example.
+        def bundled_source?(klass)
+          name = klass.name
+          return false if name.nil?
+
+          location = Object.const_source_location(name)
+          return false if location.nil? || location.first.nil?
+
+          location.first.start_with?("#{BUNDLED_PLUGINS_ROOT}#{File::SEPARATOR}")
+        rescue NameError
+          false
+        end
+
+        # @return the gems whose entry file this call resolved, as `plugin id => gem name`.
         def require_bundled_plugins
-          return unless File.directory?(BUNDLED_PLUGINS_ROOT)
+          return {} unless File.directory?(BUNDLED_PLUGINS_ROOT)
 
           add_bundled_lib_dirs
-          Dir.children(BUNDLED_PLUGINS_ROOT).sort.each do |gem_name|
+          Dir.children(BUNDLED_PLUGINS_ROOT).sort.each_with_object({}) do |gem_name, resolved|
             path = Loader.bundled_plugin_path(gem_name)
             next if path.nil?
 
+            resolved[gem_name.delete_prefix(FirstParty::GEM_PREFIX)] = gem_name
             require_and_record(gem_name, path)
           end
         end
@@ -102,12 +148,17 @@ module Rigor
           end
         end
 
+        # A plugin gem that fails to load is skipped rather than fatal: the catalogue exists to *advise*, and
+        # a broken bundled copy is already reported by `rigor doctor`'s plugin checks for the plugins the
+        # project actually enabled. The failure is recorded in {load_failures} so a missing entry stays
+        # diagnosable instead of silently narrowing the index.
         def require_and_record(gem_name, path)
           before = Plugin.registered.keys
           require path
           newly_registered = Plugin.registered.keys - before
           Plugin.record_gem_registration(gem_name, newly_registered) unless newly_registered.empty?
-        rescue ::LoadError, StandardError
+        rescue ::LoadError, StandardError => e
+          @load_failures[gem_name] = "#{e.class}: #{e.message}"
           nil
         end
       end

@@ -10,6 +10,10 @@ RSpec.describe Rigor::PluginGapAdvisory do
 
   after { FileUtils.remove_entry(root) }
 
+  # The catalogue memoises process-wide, so an earlier example's stubbed engine root or throwaway plugin
+  # class would otherwise decide what this file measures.
+  before { Rigor::Plugin::BundledCatalog.reset! }
+
   # `direct:` defaults to the whole spec list, so an arm that does not care about the distinction reads as
   # before; pass it explicitly to model a transitive gem.
   def write_lock(*gems, direct: gems)

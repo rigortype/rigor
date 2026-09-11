@@ -1,0 +1,1 @@
+- **[doctor]** `rigor doctor`'s plugin-gap advisory no longer depends on the order in which plugin classes happened to load, so it can no longer report a gap for a bundled plugin the project already has. ([#982](https://github.com/rigortype/rigor/pull/982))

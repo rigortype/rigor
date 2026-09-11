@@ -1217,7 +1217,10 @@ module Rigor
       def build_run_dependency_descriptor(expansion, rbs_descriptor)
         entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) +
                   pre_eval_file_entries + rbs_descriptor.files
-        globs = []
+        # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
+        # `.rbs` files that existed while the run read them, so without these a signature file written after
+        # the run left the slot validating fresh and the warm run answered without it.
+        globs = rbs_descriptor.globs.dup
         @plugin_registry.plugins.each do |plugin|
           # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
           # are frozen after the run, and a plugin that never built a boundary read no files through it,

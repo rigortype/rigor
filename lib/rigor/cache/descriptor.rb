@@ -48,7 +48,12 @@ module Rigor
       # added to a schema-less project) invalidates the warm entry. A pre-8 entry carries no absence rows
       # and would validate fresh across exactly that edit, so cached entries must read as misses once and
       # rebuild carrying the rows.
-      SCHEMA_VERSION = 8
+      # v9: #979 — the run-result dependency descriptor now carries a {GlobEntry} directory listing per RBS
+      # signature root, so a `.rbs` file APPEARING under one (a `sig/roles.rbs` declaring the interface a
+      # `conforms-to` names) invalidates the warm entry. A pre-9 entry carries no signature-root row and
+      # would validate fresh across exactly that edit — the #577 reasoning, one slot over — so cached
+      # entries must read as misses once and rebuild carrying the rows.
+      SCHEMA_VERSION = 9
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

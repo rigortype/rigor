@@ -135,6 +135,15 @@ RSpec.configure do |config|
   # each cache spec to remember.
   config.before { Rigor::Cache::EngineSource.reset_process_identity! }
 
+  # #982 — `Plugin::BundledCatalog` memoises the bundled-plugin index for the life of a process, and one
+  # example that reads it under a stubbed `ObjectSpace` (the impostor case) would otherwise leave a
+  # one-entry index for every later reader (`rigor doctor`, `rigor skill describe`) in the same shard.
+  # Cleared per example, like the engine-source identity above, rather than asking each reader to.
+  config.before do
+    require "rigor/plugin/bundled_catalog"
+    Rigor::Plugin::BundledCatalog.reset!
+  end
+
   # Issue #330 — the guard that keeps the suite leak-free rather than merely leak-free today. Everything scoped
   # to an example must already have been reclaimed by its own block or `after` hook, and the process-lifetime
   # directories are released here; whatever is still inside the private root at this point is a leak, and naming

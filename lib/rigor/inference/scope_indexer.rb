@@ -4525,8 +4525,13 @@ module Rigor
            struct_member_layouts constant_writes].each do |key|
           acc[key] = rekey_class_table(acc[key], renames)
         end
-        acc[:header_nestings] = acc[:header_nestings].transform_values do |chain|
-          chain.map { |entry| rename_compact_name(renames, entry) }
+        # A `header_nestings` value is a BUCKET (`raw header → chain`, plus the unkeyed union), not a
+        # chain: mapping the bucket itself turned every entry into a `[raw, chain]` pair rendered as a
+        # string, and the next per-file merge (`merge_header_nesting_bucket`) and every
+        # `Scope#recorded_header_nesting` lookup then raised on an Array where a Hash was expected — an
+        # internal analyzer error on every file of a project with one compact header (#984).
+        acc[:header_nestings] = acc[:header_nestings].transform_values do |bucket|
+          bucket.transform_values { |chain| chain.map { |entry| rename_compact_name(renames, entry) } }
         end
         acc[:def_nestings].transform_values! do |chain|
           chain&.map { |entry| rename_compact_name(renames, entry) }

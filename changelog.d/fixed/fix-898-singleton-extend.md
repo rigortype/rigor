@@ -1,1 +1,0 @@
-- **[engine]** `flow.unreachable-clause` no longer reports a `when`/`is_a?` arm unreachable for a class object the project `extend`s with the module the arm names — `case Widget when Comparable` after `class Widget; extend Comparable; end` matches at runtime ([#910](https://github.com/rigortype/rigor/pull/910)).

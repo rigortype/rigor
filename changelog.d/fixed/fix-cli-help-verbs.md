@@ -1,1 +1,0 @@
-- **[cli]** `rigor help` now lists `baseline` and `unused`, the two dispatchable commands it had been omitting. ([#906](https://github.com/rigortype/rigor/pull/906))

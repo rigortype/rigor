@@ -1,1 +1,0 @@
-- **[cache]** A new `sig/*.rbs` file now invalidates the run-result cache, so a warm `rigor check` reflects a signature added since the last run instead of replaying the previous answers. ([#981](https://github.com/rigortype/rigor/pull/981))

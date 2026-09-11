@@ -1,1 +1,0 @@
-- **[rigor-ffi]** `.rigor.yml`'s `exceptions:` and `target:` keys for the `rigor-ffi` plugin now validate and take effect, instead of being silently rejected as unknown config. ([#944](https://github.com/rigortype/rigor/pull/944))

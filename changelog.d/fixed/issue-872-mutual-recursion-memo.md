@@ -1,1 +1,0 @@
-- **[engine]** `rigor check` no longer re-walks a strongly connected component of mutually recursive methods once per call edge, so a file such as rufo's `formatter.rb` — which previously did not finish — now completes in seconds ([#874](https://github.com/rigortype/rigor/pull/874)).

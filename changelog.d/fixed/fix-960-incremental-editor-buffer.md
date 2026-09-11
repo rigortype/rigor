@@ -1,1 +1,0 @@
-- **[incremental]** `rigor check --incremental` in editor mode (`--tmp-file` / `--instead-of`) now analyses the buffer's bytes and their dependents instead of silently serving the answers for the file on disk. ([#966](https://github.com/rigortype/rigor/pull/966))

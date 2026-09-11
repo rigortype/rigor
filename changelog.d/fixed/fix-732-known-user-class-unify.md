@@ -1,1 +1,0 @@
-- **[check]** The Liskov override rules now recognise a parent class whose only project-side content is class methods, so a `sig/`-declared method inherited from such a parent is compared against its override instead of being skipped ([#892](https://github.com/rigortype/rigor/pull/892)).

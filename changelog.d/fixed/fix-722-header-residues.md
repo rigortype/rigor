@@ -1,1 +1,0 @@
-- **[engine]** A compact `class Outer::Leaf` header written inside `module Wrap` now reopens the top-level `Outer::Leaf`, the way Ruby does when the enclosing namespace defines no `Wrap::Outer`, so calls on that class resolve instead of typing `untyped`. ([#961](https://github.com/rigortype/rigor/pull/961))

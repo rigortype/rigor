@@ -1,1 +1,0 @@
-- **[docs]** ADR-39, the internal spec and the `rigor-plugin-author` skill no longer document a `.rigor.yml` `plugins_isolation:` key: the plugin-isolation strategy is selected by the `RIGOR_PLUGIN_ISOLATION` environment variable, and the config key was never implemented. ([#913](https://github.com/rigortype/rigor/pull/913))

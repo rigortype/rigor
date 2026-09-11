@@ -1,1 +1,0 @@
-- **[cli]** `rigor explain` now answers the `sig.skipped.*` identifiers `rigor sig-gen` prints, and `rigor doctor` warns when your gems are installed in the active Ruby's default gem home — the layout where no gem-shipped `sig/` can be discovered. ([#962](https://github.com/rigortype/rigor/pull/962))

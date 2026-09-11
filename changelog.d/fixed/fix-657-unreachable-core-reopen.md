@@ -1,1 +1,0 @@
-- **[engine]** `flow.unreachable-clause` no longer reports a `when`/`is_a?` arm unreachable for an array, hash, or class-object subject whose class the project reopened with a mixin — `case [1, 2] when Taggable` after `class Array; include Taggable; end` matches at runtime ([#899](https://github.com/rigortype/rigor/pull/899)).

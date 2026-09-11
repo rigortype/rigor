@@ -1,1 +1,0 @@
-- **[engine]** `call.wrong-arity` no longer decides an argument count against a receiver whose method surface it cannot enumerate — a value typed as a mixin module, or as `Class` / `Module` — matching the receivers `call.undefined-method` already declines; a real class keeps its arity check. [#884](https://github.com/rigortype/rigor/pull/884)

@@ -1,1 +1,0 @@
-- **[activesupport]** `to_param`, `to_query`, `duplicable?`, `instance_values` and `instance_variable_names` are declared on `Object`, where ActiveSupport defines them, so they stop reporting `undefined method` on every receiver that is not a `Hash` or `nil` ([#916](https://github.com/rigortype/rigor/pull/916))

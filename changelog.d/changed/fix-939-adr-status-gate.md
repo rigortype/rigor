@@ -1,1 +1,0 @@
-- **[docs]** Each ADR's own `Status:` header is now gated against its row in the ADR index, so the two records can no longer drift apart unnoticed. ([#948](https://github.com/rigortype/rigor/pull/948))

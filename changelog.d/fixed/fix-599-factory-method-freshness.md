@@ -1,1 +1,0 @@
-- **[inference]** A `Struct` member read through a factory method (`def build = Pair.new(...)` then `build.items`) folds again — the freshness gate now accepts a chained receiver whose callee is cheaply resolvable and provably returns something it just built, while every self-returning shape stays refused. ([#972](https://github.com/rigortype/rigor/pull/972))

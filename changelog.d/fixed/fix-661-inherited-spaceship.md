@@ -1,1 +1,0 @@
-- **[inference]** `a <=> b` on a receiver that inherits `Object#<=>` now reads as `Integer?` rather than as the identity comparison's literal `0?`, so a `Comparable` value or an `ActiveSupport::Duration` no longer folds `n.negative?` on the result to a dead branch ([#914](https://github.com/rigortype/rigor/pull/914))

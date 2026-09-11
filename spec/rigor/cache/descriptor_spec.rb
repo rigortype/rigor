@@ -512,6 +512,67 @@ RSpec.describe Rigor::Cache::Descriptor do
       b = described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v")
       expect(a).to eq(b)
     end
+
+    it "rejects an unknown mode" do
+      expect { described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v", mode: :digest) }
+        .to raise_error(ArgumentError, /mode/)
+    end
+  end
+
+  # Issue #979 — the mode whose question is only "which paths match". Edits to the matched files are carried
+  # by their own `:stat` {FileEntry} rows, so a names row must survive everything those rows survive.
+  describe "GlobEntry names mode (#979)" do
+    around do |example|
+      Dir.mktmpdir("rigor-glob-names-spec-") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    attr_reader :dir
+
+    def compute
+      described_class::GlobEntry.compute(root: dir, pattern: "**/*.rb", mode: :names)
+    end
+
+    it "holds its value across a content edit, a touch, and an inode swap" do
+      path = File.join(dir, "a.rb")
+      File.write(path, "A")
+      base = compute
+
+      expect(base.mode).to eq(:names)
+
+      File.write(path, "A2")
+      File.utime(Time.now + 3600, Time.now + 3600, path)
+      FileUtils.cp(path, "#{path}.tmp")
+      FileUtils.mv("#{path}.tmp", path)
+
+      expect(compute.value).to eq(base.value)
+      expect(described_class::GlobEntry.fresh?(base)).to be(true)
+    end
+
+    it "changes its value on an addition and on a removal" do
+      File.write(File.join(dir, "a.rb"), "A")
+      base = compute
+
+      File.write(File.join(dir, "b.rb"), "B")
+      expect(compute.value).not_to eq(base.value)
+      expect(described_class::GlobEntry.fresh?(base)).to be(false)
+
+      File.unlink(File.join(dir, "b.rb"))
+      File.unlink(File.join(dir, "a.rb"))
+      expect(described_class::GlobEntry.fresh?(base)).to be(false)
+    end
+
+    it "keeps a stat-mode descriptor's canonical bytes free of the field" do
+      stat_row = described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v")
+      names_row = described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v", mode: :names)
+
+      expect(stat_row.to_h).to eq({ "root" => "/p", "pattern" => "*.rb", "value" => "v" })
+      expect(names_row.to_h["mode"]).to eq("names")
+      expect(stat_row).not_to eq(names_row)
+      expect(stat_row.slot_key).not_to eq(names_row.slot_key)
+    end
   end
 
   describe "#fresh? with globs (ADR-60 WD3)" do

@@ -61,7 +61,12 @@ time — search roots are typically computed in `#init` from
 config) returning that Array. Each evaluated `(root, pattern)`
 becomes a `Cache::Descriptor::GlobEntry` row in the producer's
 dependency descriptor — one entry digests the whole glob, so a
-content change, an addition, or a removal all invalidate.
+content change, an addition, or a removal all invalidate. Plugin
+rows are always the default `:stat` mode: a `watch:` declares the
+inputs a producer reads, so its rows must carry their content.
+The narrower `:names` mode ([`cache.md`](cache.md) §
+"Slot entries", #979) is for a listing whose files are separately
+covered, and no plugin row qualifies.
 
 `generation_cap:` declares how many generations of this
 producer's entries survive `Cache::Store#evict!`'s compaction

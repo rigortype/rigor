@@ -43,7 +43,7 @@ GemEntry        :: { name: String, requirement: String, locked: String? }
 PluginEntry     :: { id: String, version: String, config_hash: String? }
 ConfigEntry     :: { key: String, value_hash: String }
 DependencyEntry :: { gem_name: String, gem_version: String, mode: :disabled|:when_missing|:full }
-GlobEntry       :: { root: String, pattern: String, value: String }
+GlobEntry       :: { root: String, pattern: String, value: String, mode: :stat|:names }
 ```
 
 Each entry is constructed via keyword arguments and frozen
@@ -63,7 +63,27 @@ WD2 that per-glob digest is a SHA-256 over sorted **stat tuples**
 (`"<path>\0<size>\0<mtime_ns>\0<ctime_ns>\0<inode>\n"` rows), not file
 content — re-validation re-globs and re-stats, reading zero content bytes
 on an unchanged tree while any edit (which moves mtime + ctime) still moves
-the signature.
+the signature. `GlobEntry#new` validates the `mode` enum, raising
+`ArgumentError` on an unknown value.
+
+`mode` ([#979](https://github.com/rigortype/rigor/issues/979)) selects
+which question the signature answers. `:stat` is the default just
+described — appearance, disappearance and edit alike. `:names` hashes the
+sorted matching **paths alone**, reading no stat and no content, so only a
+change to the SET of matching files moves it. A `:names` row is for a
+dependency whose members are already covered individually: the run
+descriptor's per-signature-root rows are `:names` because every `.rbs`
+they list also carries its own `:stat` `FileEntry` row, and an edit must
+invalidate through that row's ADR-87 WD1 digest fallback rather than
+through the glob — a stat-mode glob over a signature tree would read every
+`git checkout`, `bundle install`, and CI cache restored over a fresh
+checkout as a full re-analysis, none of which changes a byte of RBS. The
+mode is part of the composition `slot_key`, and is omitted from `to_h`
+(and so from the canonical bytes) when it is `:stat`, leaving pre-#979
+descriptors byte-identical — the field itself moves no producer's key.
+Every key did move once with `SCHEMA_VERSION` 9, which the storage layer
+mixes into each key; that one-time miss is the #979 migration, the same
+shape as v8's for #577.
 
 The `:stat` comparator is the ADR-87 WD1 stat-then-digest tier for
 individual `FileEntry` slots. Its `value` packs `"<digest> <size>
@@ -147,7 +167,7 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `8` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `9` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
    synthesizing missing `signature_paths:` namespaces; v4 added the
@@ -162,7 +182,11 @@ input + descriptor combination. The key incorporates:
    invalidates run-result and plugin-producer entries written before
    `IoBoundary#read_file` recorded absence rows for probed-but-missing
    paths (ADR-45 WD1, #577) — a pre-8 entry would validate fresh across
-   exactly the file-appearance edit those rows exist to catch). Bumping
+   exactly the file-appearance edit those rows exist to catch; v9 adds the
+   run descriptor's per-signature-root names-mode `GlobEntry` listing rows
+   (#979), for
+   the same migration reason one slot over — a pre-9 entry carries none and
+   validates fresh across a `.rbs` appearing under `sig/`). Bumping
    this constant invalidates every cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
@@ -1175,7 +1199,7 @@ bump invalidates every RBS-derived cached producer in lockstep.
 The lazy-`files` variant behind the ADR-45 run-diagnostics
 record-and-validate cache. `RunDescriptor` is **not** a
 `Descriptor` — it is never composed, hashed, or `==`'d, and only
-its three readers (`gems`, `configs`, `files`) are consulted — so
+its four readers (`gems`, `configs`, `files`, `globs`) are consulted — so
 `files` can be deferred without costing soundness. `gems` and
 `configs` are supplied eagerly and are byte-identical to
 `.build`'s (the cache key is unchanged); `files` is computed on
@@ -1187,6 +1211,79 @@ machine-local stat data (`.build`'s cache-KEY `files` stay
 `:digest`). `RbsDescriptor.rbs_gem_entry` is public for the same
 reason: the ADR-87 WD4 probe reconstructs the identical `gems` +
 `rbs.libraries` key slots without holding a loader.
+
+`globs` ([#979](https://github.com/rigortype/rigor/issues/979)) is the
+directory-LISTING half, one `GlobEntry` per signature root over
+`**/*.rbs` (`RbsDescriptor.glob_entries`). `files` answers only "did a
+signature file I read change", which is a question about the files that
+existed while the run read them — so a `sig/roles.rbs` written after the
+run was in no row, the `analysis.run-diagnostics` dependency descriptor
+validated fresh, and the warm run replayed diagnostics computed without
+it (an unsatisfied `conforms-to` kept reporting `unresolved` after the
+interface it names was declared). A glob row re-globs on the next run and
+sees the appearance, exactly as the `IoBoundary#list_directory` row does
+for a plugin-listed directory. It is recorded once per signature ROOT,
+not per file: validation is a single `Dir.glob` per root whatever the
+tree's size.
+
+The rows are `:names` mode. What they add is which signature files exist;
+every edit to one of them is already carried by that file's own `:stat`
+`FileEntry` row, which survives a moved stat tuple by falling back to the
+recorded content digest. A `:stat` glob would not, so a `git checkout`
+touching a `.rbs`, a `bundle install`, an `rbs collection install`, or any
+CI run with a restored cache over a fresh checkout would cost a full
+re-analysis while changing no RBS at all. Names mode also reads no stat,
+so these rows neither pay for nor perturb the per-run
+`FileDigest.validation_stat` memo a collecting run shares between its two
+validation passes.
+
+The roots are the loader's own `signature_paths` — the project's
+configured paths (including the auto-detected `sig/`), the bundled
+plugins' `sig/` trees ([ADR-25](../adr/25-plugin-contributed-rbs.md)),
+the bundle walk, `rbs collection`, and the ADR-72 overlays. Rigor's own
+`data/` signature trees (`vendored_gem_sigs/`, `core_overlay/`,
+`capability_roles/`) get `files` rows and deliberately no glob row: they
+are engine-owned, so a file appears under one only when the engine tree
+itself is edited, which for an installed gem means a different
+`Rigor::VERSION` and for a checkout normally arrives with the `lib/`
+change that reads it — and that re-keys every computed-value slot through
+`EngineSource`. The residue (adding a `.rbs` under `data/` in a checkout
+and touching no `.rb`, since `EngineSource` digests `.rb` only) is an
+engine-development edit, not a project edit, and buying it would cost
+every project a stat walk of the vendored gem-signature tree on every
+warm run.
+
+### The run-descriptor row inventory
+
+`Analysis::Runner#build_run_dependency_descriptor` composes, for the
+ADR-45 `analysis.run-diagnostics` slot:
+
+| Row | Source | Catches |
+| --- | --- | --- |
+| `:stat` file, per analyzed file | `analyzed_file_entries` | an edit to any file the run analyzed |
+| `:stat` file, per discovered-not-analyzed file | `discovery_file_entries` ([#684](https://github.com/rigortype/rigor/issues/684)) | an edit to a file a widened run only discovered |
+| `:stat` file, per `pre_eval:` file | `pre_eval_file_entries` ([#352](https://github.com/rigortype/rigor/issues/352)) | an edit to an ADR-17 pre-evaluated file |
+| `:stat` file, per `.rbs` under every signature root and under Rigor's own `data/` trees (`vendored_gem_sigs/`, `core_overlay/`, `capability_roles/`) | `RunDescriptor#files` → `RbsDescriptor.file_entries` | an edit to a signature file the run read |
+| names glob, per signature root (`**/*.rbs`) | `RunDescriptor#globs` (#979) | a `.rbs` APPEARING under or vanishing from a signature root |
+| `:stat` / `:exists` file, per plugin `IoBoundary` read | `IoBoundary#cache_descriptor` ([#577](https://github.com/rigortype/rigor/issues/577)) | an edit to — or the appearance of — a file a plugin read or probed |
+| glob, per plugin-listed directory | `IoBoundary#cache_descriptor` ([#954](https://github.com/rigortype/rigor/issues/954)) | a file appearing in a directory a plugin listed |
+| glob, per producer `watch:` pattern | `Plugin::Base#watch_glob_entries` (ADR-60 WD3) | an edit under a producer's declared watch |
+
+Non-file inputs (the engine source, the lockfiles, the resolved
+configuration, the RBS library list) belong to the cache KEY
+(`Analysis::RunCacheKey`), never here: `Descriptor#fresh?` refuses any
+descriptor carrying a `gems` / `plugins` / `configs` / `dependencies`
+slot.
+
+The persisted SHAPE barely changed — `globs` is an existing slot (v4), and
+the rows only add a `mode` field that serialises to nothing in the default
+mode — but
+`SCHEMA_VERSION` still went 8 → 9, for the migration reason v8 records one
+slot over: an entry written before #979 carries no signature-root row, so
+it would validate FRESH across exactly the file-appearance edit the row
+exists to catch, and would keep replaying pre-fix diagnostics until it
+missed for some unrelated reason. The bump makes every pre-fix entry read
+as a miss once and rebuild carrying the rows.
 
 ## Constant-lookup path under `cache_store`
 

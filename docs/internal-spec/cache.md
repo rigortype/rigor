@@ -79,8 +79,11 @@ through the glob — a stat-mode glob over a signature tree would read every
 `git checkout`, `bundle install`, and CI cache restored over a fresh
 checkout as a full re-analysis, none of which changes a byte of RBS. The
 mode is part of the composition `slot_key`, and is omitted from `to_h`
-(and so from the canonical bytes and every cache key) when it is `:stat`,
-leaving pre-#979 descriptors byte-identical.
+(and so from the canonical bytes) when it is `:stat`, leaving pre-#979
+descriptors byte-identical — the field itself moves no producer's key.
+Every key did move once with `SCHEMA_VERSION` 9, which the storage layer
+mixes into each key; that one-time miss is the #979 migration, the same
+shape as v8's for #577.
 
 The `:stat` comparator is the ADR-87 WD1 stat-then-digest tier for
 individual `FileEntry` slots. Its `value` packs `"<digest> <size>

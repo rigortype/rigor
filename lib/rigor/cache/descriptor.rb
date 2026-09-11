@@ -328,7 +328,8 @@ module Rigor
         def to_h
           h = { "root" => root, "pattern" => pattern, "value" => value }
           # Omitted in the default mode so a descriptor carrying only stat globs keeps its pre-#979 canonical
-          # bytes — the cache KEY of every producer that declares a `watch:` is then unchanged by this field.
+          # bytes: this FIELD moves no producer's key. (Every key still moved once with SCHEMA_VERSION 9,
+          # which the storage layer mixes in; that is the #979 migration, not the mode.)
           h["mode"] = mode.to_s unless mode == :stat
           h
         end

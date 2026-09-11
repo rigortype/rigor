@@ -15,93 +15,73 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## Where the cycle stands
+## v0.3.9 is cut and mid-publish — READ THIS BEFORE ANYTHING ELSE
 
-**v0.3.8 is published**; `[Unreleased]` is empty and `changelog.d/` holds the whole cycle (2026-09-09's
-~30 PRs plus 2026-09-10's two batches below). The next cut happens only when the user invokes
-`/rigor-release-prep`.
+`master` carries `Bump up version to 0.3.9` (`0c6c6ae0`, PR #989 rebase-merged): `Rigor::VERSION`
+is `0.3.9`, `CHANGELOG.md` holds the sealed `## [0.3.9] - 2026-09-12` section, `changelog.d/` is
+empty again, `README.md`'s status line names 0.3.9. The v0.3.9 milestone is closed (34 issues).
 
-## 2026-09-10 — the v0.3.9 milestone sweep, 15 parallel lanes
+**The gem is NOT published yet.** The remaining steps, in order:
 
-One session drove `gh issue list --milestone v0.3.9` with Sonnet/Opus lanes in worktrees, no local
-full gate, remote CI as the gate, adversarial review before each merge. Landed (all merged, master
-green at the last integration run):
+1. `gem push` — built and waiting at `~/repo/ruby/rigor-wt/publish-0.3.9/rigortype-0.3.9.gem`
+   (a clean worktree at `0c6c6ae0`). RubyGems demands an MFA OTP, so this is the USER's command;
+   an agent must not handle the code.
+2. `git tag v0.3.9 0c6c6ae0` (annotated, matching v0.3.8) and `git push origin refs/tags/v0.3.9`,
+   only after RubyGems accepts the gem.
+3. `bundle exec rake release:github` from `master` — it needs the tag locally and extracts the
+   `## [0.3.9]` section verbatim as the release body.
 
-- Engine FPs: #946 (#917 `.new` arity on an undeclared constructor), #945 (#909 `class << self`
-  ivar facet), #955 (#633 own-method veto reaches inherited/pre-`Object`/singleton sources), #951
-  (#645 union mutator widening), #964 (#643 element-read mutation), #965 (#617 block-return residues:
-  compound-write tail, `String#<<`, find-family floor, cap floor), #961 (#722 compact-header leading
-  segment; `IncrementalSnapshot::SCHEMA` 20).
-- Caches: #954 (#629/#630 plugin `IoBoundary` reads + `list_directory` row), #958 (#639 class-existence
-  edge; #640 was already fixed and is now gated), #966 (#960 editor-mode `--instead-of` spelling +
-  buffer digest).
-- CLI/plugins: #949 (#925 `target_gems:` + plugin-gap advisory, DIRECT deps only + `rails` umbrella),
-  #968 (#936 item 3, the `Difference` mutator arm; #936 closed), #944 (#918 rigor-ffi `config_schema`), #947 (#920 `rigor init` rule list from `ALL_RULES`), #950
-  (#921 `:factory_index` fact + probe commands run `#prepare`), #957 (#609 sig-gen `::`-anchored
-  superclass, exit 70 on a fatal error, `sig/` IS auto-discovered), #952 (#530 lockfile-less gem
-  provenance), #962 (#936 items 1/4/5/7), #967 (doctor catalogue off loaded classes — an
-  order-dependent shard flake that reddened master once).
-- Docs straight to master: #919, #940 (17 ADRs re-statused with code evidence), #941, #942, #943
-  (partial-supersession marker in ADR-49, ten ADRs), #948 (#939 the header-vs-index status gate),
-  #956 (#938 residues).
-- Adjudicated without code: #533 closed (6/8 already fixed; item 5 split to #953).
+Do not re-run `/rigor-release-prep`, do not re-cut, and do not open `[Unreleased]` entries as
+anything but `changelog.d/` fragments. If the push already happened, verify with
+`gem list -r rigortype` and `git ls-remote --tags origin v0.3.9` before believing this file.
 
-## 2026-09-10, second batch — five `ready-for-agent` lanes, all landed
+## What the cut cost, and the two gate findings behind it
 
-- #975 (#580): a mutation-widened `Nominal` re-joins later stores, gated in-band on a parameter that
-  already carries a `Dynamic[top]` arm (no provenance slot exists on `Type::Nominal`; the gradual arm
-  IS the mark). `a = []; a.push(1); a.push("s")` reads `Array[Dynamic[top] | Integer | String]`.
-- #972 (#599): factory-method freshness — the gate accepts a chained receiver whose callee is cheaply
-  resolvable and whose RETURN POSITION is a materialisation (not a self-alias scan; documented why).
-- #971 (#911): `.rigor.yml` `plugins_isolation:` (`none` | `process`); ENV wins; `ruby_box` is a
-  configuration error naming the variable.
-- #974 (#534 item 7 only — items 1–4 were already landed; 5 and 6 stay open): the Rails plugins
-  declare their exception hierarchies / namespaces leniently, every class in `open_receivers:`.
-- #973 (#915): `class << self; include M; end` records as an extend; RBS-declared `extend` reaches
-  narrowing through `Environment#singleton_extended_modules`; `IncrementalSnapshot::SCHEMA` 21.
+The first release PR (#983) went red on both advisory gates, and both were real:
 
-## 2026-09-11 — the human-gated v0.3.9 items, adjudicated and landed
+- **The OSS sweep caught a release-blocking crash `make verify` could not.** #961's compact-header
+  re-anchoring rewrote each `header_nestings` BUCKET as if it were a chain, so every Mastodon file
+  reported an `internal analyzer error` (1,073 rows against a 468 threshold). Filed #984, fixed by
+  #985; the sweep then matched v0.3.8 row for row. Rigor's own `lib` has no compact header, so the
+  rename pass never ran under `make check`, and the PR's single-file fixtures never reached the
+  cross-file merge that raised. **An engine change to the discovery fold needs a multi-file fixture
+  and an OSS sweep before a cut, not at it.** The review also found the colliding-bucket merge is
+  still last-wins and fold-order dependent: #986 (v0.4.0).
+- **The perf gate's RSS band is noise-wide.** `peak_rss_kb` read +10.5 % against v0.3.8 while
+  allocations fell 35 %. Attributed in `docs/notes/20260912-v039-rss-attribution.md`: diffuse across
+  ~95 merges with no step, live slots after GC only +3.5 %, so it is transient peak from fewer minor
+  GCs, not retention. `bench/baseline.json` is recalibrated from the gate run and both halves are
+  recorded together. The band is +10 % over a SINGLE sample whose host spread is ±7 %: #987 (v0.4.0).
 
-Adjudicated with the user (grilling round): #928, #796+#794, #959 stay on v0.3.9 and shipped; #697,
-#424, #476 moved to v0.4.0; #378 closed as already settled (steins#468/#469, `mutate.instance`).
-Each PR passed a Fable adversarial review before merge; two reviews sent a PR back first.
-
-- #976 (#928): the five capability roles ship as bundled RBS (`data/capability_roles/`), project
-  declarations win per declaration on a name clash, unresolved `conforms-to` interface is `:warning`.
-- #977 (#959): `plugin_trust.read-refused` `:info`, one per plugin, when the `IoBoundary` refused a
-  read; `getcwd` is symlink-resolved, so the hint is about the refused path's spelling, not the cwd.
-- #978 (#796 + #794): the snapshot carries `definition-build-failed` and the HKT-scan outcome and
-  replays them on a narrowed closure; SCHEMA 22; a `virtual:` buffer in the closure drops its entry.
-  The durable false negative that drop leaves is #980 (v0.4.0, `ready-for-human`).
-- #981 (#979): one names-only `GlobEntry` per signature root in the run descriptor (`mode: :names`,
-  `Cache::Descriptor::SCHEMA_VERSION` 9), so a NEW `sig/*.rbs` invalidates the run cache while a
-  `touch` or fresh checkout still hits. Two Fable rounds: the first stat-mode row was a High.
-- #982: `Plugin::BundledCatalog` lets a class under `plugins/` win its id over an anonymous spec
-  double; `spec_helper` resets the catalogue per example (the shard flake behind two red runs).
+A 34-project, 306-run crash check over the survey corpus (`docs/notes/20260912-v039-oss-corpus-crash-check.md`)
+found no crash on the swept surface, and records what it did NOT sweep.
 
 ## Open threads
 
-- #424 stays open on its WD16 target (`Propagator.propagate` at gitlab scale). The per-project half
-  is measured and closed: `docs/notes/20260910-effect-collection-profile.md` — +11.3 % wall on
-  plugin-less redmine, the second walk is ~36 % of the delta and the shareable descent ~12 %, so the
-  ≤ 5 % bound is unreachable without changing what collection proves (a No-Go input for #409).
-- Filed this session, `ready-for-human`: #959 (TrustPolicy refuses every plugin read under a symlinked
-  project root, silently), #953 (literal-lambda call forms), #963 (#633 residue: block-self shapes,
-  plugin-supplied methods).
-- Still open on v0.3.9: only #424's WD16 half; #697 waits on #660 (v0.4.0).
+- **#424** keeps only its WD16 half (`Propagator.propagate` at gitlab scale). The per-project bound
+  is measured and closed: `docs/notes/20260910-effect-collection-profile.md` shows the ≤ 5 % budget
+  is unreachable without changing what collection proves, which is a No-Go input for #409.
+- **#697** waits on **#660** (where open-receiver membership lives). Do not add a fourth protection
+  route; #902 shipped only the loud-not-silent half and a spec pins that the FP still fires.
+- Filed by the reviews of this cycle, all `v0.4.0`: #980 (a dropped `definition-build-failed` row
+  stays dropped across warm runs), #986, #987.
+- `gh issue list --label ready-for-agent` is 13 items; `v0.4.0` holds 20 and is the pre-1.0 break
+  (ADR-50 WD5/WD7: `int<a,b>` removed, effects default-on, plugin-contract changes needing a corpus
+  FP diff). `v0.4.x` holds the line-level backlog.
 
 ## How to enter
 
-1. Nothing is uncommitted and no PR of this session's is open. Re-derive file:line at current HEAD.
-2. The lane contract that worked: worktree per lane, targeted specs + rubocop only, `git push` then
-   END (no CI polling — 15 lanes with `gh run watch` loops exhausted the 5000/h GitHub API budget
-   twice; poll once a minute per PR via `statusCheckRollup`). To add a commit to a lane's branch,
-   reset to the remote tip and cherry-pick; a rebase-then-push is non-fast-forward and force is
-   blocked.
-3. Three things every engine lane tripped on: the `sig/` provenance residue pin
-   (`spec/rigor/sig_gen/provenance_spec.rb`) moves whenever a hand-written line lands OR inference
-   changes what sig-gen would emit — #965's `@x ||= new` reading moved three `.default` readers to
-   `sig.skipped.untyped-return` until the unbound case kept the rvalue; a new precision fixture needs
-   its golden (`UPDATE_SNAPSHOTS=<fixture>`); and a spec that enables a bundled plugin by gem name is
-   order-dependent unless it registers the class itself (`Rigor::Plugin.unregister!` + no-op `require`).
-4. `gh issue list --label ready-for-agent` is the backlog; the v0.4.0 milestone is the pre-1.0 break.
+1. Working tree clean, no open PR. Worktrees: `publish-0.3.9` (keep until the gem is pushed) and
+   `perfbench-harness-775` (pre-existing, not this cycle's).
+2. The lane contract that carried ~110 PRs this cycle: one worktree per lane, targeted specs plus
+   rubocop only, remote CI as the gate, `git push` then END. No CI polling from a lane — fifteen
+   lanes with `gh run watch` loops exhausted the 5,000/hour GitHub API budget twice; poll once a
+   minute per PR via `statusCheckRollup`. To add a commit to a lane's branch, reset to the remote
+   tip and cherry-pick: rebase-then-push is non-fast-forward and force is blocked.
+3. **Review before merge paid for itself.** A Fable adversarial-review subagent per PR (brief in the
+   session scratchpad's `REVIEW.md`: false positives first, then unsound precision, contract drift,
+   vacuous gates, blast radius) sent three PRs back with findings their own gates had missed.
+4. Three traps every engine lane hit: the `sig/` provenance residue pin moves whenever a hand-written
+   line lands OR inference changes what sig-gen would emit; a new precision fixture needs its golden
+   (`UPDATE_SNAPSHOTS=<fixture>`); a spec that enables a bundled plugin by gem name is order-dependent
+   unless it registers the class itself (`Plugin.unregister!` plus a no-op `require`).

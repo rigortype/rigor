@@ -48,10 +48,10 @@ module Rigor
       # added to a schema-less project) invalidates the warm entry. A pre-8 entry carries no absence rows
       # and would validate fresh across exactly that edit, so cached entries must read as misses once and
       # rebuild carrying the rows.
-      # v9: #979 — the run-result dependency descriptor now carries a {GlobEntry} directory listing per RBS
-      # signature root, so a `.rbs` file APPEARING under one (a `sig/roles.rbs` declaring the interface a
-      # `conforms-to` names) invalidates the warm entry. A pre-9 entry carries no signature-root row and
-      # would validate fresh across exactly that edit — the #577 reasoning, one slot over — so cached
+      # v9: #979 — the run-result dependency descriptor now carries a names-only {GlobEntry} directory
+      # listing per RBS signature root, so a `.rbs` file APPEARING under one (a `sig/roles.rbs` declaring the
+      # interface a `conforms-to` names) invalidates the warm entry. A pre-9 entry carries no signature-root
+      # row and would validate fresh across exactly that edit — the #577 reasoning, one slot over — so cached
       # entries must read as misses once and rebuild carrying the rows.
       SCHEMA_VERSION = 9
 
@@ -240,31 +240,58 @@ module Rigor
         FIELD_SEPARATOR = "\0"
         private_constant :ROW_SEPARATOR, :FIELD_SEPARATOR
 
+        # `:stat` is the ADR-87 WD2 signature above — it answers "did anything under this glob change",
+        # appearance and edit alike. `:names` (#979) answers only "did the SET of matching paths change":
+        # its rows are the sorted relative names, so a file whose bytes are unchanged never moves the
+        # signature however its stat tuple moved. A row exists to catch appearance/disappearance only —
+        # edits to the files it lists are already carried by their own `:stat` {FileEntry} rows — and a
+        # names row must therefore survive what those rows survive. A `:stat` glob over a signature tree
+        # would not: ADR-87 WD1 lets a `:stat` file row fall back to its recorded content digest when the
+        # tuple moves, so a `git checkout`, a `bundle install` or a CI cache restored over a fresh checkout
+        # keeps the file rows fresh while it would move every glob signature, turning every such run into a
+        # full re-analysis. `:names` also reads no stat at all, so it costs a `Dir.glob` and nothing else.
+        VALID_MODES = %i[stat names].freeze
+
         attr_reader :root, :pattern, :value
 
-        value_fields :root, :pattern, :value
+        value_fields :root, :pattern, :mode, :value
 
-        def initialize(root:, pattern:, value:)
+        def initialize(root:, pattern:, value:, mode: :stat)
+          raise ArgumentError, "GlobEntry mode must be one of #{VALID_MODES.inspect}, got #{mode.inspect}" \
+            unless VALID_MODES.include?(mode)
+
           @root = root.to_s.dup.freeze
           @pattern = pattern.to_s.dup.freeze
+          @mode = mode
           @value = value.to_s.dup.freeze
           freeze
         end
 
+        # Defaulted rather than an `attr_reader` because an entry Marshal-loaded from a store written before
+        # the field existed carries no `@mode` ivar; every such entry was recorded under the stat signature.
+        def mode
+          @mode || :stat
+        end
+
         # Builds the entry for the glob's CURRENT filesystem state.
-        def self.compute(root:, pattern:)
-          new(root: root, pattern: pattern, value: signature_for(root: root, pattern: pattern))
+        def self.compute(root:, pattern:, mode: :stat)
+          new(root: root, pattern: pattern, mode: mode,
+              value: signature_for(root: root, pattern: pattern, mode: mode))
         end
 
         # The aggregate signature the entry's `value` carries: SHA-256 over the sorted per-file rows. In the
         # default (`:stat`) mode a row is the file's `(path, size, mtime_ns, ctime_ns, inode)` tuple — NO
         # content read; in strict mode a row is `(path, content-sha256)`, restoring the pre-ADR-87 authority.
+        # In `:names` mode a row is the path alone, stat-free, so only the matching SET moves the signature.
         # Per-file stat failures (a file vanishing between the glob and the stat) drop the row — same race
         # posture as {Descriptor#file_entry_fresh?}. `Dir.glob` returns sorted entries by default so the row
         # order — and therefore the signature — is stable.
-        def self.signature_for(root:, pattern:)
+        def self.signature_for(root:, pattern:, mode: :stat)
+          paths = Dir.glob(File.join(root, pattern))
+          return Digest::SHA256.hexdigest(paths.map { |path| "#{path}#{ROW_SEPARATOR}" }.join) if mode == :names
+
           strict = FileDigest.strict_validation?
-          rows = Dir.glob(File.join(root, pattern)).filter_map do |path|
+          rows = paths.filter_map do |path|
             st = File.stat(path)
             next nil unless st.file?
 
@@ -281,23 +308,29 @@ module Rigor
         end
 
         # ADR-87 WD2 — fresh iff re-globbing + re-stat-ing reproduces the recorded signature. Zero file-content
-        # bytes are read in the default mode. Any failure reads as stale (recompute), never a crash. A stored
-        # signature recorded under the opposite validation mode simply mismatches and recomputes.
+        # bytes are read in the default mode, and no stat at all in `:names`. Any failure reads as stale
+        # (recompute), never a crash. A stored signature recorded under the opposite validation mode simply
+        # mismatches and recomputes.
         def self.fresh?(entry)
-          signature_for(root: entry.root, pattern: entry.pattern) == entry.value
+          signature_for(root: entry.root, pattern: entry.pattern, mode: entry.mode) == entry.value
         rescue StandardError
           false
         end
 
-        # Composition key — {.compose} unions per (root, pattern) slot; two contributions for the same slot
-        # must agree on the value or {Conflict} is raised. Within one run the same glob stat-reads identically,
-        # so contributions never conflict.
+        # Composition key — {.compose} unions per (root, pattern, mode) slot; two contributions for the same
+        # slot must agree on the value or {Conflict} is raised. Within one run the same glob stat-reads
+        # identically, so contributions never conflict. The mode is part of the key because the two signatures
+        # over one (root, pattern) are different questions, not rival answers to the same one.
         def slot_key
-          "#{root}\0#{pattern}"
+          "#{root}\0#{pattern}\0#{mode}"
         end
 
         def to_h
-          { "root" => root, "pattern" => pattern, "value" => value }
+          h = { "root" => root, "pattern" => pattern, "value" => value }
+          # Omitted in the default mode so a descriptor carrying only stat globs keeps its pre-#979 canonical
+          # bytes — the cache KEY of every producer that declares a `watch:` is then unchanged by this field.
+          h["mode"] = mode.to_s unless mode == :stat
+          h
         end
       end
 
@@ -381,7 +414,7 @@ module Rigor
           "dependencies" => sort_entries(dependencies, "gem_name").map(&:to_h),
           "files" => sort_entries(files, "path").map(&:to_h),
           "gems" => sort_entries(gems, "name").map(&:to_h),
-          "globs" => globs.sort_by { |e| [e.root, e.pattern] }.map(&:to_h),
+          "globs" => globs.sort_by { |e| [e.root, e.pattern, e.mode.to_s] }.map(&:to_h),
           "plugins" => sort_entries(plugins, "id").map(&:to_h)
         }
       end

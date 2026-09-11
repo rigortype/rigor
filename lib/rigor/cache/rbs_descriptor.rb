@@ -98,7 +98,14 @@ module Rigor
       # written afterwards is in no row, so the ADR-45 run-result slot validated fresh and the warm run kept
       # serving diagnostics computed without it. A glob row is the same edge {Plugin::IoBoundary} records
       # for a listed directory (#954): re-globbing on the next run sees the appearance, and one row per root
-      # (not per file) keeps the cost a single `Dir.glob` + stat walk.
+      # (not per file) keeps the cost a single `Dir.glob`.
+      #
+      # The rows are `:names` mode, not the default `:stat`: the question they add is which signature files
+      # EXIST, and every edit to one of them is already carried by that file's own ADR-87 WD1 `:stat` row —
+      # which survives a moved stat tuple by falling back to its recorded content digest. A stat-mode glob
+      # would not, so a `git checkout`, a `bundle install`, or a CI run with a restored cache over a fresh
+      # checkout — none of which changes a byte of RBS — would turn every warm run into a full re-analysis.
+      # Names mode also reads no stat, so it neither pays for nor perturbs the per-run validation-stat memo.
       #
       # Scoped to the loader's own roots — the project's `signature_paths:` (including the auto-detected
       # `sig/`), the bundled-plugin `sig/` trees (ADR-25), the bundle walk, `rbs collection`, the ADR-72
@@ -114,7 +121,7 @@ module Rigor
         loader.signature_paths.uniq(&:to_s).filter_map do |root|
           next unless root.directory?
 
-          Descriptor::GlobEntry.compute(root: root.to_s, pattern: File.join("**", "*.rbs"))
+          Descriptor::GlobEntry.compute(root: root.to_s, pattern: File.join("**", "*.rbs"), mode: :names)
         end
       end
 

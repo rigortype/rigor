@@ -250,16 +250,15 @@
     }
 
     /* Tab indents (see the keymap below), so the usual Tab focus move is gone;
-       name the Escape-then-Tab hatch here — CodeMirror requires it when Tab is
-       bound, and it keeps the widget clear of the "no keyboard trap" criterion.
-       It truncates rather than wraps on narrow headers; the full sentence stays
-       in the accessibility tree for the editor's aria-describedby. */
+       keep its Escape-then-Tab hatch visible without crowding header controls. */
     #editor-help {
-      min-width: 0;
-      overflow: hidden;
+      flex-shrink: 0;
+      padding: var(--rigor-sp-1) var(--rigor-sp-4);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
       white-space: nowrap;
-      text-overflow: ellipsis;
       font-size: 11px;
+      line-height: 1.5;
       color: var(--muted);
     }
     #editor-help kbd {
@@ -585,17 +584,6 @@
 
     /* ─── Responsive: collapse sidebar below 720px ────────────────── */
     @media (max-width: 720px) {
-      /* The header has no room to keep the hint legible here; clip it from
-         sight but leave it in the accessibility tree for aria-describedby. */
-      #editor-help {
-        position: absolute;
-        width: 1px; height: 1px;
-        margin: -1px; padding: 0;
-        overflow: hidden;
-        clip: rect(0 0 0 0);
-        white-space: nowrap;
-        border: 0;
-      }
       main { flex-direction: column; }
       #sidebar {
         width: 100%;
@@ -610,12 +598,12 @@
   <header>
     <span class="brand">Rigor <span class="product">Playground</span></span>
     <span id="status" aria-live="polite">Ready</span>
-    <p id="editor-help"><kbd>Esc</kbd> then <kbd>Tab</kbd> to move focus out of the editor.</p>
     <div class="toolbar">
       <button class="btn" id="theme-btn" title="Cycle theme (Dark / Light / Auto)" aria-label="Toggle theme">Dark</button>
       <button class="btn active" id="type-btn" aria-pressed="true"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>Hide types</span></button>
     </div>
   </header>
+  <p id="editor-help">Press <kbd>Esc</kbd>, then <kbd>Tab</kbd>, to leave the editor.</p>
 
   <main>
     <div id="editor-wrap">

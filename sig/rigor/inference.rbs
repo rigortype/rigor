@@ -170,7 +170,7 @@ module Rigor
       def self?.collect_class_decls: (untyped node, Array[String] qualified_prefix, Hash[String, Type::t] accumulator) -> void
       def self?.constant_writes_for_file: (untyped root) -> Hash[String, untyped]
       def self?.constant_literal_value: (untyped rvalue) -> Array[untyped]?
-      def self?.finalize_constant_writes: (Hash[String, Hash[String, untyped]] writes) -> [Hash[String, Type::t], Hash[String, Set[String]]]
+      def self?.finalize_constant_writes: (Hash[String, Hash[String, untyped]] writes) -> [Hash[String, Type::Constant], Hash[String, Set[String]]]
       def self?.propagate: (untyped node, Hash[untyped, Scope] table, Scope parent_scope) -> void
     end
 

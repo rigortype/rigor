@@ -125,6 +125,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-108 | [Type provenance for agents: the `rigor-type-oracle` skill and the adopting project's contract](108-type-provenance-for-agents.md) | Accepted (skill, `rigor-project-init` contract paragraph, and catalogue wiring landed in #826; ADR-107 is the repo-side twin) |
 | ADR-109 | [Ruby range literals as the notation and the semantics of numeric range refinements](109-ruby-native-range-notation.md) | Accepted (implemented: `Integer[1..10]` in #830, `Float[R]` in #844, Float narrowing in #846, the `int<a, b>` deprecation row in #854, the Float folds) |
 | ADR-110 | [An inherited declaration does not outrank the receiver's own `def`](110-inherited-declaration-precedence.md) | Accepted (WD1 + WD3 implemented in #856; measured zero new diagnostics across 25 corpus targets) |
+| ADR-111 | [Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect](111-inline-refinement-carrier.md) | Proposed (recommends reaffirming the `%a{}` carrier for #996; Steep measurement is the open precondition; nothing implemented) |
 
 ## Adding a New ADR
 

@@ -300,27 +300,56 @@ module Rigor
         # These are invisible without a report: synthesis succeeds, and the annotation comment is even echoed
         # into the generated RBS, so the omission shows up neither in the output nor at runtime.
         #
-        # The one case today is `module-self`, where the two inline-RBS dialects disagree on spelling. rbs's
-        # own `docs/inline.md` documents `# @rbs module-self: Foo`; the rbs-inline gem's grammar is
-        # `# @rbs module-self Foo`, without the colon. Handed the colon form the gem still builds a
-        # `ModuleSelf` annotation but extracts no types from it, so an empty `self_types` on a parsed
-        # annotation is a precise signature for "the author asked for a constraint we did not apply".
-        # Measured both ways in `docs/notes/20260730-inline-rbs-parser-grammar-diff.md`.
+        # Two cases today:
         #
-        # Deliberately narrow. A construct the gem's parser REJECTS already routes through WD6's error path,
-        # and one it never recognised at all is upstream's grammar to define (WD3) — guessing at those would
-        # make this a lint on comment prose, which is exactly the false-positive cost ADR-5 ranks first.
+        # - `module-self`, where the two inline-RBS dialects disagree on spelling. rbs's own `docs/inline.md`
+        #   documents `# @rbs module-self: Foo`; the rbs-inline gem's grammar is `# @rbs module-self Foo`,
+        #   without the colon. Handed the colon form the gem still builds a `ModuleSelf` annotation but
+        #   extracts no types from it, so an empty `self_types` on a parsed annotation is a precise signature
+        #   for "the author asked for a constraint we did not apply". Measured both ways in
+        #   `docs/notes/20260730-inline-rbs-parser-grammar-diff.md`.
+        # - a `#:` line whose type does not parse (issue #997). Upstream's own tolerant parse
+        #   ({#parse_type_method_type} in its `annotation_parser.rb`) never raises on this: it consumes the
+        #   rest of the line into a `SyntaxErrorAssertion` and moves on, so nothing upstream ever surfaces
+        #   the failure. Measured at 568138c2: `#: (finite-float) -> String` above a `def` synthesized no
+        #   signature for it AT ALL, and `rigor check` on the file reported nothing beyond an unrelated
+        #   `rbs.coverage.missing-gem` info — the annotation was indistinguishable from one never written,
+        #   which ADR-93's "an inline annotation is a live contract" forbids.
+        #
+        # Deliberately narrow otherwise. A construct the gem's parser REJECTS already routes through WD6's
+        # error path, and one it never recognised at all is upstream's grammar to define (WD3) — guessing at
+        # those would make this a lint on comment prose, which is exactly the false-positive cost ADR-5 ranks
+        # first. `SyntaxErrorAssertion` is neither: the gem's OWN parser recognised the `#:` shape and
+        # positively flagged its payload as unparseable, so reporting it is naming a fact rbs-inline already
+        # computed, not guessing at one.
         def unhonoured_annotations(prism_result)
           ::RBS::Inline::AnnotationParser.parse(prism_result.comments).flat_map do |parsed|
             parsed.each_annotation.filter_map do |annotation|
-              next unless annotation.is_a?(::RBS::Inline::AST::Annotations::ModuleSelf)
-              next unless annotation.self_types.empty?
+              case annotation
+              when ::RBS::Inline::AST::Annotations::ModuleSelf
+                next if annotation.self_types.any?
 
-              "`@rbs module-self` contributed no self-type constraint. Rigor reads the " \
-                "`# @rbs module-self Foo` spelling; `# @rbs module-self: Foo` (the spelling in rbs's own " \
-                "inline documentation) is not honoured here."
+                "`@rbs module-self` contributed no self-type constraint. Rigor reads the " \
+                  "`# @rbs module-self Foo` spelling; `# @rbs module-self: Foo` (the spelling in rbs's own " \
+                  "inline documentation) is not honoured here."
+              when ::RBS::Inline::AST::Annotations::SyntaxErrorAssertion
+                syntax_error_assertion_notice(annotation)
+              end
             end
           end.uniq
+        end
+
+        # Issue #997 — the line comes off the annotation's OWN `Prism::Comment` location, not the
+        # synthesized RBS buffer: unlike {Environment::RbsLoader#unresolved_type_name_detail}'s position,
+        # this one is read straight from the `.rb` file this synthesis call is fresh over (the per-file
+        # synthesizer cache is content-keyed, so a changed file simply misses rather than replaying a stale
+        # line), so it is the real line the author wrote, not an approximation.
+        def syntax_error_assertion_notice(annotation)
+          line = annotation.source.comments.first&.location&.start_line
+          position = line ? " on line #{line}" : ""
+          "a `#:` annotation#{position} did not parse as an RBS method type or type " \
+            "(`#{annotation.error_string}`) and was DROPPED — the method types as if the annotation had " \
+            "never been written, not merely as if its type were wrong. Fix the RBS syntax to restore it."
         end
 
         # Rewrite every RDoc directive comment to its spaced spelling (`#:nodoc:` -> `# :nodoc:`) so

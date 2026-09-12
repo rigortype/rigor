@@ -45,7 +45,7 @@ plugin id/version + config), so an unchanged second run skips the parse.
 | Rule | Severity | Fires when |
 | --- | --- | --- |
 | `plugin.rbs-inline.source-rbs-synthesis-failed` | info | rbs-inline could not parse a file; analysis falls back to no inline-RBS contribution and the diagnostic carries the upstream error |
-| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Two causes: a member your `sig/` also declares (see [Precedence](#precedence)), and the `# @rbs module-self: Foo` spelling (see below) |
+| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Three causes: a member your `sig/` also declares (see [Precedence](#precedence)), the `# @rbs module-self: Foo` spelling (see below), and a `#:` line whose type does not parse (see [Unparseable `#:` types](#unparseable--types)) |
 
 ## Precedence
 
@@ -108,6 +108,55 @@ Rigor reports the second form as
 in silence. Constructs the gem supports and the built-in parser does not —
 `@rbs generic T`, `@rbs!` embedded RBS blocks, `@rbs inherits`, method
 visibility — all work here.
+
+## Unparseable `#:` types
+
+A `#:` line whose type does not parse as RBS is dropped — the signature never
+applies, and the method types as if the line had never been written, not
+merely as if its type were wrong:
+
+```ruby
+class BadRefProbe
+  #: (finite-float) -> String
+  def show(f)
+    f.to_s
+  end
+end
+```
+
+`finite-float` is a [Rigor refinement](../16-rbs-extended-annotations.md)
+name, not an RBS type, and does not belong in an ordinary type position.
+Rigor reports the drop as
+`plugin.rbs-inline.source-rbs-annotation-not-honoured`, naming the line and
+the text that failed to parse, rather than leaving `show` silently `untyped`
+with no diagnostic anywhere. The `# @rbs name: TYPE` tag form of the same
+mistake is a different failure shape — see the next section.
+
+## An unresolvable type name in `# @rbs`
+
+Naming a Rigor refinement (or any other unresolvable name) where an RBS type
+belongs in the `# @rbs name: TYPE` tag form does not drop silently the way
+`#:` does — it takes the whole class down:
+
+```ruby
+class ProbeZZ
+  # @rbs g: finite-float
+  def probe(g)
+    g.to_s
+  end
+end
+```
+
+Upstream's own type parser truncates `finite-float` to `finite` (a hyphen
+cannot continue an RBS type name) before this ever reaches Rigor, so `finite`
+is the only token that reaches `RBS::DefinitionBuilder` — and it names no
+loaded type, so the build for the WHOLE class fails
+(`RBS::NoTypeFoundError`). `probe`, and every other real method on `ProbeZZ`,
+reads `Dynamic[top]`. This surfaces as
+`rbs.coverage.definition-build-failed`, naming the token and, when it is the
+truncated head of a registered refinement name, the `%a{rigor:v1:…}` spelling
+that IS valid today (see
+[RBS::Extended annotations](../16-rbs-extended-annotations.md)).
 
 ## Configuration
 

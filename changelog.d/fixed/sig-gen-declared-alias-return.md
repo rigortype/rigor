@@ -1,0 +1,1 @@
+- **[sig-gen]** A declared return spelled through a project's own RBS type alias (e.g. `-> Type::t`) is no longer misread as a bare `untyped`, which used to spuriously propose the inferred return as a `tighter-return` even when the alias already named it exactly. ([#1000](https://github.com/rigortype/rigor/pull/1000))

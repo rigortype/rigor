@@ -68,6 +68,18 @@ module Rigor
         # instead of adopting the placeholder. `Rigor::RbsExtended.inferred_return?` is the reader.
         INFERRED_RETURN_ANNOTATION = "rigor:v1:inferred-return"
 
+        # The RBS annotation the synthesizer writes on every member where upstream defaulted EVERY type
+        # slot — every parameter and the return alike — because the author's comment block asserted nothing
+        # about this member's own contract (issue #991). This is a strictly narrower condition than
+        # {INFERRED_RETURN_ANNOTATION}: that one fires whenever the return alone defaulted, which is also
+        # true of a member whose parameters WERE annotated (`# @rbs num: Float` with no `# @rbs return:`).
+        # This annotation distinguishes "nobody said anything about this member" from "the return half was
+        # left to inference" — the two collapse under return-only provenance, because no equivalent
+        # per-parameter survivor exists to separate them (see {DEFAULTED_TYPE_NAME}), so this constant
+        # exists precisely to carry that missing half. Its meaning is normative in
+        # `docs/type-specification/rbs-extended.md`. `Rigor::RbsExtended.inferred_signature?` is the reader.
+        INFERRED_SIGNATURE_ANNOTATION = "rigor:v1:inferred-signature"
+
         # The stand-in type handed to upstream's `Writer#default_type`, and the whole reason this plugin can
         # tell a defaulted type from an authored one. `RBS::Inline::Writer` substitutes `default_type`
         # wherever the author wrote nothing — `return_type || default_type` in `RubyDef#method_overloads`,
@@ -162,6 +174,15 @@ module Rigor
         # about the return. The engine reads the annotation in `RbsDispatch` and falls through to the same
         # body-inference tier an undeclared method takes.
         #
+        # A member additionally carries {INFERRED_SIGNATURE_ANNOTATION} when EVERY type slot on it —
+        # not only the return — defaulted: a fully bare `def`, or one whose only annotation lives on a
+        # sibling member the file also happens to carry. A member with a parameter annotated (`# @rbs num:
+        # Float`) but no `# @rbs return:` still gets {INFERRED_RETURN_ANNOTATION} (the return did default),
+        # but NOT this one — the author asserted something about the member, just not its return. Issue
+        # #991's `call.wrong-arity` reads this one rather than the return-only annotation, because the
+        # arity question is about the parameter list, and the parameter list is exactly what tells the two
+        # cases apart.
+        #
         # Two properties make the rewrite safe rather than clever:
         #
         # - the stand-in is a token this plugin injected, so replacing it is exact — it can only appear
@@ -181,53 +202,85 @@ module Rigor
         def mark_inferred_returns(rendered)
           return rendered if rendered.nil? || !rendered.b.include?(DEFAULTED_TYPE_NAME.to_s)
 
-          marked_lines = rendered.valid_encoding? ? defaulted_member_lines(rendered) : Set.new
+          return_lines, signature_lines =
+            rendered.valid_encoding? ? defaulted_member_lines(rendered) : [Set.new, Set.new]
           scrubbed = rendered.b.gsub(DEFAULTED_TYPE_NAME.to_s, "untyped").force_encoding(rendered.encoding)
-          return scrubbed if marked_lines.empty?
+          return scrubbed if return_lines.empty?
 
           scrubbed.lines.each_with_index.flat_map do |line, index|
-            next line unless marked_lines.include?(index + 1)
+            line_number = index + 1
+            next line unless return_lines.include?(line_number)
 
-            ["#{line[/\A[ \t]*/]}%a{#{INFERRED_RETURN_ANNOTATION}}\n", line]
+            indent = line[/\A[ \t]*/]
+            annotations = ["#{indent}%a{#{INFERRED_RETURN_ANNOTATION}}\n"]
+            annotations << "#{indent}%a{#{INFERRED_SIGNATURE_ANNOTATION}}\n" if signature_lines.include?(line_number)
+            [*annotations, line]
           end.join
         end
 
-        # The 1-based line of every member in `rendered` whose return type (or, for an attribute, whose
-        # type) is the defaulted stand-in. A member's `location.start_line` is the line its `def` /
-        # `attr_*` keyword sits on, which is where the annotation has to go.
+        # The 1-based lines of every member in `rendered` whose return type (or, for an attribute, whose
+        # type) is the defaulted stand-in — and, of those, the subset where EVERY type slot on the member
+        # defaulted, not only the return. A member's `location.start_line` is the line its `def` /
+        # `attr_*` keyword sits on, which is where the annotation has to go. Returns `[return_lines,
+        # signature_lines]`; `signature_lines` is always a subset of `return_lines`, since a member cannot
+        # have every slot defaulted without its return being one of them.
         def defaulted_member_lines(rendered)
           buffer = ::RBS::Buffer.new(name: "(rigor: inline defaulted-type probe)", content: rendered)
           _, _directives, decls = ::RBS::Parser.parse_signature(buffer)
-          collect_defaulted_member_lines(decls, Set.new)
+          collect_defaulted_member_lines(decls, Set.new, Set.new)
         rescue ::StandardError
           # The writer's own output failing to parse is a condition the loader already handles (ADR-32 WD6
           # fail-soft drops the entry). Declining to mark here keeps that the only failure.
-          Set.new
+          [Set.new, Set.new]
         end
 
-        def collect_defaulted_member_lines(nodes, lines)
+        def collect_defaulted_member_lines(nodes, return_lines, signature_lines)
           nodes.each do |node|
             next unless node.respond_to?(:members)
 
             node.members.each do |member|
-              line = defaulted_member_line(member)
-              lines << line if line
+              classify_defaulted_member(member, return_lines, signature_lines)
             end
-            collect_defaulted_member_lines(node.members.grep(::RBS::AST::Declarations::Base), lines)
+            collect_defaulted_member_lines(
+              node.members.grep(::RBS::AST::Declarations::Base), return_lines, signature_lines
+            )
           end
-          lines
+          [return_lines, signature_lines]
         end
 
-        def defaulted_member_line(member)
+        def classify_defaulted_member(member, return_lines, signature_lines)
           case member
           when ::RBS::AST::Members::MethodDefinition
-            return nil unless member.overloads.any? { |o| defaulted_type?(o.method_type.type.return_type) }
+            return unless member.overloads.any? { |o| defaulted_type?(o.method_type.type.return_type) }
+
+            line = member.location&.start_line
+            return if line.nil?
+
+            return_lines << line
+            signature_lines << line if member.overloads.all? { |o| fully_defaulted_overload?(o) }
           when ::RBS::AST::Members::Attribute
-            return nil unless defaulted_type?(member.type)
-          else
-            return nil
+            return unless defaulted_type?(member.type)
+
+            line = member.location&.start_line
+            return if line.nil?
+
+            # An attribute has exactly one type slot (the value type, shared by its reader and writer
+            # overloads), so "the type defaulted" and "every type slot defaulted" are the same fact.
+            return_lines << line
+            signature_lines << line
           end
-          member.location&.start_line
+        end
+
+        # True when every parameter type and the return type of `overload` — everything
+        # `RBS::Types::Function#each_type` yields — is the defaulted stand-in, i.e. the author's comment
+        # block asserted nothing about this overload's own contract. Block-type provenance is
+        # deliberately not part of this: a block parameter's shape does not bear on the positional arity
+        # #991 exists to check, and upstream defaults it independently of the parameter list either way.
+        def fully_defaulted_overload?(overload)
+          function = overload.method_type.type
+          return false unless function.respond_to?(:each_type)
+
+          function.each_type.all? { |type| defaulted_type?(type) }
         end
 
         def defaulted_type?(type)

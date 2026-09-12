@@ -18,6 +18,15 @@
 # arity-checked would depend on an unrelated annotation elsewhere in its file. The regression arm below
 # exercises the plugin for real and checks exactly that: a declared `Foo#f` fires per usual, alongside an
 # undeclared `Bar#g` in the SAME file that must stay silent.
+#
+# The case #991 was actually filed for is narrower still, and needed its own fact rather than reusing
+# `rigor:v1:inferred-return`: an author who writes `# @rbs num: Float` and nothing else has made an
+# assertion about the parameter list, even though the return — nothing about it was written — still
+# defaults, and defaulting the return is the ONLY provenance `inferred-return?` can see. Gating
+# `wrong_arity_diagnostic` on that directive silenced this exact case, indistinguishable from a fully
+# bare `def`. `rigor:v1:inferred-signature` (present only when EVERY type slot on the member defaulted,
+# not only the return) is what the rule reads instead — see the "param annotated, return left to the
+# synthesizer" arm below, which is the issue's own repro.
 
 require "spec_helper"
 require "fileutils"
@@ -138,6 +147,122 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
     )
     expect(rules_and_messages(configuration)).to be_empty
+  end
+
+  # The issue's own repro: `# @rbs num: Float` and nothing else. The parameter is authored; the return
+  # is not, and `rigor-rbs-inline` defaults it exactly as it would for a fully bare `def`. Only
+  # `rigor:v1:inferred-signature` — present when EVERY type slot defaulted — tells the two apart;
+  # `rigor:v1:inferred-return` alone cannot, since it is present on both.
+  it "fires on an inline `# @rbs`-declared method whose PARAMETER is authored and whose return is " \
+     "left to the synthesizer (#991)" do
+    plugin_requirer = require_rbs_inline_plugin
+    write_project(<<~RUBY)
+      class Foo
+        # @rbs num: Float
+        def f(num)
+          num
+        end
+      end
+
+      #{calls}
+    RUBY
+
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        "paths" => %w[lib], "workers" => 0,
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    )
+    diagnostics = rules_and_messages(configuration, plugin_requirer: plugin_requirer)
+    expect(diagnostics).to eq(expected_diagnostics)
+  ensure
+    Rigor::Plugin.unregister!
+  end
+
+  # An author-written `#: (String) -> untyped` return is a real, authored contract — not the
+  # synthesizer's defaulted placeholder — even though both render as `untyped`. `defaulted_type?` in the
+  # plugin tells them apart by construction (the placeholder is a distinctive alias, scrubbed to
+  # `untyped` only after the provenance check), so this member carries neither `inferred-return` nor
+  # `inferred-signature` and the rule must witness normally.
+  it "fires on a method whose author wrote an explicit `#: (String) -> untyped` full signature" do
+    plugin_requirer = require_rbs_inline_plugin
+    write_project(<<~RUBY)
+      class Baz
+        #: (String) -> untyped
+        def h(s)
+          s
+        end
+      end
+
+      Baz.new.h
+      Baz.new.h(1, 2)
+    RUBY
+
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        "paths" => %w[lib], "workers" => 0,
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    )
+    diagnostics = rules_and_messages(configuration, plugin_requirer: plugin_requirer)
+    expect(diagnostics).to eq(
+      [["call.wrong-arity", "wrong number of arguments to `h' on Baz (given 0, expected 1)"],
+       ["call.wrong-arity", "wrong number of arguments to `h' on Baz (given 2, expected 1)"],
+       ["call.argument-type-mismatch", "argument type mismatch at `h' on Baz: expected String, got 1"]]
+    )
+  ensure
+    Rigor::Plugin.unregister!
+  end
+
+  # A mixin reached through an annotated file: `Helper#helper` carries no annotation of its own, only
+  # `Foo#f` (elsewhere in the same file) does, which is what pulls the plugin's file-wide skeleton in.
+  # `C` never defines `helper` itself, so the only signature `wrong_arity_diagnostic` can resolve for
+  # `C.new.helper` is the fully-defaulted one synthesized for `Helper#helper` — which must decline the
+  # same way an unannotated same-class method does.
+  def mixin_project
+    <<~RUBY
+      class Foo
+        # @rbs num: Float
+        # @rbs return: Float
+        def f(num)
+          num
+        end
+      end
+
+      module Helper
+        def helper(a)
+          a
+        end
+      end
+
+      class C
+        include Helper
+      end
+
+      #{calls}
+      C.new.helper
+      C.new.helper(1, 2)
+    RUBY
+  end
+
+  it "stays silent on a mixin method reached through a file the inline plugin annotates for an " \
+     "unrelated class (#992 regression)" do
+    plugin_requirer = require_rbs_inline_plugin
+    write_project(mixin_project)
+
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        "paths" => %w[lib], "workers" => 0,
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    )
+    diagnostics = rules_and_messages(configuration, plugin_requirer: plugin_requirer)
+    expect(diagnostics).to eq(expected_diagnostics)
+  ensure
+    Rigor::Plugin.unregister!
   end
 
   # `Bar#g` carries no declaration of its own; only `Foo#f`'s inline annotation makes the file

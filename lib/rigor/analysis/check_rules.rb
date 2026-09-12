@@ -1501,15 +1501,23 @@ module Rigor
           # arity happens to be structurally accurate (it is read off the real `Prism::DefNode`) but that no
           # author ever asserted. Trusting it here would make whether an UNANNOTATED sibling method gets
           # arity-checked depend on whether some OTHER method in its file happens to carry an annotation,
-          # which is exactly the coupling #823 already ruled out for return typing. `inferred_return?` is
-          # the one piece of per-member provenance that survives synthesis (see its own comment): true
-          # exactly when the writer defaulted this member's return type, which happens both for a fully bare
-          # `def` and for one with only a parameter annotation, since there is no equivalent per-parameter
-          # survivor to tell those two apart. Declining both is the conservative reading — AGENTS.md ranks a
-          # false positive above worst-case static reading, and #992 is where the false-positive envelope
-          # for a source-only arity gets built. A `sig/` declaration never carries this annotation, so the
-          # #991 case this rule exists for is unaffected.
-          return nil if Rigor::RbsExtended.inferred_return?(method_def)
+          # which is exactly the coupling #823 already ruled out for return typing.
+          #
+          # `inferred_signature?` — not `inferred_return?` — is the right gate here. `inferred_return?` also
+          # trips on a member whose PARAMETERS the author did annotate (`# @rbs num: Float`) and only the
+          # return defaulted; declining on that would silence the very case #991 exists for, since a
+          # parameter the author wrote is an assertion about the parameter list, and the parameter list is
+          # exactly what arity is a question about. The synthesized skeleton's arity is faithful by
+          # construction either way — upstream renders the `def`'s real parameter list whether or not
+          # anything nearby was annotated — so the reason to stay silent on a bare `def` is never that its
+          # arity might be wrong; it is that nobody asserted anything about the member at all, which is
+          # #992's envelope (`define_method`, `method_missing`, aliases, reopened classes, `prepend`,
+          # ADR-17 `pre_eval:` patches, plugin-contributed surfaces) rather than a signature question.
+          # `inferred_signature?` is true only when EVERY type slot on the member defaulted — no parameter
+          # and no return was authored — which is exactly "nobody asserted anything here". A `sig/`
+          # declaration never carries either annotation, so the #991 case this rule exists for is
+          # unaffected.
+          return nil if Rigor::RbsExtended.inferred_signature?(method_def)
           return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
 
           arity_envelope = compute_arity_envelope(method_def)

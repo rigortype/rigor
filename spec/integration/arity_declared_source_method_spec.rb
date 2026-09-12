@@ -8,6 +8,16 @@
 #
 # The `sig/` and inline-annotation arms below are the two ways a project method acquires a trustworthy
 # signature (acceptance criteria 1 and 2); the no-declaration arm is the unchanged control (criterion 3).
+#
+# Issue #992 — the no-declaration arm above builds its fixture with `Configuration.new` and no
+# `plugin_requirer:`, so `rigor-rbs-inline` never loads and `Foo#f` resolves no signature at all: the
+# arm proves nothing about a NORMAL project, where ADR-93 auto-wires the plugin by default. Under that
+# default, a file carrying ONE annotation gets a full `(untyped, …) -> untyped` skeleton synthesized for
+# EVERY `def` in it (#823), so a sibling method with no declaration of its own still resolves a
+# `method_def` — one `wrong_arity_diagnostic` must not trust, or whether an undeclared method gets
+# arity-checked would depend on an unrelated annotation elsewhere in its file. The regression arm below
+# exercises the plugin for real and checks exactly that: a declared `Foo#f` fires per usual, alongside an
+# undeclared `Bar#g` in the SAME file that must stay silent.
 
 require "spec_helper"
 require "fileutils"
@@ -128,5 +138,48 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
     )
     expect(rules_and_messages(configuration)).to be_empty
+  end
+
+  # `Bar#g` carries no declaration of its own; only `Foo#f`'s inline annotation makes the file
+  # "annotated" and pulls the plugin in. `expected_diagnostics` names only `Foo#f`, so `Bar#g`'s two
+  # calls proving silent is exactly `diagnostics == expected_diagnostics`, not a separate assertion.
+  def undeclared_sibling_project
+    <<~RUBY
+      class Foo
+        # @rbs num: Float
+        # @rbs return: Float
+        def f(num)
+          num
+        end
+      end
+
+      class Bar
+        def g(x)
+          x
+        end
+      end
+
+      #{calls}
+      Bar.new.g
+      Bar.new.g(1, 2)
+    RUBY
+  end
+
+  it "stays silent on an undeclared sibling method even though the inline plugin annotates " \
+     "another method in the same file (#992 regression)" do
+    plugin_requirer = require_rbs_inline_plugin
+    write_project(undeclared_sibling_project)
+
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        "paths" => %w[lib], "workers" => 0,
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    )
+    diagnostics = rules_and_messages(configuration, plugin_requirer: plugin_requirer)
+    expect(diagnostics).to eq(expected_diagnostics)
+  ensure
+    Rigor::Plugin.unregister!
   end
 end

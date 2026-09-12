@@ -1494,6 +1494,22 @@ module Rigor
           # whose contract binds. `method_def.nil?` below is what keeps an undeclared source method silent.
           method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
           return nil if method_def.nil?
+
+          # Issue #992 — under ADR-93 the bundled `rigor-rbs-inline` plugin emits a full parameter skeleton
+          # for EVERY `def` in a file that carries at least one annotation anywhere in it (#823), so
+          # `trustworthy_signature` resolves a `method_def` even for a bare, undeclared `def` — one whose
+          # arity happens to be structurally accurate (it is read off the real `Prism::DefNode`) but that no
+          # author ever asserted. Trusting it here would make whether an UNANNOTATED sibling method gets
+          # arity-checked depend on whether some OTHER method in its file happens to carry an annotation,
+          # which is exactly the coupling #823 already ruled out for return typing. `inferred_return?` is
+          # the one piece of per-member provenance that survives synthesis (see its own comment): true
+          # exactly when the writer defaulted this member's return type, which happens both for a fully bare
+          # `def` and for one with only a parameter annotation, since there is no equivalent per-parameter
+          # survivor to tell those two apart. Declining both is the conservative reading — AGENTS.md ranks a
+          # false positive above worst-case static reading, and #992 is where the false-positive envelope
+          # for a source-only arity gets built. A `sig/` declaration never carries this annotation, so the
+          # #991 case this rule exists for is unaffected.
+          return nil if Rigor::RbsExtended.inferred_return?(method_def)
           return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
 
           arity_envelope = compute_arity_envelope(method_def)

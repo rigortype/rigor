@@ -722,6 +722,9 @@ AscDesc.new.ascdesc(:bad)
           EditorView.theme({
             "&": { backgroundColor: "var(--bg)", color: "var(--text)", height: "100%" },
             ".cm-content": { caretColor: "var(--accent)", fontFamily: MONO, padding: "8px 0" },
+            // CM6's base theme draws the cursor as a black left border, which is
+            // invisible on the dark background; paint it with the theme accent.
+            ".cm-cursor": { borderLeftColor: "var(--accent)", borderLeftWidth: "2px" },
             ".cm-gutters": { backgroundColor: "var(--gutter-bg)", color: "var(--gutter-fg)", border: "none", borderRight: "1px solid var(--border)" },
             ".cm-activeLine": { backgroundColor: "var(--active-line)" },
             ".cm-selectionBackground": { backgroundColor: "var(--selection)" },

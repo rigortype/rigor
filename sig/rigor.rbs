@@ -145,6 +145,9 @@ module Rigor
       # The incremental session's read surface (ADR-46 / ADR-67 / ADR-103) — `IncrementalSession`
       # drives a live Runner through these between rechecks. Typed `untyped` like the cache / effects
       # readers above until their namespaces are sig-covered.
+      # sig-gen gap: #1008 — `result` is populated by `collect_return_summaries` mutating it by
+      # reference from a sibling method; sig-gen folds only the `{}` seed and the empty-memo early
+      # return, so it proposes the seed shape instead of the honest, usually-non-empty contract.
       def return_summaries: () -> untyped
       def param_inferred_types: () -> untyped
       def effect_collections_by_path: () -> untyped

@@ -106,6 +106,12 @@ module Rigor
     # `docs/type-specification/rbs-extended.md`.
     INFERRED_RETURN_DIRECTIVE = "rigor:v1:inferred-return"
 
+    # `%a{rigor:v1:inferred-signature}` — every type slot on the member, parameters and return alike,
+    # is a placeholder: the author's comment block asserted nothing about this member's own contract.
+    # Strictly narrower than {INFERRED_RETURN_DIRECTIVE}, which also covers a member with an authored
+    # parameter and no authored return. Normative in `docs/type-specification/rbs-extended.md`.
+    INFERRED_SIGNATURE_DIRECTIVE = "rigor:v1:inferred-signature"
+
     module_function
 
     # Whether `method_def` declares its return type inferred rather than contracted (issue #823).
@@ -129,6 +135,27 @@ module Rigor
       return false if annotations.nil? || annotations.empty?
 
       annotations.any? { |annotation| annotation.string.to_s.strip == INFERRED_RETURN_DIRECTIVE }
+    end
+
+    # Whether `method_def` declares its ENTIRE signature inferred — every parameter and the return alike
+    # — rather than only its return (issue #991).
+    #
+    # `inferred_return?` alone cannot separate a fully bare `def` from one whose parameters ARE declared
+    # (`# @rbs num: Float`) and only its return defaulted: both trip the same return-only provenance,
+    # because no equivalent per-parameter survivor exists to tell them apart. This reads the plugin's
+    # narrower, member-level fact instead: true only when nothing at all was asserted about the member.
+    # `call.wrong-arity` declines on this rather than on {inferred_return?}, since a parameter the author
+    # DID annotate is an assertion about the parameter list, and the parameter list is exactly what arity
+    # is a question about (see the rule's own comment).
+    #
+    # @param method_def — an `RBS::Definition::Method`, or anything else answering `#annotations`.
+    def inferred_signature?(method_def)
+      return false if method_def.nil?
+
+      annotations = method_def.annotations
+      return false if annotations.nil? || annotations.empty?
+
+      annotations.any? { |annotation| annotation.string.to_s.strip == INFERRED_SIGNATURE_DIRECTIVE }
     end
 
     # Reads RBS::Extended predicate effects off `RBS::Definition::Method#annotations`. Returns the effects in

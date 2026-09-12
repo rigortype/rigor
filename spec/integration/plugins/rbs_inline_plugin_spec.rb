@@ -343,7 +343,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
 
     it "types an attr_reader sibling from the class body rather than the skeleton" do
-      expect(synthesized_for(<<~RUBY)).to include("%a{rigor:v1:inferred-return}\n  attr_reader plain: untyped")
+      expect(synthesized_for(<<~RUBY))
         class Greeter
           # @rbs times: Integer
           def repeat(times)
@@ -353,6 +353,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
           attr_reader :plain
         end
       RUBY
+        .to include("%a{rigor:v1:inferred-return}\n  %a{rigor:v1:inferred-signature}\n  attr_reader plain: untyped")
     end
 
     # The stand-in the plugin renders with must never reach the environment: an undeclared type alias makes
@@ -373,12 +374,15 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       RUBY
 
       expect(synthesized).not_to include("rigor__inline_defaulted")
-      expect(synthesized).to include("%a{rigor:v1:inferred-return}\n  def sibling:")
+      # `sibling` is annotated nowhere, so EVERY slot on it defaulted (not only the return), and it
+      # carries both marks — see "marks only inferred-return, not inferred-signature" below for the
+      # contrasting case.
+      expect(synthesized).to include("%a{rigor:v1:inferred-return}\n  %a{rigor:v1:inferred-signature}\n  def sibling:")
       # The parameter slots keep the skeleton's arity; only the RETURN slot is what the mark speaks about.
       expect(synthesized).to include("(untyped a, ?untyped b, *untyped rest, key: untyped, **untyped kw)")
     end
 
-    it "marks the return of a method whose parameters alone were annotated" do
+    it "marks the return of a method whose parameters alone were annotated, but not the full signature" do
       synthesized = synthesized_for(<<~RUBY)
         class Greeter
           # @rbs times: Integer
@@ -390,12 +394,18 @@ RSpec.describe "plugins/rigor-rbs-inline" do
 
       expect(synthesized)
         .to include("%a{rigor:v1:inferred-return}\n  def repeat: (Integer times) -> untyped")
+      # Issue #991 — the parameter WAS authored, so this member must not read as "nothing was asserted
+      # about it": `rigor:v1:inferred-signature` (present only when EVERY slot defaulted) must be absent,
+      # even though `rigor:v1:inferred-return` fires the same way it would for a fully bare `def`.
+      expect(synthesized).not_to include("rigor:v1:inferred-signature")
     end
 
     # The mark is a string contract across the plugin/engine boundary, spelled once on each side.
     it "writes the directive the engine reads" do
       expect(Rigor::Plugin::RbsInline::Synthesizer::INFERRED_RETURN_ANNOTATION)
         .to eq(Rigor::RbsExtended::INFERRED_RETURN_DIRECTIVE)
+      expect(Rigor::Plugin::RbsInline::Synthesizer::INFERRED_SIGNATURE_ANNOTATION)
+        .to eq(Rigor::RbsExtended::INFERRED_SIGNATURE_DIRECTIVE)
     end
 
     it "does not mark a fully annotated method" do
@@ -410,6 +420,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
 
       expect(synthesized).to include("def repeat: (Integer) -> String")
       expect(synthesized).not_to include("rigor:v1:inferred-return")
+      expect(synthesized).not_to include("rigor:v1:inferred-signature")
     end
   end
 

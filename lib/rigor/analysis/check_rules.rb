@@ -1481,13 +1481,43 @@ module Rigor
           # `.new` against the real `Struct.new(*Symbol)` signature is a
           # false positive. Skip arity-checking the chained position.
           return nil if anonymous_struct_new_call?(call_node, class_name, kind)
-          return nil if scope.discovered_method?(class_name, call_node.name, kind)
 
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
           return nil unless definition_available?(receiver_type, class_name, scope)
 
+          # Issue #991 — `discovered_method?` used to exempt the call outright at this point, before ever
+          # asking for a declaration. That is right for a method the project declares NOWHERE ELSE:
+          # `DiscoveryIndex` records only `method_name => :instance | :singleton`, no parameter shape, so
+          # there was no arity to check against. It does not extend to a method the project ALSO declares —
+          # `trustworthy_signature` is the same lookup `argument_type_diagnostic` treats as authoritative
+          # over a source `def` (see its own comment beside that call), and the two rules must agree on
+          # whose contract binds. `method_def.nil?` below is what keeps an undeclared source method silent.
           method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
           return nil if method_def.nil?
+
+          # Issue #992 — under ADR-93 the bundled `rigor-rbs-inline` plugin emits a full parameter skeleton
+          # for EVERY `def` in a file that carries at least one annotation anywhere in it (#823), so
+          # `trustworthy_signature` resolves a `method_def` even for a bare, undeclared `def` — one whose
+          # arity happens to be structurally accurate (it is read off the real `Prism::DefNode`) but that no
+          # author ever asserted. Trusting it here would make whether an UNANNOTATED sibling method gets
+          # arity-checked depend on whether some OTHER method in its file happens to carry an annotation,
+          # which is exactly the coupling #823 already ruled out for return typing.
+          #
+          # `inferred_signature?` — not `inferred_return?` — is the right gate here. `inferred_return?` also
+          # trips on a member whose PARAMETERS the author did annotate (`# @rbs num: Float`) and only the
+          # return defaulted; declining on that would silence the very case #991 exists for, since a
+          # parameter the author wrote is an assertion about the parameter list, and the parameter list is
+          # exactly what arity is a question about. The synthesized skeleton's arity is faithful by
+          # construction either way — upstream renders the `def`'s real parameter list whether or not
+          # anything nearby was annotated — so the reason to stay silent on a bare `def` is never that its
+          # arity might be wrong; it is that nobody asserted anything about the member at all, which is
+          # #992's envelope (`define_method`, `method_missing`, aliases, reopened classes, `prepend`,
+          # ADR-17 `pre_eval:` patches, plugin-contributed surfaces) rather than a signature question.
+          # `inferred_signature?` is true only when EVERY type slot on the member defaulted — no parameter
+          # and no return was authored — which is exactly "nobody asserted anything here". A `sig/`
+          # declaration never carries either annotation, so the #991 case this rule exists for is
+          # unaffected.
+          return nil if Rigor::RbsExtended.inferred_signature?(method_def)
           return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
 
           arity_envelope = compute_arity_envelope(method_def)

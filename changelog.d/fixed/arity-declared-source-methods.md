@@ -1,0 +1,1 @@
+- **[check]** `call.wrong-arity` now fires on a project-defined method that also carries a trustworthy `sig/` or inline `# @rbs` / `#:` signature, instead of silently exempting every source-defined method regardless of its declared arity. ([#999](https://github.com/rigortype/rigor/pull/999))

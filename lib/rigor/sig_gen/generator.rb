@@ -951,10 +951,19 @@ module Rigor
         translated.size == 1 ? translated.first : Type::Combinator.union(*translated)
       end
 
+      # `alias_expander:` matters here as much as it does at any dispatch site (see
+      # {Inference::RbsTypeTranslator}'s own doc comment): without it, a declared return spelled as a
+      # project alias (`Type::t`, `Environment::ordering`, `Inference::closure_classification`) degrades
+      # to `Dynamic[Top]` exactly like a bare `untyped` would, and {#declared_untyped?} cannot tell an
+      # author's meaningful alias apart from an absent declaration. That collapsed a well-typed, already
+      # exact declaration into a spurious {#declared_untyped_candidate} the moment #995 made "declared
+      # untyped" a proposable position — the ADR-107 G3 gate caught it on this repo's own `sig/` tree
+      # (`Environment#class_ordering`'s `-> ordering` and every `-> Type::t` return in `type.rbs` /
+      # `inference.rbs` / `scope.rbs`).
       def translate_method_type_return(method_type)
         Inference::RbsTypeTranslator.translate(
           method_type.type.return_type,
-          self_type: nil, instance_type: nil, type_vars: {}
+          self_type: nil, instance_type: nil, type_vars: {}, alias_expander: @environment&.rbs_loader
         )
       rescue StandardError
         nil

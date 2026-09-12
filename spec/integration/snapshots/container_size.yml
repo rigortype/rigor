@@ -2,7 +2,7 @@
 locals:
   acc: Hash
   "n": Dynamic[top]
-  text: String
+  text: decimal-int-string
   words: Dynamic[top]
 assertions:
   '1': non-negative-int

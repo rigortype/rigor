@@ -1,9 +1,9 @@
 ---
 locals:
-  joined: String
+  joined: non-empty-string
   lower: Integer
   ranged: Integer
-  strs: "[String, String]"
+  strs: "[non-empty-string, non-empty-string]"
   sum: Integer
   sum2: Integer
   upper: Integer
@@ -12,4 +12,4 @@ assertions:
   '1': Integer
   '2': Integer
   '3': Integer
-  '4': String
+  '4': non-empty-string

@@ -197,7 +197,8 @@ module Rigor
           Type::Difference => :dispatch_difference,
           Type::Refined => :dispatch_refined,
           Type::Intersection => :dispatch_intersection,
-          Type::IntegerRange => :dispatch_integer_range
+          Type::IntegerRange => :dispatch_integer_range,
+          Type::FloatRange => :dispatch_float_range
         }.freeze
         private_constant :RECEIVER_HANDLERS
 
@@ -304,12 +305,73 @@ module Rigor
             when "String"
               dispatch_string_binary_from_arg(method_name, args.first) if args.size == 1
             when "Integer"
-              dispatch_integer_binary_from_arg(method_name, args.first) if args.size == 1
+              integer_nominal_projection(method_name, args)
+            when "Float"
+              float_to_s_projection(method_name, args)
             when "Array"
               case method_name
               when :flatten then array_nominal_flatten(nominal, args)
               when :compact then array_nominal_compact(nominal, args)
               end
+            end
+          end
+
+          # `Integer#to_s` / `Integer#inspect` (#993) on a bare `Nominal[Integer]` receiver, ahead of the
+          # existing `:*` binary fold. `#inspect` takes no argument and matches `#to_s()` byte for byte, so
+          # it routes through the same no-arg branch.
+          def integer_nominal_projection(method_name, args)
+            case method_name
+            when :to_s then integer_to_s_projection(args)
+            when :inspect then args.empty? ? Type::Combinator.decimal_int_string : nil
+            else dispatch_integer_binary_from_arg(method_name, args.first) if args.size == 1
+            end
+          end
+
+          # `decimal-int-string`'s predicate (`/\A-?\d+\z/`) admits the optional sign, so — unlike the
+          # `IntegerRange#to_s` tier above, which declines a signed range because it cannot yet prove the
+          # sign is absent — a bare `Integer` (sign completely unknown) still reaches it for the base-10
+          # case: base 10 is Ruby's default sign-and-digits grammar for every Integer. Any other base,
+          # known or not statically known, drops to `non-empty-string`: `to_s(base)` never returns `""`,
+          # but a non-decimal base's digits (`255.to_s(16)` is `"ff"`, not the `0xff` literal) match no
+          # registered refinement.
+          def integer_to_s_projection(args)
+            return Type::Combinator.decimal_int_string if args.empty?
+            return nil unless args.size == 1
+
+            decimal_base?(args.first) ? Type::Combinator.decimal_int_string : Type::Combinator.non_empty_string
+          end
+
+          def decimal_base?(arg)
+            arg.is_a?(Type::Constant) && arg.value == 10
+          end
+
+          # `Float#to_s` / `Float#inspect` (#993) on a bare `Nominal[Float]` receiver. No finiteness proof
+          # is available here — a bare `Float` admits `Infinity` / `-Infinity` / `NaN`, none of which are
+          # Ruby numeric literals — so the floor is `non-empty-string` (Ruby's conversion is total and
+          # never returns `""`). A `FloatRange` receiver with proven-finite bounds reaches `numeric-string`
+          # instead; see {#dispatch_float_range}.
+          def float_to_s_projection(method_name, args)
+            return nil unless %i[to_s inspect].include?(method_name)
+            return nil unless args.empty?
+
+            Type::Combinator.non_empty_string
+          end
+
+          # `Float#to_s` / `Float#inspect` (#993) on a `FloatRange` receiver. `min` / `canonical_max` both
+          # finite (Ruby's own `Float#finite?`, the same check {MethodDispatcher::ConstantFolding}'s
+          # `float_range_finite` fold uses) is exactly a finiteness proof: no bounded range contains `NaN`,
+          # and finite bounds rule out both infinities too. `finite-float` satisfies it, as does any
+          # narrower bounded sub-range and the `f.finite?` truthy-edge narrowing (ADR-109 WD5) that
+          # produces `finite-float` — but `Float[0.0..]` does NOT, because its endless upper bound is
+          # `Float::INFINITY`.
+          def dispatch_float_range(range, method_name, args)
+            return nil unless args.empty?
+            return nil unless %i[to_s inspect].include?(method_name)
+
+            if range.min.finite? && range.canonical_max.finite?
+              Type::Combinator.numeric_string
+            else
+              Type::Combinator.non_empty_string
             end
           end
 

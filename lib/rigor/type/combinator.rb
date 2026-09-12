@@ -825,30 +825,106 @@ module Rigor
 
           return [top] if flattened.any?(Top)
 
-          absorb_float_ranges(unique_members(flattened))
+          absorb_contained_members(unique_members(flattened))
         end
 
-        # ADR-109 WD5 — a `FloatRange` member is absorbed by a bare `Nominal[Float]` member or by a
-        # `FloatRange` member that contains it. The truthy edge of `x > c` is a range and the falsy
-        # edge keeps `Float`, so the join after every Float guard would otherwise carry both and every
-        # later guard would narrow member by member into a growing union (`Float[...1.0] |
-        # Float[0.0...1.0]`) that names one set. `IntegerRange` keeps its pre-ADR-109 behaviour
-        # (`Integer | Integer[0..5]` stays as written) because both of its edges narrow.
-        def absorb_float_ranges(members)
-          return members unless members.any?(FloatRange)
+        # Drops every member another member already contains, so the join after a guard names one set
+        # instead of several readings of it. The normative relation is
+        # docs/type-specification/normalization.md § "Member absorption"; {absorbed_by?} is that list.
+        #
+        # Only a `FloatRange`, `Tuple` or `HashShape` member can be dropped, so the O(n²) scan is
+        # skipped for every union that carries none of them — this runs on the hot path of every join.
+        #
+        # The `!absorbed_by?(other, member)` re-check costs one predicate call per pair that absorbed
+        # at all, and it is what makes "both arms dropped" unrepresentable should a future clause make
+        # the relation symmetric on a pair of distinct members.
+        def absorb_contained_members(members)
+          return members unless members.any? { |m| absorbable_member?(m) }
 
           members.reject do |member|
-            member.is_a?(FloatRange) &&
-              members.any? { |other| !other.equal?(member) && float_range_absorbed_by?(member, other) }
+            absorbable_member?(member) &&
+              members.any? do |other|
+                !other.equal?(member) && absorbed_by?(member, other) && !absorbed_by?(other, member)
+              end
           end
         end
 
+        def absorbable_member?(type)
+          type.is_a?(FloatRange) || type.is_a?(Tuple) || type.is_a?(HashShape)
+        end
+
+        # `narrower`'s inhabitants are a subset of `wider`'s under a rule the union already applies to
+        # a direct member. The structural clauses only lift that same relation element-wise over a
+        # fixed spine; none of them introduces an absorption the flat union does not already perform,
+        # which is why a value-pinned element never collapses (normalization.md keeps `1 | Integer`,
+        # so `[1, String] | [Integer, String]` keeps both arms) and an `IntegerRange` or `Refined`
+        # element never does either.
+        def absorbed_by?(narrower, wider)
+          return true if wider.is_a?(Top) || narrower.is_a?(Bot)
+          return true if listed_in_union?(narrower, wider)
+
+          case narrower
+          when FloatRange then float_range_absorbed_by?(narrower, wider)
+          when Tuple then wider.is_a?(Tuple) && tuple_absorbed_by?(narrower, wider)
+          when HashShape then wider.is_a?(HashShape) && hash_shape_absorbed_by?(narrower, wider)
+          when Union then union_absorbed_by?(narrower, wider)
+          else false
+          end
+        end
+
+        # Flatten-and-dedupe read one level down: the member is already one of the arms `wider` lists.
+        def listed_in_union?(narrower, wider)
+          wider.is_a?(Union) && wider.members.any? { |member| element_absorbed_or_equal?(narrower, member) }
+        end
+
+        def union_absorbed_by?(narrower, wider)
+          narrower.members.all? { |member| element_absorbed_or_equal?(member, wider) }
+        end
+
+        def element_absorbed_or_equal?(narrower, wider)
+          narrower.equal?(wider) || narrower == wider || absorbed_by?(narrower, wider)
+        end
+
+        # ADR-109 WD5 — a `FloatRange` is absorbed by a bare `Nominal[Float]` or by a `FloatRange` that
+        # contains it. The truthy edge of `x > c` is a range and the falsy edge keeps `Float`, so the
+        # join after every Float guard would otherwise carry both and every later guard would narrow
+        # member by member into a growing union (`Float[...1.0] | Float[0.0...1.0]`) that names one set.
+        # `IntegerRange` keeps its pre-ADR-109 behaviour (`Integer | Integer[0..5]` stays as written)
+        # because both of its edges narrow.
         def float_range_absorbed_by?(range, other)
           case other
           when Nominal then other.class_name == "Float" && other.type_args.empty?
           when FloatRange then other != range && other.accepts(range).yes?
           else false
           end
+        end
+
+        # Differing arity is never absorbed: `[A]` and `[A, B]` have disjoint inhabitants, so neither
+        # arm is a reading of the other.
+        def tuple_absorbed_by?(narrower, wider)
+          return false unless narrower.elements.size == wider.elements.size
+
+          narrower.elements.each_with_index.all? do |element, index|
+            element_absorbed_or_equal?(element, wider.elements[index])
+          end
+        end
+
+        def hash_shape_absorbed_by?(narrower, wider)
+          return false unless hash_shape_spine_equal?(narrower, wider)
+
+          narrower.pairs.all? { |key, value| element_absorbed_or_equal?(value, wider.pairs[key]) }
+        end
+
+        # The spine is everything but the value types: the key set and the openness / optionality /
+        # read-only policy. Two shapes that disagree on any of it describe differently-shaped hashes,
+        # and an element-wise reading of their values would not be a containment.
+        def hash_shape_spine_equal?(narrower, wider)
+          narrower.pairs.size == wider.pairs.size &&
+            narrower.extra_keys == wider.extra_keys &&
+            narrower.required_keys == wider.required_keys &&
+            narrower.optional_keys == wider.optional_keys &&
+            narrower.read_only_keys == wider.read_only_keys &&
+            narrower.pairs.each_key.all? { |key| wider.pairs.key?(key) }
         end
 
         def unique_members(types)

@@ -1,0 +1,30 @@
+---
+locals:
+  arity: '[Float, "x"] | [Float]'
+  disjoint: "[Float[-1.0..0.0], 1] | [Float[1.0..], 1]"
+  f: Float
+  g: Float
+  h: Float
+  i: Integer | Integer[0..5]
+  ints: '[Integer, "x"] | [Integer[0..5], "x"]'
+  j: Integer
+  k: Float
+  m: Float
+  "n": Float
+  nested: "[[Float, String], 1]"
+  not_a_tuple: Array[String] | [Float, "x"]
+  pinned: '[1, "x"] | [Integer, "x"]'
+  r: Float
+  shape: "{ value: Float }"
+  shape_keys: "{ value: Float } | { value: Float, extra: 1 }"
+  three: "[Float, String]"
+assertions:
+  '1': "[Float, String]"
+  '2': "[[Float, String], 1]"
+  '3': "{ value: Float }"
+  '4': '[Integer, "x"] | [Integer[0..5], "x"]'
+  '5': '[1, "x"] | [Integer, "x"]'
+  '6': '[Float, "x"] | [Float]'
+  '7': "[Float[-1.0..0.0], 1] | [Float[1.0..], 1]"
+  '8': Array[String] | [Float, "x"]
+  '9': "{ value: Float } | { value: Float, extra: 1 }"

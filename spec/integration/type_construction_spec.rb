@@ -1175,6 +1175,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/tuple_union_absorption.rb — issue #994 element-wise arm absorption" do
+    let(:harness) { harness_for("tuple_union_absorption") }
+
+    it "collapses a contained same-arity tuple / identically-shaped hash arm and keeps every excluded one" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/float_folds.rb — ADR-109 bounded Float folds (rand, Math, abs, clamp)" do
     let(:harness) { harness_for("float_folds") }
 

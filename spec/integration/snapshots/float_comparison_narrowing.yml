@@ -5,18 +5,21 @@ locals:
   x: Float
 assertions:
   '1': Float[0.0..]
-  '2': Float
-  '3': Float[...1.0]
-  '4': Float[..1.0]
-  '5': Float[0.0..1.0]
-  '6': Float[...1.0]
-  '7': Float[0.0..1.0]
-  '8': Float
+  '2': non-empty-string
+  '3': Float
+  '4': Float[...1.0]
+  '5': Float[..1.0]
+  '6': Float[0.0..1.0]
+  '7': Float[...1.0]
+  '8': Float[0.0..1.0]
   '9': Float
-  '10': non-nan-float
-  '11': finite-float
-  '12': Float
-  '13': non-negative-int
-  '14': non-negative-int
-  '15': Float[0.0..]
-  '16': Float[0.0...1.0]
+  '10': Float
+  '11': non-nan-float
+  '12': finite-float
+  '13': numeric-string
+  '14': Float
+  '15': non-empty-string
+  '16': non-negative-int
+  '17': non-negative-int
+  '18': Float[0.0..]
+  '19': Float[0.0...1.0]

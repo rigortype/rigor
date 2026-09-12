@@ -203,6 +203,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     it "declines Integer#digits on a negative receiver" do
       expect(fold(-5, :digits)).to be_nil
     end
+
+    it "pins the three non-finite Float spellings' #to_s / #inspect (#993) — none is a numeric literal" do
+      # Refutes an unconditional `Float#to_s -> numeric-string` claim: every one of these prints as a
+      # non-empty String that Ruby's own parser would not read back as a Float literal.
+      expect(fold(Float::INFINITY, :to_s).value).to eq("Infinity")
+      expect(fold(-Float::INFINITY, :to_s).value).to eq("-Infinity")
+      expect(fold(Float::NAN, :to_s).value).to eq("NaN")
+
+      expect(fold(Float::INFINITY, :inspect).value).to eq("Infinity")
+      expect(fold(-Float::INFINITY, :inspect).value).to eq("-Infinity")
+      expect(fold(Float::NAN, :inspect).value).to eq("NaN")
+    end
   end
 
   describe "catalog-uplift additions (pure scalar + Array→Tuple)" do

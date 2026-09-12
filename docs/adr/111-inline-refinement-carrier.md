@@ -171,9 +171,10 @@ This ADR's compatibility claim is the measured one, and the measurement is one r
 - **Defect — Rigor's reader silently drops the same-line forms.** `#: %a{…} () -> T` and `# @rbs %a{…}
   () -> T` are rbs syntax the built-in reader accepts; the gem drops the method type or the line
   without a diagnostic, which violates ADR-32 WD12 (a parsed-but-unhonoured annotation is never
-  swallowed) and `overview.md`'s "100% compatible with RBS and rbs-inline syntax". Route to its own
-  issue; add the row to ADR-32 WD11's lost-construct list; fix on Rigor's side so that both spellings
-  reach the environment with the annotation attached — the plugin's synthesis seam
+  swallowed) and `overview.md`'s "100% compatible with RBS and rbs-inline syntax". Routed to
+  [#998](https://github.com/rigortype/rigor/issues/998), which adds the row to ADR-32 WD11's
+  lost-construct list; fix on Rigor's side so that both spellings reach the environment with the
+  annotation attached — the plugin's synthesis seam
   (`plugins/rigor-rbs-inline/lib/rigor/plugin/rbs_inline.rb`, where WD6's `default_type` marker and the
   `#:nodoc:` rewrite already sit) is the injection point. Once fixed, the manual documents **both**
   forms and recommends the same-line one, because it is the one the ecosystem's long-run reader

@@ -1,0 +1,1 @@
+- **[playground]** Tab now indents in the editor instead of moving focus, and the WASM page's dark-theme cursor no longer blends into the background. ([#990](https://github.com/rigortype/rigor/pull/990))

@@ -238,6 +238,125 @@ RSpec.describe Rigor::Type::Combinator do
       expect(a).to eq(b)
     end
 
+    # Issue #994 — the member absorption above, asked one level down. Every case below that keeps
+    # both arms keeps them because the DIRECT union of the two differing elements keeps both, which
+    # is the whole content of the rule: the element-wise clause grants no absorption of its own.
+    describe "element-wise absorption of structural arms" do
+      let(:float) { described_class.nominal_of("Float") }
+      let(:string) { described_class.nominal_of("String") }
+      let(:integer) { described_class.nominal_of("Integer") }
+      let(:non_negative_float) { described_class.float_range(0.0, Float::INFINITY) }
+      let(:negative_float) { described_class.float_range(-Float::INFINITY, 0.0, exclude_end: true) }
+
+      def tuple(*elements)
+        described_class.tuple_of(*elements)
+      end
+
+      it "collapses a same-arity tuple arm the other arm contains element-wise" do
+        union = described_class.union(tuple(float, string), tuple(non_negative_float, string))
+        expect(union).to eq(tuple(float, string))
+      end
+
+      it "recurses into a nested tuple element" do
+        union = described_class.union(
+          tuple(tuple(float, string), integer),
+          tuple(tuple(non_negative_float, string), integer)
+        )
+        expect(union).to eq(tuple(tuple(float, string), integer))
+      end
+
+      it "collapses when the containing element is top" do
+        union = described_class.union(tuple(float, string), tuple(described_class.top, string))
+        expect(union).to eq(tuple(described_class.top, string))
+      end
+
+      it "collapses when the contained element is bot" do
+        union = described_class.union(tuple(described_class.bot, string), tuple(float, string))
+        expect(union).to eq(tuple(float, string))
+      end
+
+      it "collapses when the containing element is a union that already lists the contained one" do
+        wider = described_class.union(float, string)
+        union = described_class.union(tuple(float, string), tuple(wider, string))
+        expect(union).to eq(tuple(wider, string))
+      end
+
+      it "keeps both arms for an IntegerRange element, as the direct union does" do
+        arms = [tuple(integer, string), tuple(described_class.integer_range(0, 5), string)]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both arms for a Refined element, as the direct union does" do
+        arms = [tuple(string, integer), tuple(described_class.lowercase_string, integer)]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both arms for a value-pinned element, as `1 | Integer` does" do
+        arms = [tuple(described_class.constant_of(1), string), tuple(integer, string)]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both arms for a dynamic-origin element (ADR-83)" do
+        arms = [tuple(float, string), tuple(described_class.untyped, string)]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both arms of differing arity even when every shared position is contained" do
+        arms = [tuple(float, string), tuple(non_negative_float)]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both arms when neither contains the other" do
+        arms = [tuple(non_negative_float, string), tuple(negative_float, string)]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps a tuple arm beside an Array arm — different carriers, not one spine" do
+        arms = [tuple(float, string), described_class.nominal_of("Array", type_args: [float])]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "collapses a hash-shape arm the other arm contains over an identical spine" do
+        union = described_class.union(
+          described_class.hash_shape_of({ value: float }),
+          described_class.hash_shape_of({ value: non_negative_float })
+        )
+        expect(union).to eq(described_class.hash_shape_of({ value: float }))
+      end
+
+      it "keeps both hash-shape arms when the key set differs" do
+        arms = [
+          described_class.hash_shape_of({ value: float }),
+          described_class.hash_shape_of({ value: non_negative_float, extra: integer })
+        ]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both hash-shape arms when the extra-key policy differs" do
+        arms = [
+          described_class.hash_shape_of({ value: float }),
+          described_class.hash_shape_of({ value: non_negative_float }, extra_keys: :open)
+        ]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both hash-shape arms when a key's optionality differs" do
+        arms = [
+          described_class.hash_shape_of({ value: float }),
+          described_class.hash_shape_of({ value: non_negative_float }, optional_keys: [:value])
+        ]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+
+      it "keeps both hash-shape arms when a key's read-only marker differs" do
+        arms = [
+          described_class.hash_shape_of({ value: float }),
+          described_class.hash_shape_of({ value: non_negative_float }, read_only_keys: [:value])
+        ]
+        expect(described_class.union(*arms).members).to match_array(arms)
+      end
+    end
+
     describe "#describe bool collapse" do
       let(:true_) { described_class.constant_of(true) }
       let(:false_) { described_class.constant_of(false) }

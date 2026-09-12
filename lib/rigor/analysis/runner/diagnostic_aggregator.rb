@@ -39,7 +39,9 @@ module Rigor
         #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
         # @param definition_build_failures_snapshot — issue #696 — reader returning the per-class
         #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
-        #   conflicting_buffer_names]` tuples. Empty for a healthy sig set.
+        #   conflicting_buffer_names, unresolved_type_name_detail]` tuples (issue #997 added the fifth
+        #   element — `[token, location, refinement_hint]`, `nil` unless `error_class` is
+        #   `RBS::NoTypeFoundError`). Empty for a healthy sig set.
         # @param hkt_scan_failure_snapshot — issue #784 — reader returning the `[error_class_name,
         #   first_message_line, raw_frame_or_nil, stage]` tuple whichever stage of the HKT-registry build
         #   raised, or nil when both built (or were never demanded). `stage` is `:scan` (the RBS `type`-alias
@@ -585,22 +587,50 @@ module Rigor
         end
 
         # The closing advice follows the FIRST failure's error class: `GenericParameterMismatchError` is two
-        # declarations of one CLASS at different generic arity (#610), and "remove the duplicate member"
-        # sends its reader after a member that does not exist.
+        # declarations of one CLASS at different generic arity (#610); `NoTypeFoundError` (issue #997) is
+        # ONE declaration naming a type that does not exist, which "remove the duplicate declaration" sends
+        # its reader after a duplicate that is not there — the fifth tuple element
+        # ({RbsLoader#unresolved_type_name_detail}) is non-nil for exactly that case. Every other error class
+        # (the two duplicated-definition errors, `RecursiveAncestorError`, …) keeps the duplicate-declaration
+        # wording, which is accurate for them.
         def definition_build_advice(failure)
-          _, error_class, = failure
+          _, error_class, _member, _buffers, unresolved = failure
           if error_class.to_s.end_with?("GenericParameterMismatchError")
             "Two signature sources declare the class with a different number of type parameters; make " \
               "the declarations agree (`rbs validate`) to restore type coverage."
+          elsif unresolved
+            unresolved_type_name_advice(unresolved)
           else
             "Two signature sources declare the same member; remove the duplicate declaration " \
               "(`rbs validate`) to restore type coverage."
           end
         end
 
-        # `[class_name, error_class, member, buffers]`. The member is nil for the error classes that carry no
-        # name at all (`RecursiveAncestorError`), and the clause then names the error class alone rather than
-        # inventing a member.
+        # Issue #997 — `unresolved` is {RbsLoader#unresolved_type_name_detail}'s `[token, location,
+        # refinement_hint]`. `refinement_hint` turns the message into a fix: the token is not a typo to
+        # chase down but the start of a Rigor refinement name that is not valid in an RBS type position, and
+        # the reader is told the spelling that IS valid today. Without a hint, the token is named with its
+        # position and the reader is left with the same "not a duplicate" correction plus a typo/missing-load
+        # check — still narrower than the duplicate-declaration wording it replaces.
+        def unresolved_type_name_advice(unresolved)
+          token, location, refinement_hint = unresolved
+          position = location ? " at `#{location}`" : ""
+          if refinement_hint
+            "`#{token}`#{position} does not name a type RBS can resolve; it is the start of the Rigor " \
+              "refinement `#{refinement_hint}`, which is not valid in an RBS type position. Write it as " \
+              "an `%a{rigor:v1:param: name is #{refinement_hint}}` (or `return:` / `assert`) annotation " \
+              "alongside the plain RBS type instead — see docs/manual/16-rbs-extended-annotations.md — " \
+              "to restore type coverage."
+          else
+            "One signature source names `#{token}`#{position}, which is not a type RBS can resolve; fix " \
+              "the typo, or if it names a class, confirm it is loaded (`rbs validate`) to restore type " \
+              "coverage."
+          end
+        end
+
+        # `[class_name, error_class, member, buffers, unresolved_type_name_detail]`. The member is nil for
+        # the error classes that carry no name at all (`RecursiveAncestorError`), and the clause then names
+        # the error class alone rather than inventing a member.
         def first_failure_clause(failure)
           _, error_class, member, = failure
           return " First failure: #{error_class}." if member.nil? || member.empty?

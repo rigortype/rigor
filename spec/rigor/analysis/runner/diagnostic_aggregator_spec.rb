@@ -896,5 +896,47 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
 
       expect(message).to include("remove the duplicate declaration")
     end
+
+    # Issue #997 — a four-element failure tuple (every existing producer, and every cached blob written
+    # before the fifth slot existed) destructures `unresolved` as `nil` and keeps the duplicate-declaration
+    # wording rather than raising.
+    it "keeps the duplicate-member advice for a four-element failure tuple with no fifth slot" do
+      failures = [["Acme", "RBS::DuplicatedMethodDefinitionError", "::Acme#label", []]]
+      message = build_aggregator(
+        definition_build_failures_snapshot: failures
+      ).rbs_definition_build_failed_diagnostics.first.message
+
+      expect(message).to include("remove the duplicate declaration")
+      expect(message).not_to include("does not name a type RBS can resolve")
+    end
+
+    # Issue #997 — one signature source naming a type RBS never resolved is not a duplicate: no other
+    # declaration is in play, so "remove the duplicate declaration" sends the reader after nothing.
+    it "names the unresolved token and its position instead of the duplicate-member advice" do
+      failures = [["ProbeZZ", "RBS::NoTypeFoundError", "finite", [],
+                   ["finite", "virtual:rbs-inline:probe.rb:4:14...4:20", nil]]]
+      message = build_aggregator(
+        definition_build_failures_snapshot: failures
+      ).rbs_definition_build_failed_diagnostics.first.message
+
+      expect(message).not_to include("remove the duplicate declaration")
+      expect(message).to include("`finite`")
+      expect(message).to include("virtual:rbs-inline:probe.rb:4:14...4:20")
+      expect(message).to include("which is not a type RBS can resolve")
+    end
+
+    # Issue #997 — when the unresolved token is the start of a registered Rigor refinement name, the
+    # message names the valid spelling instead of only telling the reader what is wrong.
+    it "points at the valid %a{rigor:v1:...} spelling when the token matches a Rigor refinement" do
+      failures = [["ProbeZZ", "RBS::NoTypeFoundError", "finite", [],
+                   ["finite", "virtual:rbs-inline:probe.rb:4:14...4:20", "finite-float"]]]
+      message = build_aggregator(
+        definition_build_failures_snapshot: failures
+      ).rbs_definition_build_failed_diagnostics.first.message
+
+      expect(message).to include("Rigor refinement `finite-float`")
+      expect(message).to include("%a{rigor:v1:param: name is finite-float}")
+      expect(message).to include("docs/manual/16-rbs-extended-annotations.md")
+    end
   end
 end

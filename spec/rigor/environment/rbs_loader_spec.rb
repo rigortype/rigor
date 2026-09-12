@@ -640,6 +640,84 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.definition_build_failures).to be_empty
     end
 
+    # Issue #997 — `RBS::NoTypeFoundError` is a DIFFERENT failure kind than the duplicate-declaration
+    # examples above: one declaration names a type that does not exist, not two declarations colliding. The
+    # fifth tuple element ({RbsLoader#unresolved_type_name_detail}) is what
+    # `DiagnosticAggregator#definition_build_advice` reads to tell the two apart.
+    #
+    # A hand-authored `signature_paths:` `.rbs` referencing an unknown type does NOT reach
+    # `NoTypeFoundError` at all — {#stub_missing_referenced_types} synthesizes an empty stub for it first
+    # (ADR-5 robustness, second tier), so these fixtures go through `virtual_rbs:` instead, exactly the lane
+    # {.stub_missing_referenced_types}'s own comment says is out of its bound ("bounded to `signature_paths`
+    # classes") and the one an inline `# @rbs` / `#:` annotation actually rides.
+    describe "an unresolvable type name (#997)" do
+      def virtual_probe(comment_line = nil)
+        body = +"class ProbeZZ\n"
+        body << "  #{comment_line}\n" if comment_line
+        body << "  def probe: (finite g) -> untyped\nend\n"
+        ["virtual:rbs-inline:probe.rb", body]
+      end
+
+      it "records the token and its position, with no refinement hint absent a matching name nearby" do
+        loader = described_class.new(virtual_rbs: [virtual_probe])
+        allow(loader).to receive(:warn)
+
+        expect(loader.instance_definition("ProbeZZ")).to be_nil
+
+        _, error_class, member, _buffers, unresolved = loader.definition_build_failures.first
+        expect(error_class).to eq("RBS::NoTypeFoundError")
+        expect(member).to eq("finite")
+        token, location, refinement_hint = unresolved
+        expect(token).to eq("finite")
+        expect(location).to include("virtual:rbs-inline:probe.rb")
+        expect(refinement_hint).to be_nil
+      end
+
+      # The comment is what a synthesized rbs-inline buffer echoes verbatim above the member it generates
+      # (`Effects::InlineAnchor`'s "annotation echo") — reproduced by hand here to exercise the textual scan
+      # without depending on the rbs-inline plugin.
+      it "names the full refinement when the truncated token is followed by a registered compound name" do
+        loader = described_class.new(virtual_rbs: [virtual_probe("# @rbs g: finite-float")])
+        allow(loader).to receive(:warn)
+
+        expect(loader.instance_definition("ProbeZZ")).to be_nil
+
+        _, _, _, _, unresolved = loader.definition_build_failures.first
+        _token, _location, refinement_hint = unresolved
+        expect(refinement_hint).to eq("finite-float")
+      end
+
+      # A coincidental `token-suffix` that is not a REGISTERED refinement must say nothing: false positives
+      # outrank a "did you mean" that would be a guess.
+      it "declines the hint when the nearby compound name is not a registered refinement" do
+        loader = described_class.new(virtual_rbs: [virtual_probe("# finite-nonsense")])
+        allow(loader).to receive(:warn)
+
+        expect(loader.instance_definition("ProbeZZ")).to be_nil
+
+        _, _, _, _, unresolved = loader.definition_build_failures.first
+        _token, _location, refinement_hint = unresolved
+        expect(refinement_hint).to be_nil
+      end
+
+      # F4's own guarantee, extended to the new slot: a cache hit must report the SAME hint a cold run does.
+      it "reports the same refinement hint on a cache-hit run as on a cold one" do
+        virtual = [virtual_probe("# @rbs g: finite-float")]
+        cache_store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+        warm = described_class.new(virtual_rbs: virtual, cache_store: cache_store)
+        allow(warm).to receive(:warn)
+        warm.send(:env)
+
+        loader = described_class.new(virtual_rbs: virtual, cache_store: cache_store)
+        allow(loader).to receive(:warn)
+        loader.instance_definition("ProbeZZ")
+
+        _, _, _, _, unresolved = loader.definition_build_failures.first
+        _token, _location, refinement_hint = unresolved
+        expect(refinement_hint).to eq("finite-float")
+      end
+    end
+
     # Issue #696 review, F1 — the regression gate for the BLOCKER. The whole-universe walk behind
     # `#prewarm` / `#reflection` is a cache-warming implementation detail, so what it discovers must not
     # reach the diagnostic: otherwise the reported class list depends on whether a pool warmed a cache, and

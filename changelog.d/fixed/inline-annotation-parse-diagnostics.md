@@ -1,0 +1,1 @@
+- **[check]** A Rigor refinement name written where an RBS type belongs no longer degrades a whole class behind a "duplicate declaration" message that names no such duplicate, and an unparseable `#:` annotation is now reported instead of being dropped in silence. [#1005](https://github.com/rigortype/rigor/pull/1005)

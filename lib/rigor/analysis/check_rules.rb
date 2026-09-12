@@ -1481,11 +1481,17 @@ module Rigor
           # `.new` against the real `Struct.new(*Symbol)` signature is a
           # false positive. Skip arity-checking the chained position.
           return nil if anonymous_struct_new_call?(call_node, class_name, kind)
-          return nil if scope.discovered_method?(class_name, call_node.name, kind)
 
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
           return nil unless definition_available?(receiver_type, class_name, scope)
 
+          # Issue #991 — `discovered_method?` used to exempt the call outright at this point, before ever
+          # asking for a declaration. That is right for a method the project declares NOWHERE ELSE:
+          # `DiscoveryIndex` records only `method_name => :instance | :singleton`, no parameter shape, so
+          # there was no arity to check against. It does not extend to a method the project ALSO declares —
+          # `trustworthy_signature` is the same lookup `argument_type_diagnostic` treats as authoritative
+          # over a source `def` (see its own comment beside that call), and the two rules must agree on
+          # whose contract binds. `method_def.nil?` below is what keeps an undeclared source method silent.
           method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
           return nil if method_def.nil?
           return nil if undeclared_constructor?(class_name, call_node, kind, method_def)

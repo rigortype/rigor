@@ -89,6 +89,18 @@
       background: var(--surface); border-bottom: 1px solid var(--border);
       flex-shrink: 0; min-height: 44px;
     }
+    /* Tab indents (see the keymap below), so the usual Tab focus move is gone;
+       name the Escape-then-Tab hatch here — CodeMirror requires it when Tab is
+       bound, and it keeps the widget clear of the "no keyboard trap" criterion.
+       It truncates rather than wraps on narrow headers; the full sentence stays
+       in the accessibility tree for the editor's aria-describedby. */
+    #editor-help { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
+    #editor-help kbd { font-family: var(--rigor-font-mono); font-size: 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 3px; padding: 0 3px; }
+    /* The header has no room to keep the hint legible here; clip it from sight
+       but leave it in the accessibility tree for aria-describedby. */
+    @media (max-width: 720px) {
+      #editor-help { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    }
     .brand { font-weight: 700; letter-spacing: -0.01em; color: var(--text); display: flex; align-items: baseline; gap: 8px; }
     .brand::before { content: ""; display: inline-block; width: 10px; height: 10px; background: var(--accent); border-radius: 1px; transform: translateY(1px); }
     .brand .product { font-weight: 500; color: var(--muted); }
@@ -226,6 +238,7 @@
   <header>
     <span class="brand">Rigor <span class="product">Playground</span> <span class="wasm-tag">WASM</span></span>
     <span id="status" aria-live="polite">Loading…</span>
+    <p id="editor-help"><kbd>Esc</kbd> then <kbd>Tab</kbd> to move focus out of the editor.</p>
     <div class="toolbar">
       <button class="btn" id="theme-btn" title="Cycle theme">Dark</button>
       <button class="btn active" id="type-btn" aria-pressed="true"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>Hide types</span></button>
@@ -711,6 +724,8 @@ AscDesc.new.ascdesc(:bad)
           // wins; bind it to indentation instead. Placed after basicSetup so an
           // open autocomplete's own Tab binding still takes precedence.
           keymap.of([indentWithTab]),
+          // Point assistive tech at the Escape-then-Tab hint above.
+          EditorView.contentAttributes.of({ "aria-describedby": "editor-help" }),
           Prec.highest(syntaxHighlighting(rigorHighlight)),
           lintGutter(), annoField, traceHlField,
           // Don't clear the type overlay on each keystroke. The existing

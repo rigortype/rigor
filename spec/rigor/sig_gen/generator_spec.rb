@@ -15,14 +15,22 @@ RSpec.describe Rigor::SigGen::Generator do
     full
   end
 
-  def generator(paths:, signature_paths: nil)
+  def generator(paths:, signature_paths: nil, plugins: nil)
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge(
         "paths" => paths,
-        "signature_paths" => signature_paths
+        "signature_paths" => signature_paths,
+        "plugins" => plugins
       ).compact
     )
     described_class.new(configuration: configuration, paths: paths)
+  end
+
+  # `Configuration.new` never auto-wires `rigor-rbs-inline` (only `Configuration.load` does — the suite's bare
+  # unit constructions deliberately skip it), so a spec exercising ADR-93's inline `# @rbs` synthesis has to
+  # list the plugin explicitly the same way `Configuration.autowire_default_plugins` would.
+  def rbs_inline_plugin_entry
+    { "gem" => "rigor-rbs-inline", "id" => "rbs-inline", "config" => { "require_magic_comment" => false } }
   end
 
   describe "#run on a fresh class without RBS" do
@@ -872,6 +880,97 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.declared_return_rbs).to eq("Object")
       expect(method.rbs).to eq("def label: (untyped) -> String")
+    end
+  end
+
+  # Issue #995. A declared `untyped` return says nothing at all — the ABSENCE of a statement — unlike a
+  # declared `void` (#836), which is the author's word that the value is not part of the contract. Before the
+  # fix, `tighter?`'s backward acceptance check could not tell "no information" apart from "the author
+  # narrowed something real", so both landed `equivalent` — for `untyped` that meant the candidate vanished
+  # with no `rbs` line AND no `skipped` entry, the silent-disappearance bug the issue reports. Two spellings
+  # reach the same `compare_against_declared` comparison: the `sig/`-declared `-> untyped` return written by
+  # hand, and the one ADR-93's inline `# @rbs param: Type` annotation synthesizes for a method whose return
+  # clause it never mentions.
+  describe "#run when the declared return is `untyped`" do
+    it "proposes the inferred return as tighter, was: untyped, for a sig/-declared `-> untyped` return" do
+      write_fixture("sig/box.rbs", "class Box\n  def f: (Float num) -> untyped\nend\n")
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def f(num)
+            if num > 0
+              [num, num.to_s]
+            else
+              [num, num.to_s]
+            end
+          end
+        end
+      RUBY
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :f }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.declared_return_rbs).to eq("untyped")
+      # The rendered PARAMETER stays `untyped` regardless of the declared `Float` per ADR-5 clause 2 (see the
+      # class doc comment) — only `--params=observed` widens it. The fix under test is about the RETURN.
+      expect(method.rbs).to eq("def f: (untyped) -> [Float, String]")
+    end
+
+    # The suite pins `Configuration.load`'s `rigor-rbs-inline` auto-wire off (see spec_helper.rb) and this spec
+    # bypasses `Configuration.load` entirely (its `generator` helper builds a bare `Configuration.new`), so
+    # neither pin applies here — the plugin still needs an explicit `plugins:` entry, and its class needs to be
+    # registered by hand once per process the way `require`'s once-per-process no-op leaves other specs' own
+    # `Plugin.unregister!` calls unable to undo (cli_spec.rb's `:rbs_inline_autowire` context does the same).
+    it "proposes the inferred return for the ADR-93 inline-annotated, return-bare shape the issue reports" do
+      require "rigor-rbs-inline"
+      Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+
+      # No sig/ at all: the inline `# @rbs num: Float` is ADR-93's own synthesis of `def f: (Float) -> untyped`
+      # — the exact repro from #995, reproduced here as a spec rather than a manual CLI run.
+      path = write_fixture("lib/foo.rb", <<~RUBY)
+        class Foo
+          # @rbs num: Float
+          def f(num)
+            if num > 0
+              [num, num.to_s]
+            else
+              [num, num.to_s]
+            end
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path], plugins: [rbs_inline_plugin_entry]).run
+      method = candidates.find { |c| c.method_name == :f }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.declared_return_rbs).to eq("untyped")
+      expect(method.rbs).to eq("def f: (untyped) -> [Float, String]")
+    end
+
+    it "still classifies a declared `void` equivalent — #836's carve-out is untouched by the untyped fix" do
+      write_fixture("sig/box.rbs", "class Box\n  def load_factor: () -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def load_factor\n    3.14\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :load_factor }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.declared_return_rbs).to eq("void")
+    end
+
+    it "does NOT propose anything new when the declared return is a real, matching type" do
+      # `rand(10)` is the corpus's unknown-Integer oracle: the body proves an ordinary `Integer` nominal, never
+      # folded to a literal, so this exercises the `declared_rbs == inferred_rbs` equivalence rather than the
+      # literal-decline guard a folded body would also hit.
+      write_fixture("sig/box.rbs", "class Box\n  def count: (untyped) -> Integer\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def count(x)\n    rand(10)\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :count }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.declared_return_rbs).to eq("Integer")
     end
   end
 

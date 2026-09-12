@@ -1,0 +1,1 @@
+- **[sig-gen]** A method whose declared return is `untyped` (including one ADR-93 synthesizes from a parameter-only inline `# @rbs` annotation) now gets a `tighter-return` proposal for its inferred return instead of silently disappearing from `--print` and the JSON payload. ([#1000](https://github.com/rigortype/rigor/pull/1000))

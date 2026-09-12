@@ -279,7 +279,8 @@
   <script type="module">
     import { basicSetup, EditorView, EditorState } from "https://esm.sh/@codemirror/basic-setup@0.20"
     import { StateField, StateEffect, Prec }       from "https://esm.sh/@codemirror/state@0.20"
-    import { Decoration, WidgetType }              from "https://esm.sh/@codemirror/view@0.20"
+    import { Decoration, WidgetType, keymap }      from "https://esm.sh/@codemirror/view@0.20"
+    import { indentWithTab }                       from "https://esm.sh/@codemirror/commands@0.20"
     import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "https://esm.sh/@codemirror/language@0.20?deps=@lezer/highlight@1.1.6"
     import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
@@ -706,6 +707,10 @@ AscDesc.new.ascdesc(:bad)
         doc: INITIAL_DOC,
         extensions: [
           basicSetup, StreamLanguage.define(ruby),
+          // basicSetup leaves Tab unbound, so the browser's default focus move
+          // wins; bind it to indentation instead. Placed after basicSetup so an
+          // open autocomplete's own Tab binding still takes precedence.
+          keymap.of([indentWithTab]),
           Prec.highest(syntaxHighlighting(rigorHighlight)),
           lintGutter(), annoField, traceHlField,
           // Don't clear the type overlay on each keystroke. The existing

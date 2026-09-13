@@ -1,0 +1,1 @@
+- **[check]** `call.wrong-arity` now checks calls to a method your project defines in Ruby source but declares nowhere, against the `def`'s own parameter list, and stays silent wherever metaprogramming, reopened classes, mixins, subclasses or plugins could make a different definition run. [#1010](https://github.com/rigortype/rigor/pull/1010)

@@ -11,16 +11,16 @@ locals:
   k: Float
   m: Float
   "n": Float
-  nested: "[[Float, String], 1]"
+  nested: "[[Float, non-empty-string], 1]"
   not_a_tuple: Array[String] | [Float, "x"]
   pinned: '[1, "x"] | [Integer, "x"]'
   r: Float
   shape: "{ value: Float }"
   shape_keys: "{ value: Float } | { value: Float, extra: 1 }"
-  three: "[Float, String]"
+  three: "[Float, non-empty-string]"
 assertions:
-  '1': "[Float, String]"
-  '2': "[[Float, String], 1]"
+  '1': "[Float, non-empty-string]"
+  '2': "[[Float, non-empty-string], 1]"
   '3': "{ value: Float }"
   '4': '[Integer, "x"] | [Integer[0..5], "x"]'
   '5': '[1, "x"] | [Integer, "x"]'

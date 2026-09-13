@@ -22,7 +22,7 @@ three = if f > 0.0
         else
           [f, f.to_s]
         end
-assert_type("[Float, String]", three)
+assert_type("[Float, non-empty-string]", three)
 
 # The lift recurses, so a tuple nested inside a tuple collapses too.
 g = Float(ARGV[1])
@@ -31,7 +31,7 @@ nested = if g > 0.0
          else
            [[g, g.to_s], 1]
          end
-assert_type("[[Float, String], 1]", nested)
+assert_type("[[Float, non-empty-string], 1]", nested)
 
 # A hash shape absorbs over an identical spine: same keys, same
 # openness, same required/optional/read-only classification.

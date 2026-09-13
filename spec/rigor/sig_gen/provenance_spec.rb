@@ -100,6 +100,13 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `dynamic_return_type`'s literal-`nil` proposal is wrong (its real `instance_exec`'d-block branch is
 # unseen) and is marked `#1007`. `rigor.rbs` drops 1: `Runner#return_summaries`'s `{}` proposal is
 # wrong for the same reason, applied to a Hash mutated by a sibling method, and marked `#1008`.
+#
+# 664 since #994. Element-wise union absorption collapses the inferred return of
+# `StatementEvaluator#eval_branch_or_nil` and `#eval_class_body` — each a union of same-arity
+# `[Type::t, Scope]` tuples whose narrower arms are contained in a wider one — down to the single
+# tuple the declaration already names, so both leave `declared_divergent` for generated-equivalent
+# (`inference.rbs` -2). It needs #995's alias expansion as well: without it the declared `Type::t`
+# element read as `untyped` and no inferred form could ever compare equal.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -115,7 +122,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
   "sig/rigor/cli/type_scan_command.rbs" => 1,
   "sig/rigor/environment.rbs" => 41,
-  "sig/rigor/inference.rbs" => 88,
+  "sig/rigor/inference.rbs" => 86,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,

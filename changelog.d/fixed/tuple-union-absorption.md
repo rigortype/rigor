@@ -1,0 +1,1 @@
+- **[inference]** A union of same-arity tuples or identically-shaped hash shapes now drops an arm that another arm already contains element-wise, so the join after a guard reads `[Float, String]` instead of three readings of the same set. [#1006](https://github.com/rigortype/rigor/pull/1006)

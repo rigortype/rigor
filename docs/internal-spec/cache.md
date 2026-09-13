@@ -883,6 +883,21 @@ Exactly two live here, and the list is closed:
   exactly the one whose contribution may no longer collide, this run cannot re-derive the
   row (#696 forbids the demand), and under-reporting beats asserting a diagnostic on a
   program that may now be correct.
+
+  [#997](https://github.com/rigortype/rigor/issues/997) added a fifth element to each
+  per-class tuple — `unresolved_type_name_detail`, `nil` for every failure kind but
+  `RBS::NoTypeFoundError` — carrying the unresolved token, the position
+  `RBS::Location#to_s` renders it at, and (when applicable) the full Rigor refinement
+  name that token is the truncated head of. It is computed ONCE, from the live error, at
+  the exact moment {Environment::RbsLoader#store_definition_build_detail} records the
+  rest of the tuple, and frozen alongside it — never re-derived from a replayed tuple,
+  which by the time it reaches this snapshot is plain strings with no live
+  `RBS::NoTypeFoundError` behind them to re-inspect. This is what keeps it safe under the
+  SAME hazard the member and buffer-name fields already navigate (the ADR-54 environment
+  cache's `RBS::Location` marshal patch drops per-node POSITIONS, reconstructing a
+  zero-range sentinel on a cache hit): the fifth element is derived data, not a `Location`
+  object, so a warm run replays the exact string a cold run computed rather than
+  re-deriving a degraded one from a cache-loaded declaration's sentinel position.
 - **`hkt_scan_failure`** — the `rbs.coverage.hkt-scan-failed` outcome tuple
   ([#784](https://github.com/rigortype/rigor/issues/784)). The scan has ONE outcome per
   environment, so a replayed outcome is exactly as fresh as the environment it was

@@ -1175,6 +1175,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/numeric_to_s_refinements.rb — Integer#to_s / Float#to_s projections (#993)" do
+    let(:harness) { harness_for("numeric_to_s_refinements") }
+
+    it "projects a bare Integer/Float receiver to its floor refinement, with no finiteness proof" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/float_folds.rb — ADR-109 bounded Float folds (rand, Math, abs, clamp)" do
     let(:harness) { harness_for("float_folds") }
 
@@ -2023,8 +2032,8 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(harness.local(:sum)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
       end
 
-      it "types the String-element fold as String" do
-        expect(harness.local(:joined)).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      it "types the String-element fold as non-empty-string (#993 — rand.to_s is total, never empty)" do
+        expect(harness.local(:joined)).to eq(Rigor::Type::Combinator.non_empty_string)
       end
     end
   end

@@ -9,6 +9,9 @@ x = Float(ARGV[0])
 
 if x > 0.0
   assert_type("Float[0.0..]", x)
+  # #993 — `Float[0.0..]` is an endless range whose upper bound is `+Infinity`, so it is NOT a
+  # finiteness proof: `to_s` stays at the non-empty-string floor.
+  assert_type("non-empty-string", x.to_s)
 else
   assert_type("Float", x)
 end
@@ -45,8 +48,13 @@ end
 
 if x.finite?
   assert_type("finite-float", x)
+  # #993 — the truthy edge carries a finiteness proof, so `to_s` reaches numeric-string.
+  assert_type("numeric-string", x.to_s)
 else
   assert_type("Float", x)
+  # #993 — the falsy edge keeps the entry type, so `to_s` stays at the non-empty-string floor
+  # (it still admits Infinity / -Infinity / NaN, none of which are Ruby numeric literals).
+  assert_type("non-empty-string", x.to_s)
 end
 
 # A Float literal bound leaves an Integer-rooted local untouched on both edges.

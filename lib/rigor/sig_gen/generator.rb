@@ -44,6 +44,11 @@ module Rigor
     # - A declared `void` return is never compared as a value type. It is the author's statement that the
     #   return is not part of the contract, which no inference can synthesize, so the method classifies
     #   `equivalent` carrying `void` itself as the declared spelling (#836; see {#declares_void?}).
+    # - A declared `untyped` return (the RBS `Bases::Any` spelling, including the one ADR-93 synthesizes for
+    #   a parameter-only inline `# @rbs` annotation) is the ABSENCE of a return statement, not the author's
+    #   word about it — the opposite of `void`. It is treated like no declaration at all: the inferred return
+    #   is proposed as `tighter-return`, carrying `untyped` as the declared spelling so `--diff` still shows a
+    #   declaration existed (#995; see {#declared_untyped?}).
     # - A proposal that erases to an RBS literal never tightens an existing declaration: the declared type is
     #   the author's abstraction over the body and the literal is what it hides (#837; see
     #   {#pins_literal_over_declaration?}). A method with no declaration is unaffected — clause 1 still emits
@@ -862,6 +867,8 @@ module Rigor
         return equivalent(path, def_node, class_name, kind, inferred, VOID_RETURN_RBS) if declares_void?(method_def)
 
         declared = build_declared_return(method_def)
+        return declared_untyped_candidate(path, def_node, class_name, kind, inferred) if declared_untyped?(declared)
+
         declared_rbs = declared&.erase_to_rbs
         inferred_rbs = inferred.erase_to_rbs
 
@@ -907,6 +914,36 @@ module Rigor
         method_def.method_types.any? { |mt| mt.type.return_type.is_a?(RBS::Types::Bases::Void) }
       end
 
+      # Issue #995 — a declared `untyped` (RBS `Bases::Any`, translated by
+      # {Inference::RbsTypeTranslator} to `Type::Dynamic`) says nothing at all, unlike `void` (#836), which is
+      # the author's word that the value is not part of the contract. `tighter?`'s acceptance check cannot
+      # tell the two apart — `untyped` accepts and is accepted by everything, so its backward check, which
+      # exists to refuse a declaration that carries real information the inferred form would narrow, also
+      # refused this one — and the candidate fell into `equivalent`: neither emitted nor counted among the
+      # skips. ADR-93's inline `# @rbs param: Type` annotation (no return clause) synthesizes exactly this
+      # spelling for every method it documents, so the silent drop hit the parameter-annotated, return-bare
+      # shape ADR-14 exists to help.
+      def declared_untyped?(declared)
+        declared.is_a?(Type::Dynamic)
+      end
+
+      # Built like {#new_method_candidate}, not {#compare_against_declared}'s tightening branch: a declared
+      # `untyped` return carries no information to weigh {#tighter?} or {#literal_decline?} against, the same
+      # position a method with no declaration at all is in. `declared_return_rbs` still carries `"untyped"` so
+      # `--diff` and the `[tighter, was: untyped]` print tag tell the reader a declaration existed.
+      def declared_untyped_candidate(path, def_node, class_name, kind, inferred)
+        build_candidate(
+          path: path,
+          class_name: class_name,
+          method_name: def_node.name,
+          kind: kind,
+          classification: Classification::TIGHTER_RETURN,
+          inferred_return: inferred,
+          declared_return_rbs: "untyped",
+          rbs: render_rbs_line(def_node, inferred, class_name, kind)
+        )
+      end
+
       def build_declared_return(method_def)
         translated = method_def.method_types.filter_map { |mt| translate_method_type_return(mt) }
         return nil if translated.empty?
@@ -914,10 +951,19 @@ module Rigor
         translated.size == 1 ? translated.first : Type::Combinator.union(*translated)
       end
 
+      # `alias_expander:` matters here as much as it does at any dispatch site (see
+      # {Inference::RbsTypeTranslator}'s own doc comment): without it, a declared return spelled as a
+      # project alias (`Type::t`, `Environment::ordering`, `Inference::closure_classification`) degrades
+      # to `Dynamic[Top]` exactly like a bare `untyped` would, and {#declared_untyped?} cannot tell an
+      # author's meaningful alias apart from an absent declaration. That collapsed a well-typed, already
+      # exact declaration into a spurious {#declared_untyped_candidate} the moment #995 made "declared
+      # untyped" a proposable position — the ADR-107 G3 gate caught it on this repo's own `sig/` tree
+      # (`Environment#class_ordering`'s `-> ordering` and every `-> Type::t` return in `type.rbs` /
+      # `inference.rbs` / `scope.rbs`).
       def translate_method_type_return(method_type)
         Inference::RbsTypeTranslator.translate(
           method_type.type.return_type,
-          self_type: nil, instance_type: nil, type_vars: {}
+          self_type: nil, instance_type: nil, type_vars: {}, alias_expander: @environment&.rbs_loader
         )
       rescue StandardError
         nil

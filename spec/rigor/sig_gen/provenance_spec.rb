@@ -70,9 +70,39 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # ADR-109 slice 2 against a proposal the fix prevents — came out with them (`type.rbs` +1). The ratchet
 # counts them like every other declared lenience the generator protects; `Configuration.discover`'s
 # `String?` has always sat in this bucket for the same reason.
+#
+# 666 since #995. `Generator#translate_method_type_return` translated a declared return with no
+# `alias_expander:`, so ANY declared return spelled through a project alias (`Type::t`,
+# `Environment::ordering`, `Inference::closure_classification`), not only a bare `untyped`, degraded
+# to `Dynamic[Top]` — the same misreading whether the alias sat at the top level (making
+# `declared_untyped?` true and landing a spurious `tighter_return`, e.g. the three `class_ordering`s
+# and most of `inference.rbs`'s and `type.rbs`'s share of the 22 the "unmarked tighter-return" example
+# used to list) or nested inside a compound declared type such as `[Type::t, Scope]` or
+# `Hash[String, Type::t]` (making the OUTER type merely fail to text-match what sig-gen infers, which
+# `declared_divergent` — already residue before #995 — absorbed without ever surfacing as a
+# `tighter_return`). Passing the environment's `RbsLoader` as `alias_expander:` (the idiom
+# `check_rules.rb` already uses) lets every one of these resolve to its real expansion instead. Most
+# now compare exactly equal to what sig-gen infers and leave residue entirely (`environment.rbs`'s
+# three `class_ordering`s, `inference.rbs`'s `statements_or_nil` / `classify_closure_escape` /
+# `narrow_truthy` / `narrow_non_nil` / `ClosureEscapeAnalyzer#classify` / `evaluate` /
+# `user_method_return`, `scope.rbs`'s `type_of`, `type.rbs`'s seven `Combinator` methods declared
+# `-> Type::t` plus `int_mask` / `int_mask_of`, and `reflection.rbs`'s `constant_type_for` — a
+# pre-existing, unrelated misclassification this fix incidentally corrects); `inference.rbs`'s
+# `fallback_for` resolves to `declared_divergent` instead (still residue — its body is always
+# `Type::Dynamic`, genuinely narrower than the now-correct `Type::t` union, but no longer needs a
+# `tighter_return` marker). Resolving the same alias inside a nested generic argument also surfaced
+# one previously-hidden, genuine tightening applied here — `ScopeIndexer.finalize_constant_writes`'s
+# declared `Hash[String, Type::t]` narrows to `Hash[String, Type::Constant]`. Net per file, each
+# verified against a real `bundle exec rspec spec/rigor/sig_gen/provenance_spec.rb` run:
+# `environment.rbs` -3, `inference.rbs` -7, `scope.rbs` -3, `type.rbs` -9, `reflection.rbs` -1.
+# `plugin/base.rbs` drops 4 for an unrelated reason: three bare-`untyped` members (`self.node_rule`,
+# `diagnostic`, `cache_for`) are genuinely single-implementation, always-true facts and are applied;
+# `dynamic_return_type`'s literal-`nil` proposal is wrong (its real `instance_exec`'d-block branch is
+# unseen) and is marked `#1007`. `rigor.rbs` drops 1: `Runner#return_summaries`'s `{}` proposal is
+# wrong for the same reason, applied to a Hash mutated by a sibling method, and marked `#1008`.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
-  "sig/rigor.rbs" => 51,
+  "sig/rigor.rbs" => 50,
   "sig/rigor/analysis/baseline.rbs" => 5,
   "sig/rigor/analysis/check_rules/always_truthy_condition_collector.rbs" => 1,
   "sig/rigor/analysis/check_rules/dead_assignment_collector.rbs" => 1,
@@ -84,12 +114,12 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/cli/explain_command.rbs" => 1,
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
   "sig/rigor/cli/type_scan_command.rbs" => 1,
-  "sig/rigor/environment.rbs" => 44,
-  "sig/rigor/inference.rbs" => 95,
+  "sig/rigor/environment.rbs" => 41,
+  "sig/rigor/inference.rbs" => 88,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
-  "sig/rigor/plugin/base.rbs" => 26,
+  "sig/rigor/plugin/base.rbs" => 22,
   "sig/rigor/plugin/blueprint.rbs" => 3,
   "sig/rigor/plugin/fact_store.rbs" => 2,
   # -2 (#720): `file?` / `directory?` are `probe(path) { … }`, and the block's `bool` now reaches the
@@ -100,13 +130,13 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/manifest.rbs" => 22,
   "sig/rigor/plugin/registry.rbs" => 7,
   "sig/rigor/rbs_extended.rbs" => 23,
-  "sig/rigor/reflection.rbs" => 9,
-  "sig/rigor/scope.rbs" => 113,
+  "sig/rigor/reflection.rbs" => 8,
+  "sig/rigor/scope.rbs" => 110,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 9,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,
-  "sig/rigor/type.rbs" => 221
+  "sig/rigor/type.rbs" => 212
 }.freeze
 
 module SigProvenanceSpecHelpers

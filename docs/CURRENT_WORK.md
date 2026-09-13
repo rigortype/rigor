@@ -21,23 +21,21 @@ Verified, not assumed: `gem list -r rigortype` answers `0.3.9`, `git ls-remote -
 resolves, and `gh release view v0.3.9` exists with the `[0.3.9] - 2026-09-12` body. Nothing about the
 release is outstanding. `changelog.d/` is collecting the next cycle's fragments again.
 
-## Five Draft PRs from the 2026-09-12 inference-gap batch — DO NOT MERGE without the user's word
+## The 2026-09-12 inference-gap batch LANDED on 2026-09-14
 
-Every one is `make verify` green locally and reviewed; every one is deliberately **Draft**. The user
-stopped the batch before landing, so Draft is the hold signal (`docs/notes/20260908-pr-788-draft-discipline-postmortem.md`).
-Do not `gh pr ready`, do not merge, and do not build on them without being told to.
+All five PRs merged at the user's word: #999, #1005, #1000, #1001, then #1006; master CI green at
+`4d6ac321`, closing #991, #993, #994, #995 and #997. The playground snippet that started it —
+`# @rbs num: Float` then `p Foo.new.f` — now reports `call.wrong-arity`.
 
-| PR | Closes | What it does |
-| --- | --- | --- |
-| [#999](https://github.com/rigortype/rigor/pull/999) | #991 | `call.wrong-arity` stops exempting a source-defined method that also carries a signature. Adds `%a{rigor:v1:inferred-signature}` (written only when EVERY type slot was defaulted) so a parameter-annotated method is a declaration while a bare `def` stays #992's territory. |
-| [#1000](https://github.com/rigortype/rigor/pull/1000) | #995 | A declared `untyped` return is the absence of a statement, so sig-gen proposes the inferred return instead of vanishing. Root cause found downstream: `translate_method_type_return` passed no `alias_expander:`, so any `-> Type::t` degraded to `Dynamic[Top]`. |
-| [#1001](https://github.com/rigortype/rigor/pull/1001) | #993 | `Integer#to_s` → `decimal-int-string`; `Float#to_s` → `non-empty-string`, and `numeric-string` only with a finiteness proof. `Float[0.0..]` is not one — it contains `+Infinity`. |
-| [#1005](https://github.com/rigortype/rigor/pull/1005) | #997 | An unresolvable inline type name is reported as itself instead of as a duplicate declaration, and an unparseable `#:` line is no longer dropped in silence. |
-| [#1006](https://github.com/rigortype/rigor/pull/1006) | #994 | Same-arity tuple/HashShape union arms absorb element-wise, by lifting the union's own absorption relation one level down — so `1 \| Integer`'s exclusion follows rather than being stipulated. |
+Per-PR CI could not see the batch's interactions; a local five-way merge could. #1001's
+`Float#to_s` → `non-empty-string` sharpened #1006's tuple fixture, and #995's alias expansion plus
+#994's absorption made `StatementEvaluator#eval_branch_or_nil` / `#eval_class_body` generated-equivalent,
+dropping the `sig/rigor/inference.rbs` residue pin 88 → 86. Both were fixed on #1006 before it merged,
+and the four-way tree was verified identical to what master became.
 
 PR [#990](https://github.com/rigortype/rigor/pull/990) (playground editor) belongs to another session. Hands off.
 
-## Verify these with a COLD cache — #1009
+## Verify diagnostic changes with a COLD cache — #1009
 
 A warm `.rigor/cache` written by another build can mix a stale plugin-synthesized RBS with new rule
 code and report neither build's answer. Reproduced deterministically on #999: populate at the parent
@@ -81,12 +79,12 @@ Three are worth reading before choosing anything else:
   reachable in one spelling only.
 
 [#992](https://github.com/rigortype/rigor/issues/992) (arity for a method with no declaration at all)
-is blocked by #999 landing, and is where the `define_method` / `method_missing` / `prepend` / alias
+is unblocked now that #999 landed, and is where the `define_method` / `method_missing` / `prepend` / alias
 false-positive envelope has to be built. Do not start it as a quick follow-on.
 
 ## Where the worktrees are
 
 `rigor-wt/{arity-declared-source-methods,sig-gen-untyped-declared-return,numeric-to-s-refinements,inline-annotation-parse-diagnostics,tuple-union-absorption,adr-inline-refinement-dialect}`,
-one per PR plus the ADR's. `adr-inline-refinement-dialect` also carries an installed `tool/steep/`
+one per PR (all five merged; safe to remove) plus the ADR's. `adr-inline-refinement-dialect` also carries an installed `tool/steep/`
 bundle (ignored) if another Steep measurement is wanted — a CoW-copied bundle needs `bundle pristine`
 before it runs, because its native extensions were built against a different Ruby store path.

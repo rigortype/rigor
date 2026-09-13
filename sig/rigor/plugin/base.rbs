@@ -17,7 +17,7 @@ class Rigor::Plugin::Base
   def self.producer: (untyped id, ?watch: untyped, ?serialize: untyped, ?deserialize: untyped, ?generation_cap: untyped) { (untyped params) -> untyped } -> Symbol
   def self.producers: () -> Hash[Symbol, untyped]
 
-  def self.node_rule: (untyped node_type) { (*untyped) -> untyped } -> untyped
+  def self.node_rule: (untyped node_type) { (*untyped) -> untyped } -> Class
   def self.node_rules: () -> Array[untyped]
 
   def self.node_file_context: () { (untyped root, untyped scope) -> untyped } -> untyped
@@ -47,11 +47,14 @@ class Rigor::Plugin::Base
 
   # Engine-executed dispatch over the declared DSLs.
   def node_rule_diagnostics: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
+  # sig-gen gap: #1007 — the true `return result if result` branch (base.rb:594) flows through an
+  # `instance_exec`'d, plugin-supplied Proc that sig-gen's inference does not fold into the return
+  # join, so it proposes the literal fallback `nil` instead of the honest contract.
   def dynamic_return_type: (call_node: untyped, scope: untyped, receiver_type: untyped) -> untyped
   def narrowing_facts_for: (call_node: untyped, scope: untyped) -> Array[untyped]
 
   # Authoring helpers.
-  def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> untyped
+  def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> Rigor::Analysis::Diagnostic
   def diagnostics_for: (untyped violations, path: untyped, ?node: untyped) -> Array[untyped]
   def read_fact: (plugin_id: untyped, name: untyped) -> untyped
   def producer_value: (untyped id, ?params: untyped) -> untyped
@@ -60,6 +63,6 @@ class Rigor::Plugin::Base
   def signature_paths: () -> Array[String]
   def protocol_contracts: () -> untyped
   def io_boundary: () -> Rigor::Plugin::IoBoundary
-  def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> untyped
+  def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> Proc
   def plugin_entry: () -> untyped
 end

@@ -4,6 +4,7 @@ require "rbs"
 
 require_relative "../type"
 require_relative "../inference/rbs_type_translator"
+require_relative "../builtins/imported_refinements"
 require_relative "rbs_hierarchy"
 
 module Rigor
@@ -1495,9 +1496,10 @@ module Rigor
       # definition-build failure leaves no trace in the env at all — the env is fine; it is the BUILD over it
       # that raised — so the rescue is the only place that ever knows.
       #
-      # @return `[class_name, error_class_name,
-      #   first_error_line, conflicting_buffer_names]`, one per class, in first-failure order. Empty for a
-      #   healthy sig set, which is the common case.
+      # @return `[class_name, error_class_name, member, conflicting_buffer_names,
+      #   unresolved_type_name_detail]`, one per class, in first-failure order (issue #997 added the fifth
+      #   slot; see {#unresolved_type_name_detail} — `nil` there for every failure kind but an unresolvable
+      #   type name). Empty for a healthy sig set, which is the common case.
       def definition_build_failures
         (@state[:definition_build_failures] || []).dup.freeze
       end
@@ -2397,7 +2399,60 @@ module Rigor
         return if details.key?(key)
 
         details[key] = [key, error.class.name.to_s, definition_build_member(error),
-                        definition_build_conflict_buffers(error)].freeze
+                        definition_build_conflict_buffers(error), unresolved_type_name_detail(error)].freeze
+      end
+
+      # Issue #997 — the `RBS::NoTypeFoundError` twin of {#definition_build_member}: `nil` for every other
+      # error class, so the cached tuple gains a populated fifth slot only for the failure kind it
+      # distinguishes — "one declaration names a type that does not exist" from "two declarations collide"
+      # ({DiagnosticAggregator#definition_build_advice}, which folds this in).
+      #
+      # Computed once, at RAISE time, and frozen into the cached detail rather than re-derived when a warm
+      # run replays the tuple from {IncrementalSnapshot} — there is no live `RBS::NoTypeFoundError` to
+      # re-inspect on that path, only the plain strings this method already reduced it to.
+      #
+      # `[token, location, refinement_hint]`:
+      # - `token` is the unresolved name exactly as `RBS::NoTypeFoundError#type_name` carries it — the ONLY
+      #   name that ever reaches RBS. A hyphenated payload (`finite-float`) is truncated to its first
+      #   segment by rbs-inline's own tolerant type parse (`RBS::Parser.parse_type(..., require_eof: false)`
+      #   stops at the first complete type and silently discards the rest), so `-float` never becomes a
+      #   token RBS itself can name or complain about.
+      # - `location` is `error.location.to_s` verbatim (`"virtual:rbs-inline:<path>:line:col...line:col"`)
+      #   — the position the error already carries, per issue #997, named rather than re-derived. It is a
+      #   position in the SYNTHESIZED buffer for an inline annotation, not necessarily the `.rb` line the
+      #   author wrote: {Effects::InlineAnchor} maps a known `%a{...}` spelling back by ordinal, which does
+      #   not apply to an arbitrary broken type token, so no such mapping is attempted here.
+      # - `refinement_hint` is the full compound name (`"finite-float"`) when the SAME synthesized buffer —
+      #   rbs-inline re-emits the author's original `# @rbs name: TYPE` comment verbatim above the member it
+      #   generates — carries `token` immediately followed by a hyphenated continuation that is ITSELF a
+      #   registered {Builtins::ImportedRefinements} name; `nil` otherwise. Exact-match only: a near-miss
+      #   compound name says nothing, so a coincidental `token-suffix` that is not a real refinement can
+      #   never manufacture a misleading "did you mean" (false positives outrank worst-case reading).
+      def unresolved_type_name_detail(error)
+        return nil unless error.is_a?(::RBS::NoTypeFoundError)
+
+        token = error.type_name.to_s.delete_prefix("::")
+        [token, error.location&.to_s, refinement_hint_for(token, error)].freeze
+      rescue ::RBS::BaseError, StandardError
+        nil
+      end
+
+      # The buffer rbs-inline synthesized still carries the author's own comment line verbatim (the
+      # "annotation echo" {Effects::InlineAnchor} documents), so a hyphenated refinement name truncated out
+      # of the parsed type ({#unresolved_type_name_detail}) is still readable a few characters further along
+      # the SAME text the error's own location already points into.
+      def refinement_hint_for(token, error)
+        return nil if token.empty?
+
+        content = error.location&.buffer&.content
+        return nil if content.nil?
+
+        candidate = content[/\b#{Regexp.escape(token)}-[A-Za-z0-9][\w-]*/]
+        return nil if candidate.nil?
+
+        Builtins::ImportedRefinements.known?(candidate) ? candidate : nil
+      rescue ::RBS::BaseError, StandardError
+        nil
       end
 
       # Issue #696 — the REPORTING half: promote a remembered detail into {#definition_build_failures}

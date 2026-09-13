@@ -1210,6 +1210,101 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
   end
 
+  describe "Nominal[Integer]#to_s / #inspect precision (#993)" do
+    let(:nominal_int) { Rigor::Type::Combinator.nominal_of("Integer") }
+
+    it "narrows to_s (no args) to decimal-int-string regardless of sign" do
+      expect(dispatch(receiver: nominal_int, method_name: :to_s))
+        .to eq(Rigor::Type::Combinator.decimal_int_string)
+    end
+
+    it "narrows to_s(10) to decimal-int-string" do
+      expect(dispatch(receiver: nominal_int, method_name: :to_s, args: [constant(10)]))
+        .to eq(Rigor::Type::Combinator.decimal_int_string)
+    end
+
+    it "narrows to_s(base) for a non-decimal base to non-empty-string only" do
+      expect(dispatch(receiver: nominal_int, method_name: :to_s, args: [constant(16)]))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+      expect(dispatch(receiver: nominal_int, method_name: :to_s, args: [constant(8)]))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "narrows to_s(base) to non-empty-string when the base is not statically known" do
+      dynamic_base = Rigor::Type::Combinator.nominal_of("Integer")
+      expect(dispatch(receiver: nominal_int, method_name: :to_s, args: [dynamic_base]))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "narrows inspect (no args) the same as the no-arg to_s" do
+      expect(dispatch(receiver: nominal_int, method_name: :inspect))
+        .to eq(Rigor::Type::Combinator.decimal_int_string)
+    end
+
+    it "declines inspect called with an argument" do
+      expect(dispatch(receiver: nominal_int, method_name: :inspect, args: [constant(2)])).to be_nil
+    end
+  end
+
+  describe "Nominal[Float]#to_s / #inspect precision (#993)" do
+    let(:nominal_float) { Rigor::Type::Combinator.nominal_of("Float") }
+
+    it "narrows to_s / inspect to non-empty-string with no finiteness proof on the receiver" do
+      expect(dispatch(receiver: nominal_float, method_name: :to_s))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+      expect(dispatch(receiver: nominal_float, method_name: :inspect))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "never claims numeric-string for a bare Float (Infinity/-Infinity/NaN print as non-numeric strings)" do
+      expect(dispatch(receiver: nominal_float, method_name: :to_s))
+        .not_to eq(Rigor::Type::Combinator.numeric_string)
+    end
+
+    it "declines to_s / inspect called with an argument" do
+      expect(dispatch(receiver: nominal_float, method_name: :to_s, args: [constant(2)])).to be_nil
+      expect(dispatch(receiver: nominal_float, method_name: :inspect, args: [constant(2)])).to be_nil
+    end
+  end
+
+  describe "FloatRange#to_s / #inspect precision (#993)" do
+    it "narrows finite-float#to_s / #inspect to numeric-string" do
+      expect(dispatch(receiver: Rigor::Type::Combinator.finite_float, method_name: :to_s))
+        .to eq(Rigor::Type::Combinator.numeric_string)
+      expect(dispatch(receiver: Rigor::Type::Combinator.finite_float, method_name: :inspect))
+        .to eq(Rigor::Type::Combinator.numeric_string)
+    end
+
+    it "narrows a bounded finite sub-range to numeric-string" do
+      range = Rigor::Type::Combinator.float_range(0.0, 10.0)
+      expect(dispatch(receiver: range, method_name: :to_s)).to eq(Rigor::Type::Combinator.numeric_string)
+    end
+
+    it "does NOT narrow Float[0.0..] to numeric-string (its endless end is +Infinity)" do
+      range = Rigor::Type::Combinator.float_range(0.0, Float::INFINITY)
+      expect(dispatch(receiver: range, method_name: :to_s)).to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "narrows Float[0.0...Float::INFINITY] to numeric-string (the exclusive end excludes +Infinity)" do
+      range = Rigor::Type::Combinator.float_range(0.0, Float::INFINITY, exclude_end: true)
+      expect(dispatch(receiver: range, method_name: :to_s)).to eq(Rigor::Type::Combinator.numeric_string)
+    end
+
+    it "does NOT narrow non-nan-float to numeric-string (it still admits both infinities)" do
+      expect(dispatch(receiver: Rigor::Type::Combinator.non_nan_float, method_name: :to_s))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "declines to_s / inspect called with an argument" do
+      range = Rigor::Type::Combinator.finite_float
+      expect(dispatch(receiver: range, method_name: :to_s, args: [constant(2)])).to be_nil
+    end
+
+    it "declines for non-`to_s`/`inspect` selectors" do
+      expect(dispatch(receiver: Rigor::Type::Combinator.finite_float, method_name: :abs)).to be_nil
+    end
+  end
+
   describe "HashShape mid/low-priority handlers (coverage uplift)" do
     let(:two) { hash_shape(a: constant(1), b: constant(2)) }
     let(:one) { hash_shape(a: constant(1)) }

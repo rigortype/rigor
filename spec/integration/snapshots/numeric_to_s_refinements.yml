@@ -1,0 +1,15 @@
+---
+locals:
+  base: Integer
+  f: Float
+  i: Integer
+assertions:
+  '1': decimal-int-string
+  '2': decimal-int-string
+  '3': decimal-int-string
+  '4': non-empty-string
+  '5': non-empty-string
+  '6': non-empty-string
+  '7': non-empty-string
+  '8': non-empty-string
+  '9': non-empty-string

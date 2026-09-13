@@ -15,73 +15,78 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## v0.3.9 is cut and mid-publish — READ THIS BEFORE ANYTHING ELSE
+## v0.3.9 is fully released — the previous handoff's "mid-publish" section is done
 
-`master` carries `Bump up version to 0.3.9` (`0c6c6ae0`, PR #989 rebase-merged): `Rigor::VERSION`
-is `0.3.9`, `CHANGELOG.md` holds the sealed `## [0.3.9] - 2026-09-12` section, `changelog.d/` is
-empty again, `README.md`'s status line names 0.3.9. The v0.3.9 milestone is closed (34 issues).
+Verified, not assumed: `gem list -r rigortype` answers `0.3.9`, `git ls-remote --tags origin v0.3.9`
+resolves, and `gh release view v0.3.9` exists with the `[0.3.9] - 2026-09-12` body. Nothing about the
+release is outstanding. `changelog.d/` is collecting the next cycle's fragments again.
 
-**The gem is NOT published yet.** The remaining steps, in order:
+## Five Draft PRs from the 2026-09-12 inference-gap batch — DO NOT MERGE without the user's word
 
-1. `gem push` — built and waiting at `~/repo/ruby/rigor-wt/publish-0.3.9/rigortype-0.3.9.gem`
-   (a clean worktree at `0c6c6ae0`). RubyGems demands an MFA OTP, so this is the USER's command;
-   an agent must not handle the code.
-2. `git tag v0.3.9 0c6c6ae0` (annotated, matching v0.3.8) and `git push origin refs/tags/v0.3.9`,
-   only after RubyGems accepts the gem.
-3. `bundle exec rake release:github` from `master` — it needs the tag locally and extracts the
-   `## [0.3.9]` section verbatim as the release body.
+Every one is `make verify` green locally and reviewed; every one is deliberately **Draft**. The user
+stopped the batch before landing, so Draft is the hold signal (`docs/notes/20260908-pr-788-draft-discipline-postmortem.md`).
+Do not `gh pr ready`, do not merge, and do not build on them without being told to.
 
-Do not re-run `/rigor-release-prep`, do not re-cut, and do not open `[Unreleased]` entries as
-anything but `changelog.d/` fragments. If the push already happened, verify with
-`gem list -r rigortype` and `git ls-remote --tags origin v0.3.9` before believing this file.
+| PR | Closes | What it does |
+| --- | --- | --- |
+| [#999](https://github.com/rigortype/rigor/pull/999) | #991 | `call.wrong-arity` stops exempting a source-defined method that also carries a signature. Adds `%a{rigor:v1:inferred-signature}` (written only when EVERY type slot was defaulted) so a parameter-annotated method is a declaration while a bare `def` stays #992's territory. |
+| [#1000](https://github.com/rigortype/rigor/pull/1000) | #995 | A declared `untyped` return is the absence of a statement, so sig-gen proposes the inferred return instead of vanishing. Root cause found downstream: `translate_method_type_return` passed no `alias_expander:`, so any `-> Type::t` degraded to `Dynamic[Top]`. |
+| [#1001](https://github.com/rigortype/rigor/pull/1001) | #993 | `Integer#to_s` → `decimal-int-string`; `Float#to_s` → `non-empty-string`, and `numeric-string` only with a finiteness proof. `Float[0.0..]` is not one — it contains `+Infinity`. |
+| [#1005](https://github.com/rigortype/rigor/pull/1005) | #997 | An unresolvable inline type name is reported as itself instead of as a duplicate declaration, and an unparseable `#:` line is no longer dropped in silence. |
+| [#1006](https://github.com/rigortype/rigor/pull/1006) | #994 | Same-arity tuple/HashShape union arms absorb element-wise, by lifting the union's own absorption relation one level down — so `1 \| Integer`'s exclusion follows rather than being stipulated. |
 
-## What the cut cost, and the two gate findings behind it
+PR [#990](https://github.com/rigortype/rigor/pull/990) (playground editor) belongs to another session. Hands off.
 
-The first release PR (#983) went red on both advisory gates, and both were real:
+## Verify these with a COLD cache — #1009
 
-- **The OSS sweep caught a release-blocking crash `make verify` could not.** #961's compact-header
-  re-anchoring rewrote each `header_nestings` BUCKET as if it were a chain, so every Mastodon file
-  reported an `internal analyzer error` (1,073 rows against a 468 threshold). Filed #984, fixed by
-  #985; the sweep then matched v0.3.8 row for row. Rigor's own `lib` has no compact header, so the
-  rename pass never ran under `make check`, and the PR's single-file fixtures never reached the
-  cross-file merge that raised. **An engine change to the discovery fold needs a multi-file fixture
-  and an OSS sweep before a cut, not at it.** The review also found the colliding-bucket merge is
-  still last-wins and fold-order dependent: #986 (v0.4.0).
-- **The perf gate's RSS band is noise-wide.** `peak_rss_kb` read +10.5 % against v0.3.8 while
-  allocations fell 35 %. Attributed in `docs/notes/20260912-v039-rss-attribution.md`: diffuse across
-  ~95 merges with no step, live slots after GC only +3.5 %, so it is transient peak from fewer minor
-  GCs, not retention. `bench/baseline.json` is recalibrated from the gate run and both halves are
-  recorded together. The band is +10 % over a SINGLE sample whose host spread is ±7 %: #987 (v0.4.0).
+A warm `.rigor/cache` written by another build can mix a stale plugin-synthesized RBS with new rule
+code and report neither build's answer. Reproduced deterministically on #999: populate at the parent
+commit (2 diagnostics), switch to the child, run warm → 4, while `--no-cache` and a cache-cleaned warm
+run both give 2. A `lib/`-only change (#1006) does not show it, so the hole is in the plugin-synthesis
+lane. Until [#1009](https://github.com/rigortype/rigor/issues/1009) is fixed, judge any
+diagnostic-affecting change with `rigor check --no-cache` or after `rm -rf .rigor/cache` — a warm run
+is not a valid instrument for "does this fire?".
 
-A 34-project, 306-run crash check over the survey corpus (`docs/notes/20260912-v039-oss-corpus-crash-check.md`)
-found no crash on the swept surface, and records what it did NOT sweep.
+## ADR-111 is Proposed and waits on the maintainer
 
-## Open threads
+[`docs/adr/111-inline-refinement-carrier.md`](adr/111-inline-refinement-carrier.md), grounded in
+[`docs/notes/20260912-inline-refinement-carrier-probe.md`](notes/20260912-inline-refinement-carrier-probe.md)
+— fourteen spellings measured through three readers (the `rbs-inline` gem, rbs 4.2.0's
+`RBS::InlineParser`, Steep 2.0.0 with `check "lib", inline: true`).
 
-- **#424** keeps only its WD16 half (`Propagator.propagate` at gitlab scale). The per-project bound
-  is measured and closed: `docs/notes/20260910-effect-collection-profile.md` shows the ≤ 5 % budget
-  is unreachable without changing what collection proves, which is a No-Go input for #409.
-- **#697** waits on **#660** (where open-receiver membership lives). Do not add a fourth protection
-  route; #902 shipped only the loud-not-silent half and a spec pins that the FP still fires.
-- Filed by the reviews of this cycle, all `v0.4.0`: #980 (a dropped `definition-build-failed` row
-  stays dropped across warm runs), #986, #987.
-- `gh issue list --label ready-for-agent` is 13 items; `v0.4.0` holds 20 and is the pre-1.0 break
-  (ADR-50 WD5/WD7: `int<a,b>` removed, effects default-on, plugin-contract changes needing a corpus
-  FP diff). `v0.4.x` holds the line-level backlog.
+It recommends **reaffirming** that Rigor has no comment dialect of its own, on a boundedness rather
+than invisibility criterion. Two measurements decided the spelling: Steep reports the own-line
+`%a{rigor:v1:…}` form — the form `docs/manual/16-rbs-extended-annotations.md` documents — as a
+user-visible error (`%a{pure}` too), while the same-line form is clean and genuinely bound; and
+`# @rbs-ext` is measured out as a name (`@rbs\b` matches before the hyphen) where `# @extrbs` is clean
+in all three readers. So the same-line form is the only spelling the ADR recommends, and
+[#998](https://github.com/rigortype/rigor/issues/998) — Rigor's own reader silently dropping it — is
+the prerequisite for the manual recommending anything, not a follow-up. Re-evaluation trigger (i) is
+half-fired. The maintainer decides; nothing is implemented.
 
-## How to enter
+## Issues this batch filed, and what is worth picking up first
 
-1. Working tree clean, no open PR. Worktrees: `publish-0.3.9` (keep until the gem is pushed) and
-   `perfbench-harness-775` (pre-existing, not this cycle's).
-2. The lane contract that carried ~110 PRs this cycle: one worktree per lane, targeted specs plus
-   rubocop only, remote CI as the gate, `git push` then END. No CI polling from a lane — fifteen
-   lanes with `gh run watch` loops exhausted the 5,000/hour GitHub API budget twice; poll once a
-   minute per PR via `statusCheckRollup`. To add a commit to a lane's branch, reset to the remote
-   tip and cherry-pick: rebase-then-push is non-fast-forward and force is blocked.
-3. **Review before merge paid for itself.** A Fable adversarial-review subagent per PR (brief in the
-   session scratchpad's `REVIEW.md`: false positives first, then unsound precision, contract drift,
-   vacuous gates, blast radius) sent three PRs back with findings their own gates had missed.
-4. Three traps every engine lane hit: the `sig/` provenance residue pin moves whenever a hand-written
-   line lands OR inference changes what sig-gen would emit; a new precision fixture needs its golden
-   (`UPDATE_SNAPSHOTS=<fixture>`); a spec that enables a bundled plugin by gem name is order-dependent
-   unless it registers the class itself (`Plugin.unregister!` plus a no-op `require`).
+Fourteen, all from measured behaviour rather than reading: #991-#998, #1002, #1003, #1004, #1007,
+#1008, #1009.
+
+Three are worth reading before choosing anything else:
+
+- [#1009](https://github.com/rigortype/rigor/issues/1009) — the cache hole above. It makes every other
+  diagnostic verification less trustworthy, so it buys more than its own fix.
+- [#1004](https://github.com/rigortype/rigor/issues/1004) — `Integer#to_s(16)` and a bare-hex-digit
+  regex both claim `hex-int-string`, whose predicate requires the `0x` prefix. A refinement that is
+  false of its inhabitants is worse than the `String` it replaces.
+- [#1003](https://github.com/rigortype/rigor/issues/1003) — a predicate guard narrows in `if`/`else`
+  and not in the ternary spelling of the same guard. Structural: every guard-dependent refinement is
+  reachable in one spelling only.
+
+[#992](https://github.com/rigortype/rigor/issues/992) (arity for a method with no declaration at all)
+is blocked by #999 landing, and is where the `define_method` / `method_missing` / `prepend` / alias
+false-positive envelope has to be built. Do not start it as a quick follow-on.
+
+## Where the worktrees are
+
+`rigor-wt/{arity-declared-source-methods,sig-gen-untyped-declared-return,numeric-to-s-refinements,inline-annotation-parse-diagnostics,tuple-union-absorption,adr-inline-refinement-dialect}`,
+one per PR plus the ADR's. `adr-inline-refinement-dialect` also carries an installed `tool/steep/`
+bundle (ignored) if another Steep measurement is wanted — a CoW-copied bundle needs `bundle pristine`
+before it runs, because its native extensions were built against a different Ruby store path.

@@ -661,6 +661,22 @@ always answered this way when the declaration happened to be a UNION —
 refuses it — and whether the author wrote `String` or `String?` was never a
 decision about literals.
 
+**2026-09-12 — a declared `untyped` return is exempt from the rule in the OPPOSITE direction: it is treated
+like no declaration at all, and the inferred return IS proposed.** `void` and the RBS literal case above are
+both about a declaration that says MORE than the body proves — an author's abstraction the body cannot derive.
+A declared `untyped` (RBS `Bases::Any`) is the opposite: it says NOTHING. `tighter?`'s acceptance check cannot
+tell "nothing" apart from "something real the inferred form would narrow" — `untyped` accepts and is accepted
+by everything, so the backward half of the check, which exists to catch the second case, also caught the
+first, and `compare_against_declared` classified the method `equivalent` without ever emitting the return
+inference actually proved. Worse than a decline: `equivalent` is not in `Classification::EMITTABLE` and is not
+a `skipped` row either, so the candidate disappeared from both `--print` and the JSON payload with nothing to
+explain why ([#995](https://github.com/rigortype/rigor/issues/995)). ADR-93's inline `# @rbs param: Type`
+annotation (no return clause) synthesizes exactly this declared shape for every method it documents, so the
+silent drop landed on the parameter-annotated, return-bare method ADR-14 exists to help. `declared_untyped?`
+short-circuits `compare_against_declared` before `tighter?` runs at all, building the same `tighter-return`
+candidate a method with no declaration would get — carrying `"untyped"` as `declared_return_rbs` so `--diff`
+and the `[tighter, was: untyped]` print tag still tell the reader a declaration existed.
+
 Two boundaries. The rule is on the ERASURE, so a `Type::Constant` RBS has no
 literal spelling for still proposes its nominal: `def pi: () -> Numeric` against
 a body of `3.14` proposes `Float`. And it binds only against an EXISTING
@@ -700,3 +716,7 @@ override anywhere — has no wider declaration to find.
   same reading: the declared type is the author's abstraction over the body.
   Clause 3 of § "What 'more precise' means for tighter-return mode" and the
   second dated paragraph in § "The inference-vs-RBS contradiction rule".
+- 2026-09-12 — #995 exempted a declared `untyped` return, on the opposite
+  reading from `void` / the RBS-literal case: `untyped` says nothing, so it is
+  treated like no declaration at all and the inferred return is proposed. See
+  the third dated paragraph in § "The inference-vs-RBS contradiction rule".

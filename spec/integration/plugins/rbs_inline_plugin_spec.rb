@@ -343,7 +343,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
 
     it "types an attr_reader sibling from the class body rather than the skeleton" do
-      expect(synthesized_for(<<~RUBY)).to include("%a{rigor:v1:inferred-return}\n  attr_reader plain: untyped")
+      expect(synthesized_for(<<~RUBY))
         class Greeter
           # @rbs times: Integer
           def repeat(times)
@@ -353,6 +353,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
           attr_reader :plain
         end
       RUBY
+        .to include("%a{rigor:v1:inferred-return}\n  %a{rigor:v1:inferred-signature}\n  attr_reader plain: untyped")
     end
 
     # The stand-in the plugin renders with must never reach the environment: an undeclared type alias makes
@@ -373,12 +374,15 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       RUBY
 
       expect(synthesized).not_to include("rigor__inline_defaulted")
-      expect(synthesized).to include("%a{rigor:v1:inferred-return}\n  def sibling:")
+      # `sibling` is annotated nowhere, so EVERY slot on it defaulted (not only the return), and it
+      # carries both marks — see "marks only inferred-return, not inferred-signature" below for the
+      # contrasting case.
+      expect(synthesized).to include("%a{rigor:v1:inferred-return}\n  %a{rigor:v1:inferred-signature}\n  def sibling:")
       # The parameter slots keep the skeleton's arity; only the RETURN slot is what the mark speaks about.
       expect(synthesized).to include("(untyped a, ?untyped b, *untyped rest, key: untyped, **untyped kw)")
     end
 
-    it "marks the return of a method whose parameters alone were annotated" do
+    it "marks the return of a method whose parameters alone were annotated, but not the full signature" do
       synthesized = synthesized_for(<<~RUBY)
         class Greeter
           # @rbs times: Integer
@@ -390,12 +394,18 @@ RSpec.describe "plugins/rigor-rbs-inline" do
 
       expect(synthesized)
         .to include("%a{rigor:v1:inferred-return}\n  def repeat: (Integer times) -> untyped")
+      # Issue #991 — the parameter WAS authored, so this member must not read as "nothing was asserted
+      # about it": `rigor:v1:inferred-signature` (present only when EVERY slot defaulted) must be absent,
+      # even though `rigor:v1:inferred-return` fires the same way it would for a fully bare `def`.
+      expect(synthesized).not_to include("rigor:v1:inferred-signature")
     end
 
     # The mark is a string contract across the plugin/engine boundary, spelled once on each side.
     it "writes the directive the engine reads" do
       expect(Rigor::Plugin::RbsInline::Synthesizer::INFERRED_RETURN_ANNOTATION)
         .to eq(Rigor::RbsExtended::INFERRED_RETURN_DIRECTIVE)
+      expect(Rigor::Plugin::RbsInline::Synthesizer::INFERRED_SIGNATURE_ANNOTATION)
+        .to eq(Rigor::RbsExtended::INFERRED_SIGNATURE_DIRECTIVE)
     end
 
     it "does not mark a fully annotated method" do
@@ -410,6 +420,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
 
       expect(synthesized).to include("def repeat: (Integer) -> String")
       expect(synthesized).not_to include("rigor:v1:inferred-return")
+      expect(synthesized).not_to include("rigor:v1:inferred-signature")
     end
   end
 
@@ -632,6 +643,98 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       expect(not_honoured.first.severity).to eq(:info)
       expect(not_honoured.first.message).to include("module-self")
       expect(result.diagnostics.map(&:qualified_rule)).not_to include("source-rbs-synthesis-failed")
+    end
+
+    # Issue #997 — measured at 568138c2: a `#:` annotation whose type does not parse (naming a Rigor
+    # refinement where an RBS type belongs, e.g. `finite-float`) was DROPPED in total silence. Upstream's
+    # own tolerant parse never raises — it records a `SyntaxErrorAssertion` and moves on — so nothing short
+    # of reading that annotation object surfaces the failure; before this, `rigor check` reported nothing
+    # beyond an unrelated `rbs.coverage.missing-gem` info, and the author had no way to tell their signature
+    # from one they never wrote.
+    describe "an unparseable `#:` annotation (#997)" do
+      it "is parsed but not honoured, naming the line and the text that failed" do
+        outcome = synthesizer_outcome(<<~RUBY)
+          class BadRefProbe
+            #: (finite-float) -> String
+            def show(f)
+              f.to_s
+            end
+          end
+        RUBY
+
+        kind, source, messages = outcome
+        expect(kind).to eq(:ok)
+        # The rest of the file is unaffected — the method still synthesizes, just without this signature.
+        expect(source).to include("def show:")
+        expect(messages.first).to include("line 2")
+        expect(messages.first).to include("(finite-float) -> String")
+        expect(messages.first).to include("DROPPED")
+      end
+
+      it "surfaces it as an info diagnostic, and the method types as untyped rather than the declared signature" do
+        result = run_plugin(source: <<~RUBY)
+          # rbs_inline: enabled
+          class BadRefProbe
+            #: (finite-float) -> String
+            def show(f)
+              f.to_s
+            end
+          end
+        RUBY
+
+        not_honoured = result.diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
+        expect(not_honoured.size).to eq(1)
+        expect(not_honoured.first.severity).to eq(:info)
+        expect(not_honoured.first.message).to include("did not parse as an RBS method type")
+        expect(not_honoured.first.message).to include("finite-float")
+      end
+
+      # The must-still-succeed twin: a well-formed `#:` line must stay silent, or this would be a lint on
+      # every correct annotation in every project (ADR-5 false-positive discipline).
+      it "stays silent on a `#:` annotation that parses cleanly" do
+        outcome = synthesizer_outcome(<<~RUBY)
+          class GoodRefProbe
+            #: (String) -> String
+            def show(f)
+              f.to_s
+            end
+          end
+        RUBY
+
+        # No notices at all: `Synthesizer#call` returns the bare RBS String rather than the
+        # `[:ok, source, messages]` tuple (see the "stays silent on the rbs-inline spelling" example above).
+        expect(outcome).to be_a(String)
+        expect(outcome).to include("def show: (String) -> String")
+      end
+    end
+  end
+
+  # Issue #997, the `# @rbs` tag's failure mode — a Rigor refinement named where an RBS type belongs makes
+  # `RBS::DefinitionBuilder` raise `NoTypeFoundError` for the WHOLE class, and the `rbs.coverage.definition-
+  # build-failed` warning that reports it used to blame a duplicate declaration that is not there (measured
+  # at 568138c2). This exercises the real `rigor-rbs-inline` synthesis path end to end, unlike
+  # `spec/rigor/environment/rbs_loader_spec.rb`'s hand-built `virtual_rbs:` fixture for the same failure.
+  describe "an unresolvable type name via the `# @rbs` tag form (#997)" do
+    it "names the token and points at the valid %a{rigor:v1:...} spelling instead of the duplicate-member advice" do
+      result = run_plugin(source: <<~RUBY)
+        # rbs_inline: enabled
+        class ProbeZZ
+          # @rbs g: finite-float
+          def probe(g)
+            g.to_s
+          end
+        end
+      RUBY
+
+      failed = result.diagnostics.select { |d| d.qualified_rule == "rbs.coverage.definition-build-failed" }
+      expect(failed.size).to eq(1)
+      expect(failed.first.severity).to eq(:warning)
+      expect(failed.first.message).to include("ProbeZZ")
+      expect(failed.first.message).to include("First failure: RBS::NoTypeFoundError on `finite`")
+      expect(failed.first.message).to include("Rigor refinement `finite-float`")
+      expect(failed.first.message).to include("%a{rigor:v1:param: name is finite-float}")
+      expect(failed.first.message).to include("docs/manual/16-rbs-extended-annotations.md")
+      expect(failed.first.message).not_to include("remove the duplicate declaration")
     end
   end
 

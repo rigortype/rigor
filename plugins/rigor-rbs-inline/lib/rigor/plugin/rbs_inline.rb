@@ -68,6 +68,18 @@ module Rigor
         # instead of adopting the placeholder. `Rigor::RbsExtended.inferred_return?` is the reader.
         INFERRED_RETURN_ANNOTATION = "rigor:v1:inferred-return"
 
+        # The RBS annotation the synthesizer writes on every member where upstream defaulted EVERY type
+        # slot — every parameter and the return alike — because the author's comment block asserted nothing
+        # about this member's own contract (issue #991). This is a strictly narrower condition than
+        # {INFERRED_RETURN_ANNOTATION}: that one fires whenever the return alone defaulted, which is also
+        # true of a member whose parameters WERE annotated (`# @rbs num: Float` with no `# @rbs return:`).
+        # This annotation distinguishes "nobody said anything about this member" from "the return half was
+        # left to inference" — the two collapse under return-only provenance, because no equivalent
+        # per-parameter survivor exists to separate them (see {DEFAULTED_TYPE_NAME}), so this constant
+        # exists precisely to carry that missing half. Its meaning is normative in
+        # `docs/type-specification/rbs-extended.md`. `Rigor::RbsExtended.inferred_signature?` is the reader.
+        INFERRED_SIGNATURE_ANNOTATION = "rigor:v1:inferred-signature"
+
         # The stand-in type handed to upstream's `Writer#default_type`, and the whole reason this plugin can
         # tell a defaulted type from an authored one. `RBS::Inline::Writer` substitutes `default_type`
         # wherever the author wrote nothing — `return_type || default_type` in `RubyDef#method_overloads`,
@@ -162,6 +174,15 @@ module Rigor
         # about the return. The engine reads the annotation in `RbsDispatch` and falls through to the same
         # body-inference tier an undeclared method takes.
         #
+        # A member additionally carries {INFERRED_SIGNATURE_ANNOTATION} when EVERY type slot on it —
+        # not only the return — defaulted: a fully bare `def`, or one whose only annotation lives on a
+        # sibling member the file also happens to carry. A member with a parameter annotated (`# @rbs num:
+        # Float`) but no `# @rbs return:` still gets {INFERRED_RETURN_ANNOTATION} (the return did default),
+        # but NOT this one — the author asserted something about the member, just not its return. Issue
+        # #991's `call.wrong-arity` reads this one rather than the return-only annotation, because the
+        # arity question is about the parameter list, and the parameter list is exactly what tells the two
+        # cases apart.
+        #
         # Two properties make the rewrite safe rather than clever:
         #
         # - the stand-in is a token this plugin injected, so replacing it is exact — it can only appear
@@ -181,53 +202,85 @@ module Rigor
         def mark_inferred_returns(rendered)
           return rendered if rendered.nil? || !rendered.b.include?(DEFAULTED_TYPE_NAME.to_s)
 
-          marked_lines = rendered.valid_encoding? ? defaulted_member_lines(rendered) : Set.new
+          return_lines, signature_lines =
+            rendered.valid_encoding? ? defaulted_member_lines(rendered) : [Set.new, Set.new]
           scrubbed = rendered.b.gsub(DEFAULTED_TYPE_NAME.to_s, "untyped").force_encoding(rendered.encoding)
-          return scrubbed if marked_lines.empty?
+          return scrubbed if return_lines.empty?
 
           scrubbed.lines.each_with_index.flat_map do |line, index|
-            next line unless marked_lines.include?(index + 1)
+            line_number = index + 1
+            next line unless return_lines.include?(line_number)
 
-            ["#{line[/\A[ \t]*/]}%a{#{INFERRED_RETURN_ANNOTATION}}\n", line]
+            indent = line[/\A[ \t]*/]
+            annotations = ["#{indent}%a{#{INFERRED_RETURN_ANNOTATION}}\n"]
+            annotations << "#{indent}%a{#{INFERRED_SIGNATURE_ANNOTATION}}\n" if signature_lines.include?(line_number)
+            [*annotations, line]
           end.join
         end
 
-        # The 1-based line of every member in `rendered` whose return type (or, for an attribute, whose
-        # type) is the defaulted stand-in. A member's `location.start_line` is the line its `def` /
-        # `attr_*` keyword sits on, which is where the annotation has to go.
+        # The 1-based lines of every member in `rendered` whose return type (or, for an attribute, whose
+        # type) is the defaulted stand-in — and, of those, the subset where EVERY type slot on the member
+        # defaulted, not only the return. A member's `location.start_line` is the line its `def` /
+        # `attr_*` keyword sits on, which is where the annotation has to go. Returns `[return_lines,
+        # signature_lines]`; `signature_lines` is always a subset of `return_lines`, since a member cannot
+        # have every slot defaulted without its return being one of them.
         def defaulted_member_lines(rendered)
           buffer = ::RBS::Buffer.new(name: "(rigor: inline defaulted-type probe)", content: rendered)
           _, _directives, decls = ::RBS::Parser.parse_signature(buffer)
-          collect_defaulted_member_lines(decls, Set.new)
+          collect_defaulted_member_lines(decls, Set.new, Set.new)
         rescue ::StandardError
           # The writer's own output failing to parse is a condition the loader already handles (ADR-32 WD6
           # fail-soft drops the entry). Declining to mark here keeps that the only failure.
-          Set.new
+          [Set.new, Set.new]
         end
 
-        def collect_defaulted_member_lines(nodes, lines)
+        def collect_defaulted_member_lines(nodes, return_lines, signature_lines)
           nodes.each do |node|
             next unless node.respond_to?(:members)
 
             node.members.each do |member|
-              line = defaulted_member_line(member)
-              lines << line if line
+              classify_defaulted_member(member, return_lines, signature_lines)
             end
-            collect_defaulted_member_lines(node.members.grep(::RBS::AST::Declarations::Base), lines)
+            collect_defaulted_member_lines(
+              node.members.grep(::RBS::AST::Declarations::Base), return_lines, signature_lines
+            )
           end
-          lines
+          [return_lines, signature_lines]
         end
 
-        def defaulted_member_line(member)
+        def classify_defaulted_member(member, return_lines, signature_lines)
           case member
           when ::RBS::AST::Members::MethodDefinition
-            return nil unless member.overloads.any? { |o| defaulted_type?(o.method_type.type.return_type) }
+            return unless member.overloads.any? { |o| defaulted_type?(o.method_type.type.return_type) }
+
+            line = member.location&.start_line
+            return if line.nil?
+
+            return_lines << line
+            signature_lines << line if member.overloads.all? { |o| fully_defaulted_overload?(o) }
           when ::RBS::AST::Members::Attribute
-            return nil unless defaulted_type?(member.type)
-          else
-            return nil
+            return unless defaulted_type?(member.type)
+
+            line = member.location&.start_line
+            return if line.nil?
+
+            # An attribute has exactly one type slot (the value type, shared by its reader and writer
+            # overloads), so "the type defaulted" and "every type slot defaulted" are the same fact.
+            return_lines << line
+            signature_lines << line
           end
-          member.location&.start_line
+        end
+
+        # True when every parameter type and the return type of `overload` — everything
+        # `RBS::Types::Function#each_type` yields — is the defaulted stand-in, i.e. the author's comment
+        # block asserted nothing about this overload's own contract. Block-type provenance is
+        # deliberately not part of this: a block parameter's shape does not bear on the positional arity
+        # #991 exists to check, and upstream defaults it independently of the parameter list either way.
+        def fully_defaulted_overload?(overload)
+          function = overload.method_type.type
+          return false unless function.respond_to?(:each_type)
+
+          function.each_type.all? { |type| defaulted_type?(type) }
         end
 
         def defaulted_type?(type)
@@ -300,27 +353,56 @@ module Rigor
         # These are invisible without a report: synthesis succeeds, and the annotation comment is even echoed
         # into the generated RBS, so the omission shows up neither in the output nor at runtime.
         #
-        # The one case today is `module-self`, where the two inline-RBS dialects disagree on spelling. rbs's
-        # own `docs/inline.md` documents `# @rbs module-self: Foo`; the rbs-inline gem's grammar is
-        # `# @rbs module-self Foo`, without the colon. Handed the colon form the gem still builds a
-        # `ModuleSelf` annotation but extracts no types from it, so an empty `self_types` on a parsed
-        # annotation is a precise signature for "the author asked for a constraint we did not apply".
-        # Measured both ways in `docs/notes/20260730-inline-rbs-parser-grammar-diff.md`.
+        # Two cases today:
         #
-        # Deliberately narrow. A construct the gem's parser REJECTS already routes through WD6's error path,
-        # and one it never recognised at all is upstream's grammar to define (WD3) — guessing at those would
-        # make this a lint on comment prose, which is exactly the false-positive cost ADR-5 ranks first.
+        # - `module-self`, where the two inline-RBS dialects disagree on spelling. rbs's own `docs/inline.md`
+        #   documents `# @rbs module-self: Foo`; the rbs-inline gem's grammar is `# @rbs module-self Foo`,
+        #   without the colon. Handed the colon form the gem still builds a `ModuleSelf` annotation but
+        #   extracts no types from it, so an empty `self_types` on a parsed annotation is a precise signature
+        #   for "the author asked for a constraint we did not apply". Measured both ways in
+        #   `docs/notes/20260730-inline-rbs-parser-grammar-diff.md`.
+        # - a `#:` line whose type does not parse (issue #997). Upstream's own tolerant parse
+        #   ({#parse_type_method_type} in its `annotation_parser.rb`) never raises on this: it consumes the
+        #   rest of the line into a `SyntaxErrorAssertion` and moves on, so nothing upstream ever surfaces
+        #   the failure. Measured at 568138c2: `#: (finite-float) -> String` above a `def` synthesized no
+        #   signature for it AT ALL, and `rigor check` on the file reported nothing beyond an unrelated
+        #   `rbs.coverage.missing-gem` info — the annotation was indistinguishable from one never written,
+        #   which ADR-93's "an inline annotation is a live contract" forbids.
+        #
+        # Deliberately narrow otherwise. A construct the gem's parser REJECTS already routes through WD6's
+        # error path, and one it never recognised at all is upstream's grammar to define (WD3) — guessing at
+        # those would make this a lint on comment prose, which is exactly the false-positive cost ADR-5 ranks
+        # first. `SyntaxErrorAssertion` is neither: the gem's OWN parser recognised the `#:` shape and
+        # positively flagged its payload as unparseable, so reporting it is naming a fact rbs-inline already
+        # computed, not guessing at one.
         def unhonoured_annotations(prism_result)
           ::RBS::Inline::AnnotationParser.parse(prism_result.comments).flat_map do |parsed|
             parsed.each_annotation.filter_map do |annotation|
-              next unless annotation.is_a?(::RBS::Inline::AST::Annotations::ModuleSelf)
-              next unless annotation.self_types.empty?
+              case annotation
+              when ::RBS::Inline::AST::Annotations::ModuleSelf
+                next if annotation.self_types.any?
 
-              "`@rbs module-self` contributed no self-type constraint. Rigor reads the " \
-                "`# @rbs module-self Foo` spelling; `# @rbs module-self: Foo` (the spelling in rbs's own " \
-                "inline documentation) is not honoured here."
+                "`@rbs module-self` contributed no self-type constraint. Rigor reads the " \
+                  "`# @rbs module-self Foo` spelling; `# @rbs module-self: Foo` (the spelling in rbs's own " \
+                  "inline documentation) is not honoured here."
+              when ::RBS::Inline::AST::Annotations::SyntaxErrorAssertion
+                syntax_error_assertion_notice(annotation)
+              end
             end
           end.uniq
+        end
+
+        # Issue #997 — the line comes off the annotation's OWN `Prism::Comment` location, not the
+        # synthesized RBS buffer: unlike {Environment::RbsLoader#unresolved_type_name_detail}'s position,
+        # this one is read straight from the `.rb` file this synthesis call is fresh over (the per-file
+        # synthesizer cache is content-keyed, so a changed file simply misses rather than replaying a stale
+        # line), so it is the real line the author wrote, not an approximation.
+        def syntax_error_assertion_notice(annotation)
+          line = annotation.source.comments.first&.location&.start_line
+          position = line ? " on line #{line}" : ""
+          "a `#:` annotation#{position} did not parse as an RBS method type or type " \
+            "(`#{annotation.error_string}`) and was DROPPED — the method types as if the annotation had " \
+            "never been written, not merely as if its type were wrong. Fix the RBS syntax to restore it."
         end
 
         # Rewrite every RDoc directive comment to its spaced spelling (`#:nodoc:` -> `# :nodoc:`) so

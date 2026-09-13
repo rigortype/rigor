@@ -28,7 +28,9 @@ assert_type("Integer", sum)
 sum2 = xs.inject(0, :+)
 assert_type("Integer", sum2)
 
-# String element type with `:+` concatenation.
+# String element type with `:+` concatenation. `rand.to_s` is `non-empty-string` (#993 — a bare
+# `Float` has no finiteness proof, but `to_s` is still total and never returns `""`), and
+# `non-empty-string + non-empty-string` stays `non-empty-string`.
 strs = [rand.to_s, rand.to_s]
 joined = strs.reduce(:+)
-assert_type("String", joined)
+assert_type("non-empty-string", joined)

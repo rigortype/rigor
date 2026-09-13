@@ -106,7 +106,12 @@ module Rigor
       # blob has no such section and would deserialise it as nil, which reads as "nothing cached" and is
       # therefore not misread — but a snapshot written by an engine that did not yet REPLAY them was also
       # written by one whose narrowed runs under-reported, so the gate rejects it and the next run is cold.
-      SCHEMA = 22
+      # 23: issue #992 gives each seed bundle a `parameter_envelopes` table — the joined positional envelope
+      # of every method a file records, plus its module / dynamic-surface marks — which `call.wrong-arity`
+      # reads for a method no signature declares. A pre-23 bundle folds as "no envelopes", which only ever
+      # withholds a check, but a warm run that withholds where a cold run fires is still the
+      # `--verify-incremental` divergence 14 was bumped for.
+      SCHEMA = 23
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

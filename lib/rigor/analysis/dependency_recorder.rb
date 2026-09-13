@@ -126,6 +126,29 @@ module Rigor
         [result, capture.snapshot]
       end
 
+      # Issue #992 — runs the block with its reads DETACHED from the current consumer (and from any enclosing
+      # capture) and returns `[block_result, read_set]`, so a caller that learns only afterwards whether its
+      # answer depended on those reads can {replay} them or drop them. `call.wrong-arity` reads a class's whole
+      # envelope bucket to decide a call that turns out to fit, and recording that as a file-level ancestry
+      # edge would make every correct call on a project class re-check on any edit to the class's files.
+      # Returns a nil read set when no recording is active.
+      def withhold
+        previous = Thread.current[KEY]
+        return [yield, nil] if previous.nil?
+
+        previous_captures = Thread.current[CAPTURE_KEY]
+        capture = Capture.new
+        Thread.current[KEY] = Accumulator.new(previous.consumer)
+        Thread.current[CAPTURE_KEY] = [capture]
+        begin
+          result = yield
+        ensure
+          Thread.current[KEY] = previous
+          Thread.current[CAPTURE_KEY] = previous_captures
+        end
+        [result, capture.snapshot]
+      end
+
       # ADR-84 WD2 — replays a {ReadSet} into the current consumer's accumulator as if each read happened
       # here, applying the same per-consumer self-read filter as {read_site}, and tees into every active
       # capture so an enclosing capture window stays transitive when a memo hit substitutes for a body walk.

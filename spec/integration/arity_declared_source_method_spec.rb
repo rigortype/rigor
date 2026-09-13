@@ -9,15 +9,13 @@
 # The `sig/` and inline-annotation arms below are the two ways a project method acquires a trustworthy
 # signature (acceptance criteria 1 and 2); the no-declaration arm is the unchanged control (criterion 3).
 #
-# Issue #992 — the no-declaration arm above builds its fixture with `Configuration.new` and no
-# `plugin_requirer:`, so `rigor-rbs-inline` never loads and `Foo#f` resolves no signature at all: the
-# arm proves nothing about a NORMAL project, where ADR-93 auto-wires the plugin by default. Under that
-# default, a file carrying ONE annotation gets a full `(untyped, …) -> untyped` skeleton synthesized for
-# EVERY `def` in it (#823), so a sibling method with no declaration of its own still resolves a
-# `method_def` — one `wrong_arity_diagnostic` must not trust, or whether an undeclared method gets
-# arity-checked would depend on an unrelated annotation elsewhere in its file. The regression arm below
-# exercises the plugin for real and checks exactly that: a declared `Foo#f` fires per usual, alongside an
-# undeclared `Bar#g` in the SAME file that must stay silent.
+# Issue #992 — under ADR-93 a file carrying ONE annotation gets a full `(untyped, …) -> untyped` skeleton
+# synthesized for EVERY `def` in it (#823), so a sibling method with no declaration of its own still
+# resolves a `method_def`. That member's arity is never read: whether an undeclared method is checked must
+# not depend on an unrelated annotation elsewhere in its file, so it is checked exactly as a method with no
+# member at all is — against its `def`'s own envelope (`spec/integration/arity_undeclared_source_method_spec.rb`).
+# The arms below exercise the plugin for real: the undeclared `Bar#g` / `Helper#helper` fire with the
+# same messages the no-declaration arm produces, and their argument types are never checked.
 #
 # The case #991 was actually filed for is narrower still, and needed its own fact rather than reusing
 # `rigor:v1:inferred-return`: an author who writes `# @rbs num: Float` and nothing else has made an
@@ -140,13 +138,15 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
     Rigor::Plugin.unregister!
   end
 
-  it "stays silent on the same call shapes when the method carries no declaration at all (control)" do
+  # Issue #992 — with no declaration anywhere, the `def`'s own envelope still checks arity; the argument
+  # TYPE has no contract to be checked against, so `f("x")` stays silent.
+  it "checks only arity on the same call shapes when the method carries no declaration at all" do
     write_project("#{def_f}\n#{calls}")
 
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
     )
-    expect(rules_and_messages(configuration)).to be_empty
+    expect(rules_and_messages(configuration)).to eq(expected_diagnostics.first(2))
   end
 
   # The issue's own repro: `# @rbs num: Float` and nothing else. The parameter is authored; the return
@@ -219,8 +219,8 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
   # A mixin reached through an annotated file: `Helper#helper` carries no annotation of its own, only
   # `Foo#f` (elsewhere in the same file) does, which is what pulls the plugin's file-wide skeleton in.
   # `C` never defines `helper` itself, so the only signature `wrong_arity_diagnostic` can resolve for
-  # `C.new.helper` is the fully-defaulted one synthesized for `Helper#helper` — which must decline the
-  # same way an unannotated same-class method does.
+  # `C.new.helper` is the fully-defaulted one synthesized for `Helper#helper` — which is checked the same
+  # way an unannotated method with no member at all is (#992): through `C`'s mixin to `Helper`'s `def`.
   def mixin_project
     <<~RUBY
       class Foo
@@ -247,8 +247,8 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
     RUBY
   end
 
-  it "stays silent on a mixin method reached through a file the inline plugin annotates for an " \
-     "unrelated class (#992 regression)" do
+  it "checks a mixin method reached through a file the inline plugin annotates for an unrelated class " \
+     "against the def's own envelope (#992)" do
     plugin_requirer = require_rbs_inline_plugin
     write_project(mixin_project)
 
@@ -260,14 +260,17 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
       )
     )
     diagnostics = rules_and_messages(configuration, plugin_requirer: plugin_requirer)
-    expect(diagnostics).to eq(expected_diagnostics)
+    expect(diagnostics).to eq(
+      expected_diagnostics +
+        [["call.wrong-arity", "wrong number of arguments to `helper' on C (given 0, expected 1)"],
+         ["call.wrong-arity", "wrong number of arguments to `helper' on C (given 2, expected 1)"]]
+    )
   ensure
     Rigor::Plugin.unregister!
   end
 
   # `Bar#g` carries no declaration of its own; only `Foo#f`'s inline annotation makes the file
-  # "annotated" and pulls the plugin in. `expected_diagnostics` names only `Foo#f`, so `Bar#g`'s two
-  # calls proving silent is exactly `diagnostics == expected_diagnostics`, not a separate assertion.
+  # "annotated" and pulls the plugin in.
   def undeclared_sibling_project
     <<~RUBY
       class Foo
@@ -290,8 +293,8 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
     RUBY
   end
 
-  it "stays silent on an undeclared sibling method even though the inline plugin annotates " \
-     "another method in the same file (#992 regression)" do
+  it "checks an undeclared sibling method against its def's own envelope, not the skeleton the inline " \
+     "plugin synthesizes because another method in the same file is annotated (#992)" do
     plugin_requirer = require_rbs_inline_plugin
     write_project(undeclared_sibling_project)
 
@@ -303,7 +306,11 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
       )
     )
     diagnostics = rules_and_messages(configuration, plugin_requirer: plugin_requirer)
-    expect(diagnostics).to eq(expected_diagnostics)
+    expect(diagnostics).to eq(
+      expected_diagnostics +
+        [["call.wrong-arity", "wrong number of arguments to `g' on Bar (given 0, expected 1)"],
+         ["call.wrong-arity", "wrong number of arguments to `g' on Bar (given 2, expected 1)"]]
+    )
   ensure
     Rigor::Plugin.unregister!
   end

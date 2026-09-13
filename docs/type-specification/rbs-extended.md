@@ -80,6 +80,7 @@ def valid_string?: (untyped value) -> bool
 | `rigor:v1:assert-if-false target is T` | Refines `target` when the method returns `false` or `nil`. |
 | `rigor:v1:effect <label-list>` | Declares an **effect envelope** — an upper bound on the effect labels the method's code may perform. Also valid on a `class` / `module` declaration, where it distributes (§ "Effect envelopes"). |
 | `rigor:v1:inferred-return` | The declaration states the member's presence and its parameters and says **nothing** about what it returns; Rigor infers the return type from the implementation (§ "Declarations that do not state a return type"). |
+| `rigor:v1:inferred-signature` | The declaration states only that a member with this name and shape exists; **every** type on it — every parameter and the return alike — is a placeholder, so nothing about its contract was asserted (§ "Declarations with no authored type at all"). |
 
 A true-branch-only predicate is sufficient for Python `TypeGuard`-like behavior. A predicate pair that describes both branches is sufficient for Python `TypeIs`-like behavior. The false branch MAY be written as an explicit negative type when that is clearer:
 
@@ -121,11 +122,30 @@ A declaration usually contracts both halves of a method: what it accepts and wha
 def sibling: () -> untyped
 ```
 
-Everything else the declaration says still holds. The member counts toward the class's method surface, so a call to it is not `call.undefined-method`; its parameter list still governs arity and argument-type checking; and the name resolves for other signatures that reference the class. Only the return type is withheld.
+Everything else the declaration says still holds. The member counts toward the class's method surface, so a call to it is not `call.undefined-method`; its parameter list still governs arity and argument-type checking; and the name resolves for other signatures that reference the class. Only the return type is withheld. (One rule reads a narrower fact than "parameters are as declared": `call.wrong-arity` additionally declines when `rigor:v1:inferred-signature` is also present on the member — see below — because in that case the parameter list is not "as declared" either, it is as defaulted.)
 
 The directive exists because a signature can be generated from source that never stated a return type. Rigor's rbs-inline ingestion writes it on every type slot the reader defaulted rather than read from an annotation ([ADR-93](../adr/93-default-rbs-inline-ingestion.md) WD6): inside a file that carries one annotation, the reader emits a full signature for every unannotated `def` in it too, and without this an annotation on one method would retype all of its siblings to `untyped`. An author MAY write the directive in a hand-written `.rbs` for the same effect — a partial signature that constrains arguments and defers the return.
 
 The directive takes no payload and is read on method members and on `attr_*` members. The directive wins over whatever return type the signature carries, so `untyped` is the only return type worth writing beside it; a real one there is dead text rather than a conflict Rigor reports. It is not read on a `class` / `module` declaration and does not distribute to a declaration's members the way an effect envelope does.
+
+## Declarations with no authored type at all
+
+`rigor:v1:inferred-return` alone cannot distinguish a member whose parameters the author actually wrote from one whose entire signature the synthesizer invented: both default the return, since there is no per-parameter equivalent of the return slot to survive synthesis and say "this one was authored, only the return was not." `rigor:v1:inferred-signature` carries that missing fact: it is present only when the return AND every parameter defaulted, meaning nothing at all was asserted about the member.
+
+```rbs
+%a{rigor:v1:inferred-return}
+%a{rigor:v1:inferred-signature}
+def bare: (untyped num) -> untyped
+
+%a{rigor:v1:inferred-return}
+def annotated_param: (Float num) -> untyped
+```
+
+The first member carries both directives: a fully bare `def` with no annotation anywhere on it. The second carries only `inferred-return`: its author wrote `# @rbs num: Float`, an assertion about the parameter list, and only the return was left to the synthesizer. The two are indistinguishable under `inferred-return?` alone; `inferred-signature?` is what tells them apart.
+
+`call.wrong-arity` is the reason this directive exists (issue #991). The rule treats a project `def` that also resolves a trustworthy signature as authoritative for arity, on the same terms as `call.argument-type-mismatch` — except when `rigor:v1:inferred-signature` is present, in which case it declines: the synthesized skeleton's arity is faithful by construction (upstream renders the `def`'s real parameter list regardless of what nearby was annotated), so the reason to stay silent is never that the arity might be wrong, but that nobody asserted anything about the member at all — indistinguishable at that point from `define_method`, `method_missing`, an alias, a reopened class, `prepend`, an ADR-17 `pre_eval:` patch, or a plugin-contributed surface, which is [issue #992](https://github.com/rigortype/rigor/issues/992)'s envelope, not this directive's. An authored parameter with a defaulted return carries no such ambiguity, so `inferred-signature` is absent and the rule witnesses normally.
+
+Like `rigor:v1:inferred-return`, this directive takes no payload, is read on method members and `attr_*` members (where it is redundant with `inferred-return`, since an attribute has exactly one type slot), is never read on a `class` / `module` declaration, and never appears without `rigor:v1:inferred-return` alongside it — a member cannot have every slot defaulted without its return being one of them.
 
 ## Explicit conformance directive
 

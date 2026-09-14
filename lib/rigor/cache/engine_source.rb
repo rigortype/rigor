@@ -3,6 +3,7 @@
 require "digest"
 
 require_relative "../version"
+require_relative "descriptor"
 
 module Rigor
   module Cache
@@ -63,6 +64,9 @@ module Rigor
       # to whatever else happened to be there, which is exactly the weakening this module forbids.
       REQUIRED_DIRECTORY = "lib"
 
+      # The config-row key every computed-value slot carries the identity under.
+      CONFIG_KEY = "engine-source"
+
       module_function
 
       # @return the gem root — the directory holding `lib/`, three levels above this file.
@@ -104,6 +108,21 @@ module Rigor
         return @process_identity if defined?(@process_identity)
 
         @process_identity = identity
+      end
+
+      # The `engine-source` key row for a cache whose value this engine computed, built from
+      # {.process_identity}: empty for a version-pinned tree, so a released gem's keys stay byte-identical.
+      #
+      # Issue #1009 — a slot keyed only on its inputs and a plugin's manifest version outlives the engine
+      # that filled it. The per-file synthesizer slot and every plugin producer were keyed that way, so after
+      # an engine or bundled-plugin edit the run-result key moved and the run re-analysed, but through the
+      # previous build's synthesized RBS and producer values. {Unavailable} propagates, so a caller that
+      # cannot identify the engine bypasses its cache instead of falling back to the weaker key.
+      def key_config_entries
+        identity = process_identity
+        return [] if identity.nil?
+
+        [Descriptor::ConfigEntry.new(key: CONFIG_KEY, value_hash: Digest::SHA256.hexdigest(identity))]
       end
 
       # Discards the {.process_identity} memo; production code MUST NOT call this — a run that recomputed

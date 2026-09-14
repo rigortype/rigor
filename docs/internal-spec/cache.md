@@ -340,13 +340,47 @@ hands off to the full path, which records its own.
 
 A cache whose value is a function of what the analyzer *computes* —
 `analysis.run-diagnostics`, `analysis.run-effects`,
-`protection.mutation-file-result`, and the
+`protection.mutation-file-result`, the per-file
+`plugin.source_rbs_synthesizer` slot, every plugin producer
+(`plugin.<id>.<producer>`), and the
 `IncrementalSnapshot` — MUST key on the engine's source, not only on
 `Rigor::VERSION`. The version pins the bytes for a gem installed from
 RubyGems and for nothing else, so on an edited working tree a warm run
 replays pre-edit diagnostics and a before/after measurement of an engine
 change reports a zero it did not
 earn ([#285](https://github.com/rigortype/rigor/issues/285)).
+
+Every `Descriptor`-keyed slot among these (all but the
+`IncrementalSnapshot`, whose fingerprint appends the identity as a
+string part) takes the row from
+`EngineSource.key_config_entries` — an `engine-source` `ConfigEntry`
+whose `value_hash` is the SHA-256 of the identity, or no row at all for a
+version-pinned tree — so the slots cannot drift apart in how they carry
+it.
+
+**Why a slot fed to another computation needs it too
+([#1009](https://github.com/rigortype/rigor/issues/1009)).** Moving the
+run-result key alone is not enough when the re-analysis it forces reads
+*other* cached values the engine computed. Before #1009 the
+`plugin.source_rbs_synthesizer` slot was keyed on the source file's
+digest and the plugin's `PluginEntry` (id, manifest version, config
+hash), and a plugin producer's key on the `PluginEntry` alone. A
+checkout that edits a bundled plugin's synthesizer keeps its manifest
+version, so after such an edit the run-result key moved and the run
+re-analysed — but the synthesizer slot served the previous build's RBS
+string. The `rbs.virtual_rbs` row of the environment key (see
+`RbsDescriptor` below) hashes the string it is handed, so the stale
+string kept `rbs.environment` warm as well, and the new build's rules
+read the old build's signatures: a warm result that neither build
+reports cold. A `lib/`-only edit that changes no synthesizer output did
+not show it, which is why the run-result key's own coverage looked
+sufficient. With the row in the synthesizer key, an engine edit
+re-synthesizes every annotated file; when the output is unchanged the
+`rbs.virtual_rbs` row is too, so `rbs.environment` still hits.
+
+A caller that cannot identify the engine (`EngineSource::Unavailable`)
+runs the synthesizer or producer uncached for the run rather than keying
+it without the row.
 
 `Cache::EngineSource.identity` supplies the slot, in two regimes:
 

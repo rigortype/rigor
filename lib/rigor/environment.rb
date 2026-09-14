@@ -16,6 +16,7 @@ require_relative "environment/lockfile_resolver"
 require_relative "environment/installed_gem_set"
 require_relative "environment/rbs_collection_discovery"
 require_relative "plugin/isolation"
+require_relative "cache/engine_source"
 require_relative "environment/rbs_coverage_report"
 require_relative "inference/synthetic_method_index"
 require_relative "inference/project_patched_methods"
@@ -492,7 +493,10 @@ module Rigor
       #
       # WD5 — when `cache_store` is supplied, each (file, plugin) synthesizer call is memoised through
       # `Cache::Store`. The cache key composes the file's content SHA with the plugin's `PluginEntry` (id +
-      # version + config_hash) so a config change or content change invalidates the entry automatically.
+      # version + config_hash) so a config change or content change invalidates the entry automatically, and
+      # with the engine's source identity (issue #1009): a plugin's manifest version does not move when a
+      # checkout edits its synthesizer, and a stale string here also keeps the `rbs.virtual_rbs` env key warm,
+      # so the new build's rules would read the old build's RBS.
       def collect_virtual_rbs(plugin_registry, source_files, cache_store, reporter)
         return [] if plugin_registry.nil?
 
@@ -523,6 +527,8 @@ module Rigor
         return invoke_synthesizer_safely(callable, path) unless File.file?(path)
 
         descriptor = build_synthesizer_cache_descriptor(plugin, path)
+        return invoke_synthesizer_safely(callable, path) if descriptor.nil?
+
         cache_store.fetch_or_compute(
           producer_id: SYNTHESIZER_CACHE_PRODUCER_ID,
           params: {},
@@ -631,8 +637,13 @@ module Rigor
             comparator: :digest,
             value: synthesizer_input_digest(path)
           )],
-          plugins: [plugin.plugin_entry]
+          plugins: [plugin.plugin_entry],
+          configs: Cache::EngineSource.key_config_entries
         )
+      rescue Cache::EngineSource::Unavailable
+        # An engine that cannot be identified must not be keyed by its inputs alone (issue #1009): nil runs the
+        # synthesizer uncached rather than serving an entry another build may have written.
+        nil
       end
 
       def synthesizer_input_digest(path)

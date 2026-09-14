@@ -8,6 +8,7 @@ require "prism"
 require_relative "manifest"
 require_relative "node_context"
 require_relative "../analysis/diagnostic"
+require_relative "../cache/engine_source"
 # `producer generation_cap:` defaults to (and validates against) `Cache::Store::UNBOUNDED_GENERATIONS`, and a
 # plugin class body can be evaluated before anything else pulled the cache layer in.
 require_relative "../cache/store"
@@ -808,7 +809,12 @@ module Rigor
         return compute unless store
 
         prefixed_id = "plugin.#{manifest.id}.#{producer_id}"
-        key_descriptor = compose_key_descriptor(descriptor)
+        begin
+          key_descriptor = compose_key_descriptor(descriptor)
+        rescue Cache::EngineSource::Unavailable
+          # An unidentifiable engine runs the producer uncached rather than keyed without it (issue #1009).
+          return compute
+        end
         lambda do
           store.fetch_or_validate(
             producer_id: prefixed_id,
@@ -1026,8 +1032,13 @@ module Rigor
       # plugin-author-supplied extension carrying IDENTITY inputs (gem-version pins, `ConfigEntry` rows,
       # configuration-file digests). The IoBoundary read history deliberately does NOT enter the key — it is
       # recorded post-compute into the dependency descriptor instead (see {#producer_dependency_descriptor}).
+      #
+      # Issue #1009 — the engine's source identity rides in the auto-built half. The manifest version is the
+      # plugin author's promise, and a checkout editing a bundled plugin (or the engine API a producer computes
+      # through) keeps it, so without the identity the next session served the previous build's value into a
+      # run the run-result key had correctly re-analysed.
       def compose_key_descriptor(extra)
-        auto_built = Cache::Descriptor.new(plugins: [plugin_entry])
+        auto_built = Cache::Descriptor.new(plugins: [plugin_entry], configs: Cache::EngineSource.key_config_entries)
         return auto_built if extra.nil?
 
         Cache::Descriptor.compose(auto_built, extra)

@@ -1,0 +1,13 @@
+---
+locals:
+  hash: non-empty-string?
+  "n": Integer
+  oct: non-empty-string?
+  str: '"input"'
+assertions:
+  '1': decimal-int-string
+  '2': decimal-int-string
+  '3': non-empty-string
+  '4': non-empty-string
+  '5': non-empty-string
+  '6': non-empty-string

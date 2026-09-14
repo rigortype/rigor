@@ -9,6 +9,7 @@ require_relative "../environment"
 require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
+require_relative "optimistic_origin"
 
 module Rigor
   module Inference
@@ -52,6 +53,12 @@ module Rigor
       RegexMatchPattern = Data.define(:source, :extended)
       private_constant :TRUSTED_EQUALITY_LITERAL_CLASSES, :SINGLETON_LITERAL_CLASSES, :ClassNarrowingContext,
                        :RegexMatchPattern
+
+      # Issue #1017 — the tallest stack of conditionals a condition may carry and still contribute facts. A
+      # conditional guard analyses its predicate and both arms, so each level can triple the analysis; past this
+      # height the guard declines to "no narrowing". Height counts conditionals reached through the shapes the
+      # analyser walks (parentheses, a body's last statement, `&&` / `||`, `!`, a predicate, an arm).
+      CONDITIONAL_GUARD_DEPTH = 2
 
       module_function
 
@@ -478,10 +485,8 @@ module Rigor
           analyse_global_write(node, scope)
         when Prism::CallNode
           analyse_call(node, scope)
-        when Prism::AndNode
-          analyse_and(node, scope)
-        when Prism::OrNode
-          analyse_or(node, scope)
+        when Prism::AndNode, Prism::OrNode, Prism::IfNode, Prism::UnlessNode
+          analyse_composition(node, scope)
         when Prism::MatchWriteNode
           analyse_match_write(node, scope)
         end
@@ -3183,6 +3188,16 @@ module Rigor
           [truthy.public_send(writer, receiver.name, non_nil), falsey]
         end
 
+        # The predicates composed from other predicates, whose edges are built from their
+        # operands' edges.
+        def analyse_composition(node, scope)
+          case node
+          when Prism::AndNode then analyse_and(node, scope)
+          when Prism::OrNode then analyse_or(node, scope)
+          else analyse_conditional(node, scope)
+          end
+        end
+
         # `a && b` short-circuits: the truthy edge is the truthy edge of `b` evaluated under
         # `a`'s truthy scope; the falsey edge is the union of `a`'s falsey scope (b skipped) and
         # `b`'s falsey scope (b ran but returned falsey). When a sub-edge cannot be narrowed we
@@ -3190,7 +3205,7 @@ module Rigor
         # output scopes.
         def analyse_and(node, scope)
           truthy_a, falsey_a = analyse(node.left, scope) || [scope, scope]
-          truthy_b, falsey_b = analyse(node.right, truthy_a) || [truthy_a, truthy_a]
+          truthy_b, falsey_b = operand_edges(node.right, truthy_a)
           [truthy_b, falsey_a.join(falsey_b)]
         end
 
@@ -3199,8 +3214,96 @@ module Rigor
         # falsey scope evaluated under `a`'s falsey scope.
         def analyse_or(node, scope)
           truthy_a, falsey_a = analyse(node.left, scope) || [scope, scope]
-          truthy_b, falsey_b = analyse(node.right, falsey_a) || [falsey_a, falsey_a]
+          truthy_b, falsey_b = operand_edges(node.right, falsey_a)
           [truthy_a.join(truthy_b), falsey_b]
+        end
+
+        # The edges of an operand that runs only on one edge of an earlier operand, which is the
+        # step `&&` and `||` both take for their right operand.
+        def operand_edges(node, edge_scope)
+          analyse(node, edge_scope) || [edge_scope, edge_scope]
+        end
+
+        # Issue #1017 — `p ? q : r` (and `if` / `unless` in condition position) is truthy through
+        # `p ∧ q` or `¬p ∧ r` and falsey through `p ∧ ¬q` or `¬p ∧ ¬r`. Each conjunction is the
+        # `&&` step — the arm's edges under the predicate's edge ({#operand_edges}) — and each
+        # disjunction is the `||` merge (`Scope#join`), so `p ? false : q` narrows as `!p && q`
+        # does without a literal-arm rule: an arm whose value is settled contributes only its
+        # live edge ({#settled_edges}). Beyond {CONDITIONAL_GUARD_DEPTH} the guard declines.
+        #
+        # The predicate's own edges are never dropped as settled. `scope` is the scope after the
+        # whole conditional ran, so it has already joined the arms, and a carrier every arm
+        # narrowed has lost its optimistic mark there (`Scope#with_local` drops it): a
+        # `missable.nil?` predicate reads as a proof-looking `false` it is not. An arm is judged
+        # under the predicate's edge instead, where a settled value follows from that edge.
+        def analyse_conditional(node, scope)
+          return nil if conditional_guard_height(node) > CONDITIONAL_GUARD_DEPTH
+
+          predicate, then_arm, else_arm = conditional_parts(node)
+          truthy_p, falsey_p = operand_edges(predicate, scope)
+          truthy_q, falsey_q = settled_edges(then_arm, truthy_p)
+          truthy_r, falsey_r = settled_edges(else_arm, falsey_p)
+          truthy = join_live_edges(truthy_q, truthy_r)
+          falsey = join_live_edges(falsey_q, falsey_r)
+          return nil if truthy.nil? && falsey.nil?
+
+          [truthy || scope, falsey || scope]
+        end
+
+        # `[predicate, arm run when it is truthy, arm run when it is falsey]`. An arm is a body or
+        # `nil` for an absent / empty one; an `elsif` is the nested conditional itself.
+        def conditional_parts(node)
+          if node.is_a?(Prism::UnlessNode)
+            [node.predicate, else_body(node.else_clause), node.statements]
+          else
+            subsequent = node.subsequent
+            [node.predicate, node.statements, subsequent.is_a?(Prism::ElseNode) ? else_body(subsequent) : subsequent]
+          end
+        end
+
+        def else_body(else_node)
+          else_node&.statements
+        end
+
+        # An operand's `[truthy, falsey]` edges with a dead edge as `nil`. An absent arm evaluates
+        # to `nil`, so only its falsey edge is live. Otherwise the edge the operand's type proves
+        # unreachable is dropped — unless that proof rests on an optimistically nil-free lookup
+        # (ADR-101, issue #313), which `branch_certainty` refuses to elide an arm on as well.
+        def settled_edges(node, scope)
+          return [nil, scope] if node.nil?
+
+          truthy, falsey = operand_edges(node, scope)
+          case predicate_certainty(scope.type_of(node))
+          when :truthy then optimistic_operand?(node, scope) ? [truthy, falsey] : [truthy, nil]
+          when :falsey then optimistic_operand?(node, scope) ? [truthy, falsey] : [nil, falsey]
+          else [truthy, falsey]
+          end
+        end
+
+        def optimistic_operand?(node, scope)
+          node = node.body.last while node.is_a?(Prism::StatementsNode) && !node.body.empty?
+          !OptimisticOrigin.resolve(node, scope).nil?
+        end
+
+        def join_live_edges(left, right)
+          return right if left.nil?
+          return left if right.nil?
+
+          left.join(right)
+        end
+
+        # The number of conditionals stacked in `node` along the shapes {.analyse} walks.
+        def conditional_guard_height(node)
+          case node
+          when Prism::IfNode, Prism::UnlessNode
+            1 + conditional_parts(node).map { |part| conditional_guard_height(part) }.max
+          when Prism::ParenthesesNode then conditional_guard_height(node.body)
+          when Prism::StatementsNode then conditional_guard_height(node.body.last)
+          when Prism::AndNode, Prism::OrNode
+            [conditional_guard_height(node.left), conditional_guard_height(node.right)].max
+          when Prism::CallNode then node.name == :! ? conditional_guard_height(node.receiver) : 0
+          else 0
+          end
         end
       end
     end

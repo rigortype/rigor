@@ -32,6 +32,7 @@ Edge-aware scopes are finer than assigning one scope to the whole `if` condition
 - `!a` swaps truthy and falsey scopes.
 - `unless a` uses the same condition facts as `if a`, then swaps branch destinations.
 - `case`, pattern matching, and chained `elsif` expressions pass negative facts from earlier arms to later arms.
+- The ternary `a ? b : c`, the modifier `b if a` / `b unless a`, and the block forms are one construct: each MUST narrow its arms from the same condition facts, and the value of a conditional MUST be the same whether it is a statement or a value — an argument, a receiver, a collection element, or the right-hand side of a write. A Float comparison's falsey arm keeps the entry type in every spelling, because `!(x > c)` also holds for `NaN`.
 
 ```ruby
 def contradictory(foo)

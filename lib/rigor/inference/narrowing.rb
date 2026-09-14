@@ -120,10 +120,9 @@ module Rigor
       # falsey fragments above: `:truthy` when no inhabitant is falsey (the falsey fragment is
       # `Bot`), `:falsey` when no inhabitant is truthy, nil when both fragments are inhabited —
       # or when the type itself is nil / `Bot` (dead code is not a certainty claim). This is the
-      # single owner of the judgment both branch-elision consumers read
-      # (`ExpressionTyper#elide_or_union` on the value side, `StatementEvaluator#live_branch_for_if`
-      # on the scope side), so the type a dead branch is elided from and the scope that stops
-      # flowing through it can never disagree.
+      # single owner of the judgment branch elision reads (`StatementEvaluator#live_branch_for_if`,
+      # which a value-position conditional reaches too since issue #1003), so the type a dead
+      # branch is elided from and the scope that stops flowing through it can never disagree.
       def predicate_certainty(type)
         return nil if type.nil? || type.is_a?(Type::Bot)
 

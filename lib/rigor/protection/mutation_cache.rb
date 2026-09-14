@@ -182,8 +182,7 @@ module Rigor
         # `Unavailable` rescue above and disables the cache, which is the only sound reading of a key slot
         # that could not be computed.
         def engine_source_entries
-          identity = Cache::EngineSource.process_identity
-          identity.nil? ? [] : [config_entry("engine-source", identity)]
+          Cache::EngineSource.key_config_entries
         end
 
         # Probed BEFORE the snapshot load, for the reason string rather than for soundness. Since #289

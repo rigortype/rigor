@@ -1,0 +1,1 @@
+- **[cache]** A warm `rigor check` run from a source checkout no longer mixes the previous build's inline-RBS synthesis and plugin cache values into a newer build's analysis after an engine or bundled-plugin edit, so the warm result matches a `--no-cache` run. [#1012](https://github.com/rigortype/rigor/pull/1012)

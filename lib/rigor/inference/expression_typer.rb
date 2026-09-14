@@ -27,7 +27,6 @@ require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "receiver_alias"
 require_relative "singleton_object_constant"
-require_relative "optimistic_origin"
 require_relative "struct_fold_safety"
 require_relative "version_guard"
 
@@ -759,70 +758,16 @@ module Rigor
         scope.evaluate(node, tracer: tracer).first
       end
 
-      # Issue #286 — the effective optimistic-nil-free cause of an expression. {OptimisticOrigin.resolve} owns
-      # the judgment, shared verbatim with `StatementEvaluator#optimistic_origin_for` and the
-      # `flow.always-truthy-condition` collector.
-      def optimistic_origin_for(node)
-        OptimisticOrigin.resolve(node, scope)
-      end
-
       def type_of_else(node)
         statements_or_nil(node.statements)
       end
 
-      # `a && b` and `a || b` short-circuit at the value level: `a && b` returns `a` when `a` is falsey, else
-      # `b`. `a || b` returns `a` when `a` is truthy, else `b`.
-      #
-      # v0.0.6 — when the left operand folds to a `Type::Constant`, we know which side actually flows
-      # through, so the result is one operand's type instead of a union. Otherwise the union-of-both-operands
-      # fallback is preserved.
+      # `a && b` / `a || b` in value position. Issue #1016: this handler used to type both operands in the
+      # receiver scope, so `x.finite? && x` read `Float | false` while the statement form bound
+      # `false | finite-float`. Like `type_of_conditional`, it delegates to the statement evaluator, which owns
+      # the RHS narrowing, the constant short-circuit and its issue #313 optimistic-carrier decline.
       def type_of_and_or(node)
-        left_type = type_of(node.left)
-        polarity = left_operand_polarity(node.left, left_type)
-        return short_circuit_for(node, left_type, polarity) if polarity
-
-        # The left operand only flows through on the edge that short-circuits: `a || b` yields `a` solely
-        # when `a` is truthy, so its falsey constituents (`nil` / `false`) can never be the value of the
-        # OrNode (they hand off to `b`); `a && b` yields `a` solely when `a` is falsey. Narrow the surviving
-        # left edge before the union so `s || full` (with `s : String?`) types `String | <full>` rather than
-        # re-admitting the stripped `nil`. Mirrors `StatementEvaluator#eval_and_or`'s `skipped_type`.
-        surviving_left =
-          if node.is_a?(Prism::AndNode)
-            Narrowing.narrow_falsey(left_type)
-          else
-            Narrowing.narrow_truthy(left_type)
-          end
-        Type::Combinator.union(surviving_left, type_of(node.right))
-      end
-
-      def short_circuit_for(node, left_type, polarity)
-        and_node = node.is_a?(Prism::AndNode)
-        if polarity == :truthy
-          and_node ? type_of(node.right) : left_type
-        else
-          and_node ? left_type : type_of(node.right)
-        end
-      end
-
-      # Issue #313 — the node-aware wrapper the `&&` / `||` short-circuit reads. The spec's exclusion binds
-      # this gate as much as it binds `flow.always-truthy-condition`, and a `Constant`-only gate is not by
-      # itself enough to honour it: a literal hash whose values share one type reads as a lone `Constant`
-      # (`UNIFORM[key]` → `Constant[1]`), so the gate would judge the left operand of `UNIFORM[key] || key`
-      # provably truthy and discard the author's fallback — the counter-example the spec names verbatim.
-      # Declining returns the union of both operands, which is what `StatementEvaluator#eval_and_or` produces
-      # anyway, so the two `&&` / `||` typers stay in agreement.
-      def left_operand_polarity(left_node, left_type)
-        return nil unless optimistic_origin_for(left_node).nil?
-
-        constant_value_polarity(left_type)
-      end
-
-      # Returns `:truthy` / `:falsey` for a `Type::Constant`, nil otherwise — the `&&` / `||` short-circuit
-      # reads a typed operand, not a predicate node.
-      def constant_value_polarity(type)
-        return nil unless type.is_a?(Type::Constant)
-
-        type.value ? :truthy : :falsey
+        scope.evaluate(node, tracer: tracer).first
       end
 
       # Three-valued evaluation of `case predicate when pattern` dispatch. For each `when` clause we ask:

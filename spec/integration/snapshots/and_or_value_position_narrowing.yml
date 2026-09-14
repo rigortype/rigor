@@ -1,0 +1,33 @@
+---
+locals:
+  a: Array[String] | non-empty-array[String]
+  class_stmt: 1 | false
+  cmp_falsey_stmt: Float | true
+  cmp_truthy_stmt: Float[0.0..] | false
+  empty_stmt: non-empty-array[String] | true
+  fallback_stmt: 1 | 5
+  finite_stmt: false | finite-float
+  key: Symbol
+  literal_stmt: ":a | false"
+  nan_stmt: non-nan-float | true
+  nested_stmt: "[String, finite-float] | true"
+  nil_stmt: String | true
+  s: String?
+  short_circuit_stmt: '1'
+  sym: ":a | :b"
+  uniform: "{ a: 1, b: 1 }"
+  v: '"str" | 1'
+  x: Float
+assertions:
+  '1': false | finite-float
+  '2': "[false | finite-float]"
+  '3': non-nan-float | true
+  '4': Float[0.0..] | false
+  '5': Float | true
+  '6': String | true
+  '7': 1 | false
+  '8': non-empty-array[String] | true
+  '9': ":a | false"
+  '10': "[String, finite-float] | true"
+  '11': '1'
+  '12': 1 | 5

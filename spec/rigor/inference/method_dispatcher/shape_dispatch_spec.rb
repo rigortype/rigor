@@ -1179,19 +1179,26 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         .to eq(Rigor::Type::Combinator.decimal_int_string)
     end
 
-    it "narrows non-negative-int#to_s(16) to hex-int-string" do
+    it "narrows non-negative-int#to_s(16) to non-empty-string, NEVER hex-int-string (#1004)" do
+      # `hex-int-string`'s predicate REQUIRES the `0x` prefix (`refined.rb`); `255.to_s(16)` is `"ff"`,
+      # with no prefix, so the old `hex-int-string` answer was false of every value this producer emits.
       expect(dispatch(receiver: non_negative, method_name: :to_s, args: [constant(16)]))
-        .to eq(Rigor::Type::Combinator.hex_int_string)
+        .to eq(Rigor::Type::Combinator.non_empty_string)
     end
 
-    it "narrows non-negative-int#to_s(8) to octal-int-string" do
+    it "narrows non-negative-int#to_s(8) to non-empty-string, NEVER octal-int-string (#1004)" do
+      # Same unsoundness for the `0o` prefix: `64.to_s(8)` is `"100"`, no leading zero.
       expect(dispatch(receiver: non_negative, method_name: :to_s, args: [constant(8)]))
-        .to eq(Rigor::Type::Combinator.octal_int_string)
+        .to eq(Rigor::Type::Combinator.non_empty_string)
     end
 
-    it "declines for unsupported bases (binary, custom alphabets)" do
+    it "narrows to_s for any other base to non-empty-string too, instead of declining (#1004)" do
+      # Matches the `Nominal[Integer]` tier below (#993 / #1001): every non-10 base reaches the same
+      # `non-empty-string` floor, so a base Rigor has no digit-alphabet carrier for (2, 36, ...) is no
+      # longer a special "decline" case.
       [2, 7, 36].each do |b|
-        expect(dispatch(receiver: non_negative, method_name: :to_s, args: [constant(b)])).to be_nil
+        expect(dispatch(receiver: non_negative, method_name: :to_s, args: [constant(b)]))
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
     end
 
@@ -1207,6 +1214,63 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
 
     it "declines for non-`to_s` selectors on IntegerRange receivers" do
       expect(dispatch(receiver: non_negative, method_name: :inspect)).to be_nil
+    end
+  end
+
+  describe "to_s producer / refinement predicate soundness (#1004)" do
+    # The bug #1004 fixes: a producer projected `hex-int-string` / `octal-int-string` for values
+    # that predicate REJECTS (`refined.rb`'s `HEX_INT_STRING_PATTERN` / `OCTAL_INT_STRING_PATTERN`
+    # require the `0x` / `0o` prefix; `Integer#to_s(base)` never emits one). A hand-picked example
+    # would not have caught this — the original producer's own hand-picked examples were exactly
+    # the values it got wrong. Instead this runs the REAL Ruby `to_s(base)` computation for a
+    # handful of receivers and asserts the refinement the engine assigns actually accepts the
+    # result, via the same `accepts` path `Inference::Acceptance` uses at runtime.
+    def refinement_accepts?(refinement, value)
+      constant = Rigor::Type::Combinator.constant_of(value)
+      refinement.respond_to?(:matches?) ? refinement.matches?(value) : refinement.accepts(constant).yes?
+    end
+
+    it "IntegerRange#to_s(base): the assigned refinement accepts to_s's real output, for every base and receiver" do
+      receivers_and_samples = {
+        Rigor::Type::Combinator.non_negative_int => [0, 1, 15, 16, 64, 100, 255, 4096],
+        Rigor::Type::Combinator.positive_int => [1, 8, 64, 100],
+        Rigor::Type::Combinator.integer_range(0, 99) => [0, 8, 42, 99]
+      }
+      bases = [8, 10, 16, 2, 36]
+
+      receivers_and_samples.each do |receiver, samples|
+        bases.each do |base|
+          result = dispatch(receiver: receiver, method_name: :to_s, args: [constant(base)])
+          next if result.nil?
+
+          samples.each do |n|
+            actual = n.to_s(base)
+            expect(refinement_accepts?(result, actual)).to be(true),
+                                                           "#{receiver.describe}#to_s(#{base}) projected " \
+                                                           "#{result.describe}, which rejects #{actual.inspect} " \
+                                                           "(the real to_s of #{n})"
+          end
+        end
+      end
+    end
+
+    it "Nominal[Integer]#to_s(base): the assigned refinement accepts to_s's real output, including negatives" do
+      nominal_int = Rigor::Type::Combinator.nominal_of("Integer")
+      bases = [8, 10, 16, 2, 36]
+      samples = [-255, -7, 0, 1, 64, 255]
+
+      bases.each do |base|
+        result = dispatch(receiver: nominal_int, method_name: :to_s, args: [constant(base)])
+        next if result.nil?
+
+        samples.each do |n|
+          actual = n.to_s(base)
+          expect(refinement_accepts?(result, actual)).to be(true),
+                                                         "Nominal[Integer]#to_s(#{base}) projected " \
+                                                         "#{result.describe}, which rejects #{actual.inspect} " \
+                                                         "(the real to_s of #{n})"
+        end
+      end
     end
   end
 

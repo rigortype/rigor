@@ -23,39 +23,45 @@ RSpec.describe Rigor::Builtins::RegexRefinement do
       end
     end
 
-    context "with `\\h`- and explicit-class hex bodies" do
-      it "maps `\\h+` to hex-int-string" do
+    context "with `\\h`- and explicit-class hex bodies (#1004: non-empty-string, NEVER hex-int-string)" do
+      # `hex-int-string`'s predicate REQUIRES the `0x` / `0X` prefix (`refined.rb`). A bare hex-digit
+      # class like `[0-9a-fA-F]+` matches "ff", which has no prefix at all — mapping it to
+      # `hex-int-string` was false of the value it claims to describe. `non-empty-string` is the sound
+      # floor: the `+` / bounded quantifier already guarantees a non-empty match.
+      it "maps `\\h+` to non-empty-string" do
         expect(described_class.for_capture_body('\h+'))
-          .to eq(Rigor::Type::Combinator.hex_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
-      it "maps `[0-9a-fA-F]+` to hex-int-string" do
+      it "maps `[0-9a-fA-F]+` to non-empty-string" do
         expect(described_class.for_capture_body("[0-9a-fA-F]+"))
-          .to eq(Rigor::Type::Combinator.hex_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
-      it "maps `[0-9a-f]+` and `[0-9A-F]+` to hex-int-string" do
+      it "maps `[0-9a-f]+` and `[0-9A-F]+` to non-empty-string" do
         expect(described_class.for_capture_body("[0-9a-f]+"))
-          .to eq(Rigor::Type::Combinator.hex_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
         expect(described_class.for_capture_body("[0-9A-F]+"))
-          .to eq(Rigor::Type::Combinator.hex_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
-      it "maps `\\h{8}` to hex-int-string" do
+      it "maps `\\h{8}` to non-empty-string" do
         expect(described_class.for_capture_body('\h{8}'))
-          .to eq(Rigor::Type::Combinator.hex_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
     end
 
-    context "with `[0-7]`-class octal bodies" do
-      it "maps `[0-7]+` to octal-int-string" do
+    context "with `[0-7]`-class octal bodies (#1004: non-empty-string, NEVER octal-int-string)" do
+      # Same unsoundness for the `0o` / leading-`0` prefix `octal-int-string` requires: "17" matches
+      # `[0-7]+` but has no such prefix.
+      it "maps `[0-7]+` to non-empty-string" do
         expect(described_class.for_capture_body("[0-7]+"))
-          .to eq(Rigor::Type::Combinator.octal_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
-      it "maps `[0-7]{3}` to octal-int-string" do
+      it "maps `[0-7]{3}` to non-empty-string" do
         expect(described_class.for_capture_body("[0-7]{3}"))
-          .to eq(Rigor::Type::Combinator.octal_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
     end
 
@@ -141,16 +147,16 @@ RSpec.describe Rigor::Builtins::RegexRefinement do
           .to eq(Rigor::Type::Combinator.numeric_string)
       end
 
-      it "maps `\\A\\h+\\z` and `\\A[0-9a-fA-F]+\\z` to hex-int-string" do
+      it "maps `\\A\\h+\\z` and `\\A[0-9a-fA-F]+\\z` to non-empty-string, NEVER hex-int-string (#1004)" do
         expect(described_class.for_whole_pattern('\A\h+\z'))
-          .to eq(Rigor::Type::Combinator.hex_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
         expect(described_class.for_whole_pattern('\A[0-9a-fA-F]+\z'))
-          .to eq(Rigor::Type::Combinator.hex_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
-      it "maps `\\A[0-7]+\\z` to octal-int-string" do
+      it "maps `\\A[0-7]+\\z` to non-empty-string, NEVER octal-int-string (#1004)" do
         expect(described_class.for_whole_pattern('\A[0-7]+\z'))
-          .to eq(Rigor::Type::Combinator.octal_int_string)
+          .to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
       it "maps `\\A[a-z]+\\z` / `\\A[A-Z]+\\z` to lower/uppercase-string" do
@@ -191,6 +197,47 @@ RSpec.describe Rigor::Builtins::RegexRefinement do
       it "rejects the empty anchored source `\\A\\z` and a nil source" do
         expect(described_class.for_whole_pattern('\A\z')).to be_nil
         expect(described_class.for_whole_pattern(nil)).to be_nil
+      end
+    end
+  end
+
+  describe "RULES table / predicate soundness (#1004)" do
+    # Every RULES row claims its refinement describes what its regex body matches. This runs each
+    # body's OWN regex semantics (independent of the RULES table — Ruby's `Regexp` engine, not our
+    # hand-picked positive examples) against a real sample, confirms the sample genuinely is a match,
+    # and then asserts the mapped refinement's real predicate/acceptance accepts that same sample. A
+    # hand-picked example that only exercises the prefixed literal case (`"0xff"`) would not have
+    # caught #1004 — the bug was specifically that a bare, prefix-free match ("ff") reaches a
+    # refinement whose predicate requires the prefix.
+    def refinement_accepts?(refinement, value)
+      constant = Rigor::Type::Combinator.constant_of(value)
+      refinement.respond_to?(:matches?) ? refinement.matches?(value) : refinement.accepts(constant).yes?
+    end
+
+    sample_by_body = {
+      '\d+' => "42",
+      "[0-9]+" => "07",
+      '\h+' => "ff",
+      "[0-9a-fA-F]+" => "1F",
+      "[0-9a-f]+" => "0a",
+      "[0-9A-F]+" => "0A",
+      "[0-7]+" => "17",
+      "[a-z]+" => "abc",
+      "[A-Z]+" => "ABC",
+      "[[:digit:]]+" => "007"
+    }
+
+    sample_by_body.each do |body, sample|
+      it "the refinement for `#{body}` accepts a real match of its own regex (#{sample.inspect})" do
+        expect(sample).to match(/\A#{body}\z/), "sample #{sample.inspect} is not itself a match of /#{body}/"
+
+        refinement = described_class.for_capture_body(body)
+        expect(refinement).not_to be_nil
+
+        expect(refinement_accepts?(refinement, sample)).to be(true),
+                                                           "for_capture_body(#{body.inspect}) => " \
+                                                           "#{refinement.describe}, which rejects " \
+                                                           "#{sample.inspect} even though /#{body}/ matches it"
       end
     end
   end

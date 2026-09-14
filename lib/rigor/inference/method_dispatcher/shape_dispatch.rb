@@ -202,17 +202,6 @@ module Rigor
         }.freeze
         private_constant :RECEIVER_HANDLERS
 
-        # v0.1.1 Track 1 slice 5b — `Integer#to_s(base)` on a non-negative `IntegerRange` receiver. The
-        # output of `n.to_s(b)` for `n >= 0` is digit-string-only (no leading sign), so when the base is in
-        # this table the result lifts to the matching imported refinement. Bases not listed (2, 36, ...)
-        # keep the v0.1.0 baseline since Rigor has no carrier for the resulting alphabet.
-        TO_S_BASE_REFINEMENTS = {
-          10 => :decimal_int_string,
-          8 => :octal_int_string,
-          16 => :hex_int_string
-        }.freeze
-        private_constant :TO_S_BASE_REFINEMENTS
-
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name
@@ -480,10 +469,18 @@ module Rigor
 
           # `IntegerRange#to_s` precision (v0.1.1 Track 1 slice 5b). When the range's lower bound is
           # `>= 0`, every member is a non-negative integer and `to_s(base)` returns a digit-string with no
-          # leading sign. The result lifts to the matching imported refinement (`decimal-int-string` for
-          # base 10, `octal-int-string` for 8, `hex-int-string` for 16). Signed ranges fall through (the
-          # result could carry a `-` sign that no Rigor refinement currently captures), as do bases
-          # without a digit-only refinement.
+          # leading sign. Base 10 is Ruby's decimal-literal grammar, so the result lifts to
+          # `decimal-int-string`. Signed ranges fall through entirely (the result could carry a `-` sign
+          # that `decimal-int-string` alone would need a sign proof for, matching the
+          # `Nominal[Integer]` tier's own signed-base-10 carve-out below).
+          #
+          # #1004 — every other base (a different literal, such as 8 or 16, or a value that is not
+          # statically known) does NOT lift to `octal-int-string` / `hex-int-string`: those refinements'
+          # predicates REQUIRE the `0o` / `0x` prefix Ruby's own `to_s(base)` never emits
+          # (`64.to_s(8)` is `"100"`, `255.to_s(16)` is `"ff"` — neither has a prefix), so a producer
+          # that claimed them was unsound. The floor is `non-empty-string`, same as the bare
+          # `Nominal[Integer]` path (#993 / #1001) reaches for the identical reason: `to_s(base)` is
+          # total and never returns `""`.
           def dispatch_integer_range(range, method_name, args)
             return nil unless method_name == :to_s
             return nil unless range.lower >= 0
@@ -491,10 +488,7 @@ module Rigor
             base = base_argument(args)
             return nil if base.nil?
 
-            refinement = TO_S_BASE_REFINEMENTS[base]
-            return nil if refinement.nil?
-
-            Type::Combinator.public_send(refinement)
+            base == 10 ? Type::Combinator.decimal_int_string : Type::Combinator.non_empty_string
           end
 
           # `to_s` with no argument defaults to base 10. With one argument, the value MUST be a

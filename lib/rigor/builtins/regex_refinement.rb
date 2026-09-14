@@ -20,13 +20,21 @@ module Rigor
     # `{n,m}` forms with `n >= 1`):
     #
     #   - `\d`, `[0-9]`            -> decimal-int-string
-    #   - `\h`                     -> hex-int-string
-    #   - `[0-9a-fA-F]`            -> hex-int-string
-    #   - `[0-9a-f]`, `[0-9A-F]`   -> hex-int-string
-    #   - `[0-7]`                  -> octal-int-string
+    #   - `\h`                     -> non-empty-string
+    #   - `[0-9a-fA-F]`            -> non-empty-string
+    #   - `[0-9a-f]`, `[0-9A-F]`   -> non-empty-string
+    #   - `[0-7]`                  -> non-empty-string
     #   - `[a-z]`                  -> lowercase-string
     #   - `[A-Z]`                  -> uppercase-string
     #   - `[[:digit:]]`            -> numeric-string
+    #
+    # #1004 — the hex/octal digit classes do NOT map to `hex-int-string` / `octal-int-string`.
+    # Those refinements' predicates (`Type::Refined` PREDICATES, in `type/refined.rb`) REQUIRE the
+    # conventional `0x` / `0o` prefix, but a bare digit class like `[0-9a-fA-F]+` matches "ff" —
+    # a string with no prefix at all. Mapping a matched digit run to a refinement its own
+    # predicate rejects is unsound (worse than the plain `String` it replaces), so these rows
+    # drop to `non-empty-string`: the `+` / `{n,}` (n >= 1) quantifier already guarantees the
+    # captured run is never empty, and that much is true regardless of prefix.
     #
     # Anything outside the table returns `nil` so the calling narrowing site falls back to
     # its previous behaviour (plain `String`). Arbitrary regex semantic equivalence is
@@ -46,11 +54,11 @@ module Rigor
       RULES = Ractor.make_shareable([
                                       [/\A\\d#{QUANTIFIER_SOURCE}\z/, :decimal_int_string],
                                       [/\A\[0-9\]#{QUANTIFIER_SOURCE}\z/, :decimal_int_string],
-                                      [/\A\\h#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-                                      [/\A\[0-9a-fA-F\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-                                      [/\A\[0-9a-f\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-                                      [/\A\[0-9A-F\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-                                      [/\A\[0-7\]#{QUANTIFIER_SOURCE}\z/, :octal_int_string],
+                                      [/\A\\h#{QUANTIFIER_SOURCE}\z/, :non_empty_string],
+                                      [/\A\[0-9a-fA-F\]#{QUANTIFIER_SOURCE}\z/, :non_empty_string],
+                                      [/\A\[0-9a-f\]#{QUANTIFIER_SOURCE}\z/, :non_empty_string],
+                                      [/\A\[0-9A-F\]#{QUANTIFIER_SOURCE}\z/, :non_empty_string],
+                                      [/\A\[0-7\]#{QUANTIFIER_SOURCE}\z/, :non_empty_string],
                                       [/\A\[a-z\]#{QUANTIFIER_SOURCE}\z/, :lowercase_string],
                                       [/\A\[A-Z\]#{QUANTIFIER_SOURCE}\z/, :uppercase_string],
                                       [/\A\[\[:digit:\]\]#{QUANTIFIER_SOURCE}\z/, :numeric_string]

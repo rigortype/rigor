@@ -35,15 +35,22 @@ and the four-way tree was verified identical to what master became.
 
 PR [#990](https://github.com/rigortype/rigor/pull/990) (playground editor) belongs to another session. Hands off.
 
-## Verify diagnostic changes with a COLD cache — #1009
+## Second wave landed 2026-09-14: #1009, #1004, #1003
 
-A warm `.rigor/cache` written by another build can mix a stale plugin-synthesized RBS with new rule
-code and report neither build's answer. Reproduced deterministically on #999: populate at the parent
-commit (2 diagnostics), switch to the child, run warm → 4, while `--no-cache` and a cache-cleaned warm
-run both give 2. A `lib/`-only change (#1006) does not show it, so the hole is in the plugin-synthesis
-lane. Until [#1009](https://github.com/rigortype/rigor/issues/1009) is fixed, judge any
-diagnostic-affecting change with `rigor check --no-cache` or after `rm -rf .rigor/cache` — a warm run
-is not a valid instrument for "does this fire?".
+- [#1012](https://github.com/rigortype/rigor/pull/1012) closes #1009. The stale slot was
+  `plugin.source_rbs_synthesizer`, keyed on source digest + plugin manifest only, so a checkout that
+  edited the rbs-inline synthesizer kept serving the previous build's RBS; plugin-producer keys had the
+  same gap. Both now carry `Cache::EngineSource.key_config_entries`. Diagnose this class with
+  `rigor check --cache-stats`. **Still unverified:** the `rbs.*` translated-value producers keyed by
+  `RbsDescriptor` ([#1014](https://github.com/rigortype/rigor/issues/1014)) — until it closes, judge
+  "does this fire?" cold.
+- [#1013](https://github.com/rigortype/rigor/pull/1013) closes #1004: `to_s(8)` / `to_s(16)` and the
+  bare hex/octal digit-class regex rows now yield `non-empty-string`, not a prefix-requiring refinement
+  their values fail.
+- [#1015](https://github.com/rigortype/rigor/pull/1015) closes #1003. The gap was statement vs value
+  position, not ternary vs `if`: `ExpressionTyper#type_of_if` was a second typer and is deleted; a
+  value-position conditional now goes through `scope.evaluate`. Corpus flat on 21 targets; `rigor check
+  lib` wall time unchanged within noise.
 
 ## ADR-111 is Proposed and waits on the maintainer
 
@@ -62,21 +69,19 @@ in all three readers. So the same-line form is the only spelling the ADR recomme
 the prerequisite for the manual recommending anything, not a follow-up. Re-evaluation trigger (i) is
 half-fired. The maintainer decides; nothing is implemented.
 
-## Issues this batch filed, and what is worth picking up first
+## Open follow-ups, and what is worth picking up next
 
-Fourteen, all from measured behaviour rather than reading: #991-#998, #1002, #1003, #1004, #1007,
-#1008, #1009.
+Open from these two waves: #996 (ADR-111, the maintainer's ruling), #998, #1002, #1007, #1008, #1011,
+#1014, #1016, #1017.
 
-Three are worth reading before choosing anything else:
-
-- [#1009](https://github.com/rigortype/rigor/issues/1009) — the cache hole above. It makes every other
-  diagnostic verification less trustworthy, so it buys more than its own fix.
-- [#1004](https://github.com/rigortype/rigor/issues/1004) — `Integer#to_s(16)` and a bare-hex-digit
-  regex both claim `hex-int-string`, whose predicate requires the `0x` prefix. A refinement that is
-  false of its inhabitants is worse than the `String` it replaces.
-- [#1003](https://github.com/rigortype/rigor/issues/1003) — a predicate guard narrows in `if`/`else`
-  and not in the ternary spelling of the same guard. Structural: every guard-dependent refinement is
-  reachable in one spelling only.
+- [#998](https://github.com/rigortype/rigor/issues/998) — Rigor's inline reader silently drops the
+  same-line `%a{}` forms rbs's built-in reader and Steep accept. ADR-111 makes it the prerequisite for
+  the manual recommending any inline refinement spelling.
+- [#1016](https://github.com/rigortype/rigor/issues/1016) — a bare `&&` / `||` as a value still has the
+  two-typer shape #1015 removed for conditionals (`x.finite? && x` is `Float | false` as a value). Mind
+  the #313 short-circuit gate that only the value path carries.
+- [#1014](https://github.com/rigortype/rigor/issues/1014) — reproduce-first check of the `rbs.*` cache
+  producers; closing it retires the "judge cold" caveat above.
 
 [#992](https://github.com/rigortype/rigor/issues/992) LANDED as PR [#1010](https://github.com/rigortype/rigor/pull/1010)
 on 2026-09-14, default on: `call.wrong-arity` now checks positional arity against a `def` nobody
@@ -89,7 +94,7 @@ a deliberate false negative. Keyword arguments are out of scope. Remaining risk 
 
 ## Where the worktrees are
 
-`rigor-wt/{arity-declared-source-methods,sig-gen-untyped-declared-return,numeric-to-s-refinements,inline-annotation-parse-diagnostics,tuple-union-absorption,arity-undeclared-source-methods,adr-inline-refinement-dialect}`,
-one per PR (all six merged; safe to remove) plus the ADR's. `adr-inline-refinement-dialect` also carries an installed `tool/steep/`
+`rigor-wt/{arity-declared-source-methods,sig-gen-untyped-declared-return,numeric-to-s-refinements,inline-annotation-parse-diagnostics,tuple-union-absorption,arity-undeclared-source-methods,cross-build-synthesis-cache,hex-octal-int-string-soundness,ternary-predicate-narrowing,adr-inline-refinement-dialect}`,
+one per PR (all nine merged; safe to remove) plus the ADR's. `adr-inline-refinement-dialect` also carries an installed `tool/steep/`
 bundle (ignored) if another Steep measurement is wanted — a CoW-copied bundle needs `bundle pristine`
 before it runs, because its native extensions were built against a different Ruby store path.

@@ -6,6 +6,8 @@ require_relative "../scope"
 require_relative "../type"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "../source/node_walker"
+require_relative "../source/parameter_envelope"
 require_relative "../cache/file_digest"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
@@ -135,7 +137,7 @@ module Rigor
         # discovered-methods existence table and the instance def-node table — see {#build_methods_and_def_nodes}.
         # `seed_discovered_methods` seeds the former onto the scope and returns the def-node table for
         # `merge_project_method_indexes` below.
-        seeded_scope, file_def_nodes = seed_discovered_methods(seeded_scope, default_scope, root)
+        seeded_scope, file_def_nodes, file_envelopes = seed_discovered_methods(seeded_scope, default_scope, root)
 
         # v0.0.2 #5 + ADR-24 slice 2 — record per-instance-method def nodes, the class -> superclass map, and the
         # class/module -> included-modules map, each merged under the cross-file pre-pass seed (see below). v0.1.2 —
@@ -143,7 +145,7 @@ module Rigor
         # `def.method-visibility-mismatch` and ADR-35 `def.override-visibility-reduced` CheckRules consult the table.
         # Seeded inside `merge_project_method_indexes` so the per-file visibilities merge OVER the cross-file project
         # seed rather than overwriting it.
-        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes)
+        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes, file_envelopes)
 
         table = {}.compare_by_identity
         table.default = seeded_scope
@@ -166,13 +168,13 @@ module Rigor
 
       # Runs the combined methods/def-nodes descent (one walk of the file), seeds the discovered-methods existence table
       # onto `seeded_scope` (merged UNDER the cross-file pre-pass seed `default_scope` carries), and returns `[scope,
-      # file_def_nodes]` so the caller can thread the def-node table into {#merge_project_method_indexes} without
-      # walking the file a second time.
+      # file_def_nodes, file_envelopes]` so the caller can thread the def-node and issue #992 envelope tables into
+      # {#merge_project_method_indexes} without walking the file a second time.
       def seed_discovered_methods(seeded_scope, default_scope, root)
-        file_methods, file_def_nodes = build_methods_and_def_nodes(root, default_scope.source_path)
+        file_methods, file_def_nodes, file_envelopes = build_methods_and_def_nodes(root, default_scope.source_path)
         discovered_methods = deep_merge_class_methods(default_scope.discovered_methods, file_methods)
         scope = seeded_scope.with_discovery(seeded_scope.discovery.with(discovered_methods: discovered_methods))
-        [scope, file_def_nodes]
+        [scope, file_def_nodes, file_envelopes]
       end
 
       # ADR-48 Struct slice 3 — installs the top-level fold-safe-local set ({Inference::StructFoldSafety}). Struct
@@ -189,7 +191,11 @@ module Rigor
       # def-node table, the class -> superclass map, and the class/module -> included-modules map. Each per-file table
       # is merged UNDER the cross-file `discovered_def_index_for_paths` seed carried on `default_scope` — same-file
       # declarations win per entry, the cross-file seed supplies sibling-file ancestors.
-      def merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes)
+      #
+      # Issue #992 — the envelope table is JOINED with the seed rather than overlaid: the seed already carries this
+      # file's own contribution (identical, so the join keeps it), and a reopening in a sibling file must still
+      # make a disagreeing name opaque here, which "same-file declarations win" would silently undo.
+      def merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes, file_envelopes)
         def_nodes, def_nestings = merge_def_node_tables(default_scope, root, file_def_nodes)
         singleton_def_nodes = default_scope.discovered_singleton_def_nodes.merge(
           build_discovered_singleton_def_nodes(root)
@@ -227,10 +233,15 @@ module Rigor
             discovered_includes: includes,
             discovered_extends: extends,
             discovered_method_visibilities: method_visibilities,
+            discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
             data_member_layouts: data_member_layouts,
             struct_member_layouts: struct_member_layouts
           )
         )
+      end
+
+      def merge_envelope_seed(default_scope, file_envelopes)
+        Source::ParameterEnvelope.merge_tables(default_scope.discovered_parameter_envelopes, file_envelopes)
       end
 
       # The as-written superclass table and its issue #682 header-nesting twin, each merged over the cross-file
@@ -2058,12 +2069,40 @@ module Rigor
       # `walk_methods` and `walk_def_nodes` had byte-identical class / module / singleton / meta-block descents (both
       # stop at `DefNode`), so a single combined walk records both accumulators at once instead of traversing every file
       # twice.
+      #
+      # Issue #992 — and a third, `envelopes`: `{class_name => {[kind, method] => envelope}}`, the
+      # {Source::ParameterEnvelope} of every name the existence table records, plus the class-wide
+      # {Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK} / {Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK} keys.
+      # It is written by the SAME recorder that writes the existence table ({#record_method}), so a name the
+      # walk learns from an `alias`, an `attr_*` or a `define_method` can never be missing from it: those
+      # record {Source::ParameterEnvelope::OPAQUE}, and only a `def` records a real envelope.
       def build_methods_and_def_nodes(root, source_path = nil)
-        methods = {}
+        tables = MethodTables.new({}, {})
         def_nodes = {}
-        walk_methods_and_def_nodes(root, [], false, methods, def_nodes, source_path)
+        walk_methods_and_def_nodes(root, [], false, tables, def_nodes, source_path)
         apply_alias_def_nodes(root, def_nodes)
-        [methods.transform_values(&:freeze).freeze, def_nodes.transform_values(&:freeze).freeze]
+        [tables.existence.transform_values(&:freeze).freeze, def_nodes.transform_values(&:freeze).freeze,
+         tables.envelopes.transform_values(&:freeze).freeze]
+      end
+
+      # The accumulator {#walk_methods_and_def_nodes} threads: the existence table and its issue #992
+      # envelope twin, which only {#record_method} and {#record_surface_mark} write.
+      MethodTables = Struct.new(:existence, :envelopes)
+
+      # The walk's single existence writer. Everything except a `def` passes no envelope and so records
+      # {Source::ParameterEnvelope::OPAQUE}.
+      def record_method(tables, class_name, method_name, kind, envelope = Source::ParameterEnvelope::OPAQUE)
+        record_method_kind(tables.existence, class_name, method_name, kind)
+        record_envelope(tables.envelopes, class_name, [kind, method_name], envelope)
+      end
+
+      def record_envelope(envelopes, class_name, key, envelope)
+        table = (envelopes[class_name] ||= {})
+        table[key] = Source::ParameterEnvelope.merge(table[key], envelope)
+      end
+
+      def record_surface_mark(tables, class_name, mark)
+        record_envelope(tables.envelopes, class_name, mark, Source::ParameterEnvelope::OPAQUE)
       end
 
       # Merges two `class_name => { method => kind }` tables, unioning the per-class method maps (so a seeded cross-file
@@ -2115,7 +2154,7 @@ module Rigor
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
-            record_meta_superclass_members(node, child_prefix, methods_acc) if node.is_a?(Prism::ClassNode)
+            record_declaration_facts(node, child_prefix, methods_acc)
             if node.body
               walk_methods_and_def_nodes(node.body, child_prefix, false, methods_acc, def_nodes_acc, source_path)
             end
@@ -2132,7 +2171,7 @@ module Rigor
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
-            record_meta_members(node.value, child_prefix, methods_acc)
+            record_meta_new_facts(node.value, child_prefix, methods_acc)
             walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc,
                                        source_path)
             # No anonymous registration here: the constant IS the name, and `StatementEvaluator#eval_constant_write`
@@ -2142,10 +2181,11 @@ module Rigor
           end
         when Prism::DefNode
           record_def_method(node, qualified_prefix, in_singleton_class, methods_acc)
+          record_def_body_evidence(node, qualified_prefix, methods_acc)
           record_def_node(node, qualified_prefix, in_singleton_class, def_nodes_acc)
           return
-        when Prism::AliasMethodNode
-          record_alias_method(node, qualified_prefix, in_singleton_class, methods_acc)
+        when Prism::AliasMethodNode, Prism::UndefNode
+          record_alias_or_undef(node, qualified_prefix, in_singleton_class, methods_acc)
           return
         when Prism::CallNode
           anonymous = record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
@@ -2162,6 +2202,31 @@ module Rigor
         end
       end
 
+      # `class Foo < Struct.new(:a)` members, and issue #992's module mark for a `module` declaration.
+      def record_declaration_facts(node, child_prefix, tables)
+        if node.is_a?(Prism::ClassNode)
+          record_meta_superclass_members(node, child_prefix, tables)
+        else
+          record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
+        end
+      end
+
+      # The block form of a meta-new constant write: its members, and the module mark `Module.new` earns.
+      def record_meta_new_facts(rvalue, child_prefix, tables)
+        record_meta_members(rvalue, child_prefix, tables)
+        return unless module_new_call?(rvalue)
+
+        record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
+      end
+
+      def record_alias_or_undef(node, qualified_prefix, in_singleton_class, tables)
+        if node.is_a?(Prism::UndefNode)
+          record_undef(node, qualified_prefix, tables)
+        else
+          record_alias_method(node, qualified_prefix, in_singleton_class, tables)
+        end
+      end
+
       # The `Prism::CallNode` leaf actions of {#walk_methods_and_def_nodes}: the `define_method` / `attr_*` macro
       # recorders, plus the {AnonymousMetaClass} name of a class-creating meta call carrying a block (nil for
       # every other call), which the caller uses to decide whether the block body needs the anonymous-class-body
@@ -2171,6 +2236,7 @@ module Rigor
         record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc) if ATTR_MACROS.include?(node.name)
         record_module_attr_methods(node, qualified_prefix, methods_acc) if MODULE_ATTR_MACROS.key?(node.name)
         record_alias_method_call(node, qualified_prefix, in_singleton_class, methods_acc)
+        record_surface_evidence(node, qualified_prefix, methods_acc)
         AnonymousMetaClass.name_for(node, source_path)
       end
 
@@ -2184,7 +2250,7 @@ module Rigor
         return if names.nil?
 
         kind = in_singleton_class ? :singleton : :instance
-        record_method_kind(accumulator, qualified_prefix.join("::"), names.first, kind)
+        record_method(accumulator, qualified_prefix.join("::"), names.first, kind)
       end
 
       # #319 — walks a `Class.new do ... end` / `Module.new do ... end` / `Struct.new(*sym) do ... end` /
@@ -2326,7 +2392,7 @@ module Rigor
         return if members.empty?
 
         class_name = qualified_prefix.join("::")
-        members.each { |member| record_method_kind(accumulator, class_name, member, :instance) }
+        members.each { |member| record_method(accumulator, class_name, member, :instance) }
       end
 
       # Unwinds nested single-parent `Class.new(...)` calls to a root `Struct.new(...)` / `Data.define(...)`.
@@ -2373,7 +2439,47 @@ module Rigor
         class_name = qualified_prefix.join("::")
         singleton = def_singleton?(def_node, qualified_prefix, in_singleton_class)
         kind = singleton ? :singleton : :instance
-        record_method_kind(accumulator, class_name, def_node.name, kind)
+        record_method(accumulator, class_name, def_node.name, kind, Source::ParameterEnvelope.of(def_node))
+      end
+
+      # Issue #992 — the rewriting calls a METHOD BODY makes, which the declaration walk never descends into:
+      # `def self.inherited(sub) = sub.class_eval { … }`, `def self.wrap_all = define_method(…)`,
+      # `def decorate(obj) = obj.extend(Decorator)`. A class-body macro records the same evidence in
+      # {#record_surface_evidence}; `send` is left out here because inside a body it is an ordinary call far
+      # more often than a definition.
+      def record_def_body_evidence(def_node, qualified_prefix, tables)
+        return if def_node.body.nil?
+
+        Source::NodeWalker.each(def_node.body) do |node|
+          next unless node.is_a?(Prism::CallNode)
+
+          if node.name == :extend
+            record_object_extension(node, qualified_prefix, tables)
+          elsif SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_NAMING_CALLS.include?(node.name)
+            record_body_rewrite(node, qualified_prefix, tables)
+          end
+        end
+      end
+
+      def record_body_rewrite(node, qualified_prefix, tables)
+        receiver = node.receiver
+        if receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+          constant_receiver_candidates(receiver, qualified_prefix).each do |name|
+            record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+          end
+        elsif !qualified_prefix.empty?
+          record_surface_mark(tables, qualified_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+        end
+      end
+
+      def record_object_extension(node, qualified_prefix, tables)
+        (node.arguments&.arguments || []).each do |argument|
+          next unless argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode)
+
+          constant_receiver_candidates(argument, qualified_prefix).each do |name|
+            record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK)
+          end
+        end
       end
 
       # `def Foo.bar` inside `module Foo` (or `def Meta.init` inside `module Meta`) is semantically equivalent to `def
@@ -3284,7 +3390,145 @@ module Rigor
         class_name = qualified_prefix.join("::")
         new_name = alias_node.new_name.unescaped.to_sym
         kind = in_singleton_class ? :singleton : :instance
-        record_method_kind(accumulator, class_name, new_name, kind)
+        record_method(accumulator, class_name, new_name, kind)
+        # Issue #992 — the aliased name too: `alias f_without_x f` is how a later redefinition of `f`
+        # wraps the original, so `f` is not one `def` any more whatever this file's `def f` says.
+        return unless alias_node.old_name.is_a?(Prism::SymbolNode)
+
+        record_method_envelope_opaque(accumulator, class_name, alias_node.old_name.unescaped.to_sym)
+      end
+
+      # Issue #992 — `undef f` removes a method the envelope table would otherwise still describe.
+      def record_undef(undef_node, qualified_prefix, tables)
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        undef_node.names.each do |name|
+          method_name = literal_method_name(name)
+          record_method_envelope_opaque(tables, class_name, method_name) if method_name
+        end
+      end
+
+      # Both kinds, and the envelope table only: the evidence says something rewrites the name, not which
+      # side it lives on, and it is not evidence that the name EXISTS, so the existence table is untouched.
+      def record_method_envelope_opaque(tables, class_name, method_name)
+        %i[instance singleton].each do |kind|
+          record_envelope(tables.envelopes, class_name, [kind, method_name], Source::ParameterEnvelope::OPAQUE)
+        end
+      end
+
+      # The receiverless class-body calls whose symbol arguments are never a method being rewritten, so they
+      # may name a method without making its envelope opaque. Deliberately short: a macro missing from it
+      # costs a check on that one name, while a wrapping macro wrongly listed here (`memoize :f`,
+      # `def_delegator :@x, :f`) would leave a `def`'s envelope standing for a method that no longer has it.
+      NAME_NEUTRAL_MACROS = %i[
+        private public protected module_function private_class_method public_class_method
+        private_constant public_constant require require_relative autoload
+      ].to_set.freeze
+      private_constant :NAME_NEUTRAL_MACROS
+
+      # The calls that rewrite a class's method table in ways no literal argument names: `class_eval` and
+      # friends run code (a heredoc or a block) against the class, `define_method` / `alias_method` /
+      # `remove_method` with a computed name, the `send` family, and a mixin whose argument is not a
+      # constant.
+      SURFACE_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].to_set.freeze
+      SURFACE_NAMING_CALLS = %i[
+        define_method define_singleton_method alias_method remove_method undef_method
+      ].to_set.freeze
+      SURFACE_SEND_CALLS = %i[send __send__ public_send].to_set.freeze
+      SURFACE_MIXIN_CALLS = %i[include prepend extend].to_set.freeze
+      # A project's own mixin helper — GitLab's `prepend_mod_with("IntegrationsHelper")` prepends a module
+      # from the `ee/` tree the analysed paths may not reach, which can redefine any method of the class.
+      SURFACE_MIXIN_HELPER = /(?:\A|_)(?:include|prepend|extend)(?:_|\z)/
+      private_constant :SURFACE_EVAL_CALLS, :SURFACE_NAMING_CALLS, :SURFACE_SEND_CALLS, :SURFACE_MIXIN_CALLS,
+                       :SURFACE_MIXIN_HELPER
+
+      # Issue #992 — the evidence a class-body call leaves about a method table that a `def` alone does not
+      # describe. Recorded into the envelope table only, never the existence table:
+      #
+      # - a receiverless call from {SURFACE_EVAL_CALLS}, a {SURFACE_NAMING_CALLS} call whose name is computed,
+      #   a {SURFACE_SEND_CALLS} call, or a mixin of a non-constant marks the lexical class
+      #   {Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK};
+      # - the same calls on a constant receiver (`Widget.class_eval { … }`, `Widget.include(M)`) mark every
+      #   name that constant can denote from here, because this walk records the block's `def`s on the
+      #   LEXICAL class, not on the receiver;
+      # - any other receiverless call makes the envelope of every method a literal argument names opaque —
+      #   `memoize :f`, `def_delegator :@x, :f`, `alias_method :g, :f` — unless it is {NAME_NEUTRAL_MACROS}.
+      def record_surface_evidence(node, qualified_prefix, tables)
+        receiver = node.receiver
+        if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          record_self_surface_evidence(node, qualified_prefix, tables)
+        elsif receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+          return unless surface_rewriting_call?(node)
+
+          constant_receiver_candidates(receiver, qualified_prefix).each do |name|
+            record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+          end
+        end
+      end
+
+      def record_self_surface_evidence(node, qualified_prefix, tables)
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        if dynamic_surface_call?(node)
+          record_surface_mark(tables, class_name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+        elsif node.name == :refine
+          record_refinement(node, qualified_prefix, tables)
+        elsif !NAME_NEUTRAL_MACROS.include?(node.name)
+          (node.arguments&.arguments || []).each do |argument|
+            # `memoize def f(a)` wraps the def it is handed exactly as `memoize :f` does.
+            method_name = argument.is_a?(Prism::DefNode) ? argument.name : literal_method_name(argument)
+            record_method_envelope_opaque(tables, class_name, method_name) if method_name
+          end
+        end
+      end
+
+      # `refine Widget do def f(a, b) … end end` redefines `Widget#f` in every file that says `using`, and this
+      # walk records the block's `def`s on the refining module instead.
+      def record_refinement(node, qualified_prefix, tables)
+        target = node.arguments&.arguments&.first
+        return unless target.is_a?(Prism::ConstantReadNode) || target.is_a?(Prism::ConstantPathNode)
+
+        constant_receiver_candidates(target, qualified_prefix).each do |name|
+          record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+        end
+      end
+
+      def surface_rewriting_call?(node)
+        SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_NAMING_CALLS.include?(node.name) ||
+          SURFACE_SEND_CALLS.include?(node.name) || ATTR_MACROS.include?(node.name) || surface_mixin_call?(node)
+      end
+
+      def surface_mixin_call?(node)
+        SURFACE_MIXIN_CALLS.include?(node.name) || SURFACE_MIXIN_HELPER.match?(node.name.to_s)
+      end
+
+      def dynamic_surface_call?(node)
+        return true if SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_SEND_CALLS.include?(node.name)
+
+        arguments = node.arguments&.arguments || []
+        if SURFACE_NAMING_CALLS.include?(node.name)
+          arguments.empty? || literal_method_name(arguments.first).nil?
+        elsif surface_mixin_call?(node)
+          arguments.any? do |argument|
+            !(argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode) ||
+              argument.is_a?(Prism::SelfNode))
+          end
+        else
+          false
+        end
+      end
+
+      # Every qualified name a constant receiver written inside `qualified_prefix` can denote, innermost
+      # first: the walk runs before any scope exists, so it cannot resolve the constant, and over-marking a
+      # same-named class elsewhere only withholds a check.
+      def constant_receiver_candidates(receiver, qualified_prefix)
+        written = Source::ConstantPath.qualified_name(receiver)
+        return [] if written.nil?
+        return [written.delete_prefix("::")] if written.start_with?("::")
+
+        qualified_prefix.length.downto(1).map { |i| (qualified_prefix[0, i] + [written]).join("::") } << written
       end
 
       # Post-pass over the `def_nodes` accumulator: for every `alias` declaration inside a class body, if the original
@@ -3371,7 +3615,7 @@ module Rigor
         return if method_name.nil?
 
         class_name = qualified_prefix.join("::")
-        record_method_kind(accumulator, class_name, method_name, in_singleton_class ? :singleton : :instance)
+        record_method(accumulator, class_name, method_name, in_singleton_class ? :singleton : :instance)
       end
 
       # The `attr_*` accessor macros that introduce methods Rigor must treat as source-declared. Without this, a class
@@ -3394,8 +3638,8 @@ module Rigor
           base = literal_method_name(arg)
           next if base.nil?
 
-          record_method_kind(accumulator, class_name, base, kind) if reader
-          record_method_kind(accumulator, class_name, :"#{base}=", kind) if writer
+          record_method(accumulator, class_name, base, kind) if reader
+          record_method(accumulator, class_name, :"#{base}=", kind) if writer
         end
       end
 
@@ -3442,8 +3686,8 @@ module Rigor
       end
 
       def record_both_kinds(accumulator, class_name, method_name)
-        record_method_kind(accumulator, class_name, method_name, :instance)
-        record_method_kind(accumulator, class_name, method_name, :singleton)
+        record_method(accumulator, class_name, method_name, :instance)
+        record_method(accumulator, class_name, method_name, :singleton)
       end
 
       def literal_method_name(node)
@@ -3562,7 +3806,19 @@ module Rigor
         append_declaration_tables(parts, file_index)
         append_def_signatures(parts, file_index[:def_nodes], "#")
         append_def_signatures(parts, file_index[:singleton_def_nodes], ".")
+        append_envelope_signature(parts, file_index[:parameter_envelopes] || {})
         Digest::SHA256.hexdigest(parts.join("\x00"))
+      end
+
+      # Issue #992 — the joined envelope table is a declaration surface the per-def signatures above cannot
+      # reconstruct: they keep the LAST `def` of a name, and they see neither a second `def` with another
+      # shape nor a `memoize :f` beside it, either of which moves a dependent's `call.wrong-arity` verdict.
+      def append_envelope_signature(parts, envelopes)
+        envelopes.sort_by { |cn, _| cn.to_s }.each do |class_name, entries|
+          entries.map { |key, envelope| "a:#{class_name}#{key.inspect}=#{envelope.inspect}" }.sort.each do |part|
+            parts << part
+          end
+        end
       end
 
       # Issue #644 — the cross-file VALUE-constant surface. Load-bearing for soundness, not precision: a
@@ -3812,6 +4068,9 @@ module Rigor
       # bundle's carries {DefHandle}s. The merges never deref the value, so both fold identically.
       def fold_file_index(acc, file_index)
         fold_def_tables(acc, file_index)
+        # Issue #992 — a pre-23 seed bundle carries no envelopes; the SCHEMA bump makes such a blob a cold
+        # rebuild, and an absent table only ever withholds a check.
+        fold_parameter_envelopes(acc, file_index[:parameter_envelopes] || {})
         # Issue #681 — a re-walked file contributes live nodes and their chains together. A file restored from
         # a seed bundle contributes NO entry here and cannot: this table is keyed by node identity, and the
         # only object a bundle has is a {DefHandle}. Issue #707 — the chain travels ON the handle instead, and
@@ -3840,6 +4099,17 @@ module Rigor
         file_index[:methods].each { |cn, table| acc[:methods][cn] = merge_method_kinds(acc[:methods][cn] || {}, table) }
         fold_def_sources(acc, :def_sources, file_index[:def_sources])
         fold_def_sources(acc, :singleton_def_sources, file_index[:singleton_def_sources])
+      end
+
+      # Issue #992 — joins one file's envelope table into the cross-file accumulator, in place. The join is
+      # commutative and idempotent, so the fold is order-independent and a bundle-served file folds exactly
+      # as its live walk would.
+      def fold_parameter_envelopes(acc, file_envelopes)
+        target = acc[:parameter_envelopes]
+        file_envelopes.each do |class_name, entries|
+          bucket = target[class_name] = (target[class_name] || {}).dup
+          entries.each { |key, envelope| bucket[key] = Source::ParameterEnvelope.merge(bucket[key], envelope) }
+        end
       end
 
       # A `"path:line"` source table (instance or singleton) is first-file-wins per `(class, method)` (`||=`),
@@ -3900,6 +4170,9 @@ module Rigor
           includes: file_index[:includes],
           method_visibilities: file_index[:method_visibilities],
           methods: file_index[:methods],
+          # Issue #992 — plain `{class name => {[kind, name] => [min, max, required_keywords] | :opaque}}`
+          # data, so the bundle stays Marshal-clean and a warm file joins the envelopes its cold walk records.
+          parameter_envelopes: file_index[:parameter_envelopes],
           class_source_names: file_index[:class_sources].keys,
           # Issue #722 residue 2 — plain data, so the bundle stays Marshal-clean and a warm incremental file
           # re-anchors its compact headers the way a cold walk of it does.
@@ -3930,6 +4203,7 @@ module Rigor
           extends: bundle[:extends] || {},
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
+          parameter_envelopes: bundle[:parameter_envelopes] || {},
           class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
           compact_headers: bundle[:compact_headers] || {},
           # Issue #644 — a pre-#644 bundle carries no census; the SCHEMA bump makes such a blob a cold
@@ -3968,7 +4242,7 @@ module Rigor
         { def_nodes: {}, def_nestings: {}.compare_by_identity,
           singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
           superclasses: {}, header_nestings: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {},
-          class_sources: {},
+          parameter_envelopes: {}, class_sources: {},
           # Issue #722 residue 2 — compact-header re-anchor candidates, adjudicated in {#finalize_def_index}.
           compact_headers: {},
           constant_writes: {},
@@ -3992,8 +4266,9 @@ module Rigor
         # keeps that contract intact while still letting `attr_reader :x` in one file suppress a false undefined-method
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
+        acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes method_visibilities
-           methods class_sources constant_sources].each do |key|
+           methods parameter_envelopes class_sources constant_sources].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
@@ -4024,8 +4299,9 @@ module Rigor
         # One combined descent yields both the methods existence table and the def-node table; the latter is also
         # consumed by `record_class_sources`, so a def-dense file is walked once here instead of three times (methods +
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
-        file_methods, file_def_nodes = build_methods_and_def_nodes(root, path)
+        file_methods, file_def_nodes, file_envelopes = build_methods_and_def_nodes(root, path)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
+        fold_parameter_envelopes(acc, file_envelopes)
         # Issue #681 — node-identity keyed, so this is a flat union: no two files can contribute the same key.
         acc[:def_nestings].merge!(build_def_nestings(root))
         # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,
@@ -4504,6 +4780,14 @@ module Rigor
         end
       end
 
+      def rekey_parameter_envelopes(table, renames)
+        table.each_with_object({}) do |(name, entries), out|
+          out.merge!(rename_compact_name(renames, name) => entries) do |_key, sitting, arriving|
+            sitting.merge(arriving) { |_entry, a, b| Source::ParameterEnvelope.merge(a, b) }
+          end
+        end
+      end
+
       # The per-shape combine {#rekey_class_table} applies. Every class-keyed table's value is a Hash of
       # per-member entries, a Set or Array of names, or a single scalar fact (a superclass name, a member
       # layout); the first two union, and a scalar keeps the entry already sitting, matching the first-wins
@@ -4525,6 +4809,10 @@ module Rigor
            struct_member_layouts constant_writes].each do |key|
           acc[key] = rekey_class_table(acc[key], renames)
         end
+        # Issue #992 — the envelope table cannot take {#combine_rekeyed_entries}' later-wins Hash merge: two
+        # bodies of one class landing on the same key are exactly the reopening whose disagreement must
+        # make a name opaque.
+        acc[:parameter_envelopes] = rekey_parameter_envelopes(acc[:parameter_envelopes], renames)
         # A `header_nestings` value is a BUCKET (`raw header → chain`, plus the unkeyed union), not a
         # chain: mapping the bucket itself turned every entry into a `[raw, chain]` pair rendered as a
         # string, and the next per-file merge (`merge_header_nesting_bucket`) and every

@@ -24,6 +24,7 @@ module Rigor
       :discovered_def_sources,
       :discovered_singleton_def_sources,
       :discovered_method_visibilities,
+      :discovered_parameter_envelopes,
       :discovered_superclasses,
       :discovered_header_nestings,
       :discovered_includes,
@@ -60,6 +61,29 @@ module Rigor
       # as written, and no ancestor name can be nil.
       UNKEYED_HEADER_NESTING = nil
 
+      # Issue #992 — the two class-wide keys a `discovered_parameter_envelopes` bucket can carry beside its
+      # `[kind, method_name]` entries. Their PRESENCE is the fact; the value is always
+      # `Source::ParameterEnvelope::OPAQUE`, so a bucket folds under the one join every other entry does.
+      # Symbols, because every per-method key is an Array and neither can collide with the other.
+      #
+      # - {ENVELOPE_MODULE_MARK}: the name is declared with `module` (or `Const = Module.new do … end`) somewhere
+      #   in the project. An instance of it is an instance of an unknown includer.
+      # - {ENVELOPE_DYNAMIC_MARK}: the class body rewrites its method table in a way no literal argument names
+      #   (`class_eval`, a computed `define_method`, `send`, a non-constant mixin), or a constant-receiver form
+      #   of those names it from outside.
+      # - {ENVELOPE_OBJECT_EXTENDED_MARK}: some method body passes the module to `extend`, so an object of any
+      #   class may carry its instance methods ahead of that class's own.
+      ENVELOPE_MODULE_MARK = :"<module>"
+      ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
+      ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"
+
+      # Issue #992 — the class key a WHOLE-PROJECT discovery pass adds to `discovered_parameter_envelopes`
+      # (`ScopeIndexer#finalize_def_index`), with an empty bucket. A single file's walk alone — `run_source`,
+      # the LSP `prebuilt:` scope — sees one `def` and cannot see the reopening, subclass or `class_eval` in
+      # another file that would make it opaque, so `call.wrong-arity` reads an envelope only when this key is
+      # present. Not a constant character, so no class can be named it.
+      ENVELOPE_PROJECT_WIDE = "<project-wide>"
+
       # The shared all-empty index `Scope.empty` (and every scope that never sees a seeding pass) points at — one
       # allocation per process.
       EMPTY = new(
@@ -87,6 +111,13 @@ module Rigor
         discovered_def_sources: EMPTY_TABLE,
         discovered_singleton_def_sources: EMPTY_TABLE,
         discovered_method_visibilities: EMPTY_TABLE,
+        # Issue #992 — `{qualified class name => {[kind, method_name] => Source::ParameterEnvelope}}`, the
+        # parameter envelope of every method the declaration walk records, plus {ENVELOPE_MODULE_MARK} /
+        # {ENVELOPE_DYNAMIC_MARK}. Written beside `discovered_methods` by one recorder, so an `alias` / `attr_*`
+        # / `define_method` name is always present here as `OPAQUE`, and folded across files and reopenings
+        # with `Source::ParameterEnvelope.merge`: one value per name, a real envelope only while every
+        # contribution agrees. Read by `call.wrong-arity` for a method no signature declares.
+        discovered_parameter_envelopes: EMPTY_TABLE,
         discovered_superclasses: EMPTY_TABLE,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,

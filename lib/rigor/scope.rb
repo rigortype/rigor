@@ -47,6 +47,7 @@ module Rigor
     def discovered_def_sources = @discovery.discovered_def_sources
     def discovered_singleton_def_sources = @discovery.discovered_singleton_def_sources
     def discovered_method_visibilities = @discovery.discovered_method_visibilities
+    def discovered_parameter_envelopes = @discovery.discovered_parameter_envelopes
     def discovered_superclasses = @discovery.discovered_superclasses
     def discovered_includes = @discovery.discovered_includes
     def discovered_extends = @discovery.discovered_extends
@@ -1151,6 +1152,17 @@ module Rigor
 
       sites.each { |site| Analysis::DependencyRecorder.read_site(site) }
     end
+
+    # Issue #992 — one class's `discovered_parameter_envelopes` bucket (`{[kind, method_name] => envelope}` plus
+    # the class-wide marks), or an empty Hash. Records the ADR-46 class edge first: a verdict read off the
+    # bucket depends on every file that declares the class, and a `memoize :f` added to one of them moves it.
+    def parameter_envelopes_of(class_name)
+      record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
+      @discovery.discovered_parameter_envelopes[class_name.to_s] || EMPTY_PARAMETER_ENVELOPES
+    end
+
+    EMPTY_PARAMETER_ENVELOPES = {}.freeze
+    private_constant :EMPTY_PARAMETER_ENVELOPES
 
     # v0.1.2 — per-class table mapping `method_name (Symbol) → :public | :private | :protected`. Populated by
     # `ScopeIndexer` for every `def` it sees inside a class body, with the visibility taken from the surrounding

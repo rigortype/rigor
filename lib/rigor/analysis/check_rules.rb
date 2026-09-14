@@ -25,6 +25,7 @@ require_relative "check_rules/ivar_write_collector"
 require_relative "check_rules/main_pass_collector"
 require_relative "check_rules/void_value_use_collector"
 require_relative "check_rules/self_closedness_scanner"
+require_relative "check_rules/source_arity"
 
 module Rigor
   module Analysis
@@ -1449,7 +1450,7 @@ module Rigor
         # by `undefined_method_diagnostic`; it returns nil
         # when the call's receiver / RBS coverage / call shape
         # disqualifies the rule.
-        # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+        # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def wrong_arity_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
           return nil unless plain_positional_call?(call_node)
@@ -1482,52 +1483,107 @@ module Rigor
           # false positive. Skip arity-checking the chained position.
           return nil if anonymous_struct_new_call?(call_node, class_name, kind)
 
-          return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
-          return nil unless definition_available?(receiver_type, class_name, scope)
-
-          # Issue #991 — `discovered_method?` used to exempt the call outright at this point, before ever
-          # asking for a declaration. That is right for a method the project declares NOWHERE ELSE:
-          # `DiscoveryIndex` records only `method_name => :instance | :singleton`, no parameter shape, so
-          # there was no arity to check against. It does not extend to a method the project ALSO declares —
-          # `trustworthy_signature` is the same lookup `argument_type_diagnostic` treats as authoritative
-          # over a source `def` (see its own comment beside that call), and the two rules must agree on
-          # whose contract binds. `method_def.nil?` below is what keeps an undeclared source method silent.
-          method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
-          return nil if method_def.nil?
-
-          # Issue #992 — under ADR-93 the bundled `rigor-rbs-inline` plugin emits a full parameter skeleton
-          # for EVERY `def` in a file that carries at least one annotation anywhere in it (#823), so
-          # `trustworthy_signature` resolves a `method_def` even for a bare, undeclared `def` — one whose
-          # arity happens to be structurally accurate (it is read off the real `Prism::DefNode`) but that no
-          # author ever asserted. Trusting it here would make whether an UNANNOTATED sibling method gets
-          # arity-checked depend on whether some OTHER method in its file happens to carry an annotation,
-          # which is exactly the coupling #823 already ruled out for return typing.
-          #
-          # `inferred_signature?` — not `inferred_return?` — is the right gate here. `inferred_return?` also
-          # trips on a member whose PARAMETERS the author did annotate (`# @rbs num: Float`) and only the
-          # return defaulted; declining on that would silence the very case #991 exists for, since a
-          # parameter the author wrote is an assertion about the parameter list, and the parameter list is
-          # exactly what arity is a question about. The synthesized skeleton's arity is faithful by
-          # construction either way — upstream renders the `def`'s real parameter list whether or not
-          # anything nearby was annotated — so the reason to stay silent on a bare `def` is never that its
-          # arity might be wrong; it is that nobody asserted anything about the member at all, which is
-          # #992's envelope (`define_method`, `method_missing`, aliases, reopened classes, `prepend`,
-          # ADR-17 `pre_eval:` patches, plugin-contributed surfaces) rather than a signature question.
-          # `inferred_signature?` is true only when EVERY type slot on the member defaulted — no parameter
-          # and no return was authored — which is exactly "nobody asserted anything here". A `sig/`
-          # declaration never carries either annotation, so the #991 case this rule exists for is
-          # unaffected.
-          return nil if Rigor::RbsExtended.inferred_signature?(method_def)
-          return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
-
-          arity_envelope = compute_arity_envelope(method_def)
+          arity_envelope = arity_envelope_for(receiver_type, class_name, call_node, scope, kind)
           return nil if arity_envelope.nil?
 
           actual = (call_node.arguments&.arguments || []).size
-          min, max = arity_envelope
-          return nil if actual.between?(min, max)
+          min, max, source_arity = arity_envelope
+          if actual.between?(min, max)
+            source_arity&.settle_by_definitions
+            return nil
+          end
+          # Issue #992 — a source envelope's remaining declines can only withhold, so they run only now.
+          source_arity&.settle_by_walk
+          return nil if source_arity && !source_arity.authoritative?(class_name)
 
           build_arity_diagnostic(path, call_node, class_name, min, max, actual)
+        end
+
+        # The `[min, max]` the call is checked against — a declared signature's, or (issue #992) the project
+        # `def`'s own when no signature declares the method, with the {SourceArity} that found it as a third
+        # element — or nil when neither may be trusted.
+        #
+        # Issue #991 — `discovered_method?` used to exempt the call outright before ever asking for a
+        # declaration. `trustworthy_signature` is the same lookup `argument_type_diagnostic` treats as
+        # authoritative over a source `def` (see its own comment beside that call), and the two rules must agree
+        # on whose contract binds, so a declared method is checked against its declaration.
+        def arity_envelope_for(receiver_type, class_name, call_node, scope, kind)
+          if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+            return nil unless definition_available?(receiver_type, class_name, scope)
+
+            method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
+            if method_def && !Rigor::RbsExtended.inferred_signature?(method_def)
+              return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
+
+              return compute_arity_envelope(method_def)
+            end
+            return nil unless source_lane_open?(method_def, receiver_type, class_name, call_node, scope)
+          end
+
+          source_arity_envelope(class_name, call_node, scope, kind)
+        end
+
+        # Issue #992 — whether a class RBS knows may still be checked against its project `def`. Two lanes:
+        #
+        # - the member resolved and carries `%a{rigor:v1:inferred-signature}`: under ADR-93 the bundled
+        #   `rigor-rbs-inline` plugin emits a full skeleton for EVERY `def` in a file carrying at least one
+        #   annotation (#823), with every type slot defaulted, so nobody asserted anything about it. Its arity
+        #   is NOT read here — the `def`'s envelope is, through the same {SourceArity} walk as a method with no
+        #   member at all, so one `def` is never judged by two readings of its parameter list;
+        # - no member resolved, and the class's declaration is the project's own `sig/`
+        #   (`project_declared_class?`): a partial sidecar of a project class whose `def` lives in source.
+        #
+        # Everything else declines. A bundled declaration (core / stdlib / gem) describes a class the project
+        # does not own, so a project `def` on it is an ADR-17 monkey-patch that another library may patch too;
+        # a lookup that raised, or a name an open receiver only inherited (`trustworthy_signature` answered
+        # nil for those while a raw lookup does not), is not "no member".
+        def source_lane_open?(method_def, receiver_type, class_name, call_node, scope)
+          return true if method_def
+
+          lookup_method(receiver_type, class_name, call_node.name, scope).nil? &&
+            Rigor::Reflection.project_declared_class?(class_name, scope: scope)
+        end
+
+        # Issue #992 — stage 1 of {SourceArity}: the nearest project definition's envelope, after the
+        # receiver-level declines that need no walk. Stage 2 (`SourceArity#authoritative?`) runs only once the
+        # count is known to fall outside it.
+        def source_arity_envelope(class_name, call_node, scope, kind)
+          return nil unless scope.discovered_parameter_envelopes.key?(Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE)
+          return nil if unbounded_receiver_surface?(class_name, scope)
+          return nil if plugin_typed_call?(call_node, scope)
+          # An instance of a project module is an instance of whatever includes it (#739's reasoning, which
+          # `module_mixin_receiver?` can only apply to a module RBS declares).
+          return nil if kind == :instance && project_module?(class_name, scope)
+          return nil if project_module_class_receiver?(call_node, scope)
+
+          arity = SourceArity.new(scope, call_node.name, kind)
+          envelope = arity.owner_envelope(class_name)
+          if envelope.nil? || envelope[2]
+            envelope.nil? && arity.ambiguous? ? arity.settle_by_walk : arity.settle_by_definitions
+            return nil
+          end
+
+          [envelope[0], envelope[1] || Float::INFINITY, arity]
+        end
+
+        # `self.class.f(1)` inside a project module's instance method: the engine types `self.class` as the
+        # module's singleton, but at runtime it is the includer's class, whose class methods are its own. The
+        # source-lane twin of {#mixin_self_class_receiver?}, which can only see a module RBS declares.
+        def project_module_class_receiver?(call_node, scope)
+          receiver = call_node.receiver
+          return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :class && receiver.arguments.nil?
+          return false if receiver.receiver.nil?
+
+          inner = concrete_class_name(scope.type_of(receiver.receiver))
+          !inner.nil? && project_module?(inner, scope)
+        end
+
+        # Read off the table directly rather than through `Scope#parameter_envelopes_of`: a class does not turn
+        # into a module without its declaration (and so the receiver's own typing) changing, so this answer
+        # needs no ADR-46 class edge of its own.
+        def project_module?(class_name, scope)
+          bucket = scope.discovered_parameter_envelopes[class_name.to_s]
+          !bucket.nil? && bucket.key?(Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
         end
 
         # Issue #917 — no loaded RBS declares a constructor for this class. The definition builder

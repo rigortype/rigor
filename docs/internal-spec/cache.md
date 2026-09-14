@@ -729,7 +729,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 22`)
+### `Payload` (current `SCHEMA = 23`)
 
 ```
 Payload :: Data[
@@ -773,7 +773,9 @@ diff drives the `constant:` edge's producer) and gave each seed bundle a
 seed-bundle grammar bumps, each recorded against its issue in the numbered
 comment on `IncrementalSnapshot::SCHEMA`; `22` added `run_level_rows`
 ([#796](https://github.com/rigortype/rigor/issues/796),
-[#794](https://github.com/rigortype/rigor/issues/794)). A blob
+[#794](https://github.com/rigortype/rigor/issues/794)); `23` gave each seed
+bundle a `parameter_envelopes` table
+([#992](https://github.com/rigortype/rigor/issues/992)). A blob
 from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
 
@@ -804,7 +806,10 @@ Two persisted summaries prove "nothing changed":
 
 - **Declaration shape** (consumed by ancestry / file-level dependents) — the
   ADR-85 seed bundle carries per-def signature shape (name, kind,
-  parameter structure, visibility) plus superclass / include / layout. A
+  parameter structure, visibility) plus superclass / include / layout, and
+  the joined [#992](https://github.com/rigortype/rigor/issues/992)
+  parameter-envelope table (which also moves on a wrapping macro such as
+  `memoize :f` that no per-def shape records). A
   body edit leaves it equal; an arity, visibility, or added/removed-method
   edit does not. A declaration-stable changed file drops its ancestry /
   file-level dependents from the closure.

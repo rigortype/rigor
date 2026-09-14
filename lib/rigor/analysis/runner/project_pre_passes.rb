@@ -55,8 +55,8 @@ module Rigor
           :discovered_singleton_def_nodes, :discovered_def_sources, :discovered_singleton_def_sources,
           :discovered_superclasses, :discovered_header_nestings, :discovered_includes,
           :discovered_extends, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
-          :discovered_method_visibilities, :discovered_methods, :data_member_layouts,
-          :struct_member_layouts
+          :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes,
+          :data_member_layouts, :struct_member_layouts
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -174,6 +174,7 @@ module Rigor
             constant_writes: def_index.fetch(:constant_writes),
             discovered_method_visibilities: def_index.fetch(:method_visibilities),
             discovered_methods: def_index.fetch(:methods),
+            discovered_parameter_envelopes: def_index.fetch(:parameter_envelopes),
             data_member_layouts: def_index.fetch(:data_member_layouts),
             struct_member_layouts: def_index.fetch(:struct_member_layouts)
           )

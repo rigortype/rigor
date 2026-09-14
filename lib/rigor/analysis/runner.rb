@@ -392,6 +392,8 @@ module Rigor
         @published_constant_name_set = nil
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
+        # Issue #992 — the cross-file parameter-envelope table `call.wrong-arity` reads for an undeclared `def`.
+        @project_discovered_parameter_envelopes = {}.freeze
         @project_data_member_layouts = {}.freeze
         @project_struct_member_layouts = {}.freeze
         # Issue #684 — set per run by {#project_discovery_expansion}; nil on every path that does not widen.
@@ -1361,6 +1363,7 @@ module Rigor
         @project_constant_writes = discovery.constant_writes
         @project_discovered_method_visibilities = discovery.discovered_method_visibilities
         @project_discovered_methods = discovery.discovered_methods
+        @project_discovered_parameter_envelopes = discovery.discovered_parameter_envelopes
         @project_data_member_layouts = discovery.data_member_layouts
         @project_struct_member_layouts = discovery.struct_member_layouts
       end
@@ -1807,10 +1810,18 @@ module Rigor
           tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
         end
         tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
+        seed_parameter_envelope_table(tables)
         seed_opt_in_pre_pass_tables(tables)
         seed_member_layout_tables(tables)
         seed_dependency_attribution_tables(tables)
         tables
+      end
+
+      # Issue #992 — split out of {#project_scope_seed_tables} to keep it under the complexity budget.
+      def seed_parameter_envelope_table(tables)
+        return if @project_discovered_parameter_envelopes.empty?
+
+        tables[:discovered_parameter_envelopes] = @project_discovered_parameter_envelopes
       end
 
       # The two mixin tables: the ADR-24 instance-side `include` / `prepend` map and its #898 singleton-side

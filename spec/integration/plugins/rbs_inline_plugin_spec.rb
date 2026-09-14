@@ -707,6 +707,153 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         expect(outcome).to include("def show: (String) -> String")
       end
     end
+
+    # Issue #1019, row H — the gem's grammar makes the colon-and-type optional on a `# @rbs name: T` var
+    # decl, so a `T` that does not parse leaves `VarType#type` `nil` instead of raising: `# @rbs n:
+    # Integer[1..10]` types the parameter `untyped`, silently, with the refinement payload thrown away.
+    # `Integer[1..10]` is a valid Rigor refinement in a `%a{rigor:v1:param:}` position
+    # (docs/manual/16-rbs-extended-annotations.md), just not in an RBS type position.
+    describe "an unparseable `# @rbs name:` parameter type (#1019, row H)" do
+      it "is parsed but not honoured, naming the line, the dropped type, and the %a{} spelling that works" do
+        outcome = synthesizer_outcome(<<~RUBY)
+          class BoundedProbe
+            # @rbs n: Integer[1..10]
+            def probe(n)
+              n
+            end
+          end
+        RUBY
+
+        kind, source, messages = outcome
+        expect(kind).to eq(:ok)
+        # The rest of the file is unaffected — the method still synthesizes, just with `n` untyped.
+        expect(source).to include("def probe:")
+        expect(source).to include("untyped n")
+        expect(messages.size).to eq(1)
+        expect(messages.first).to include("line 2")
+        expect(messages.first).to include("`Integer[1..10]`")
+        expect(messages.first).to include("DROPPED")
+        expect(messages.first).to include("%a{rigor:v1:param: n is Integer[1..10]}")
+        expect(messages.first).to include("docs/manual/16-rbs-extended-annotations.md")
+      end
+
+      it "surfaces it as an info diagnostic, and the parameter types as untyped rather than the refinement" do
+        result = run_plugin(source: <<~RUBY)
+          # rbs_inline: enabled
+          class BoundedProbe
+            # @rbs n: Integer[1..10]
+            def probe(n)
+              n
+            end
+          end
+        RUBY
+
+        not_honoured = result.diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
+        expect(not_honoured.size).to eq(1)
+        expect(not_honoured.first.severity).to eq(:info)
+        expect(not_honoured.first.message).to include("did not parse as an RBS type")
+        expect(not_honoured.first.message).to include("Integer[1..10]")
+      end
+
+      # The must-still-succeed twin: a well-formed `# @rbs name: T` parameter annotation must stay silent.
+      it "stays silent on a `# @rbs name: T` parameter annotation that parses cleanly" do
+        outcome = synthesizer_outcome(<<~RUBY)
+          class PlainProbe
+            # @rbs n: Integer
+            def probe(n)
+              n
+            end
+          end
+        RUBY
+
+        expect(outcome).to be_a(String)
+        expect(outcome).to include("Integer n")
+      end
+    end
+
+    # Issue #1019, row B — `annotation_comment?`'s `/\A#(\s*)@rbs(\b|!)/` matches the word boundary right
+    # after `@rbs`, so `# @rbs-ext …` is an `@rbs` annotation attempt to the gem's own detector even though
+    # nothing recognises `-ext`. `parse_annotation`'s `case` has no branch for it and returns `nil`, which
+    # folds the whole paragraph back into an ordinary `CommentLines` — indistinguishable, downstream, from a
+    # comment that never meant to be `@rbs` at all (measured at 568138c2: no diagnostic, and the `# @rbs
+    # return: String` line right below it still binds).
+    describe "an `@rbs`-prefixed tag the gem does not recognise (#1019, row B)" do
+      it "is parsed but not honoured, naming the line and the dropped comment" do
+        outcome = synthesizer_outcome(<<~RUBY)
+          class TagProbe
+            # @rbs-ext return: non-empty-string
+            # @rbs return: String
+            def name
+              "x"
+            end
+          end
+        RUBY
+
+        kind, source, messages = outcome
+        expect(kind).to eq(:ok)
+        # The neighbouring well-formed line is unaffected — that is the whole reason this is not a WD6 error.
+        expect(source).to include("def name: () -> String")
+        expect(messages.size).to eq(1)
+        expect(messages.first).to include("line 2")
+        expect(messages.first).to include("@rbs-ext")
+        expect(messages.first).to include("DROPPED")
+        # Must not imply `@rbs-ext` is a recognised tag (issue #1019's explicit requirement).
+        expect(messages.first).not_to include("recognised tag `@rbs-ext`")
+        expect(messages.first).not_to match(/@rbs-ext.{0,20}is (a|the) /)
+      end
+
+      it "surfaces it as an info diagnostic without suppressing the neighbouring `# @rbs return:` line" do
+        result = run_plugin(source: <<~RUBY)
+          # rbs_inline: enabled
+          class TagProbe
+            # @rbs-ext return: non-empty-string
+            # @rbs return: String
+            def name
+              "x"
+            end
+          end
+        RUBY
+
+        not_honoured = result.diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
+        expect(not_honoured.size).to eq(1)
+        expect(not_honoured.first.severity).to eq(:info)
+        expect(not_honoured.first.message).to include("@rbs-ext")
+        expect(result.diagnostics.map(&:qualified_rule)).not_to include("source-rbs-synthesis-failed")
+      end
+
+      # The must-still-succeed twins: a comment that never claimed to be `@rbs` stays silent, whether it
+      # merely mentions `@rbs` in prose or spells the maintainer's own counter-proposal (`@extrbs`, measured
+      # clean in ADR-111). Neither begins with the gem's `@rbs` marker, so neither is this row.
+      it "stays silent on a plain comment that merely mentions @rbs in prose" do
+        outcome = synthesizer_outcome(<<~RUBY)
+          class ProseProbe
+            # This method honours @rbs annotations documented elsewhere.
+            # @rbs return: String
+            def name
+              "x"
+            end
+          end
+        RUBY
+
+        expect(outcome).to be_a(String)
+        expect(outcome).to include("def name: () -> String")
+      end
+
+      it "stays silent on the `@extrbs` counter-proposal, which the gem reads as an ordinary comment" do
+        outcome = synthesizer_outcome(<<~RUBY)
+          class ExtRbsProbe
+            # @extrbs return: non-empty-string
+            # @rbs return: String
+            def name
+              "x"
+            end
+          end
+        RUBY
+
+        expect(outcome).to be_a(String)
+        expect(outcome).to include("def name: () -> String")
+      end
+    end
   end
 
   # Issue #998 — `# @rbs %a{…} () -> T` and `#: %a{…} () -> T`, the same-line spellings rbs's built-in reader

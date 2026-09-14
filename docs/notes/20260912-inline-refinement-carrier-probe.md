@@ -2,7 +2,10 @@
 
 Date: 2026-09-12, at `568138c2`; the Steep column and rows X, Y and the controls added the same day
 at `ea5b0137`. rbs 4.2.0 and rbs-inline 0.14.0, the versions this repo's bundle resolves; Steep
-2.0.0 over rbs 4.0.2, the pin in `tool/steep/`. Grounding for
+2.0.0 over rbs 4.0.2, the pin in `tool/steep/`. The "Rigor after #998" column was added 2026-09-14
+on the [#998](https://github.com/rigortype/rigor/issues/998) branch, forked from `19d7105d`, same rbs
+and rbs-inline; Steep was not re-run for it (`tool/steep/` is not installed in that worktree), so the
+two rows marked ′ have no Steep cell. Grounding for
 [ADR-111](../adr/111-inline-refinement-carrier.md); the ruling itself is there, not here.
 
 Status: **measurement note.** Answers the question issue
@@ -45,6 +48,15 @@ result.diagnostics.each { |d| puts "#{d.class.name.split('::').last}: #{d.messag
 
 Run inside the Flake: `nix … develop --command bundle exec ruby probe.rb FIXTURE.rb`.
 
+The "Rigor after #998" column is what Rigor itself contributes, not the bare gem: the plugin's
+`Rigor::Plugin::RbsInline::Synthesizer.new(require_magic_comment: false).call(path)` — the synthesized
+RBS plus any ADR-32 WD12 notice it returns — over the same fixtures, with the probe above re-run
+unchanged to confirm the gem column did not move, and `rigor check --no-cache` over each fixture for
+the diagnostics. Where a cell says *binds*, the fixture was also run with the body changed to `1`
+under a `%a{pure}` spelling (reported `def.return-type-mismatch … declared String, inferred 1`), and
+the call site `Probe.new.name` read `non-empty-string` under `rigor type-of` with `.rigor/` deleted
+first.
+
 Steep runs over the same fixtures laid out as a throwaway project, one file per row under `lib/`,
 with `tool/steep/`'s bundle (`make steep-install`; a bundle cloned from another Ruby store path
 needs `bundle pristine` under that Gemfile first, because the native extensions were built against
@@ -77,22 +89,24 @@ The plain contract in every fixture is `() -> String` or a one-parameter method;
 under Diagnostic ID `RBS::InlineDiagnostic`, on the annotation line, and `steep check` exits
 non-zero on it.
 
-| # | Spelling (the comment lines above the `def`) | `rbs-inline` gem → RBS text | `RBS::InlineParser` (rbs 4.2.0) | Steep 2.0.0, `inline: true` |
-| --- | --- | --- | --- | --- |
-| A | `# @rbs %a{rigor:v1:return: non-empty-string}` then `# @rbs return: String` | `%a{rigor:v1:return: non-empty-string}` on `def name: () -> String` — **the annotation lands** | `() -> String`, annotations `[]`, **`AnnotationSyntaxError: expected a token pARROW`** — the plain return binds, the annotation is lost and reported | **`Syntax error: expected a token pARROW`** |
-| A2 | `# @rbs %a{rigor:v1:return: non-empty-string} () -> String` (one line) | annotation lands, method type **dropped** → `def name: () -> untyped`, no diagnostic | `() -> String` with overload annotation `["rigor:v1:return: non-empty-string"]`, no diagnostic | clean, binds (control) |
-| F | `#: %a{rigor:v1:return: non-empty-string} () -> String` | `SyntaxErrorAssertion` — whole line **dropped silently**, `def name: () -> untyped` | `() -> String` with the overload annotation, no diagnostic | clean, binds (control) |
-| Q | `# @rbs %a{…}` then `#: () -> String` | annotation lands on `() -> String` | as A: `pARROW` error, annotation lost | **as A** |
-| P | `# @rbs %a{pure}` then `# @rbs return: String` | as A | as A — the split is a property of own-line `%a{}`, not of the Rigor payload | **as A** |
-| P2 | `#: %a{pure} () -> String` | as F: dropped silently | as F: annotation `["pure"]` | clean |
-| B | `# @rbs-ext return: non-empty-string` then `# @rbs return: String` | paragraph read as plain comment (`CommentLines`), no diagnostic; the next `@rbs` line binds | `() -> String`, **`AnnotationSyntaxError: unexpected token for @rbs annotation`** | **`Syntax error: unexpected token for @rbs annotation`** |
-| X | `# @extrbs return: non-empty-string` then `# @rbs return: String` (or `#: () -> String`) | plain comment; **copied through into the generated RBS as comment text** above `def name: () -> String`; the next line binds | `() -> String`, no diagnostic | clean, binds (control) |
-| Y | `#: () -> String` then `# @extrbs return: non-empty-string` — the tag *after* the type line | binds `() -> String`, but the writer re-renders the comment block: `# : () -> String` / `#  @extrbs …` | `() -> String`, no diagnostic | clean |
-| C | `# rigor: return non-empty-string` then `# @rbs return: String` | plain comment, no effect, next line binds | `() -> String`, **no diagnostic** | clean |
-| G | `# @rigor return: non-empty-string` then `# @rbs return: String` | plain comment, no effect, next line binds | `() -> String`, no diagnostic | clean |
-| D | `# @rbs g: finite-float` | `def probe: (finite g) -> untyped` — the reader stops at `-`, **emits `finite` as a type**, no diagnostic (the `NoTypeFoundError: Could not find finite` of #997) | `(?) -> untyped`, `AnnotationSyntaxError: expected a token pEOF` | **`Syntax error: expected a token pEOF`** |
-| E | `#: (finite-float) -> String` | `SyntaxErrorAssertion`, dropped silently, `(untyped f) -> untyped` | `(?) -> untyped`, `AnnotationSyntaxError: unexpected token for function parameter name` | **`Syntax error: unexpected token for function parameter name`** |
-| H | `# @rbs n: Integer[1..10]` | `VarType` with a nil type → `(untyped n)`, no diagnostic | `(?) -> untyped`, `AnnotationSyntaxError: comma delimited type list is expected` | **`Syntax error: comma delimited type list is expected`** |
+| # | Spelling (the comment lines above the `def`) | `rbs-inline` gem → RBS text | `RBS::InlineParser` (rbs 4.2.0) | Steep 2.0.0, `inline: true` | Rigor after #998 |
+| --- | --- | --- | --- | --- | --- |
+| A | `# @rbs %a{rigor:v1:return: non-empty-string}` then `# @rbs return: String` | `%a{rigor:v1:return: non-empty-string}` on `def name: () -> String` — **the annotation lands** | `() -> String`, annotations `[]`, **`AnnotationSyntaxError: expected a token pARROW`** — the plain return binds, the annotation is lost and reported | **`Syntax error: expected a token pARROW`** | unchanged: annotation on `() -> String`, no diagnostic |
+| A2 | `# @rbs %a{rigor:v1:return: non-empty-string} () -> String` (one line) | annotation lands, method type **dropped** → `def name: () -> untyped`, no diagnostic | `() -> String` with overload annotation `["rigor:v1:return: non-empty-string"]`, no diagnostic | clean, binds (control) | **annotation and `() -> String` both attached**, no inferred mark, no diagnostic; binds, call site `non-empty-string`. At `19d7105d`: `() -> untyped`, marked inferred, silent |
+| F | `#: %a{rigor:v1:return: non-empty-string} () -> String` | `SyntaxErrorAssertion` — whole line **dropped silently**, `def name: () -> untyped` | `() -> String` with the overload annotation, no diagnostic | clean, binds (control) | **annotation and `() -> String` both attached**, no diagnostic; binds, call site `non-empty-string`. At `19d7105d` (after #1005): `() -> untyped` and a false `source-rbs-annotation-not-honoured` info calling this valid line "did not parse … DROPPED" |
+| Q | `# @rbs %a{…}` then `#: () -> String` | annotation lands on `() -> String` | as A: `pARROW` error, annotation lost | **as A** | unchanged: as A |
+| P | `# @rbs %a{pure}` then `# @rbs return: String` | as A | as A — the split is a property of own-line `%a{}`, not of the Rigor payload | **as A** | unchanged: as A |
+| P2 | `#: %a{pure} () -> String` | as F: dropped silently | as F: annotation `["pure"]` | clean | **`%a{pure}` and `() -> String` both attached**, no diagnostic; binds. At `19d7105d`: the same false info as F |
+| B | `# @rbs-ext return: non-empty-string` then `# @rbs return: String` | paragraph read as plain comment (`CommentLines`), no diagnostic; the next `@rbs` line binds | `() -> String`, **`AnnotationSyntaxError: unexpected token for @rbs annotation`** | **`Syntax error: unexpected token for @rbs annotation`** | unchanged: `() -> String`, no diagnostic |
+| X | `# @extrbs return: non-empty-string` then `# @rbs return: String` (or `#: () -> String`) | plain comment; **copied through into the generated RBS as comment text** above `def name: () -> String`; the next line binds | `() -> String`, no diagnostic | clean, binds (control) | unchanged: `() -> String`, no diagnostic |
+| Y | `#: () -> String` then `# @extrbs return: non-empty-string` — the tag *after* the type line | binds `() -> String`, but the writer re-renders the comment block: `# : () -> String` / `#  @extrbs …` | `() -> String`, no diagnostic | clean | unchanged: `() -> String`, no diagnostic |
+| C | `# rigor: return non-empty-string` then `# @rbs return: String` | plain comment, no effect, next line binds | `() -> String`, **no diagnostic** | clean | unchanged: `() -> String`, no diagnostic |
+| G | `# @rigor return: non-empty-string` then `# @rbs return: String` | plain comment, no effect, next line binds | `() -> String`, no diagnostic | clean | unchanged: `() -> String`, no diagnostic |
+| D | `# @rbs g: finite-float` | `def probe: (finite g) -> untyped` — the reader stops at `-`, **emits `finite` as a type**, no diagnostic (the `NoTypeFoundError: Could not find finite` of #997) | `(?) -> untyped`, `AnnotationSyntaxError: expected a token pEOF` | **`Syntax error: expected a token pEOF`** | unchanged: `(finite g)`, `rbs.coverage.definition-build-failed` warning naming `finite` (#997) |
+| E | `#: (finite-float) -> String` | `SyntaxErrorAssertion`, dropped silently, `(untyped f) -> untyped` | `(?) -> untyped`, `AnnotationSyntaxError: unexpected token for function parameter name` | **`Syntax error: unexpected token for function parameter name`** | unchanged: `(untyped f) -> untyped`, `source-rbs-annotation-not-honoured` info naming line 2 (#997) |
+| H | `# @rbs n: Integer[1..10]` | `VarType` with a nil type → `(untyped n)`, no diagnostic | `(?) -> untyped`, `AnnotationSyntaxError: comma delimited type list is expected` | **`Syntax error: comma delimited type list is expected`** | unchanged: `(untyped n) -> untyped`, **no diagnostic** |
+| A2′ | `# @rbs %a{pure} (finite-float) -> String` (one line, malformed) | `%a{pure}` on `def name: () -> untyped`, no diagnostic | `(?) -> untyped`, `AnnotationSyntaxError: unexpected token for function parameter name` | not measured | `%a{pure}` kept, `() -> untyped`, **new** `source-rbs-annotation-not-honoured` info naming line 2 and `(finite-float) -> String` (silent at `19d7105d`) |
+| F′ | `#: %a{pure} (finite-float) -> String` (malformed) | `SyntaxErrorAssertion`, `def name: () -> untyped` | as A2′ | not measured | unchanged from `19d7105d`: `() -> untyped`, #997's info naming line 2 and `%a{pure} (finite-float) -> String` |
 
 Without `inline: true`, every fixture class is `Ruby::UnknownConstant` (`Cannot find the
 declaration of class`) and no annotation is read at all — good or bad.
@@ -140,6 +154,15 @@ declaration of class`) and no annotation is read at all — good or bad.
    `#  @extrbs …`) though the signature still binds; before the annotation block is the safe
    position. Rigor itself parses none of this today — X and Y measure only that the neighbouring
    plain line reaches the environment untouched.
+
+7. **After #998, Rigor reads both same-line forms and still reports the malformed ones.** A2, F and
+   P2 reach the environment with the annotation and the method type attached — the only rows whose
+   Rigor column moved. The gem column did not: the repair is Rigor-side, a split of the gem's parsed
+   annotation list before its writer runs, so `rbs-inline --output` still renders A2 and F as
+   `() -> untyped`. A2′ and F′ are the paired controls: a same-line line whose method type really is
+   malformed keeps its method untyped and is reported in both spellings, where A2′ used to be silent.
+   Two rows are still silent in Rigor and outside that split: B (the gem reads `# @rbs-ext` as prose)
+   and H (`Integer[1..10]` leaves a `VarType` with no type).
 
 What this note does not establish: whether a Steep other than 2.0.0, or an rbs other than 4.0.2 /
 4.2.0, gives the built-in grammar a different shape — ADR-79 keeps Rigor on the project's own `rbs`,

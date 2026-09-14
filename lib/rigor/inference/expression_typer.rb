@@ -183,8 +183,8 @@ module Rigor
         Prism::SplatNode => :type_of_non_value,
         # Control flow (Slice 3 phase 1): branch types are unioned, jumps
         # type as Bot, loops type as Constant[nil].
-        Prism::IfNode => :type_of_if,
-        Prism::UnlessNode => :type_of_unless,
+        Prism::IfNode => :type_of_conditional,
+        Prism::UnlessNode => :type_of_conditional,
         Prism::ElseNode => :type_of_else,
         Prism::AndNode => :type_of_and_or,
         Prism::OrNode => :type_of_and_or,
@@ -746,27 +746,17 @@ module Rigor
         Type::Combinator.constant_of(nil)
       end
 
-      # `if c; t; (elsif c2; ...; )* else; e; end`. Prism nests `elsif` branches as `IfNode#subsequent`. Slice
-      # 3 phase 1 types both branches in the receiver scope and returns their union; scope rebinding is the
-      # StatementEvaluator's job (Slice 3 phase 2). Without an else clause the branch's implicit value is nil,
-      # which is included in the union.
-      #
-      # v0.0.6 — when the predicate folds to a `Type::Constant` whose value is Ruby-truthy (resp.
-      # Ruby-falsey), the unreachable branch is elided so the if-expression's type is the live branch alone.
-      # Statement-level branch elision lives in `StatementEvaluator#eval_if`; this handler covers the
-      # expression-position ternary form (`a ? b : c`) and any `if`/`unless` reached through `type_of`.
-      def type_of_if(node)
-        then_type = statements_or_nil(node.statements)
-        else_type = if_else_type(node.subsequent)
-        elide_or_union(node.predicate, then_type, else_type)
-      end
-
-      # `unless c; t; else; e; end`. Prism uses `else_clause` here (no `elsif` chain). Branch-elision logic
-      # mirrors `type_of_if`, inverted: a truthy predicate selects the else branch.
-      def type_of_unless(node)
-        then_type = statements_or_nil(node.statements)
-        else_type = if_else_type(node.else_clause)
-        elide_or_union(node.predicate, else_type, then_type)
+      # `if` / `unless` in value position — the ternary `c ? a : b`, a modifier `(a unless c)`, or a
+      # conditional written as an argument, a receiver, or a literal element. Issue #1003: this handler used
+      # to type both arms in the receiver scope and union them, so the predicate's narrowing reached a
+      # statement-position conditional (through `StatementEvaluator#eval_if`) and never a value-position
+      # one: `f.finite? ? f : 0.0` read `0.0 | Float` while the `if` statement bound `0.0 | finite-float`.
+      # It delegates to the statement evaluator instead of re-deriving the edges, so the two positions share
+      # one narrowing application, one branch elision (ADR-47 WD5 version guards, the ADR-101
+      # optimistic-carrier decline) and one terminating-arm rule, and cannot drift apart again. Only the
+      # value is read; the post-scope belongs to whichever walk owns the statement.
+      def type_of_conditional(node)
+        scope.evaluate(node, tracer: tracer).first
       end
 
       # Issue #286 — the effective optimistic-nil-free cause of an expression. {OptimisticOrigin.resolve} owns
@@ -774,44 +764,6 @@ module Rigor
       # `flow.always-truthy-condition` collector.
       def optimistic_origin_for(node)
         OptimisticOrigin.resolve(node, scope)
-      end
-
-      def if_else_type(subsequent)
-        return Type::Combinator.constant_of(nil) if subsequent.nil?
-
-        type_of(subsequent)
-      end
-
-      # Routes the predicate's typed value through branch elision. `live_when_truthy` and `live_when_falsey`
-      # are the branch types selected by the predicate's polarity; the names match `IfNode` semantics
-      # directly and invert at the `type_of_unless` call site.
-      def elide_or_union(predicate, live_when_truthy, live_when_falsey)
-        case constant_predicate_polarity(predicate)
-        when :truthy then live_when_truthy
-        when :falsey then live_when_falsey
-        else Type::Combinator.union(live_when_truthy, live_when_falsey)
-        end
-      end
-
-      # Returns `:truthy`, `:falsey`, or `nil` for an arbitrary predicate expression under three-valued logic.
-      # {Narrowing.predicate_certainty} owns the judgment (the same one `StatementEvaluator#live_branch_for_if`
-      # reads on the scope side): `Nominal[Integer]` (always truthy in Ruby), `Constant[nil]`, and
-      # `Constant[false]` fold one branch; `Union[true, false]`, `Dynamic[T]`, and `Top` keep both branches live.
-      def constant_predicate_polarity(predicate)
-        return nil if predicate.nil?
-
-        # ADR-47 WD5 — a decidable version guard (#627) answers first, exactly as it does on the scope side
-        # in `StatementEvaluator#branch_certainty`. Both readers ask the same pure function of the AST, so
-        # the expression form (`RUBY_VERSION >= "3.1" ? a : b`) and the statement form cannot disagree about
-        # which arm survives. The verdict rests on literals, so the ADR-101 optimistic-carrier decline below
-        # — which guards an RBS-derived judgment — does not apply to it.
-        guard = VersionGuard.verdict(predicate)
-        return guard if guard
-        # ADR-101 — decline on an optimistically nil-free carrier; see
-        # `StatementEvaluator#optimistic_carrier?` for why the gate is here and not in `Narrowing`.
-        return nil unless optimistic_origin_for(predicate).nil?
-
-        Narrowing.predicate_certainty(type_of(predicate))
       end
 
       def type_of_else(node)
@@ -865,9 +817,8 @@ module Rigor
         constant_value_polarity(left_type)
       end
 
-      # Returns `:truthy` / `:falsey` for a `Type::Constant`, nil otherwise. Mirrors
-      # `constant_predicate_polarity` but operates on a typed value (already-type-of'd) rather than a Prism
-      # node, so the same predicate analysis can be reused in both contexts.
+      # Returns `:truthy` / `:falsey` for a `Type::Constant`, nil otherwise — the `&&` / `||` short-circuit
+      # reads a typed operand, not a predicate node.
       def constant_value_polarity(type)
         return nil unless type.is_a?(Type::Constant)
 

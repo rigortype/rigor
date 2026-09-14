@@ -1,0 +1,37 @@
+---
+locals:
+  a: Array[String] | non-empty-array[String]
+  and_if: "[String, finite-float]?"
+  and_tern: "[String, finite-float]?"
+  class_if: 0 | 1
+  class_tern: 0 | 1
+  cmp_falsey_if: Float?
+  cmp_falsey_tern: Float?
+  cmp_truthy_tern: Float[0.0..]?
+  empty_if: non-empty-array[String]?
+  empty_tern: non-empty-array[String]?
+  finite_if: 0.0 | finite-float
+  finite_tern: 0.0 | finite-float
+  nan_if: 0.0 | non-nan-float
+  nan_tern: 0.0 | non-nan-float
+  nil_if: '"" | String'
+  nil_tern: '"" | String'
+  s: String?
+  unless_block: non-nan-float?
+  unless_modifier: non-nan-float?
+  v: '"str" | 1'
+  x: Float
+assertions:
+  '1': 0.0 | finite-float
+  '2': 0.0 | finite-float
+  '3': 0.0 | finite-float
+  '4': 0.0 | finite-float
+  '5': '"x" | numeric-string'
+  '6': 0.0 | non-nan-float
+  '7': Float[0.0..]?
+  '8': Float?
+  '9': '"" | String'
+  '10': 0 | 1
+  '11': non-empty-array[String]?
+  '12': "[String, finite-float]?"
+  '13': non-nan-float?

@@ -709,6 +709,129 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
+  # Issue #998 — `# @rbs %a{…} () -> T` and `#: %a{…} () -> T`, the same-line spellings rbs's built-in reader
+  # and Steep accept. Measured at 19d7105d: the gem kept the annotation and rendered `() -> untyped` for the
+  # first, dropped the whole line for the second, and #997's notice then told the author their valid `#:` line
+  # "did not parse". Every "now accepted" example below is paired with one that is still reported when the
+  # line really is malformed.
+  describe "same-line `%a{…}` annotation forms (#998)" do
+    def synthesizer_outcome(source)
+      Dir.mktmpdir("rigor-rbs-inline-same-line-") do |dir|
+        path = File.join(dir, "subject.rb")
+        File.write(path, source)
+        plugin = Rigor::Plugin::RbsInline.new(
+          services: Rigor::Plugin::Services.new(
+            reflection: Rigor::Reflection,
+            type: Rigor::Type::Combinator,
+            configuration: Rigor::Configuration.new
+          ),
+          config: { "require_magic_comment" => false }
+        )
+        plugin.manifest.source_rbs_synthesizer.call(path)
+      end
+    end
+
+    def probe_with(comment)
+      <<~RUBY
+        class Probe
+          #{comment}
+          def name
+            "x"
+          end
+        end
+      RUBY
+    end
+
+    {
+      "`# @rbs %a{…} () -> String`" => "# @rbs %a{rigor:v1:return: non-empty-string} () -> String",
+      "`#: %a{…} () -> String`" => "#: %a{rigor:v1:return: non-empty-string} () -> String"
+    }.each do |label, spelling|
+      it "attaches both the annotation and the method type for #{label}, with no notice" do
+        outcome = synthesizer_outcome(probe_with(spelling))
+
+        # A bare String, not the `[:ok, source, notices]` tuple: nothing about the line went unhonoured.
+        expect(outcome).to be_a(String)
+        expect(outcome).to include("%a{rigor:v1:return: non-empty-string}\n  def name: () -> String")
+        # The signature is authored (#999's marks are for defaulted slots only).
+        expect(outcome).not_to include("rigor:v1:inferred-return")
+        expect(outcome).not_to include("rigor:v1:inferred-signature")
+      end
+    end
+
+    it "keeps the own-line form exactly as before" do
+      outcome = synthesizer_outcome(<<~RUBY)
+        class Probe
+          # @rbs %a{rigor:v1:return: non-empty-string}
+          # @rbs return: String
+          def name
+            "x"
+          end
+        end
+      RUBY
+
+      expect(outcome).to be_a(String)
+      expect(outcome).to include("%a{rigor:v1:return: non-empty-string}\n  def name: () -> String")
+    end
+
+    it "splits several annotations and a multi-line overload list" do
+      outcome = synthesizer_outcome(<<~RUBY)
+        class Probe
+          # @rbs %a{pure} %a{rigor:v1:return: non-empty-string} (Integer) -> String
+          #   | () -> String
+          def name(x = 1)
+            "x"
+          end
+        end
+      RUBY
+
+      expect(outcome).to be_a(String)
+      expect(outcome).to include(
+        "%a{pure}\n  %a{rigor:v1:return: non-empty-string}\n  def name: (Integer) -> String\n          | () -> String"
+      )
+    end
+
+    it "still reports a `#: %a{…}` line whose method type is malformed (#997's notice)" do
+      kind, source, messages = synthesizer_outcome(probe_with("#: %a{pure} (finite-float) -> String"))
+
+      expect(kind).to eq(:ok)
+      expect(source).to include("def name: () -> untyped")
+      expect(source).not_to include("%a{pure}\n  def name")
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("line 2")
+      expect(messages.first).to include("did not parse as an RBS method type or type")
+      expect(messages.first).to include("%a{pure} (finite-float) -> String")
+    end
+
+    it "reports an `# @rbs %a{…}` line whose trailing method type is malformed instead of dropping it silently" do
+      kind, source, messages = synthesizer_outcome(probe_with("# @rbs %a{pure} (finite-float) -> String"))
+
+      expect(kind).to eq(:ok)
+      # The gem's own reading of the annotation is untouched; only the discarded remainder is now named.
+      expect(source).to include("%a{pure}")
+      expect(source).to include("def name: () -> untyped")
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("line 2")
+      expect(messages.first).to include("`(finite-float) -> String`")
+      expect(messages.first).to include("DROPPED")
+    end
+
+    it "surfaces no source-rbs-annotation-not-honoured row for the valid `#:` form through a real run" do
+      result = run_plugin(source: <<~RUBY)
+        # rbs_inline: enabled
+        class Probe
+          #: %a{rigor:v1:return: non-empty-string} () -> String
+          def name
+            "x"
+          end
+        end
+      RUBY
+
+      rules = result.diagnostics.map(&:qualified_rule)
+      expect(rules).not_to include("source-rbs-annotation-not-honoured")
+      expect(rules).not_to include("source-rbs-synthesis-failed")
+    end
+  end
+
   # Issue #997, the `# @rbs` tag's failure mode — a Rigor refinement named where an RBS type belongs makes
   # `RBS::DefinitionBuilder` raise `NoTypeFoundError` for the WHOLE class, and the `rbs.coverage.definition-
   # build-failed` warning that reports it used to blame a duplicate declaration that is not there (measured

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rigor/plugin"
+require_relative "rbs_inline/same_line_annotations"
 
 # ADR-32 — bundled `rigor-rbs-inline` plugin.
 #
@@ -131,6 +132,9 @@ module Rigor
           return nil if parsed.nil?
 
           uses, decls, rbs_decls = parsed
+          # Issue #998 — before the writer reads the annotation lists, so a same-line `%a{…} () -> T` renders
+          # with its method type and its annotation both attached. See {SameLineAnnotations}.
+          SameLineAnnotations.each_parsing_result(decls) { |comments| SameLineAnnotations.split!(comments) }
           rendered = mark_inferred_returns(render_with_defaulted_marker(uses, decls, rbs_decls))
           rendered = reattach_declaration_annotations(rendered)
           return nil if rendered.nil? || rendered.strip.empty?
@@ -353,7 +357,7 @@ module Rigor
         # These are invisible without a report: synthesis succeeds, and the annotation comment is even echoed
         # into the generated RBS, so the omission shows up neither in the output nor at runtime.
         #
-        # Two cases today:
+        # Three cases today:
         #
         # - `module-self`, where the two inline-RBS dialects disagree on spelling. rbs's own `docs/inline.md`
         #   documents `# @rbs module-self: Foo`; the rbs-inline gem's grammar is `# @rbs module-self Foo`,
@@ -368,6 +372,16 @@ module Rigor
         #   signature for it AT ALL, and `rigor check` on the file reported nothing beyond an unrelated
         #   `rbs.coverage.missing-gem` info — the annotation was indistinguishable from one never written,
         #   which ADR-93's "an inline annotation is a live contract" forbids.
+        # - an `# @rbs %a{…}` line whose text after the annotations is not a method type (issue #998). The
+        #   gem's `@rbs %a{}` rule lexes the annotations and ignores the rest of the line, so
+        #   `# @rbs %a{pure} (finite-float) -> String` keeps `%a{pure}` and discards the signature beside it
+        #   without a word. A remainder that IS a method type is not reported, because
+        #   {SameLineAnnotations.split!} has already made it bind — the notice is for what that repair
+        #   could not read.
+        #
+        # The list is repaired by {SameLineAnnotations.split!} first, exactly as the synthesis path repairs
+        # its own, so a valid same-line `#: %a{…} () -> T` is not reported as a `#:` line that failed to
+        # parse: it did not fail, it binds.
         #
         # Deliberately narrow otherwise. A construct the gem's parser REJECTS already routes through WD6's
         # error path, and one it never recognised at all is upstream's grammar to define (WD3) — guessing at
@@ -377,7 +391,7 @@ module Rigor
         # computed, not guessing at one.
         def unhonoured_annotations(prism_result)
           ::RBS::Inline::AnnotationParser.parse(prism_result.comments).flat_map do |parsed|
-            parsed.each_annotation.filter_map do |annotation|
+            SameLineAnnotations.split!(parsed).each_annotation.filter_map do |annotation|
               case annotation
               when ::RBS::Inline::AST::Annotations::ModuleSelf
                 next if annotation.self_types.any?
@@ -387,6 +401,8 @@ module Rigor
                   "inline documentation) is not honoured here."
               when ::RBS::Inline::AST::Annotations::SyntaxErrorAssertion
                 syntax_error_assertion_notice(annotation)
+              when ::RBS::Inline::AST::Annotations::RBSAnnotation
+                dropped_remainder_notice(annotation)
               end
             end
           end.uniq
@@ -403,6 +419,18 @@ module Rigor
           "a `#:` annotation#{position} did not parse as an RBS method type or type " \
             "(`#{annotation.error_string}`) and was DROPPED — the method types as if the annotation had " \
             "never been written, not merely as if its type were wrong. Fix the RBS syntax to restore it."
+        end
+
+        # Issue #998 — the line is read off the annotation's own comment, as in {#syntax_error_assertion_notice}.
+        def dropped_remainder_notice(annotation)
+          remainder = SameLineAnnotations.dropped_remainder(annotation)
+          return nil if remainder.nil?
+
+          line = annotation.source.comments.first&.location&.start_line
+          position = line ? " on line #{line}" : ""
+          "the text after the `%a{…}` annotation#{position} (`#{remainder}`) did not parse as an RBS method " \
+            "type and was DROPPED — the annotation is kept, but the method types as if no signature had been " \
+            "written beside it. Fix the RBS syntax to restore it."
         end
 
         # Rewrite every RDoc directive comment to its spaced spelling (`#:nodoc:` -> `# :nodoc:`) so

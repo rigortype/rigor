@@ -30,6 +30,13 @@ the precedence between a `sig/` declaration and an inline annotation
 of the same member — the `.rbs` wins, per member, and the drop is
 reported under WD12's rule.
 
+**Amended 2026-09-14** under WD11 and WD12, closing
+[#998](https://github.com/rigortype/rigor/issues/998). WD11's list of
+constructs the two readers do not share gains the `%a{}` line-shape
+split, and the plugin now reads both same-line spellings the built-in
+parser accepts; a same-line line whose method type does not parse is
+reported under WD12 rather than half-applied in silence.
+
 **Amended 2026-07-30** with WD11 and WD12, closing
 [#229](https://github.com/rigortype/rigor/issues/229). WD11 keeps
 the `rbs-inline` gem as the reader rather than migrating to the
@@ -429,6 +436,22 @@ Grounded in the measured grammar diff,
 - **Four constructs would be lost**: `@rbs generic T` (type params
   dropped), `@rbs!` embedded RBS, `@rbs inherits`, and method
   visibility. Each is rejected outright by the built-in parser.
+- **`%a{}` on a method splits by line shape, in opposite directions**
+  (added 2026-09-14, [#998](https://github.com/rigortype/rigor/issues/998)).
+  The own-line `# @rbs %a{…}` above a separate method type is gem-only:
+  the built-in parser reports `AnnotationSyntaxError: expected a token
+  pARROW` and loses the annotation. The same-line `# @rbs %a{…} () -> T`
+  and `#: %a{…} () -> T` are what the built-in parser (and Steep's inline
+  mode) accept, and the gem loses them — the method type in the first,
+  the whole line in the second, silently. The plugin repairs the gem
+  side rather than the grammar: before the writer runs, it splits a
+  same-line form in the gem's parsed annotation list into the annotation
+  and the method type, each re-read by the gem's own `AnnotationParser`
+  on the original line, and leaves anything whose remainder is not a
+  well-formed method type exactly as the gem parsed it, for WD12 to
+  report. So both same-line spellings bind in Rigor, and a move to the
+  built-in parser would lose only the own-line one. Measured in
+  [`docs/notes/20260912-inline-refinement-carrier-probe.md`](../notes/20260912-inline-refinement-carrier-probe.md).
 - **The features that prompted the question are not gaps.** `def self.`
   singleton definitions and `# @rbs @ivar: T` under a `class`/`module`
   are handled identically by both. `module-self` is supported by both,
@@ -485,6 +508,17 @@ The general rule this instantiates: **where the two dialects disagree on
 spelling, silence is the failure to avoid.** A rejected annotation the
 user can see is recoverable; one accepted by the parser and discarded by
 the writer is not.
+
+The same-line `%a{}` forms (WD11, #998) are the same failure reached
+from the writer's side: `# @rbs %a{pure} () -> String` kept the
+annotation and discarded the method type, and `#: %a{…} () -> String`
+became a `SyntaxErrorAssertion` that the #997 notice then reported as
+unparseable although it is valid for the other two readers. The fix is
+to honour the valid spelling, not to silence the notice: the repair
+runs on the list the notices are computed from too, so a valid line
+binds and says nothing, and a line whose method type genuinely fails is
+still reported — in the `#:` spelling by the #997 notice, and in the
+`@rbs` spelling by a notice naming the discarded text.
 
 Reporting it downstream is a mitigation, not the fix. A parser that
 accepts an annotation its own writer discards is an upstream

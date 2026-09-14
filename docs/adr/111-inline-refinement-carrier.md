@@ -7,7 +7,8 @@ grammar already defines, beside a plain type position that states its erasure, a
 Nothing is implemented. The precondition the first draft left open — Steep — is now measured, and it
 moved one thing: the own-line `%a{}` form the manual documents is a hard error under Steep's inline
 mode, so the **same-line** form is the only spelling this ADR recommends, and
-[#998](https://github.com/rigortype/rigor/issues/998) — Rigor's own reader drops that form — is the
+[#998](https://github.com/rigortype/rigor/issues/998) — Rigor's own reader dropped that form until
+[PR #1018](https://github.com/rigortype/rigor/pull/1018) — is the
 prerequisite for recommending it, not a follow-up. Re-evaluation trigger (i) has half-fired; WD5 says
 what the other half now means. The maintainer decides.
 
@@ -188,7 +189,8 @@ Exactly what the oracle produced, which is the ADR-108 provenance criterion appl
 The tool gains one guarantee from WD1 it would not get from a dialect: every comment it emits is a
 spelling rbs-inline's own writer copies into generated RBS *as an annotation*, so a project that later
 moves to `sig/` keeps the refinement — a dialect's line survives that boundary only as comment text
-(finding 1). For the same-line form this holds once #998 lands; today the writer drops its method type.
+(finding 1). For the same-line form this holds inside Rigor since #998 (PR #1018), which splits the line
+before the gem's writer runs; the gem's own writer (`rbs-inline --output`) still drops its method type.
 
 ### WD5 — The Steep measurement, the prerequisite, and the re-evaluation triggers
 
@@ -218,7 +220,8 @@ the recommendation.
   `#:nodoc:` rewrite already sit) is the injection point. It was a follow-up while Steep was
   unmeasured; now the recommended spelling is one Rigor's own reader throws away, so the manual's
   recommendation waits on it. #997 stays independent (in flight as PR #1005) and does not narrow:
-  both naive spellings remain invalid under every reader.
+  both naive spellings remain invalid under every reader. *(2026-09-14: PR #1018 makes Rigor's reader
+  attach both halves of both same-line spellings; the gem's own writer is unchanged.)*
 - **Re-evaluation triggers.** (i) was "Steep reports the own-line form red *and* the same-line form
   cannot be made to work in Rigor's reader within a release". **The first half has fired.** The
   second half is now the whole trigger: if #998 does not land within a release, revisit toward
@@ -263,7 +266,7 @@ Negative / carry-over:
   refinements in `.rbs` until then, and the manual says so rather than recommending either form.
 - ADR-103's inline `%a{pure}`, which the manual documents own-line, is red under Steep's inline mode
   today for the same reason (finding 5); #998's fix covers it, since same-line `%a{pure} () -> T` is
-  clean under every reader but Rigor's.
+  clean under every reader, and since PR #1018 binds in Rigor's too.
 - #997 does not narrow: both naive spellings stay invalid under every reader, so both diagnostics stay
   wanted.
 - The class-level directives inline are undocumented until measured (WD3).

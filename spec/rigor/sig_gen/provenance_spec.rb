@@ -107,6 +107,11 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # tuple the declaration already names, so both leave `declared_divergent` for generated-equivalent
 # (`inference.rbs` -2). It needs #995's alias expansion as well: without it the declared `Type::t`
 # element read as `untyped` and no inferred form could ever compare equal.
+#
+# 663 since #1016. A value-position `&&` now narrows its right operand, so
+# `Type::AnonymousClassName.match?`'s `class_name.is_a?(String) && class_name.start_with?(PREFIX)` over an
+# untyped parameter calls `start_with?` on `String` rather than on `untyped`; sig-gen proves `bool`, the
+# declared return, and the row leaves `unrenderable` for generated-equivalent (`type.rbs` -1).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -143,7 +148,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/source.rbs" => 9,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,
-  "sig/rigor/type.rbs" => 212
+  "sig/rigor/type.rbs" => 211
 }.freeze
 
 module SigProvenanceSpecHelpers

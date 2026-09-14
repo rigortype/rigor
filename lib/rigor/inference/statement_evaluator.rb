@@ -1531,34 +1531,41 @@ module Rigor
       # `branch_terminates?`) — the post-OR / post-AND scope is the LHS-skipped edge alone: `a or raise` only survives
       # when `a` was truthy, so subsequent statements observe `a` narrowed to its truthy fragment; the symmetric `a and
       # raise` survives only when `a` was falsey. Same shape as the `eval_if` / `eval_unless` early-return narrowing.
+      #
+      # This is the only and/or typer: `ExpressionTyper` reads a value-position `&&` / `||` from here (issue #1016),
+      # so the RHS narrowing and the constant short-circuit below cannot differ between a statement and a value.
       def eval_and_or(node)
+        and_node = node.is_a?(Prism::AndNode)
         left_type, left_scope = sub_eval(node.left, scope)
         truthy_left, falsey_left = Narrowing.predicate_scopes(node.left, left_scope)
-        rhs_entry = node.is_a?(Prism::AndNode) ? truthy_left : falsey_left
-        right_type, right_scope = sub_eval(node.right, rhs_entry)
+        right_type, right_scope = sub_eval(node.right, and_node ? truthy_left : falsey_left)
+        skipped_type = and_node ? Narrowing.narrow_falsey(left_type) : Narrowing.narrow_truthy(left_type)
 
-        if branch_terminates?(node.right, right_type)
-          # Control never reaches any statement after `a or raise` via the RHS edge — the RHS scope is discarded.
-          surviving_type =
-            if node.is_a?(Prism::AndNode)
-              Narrowing.narrow_falsey(left_type)
-            else
-              Narrowing.narrow_truthy(left_type)
-            end
-          surviving_scope = node.is_a?(Prism::AndNode) ? falsey_left : truthy_left
-          return [surviving_type, surviving_scope]
-        end
+        # Control never reaches any statement after `a or raise` via the RHS edge — the RHS scope is discarded.
+        return [skipped_type, and_node ? falsey_left : truthy_left] if branch_terminates?(node.right, right_type)
 
-        skipped_type =
-          if node.is_a?(Prism::AndNode)
-            Narrowing.narrow_falsey(left_type)
-          else
-            Narrowing.narrow_truthy(left_type)
-          end
-        [
-          Type::Combinator.union(skipped_type, right_type),
-          join_with_nil_injection(left_scope, right_scope)
-        ]
+        # A dead RHS is still evaluated and its scope still joins, so a write inside it nil-injects exactly as
+        # before; only its value is dropped, because it cannot be the value of the expression.
+        joined_scope = join_with_nil_injection(left_scope, right_scope)
+        return [skipped_type, joined_scope] if right_operand_dead?(node, left_type, left_scope)
+
+        [Type::Combinator.union(skipped_type, right_type), joined_scope]
+      end
+
+      # Whether a genuine `Constant` left operand proves the RHS never supplies the value: `false && b` and
+      # `1 || b`. The gate is `Constant`-only (issue #152 evaluated a wider one and declined it).
+      #
+      # Issue #313 — it MUST decline an optimistically nil-free operand. A uniform-valued literal hash reads as a lone
+      # `Constant` (`UNIFORM[key]` → `1`), so without the mark `UNIFORM[key] || key` would discard the author's
+      # fallback, and `MAP[key].nil? && b` would drop `b` the program runs when the lookup misses. The mark is
+      # resolved against the LEFT operand's post-scope, as `branch_certainty` does for `if`, so a write in the left
+      # operand (`(v = MAP[key]) || key`) is judged by the binding it just made rather than by an older one.
+      def right_operand_dead?(node, left_type, left_scope)
+        return false unless left_type.is_a?(Type::Constant)
+        return false unless optimistic_origin_for(node.left, left_scope).nil?
+
+        truthy = left_type.value ? true : false
+        node.is_a?(Prism::AndNode) ? !truthy : truthy
       end
 
       # `(body)`. Threads scope through the inner expression so `(x = 1; x + 2)` binds `x` and produces `Constant[3]`.

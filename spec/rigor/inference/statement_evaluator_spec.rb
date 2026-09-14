@@ -733,9 +733,18 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "unions the two operand types" do
-      type, _post = evaluate("1 || \"hi\"")
+      type, _post = evaluate("(1 if rand < 0.5) || \"hi\"")
       expect(type).to be_a(Rigor::Type::Union)
       expect(type.members.map(&:value)).to contain_exactly(1, "hi")
+    end
+
+    # Issue #1016 — the constant short-circuit the value position always had is the statement position's too, so
+    # `1 || "hi"` no longer differs between `x = 1 || "hi"` and `[1 || "hi"]`. The dead RHS still runs through the
+    # evaluator, so a write inside it keeps nil-injecting.
+    it "drops a dead right operand's value behind a genuine constant left operand" do
+      type, post = evaluate("1 || (y = \"hi\")")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
     end
 
     # Early-return narrowing through the OR / AND seam, mirroring the `eval_if` / `eval_unless`

@@ -81,9 +81,10 @@ module Rigor
         #   types at all.
         def select(method_definition, **) = select_candidates(method_definition, **).first
 
-        # Issue #521 — like {.select}, but when a `Dynamic[Top]` argument reaches the gradual pass it
-        # returns EVERY gradually-matching overload instead of pinning the first. An untyped argument
-        # accepts every param indiscriminately, so "first gradual match" is decided by overload-list
+        # Issue #521 — like {.select}, but when an imprecise argument (`Dynamic[Top]`, or since #1021 a
+        # union with a `Dynamic[Top]` member) reaches the gradual pass it returns EVERY gradually-matching
+        # overload instead of pinning the first. An untyped argument accepts every param
+        # indiscriminately, so "first gradual match" is decided by overload-list
         # position, not by types — `[true] * n` with an untyped `n` pinned `Array#*(string) -> String`
         # and answered a wrong precise type the runtime can contradict. The caller unions the candidates'
         # returns, which contains the truth whichever overload the runtime takes. Every other path (strict,
@@ -151,9 +152,10 @@ module Rigor
           private
 
           # Three-pass overload search:
-          # - Pass 1 (strict): skipped when any arg is `Dynamic[Top]`, because gradual acceptance against
-          #   an untyped arg accepts every param indiscriminately and would let pass 1 lock in an arbitrary
-          #   strict overload (e.g. `Regexp#=~(nil) -> nil` over the `(::interned?) -> Integer?` overload).
+          # - Pass 1 (strict): skipped when any arg is imprecise (`imprecise_arg?`), because gradual
+          #   acceptance against an untyped arg accepts every param indiscriminately and would let pass 1
+          #   lock in an arbitrary strict overload (e.g. `Regexp#=~(nil) -> nil` over the
+          #   `(::interned?) -> Integer?` overload).
           # - Pass 1.5 (alias-resolved): consults each `RBS::Types::Alias`'s strict arm so e.g.
           #   `Array#*(int)` wins over the `Array#*(string) -> String` overload for Integer args.
           # - Pass 2 (gradual): the original gradual matcher so overloads that legitimately rely on
@@ -170,11 +172,11 @@ module Rigor
             return [alias_hit] if alias_hit
 
             # Pass 2, array-valued. With every argument carrying real type information the first gradual
-            # match keeps its historical single-winner contract. With a `Dynamic[Top]` argument in play the
+            # match keeps its historical single-winner contract. With an imprecise argument in play the
             # matches are indistinguishable by types — position alone would pick — so ALL of them come back
             # and the dispatch layer unions their returns (#521).
             matches = find_matching_overload(overloads, shared, strict: false)
-            return matches.first(1) unless shared[:arg_types].any? { |t| untyped_arg?(t) }
+            return matches.first(1) unless shared[:arg_types].any? { |t| imprecise_arg?(t) }
 
             matches
           end
@@ -187,7 +189,7 @@ module Rigor
           # type_vars, block_required, param_overrides, alias_expander).
           def find_matching_overload(overloads, shared, strict:)
             arg_types = shared[:arg_types]
-            return NO_MATCH if strict && arg_types.any? { |t| untyped_arg?(t) }
+            return NO_MATCH if strict && arg_types.any? { |t| imprecise_arg?(t) }
 
             block_required = shared[:block_required]
             # Strict keeps its historical first-match short-circuit (a dispatch hot path); the gradual
@@ -218,8 +220,17 @@ module Rigor
           # Treats the literal `untyped` carrier (`Dynamic[Top]`) as too imprecise to drive a strict-pass
           # match. Other `Dynamic`-wrapped types with a concrete static facet carry enough information to
           # pick a sensible overload.
-          def untyped_arg?(type)
-            type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
+          def untyped_arg?(type) = type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
+
+          # Issue #1021 — the strict and alias passes must not discriminate on an argument whose type
+          # cannot rule an overload out: the bare untyped carrier, or a union with an untyped member. That
+          # member may reach any overload at runtime, so a strict match is decided by the union's other
+          # members alone — `Dynamic[top] | nil` pinned `Regexp#match?(nil) -> false` and typed a live
+          # predicate as the literal `false`. The gradual pass still accepts against the whole union, so
+          # `Dynamic[top] | nil` keeps both `match?` overloads and the #521 join answers `Dynamic[bool]`.
+          # A `Dynamic` with a concrete static facet stays out: its facet discriminates.
+          def imprecise_arg?(type)
+            untyped_arg?(type) || (type.is_a?(Type::Union) && type.members.any? { |member| untyped_arg?(member) })
           end
 
           # Pass 1.5: for arity-compatible overloads whose every positional param is either a strict
@@ -232,7 +243,7 @@ module Rigor
             # Issue #521 — an untyped argument "maybe"-accepts EVERY alias's strict arm, so it cannot
             # discriminate between overloads here any more than in the strict pass; without this guard a
             # Dynamic arg pinned `Array#*(string) -> String` purely by declaration order.
-            return nil if arg_types.any? { |t| untyped_arg?(t) }
+            return nil if arg_types.any? { |t| imprecise_arg?(t) }
 
             overloads.find do |method_type|
               next false unless engages_block_shape?(method_type, block_required)

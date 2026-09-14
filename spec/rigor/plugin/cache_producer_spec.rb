@@ -352,6 +352,39 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       expect(calls).to eq(1)
     end
 
+    # Issue #1009 — the plugin-producer twin of the synthesizer slot. A producer's key was the plugin's
+    # manifest id, version and config, none of which a same-`Rigor::VERSION` edit to a bundled plugin (or to
+    # the engine API it computes through) moves, so the next session served the previous build's value.
+    # Each session relocates {Rigor::Cache::EngineSource.root} and drops the identity memo, as a new process
+    # would; the producer's answer moves with the engine tree, as a rebuilt plugin's would.
+    it "recomputes across an engine-source edit, and still hits while the engine is unchanged (#1009)" do
+      engine = File.join(tmpdir, "engine")
+      FileUtils.mkdir_p(File.join(engine, "lib"))
+      allow(Rigor::Cache::EngineSource).to receive(:root).and_return(engine)
+      build = nil
+      calls = 0
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      klass.producer(:answer) do |_params|
+        calls += 1
+        build
+      end
+      session = lambda do |name|
+        build = name
+        File.write(File.join(engine, "lib", "engine.rb"), "# #{name}\n")
+        Rigor::Cache::EngineSource.reset_process_identity!
+        klass.new(services: services_with_fresh_store).cache_for(:answer, params: {}).call
+      end
+
+      expect(session.call(:old)).to eq(:old)
+      expect(session.call(:old)).to eq(:old)
+      expect(calls).to eq(1)
+
+      expect(session.call(:new)).to eq(:new)
+      expect(calls).to eq(2)
+    end
+
     # ADR-45 WD1 (#577) — the producer-cache half of the absence dependency: a block that probed for a file,
     # found none, and took its fallback has its answer invalidated once the file appears, while an unchanged
     # tree still serves the entry.

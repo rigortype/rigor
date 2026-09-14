@@ -862,4 +862,98 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       expect(hits_after).to be > hits_before
     end
   end
+
+  # Issue #1009 — a warm cache written by one build of the engine and read by a build whose synthesizer
+  # changed must not serve the first build's synthesized RBS to the second build's rules. The run-result
+  # key already moved with the engine source (#285), so the run re-analysed — but the per-file synthesizer
+  # slot it consulted was keyed on the file's bytes and the plugin's manifest version alone, which a
+  # same-`Rigor::VERSION` edit to the synthesizer does not move. The environment key hashes the synthesized
+  # string it is handed, so a stale string kept that slot warm as well: the new rules read the old RBS.
+  #
+  # "A different build" is modelled the way it arises: the engine tree's bytes move (relocated
+  # {Rigor::Cache::EngineSource.root}, as `run_cache_engine_source_spec.rb` does) AND the synthesizer's
+  # output moves with them. Every run gets a fresh Store over the same on-disk root and a fresh
+  # engine-identity memo, so each one starts where a new `rigor check` process starts.
+  describe "cross-build synthesizer cache (issue #1009)" do
+    let(:project_dir) { Dir.mktmpdir("rigor-rbs-inline-cross-build-") }
+    let(:cache_root) { File.join(project_dir, ".rigor", "cache") }
+    let(:build) { { name: nil } }
+    let(:engine_root) { Dir.mktmpdir("rigor-rbs-inline-cross-build-engine-") }
+    let(:source) do
+      <<~RUBY
+        class AscDesc
+          # @rbs asc_or_desc: :asc | :desc
+          def ascdesc(asc_or_desc)
+            asc_or_desc
+          end
+        end
+
+        AscDesc.new.ascdesc(:bad)
+      RUBY
+    end
+
+    after do
+      [project_dir, engine_root].each { |dir| FileUtils.remove_entry(dir) if File.directory?(dir) }
+    end
+
+    # Build `:old` synthesizes nothing for the file; build `:new` is the real synthesizer. The two differ in
+    # exactly the synthesized RBS, which is the lane under test.
+    def install_build(name)
+      FileUtils.mkdir_p(File.join(engine_root, "lib"))
+      File.write(File.join(engine_root, "lib", "engine.rb"), "# #{name}\n")
+      build[:name] = name
+    end
+
+    def analyse(cache: true)
+      Rigor::Plugin.unregister!
+      Rigor::Cache::EngineSource.reset_process_identity!
+      store = cache ? Rigor::Cache::Store.new(root: cache_root) : nil
+      result = run_plugin_in_dir(dir: project_dir, source: source, cache_store: store)
+      [result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }.sort, store]
+    end
+
+    def producer_stats(store, producer_id)
+      store.stats.fetch(:by_producer).fetch(producer_id, {})
+    end
+
+    before do
+      allow(Rigor::Cache::EngineSource).to receive(:root).and_return(engine_root)
+      # Wraps the synthesizer the plugin hands the engine rather than stubbing `Synthesizer#call`: an
+      # `allow_any_instance_of` stub there raised inside the engine's ADR-32 WD6 rescue and read as "no
+      # contribution" for BOTH builds, which made the two builds agree and the example vacuous.
+      allow(Rigor::Plugin::RbsInline::Synthesizer).to receive(:new).and_wrap_original do |original, **options|
+        real = original.call(**options)
+        ->(path) { build[:name] == :old ? nil : real.call(path) }
+      end
+    end
+
+    it "serves the reading build's cold answer, not the writing build's synthesized RBS" do
+      install_build(:old)
+      old_warm, = analyse
+      old_cold, = analyse(cache: false)
+      expect(old_warm).to eq(old_cold)
+
+      install_build(:new)
+      new_cold, = analyse(cache: false)
+      expect(new_cold.map(&:first)).to include("call.argument-type-mismatch")
+      expect(new_cold).not_to eq(old_cold) # the two builds genuinely disagree, or this proves nothing
+
+      new_warm, store = analyse
+      expect(new_warm).to eq(new_cold)
+      expect(producer_stats(store, "plugin.source_rbs_synthesizer")).to include(misses: 1)
+    end
+
+    it "still serves the synthesizer slot warm when neither the engine nor the source moved" do
+      install_build(:new)
+      cold, = analyse(cache: false)
+      analyse
+
+      # The run-result slot would serve the whole run before any synthesizer is consulted, so drop just that
+      # producer's entries: what remains is the question of whether the synthesizer slot itself still hits.
+      FileUtils.rm_rf(File.join(cache_root, "analysis.run-diagnostics"))
+      warm, store = analyse
+      expect(warm).to eq(cold)
+      expect(producer_stats(store, "plugin.source_rbs_synthesizer")).to include(hits: 1, misses: 0)
+    end
+  end
 end

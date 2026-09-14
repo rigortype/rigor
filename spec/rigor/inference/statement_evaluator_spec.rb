@@ -2531,31 +2531,34 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         expect(first_local_seen(:month, source)).to eq(decimal_int_string_t)
       end
 
-      it "narrows `\\h+` named capture to hex-int-string" do
+      # #1004 — `hex-int-string` / `octal-int-string` require the `0x` / `0o` prefix (`refined.rb`);
+      # a bare `\h+` / `[0-9a-fA-F]+` / `[0-7]+` capture matches a prefix-free digit run ("ff", "17"),
+      # so the sound narrowing is `non-empty-string`, never those refinements.
+      it "narrows `\\h+` named capture to non-empty-string, NEVER hex-int-string" do
         observed = first_local_seen(:hash, <<~RUBY)
           if /(?<hash>\\h+)/ =~ str
             hash
           end
         RUBY
-        expect(observed).to eq(Rigor::Type::Combinator.hex_int_string)
+        expect(observed).to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
-      it "narrows `[0-9a-fA-F]+` named capture to hex-int-string" do
+      it "narrows `[0-9a-fA-F]+` named capture to non-empty-string, NEVER hex-int-string" do
         observed = first_local_seen(:hex, <<~RUBY)
           if /(?<hex>[0-9a-fA-F]+)/ =~ str
             hex
           end
         RUBY
-        expect(observed).to eq(Rigor::Type::Combinator.hex_int_string)
+        expect(observed).to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
-      it "narrows `[0-7]+` named capture to octal-int-string" do
+      it "narrows `[0-7]+` named capture to non-empty-string, NEVER octal-int-string" do
         observed = first_local_seen(:oct, <<~RUBY)
           if /(?<oct>[0-7]+)/ =~ str
             oct
           end
         RUBY
-        expect(observed).to eq(Rigor::Type::Combinator.octal_int_string)
+        expect(observed).to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
       it "narrows `[a-z]+` named capture to lowercase-string" do

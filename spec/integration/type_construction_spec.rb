@@ -1184,6 +1184,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/hex_octal_int_string_soundness.rb — prefix-free producers never claim hex/octal-int-string" do
+    let(:harness) { harness_for("hex_octal_int_string_soundness") }
+
+    it "projects IntegerRange#to_s(base) and a bare hex/octal regex capture to non-empty-string" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/tuple_union_absorption.rb — issue #994 element-wise arm absorption" do
     let(:harness) { harness_for("tuple_union_absorption") }
 

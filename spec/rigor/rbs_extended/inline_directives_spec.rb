@@ -57,4 +57,44 @@ RSpec.describe "RBS::Extended directives written as rbs-inline comments" do
 
     expect(dumped.map(&:message)).to eq(["dump_type: non-empty-string"])
   end
+
+  # Issue #998 — the two same-line spellings rbs's built-in `RBS::InlineParser` and Steep's inline mode
+  # accept. Before the fix the gem-based reader kept the annotation and discarded `() -> String` for the
+  # `# @rbs` form, and discarded the whole line for the `#:` form, so neither reached the call site.
+  {
+    "`# @rbs %a{…} () -> String`" => "# @rbs %a{rigor:v1:return: non-empty-string} () -> String",
+    "`#: %a{…} () -> String`" => "#: %a{rigor:v1:return: non-empty-string} () -> String"
+  }.each do |label, spelling|
+    it "honours `rigor:v1:return:` written on the same line as the method type, as #{label}" do
+      dumped = diagnostics_for(<<~RUBY).select { |d| d.rule == "dump.type" }
+        class Reader
+          #{spelling}
+          def name
+            "x"
+          end
+        end
+
+        dump_type(Reader.new.name)
+      RUBY
+
+      expect(dumped.map(&:message)).to eq(["dump_type: non-empty-string"])
+    end
+
+    # The method type half, isolated: `%a{pure}` refines no return, so a mismatch against `String` can
+    # only come from `() -> String` reaching the environment. Before the fix the method was `() -> untyped`
+    # and this body was accepted.
+    it "binds the method type written after the annotation, as #{label}" do
+      bound = spelling.sub("%a{rigor:v1:return: non-empty-string}", "%a{pure}")
+      mismatches = diagnostics_for(<<~RUBY).select { |d| d.qualified_rule == "def.return-type-mismatch" }
+        class Reader
+          #{bound}
+          def name
+            1
+          end
+        end
+      RUBY
+
+      expect(mismatches.map(&:message)).to eq(["return-type mismatch on `name': declared String, inferred 1"])
+    end
+  end
 end

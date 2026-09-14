@@ -22,19 +22,44 @@ The plain `() -> String` stays the compatibility contract; the
 annotation tells Rigor the return is a non-empty string.
 
 You may also write any of them **in a `.rb` file**, as an
-rbs-inline `# @rbs %a{…}` comment — `%a{}` is rbs-inline's own
-upstream grammar, and the annotation reaches Rigor on the same
-path the generated signature does:
+inline-RBS comment — `%a{}` is RBS's own annotation grammar, and
+the annotation reaches Rigor on the same path the generated
+signature does. Rigor reads three spellings:
 
 ```rb
 # rbs_inline: enabled
 
 class Reader
+  # Own line: the annotation, then the type on its own tag.
   # @rbs %a{rigor:v1:return: non-empty-string}
   # @rbs return: String
   def read_name = "x"
+
+  # Same line, `@rbs` method type.
+  # @rbs %a{rigor:v1:return: non-empty-string} () -> String
+  def title = "x"
+
+  # Same line, `#:` method type.
+  #: %a{rigor:v1:return: non-empty-string} () -> String
+  def label = "x"
 end
 ```
+
+Several annotations may stand before the method type
+(`#: %a{pure} %a{rigor:v1:return: non-empty-string} () -> String`).
+The other inline-RBS readers do not accept all three:
+
+| spelling | rbs's built-in inline parser, Steep with `inline: true` | the `rbs-inline` gem's own `--output` |
+| --- | --- | --- |
+| own line | syntax error (`expected a token pARROW`), annotation lost | annotation kept |
+| same line | annotation and method type kept | annotation kept, method type **dropped** |
+
+Rigor keeps both halves of every row. Which spelling to recommend
+for a `.rb` file is still open in
+[ADR-111](../adr/111-inline-refinement-carrier.md), which carries
+the measurement. If the method type after a same-line annotation
+does not parse, the method is left untyped and Rigor reports it as
+[`plugin.rbs-inline.source-rbs-annotation-not-honoured`](plugins/rigor-rbs-inline.md#same-line-annotations).
 
 This needs the `rbs-inline` library installed; Rigor ingests
 inline annotations by default when it is
@@ -183,7 +208,9 @@ class UserRepository
 end
 ```
 
-The same two work as rbs-inline comments in a `.rb` file:
+The same two work as rbs-inline comments in a `.rb` file, in any of
+the three spellings shown above — the own-line
+one here:
 
 ```rb
 # rbs_inline: enabled

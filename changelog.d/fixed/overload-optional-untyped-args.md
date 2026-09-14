@@ -1,0 +1,1 @@
+- **[inference]** A method call whose argument is an unknown value that may be `nil` no longer resolves to an overload chosen by the `nil` case alone, so predicates such as `/re/.match?(value)` stop typing as always `false` and no longer produce "condition is always falsey" false positives. [#1022](https://github.com/rigortype/rigor/pull/1022)

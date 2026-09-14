@@ -239,6 +239,79 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       end
     end
 
+    # Issue #1021 — a union with an untyped member (`Dynamic[top] | nil`, the ordinary "unknown value that
+    # may be nil") is as indistinguishable by types as the bare untyped argument: its untyped arm may take
+    # any overload at runtime. Treated as precise, the strict pass keyed on the `nil` arm alone and typed
+    # `Regexp#match?(maybe_untyped)` as the literal `false`, so `if multipart?` read as always falsey.
+    describe "union with an untyped member (.select_candidates)" do
+      def select_candidates(class_name, method_name, arg_types)
+        definition = loader.instance_definition(class_name)
+        method = definition.methods[method_name]
+        instance_type = Rigor::Type::Combinator.nominal_of(class_name)
+        described_class.select_candidates(
+          method, arg_types: arg_types, self_type: instance_type, instance_type: instance_type
+        )
+      end
+
+      def first_param_names(candidates)
+        candidates.map { |mt| mt.type.required_positionals.first.type.to_s }
+      end
+
+      let(:untyped) { Rigor::Type::Combinator.untyped }
+      let(:nil_type) { Rigor::Type::Combinator.constant_of(nil) }
+
+      it "does not pin `Regexp#match?(nil) -> false` for a `Dynamic[top] | nil` argument" do
+        candidates = select_candidates("Regexp", :match?, [Rigor::Type::Combinator.union(untyped, nil_type)])
+        expect(first_param_names(candidates)).to contain_exactly("::interned", "nil")
+      end
+
+      it "answers bool, not the literal false, for `/re/.match?` on a maybe-untyped local" do
+        env = Rigor::Environment.for_project(libraries: [], signature_paths: [])
+        scope = Rigor::Scope.empty(environment: env)
+        root = Prism.parse("def f(x, c)\n  y = c ? x : nil\n  /re/.match?(y)\nend\n").value
+        index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+        call = nil
+        Rigor::Source::NodeWalker.each(root) { |n| call = n if n.is_a?(Prism::CallNode) && n.name == :match? }
+        arg = call.arguments.arguments.first
+        expect(index[arg].type_of(arg).describe(:short)).to eq("Dynamic[top]?")
+        type = index[call].type_of(call)
+        expect(type).not_to eq(Rigor::Type::Combinator.constant_of(false))
+        expect(type.describe(:short)).to eq("Dynamic[bool]")
+      end
+
+      it "returns every gradual match for Array#* with a `Dynamic[top] | Integer` argument" do
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        candidates = select_candidates("Array", :*, [Rigor::Type::Combinator.union(untyped, integer)])
+        expect(first_param_names(candidates)).to contain_exactly("::string", "::int")
+      end
+
+      it "still picks `(interned) -> bool` for a precise String argument" do
+        candidates = select_candidates("Regexp", :match?, [Rigor::Type::Combinator.nominal_of("String")])
+        expect(first_param_names(candidates)).to eq(["::interned"])
+      end
+
+      it "still picks `(nil) -> false` for a literal nil argument" do
+        candidates = select_candidates("Regexp", :match?, [nil_type])
+        expect(first_param_names(candidates)).to eq(["nil"])
+      end
+
+      it "keeps #521's all-matches answer for a bare untyped argument" do
+        expect(first_param_names(select_candidates("Regexp", :match?, [untyped]))).to eq(["::interned"])
+        expect(first_param_names(select_candidates("Array", :*, [untyped]))).to contain_exactly("::string", "::int")
+      end
+
+      it "still selects exactly one overload for a precise `String | nil` union" do
+        string_or_nil = Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("String"), nil_type)
+        expect(first_param_names(select_candidates("Regexp", :match?, [string_or_nil]))).to eq(["::interned"])
+        expect(first_param_names(select_candidates("Kernel", :Array, [string_or_nil])).size).to eq(1)
+      end
+
+      it "keeps a Dynamic with a concrete static facet out of the untyped family" do
+        dynamic_string = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("String"))
+        expect(select_candidates("Array", :*, [dynamic_string]).size).to eq(1)
+      end
+    end
+
     describe "receiver-affinity pre-sort (BigDecimal-coerce regression)" do
       # When the `bigdecimal` stdlib RBS is loaded, its reopen of `Integer#+` adds `(BigDecimal) -> BigDecimal` at the
       # FRONT of the overload list. Without the pre-sort the selector picks that arm for unknown / Integer args and

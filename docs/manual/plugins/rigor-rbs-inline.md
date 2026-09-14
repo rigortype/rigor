@@ -45,7 +45,7 @@ plugin id/version + config), so an unchanged second run skips the parse.
 | Rule | Severity | Fires when |
 | --- | --- | --- |
 | `plugin.rbs-inline.source-rbs-synthesis-failed` | info | rbs-inline could not parse a file; analysis falls back to no inline-RBS contribution and the diagnostic carries the upstream error |
-| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Three causes: a member your `sig/` also declares (see [Precedence](#precedence)), the `# @rbs module-self: Foo` spelling (see below), and a `#:` line whose type does not parse (see [Unparseable `#:` types](#unparseable--types)) |
+| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Four causes: a member your `sig/` also declares (see [Precedence](#precedence)), the `# @rbs module-self: Foo` spelling (see below), a `#:` line whose type does not parse (see [Unparseable `#:` types](#unparseable--types)), and a same-line `# @rbs %a{…}` whose method type does not parse (see [Same-line annotations](#same-line-annotations)) |
 
 ## Precedence
 
@@ -108,6 +108,34 @@ Rigor reports the second form as
 in silence. Constructs the gem supports and the built-in parser does not —
 `@rbs generic T`, `@rbs!` embedded RBS blocks, `@rbs inherits`, method
 visibility — all work here.
+
+## Same-line annotations
+
+An `%a{…}` annotation can sit on the same line as a method type:
+
+```ruby
+class Reader
+  # @rbs %a{rigor:v1:return: non-empty-string} () -> String
+  def title = "x"
+
+  #: %a{pure} () -> String
+  def label = "x"
+end
+```
+
+This is the spelling the built-in parser and Steep's inline mode accept. The
+gem itself does not: it keeps the annotation and drops the method type in the
+`@rbs` form, and drops the whole `#:` line. Rigor splits the line back into the
+annotation and the method type before the gem's writer runs, so both apply, as
+they do when the annotation has a line of its own
+([ADR-32](../../adr/32-rbs-inline-comment-ingestion.md) WD11). The gem's own
+`rbs-inline --output` is unchanged and still drops them.
+
+When the method type after the annotations does not parse, nothing is split:
+the method types as if no signature had been written, and Rigor reports it — a
+`#:` line under [Unparseable `#:` types](#unparseable--types), and an `@rbs`
+line as `plugin.rbs-inline.source-rbs-annotation-not-honoured` naming the line
+and the text it could not read.
 
 ## Unparseable `#:` types
 

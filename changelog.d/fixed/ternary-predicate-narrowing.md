@@ -1,0 +1,1 @@
+- **[inference]** A predicate guard now narrows a conditional used as a value — a ternary such as `f.finite? ? f.to_s : "x"`, or an `if` / `unless` passed as an argument or receiver — exactly as it narrows the same guard written as an `if` statement. [#1015](https://github.com/rigortype/rigor/pull/1015)

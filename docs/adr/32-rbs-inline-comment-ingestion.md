@@ -37,6 +37,16 @@ split, and the plugin now reads both same-line spellings the built-in
 parser accepts; a same-line line whose method type does not parse is
 reported under WD12 rather than half-applied in silence.
 
+**Amended 2026-09-14** under WD12, closing
+[#1019](https://github.com/rigortype/rigor/issues/1019), the
+remainder of #998's "no row is dropped without a diagnostic"
+criterion. WD12 gains two more causes: a `# @rbs name: T` parameter
+annotation whose `T` does not parse (read off
+`RBS::Inline::AST::Annotations::VarType#type` being `nil`), and an
+`@rbs`-prefixed comment paragraph the gem's own detector attempted to
+read as an annotation and could not (`# @rbs-ext …`, folded back into
+an ordinary comment with no diagnostic of its own).
+
 **Amended 2026-07-30** with WD11 and WD12, closing
 [#229](https://github.com/rigortype/rigor/issues/229). WD11 keeps
 the `rbs-inline` gem as the reader rather than migrating to the
@@ -524,6 +534,24 @@ Reporting it downstream is a mitigation, not the fix. A parser that
 accepts an annotation its own writer discards is an upstream
 `rbs-inline` defect, and fixing it there would close the gap for every
 rbs-inline user rather than only Rigor's.
+
+Two more causes closed [#1019](https://github.com/rigortype/rigor/issues/1019), the two rows #998 left
+silent because they are outside the same-line split:
+
+- a `# @rbs name: T` parameter (or local-variable) annotation whose `T` does not parse. The gem's grammar
+  makes the colon-and-type optional, so a malformed `T` leaves `VarType#name` set and `VarType#type` `nil`
+  rather than raising — `# @rbs n: Integer[1..10]` (`Integer[1..10]` is a valid Rigor refinement, just not
+  in an RBS type position — [manual 16](../manual/16-rbs-extended-annotations.md)) types the parameter
+  `untyped`, indistinguishable downstream from a parameter nobody annotated. The notice is read straight
+  off `VarType#type.nil?`, not off any pattern over the comment text, and names the `%a{rigor:v1:param:}`
+  spelling that would carry the refinement instead.
+- an `@rbs`-prefixed comment paragraph that is not one of the gem's known annotation shapes. The gem's own
+  `annotation_comment?` detector matches a `\b` word boundary right after `@rbs`, so `# @rbs-ext return:
+  non-empty-string` is inside its net — the gem tries to read it as `@rbs` — but its `parse_annotation`
+  `case` has no branch for what follows `-ext` and returns `nil`, which folds the whole paragraph back into
+  an ordinary `CommentLines`, the same class a comment that never claimed to be `@rbs` parses to. The notice
+  fires only when the gem's own marker matched, so a comment that merely mentions `@rbs` in prose, or the
+  maintainer's `@extrbs` counter-proposal (which does not begin with `@rbs`), stays silent.
 
 ### WD13 — A `sig/` declaration wins over an inline one, per member
 

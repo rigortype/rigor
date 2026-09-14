@@ -357,7 +357,7 @@ module Rigor
         # These are invisible without a report: synthesis succeeds, and the annotation comment is even echoed
         # into the generated RBS, so the omission shows up neither in the output nor at runtime.
         #
-        # Three cases today:
+        # Five cases today:
         #
         # - `module-self`, where the two inline-RBS dialects disagree on spelling. rbs's own `docs/inline.md`
         #   documents `# @rbs module-self: Foo`; the rbs-inline gem's grammar is `# @rbs module-self Foo`,
@@ -378,6 +378,25 @@ module Rigor
         #   without a word. A remainder that IS a method type is not reported, because
         #   {SameLineAnnotations.split!} has already made it bind — the notice is for what that repair
         #   could not read.
+        # - an `# @rbs name: T` parameter (or local-variable) annotation whose `T` does not parse (issue
+        #   #1019, row H). The gem's grammar makes the colon-and-type optional — {#parse_var_decl} always
+        #   builds a `VarType`, even when `parse_type` fell through — so a malformed type leaves `name`
+        #   present and `type` `nil` rather than raising: `# @rbs n: Integer[1..10]` names `n` and leaves its
+        #   type unset. `Writer#default_type` then fills the empty slot the same way an UNANNOTATED parameter
+        #   is filled, so `VarType#type.nil?` is indistinguishable downstream from "the author wrote nothing"
+        #   without this check — the same silent-drop shape #997 closed for `#:` lines and `return:`, now
+        #   closed for `name:`.
+        # - an `@rbs`-prefixed comment paragraph whose body is not one of the gem's known annotation shapes
+        #   (issue #1019, row B). {RBS::Inline::AnnotationParser#annotation_comment?} matches a `\b` word
+        #   boundary right after `@rbs`, so `# @rbs-ext …` is inside its net — the gem treats it as an `@rbs`
+        #   annotation attempt — but {RBS::Inline::AnnotationParser#parse_annotation}'s `case` has no branch
+        #   for what follows `-ext`, falls through with no `else`, and returns `nil`. `AnnotationParser#parse`
+        #   then folds the whole paragraph back into a `CommentLines` — the SAME class an ordinary comment
+        #   parses to — so nothing distinguishes "the gem tried to read this as `@rbs` and failed" from
+        #   "this was never meant to be one" except the marker the gem itself keyed on. {SameLineAnnotations::
+        #   RBS_MARKER} already carries that exact marker (documented there as "the `@rbs` marker as the
+        #   gem's `annotation_comment?` detects it"), reused here rather than duplicated, so a `CommentLines`
+        #   paragraph is only reported when the gem's own detector would have called it an `@rbs` attempt.
         #
         # The list is repaired by {SameLineAnnotations.split!} first, exactly as the synthesis path repairs
         # its own, so a valid same-line `#: %a{…} () -> T` is not reported as a `#:` line that failed to
@@ -388,10 +407,13 @@ module Rigor
         # those would make this a lint on comment prose, which is exactly the false-positive cost ADR-5 ranks
         # first. `SyntaxErrorAssertion` is neither: the gem's OWN parser recognised the `#:` shape and
         # positively flagged its payload as unparseable, so reporting it is naming a fact rbs-inline already
-        # computed, not guessing at one.
+        # computed, not guessing at one. The row-B check is the same kind of fact, read off the gem's own
+        # marker rather than a fact rbs-inline names with a dedicated AST class — nothing else in the grammar
+        # collapses a recognised-but-unparseable paragraph into ordinary prose.
         def unhonoured_annotations(prism_result)
           ::RBS::Inline::AnnotationParser.parse(prism_result.comments).flat_map do |parsed|
-            SameLineAnnotations.split!(parsed).each_annotation.filter_map do |annotation|
+            repaired = SameLineAnnotations.split!(parsed)
+            unrecognised_tag_notices(repaired) + repaired.each_annotation.filter_map do |annotation|
               case annotation
               when ::RBS::Inline::AST::Annotations::ModuleSelf
                 next if annotation.self_types.any?
@@ -403,6 +425,8 @@ module Rigor
                 syntax_error_assertion_notice(annotation)
               when ::RBS::Inline::AST::Annotations::RBSAnnotation
                 dropped_remainder_notice(annotation)
+              when ::RBS::Inline::AST::Annotations::VarType
+                var_type_notice(annotation)
               end
             end
           end.uniq
@@ -431,6 +455,53 @@ module Rigor
           "the text after the `%a{…}` annotation#{position} (`#{remainder}`) did not parse as an RBS method " \
             "type and was DROPPED — the annotation is kept, but the method types as if no signature had been " \
             "written beside it. Fix the RBS syntax to restore it."
+        end
+
+        # Issue #1019, row H — a `# @rbs name: T` whose `T` the gem's `parse_type` could not build, read off
+        # {RBS::Inline::AST::Annotations::VarType#type} being `nil` rather than off any pattern over the
+        # comment text. Silent otherwise: {Writer#default_type} fills the slot exactly as it fills a
+        # parameter nobody annotated, so `(untyped n)` does not distinguish "wrote nothing" from "wrote a
+        # type RBS could not parse". `raw` is `nil` (and the notice withheld) for the colon-less `# @rbs
+        # name` shorthand — the grammar accepts it too, but with no text to name as the dropped type it is a
+        # bare mention, not a failed assertion.
+        def var_type_notice(annotation)
+          return nil if annotation.type
+
+          raw = annotation.source.string[/#{Regexp.escape(annotation.name.to_s)}\s*:\s*(.+)\z/, 1]&.strip
+          return nil if raw.nil? || raw.empty?
+
+          line = annotation.source.comments.first&.location&.start_line
+          position = line ? " on line #{line}" : ""
+          "a `# @rbs #{annotation.name}:` annotation#{position} (`#{raw}`) did not parse as an RBS type " \
+            "and was DROPPED — the parameter types as `untyped`, not merely as if its type were wrong. If " \
+            "`#{raw}` is a Rigor refinement, write it as an `%a{rigor:v1:param: #{annotation.name} is " \
+            "#{raw}}` annotation beside the plain RBS type instead — see " \
+            "docs/manual/16-rbs-extended-annotations.md — to restore type coverage."
+        end
+
+        # Issue #1019, row B — an `@rbs`-prefixed comment paragraph the gem's OWN detector
+        # ({RBS::Inline::AnnotationParser#annotation_comment?}) called an `@rbs` annotation attempt, that
+        # `#parse_annotation`'s `case` had no branch for. `# @rbs-ext return: non-empty-string` is the case
+        # in point: `annotation_comment?`'s `/\A#(\s*)@rbs(\b|!)/` matches the `\b` word boundary between
+        # `s` and `-`, so the gem tries to read it as `@rbs`, fails, and folds it back into a `CommentLines`
+        # — the same class a `# rigor: …` or `# @extrbs …` paragraph parses to, which never claimed to be
+        # `@rbs` and must stay silent (row X / row C). {SameLineAnnotations::RBS_MARKER} already carries the
+        # gem's own marker, so matching it here is reading the SAME fact the gem's detector computed, not
+        # inventing a new one — see {#unhonoured_annotations}'s row-B paragraph for why that is not the
+        # "regexp lint on comment prose" WD12 otherwise declines to run.
+        def unrecognised_tag_notices(parsing_result)
+          parsing_result.annotations.grep(::RBS::Inline::AST::CommentLines).filter_map do |lines|
+            first_line = lines.string.each_line.first.to_s.strip
+            next unless SameLineAnnotations::RBS_MARKER.match?(first_line)
+
+            line = lines.comments.first&.location&.start_line
+            position = line ? " on line #{line}" : ""
+            "a comment#{position} (`##{first_line}`) opens with the `@rbs` marker but its body did not " \
+              "parse as a recognised `@rbs` annotation, so the whole line was DROPPED — this is not a " \
+              "recognised tag, and nothing on it was applied. Use one of the documented `# @rbs` forms " \
+              "(`name: T`, `return: T`, `module-self T`, …), or rename the tag so it does not start with " \
+              "`@rbs`, to avoid this notice."
+          end
         end
 
         # Rewrite every RDoc directive comment to its spaced spelling (`#:nodoc:` -> `# :nodoc:`) so

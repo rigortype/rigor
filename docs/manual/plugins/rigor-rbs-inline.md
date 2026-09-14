@@ -45,7 +45,7 @@ plugin id/version + config), so an unchanged second run skips the parse.
 | Rule | Severity | Fires when |
 | --- | --- | --- |
 | `plugin.rbs-inline.source-rbs-synthesis-failed` | info | rbs-inline could not parse a file; analysis falls back to no inline-RBS contribution and the diagnostic carries the upstream error |
-| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Four causes: a member your `sig/` also declares (see [Precedence](#precedence)), the `# @rbs module-self: Foo` spelling (see below), a `#:` line whose type does not parse (see [Unparseable `#:` types](#unparseable--types)), and a same-line `# @rbs %a{…}` whose method type does not parse (see [Same-line annotations](#same-line-annotations)) |
+| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Six causes: a member your `sig/` also declares (see [Precedence](#precedence)), the `# @rbs module-self: Foo` spelling (see below), a `#:` line whose type does not parse (see [Unparseable `#:` types](#unparseable--types)), a same-line `# @rbs %a{…}` whose method type does not parse (see [Same-line annotations](#same-line-annotations)), a `# @rbs name: T` parameter type that does not parse (see [Unparseable `# @rbs name:` types](#unparseable--rbs-name-types)), and an `@rbs`-prefixed tag the gem does not recognise (see [An unrecognised tag after `@rbs`](#an-unrecognised-tag-after-rbs)) |
 
 ## Precedence
 
@@ -185,6 +185,59 @@ reads `Dynamic[top]`. This surfaces as
 truncated head of a registered refinement name, the `%a{rigor:v1:…}` spelling
 that IS valid today (see
 [RBS::Extended annotations](../16-rbs-extended-annotations.md)).
+
+## Unparseable `# @rbs name:` types
+
+A bounded or parameterised refinement — `Integer[1..10]`, `non-empty-array
+[Integer]` — does not truncate at a hyphen the way `finite-float` does, so it
+does not take the whole class down. In a `# @rbs name: TYPE` position it
+leaves the parameter untyped instead, silently:
+
+```ruby
+class BoundedProbe
+  # @rbs n: Integer[1..10]
+  def probe(n)
+    n
+  end
+end
+```
+
+The gem's grammar makes the colon-and-type optional on this annotation, so a
+`TYPE` it cannot parse leaves the parameter's name recorded and its type
+unset rather than raising — indistinguishable downstream from a parameter
+nobody annotated at all. Rigor reports the drop as
+`plugin.rbs-inline.source-rbs-annotation-not-honoured`, naming the line and
+the text that failed to parse, and points at the `%a{rigor:v1:param:}`
+spelling that carries a refinement like `Integer[1..10]` correctly (see
+[RBS::Extended annotations](../16-rbs-extended-annotations.md)) — the same
+advice the `%a{rigor:v1:…}` pointer above gives for the tag form.
+
+## An unrecognised tag after `@rbs`
+
+The gem recognises a comment as an `@rbs` annotation attempt as soon as it
+sees the word boundary right after `@rbs` — which matches a hyphen, not only
+whitespace or end-of-line:
+
+```ruby
+class TagProbe
+  # @rbs-ext return: non-empty-string
+  # @rbs return: String
+  def name
+    "x"
+  end
+end
+```
+
+`# @rbs-ext …` is inside that net, but nothing in the gem's grammar
+recognises `-ext`, so the gem gives up on the whole paragraph and folds it
+back into an ordinary comment — the neighbouring `# @rbs return: String`
+line still binds, but the `@rbs-ext` line contributes nothing and, before
+this, said nothing either. Rigor reports the drop as
+`plugin.rbs-inline.source-rbs-annotation-not-honoured`, naming the line and
+the comment text — without implying `@rbs-ext` is a recognised tag of any
+kind. A comment that merely mentions `@rbs` in prose, or one that opens with
+a tag not starting with `@rbs` (`# @extrbs …`), is outside the gem's
+detector and stays silent.
 
 ## Configuration
 

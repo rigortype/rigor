@@ -134,14 +134,15 @@ RSpec.describe "conditional narrowing across spellings and positions" do
   end
 
   describe "a conditional nested inside the condition" do
-    # A conditional used AS a predicate is not a narrowing source (`Narrowing.analyse` has no `IfNode` arm), so
-    # neither spelling narrows here — unlike the equivalent `!s.nil? && x.finite?`. What this pins is that
-    # the ternary and the `if` spelling of the nested predicate agree with each other.
+    # Issue #1017 — a conditional used AS a predicate narrows like its `&&` equivalent
+    # (`nested_conditional_guard_narrowing_spec.rb` pairs the families); what this pins is that the ternary and the
+    # `if` spelling of the nested predicate agree with each other and with `!s.nil? && x.finite?`.
     it "types the ternary and the `if` spelling of the nested predicate identically" do
       ternary = types_of("(s.nil? ? false : x.finite?) ? [s, x] : :no")
       if_form = types_of("(if s.nil? then false else x.finite? end) ? [s, x] : :no")
       expect(ternary).to eq(if_form)
-      expect(ternary).to eq({ statement: ":no | [String?, Float]", value: ":no | [String?, Float]" })
+      expect(ternary).to eq(types_of("(!s.nil? && x.finite?) ? [s, x] : :no"))
+      expect(ternary).to eq({ statement: ":no | [String, finite-float]", value: ":no | [String, finite-float]" })
     end
 
     it "narrows the arms of a ternary nested inside another conditional's arm" do

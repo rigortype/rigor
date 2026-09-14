@@ -78,13 +78,18 @@ Three are worth reading before choosing anything else:
   and not in the ternary spelling of the same guard. Structural: every guard-dependent refinement is
   reachable in one spelling only.
 
-[#992](https://github.com/rigortype/rigor/issues/992) (arity for a method with no declaration at all)
-is unblocked now that #999 landed, and is where the `define_method` / `method_missing` / `prepend` / alias
-false-positive envelope has to be built. Do not start it as a quick follow-on.
+[#992](https://github.com/rigortype/rigor/issues/992) LANDED as PR [#1010](https://github.com/rigortype/rigor/pull/1010)
+on 2026-09-14, default on: `call.wrong-arity` now checks positional arity against a `def` nobody
+declared, reading one per-class parameter-envelope table that joins disagreeing shapes to opaque.
+Zero new firings across 34 survey targets — ~8,400 call sites reached an envelope and the only 4
+outliers became declines (two were real bugs that depend on load order). A literal `Base.new.x` with
+the wrong arity stays silent because the subclass-override decline applies to `Nominal[Base]`; that is
+a deliberate false negative. Keyword arguments are out of scope. Remaining risk it names: an
+`--incremental` run misses a newly added subclass override until a full run.
 
 ## Where the worktrees are
 
-`rigor-wt/{arity-declared-source-methods,sig-gen-untyped-declared-return,numeric-to-s-refinements,inline-annotation-parse-diagnostics,tuple-union-absorption,adr-inline-refinement-dialect}`,
-one per PR (all five merged; safe to remove) plus the ADR's. `adr-inline-refinement-dialect` also carries an installed `tool/steep/`
+`rigor-wt/{arity-declared-source-methods,sig-gen-untyped-declared-return,numeric-to-s-refinements,inline-annotation-parse-diagnostics,tuple-union-absorption,arity-undeclared-source-methods,adr-inline-refinement-dialect}`,
+one per PR (all six merged; safe to remove) plus the ADR's. `adr-inline-refinement-dialect` also carries an installed `tool/steep/`
 bundle (ignored) if another Steep measurement is wanted — a CoW-copied bundle needs `bundle pristine`
 before it runs, because its native extensions were built against a different Ruby store path.

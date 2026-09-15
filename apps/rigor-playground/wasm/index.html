@@ -89,6 +89,10 @@
       background: var(--surface); border-bottom: 1px solid var(--border);
       flex-shrink: 0; min-height: 44px;
     }
+    /* Tab indents (see the keymap below), so the usual Tab focus move is gone;
+       keep its Escape-then-Tab hatch visible without crowding header controls. */
+    #editor-help { flex-shrink: 0; padding: 4px 16px; background: var(--surface); border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 11px; line-height: 1.5; color: var(--muted); }
+    #editor-help kbd { font-family: var(--rigor-font-mono); font-size: 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 3px; padding: 0 3px; }
     .brand { font-weight: 700; letter-spacing: -0.01em; color: var(--text); display: flex; align-items: baseline; gap: 8px; }
     .brand::before { content: ""; display: inline-block; width: 10px; height: 10px; background: var(--accent); border-radius: 1px; transform: translateY(1px); }
     .brand .product { font-weight: 500; color: var(--muted); }
@@ -232,6 +236,7 @@
       <button class="btn" id="trace-btn" aria-pressed="false" title="Replay how the engine infers each type"><i class="fa-solid fa-film" aria-hidden="true"></i><span>Trace types</span></button>
     </div>
   </header>
+  <p id="editor-help">Press <kbd>Esc</kbd>, then <kbd>Tab</kbd>, to leave the editor.</p>
 
   <main>
     <div id="editor-wrap"><div id="editor"></div></div>
@@ -279,7 +284,8 @@
   <script type="module">
     import { basicSetup, EditorView, EditorState } from "https://esm.sh/@codemirror/basic-setup@0.20"
     import { StateField, StateEffect, Prec }       from "https://esm.sh/@codemirror/state@0.20"
-    import { Decoration, WidgetType }              from "https://esm.sh/@codemirror/view@0.20"
+    import { Decoration, WidgetType, keymap }      from "https://esm.sh/@codemirror/view@0.20"
+    import { indentWithTab }                       from "https://esm.sh/@codemirror/commands@0.20"
     import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "https://esm.sh/@codemirror/language@0.20?deps=@lezer/highlight@1.1.6"
     import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
@@ -706,6 +712,12 @@ AscDesc.new.ascdesc(:bad)
         doc: INITIAL_DOC,
         extensions: [
           basicSetup, StreamLanguage.define(ruby),
+          // basicSetup leaves Tab unbound, so the browser's default focus move
+          // wins; bind it to indentation instead. Placed after basicSetup so an
+          // open autocomplete's own Tab binding still takes precedence.
+          keymap.of([indentWithTab]),
+          // Point assistive tech at the Escape-then-Tab hint above.
+          EditorView.contentAttributes.of({ "aria-describedby": "editor-help" }),
           Prec.highest(syntaxHighlighting(rigorHighlight)),
           lintGutter(), annoField, traceHlField,
           // Don't clear the type overlay on each keystroke. The existing
@@ -717,6 +729,9 @@ AscDesc.new.ascdesc(:bad)
           EditorView.theme({
             "&": { backgroundColor: "var(--bg)", color: "var(--text)", height: "100%" },
             ".cm-content": { caretColor: "var(--accent)", fontFamily: MONO, padding: "8px 0" },
+            // CM6's base theme draws the cursor as a black left border, which is
+            // invisible on the dark background; paint it with the theme accent.
+            ".cm-cursor": { borderLeftColor: "var(--accent)", borderLeftWidth: "2px" },
             ".cm-gutters": { backgroundColor: "var(--gutter-bg)", color: "var(--gutter-fg)", border: "none", borderRight: "1px solid var(--border)" },
             ".cm-activeLine": { backgroundColor: "var(--active-line)" },
             ".cm-selectionBackground": { backgroundColor: "var(--selection)" },

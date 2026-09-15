@@ -249,6 +249,29 @@
       min-height: 44px;
     }
 
+    /* Tab indents (see the keymap below), so the usual Tab focus move is gone;
+       keep its Escape-then-Tab hatch visible without crowding header controls. */
+    #editor-help {
+      flex-shrink: 0;
+      padding: var(--rigor-sp-1) var(--rigor-sp-4);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    #editor-help kbd {
+      font-family: var(--rigor-font-mono);
+      font-size: 10px;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border-strong);
+      border-bottom-width: 2px;
+      border-radius: 3px;
+      padding: 0 3px;
+    }
+
     .brand {
       display: flex;
       align-items: baseline;
@@ -580,6 +603,7 @@
       <button class="btn active" id="type-btn" aria-pressed="true"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>Hide types</span></button>
     </div>
   </header>
+  <p id="editor-help">Press <kbd>Esc</kbd>, then <kbd>Tab</kbd>, to leave the editor.</p>
 
   <main>
     <div id="editor-wrap">
@@ -597,7 +621,8 @@
   <script type="module">
     import { basicSetup, EditorView, EditorState } from "https://esm.sh/@codemirror/basic-setup@0.20"
     import { StateField, StateEffect, Prec }       from "https://esm.sh/@codemirror/state@0.20"
-    import { Decoration, WidgetType, hoverTooltip } from "https://esm.sh/@codemirror/view@0.20"
+    import { Decoration, WidgetType, hoverTooltip, keymap } from "https://esm.sh/@codemirror/view@0.20"
+    import { indentWithTab }                       from "https://esm.sh/@codemirror/commands@0.20"
     import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "https://esm.sh/@codemirror/language@0.20?deps=@lezer/highlight@1.1.6"
     import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
@@ -782,6 +807,12 @@ AscDesc.new.ascdesc(:bad)
         doc: INITIAL_DOC,
         extensions: [
           basicSetup,
+          // basicSetup leaves Tab unbound, so the browser's default focus move
+          // wins; bind it to indentation instead. Placed after basicSetup so an
+          // open autocomplete's own Tab binding still takes precedence.
+          keymap.of([indentWithTab]),
+          // Point assistive tech at the Escape-then-Tab hint above.
+          EditorView.contentAttributes.of({ "aria-describedby": "editor-help" }),
           StreamLanguage.define(ruby),
           Prec.highest(syntaxHighlighting(rigorHighlight)),
           lintGutter(),

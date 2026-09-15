@@ -60,6 +60,14 @@ jobs:
         with:
           ruby-version: "4.0"
 
+      # For the R2 publish step's `npx wrangler` below — without this the
+      # build relies on the runner image's preinstalled Node. Keep the
+      # version in sync with vscode-extension.yml.
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
       # Cache the wasi-sdk toolchain + the cross-compiled Ruby so re-runs skip
       # the ~30-minute cold build. Keyed on the ruby_wasm version + the wasm
       # build inputs.

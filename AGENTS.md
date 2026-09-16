@@ -44,6 +44,11 @@ Choose the smallest gate that covers the changed surface:
 Keep `make check` and `make check-plugins` clean when run separately. Fix the cause — an engine
 regression, a missing blocklist entry, or a plugin-contract misuse — instead of weakening a rule.
 
+When a task measures rather than gates — running the engine against a survey project, diffing corpus
+diagnostics, benchmarking, or probing an inferred type — read
+[`docs/agents/measurement.md`](docs/agents/measurement.md) first. It collects the ways a probe
+returns a confident wrong answer.
+
 ## Contribution and release flow
 
 Before committing, pushing, opening/landing a PR, or preparing a release, read

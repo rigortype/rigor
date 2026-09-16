@@ -19,3 +19,14 @@
 
 # Skill-creator eval workspaces (transient; results belong in the session, not the tree)
 /*-workspace/
+
+# The contributor skills under `.claude/skills/` are version-controlled, but a
+# developer's global excludesfile commonly ignores `.claude` wholesale — which
+# leaves them tracked only because they were force-added once, and makes any NEW
+# skill file invisible to `git status`. Re-include the directory here so the
+# repository decides, then keep everything else in it out: `settings.local.json`
+# holds per-machine tool permissions, and the desktop app creates checkouts under
+# `.claude/worktrees/`.
+!/.claude/
+/.claude/*
+!/.claude/skills/

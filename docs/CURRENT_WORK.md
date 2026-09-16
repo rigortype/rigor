@@ -36,18 +36,31 @@ own-line form the manual documents as a user-visible error, while the same-line 
 three readers. Grounded in [`docs/notes/20260912-inline-refinement-carrier-probe.md`](notes/20260912-inline-refinement-carrier-probe.md).
 Nothing is implemented; the maintainer decides.
 
-## What is worth picking up next
+## Four Draft PRs are green and wait for the landing word
 
-- [#1002](https://github.com/rigortype/rigor/issues/1002) — `sig-gen` expands a 22-arm union that a
-  project-declared RBS alias already names. Unimplemented, but the `sig/` rows it was filed against
-  were retired by #1000; the first step is finding a fresh position, as the issue now says.
-- [#1014](https://github.com/rigortype/rigor/issues/1014) — the static half is settled (no engine
-  identity reaches the five `rbs.*` keys; the issue records the evidence). What remains is the
-  warm-run reproduction and the fix or the documented reason. Closing it retires the caveat below.
-- [#1011](https://github.com/rigortype/rigor/issues/1011) needs a ruling before work starts: are the
-  `sig-gen gap:` markers wrong, or is the gate's wording? [#1007](https://github.com/rigortype/rigor/issues/1007)
-  and [#1008](https://github.com/rigortype/rigor/issues/1008) are engine gaps sitting behind two
-  marked `sig/` rows.
+Each was implemented by an Opus lane in its own worktree, went through two or three rounds of
+adversarial review, and is green on CI at the head named. None may land without the maintainer's
+explicit word; all stay Draft until then.
+
+- [PR #1029](https://github.com/rigortype/rigor/pull/1029) — #986. Colliding compact-header buckets
+  are kept as alternatives and `Scope` declines a name the two crefs resolve to different project
+  classes; `SourceArity` takes both as mixin levels so only a disagreeing method declines.
+- [PR #1030](https://github.com/rigortype/rigor/pull/1030) — #963 item 1. A `define_method` block's
+  `self` is the class instance on both evaluation paths; the one exclusion is the `class << self`
+  body itself, carried as a `Scope` mark. Items 2 and 3 stay open on #963.
+- [PR #1031](https://github.com/rigortype/rigor/pull/1031) — #1014. Engine identity reaches the five
+  `rbs.*` producer keys; two slots were reproduced serving stale values cross-build.
+- [PR #1032](https://github.com/rigortype/rigor/pull/1032) — #1002. `sig-gen` renders a project
+  alias whose lossless expansion equals the union, scoped by namespace proximity.
+
+**Landing order:** #1029 and #1030 both add `Rigor::Scope` methods and touch
+`spec/rigor/public_api_drift_spec.rb` and `sig/rigor/scope.rbs`; land one, rebase the other. Both
+carry `# sig-gen gap: #1011` markers on `Scope` rows (no engine issue tracks the untyped-return gap);
+if #1011 rules otherwise, each is a one-line repoint. The four worktrees under `rigor-wt/` are kept
+until their PR lands.
+
+Still open behind a ruling: [#1011](https://github.com/rigortype/rigor/issues/1011),
+[#1007](https://github.com/rigortype/rigor/issues/1007), [#1008](https://github.com/rigortype/rigor/issues/1008).
 
 ## Standing caveat until #1014 closes
 
@@ -58,6 +71,6 @@ fire?" on a cold run, and diagnose a suspected stale slot with `rigor check --ca
 
 ## Where the worktrees are
 
-One remains: `rigor-wt/perfbench-harness-775`, deliberately kept — it is the instrument behind the
+Five: the four PR worktrees above, and `rigor-wt/perfbench-harness-775`, deliberately kept — it is the instrument behind the
 #775 allocation work, not leftover scratch. The fifteen worktrees the previous handoff listed are
 gone, and every PR they carried is merged.

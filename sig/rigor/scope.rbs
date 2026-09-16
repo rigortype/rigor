@@ -167,8 +167,9 @@ module Rigor
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
     def ancestor_name_candidates: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 
-    # sig-gen gap: #986 — sig-gen skips the method (untyped return) because every decline returns the
-    # frozen `EMPTY_HEADER_NESTING` constant; the row is hand-written.
+    # sig-gen gap: #1011 — sig-gen skips the method (sig.skipped.untyped-return: every decline returns the
+    # frozen EMPTY_HEADER_NESTING constant); no engine issue tracks this gap yet, #1011 is the
+    # marker-convention issue. Row hand-written.
     def ambiguous_ancestor_resolutions: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 
     # Issue #530 — public so the external-gem ancestry probe asks the same question the walk does.

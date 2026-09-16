@@ -2947,6 +2947,15 @@ module Rigor
       # that made the pick load-order-dependent is adjudicated in `Scope`, which declines rather than sorts
       # (#986).
       def union_header_nesting(existing, entries)
+        # Issue #986 — the alternatives shape reaches this fold too, not just the rename pass that creates
+        # it: the per-file instance path (`merge_ancestry_tables`) merges a file's plain String chains over
+        # the cross-file SEED, whose bucket may already hold alternatives. A third site using the nested
+        # spelling (`module Outer; class Leaf`, the Zeitwerk default) is exactly that, and unioning its
+        # chain into the list split an Array. A third cref is a third alternative, so it joins them.
+        if ambiguous_header_nesting?(existing) || ambiguous_header_nesting?(entries)
+          return collide_header_nesting(existing, entries)
+        end
+
         return existing if entries.all? { |entry| existing.include?(entry) }
 
         (existing | entries).sort_by { |entry| [-entry.split("::").size, entry] }.freeze
@@ -4860,7 +4869,11 @@ module Rigor
       end
 
       def header_nesting_alternatives(entries)
-        Scope::DiscoveryIndex.ambiguous_header_nesting?(entries) ? entries : [entries]
+        ambiguous_header_nesting?(entries) ? entries : [entries]
+      end
+
+      def ambiguous_header_nesting?(entries)
+        Scope::DiscoveryIndex.ambiguous_header_nesting?(entries)
       end
 
       # The per-shape combine {#rekey_class_table} applies. Every class-keyed table's value is a Hash of

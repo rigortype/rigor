@@ -1087,14 +1087,45 @@ module Rigor
     # no rename gets — so an unambiguous collision is unchanged, and an EXTERNAL ancestor keeps the full
     # candidate list `#external_ancestor_name_candidates` hands the gem / RBS probe.
     def ambiguous_ancestor_candidates(alternatives, raw_ancestor)
-      lists = alternatives.map { |chain| chain.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s }
-      resolved = lists.filter_map { |list| list.find { |candidate| known_user_class?(candidate) } }.uniq
-      return [] if resolved.size > 1
+      return [] if ambiguous_ancestor_resolutions_of(alternatives, raw_ancestor).size > 1
 
       entries = alternatives.reduce([], :|).sort_by { |entry| [-entry.split("::").size, entry] }
       entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s
     end
-    private :ambiguous_ancestor_candidates
+
+    def ambiguous_ancestor_resolutions_of(alternatives, raw_ancestor)
+      alternatives.filter_map do |chain|
+        (chain.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s)
+          .find { |candidate| known_user_class?(candidate) }
+      end.uniq
+    end
+    private :ambiguous_ancestor_candidates, :ambiguous_ancestor_resolutions_of
+
+    # Issue #986 — the several project classes an ancestor name resolves to when the compact-header rename
+    # collision left it ambiguous, and `EMPTY_HEADER_NESTING` for every other name. {#ancestor_name_candidates}
+    # declines such a name because no ONE class is its answer; a caller that also knows which METHOD it is
+    # looking up can do better than that decline, and a rule that reports on a method must, because the
+    # decline otherwise silences it for the whole receiver — its own `def`s and its unambiguous ancestors
+    # included.
+    #
+    # Both of these classes are ancestors at runtime: both `include`s run, and only their MRO ORDER is the
+    # load order this walk cannot see. So a method only one of them declares is answered by that one
+    # whatever the order, and only a method they BOTH declare is unanswerable.
+    # `Analysis::CheckRules::SourceArity` reads this for exactly that: it takes both as mixin levels and
+    # declines on the disagreement its own envelope join already knows how to spot.
+    def ambiguous_ancestor_resolutions(subclass_qualified, raw_ancestor)
+      raw = raw_ancestor.to_s
+      return EMPTY_HEADER_NESTING if raw.start_with?("::")
+
+      recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
+      return EMPTY_HEADER_NESTING if recorded.nil?
+
+      entries = recorded_header_nesting(recorded, raw)
+      return EMPTY_HEADER_NESTING if entries.empty? || !DiscoveryIndex.ambiguous_header_nesting?(entries)
+
+      resolved = ambiguous_ancestor_resolutions_of(entries, raw_ancestor)
+      resolved.size > 1 ? resolved : EMPTY_HEADER_NESTING
+    end
 
     # Issue #728 — the chain of the declaration site that WROTE `raw`, which is the cref Ruby resolves that
     # one name in. A class's sites need not agree: `class Foo < Base` at the top level and a rooted

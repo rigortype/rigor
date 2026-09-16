@@ -2941,6 +2941,11 @@ module Rigor
         bucket.each_value(&:freeze).freeze
       end
 
+      # Most-qualified first, so a deeper cref is searched before a shallower one. Two entries of EQUAL depth
+      # are ordered alphabetically, which is a stable tie-break and nothing more: `Other::Mixin` precedes
+      # `Wrap::Mixin` for no reason Ruby would recognise. Pre-existing and left alone — the rename collision
+      # that made the pick load-order-dependent is adjudicated in `Scope`, which declines rather than sorts
+      # (#986).
       def union_header_nesting(existing, entries)
         return existing if entries.all? { |entry| existing.include?(entry) }
 
@@ -4812,8 +4817,50 @@ module Rigor
           renamed = bucket.transform_values do |chain|
             chain.map { |entry| rename_compact_name(renames, entry) }
           end
-          merge_header_nesting_bucket(out, rename_compact_name(renames, name), renamed)
+          merge_renamed_header_bucket(out, rename_compact_name(renames, name), renamed)
         end
+      end
+
+      # {#merge_header_nesting_bucket} for the rename collision. The UNKEYED entry is the per-class union by
+      # definition — the pre-#728 answer for a name no site recorded — so it keeps unioning. A KEYED entry is
+      # the cref of the site that wrote that exact name, and the two sides are two different sites, so
+      # unioning their chains would hand each site's ancestor the other's namespace: `Wrap::Mixin` sorts
+      # ahead of `::Mixin`, and `Scope#compute_ancestor_class_name` takes the first known class as the sole
+      # resolution, so the top-level site's `include Mixin` silently became the `Wrap` one. That is not just
+      # a wrong class, it is a FALSE POSITIVE source — the two modules' same-named methods can differ in
+      # arity, and `call.wrong-arity` then fires on a correct program.
+      #
+      # So the two chains are kept side by side as ALTERNATIVES and the choice is deferred to `Scope`, which
+      # knows which names the project declares: it resolves each alternative and declines only when they
+      # name two DIFFERENT project classes. A collision whose alternatives agree, or where only one of them
+      # resolves at all, is unchanged.
+      def merge_renamed_header_bucket(table, name, incoming)
+        existing = table[name]
+        return table[name] = frozen_bucket(incoming) if existing.nil?
+
+        merged = existing.dup
+        incoming.each do |raw, entries|
+          previous = merged[raw]
+          merged[raw] =
+            if previous.nil? then entries.freeze
+            elsif raw == Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING then union_header_nesting(previous, entries)
+            else collide_header_nesting(previous, entries)
+            end
+        end
+        table[name] = merged.freeze
+      end
+
+      # One keyed entry's side-by-side combine. Two sites that recorded the SAME chain collapse back to that
+      # chain, so the alternatives shape appears only where the crefs really disagree.
+      def collide_header_nesting(previous, entries)
+        alternatives = header_nesting_alternatives(previous) | header_nesting_alternatives(entries)
+        return alternatives.first.freeze if alternatives.one?
+
+        alternatives.each(&:freeze).freeze
+      end
+
+      def header_nesting_alternatives(entries)
+        Scope::DiscoveryIndex.ambiguous_header_nesting?(entries) ? entries : [entries]
       end
 
       # The per-shape combine {#rekey_class_table} applies. Every class-keyed table's value is a Hash of

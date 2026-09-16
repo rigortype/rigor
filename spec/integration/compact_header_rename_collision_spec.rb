@@ -1,20 +1,21 @@
 # frozen_string_literal: true
 
-# Issue #986 — when the compact-header rename pass lands TWO declarations of one class on a single key, the
-# colliding `header_nestings` buckets must fold with the table's own union, not with a Hash merge whose
-# winner is whichever file the project fold reached last.
+# Issue #986 — when the compact-header rename pass lands TWO declarations of one class on a single key, a
+# raw ancestor name BOTH of them wrote must not be resolved by picking one site's cref.
 #
 # `class Outer::Leaf` at the top level and `class Outer::Leaf` inside `module Wrap` are one class with both
 # bodies, and each body's `include Mixin` records a header nesting under the SAME raw key `"Mixin"` — the
-# top-level site's empty chain, the compact site's `["Wrap"]`. Replacing one with the other made
-# `Outer::Leaf.new.wrapped` and `.plain` answer differently depending on file order; unioning makes the
-# answer a property of the project.
+# top-level site's empty chain, the compact site's `["Wrap"]`. The rename pass merged the two buckets with
+# `Hash#merge`, so one chain REPLACED the other and the answer turned on which file the project fold
+# reached last: top-then-compact resolved the include to `Wrap::Mixin`, compact-then-top to `::Mixin`.
 #
-# The union is one chain per raw NAME, not one per SITE: with `Wrap::Mixin` ahead of `::Mixin`, the single
-# `"Mixin"` entry the includes record keeps resolves to `Wrap::Mixin`, and `::Mixin`'s methods stay
-# unresolved. That is #728's one-chain-per-raw-key bound, and the decline it produces is SILENT — the
-# unresolved arm answers `Dynamic`, never a diagnostic, so the cost is a missed method and not a false
-# positive. The `Dynamic[top]` expectations below pin that bound deliberately.
+# Unioning the two chains only makes that pick deterministic, and a deterministic wrong ancestor is worse
+# than an order-dependent one: `Scope#compute_ancestor_class_name` takes the first known class as the SOLE
+# resolution, `union_header_nesting` sorts `Wrap::Mixin` ahead of `::Mixin`, and if the two modules declare
+# one method at different arities `call.wrong-arity` then fires on a program Ruby runs happily. Both
+# `include`s run at runtime; which module lands nearer in the MRO is the two files' load order, which this
+# walk cannot see. So the colliding chains are kept side by side and `Scope` DECLINES when they resolve to
+# two different project classes — the receiver's method stays `Dynamic` and nothing is reported.
 
 require "spec_helper"
 require "fileutils"
@@ -87,44 +88,101 @@ RSpec.describe "a compact-header rename colliding with a top-level declaration (
     }
   end
 
-  it "answers the same whichever declaration the project folds first" do
+  it "answers the same whichever declaration the project folds first, and reports nothing" do
     top_then_compact = answers(top_level_site, compact_site, both_probe)
     compact_then_top = answers(compact_site, top_level_site, both_probe)
 
     expect(top_then_compact).to eq(compact_then_top)
-    # `Wrap::Mixin` is the most-qualified candidate the unioned chain offers for the raw name `Mixin`, and
-    # it IS an ancestor of this class at runtime — both `include Mixin` sites run. `.plain` is the
-    # one-chain-per-raw-key cost: flip it to `"dump_type: :plain"` when the includes record keeps one entry
-    # per SITE and each entry resolves in its own site's cref (#728's bound, left standing by #986).
-    expect(top_then_compact[:dumps]).to eq(["dump_type: :wrapped", "dump_type: Dynamic[top]"])
+    # Both `Mixin`s are declared, so the two alternative crefs name two different project classes and the
+    # include resolves to neither. Master answered `:wrapped` / `Dynamic[top]` one way round and
+    # `Dynamic[top]` / `:plain` the other; the two resolutions it alternated between were each a coin flip
+    # on load order, so the answer is silence in both orders rather than either of them.
+    expect(top_then_compact[:dumps]).to eq(["dump_type: Dynamic[top]", "dump_type: Dynamic[top]"])
+    expect(top_then_compact[:other]).to eq([])
   end
 
-  it "stays silent on the name the union could not resolve" do
-    # The false-positive bound. An unresolved mixin method must answer `Dynamic` and report NOTHING: the
-    # union widened the candidate list, and a widened list may not turn a missed method into a finding.
-    fold_orders.each do |first, second|
-      result = answers(first, second, "Rigor.dump_type(Outer::Leaf.new.plain)\n")
+  it "does not report an arity error when the two mixins declare one method differently" do
+    # The false-positive arm, and the reason the collision is declined rather than resolved. Ruby loads
+    # `a_first.rb` then `b_second.rb`, so `::Mixin` — included LAST — wins the MRO and `.shared` really
+    # does take no arguments. Resolving the include to `Wrap::Mixin` (which `union_header_nesting`'s
+    # most-qualified-first order picks) reported `wrong number of arguments (given 0, expected 1)` on a
+    # correct program, in BOTH fold orders.
+    wrap = <<~RUBY
+      module Wrap
+        module Mixin
+          def shared(y) = y
+        end
+
+        class Outer::Leaf
+          include Mixin
+        end
+      end
+    RUBY
+    top = <<~RUBY
+      class Outer; end
+
+      module Mixin
+        def shared = :top
+      end
+
+      class Outer::Leaf
+        include Mixin
+      end
+    RUBY
+    [[wrap, top], [top, wrap]].each do |first, second|
+      result = answers(first, second, "Rigor.dump_type(Outer::Leaf.new.shared)\n")
+      expect(result[:other]).to eq([])
       expect(result[:dumps]).to eq(["dump_type: Dynamic[top]"])
+    end
+  end
+
+  it "still fires on wrong arity for a method only one of the two mixins declares" do
+    # The must-still-FIRE arm, and the control for the one above: `call.wrong-arity` is live in this
+    # harness and still reads a mixin method's declared arity. The decline is scoped to the raw ancestor
+    # name two colliding sites both wrote, so an `include` elsewhere in the same project — here on a class
+    # no rename touches, alongside the colliding pair — is unaffected.
+    source = <<~RUBY
+      module Solo
+        def only_here(x) = x
+      end
+
+      class Alone
+        include Solo
+      end
+
+      Rigor.dump_type(Alone.new.only_here(1))
+      Alone.new.only_here
+    RUBY
+    result = answers(top_level_site, compact_site, source)
+    expect(result[:other]).to include(/wrong number of arguments/)
+    expect(result[:dumps]).to eq(["dump_type: 1"])
+  end
+
+  it "keeps resolving the collision when only one of the two crefs names a declared module" do
+    # The bound on the decline: it is two DIFFERENT project classes that make the name unanswerable. With no
+    # `Wrap::Mixin` declared, the compact site's cref resolves nowhere, the alternatives agree on `::Mixin`,
+    # and both sites' include keeps its answer — in both fold orders.
+    wrap = <<~RUBY
+      module Wrap
+        class Outer::Leaf
+          include Mixin
+        end
+      end
+    RUBY
+    [[wrap, top_level_site], [top_level_site, wrap]].each do |first, second|
+      result = answers(first, second, "Rigor.dump_type(Outer::Leaf.new.plain)\n")
+      expect(result[:dumps]).to eq(["dump_type: :plain"])
       expect(result[:other]).to eq([])
     end
   end
 
   it "declines a name neither mixin defines, in both fold orders" do
-    # The must-still-decline arm: a name no ancestor of the class owns is unchanged by the union — still
-    # `Dynamic`, still silent, exactly as before the fix.
+    # The must-still-decline arm: a name no ancestor of the class owns is unchanged — still `Dynamic`,
+    # still silent, exactly as on master.
     fold_orders.each do |first, second|
       result = answers(first, second, "Rigor.dump_type(Outer::Leaf.new.neither_mixin_defines_this)\n")
       expect(result[:dumps]).to eq(["dump_type: Dynamic[top]"])
       expect(result[:other]).to eq([])
     end
-  end
-
-  it "keeps the compact site's mixin reachable from a probe written at the top level" do
-    # The union's point, stated positively: `Wrap::Mixin`'s method answers from a probe where no `Wrap` is
-    # in scope, because the chain that governs the include is the declaring SITE's and survives the
-    # rename collision.
-    result = answers(top_level_site, compact_site, "def probe = Rigor.dump_type(Outer::Leaf.new.wrapped)\n")
-    expect(result[:dumps]).to eq(["dump_type: :wrapped"])
-    expect(result[:other]).to eq([])
   end
 end

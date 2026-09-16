@@ -1063,8 +1063,38 @@ module Rigor
 
       recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
       entries = recorded ? recorded_header_nesting(recorded, raw) : peeled_header_nesting(subclass_qualified)
+      if !entries.empty? && DiscoveryIndex.ambiguous_header_nesting?(entries)
+        return ambiguous_ancestor_candidates(entries, raw_ancestor)
+      end
+
       entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s
     end
+
+    # Issue #986 — the candidate list for a raw name two declaration sites of ONE class wrote in different
+    # crefs (the compact-header rename pass landed both on this key). Each alternative chain gets its own
+    # candidate list, in the order this walk would have used for that site alone.
+    #
+    # When two of them resolve to two DIFFERENT project classes there is no candidate list to return: at
+    # runtime both `include`s run, and which of the two same-named modules ends up nearer in the MRO is the
+    # load order of the two files, which this walk cannot know. Answering with either is a WRONG ANCESTOR,
+    # and a wrong ancestor is a false-positive source rather than a missed one — two same-named modules can
+    # declare the same method at different arities, and `call.wrong-arity` then fires on a correct program.
+    # The empty list declines instead: the name resolves to no project class, the receiver's methods stay
+    # `Dynamic`, and every rule reading this walk goes quiet.
+    #
+    # Where the alternatives AGREE, or only one of them resolves at all, there is nothing to adjudicate: the
+    # answer is the union of their chains, most-qualified first — the same list a class whose sites needed
+    # no rename gets — so an unambiguous collision is unchanged, and an EXTERNAL ancestor keeps the full
+    # candidate list `#external_ancestor_name_candidates` hands the gem / RBS probe.
+    def ambiguous_ancestor_candidates(alternatives, raw_ancestor)
+      lists = alternatives.map { |chain| chain.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s }
+      resolved = lists.filter_map { |list| list.find { |candidate| known_user_class?(candidate) } }.uniq
+      return [] if resolved.size > 1
+
+      entries = alternatives.reduce([], :|).sort_by { |entry| [-entry.split("::").size, entry] }
+      entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s
+    end
+    private :ambiguous_ancestor_candidates
 
     # Issue #728 — the chain of the declaration site that WROTE `raw`, which is the cref Ruby resolves that
     # one name in. A class's sites need not agree: `class Foo < Base` at the top level and a rooted

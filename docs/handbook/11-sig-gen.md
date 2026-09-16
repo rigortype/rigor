@@ -265,39 +265,57 @@ but it does narrow the contract relative to `untyped`.
 
 When a proposal's return is a union whose members are
 exactly the expansion of a `type` alias declared in your
-own `sig/`, the alias name is what gets emitted:
+own `sig/`, the alias name is what gets emitted. For a
+method on `Rigor::Type::Combinator`, sig-gen emits
 
-```rbs
-# Not this, even though it is the same type:
-def key_type: (untyped) -> (Rigor::Type::App | Rigor::Type::Bot | ...)
-
-# but this:
-def key_type: (untyped) -> Rigor::Type::t
+```
+def hash_shape_keys: (untyped) -> Rigor::Type::t
 ```
 
-The rule is member-set equality after the same erasure the
-union itself goes through, so a proposal missing one arm of
-the alias still prints in full — the alias names a type the
-method cannot return, and claiming it would be wrong rather
-than merely verbose.
+rather than the twenty-two members `Rigor::Type::t`
+expands to.
 
-Three limits keep the fold conservative:
+The rule is member-set equality, so a proposal missing one
+arm of the alias still prints in full — the alias names a
+type the method cannot return, and claiming it would be
+wrong rather than merely verbose.
 
-- Only aliases your project declares are considered. Core,
-  stdlib and gem RBS declare aliases you never chose
-  (`int`, `string`, `Warning::category`), and a proposal
-  should not start naming them.
-- Only aliases whose expansion is a union. A
-  `type name = String` alias never rewrites an ordinary
-  `String` return.
-- Generic aliases (`type boxed[T] = ...`) are skipped: the
-  expansion depends on the arguments, so there is no fixed
-  member set to match.
+A wrong alias name is worse than a long union: it is an RBS
+claim you did not make. Four rules keep the fold from
+guessing.
 
-When two of your aliases expand to the same member set, the
-one whose declaration sorts first by (file, line, name)
-wins. A project that declares no aliases gets byte-for-byte
-the output it got before.
+**Your aliases only.** The candidates come from your
+configured `signature_paths:` (or `sig/` when you
+configured none) — not from gems in your bundle, not from
+an `rbs collection` tree, not from plugin signature paths,
+and not from core or stdlib RBS. Core declares
+`Warning::category` as `:deprecated | :experimental |
+:performance`; a project that never wrote that alias does
+not get it in its proposals.
+
+**Namespace proximity.** An alias is only offered to a
+method whose owner is inside the alias's own namespace, and
+the nearest such alias wins — most specific first, then
+declaration order by (file, line, name). Without this,
+`:positive | :negative` anywhere in a codebase would pick
+up any alias that happens to name that pair.
+
+**Unambiguous alias bodies only.** Some RBS forms reach the
+renderer looking like something else: an intersection can
+read as one of its members, a proc type as a bare `Proc`, a
+nested alias as whatever it expanded to. An alias whose
+body contains one of those is skipped, because a fold into
+it would put a type in your signature that the method does
+not return. Only class instances, literals, singletons,
+unions, optionals and tuples qualify.
+
+**Unions only, non-generic only.** A `type name = String`
+alias never rewrites an ordinary `String` return, and a
+generic alias (`type boxed[T] = ...`) has no fixed member
+set to match.
+
+A project that declares no aliases gets byte-for-byte the
+output it got before.
 
 ## RSpec-aware observations
 

@@ -712,12 +712,12 @@ module Rigor
 
         observations = arity_matched_observations(class_name, method_name, params)
         parts = []
-        params.requireds.each_index { |i| parts << positional_type(observations, i, "") }
+        params.requireds.each_index { |i| parts << positional_type(observations, i, "", class_name) }
         offset = params.requireds.size
-        params.optionals.each_index { |i| parts << positional_type(observations, offset + i, "?") }
+        params.optionals.each_index { |i| parts << positional_type(observations, offset + i, "?", class_name) }
         parts << "*untyped" if params.rest
         parts.concat(Array.new(params.posts.size, "untyped"))
-        params.keywords.each { |kw| parts << render_keyword_param(kw, observations) }
+        params.keywords.each { |kw| parts << render_keyword_param(kw, observations, class_name) }
         parts.concat(keyword_rest_parts(params))
         parts.join(", ")
       end
@@ -767,15 +767,15 @@ module Rigor
 
       # A bare union is a valid positional type in RBS (`(String | Integer, ?String | Integer)`), so unlike the
       # return position it is not parenthesised.
-      def positional_type(observations, index, prefix)
+      def positional_type(observations, index, prefix, owner = nil)
         types = observations.filter_map { |obs| obs.positional[index] }
-        "#{prefix}#{union_erase(types)}"
+        "#{prefix}#{union_erase(types, owner: owner)}"
       end
 
-      def render_keyword_param(keyword, observations)
+      def render_keyword_param(keyword, observations, owner = nil)
         optional_marker = keyword.is_a?(Prism::OptionalKeywordParameterNode) ? "?" : ""
         types = observations.filter_map { |obs| obs.keyword[keyword.name] }
-        rendered = types.empty? ? "untyped" : paren_wrap_union(union_erase(types))
+        rendered = types.empty? ? "untyped" : paren_wrap_union(union_erase(types, owner: owner))
         "#{optional_marker}#{keyword.name}: #{rendered}"
       end
 
@@ -1144,15 +1144,18 @@ module Rigor
         params = def_node.parameters
         head = "(#{render_param_list(params, class_name, def_node.name)})#{block_signature_suffix(params)}"
         prefix = method_def_prefix(class_name, def_node.name, kind)
-        "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred))}"
+        "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred, owner: class_name))}"
       end
 
       # Routes the inferred carrier through {TypeElaborator} so bare generic nominals (`Array` / `Hash` / `Set`
       # / `Range` / `Enumerable`) get their `untyped` type parameters filled in before erasing to RBS. The
       # elaborator consults the class's RBS-declared type-parameter list via
       # `Reflection.class_type_param_names`.
-      def elaborated_rbs(type)
-        alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs)
+      # `owner:` is the class or module the rendered member belongs to. {AliasIndex} needs it to judge whether
+      # a matching alias is one this reader would expect to see; a call site that cannot supply it renders the
+      # type unfolded, which is the same output as before #1002.
+      def elaborated_rbs(type, owner: nil)
+        alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs, owner)
       end
 
       # Issue #1002 — the reverse of {#translate_method_type_return}'s `alias_expander:`. Folding happens here,
@@ -1163,7 +1166,20 @@ module Rigor
       # diagnostics, `rigor type-of` and the engine's own comparisons, and none of those should start naming a
       # project alias. Sig-gen's rendering preference is a CLI concern and stays on the CLI side.
       def alias_index
-        @alias_index ||= AliasIndex.build(environment: @environment)
+        @alias_index ||= AliasIndex.build(environment: @environment, signature_paths: project_signature_paths)
+      end
+
+      # The project's OWN signature paths, resolved exactly as `Environment.for_project` resolves its
+      # `resolved_paths` — the configured list, or `<root>/sig` when the project configured none. The
+      # loader's `signature_paths` is NOT the same list: it also carries plugin signature paths, gem `sig/`
+      # directories discovered under the project's bundle, the `rbs collection` tree and Rigor's own gem
+      # overlays, none of which declare vocabulary this project chose.
+      def project_signature_paths
+        configured = @configuration.signature_paths
+        return configured unless configured.nil?
+
+        default = Pathname(Dir.pwd) / "sig"
+        default.directory? ? [default] : []
       end
 
       # RBS / Steep require return-position unions to be parenthesised when they appear bare at the top level of
@@ -1189,15 +1205,15 @@ module Rigor
         false
       end
 
-      def union_erase(types)
+      def union_erase(types, owner: nil)
         return "untyped" if types.empty?
-        return elaborated_rbs(types.first) if types.size == 1
+        return elaborated_rbs(types.first, owner: owner) if types.size == 1
 
         # `Type::Combinator.union` dedupes by structural type equality. The carrier-level `erase_to_rbs` now
         # absorbs `untyped` members and dedupes the post-erase strings (`String | String` → `String` for
         # distinct `Constant<"Alice">` / `Constant<"Bob">` envelopes), so the sig-gen layer only needs to
         # elaborate bare generics before erasing.
-        elaborated_rbs(Type::Combinator.union(*types))
+        elaborated_rbs(Type::Combinator.union(*types), owner: owner)
       end
 
       # ADR-14 slice 4 — `attr_reader` / `attr_writer` / `attr_accessor` recognition. Each Symbol-named entry in
@@ -1443,7 +1459,7 @@ module Rigor
           kind: :instance,
           classification: Classification::NEW_METHOD,
           inferred_return: ivar_type,
-          rbs: render_attr_rbs_line(method_name, variant, ivar_type)
+          rbs: render_attr_rbs_line(method_name, variant, ivar_type, class_name)
         )
       end
 
@@ -1460,7 +1476,7 @@ module Rigor
           path: path, class_name: class_name, method_name: method_name,
           kind: :instance, classification: Classification::TIGHTER_RETURN,
           inferred_return: ivar_type, declared_return_rbs: declared_rbs,
-          rbs: render_attr_rbs_line(method_name, variant, ivar_type)
+          rbs: render_attr_rbs_line(method_name, variant, ivar_type, class_name)
         )
       end
 
@@ -1484,8 +1500,8 @@ module Rigor
       # form can normalise post-emit; the writer-side member detection (slice 2) treats existing `attr_*`
       # declarations as user-authored so a paired source-side `attr_reader` never produces a duplicate `def`
       # insertion.
-      def render_attr_rbs_line(method_name, variant, ivar_type)
-        erased = elaborated_rbs(ivar_type)
+      def render_attr_rbs_line(method_name, variant, ivar_type, owner = nil)
+        erased = elaborated_rbs(ivar_type, owner: owner)
         wrapped = paren_wrap_union(erased)
         case variant
         when :reader then "def #{method_name}: () -> #{wrapped}"
@@ -1505,7 +1521,7 @@ module Rigor
           types = meta_member_types(class_name, layout.member_names)
           shape = MetaClassShape.of(
             kind: layout.kind, members: layout.member_names, keyword_init: layout.keyword_init,
-            member_types: types.transform_values { |type| paren_wrap_union(union_erase([type])) }
+            member_types: types.transform_values { |type| paren_wrap_union(union_erase([type], owner: class_name)) }
           )
           shape.member_decls.filter_map do |member|
             meta_member_candidate(path, class_name, member, types, scope, environment)

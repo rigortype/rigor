@@ -44,18 +44,66 @@ RSpec.describe "sig-gen alias rendering" do
 
   # @param signatures — `{ relative sig path => RBS source }`. `nil` configures no `signature_paths:` at all,
   #   which is the shape an adopting project has before it writes any RBS.
-  def rendered_return(signatures, ruby: three_symbol_method)
+  def configuration_for(signatures, bundler: nil)
+    paths = [File.join(tmpdir, "lib")]
+    Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        {
+          "paths" => paths,
+          "signature_paths" => signatures.nil? ? nil : [File.join(tmpdir, "sig")],
+          "bundler" => bundler
+        }.compact
+      )
+    )
+  end
+
+  def rendered_return(signatures, ruby: three_symbol_method, method_name: :category, bundler: nil)
     write("lib/warner.rb", ruby)
     signatures&.each { |rel, body| write(File.join("sig", rel), body) }
+    configuration = configuration_for(signatures, bundler: bundler)
     paths = [File.join(tmpdir, "lib")]
-    configuration = Rigor::Configuration.new(
-      Rigor::Configuration::DEFAULTS.merge(
-        "paths" => paths,
-        "signature_paths" => signatures.nil? ? nil : [File.join(tmpdir, "sig")]
-      ).compact
-    )
     candidates = Rigor::SigGen::Generator.new(configuration: configuration, paths: paths).run
-    candidates.find { |c| c.method_name == :category }.rbs
+    candidates.find { |c| c.method_name == method_name }.rbs
+  end
+
+  # The same alias, declared one namespace deeper than the `Deep::mood` the neighbouring examples use.
+  def nested_alias_declaration
+    <<~RBS
+      module Deep
+        module Inner
+          type mood = :deprecated | :experimental | :performance
+        end
+      end
+    RBS
+  end
+
+  def nested_three_symbol_method
+    <<~RUBY
+      module Deep
+        module Inner
+          class Warner
+            def category(n)
+              case n
+              when 0 then :deprecated
+              when 1 then :experimental
+              else :performance
+              end
+            end
+          end
+        end
+      end
+    RUBY
+  end
+
+  # `Integer | String` rather than a literal union, so an alias body can be spelled with class instances.
+  def integer_or_string_method
+    <<~RUBY
+      class Warner
+        def widened(n)
+          n.zero? ? Integer.sqrt(4) : String.new
+        end
+      end
+    RUBY
   end
 
   it "renders the alias when the inferred union is exactly the alias's expansion" do
@@ -147,5 +195,112 @@ RSpec.describe "sig-gen alias rendering" do
     )
 
     expect(rbs).to eq("def category: (untyped) -> mood")
+  end
+
+  # Issue #1002 review: the scope must be the project's OWN resolved `signature_paths:`, not the RBS loader's,
+  # which also carries plugin signature paths, the `rbs collection` tree, Rigor's gem overlays and — as this
+  # example asserts before it renders anything — every `sig/` directory discovered under the project's bundle.
+  it "ignores an alias shipped by a gem in the project's own bundle" do
+    gem_sig = File.join("vendor", "bundle", "ruby", "3.4.0", "gems", "faux-1.0.0", "sig", "faux.rbs")
+    write(gem_sig, "type mood = :deprecated | :experimental | :performance\n")
+    bundler = { "bundle_path" => File.join(tmpdir, "vendor", "bundle"),
+                "auto_detect" => false, "lockfile" => nil }
+    write("lib/warner.rb", three_symbol_method)
+    write(File.join("sig", "warner.rbs"), "class Warner\nend\n")
+    configuration = configuration_for({}, bundler: bundler)
+    environment = Rigor::ProjectEnvironment.build(configuration: configuration, source_files: [])
+
+    expect(environment.rbs_loader.signature_paths.map(&:to_s)).to include(a_string_including("faux-1.0.0"))
+
+    rbs = rendered_return({ "warner.rbs" => "class Warner\nend\n" }, bundler: bundler)
+
+    expect(rbs).to eq(full_union)
+  end
+
+  # Erasure is not injective. `(Integer & Comparable) | String` reaches the renderer indistinguishable from
+  # `Integer | String`, so folding into it would put an intersection in the author's signature that the method
+  # never returns. The companion example below proves the fixture really does reach the fold path.
+  it "does not fold an alias whose body carries an intersection" do
+    rbs = rendered_return({ "warner.rbs" => "type inter = (Integer & Comparable) | String\n" },
+                          ruby: integer_or_string_method, method_name: :widened)
+
+    expect(rbs).to eq("def widened: (untyped) -> (Integer | String)")
+  end
+
+  it "folds the same shape when the alias body carries no lossy form" do
+    rbs = rendered_return({ "warner.rbs" => "type both = Integer | String\n" },
+                          ruby: integer_or_string_method, method_name: :widened)
+
+    expect(rbs).to eq("def widened: (untyped) -> both")
+  end
+
+  # A proc type translates to a bare `Proc`, losing the signature, so the same reasoning applies.
+  it "does not fold an alias whose body carries a proc type" do
+    proc_or_string = <<~RUBY
+      class Warner
+        def handler(n)
+          n.zero? ? ->(x) { x } : String.new
+        end
+      end
+    RUBY
+
+    rbs = rendered_return({ "warner.rbs" => "type cb = ^(Integer) -> void | String\n" },
+                          ruby: proc_or_string, method_name: :handler)
+
+    expect(rbs).to eq("def handler: (untyped) -> (Proc | String)")
+  end
+
+  # Namespace proximity. Type equality alone picks names no reader expects: `:positive | :negative` is
+  # type-equal to this repository's own `Analysis::FactStore::polarity` from anywhere in the tree.
+  it "ignores an alias declared in a namespace that does not enclose the method's owner" do
+    rbs = rendered_return(
+      { "warner.rbs" => <<~RBS }
+        module Elsewhere
+          type mood = :deprecated | :experimental | :performance
+        end
+      RBS
+    )
+
+    expect(rbs).to eq(full_union)
+  end
+
+  it "folds an alias declared in an enclosing namespace of the method's owner" do
+    nested = nested_three_symbol_method
+    sig = <<~RBS
+      module Deep
+        type mood = :deprecated | :experimental | :performance
+      end
+    RBS
+    rbs = rendered_return({ "warner.rbs" => sig }, ruby: nested)
+
+    expect(rbs).to eq("def category: (untyped) -> Deep::mood")
+  end
+
+  # "Most specific, then declaration order": the nearer alias wins even though the farther one is declared in
+  # a file that sorts first, which is the tie-break that decides between two EQUALLY near aliases.
+  it "prefers the nearest enclosing namespace over an earlier-declared outer alias" do
+    nested = <<~RUBY
+      module Deep
+        module Inner
+          class Warner
+            def category(n)
+              case n
+              when 0 then :deprecated
+              when 1 then :experimental
+              else :performance
+              end
+            end
+          end
+        end
+      end
+    RUBY
+
+    rbs = rendered_return(
+      { "a_outer.rbs" => "type mood = :deprecated | :experimental | :performance\n",
+        "z_inner.rbs" => nested_alias_declaration },
+      ruby: nested
+    )
+
+    expect(rbs).to eq("def category: (untyped) -> Deep::Inner::mood")
   end
 end

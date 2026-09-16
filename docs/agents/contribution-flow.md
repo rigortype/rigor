@@ -32,6 +32,12 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   build on it until its owner hands over the lane. A green gate is not a handoff.
 - A bug-report fix credits the reporter with `Co-Authored-By: Name <email>` on every fix commit,
   including fragments, and `thank you @handle!` in the changelog. Ask for a missing email; never guess.
+- Put each `Fixes #N` on its own line. GitHub parses only the first reference in a comma-separated
+  `Fixes #a, #b, #c`, silently leaving the rest open, and a later session reads them as backlog.
+- A spec that pins behaviour you believe is wrong carries an in-place `flip this when #N is fixed`
+  comment. Without it the next reader has to re-derive whether the assertion or the engine is the
+  bug — and a batch of PRs touching disjoint files can still turn `master` red when one of them
+  fixes what another pinned, which no single PR's CI can see.
 
 ## Release Cadence
 

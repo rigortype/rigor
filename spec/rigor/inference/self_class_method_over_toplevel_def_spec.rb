@@ -584,6 +584,31 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  # Both block-entry paths must decline on the same bodies. The `class << self` exclusion rides on
+  # `Scope#singleton_class_body?`, so the return-typing pass — which has no frame stack of its own — applies it
+  # too. A project-declared generic `define_method` makes the block's own value observable, and with the block's
+  # `self` left on the singleton side the top-level `def text`'s `nil` is what it carries.
+  it "keeps the return-typing path on the evaluator's side of a `class << self` body" do
+    files = { "shadow.rb" => shadow_source, "subject.rb" => <<~SUBJECT }
+      class Widget
+        attr_reader :text
+
+        class << self
+          x = define_method(:shout) { text }
+          x.upcase
+        end
+      end
+    SUBJECT
+    signatures = { "widget.rbs" => <<~RBS }
+      class Widget
+        def self.define_method: [T] (Symbol) { () -> T } -> T
+        def text: () -> String
+      end
+    RBS
+
+    expect(messages_for(files, signatures: signatures).grep(/upcase/)).not_to be_empty
+  end
+
   # --- `Class.new(...) do ... end` (issue #963 item 1, second shape) ---------------------------------
 
   it "reads a struct member inside a `Const = Class.new(Struct.new(...)) do ... end` body" do

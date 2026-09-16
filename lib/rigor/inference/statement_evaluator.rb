@@ -186,13 +186,6 @@ module Rigor
       #   by {#eval_def} to look up the method's RBS signature. Each
       #   `ClassNode`/`ModuleNode` entry pushes a frame; `SingletonClassNode`
       #   over `self` flips the innermost frame to singleton mode.
-      # @param method_body — true while evaluating the body of a
-      #   `def`, false in a class / module / meta-class body. The frame
-      #   stack alone cannot tell the two apart: a `def` inside
-      #   `class << self` keeps the singleton frame, and issue #963's
-      #   `define_method` narrowing needs to know whether `self` is the
-      #   singleton CLASS (the `class << self` body itself) or the class
-      #   object (any `def` reached from it).
       # @param converged_loop_recording — when true (and an
       #   `on_enter` recorder is installed), {#eval_loop} re-evaluates a
       #   fixpoint-tracked loop body ONE extra time from the CONVERGED
@@ -202,14 +195,13 @@ module Rigor
       #   `Integer`). Display-path only — `rigor check` leaves it off,
       #   keeping its diagnostics and wall-clock unchanged.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze,
-                     lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, method_body: false)
+                     lexical_nesting: EMPTY_NESTING, converged_loop_recording: false)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
         @class_context = class_context.freeze
         @lexical_nesting = lexical_nesting.freeze
         @converged_loop_recording = converged_loop_recording
-        @method_body = method_body
       end
 
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
@@ -1639,8 +1631,8 @@ module Rigor
         outer_sink = Thread.current[RETURN_SINK_KEY]
         Thread.current[RETURN_SINK_KEY] = nil
         begin
-          sub_eval(node.parameters, body_scope, class_context: @class_context, method_body: true) if node.parameters
-          sub_eval(node.body, body_scope, class_context: @class_context, method_body: true) if node.body
+          sub_eval(node.parameters, body_scope, class_context: @class_context) if node.parameters
+          sub_eval(node.body, body_scope, class_context: @class_context) if node.body
         ensure
           Thread.current[RETURN_SINK_KEY] = outer_sink
         end
@@ -2154,12 +2146,14 @@ module Rigor
       # `Singleton[C]`, and #618's own-method veto asks the singleton side of a name the instance side answers.
       # {DefineMethodBlockSelf} owns the match; a non-match leaves the entry scope exactly as it was.
       #
-      # The exclusion is the `class << self` BODY, where `self` is the singleton class and the call defines a
-      # class method — not the singleton frame, which a `def` reached from that body still carries although its
-      # `self` is the class object. Hence `@method_body`, which the frame stack cannot express.
+      # The exclusion — the `class << ...` BODY, where `self` is the singleton class and the call defines a class
+      # method — rides on `Scope#singleton_class_body?`, not on the frame stack: a `def` reached from that body
+      # still carries the singleton frame although its `self` is the class object, and it is an instance method
+      # the call defines there. Carrying the mark on the scope is also what lets the return-typing path apply the
+      # same exclusion, which has no frame stack of its own.
       def narrow_define_method_block_self(call_node, block_entry)
         narrowed = DefineMethodBlockSelf.narrow_self_type_for(
-          scope: scope, call_node: call_node, singleton_body: current_frame_singleton? && !@method_body
+          scope: scope, call_node: call_node
         )
         narrowed ? block_entry.with_self_type(narrowed) : block_entry
       end
@@ -2177,8 +2171,8 @@ module Rigor
       # frame is still pushed — it is what a nested `def` registers its method under — which is exactly the
       # divergence that makes the chain a separate record rather than a view of the frame stack.
       def enter_meta_class_body(block, block_entry, class_context)
-        entry = block_entry.with_self_type(self_type_for_class_body(class_context))
-        sub_eval(block, stamp_nesting(entry, @lexical_nesting), class_context: class_context, method_body: false)
+        entry = block_entry.with_self_type(self_type_for_class_body(class_context)).with_singleton_class_body(false)
+        sub_eval(block, stamp_nesting(entry, @lexical_nesting), class_context: class_context)
       end
 
       # Slice 6 phase C sub-phase 3b/3c. When the call carries a block whose receiving method is NOT proven
@@ -2914,8 +2908,12 @@ module Rigor
         fresh = build_fresh_body_scope
         body_self = self_type_for_class_body(new_context)
         fresh = fresh.with_self_type(body_self) if body_self
+        # Issue #963 — `self` in a `class << ...` body is the SINGLETON class, which shares the `Singleton[X]`
+        # carrier a `class X` body gets. The mark is the only thing that tells the two apart downstream, and a
+        # `def` reached from this body clears it by starting from a fresh scope.
+        fresh = fresh.with_singleton_class_body(node.is_a?(Prism::SingletonClassNode))
         fresh = stamp_nesting(fresh, new_nesting)
-        sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting, method_body: false)
+        sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting)
       end
 
       def build_method_entry_scope(def_node) # rubocop:disable Metrics/AbcSize
@@ -3246,16 +3244,14 @@ module Rigor
         Type::Combinator.tuple_of(*args.map { |arg| sub_eval(arg, scope).first })
       end
 
-      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
-                   method_body: @method_body)
+      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
           on_enter: @on_enter,
           class_context: class_context,
           lexical_nesting: lexical_nesting,
-          converged_loop_recording: @converged_loop_recording,
-          method_body: method_body
+          converged_loop_recording: @converged_loop_recording
         ).evaluate(node)
       end
 

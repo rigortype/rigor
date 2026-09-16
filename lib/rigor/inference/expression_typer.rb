@@ -3392,11 +3392,11 @@ module Rigor
       #
       # Issue #963: `define_method(:name) { ... }` installs its block as an instance method and runs it with
       # `self` bound to the receiving instance, so the block body's `self` is the INSTANCE side of a class body's
-      # `Singleton[X]`. Both block-entry paths narrow it, so the value this pass computes cannot disagree with
-      # the one the statement evaluator records. The `class << self` exclusion {StatementEvaluator} applies is
-      # not available here — the frame stack is the evaluator's, and Rigor models no singleton rung — but this
-      # pass produces only the block's value type, which for a `define_method` call is discarded: the call
-      # answers `Symbol`, and no diagnostic reads the block's return.
+      # `Singleton[X]`. Both block-entry paths narrow it, and both decline on the same `class << ...` bodies,
+      # because the whole distinction rides on `Scope#singleton_class_body?` rather than on the statement
+      # evaluator's frame stack. This pass therefore cannot compute a carrier the evaluator disagrees with — it
+      # matters wherever the block's value is observable, e.g. a project-declared generic `define_method`
+      # signature that returns the block's own type.
       def block_body_self_narrowing(call_node, receiver_type)
         MacroBlockSelfType.narrow_self_type_for(
           scope: scope, call_node: call_node, receiver_type: receiver_type

@@ -21,6 +21,7 @@ module Rigor
     attr_reader source_path: String?
     attr_reader struct_fold_safe_locals: Set[Symbol]
     attr_reader opaque_block_self: bool
+    attr_reader singleton_class_body: bool
     attr_reader lexical_nesting: Array[String]?
 
     # ADR-53 Track A — the seed-time discovery tables live on the
@@ -125,6 +126,8 @@ module Rigor
     def struct_fold_safe?: (String | Symbol name) -> bool
     def entering_opaque_block: () -> Scope
     def opaque_block_self?: () -> bool
+    def with_singleton_class_body: (bool) -> Scope
+    def singleton_class_body?: () -> bool
     def with_discovery: (DiscoveryIndex index) -> Scope
     def local: (String | Symbol name) -> Type::t?
     def ivar: (String | Symbol name) -> Type::t?

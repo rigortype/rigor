@@ -20,16 +20,20 @@ module Rigor
     # existing veto ask the instance side, which is the side Ruby dispatches on; nothing in the veto
     # itself changes.
     #
-    # The match is deliberately narrow — the receiver must be the class body's own `self`, and that
-    # `self` must be a known `Singleton[C]` on the instance side of the class. `class << self` bodies
-    # (where `define_method` defines a CLASS method) and `Foo.define_method(...)` on some other receiver
-    # keep the unmodelled-self answer.
+    # The match is deliberately narrow — the receiver must be the class body's own `self`, and that `self`
+    # must be a known `Singleton[C]` on the instance side of the class. `Foo.define_method(...)` on some other
+    # receiver keeps the unmodelled-self answer, and so does a `class << ...` BODY, where `self` is the
+    # singleton class and the call defines a CLASS method: an instance reader is not in that MRO, MRI reaches
+    # the top-level `def` there, and Rigor must answer the same. The body is the exclusion, not the lexical
+    # singleton frame — a `def` reached from that body has the class object as its `self`, so the call defines
+    # an instance method and the narrowing applies. `Scope#singleton_class_body?` is what draws that line, and
+    # carrying it on the scope is what lets both block-entry paths apply it identically.
     module DefineMethodBlockSelf
       module_function
 
       # @return the block body's narrowed `self_type`, or `nil` when the call shape does not match.
-      def narrow_self_type_for(scope:, call_node:, singleton_body: false)
-        return nil if singleton_body
+      def narrow_self_type_for(scope:, call_node:)
+        return nil if scope&.singleton_class_body?
         return nil unless define_method_on_lexical_self?(call_node)
 
         self_type = scope&.self_type

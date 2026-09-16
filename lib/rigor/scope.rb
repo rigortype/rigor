@@ -23,7 +23,7 @@ module Rigor
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced, :published_constant_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
-                :opaque_block_self, :lexical_nesting,
+                :opaque_block_self, :singleton_class_body, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars
@@ -246,6 +246,7 @@ module Rigor
       source_path: nil,
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
       opaque_block_self: false,
+      singleton_class_body: false,
       lexical_nesting: nil,
       dynamic_origins: {}.compare_by_identity,
       local_origins: EMPTY_ORIGINS,
@@ -271,6 +272,7 @@ module Rigor
       @source_path = source_path
       @struct_fold_safe_locals = struct_fold_safe_locals
       @opaque_block_self = opaque_block_self
+      @singleton_class_body = singleton_class_body
       @lexical_nesting = lexical_nesting
       @dynamic_origins = dynamic_origins
       @local_origins = local_origins
@@ -420,6 +422,27 @@ module Rigor
 
     # True when this scope sits inside a block whose `self` is unmodelled ({#entering_opaque_block}).
     def opaque_block_self? = @opaque_block_self
+
+    # Issue #963 — marks the body of a `class << ...` as such. Inside it `self` is the SINGLETON class, which
+    # Rigor models with the same `Singleton[X]` carrier a `class X` body gets, so the carrier alone cannot say
+    # which of the two a scope came from. The distinction decides what `define_method` does: in a `class << self`
+    # body it defines a CLASS method (`self` there is the singleton class), while in every other body reached
+    # with a `Singleton[X]` self — a `class X` body, `def self.x`, a `def` inside `class << self` — `self` is the
+    # class object and the same call defines an INSTANCE method.
+    #
+    # The mark is stamped at singleton-class-body entry and inherited by every scope derived inside it, blocks
+    # included; a `def` body starts from a fresh scope and therefore clears it by construction, which is exactly
+    # the boundary the distinction needs. A meta-class body (`Class.new do ... end`) clears it explicitly: that
+    # block is a class body of its own, whatever encloses it.
+    def with_singleton_class_body(flag)
+      return self if @singleton_class_body == flag
+
+      rebuild(singleton_class_body: flag)
+    end
+
+    # True when this scope IS a `class << ...` body (not merely inside one lexically — a `def` reached from it
+    # answers false).
+    def singleton_class_body? = @singleton_class_body
 
     # True when `name`'s `Struct` member reads are fold-safe in this body (the local is provably never mutated /
     # aliased / escaped).
@@ -1382,6 +1405,7 @@ module Rigor
       source_path: @source_path,
       struct_fold_safe_locals: @struct_fold_safe_locals,
       opaque_block_self: @opaque_block_self,
+      singleton_class_body: @singleton_class_body,
       lexical_nesting: @lexical_nesting,
       dynamic_origins: @dynamic_origins,
       local_origins: @local_origins,
@@ -1404,6 +1428,7 @@ module Rigor
         source_path: source_path,
         struct_fold_safe_locals: struct_fold_safe_locals,
         opaque_block_self: opaque_block_self,
+        singleton_class_body: singleton_class_body,
         lexical_nesting: lexical_nesting,
         dynamic_origins: dynamic_origins,
         local_origins: local_origins,
@@ -1478,6 +1503,10 @@ module Rigor
         # block entry by `entering_opaque_block` and inherited through `rebuild`), so both arms usually carry
         # the same value and the `||` is that value.
         opaque_block_self: @opaque_block_self || other.opaque_block_self,
+        # Issue #963 — a body property like the two above, so both arms of an in-body merge carry the identical
+        # value and the `||` is that value. `||` is also the safe direction on its own terms: keeping the mark
+        # declines the `define_method` narrowing, which is the pre-#963 answer.
+        singleton_class_body: @singleton_class_body || other.singleton_class_body,
         # Issue #652 — the recorded `Module.nesting`, stamped once at body entry and threaded by `rebuild`
         # exactly as the fold-safe set is. A join is a control-flow merge INSIDE one body, so both arms
         # always carry the identical chain; taking this scope's is that chain. Dropping it would silently

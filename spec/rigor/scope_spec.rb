@@ -449,7 +449,7 @@ RSpec.describe Rigor::Scope do
           locals fact_store self_type ivars cvars globals
           indexed_narrowings method_chain_narrowings declaration_sourced
           published_constant_sourced
-          struct_fold_safe_locals opaque_block_self
+          struct_fold_safe_locals opaque_block_self singleton_class_body
           local_origins ivar_origins optimistic_locals optimistic_ivars
         ],
         receiver: %i[
@@ -488,6 +488,7 @@ RSpec.describe Rigor::Scope do
         source_path: "lib/a.rb",
         struct_fold_safe_locals: Set[:s].freeze,
         opaque_block_self: true,
+        singleton_class_body: true,
         lexical_nesting: ["A::B"].freeze,
         dynamic_origins: { node => :cause }.compare_by_identity,
         local_origins: { x: :cause }.freeze,

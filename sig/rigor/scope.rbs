@@ -21,6 +21,9 @@ module Rigor
     attr_reader source_path: String?
     attr_reader struct_fold_safe_locals: Set[Symbol]
     attr_reader opaque_block_self: bool
+    # sig-gen gap: #1011 — sig-gen skips the reader (sig.skipped.untyped-return), as for the
+    # `opaque_block_self` pair above; #1011 is the open decision about what these markers must cite,
+    # no issue tracking the untyped-return gap itself having been filed.
     attr_reader singleton_class_body: bool
     attr_reader lexical_nesting: Array[String]?
 
@@ -127,6 +130,8 @@ module Rigor
     def entering_opaque_block: () -> Scope
     def opaque_block_self?: () -> bool
     def with_singleton_class_body: (bool) -> Scope
+    # sig-gen gap: #1011 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); see the
+    # attribute above for why the pointer is the marker-convention issue.
     def singleton_class_body?: () -> bool
     def with_discovery: (DiscoveryIndex index) -> Scope
     def local: (String | Symbol name) -> Type::t?

@@ -18,6 +18,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "content_join"
+require_relative "define_method_block_self"
 require_relative "element_read_widening"
 require_relative "indexed_narrowing"
 require_relative "index_write_widening"
@@ -2124,7 +2125,7 @@ module Rigor
         block = node.block
         return unless block.is_a?(Prism::BlockNode)
 
-        block_entry = build_block_entry_scope(node, block)
+        block_entry = narrow_define_method_block_self(node, build_block_entry_scope(node, block))
         # #319 — `Class.new do ... end` and friends evaluate their block as a CLASS BODY (`class_eval`
         # semantics): `self` is the freshly created class, so a `def` inside defines an instance method on it
         # and `attr_reader` runs as a class-level macro. Enter the block under the same `self_type` /
@@ -2138,6 +2139,17 @@ module Rigor
         return sub_eval(block, block_entry) if anonymous.nil?
 
         enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
+      end
+
+      # Issue #963 — `define_method(:name) { ... }` in a class body defines an INSTANCE method, and Ruby runs
+      # the block with `self` bound to the receiving instance. Without this the block inherits the class body's
+      # `Singleton[C]`, and #618's own-method veto asks the singleton side of a name the instance side answers.
+      # {DefineMethodBlockSelf} owns the match; a non-match leaves the entry scope exactly as it was.
+      def narrow_define_method_block_self(call_node, block_entry)
+        narrowed = DefineMethodBlockSelf.narrow_self_type_for(
+          scope: scope, call_node: call_node, singleton_body: current_frame_singleton?
+        )
+        narrowed ? block_entry.with_self_type(narrowed) : block_entry
       end
 
       # Enters a meta-new `block` as the body of the class `class_context` names: `self_type` is that class's

@@ -470,4 +470,115 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
       end
     RUBY
   end
+
+  # --- `define_method` block self (issue #963 item 1) ------------------------------------------------
+  #
+  # `Module#define_method` turns its block into an INSTANCE method, and Ruby runs the body with `self`
+  # bound to the receiving instance. The block still enters with `self` unmodelled, but the carrier it
+  # inherited was the class body's `Singleton[C]` — the wrong side of the class — so the veto asked
+  # whether `C.text` exists, found nothing, and let the top-level `def text` bind ahead of the reader.
+
+  it "reads a struct member inside a `define_method` block in a `class X < Struct.new(...)` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Line < Struct.new(:text)
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "reads a struct member inside a `define_method` block in a `Const = Struct.new(...) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Line = Struct.new(:text) do
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "reads an attr_reader inside a `define_method` block" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "reads an attr_reader inside a `define_method` block that takes a parameter" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        define_method(:shout) { |n| text.upcase * n }
+      end
+    RUBY
+  end
+
+  it "still binds a top-level def inside a `define_method` block when the class answers nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Widget
+        attr_reader :other
+
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  # `class << self; define_method(:shout) { ... }; end` defines a CLASS method, whose `self` is the class
+  # object — where an instance reader is NOT in the MRO. MRI reaches the top-level `def` there, and so
+  # must Rigor: the narrowing is for the instance side only.
+  it "still binds a top-level def inside a `define_method` block in a `class << self` body" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Widget
+        attr_reader :text
+
+        class << self
+          define_method(:shout) { text.upcase }
+        end
+      end
+    RUBY
+  end
+
+  # --- `Class.new(...) do ... end` (issue #963 item 1, second shape) ---------------------------------
+
+  it "reads a struct member inside a `Const = Class.new(Struct.new(...)) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Anon = Class.new(Struct.new(:text)) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a struct member inside a `define_method` block in a `Class.new(Struct.new(...))` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Anon = Class.new(Struct.new(:text)) do
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "still binds a top-level def inside a `Class.new(...) do ... end` body answering nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Anon = Class.new(Struct.new(:other)) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  # The control: a block whose `self` Rigor still does not model is untouched by the narrowing.
+  it "leaves a plain block inside an instance method alone" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        def run
+          [1, 2].each { |n| text.upcase * n }
+        end
+      end
+    RUBY
+  end
 end

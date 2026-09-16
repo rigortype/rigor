@@ -1,7 +1,9 @@
 ---
 name: rigor-builtin-import
-description: |
-  Import Ruby built-in method types from the CRuby checkout into Rigor's runtime catalogues. Use when adding a core / stdlib class to the constant-fold dispatcher, extending per-class catalog coverage (Hash, Range, Set, Pathname, Time, Enumerable, …), regenerating the YAML catalogues, or onboarding a refinement carrier via `RBS::Extended`. Captures the nine-stage flow and its non-mechanical decision points.
+description: >-
+  Import a Ruby core/stdlib class or refinement carrier from the CRuby reference into Rigor's
+  catalogues. Use when extending built-in folding coverage or onboarding `RBS::Extended`; not for app
+  code or plugin authoring.
 metadata:
   internal: true
 ---

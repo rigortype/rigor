@@ -1,7 +1,9 @@
 ---
 name: rigor-regression-sweep
-description: |
-  Run a multi-version baseline-drift regression sweep of Rigor against a real OSS Ruby project — baseline at one tag, then `rigor check` every later tag against that frozen baseline + frozen config, and tabulate how the surfaced-diagnostic ("error increase") count evolves. Use to validate how realistic Rigor's diagnostics and the `rigor-project-init` workflow are over a normal development flow, and to grow an empirical multi-project corpus. Triggers: "sweep Rigor across versions of X", "check error increase over a release line", "validate the baseline against real churn", "regression-sweep this project".
+description: >-
+  Measure Rigor's baseline drift across the tagged history of a real OSS Ruby project. Use when
+  validating diagnostic realism over a release line or growing the survey corpus; not for a single
+  version check or ordinary project onboarding.
 metadata:
   internal: true
 ---

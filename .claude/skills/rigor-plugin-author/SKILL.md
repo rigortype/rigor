@@ -1,7 +1,9 @@
 ---
 name: rigor-plugin-author
-description: |
-  Author a new Rigor plugin end-to-end: decide `plugins/` (production) vs `examples/` (tutorial), then run requirements → template → scaffold → demo → spec → verify. Triggers: "Create a Rigor plugin for X", "Extend Rigor for our DSL", "Plugin similar to rigor-units for currency". NOT for edits to existing plugins or analyser-engine work in `lib/rigor/`.
+description: >-
+  Author a new Rigor plugin, choosing `plugins/` for production support or `examples/` for a contract
+  walkthrough. Use when extending Rigor for a DSL, framework, or macro; not for editing an existing
+  plugin or the analyzer engine.
 license: MPL-2.0
 metadata:
   internal: true

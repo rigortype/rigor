@@ -14,3 +14,6 @@
   catalogue here. Authoring either: [`docs/agents/skill-authoring.md`](docs/agents/skill-authoring.md).
 - A subagent does not inherit this contract. The Flake mandate, the `references/` read-only rule, and
   the release gate bind it too — put them in the prompt, or it will run `bundle` on the host.
+- **Auto memory is clone-wide, not worktree-scoped.** It keys off the git repository, so a parallel
+  session in a sibling worktree of this clone reads and writes the same `MEMORY.md` — a save here is
+  visible, and racing, there too.

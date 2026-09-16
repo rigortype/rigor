@@ -1,7 +1,9 @@
 ---
 name: rigor-plugin-author
-description: |
-  Author a Rigor plugin in your own repository — a standalone rigor-prefixed gem or a project-private plugin — to teach Rigor about an application DSL, framework, or metaprogramming pattern. Covers gemspec / Gemfile wiring, the plugin class and AST walker, return-type contributions, fixture-based testing (RSpec or Minitest), and version pinning against the pre-1.0 plugin contract. Triggers: "write a Rigor plugin for our DSL", "extend Rigor for X in this project", "make Rigor understand our macro". NOT for onboarding a project (use rigor-project-init) or reducing a baseline (use rigor-baseline-reduce).
+description: >-
+  Author a Rigor plugin in an adopting project or standalone `rigor-*` gem for a DSL, framework, or
+  metaprogramming pattern. Use when Rigor needs project-specific extension support; not for onboarding a
+  project, reducing a baseline, or editing Rigor's bundled plugins.
 license: MPL-2.0
 metadata:
   version: 0.1.0

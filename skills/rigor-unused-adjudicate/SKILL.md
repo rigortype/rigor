@@ -1,7 +1,9 @@
 ---
 name: rigor-unused-adjudicate
-description: |
-  Find dead code in a Ruby project with `rigor unused` — establish what the report can see on THIS project first, then adjudicate every row before proposing any deletion. Use this whenever someone asks to find or remove dead code, unused classes, unused constants, or "code nobody calls", whenever they ask what a `rigor unused` report means or which rows are safe to delete, and whenever a dead-code cleanup, codebase inventory, or legacy audit comes up — even if they never say "rigor". The report is a review queue and not a defect list; on an adjudicated corpus target only 4 of 57 rows were genuinely dead, so acting on it directly produces mostly wrong deletions. NOT for deleting a specific class you already know is dead, and NOT for `rigor check` diagnostics (those are ordinary type errors).
+description: >-
+  Adjudicate a `rigor unused` report safely before proposing dead-code removal. Use when interpreting or
+  reviewing Rigor's unused classes/modules/constants, or when a cleanup is based on that report; not for
+  a specific deletion already known to be safe or for ordinary `rigor check` diagnostics.
 license: MPL-2.0
 metadata:
   version: 0.2.0

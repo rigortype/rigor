@@ -1,7 +1,9 @@
 ---
 name: rigor-next-steps
-description: |
-  Route a project to its next Rigor step from a single entry point: resolve the `rigor` command (install it if missing), onboard the project if it has no Rigor config, then ask `rigor skill describe` what to do next and hand off to the matching skill. Triggers: "what should we do next with Rigor?", "I want to use Rigor on this project", "help me move this project forward with Rigor", "where do I start with Rigor?". NOT a replacement for the task-specific skills it routes to — it hands off to them.
+description: >-
+  Route a project to its next Rigor step, installing or onboarding Rigor when needed and then delegating
+  to `rigor skill describe`. Use when the user asks where to start or what to do next with Rigor; not
+  instead of a task-specific skill the route selects.
 license: MPL-2.0
 metadata:
   version: 0.1.0

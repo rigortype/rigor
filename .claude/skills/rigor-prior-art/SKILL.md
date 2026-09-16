@@ -1,17 +1,9 @@
 ---
 name: rigor-prior-art
 description: >-
-  Search Rigor's own research corpus — docs/adr, docs/notes, docs/design,
-  CHANGELOG.md + docs/CHANGELOG-0.1.x.md, handbook/manual — for prior
-  evaluations, surveys, measurements, comparisons, and decisions, and report
-  them with citation-grade file:line evidence. Use whenever the user asks
-  "have we evaluated / measured / compared X before?", "過去に調査・評価した
-  ことある?", "既存のノート/ADRから探して", "what do our docs say about X",
-  or needs primary-source backing for a talk, blog post, ADR, or README claim
-  — especially comparisons against other tools (Steep, Sorbet, TypeProf,
-  rbs_rails, Tapioca, PHPStan, …). Also use before publishing any comparative
-  claim about Rigor, to check what the corpus actually supports. NOT for a
-  single fact in a file you already know (just rg/Read it directly).
+  Find prior Rigor evaluations, measurements, comparisons, or decisions and report file:line evidence.
+  Use before making a comparative or historical claim, or when asked what Rigor's corpus says; not for
+  a fact in a file you already know.
 metadata:
   internal: true
 ---

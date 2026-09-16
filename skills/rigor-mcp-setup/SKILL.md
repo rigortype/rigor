@@ -1,7 +1,8 @@
 ---
 name: rigor-mcp-setup
-description: |
-  Wire Rigor's bundled MCP server (`rigor mcp`) into an AI coding agent (Claude Code, Claude Desktop, Cursor, Cline) so the agent can call Rigor's read-only analysis tools — rigor_check, rigor_type_of, rigor_triage, rigor_coverage, and more — during a session. The per-client config lives in the manual; this skill identifies the client, applies the right one, and verifies the handshake. Triggers: "set up rigor mcp", "give my AI agent Rigor tools", "wire Rigor into Claude Code / Cursor / Cline", "rigor MCP server". NOT for editor LSP integration (use rigor-editor-setup) or CI (use rigor-ci-setup).
+description: >-
+  Set up Rigor's bundled MCP server for an AI coding agent and verify the connection. Use when wiring
+  `rigor mcp` into Claude Code, Cursor, Cline, or another MCP client; not for editor LSP or CI setup.
 license: MPL-2.0
 metadata:
   version: 0.1.0

@@ -1,7 +1,9 @@
 ---
 name: rigor-docs-review
-description: |
-  Run the multi-lens review battery on Rigor's user-facing docs (docs/manual/ + docs/handbook/) as independent-context subagents, in five ordered layers: L0 mechanical (the permanent spec/docs/ gate), L1 semantic fidelity (claims vs the spec corpus / implementation / real CLI behaviour), L2 reader lenses (a Ruby-only reader with no static-typing background, procedure reproduction of the install + Rails-quickstart chapters, a Coming-from-X appendix reader), L3 bloat detection (inverted — flags fat not thin), L4 English copyedit + terminology and cross-reference hygiene. Parallel within a layer, sequential across; the LLM battery runs only when L0 is green; copyedit is always last. Records each lens to docs/notes/ and applies only necessary, axis-preserving fixes. Triggers: review the docs / manual / handbook, 査読して / 校閲して, validate a chapter before a milestone, check docs against the implementation. Not for a single typo. Software documentation, not a book — prose depth is not a virtue.
+description: >-
+  Review Rigor's user-facing manual and handbook for mechanical, semantic, reader, bloat, and copyediting
+  defects, then apply only necessary fixes. Use for a docs review or chapter validation; not for a single
+  typo or a code review.
 metadata:
   internal: true
 ---

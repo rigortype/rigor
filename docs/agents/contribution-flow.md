@@ -19,6 +19,9 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   reviewing like any other: branch + PR. Touching even one non-`.md` file makes it code regardless of
   size: branch + PR. When unsure which side a change is on, default to a branch — the direct-push
   path is the one that's expensive to undo.
+- Name a branch for the change it makes, not the tool that made it: no `claude/`, `codex/`, or other
+  tool-identifying prefix. Renaming a branch that already has an open PR is not safe — it can close
+  the PR outright — so get the name right at creation instead of fixing it after.
 - Push with an explicit refspec: `git push origin HEAD:refs/heads/<branch>`.
 - PRs start Draft and stay Draft until the user explicitly says they may land, with CI green and no
   standing stop instruction. A stop instruction means `gh pr ready --undo`. Never wait for an author

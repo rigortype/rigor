@@ -261,6 +261,44 @@ parameter contract I want."* That is a correctness-
 preserving widening — every existing caller still passes —
 but it does narrow the contract relative to `untyped`.
 
+## Type aliases your project declares
+
+When a proposal's return is a union whose members are
+exactly the expansion of a `type` alias declared in your
+own `sig/`, the alias name is what gets emitted:
+
+```rbs
+# Not this, even though it is the same type:
+def key_type: (untyped) -> (Rigor::Type::App | Rigor::Type::Bot | ...)
+
+# but this:
+def key_type: (untyped) -> Rigor::Type::t
+```
+
+The rule is member-set equality after the same erasure the
+union itself goes through, so a proposal missing one arm of
+the alias still prints in full — the alias names a type the
+method cannot return, and claiming it would be wrong rather
+than merely verbose.
+
+Three limits keep the fold conservative:
+
+- Only aliases your project declares are considered. Core,
+  stdlib and gem RBS declare aliases you never chose
+  (`int`, `string`, `Warning::category`), and a proposal
+  should not start naming them.
+- Only aliases whose expansion is a union. A
+  `type name = String` alias never rewrites an ordinary
+  `String` return.
+- Generic aliases (`type boxed[T] = ...`) are skipped: the
+  expansion depends on the arguments, so there is no fixed
+  member set to match.
+
+When two of your aliases expand to the same member set, the
+one whose declaration sorts first by (file, line, name)
+wins. A project that declares no aliases gets byte-for-byte
+the output it got before.
+
 ## RSpec-aware observations
 
 When you point `--observe` at a `spec/` directory, the

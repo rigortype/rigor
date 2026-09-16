@@ -14,6 +14,7 @@ require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/rbs_type_translator"
+require_relative "alias_index"
 require_relative "meta_class_shape"
 require_relative "rbs_validity"
 
@@ -1151,7 +1152,18 @@ module Rigor
       # elaborator consults the class's RBS-declared type-parameter list via
       # `Reflection.class_type_param_names`.
       def elaborated_rbs(type)
-        TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs
+        alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs)
+      end
+
+      # Issue #1002 — the reverse of {#translate_method_type_return}'s `alias_expander:`. Folding happens here,
+      # at the single seam every rendered type passes through (`render_rbs_line`, `union_erase` for parameter
+      # and ivar positions, the attr path), so `--print`, `--diff`, `--write` and `--format=json` cannot drift
+      # from one another: they all read the `rbs` string a candidate was built with. Deliberately NOT in
+      # {Type::Union#erase_to_rbs} — that carrier method is the type model's RBS surface, shared with
+      # diagnostics, `rigor type-of` and the engine's own comparisons, and none of those should start naming a
+      # project alias. Sig-gen's rendering preference is a CLI concern and stays on the CLI side.
+      def alias_index
+        @alias_index ||= AliasIndex.build(environment: @environment)
       end
 
       # RBS / Steep require return-position unions to be parenthesised when they appear bare at the top level of

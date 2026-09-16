@@ -1,7 +1,9 @@
 ---
 name: rigor-baseline-reduce
-description: |
-  Work a Rigor project's `.rigor-baseline.yml` down rule by rule: prioritise with `rigor triage`, sample call sites, classify each as real bug / stylistic-safe / false positive, then fix, `# rigor:disable`, or open a Rigor issue — and regenerate the baseline. Triggers: "reduce the rigor baseline", "fix some baseline diagnostics", "what rigor issue should I fix next?". NOT for first-time setup (use rigor-project-init) or authoring a plugin (use rigor-plugin-author).
+description: >-
+  Reduce an existing `.rigor-baseline.yml` rule by rule by triaging sites, fixing or intentionally
+  suppressing them, and regenerating the baseline. Use for baseline diagnostics already acknowledged by a
+  project; not for first-time setup or plugin authoring.
 license: MPL-2.0
 metadata:
   version: 0.1.0

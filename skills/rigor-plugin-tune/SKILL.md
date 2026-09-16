@@ -1,7 +1,9 @@
 ---
 name: rigor-plugin-tune
-description: |
-  Re-scan a configured project's Gemfile.lock against Rigor's bundled plugin catalogue and enable the plugins that match its current dependencies (Rails, RSpec, dry-rb, Sidekiq, Devise, …), then verify they all load. Run it after adding a gem, or when an onboarding predates a dependency the project now uses. Triggers: "enable the right Rigor plugins", "I added gem X, does Rigor have a plugin?", "which rigor plugins should this project use?", "rigor plugins for my stack". NOT for first-time onboarding (use rigor-project-init, which does the initial selection) and NOT for authoring a new plugin (use rigor-plugin-author).
+description: >-
+  Match a configured project's `Gemfile.lock` to Rigor's bundled plugin catalogue and enable the plugins
+  its current dependencies need. Use after adding a gem or when plugin selection is stale; not for
+  first-time onboarding or authoring a new plugin.
 license: MPL-2.0
 metadata:
   version: 0.1.0

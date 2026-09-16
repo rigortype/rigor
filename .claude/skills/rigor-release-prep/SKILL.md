@@ -1,6 +1,6 @@
 ---
 name: rigor-release-prep
-description: Prepare a rigor RubyGems release by bumping the gem version, updating the changelog, and running release verification commands. Use when the user asks to prepare the next version, cut a release, refresh release metadata, or make sure versioned files are consistent before tagging.
+description: Prepare a Rigor RubyGems release by bumping the version, consolidating changelog fragments, and running release gates. Use only when the user explicitly invokes `/rigor-release-prep` or asks to cut a release; not for ordinary fixes or release context alone.
 metadata:
   internal: true
 ---

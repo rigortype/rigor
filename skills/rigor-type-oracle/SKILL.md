@@ -1,7 +1,9 @@
 ---
 name: rigor-type-oracle
-description: |
-  Before writing or asserting ANY Ruby type, get it from Rigor rather than from reading the code: `rigor type-of FILE:LINE:COL` / `rigor annotate FILE` for an expression, `rigor sig-gen --print FILE` for a method signature, call-site observation for a parameter. A type you did not obtain from Rigor is a guess, and a guessed type is never written anywhere. Triggers: writing RBS under `sig/`, an inline `#:` / `# @rbs` annotation, a Sorbet `sig do … end`, a YARD `@param` / `@return`, a type stated in a doc sentence or a review comment, a nil check / `is_a?` / `respond_to?` guard justified by "this should be an X", "add types to this class / file", "document this method", "what type is this / what does this return?". Applies to Rigor's own tree too. When Rigor answers `Dynamic[top]` or `untyped`, or `sig-gen` skips the method, report the gap — never fill it in from inference of your own. NOT for setting Rigor up (use rigor-next-steps) or working a baseline down (use rigor-baseline-reduce).
+description: >-
+  Obtain a Ruby type from Rigor before writing or asserting it, using `type-of`, `annotate`, or `sig-gen`
+  as appropriate. Use when adding RBS, inline annotations, Sorbet/YARD types, type-shaped docs, or
+  type-justified guards; not for Rigor setup or baseline reduction.
 license: MPL-2.0
 metadata:
   version: 0.1.0

@@ -1,7 +1,9 @@
 ---
 name: rigor-protection-uplift
-description: |
-  Close the type-protection holes `rigor coverage --protection` surfaces: for each unprotected dispatch site, run `rigor sig-gen` first, hand-author only the minimal residual annotation, then verify with a double gate — the site becomes protected AND `rigor check` gains no new diagnostic. Triggers: "raise type protection", "add types where Rigor can't catch bugs", "act on coverage --protection / --mutation output", "make more of this code bug-catchable". NOT for Rigor's own `lib/` or the bundled plugins (use `rigor sig-gen` directly there and treat gaps as engine signal), and NOT for first-time setup (use rigor-project-init).
+description: >-
+  Close the protection gaps reported by `rigor coverage --protection`, using generated signatures before
+  minimal residual annotations and a no-new-diagnostics gate. Use when increasing bug-catching coverage
+  in an adopting project; not for Rigor's own tree, bundled plugins, or first-time setup.
 license: MPL-2.0
 metadata:
   version: 0.1.0

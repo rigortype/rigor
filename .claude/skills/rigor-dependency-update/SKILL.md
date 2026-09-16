@@ -1,7 +1,9 @@
 ---
 name: rigor-dependency-update
-description: |
-  Refresh the project's dependencies across its two independent layers in one pass — the bundled gems (`Gemfile.lock`, the runtime-affecting layer, via `bundle update`) and the Nix Flake dev environment (`flake.lock`'s `nixpkgs` pin, via `nix flake update`). Use when the user asks to "update dependencies", "bump the gems", "update the flake / nixpkgs", "refresh the dev environment", or "use the latest released dev tooling". Lands each layer as its own commit on one branch + PR, stays within the gemspec version constraints (never a range change, never a hand-edited lockfile), and handles the native-extension rebuild a nixpkgs bump forces. NOT for a Ruby version bump (use rigor-ruby-version-bump) or a references/ submodule bump (use rigor-add-reference).
+description: >-
+  Update Rigor's bundled gems and/or Nix Flake development environment while preserving version
+  constraints. Use for dependency, `Gemfile.lock`, `flake.lock`, or nixpkgs updates; not for Ruby-version
+  bumps or `references/` submodule updates.
 metadata:
   internal: true
 ---

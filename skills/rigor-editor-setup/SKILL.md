@@ -1,7 +1,9 @@
 ---
 name: rigor-editor-setup
-description: |
-  Wire Rigor's bundled language server (`rigor lsp`) into the developer's editor for live diagnostics, hover-to-type, outline, and type-aware completion. The per-editor config snippets live in the manual; this skill identifies the editor, applies the right one, and verifies the server attaches. Triggers: "set up Rigor in my editor", "rigor LSP / language server", "live Rigor diagnostics in VS Code / Neovim / Helix / Emacs", "hover types in my editor". NOT for CI integration (use rigor-ci-setup) or first-time project setup (use rigor-project-init).
+description: >-
+  Set up Rigor's bundled language server for live diagnostics, hover, outline, and completion in a
+  developer's editor. Use when wiring `rigor lsp` into VS Code, Neovim, Helix, Emacs, or another LSP
+  client; not for CI or first-time project setup.
 license: MPL-2.0
 metadata:
   version: 0.1.0

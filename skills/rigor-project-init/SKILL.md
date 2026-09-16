@@ -1,7 +1,9 @@
 ---
 name: rigor-project-init
-description: |
-  Onboard a project to Rigor type-checking from scratch: detect the stack, choose an adoption mode (baseline vs. strict), select plugins, write `.rigor.dist.yml`, then snapshot a baseline or commit to a zero-diagnostic gate. Triggers: "set up Rigor in this project", "configure rigor for X", "add type checking", or running `rigor check` in a Gemfile directory with no `.rigor.yml`. NOT for reducing an existing baseline (use rigor-baseline-reduce) or authoring a plugin (use rigor-plugin-author).
+description: >-
+  Onboard a project to Rigor from scratch by detecting the stack, selecting plugins and an adoption mode,
+  and writing the initial config and baseline or strict gate. Use for first-time Rigor setup; not for an
+  existing baseline or plugin authoring.
 license: MPL-2.0
 metadata:
   version: 0.1.0

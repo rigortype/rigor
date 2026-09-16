@@ -1,7 +1,9 @@
 ---
 name: rigor-monkeypatch-resolve
-description: |
-  Resolve a cluster of `call.unresolved-toplevel` / `call.undefined-method` diagnostics that are really the project's own monkey-patches (core-extension files that add methods with literal `def`) by wiring them into `pre_eval:` so Rigor pre-evaluates them and learns the added methods. Triggers: "Rigor flags methods my core-ext adds", "undefined-method on my own monkey-patch", "set up pre_eval", "lots of unresolved-toplevel from my lib/core_ext". NOT for dynamically-generated methods (define_method / method_missing / class_eval heredocs) — those need a plugin (use rigor-plugin-author) — and NOT for an external gem with no RBS (use rigor-rbs-setup).
+description: >-
+  Resolve Rigor diagnostics caused by literal `def` methods in a project's own monkey-patches by wiring
+  their files into `pre_eval:`. Use when project core extensions cause undefined-method findings; not for
+  dynamic method generation or an external gem without RBS.
 license: MPL-2.0
 metadata:
   version: 0.1.0

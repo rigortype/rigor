@@ -1,7 +1,9 @@
 ---
 name: rigor-doctor
-description: |
-  Validate that a project's Rigor setup is actually healthy — config parses with no silently-inert values, every configured plugin loads, the baseline is not stale, and the bundled paths resolve — by running Rigor's existing validators and interpreting them. Triggers: "is my Rigor setup correct?", "check my rigor config", "rigor diagnostics look wrong / suspicious", "validate rigor setup", "why is rigor reporting nothing / everything?". NOT for first-time setup (use rigor-project-init) or for working real diagnostics down (use rigor-baseline-reduce).
+description: >-
+  Validate that a project's Rigor configuration, plugins, paths, and baseline are actually healthy. Use
+  when diagnostics are suspicious or setup behavior is wrong; not for first-time onboarding or reducing
+  ordinary diagnostics.
 license: MPL-2.0
 metadata:
   version: 0.1.0

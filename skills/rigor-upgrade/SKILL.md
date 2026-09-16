@@ -1,7 +1,9 @@
 ---
 name: rigor-upgrade
-description: |
-  Adopt a new Rigor version cleanly: after upgrading the `rigortype` gem, re-run the analysis, diff the diagnostics against the committed baseline, and sort the changes into genuine new catches (sharper inference), known sig-quality false positives, and the baseline you should regenerate. Triggers: "I upgraded Rigor, what changed?", "new diagnostics after gem update rigortype", "adopt the new Rigor version", "rigor baseline drifted after upgrade". NOT for first-time setup (use rigor-project-init) or routine baseline work unrelated to an upgrade (use rigor-baseline-reduce).
+description: >-
+  Adopt a new `rigortype` version by comparing its diagnostics with the committed baseline and separating
+  new catches from signature-quality false positives. Use after a Rigor gem upgrade; not for first-time
+  setup or routine baseline reduction.
 license: MPL-2.0
 metadata:
   version: 0.1.0

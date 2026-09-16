@@ -1,7 +1,9 @@
 ---
 name: rigor-ask
-description: |
-  Answer any question about Rigor by investigating, not from memory — Rigor is niche and version-specific, so run its tools and read its bundled docs, then answer from what you saw. Use `rigor docs` (handbook + manual, offline and version-matched) and `rigor explain <rule>`; for the user's own code, `rigor check` / `annotate` / `type-of`. Covers: why a line is flagged or whether it's a false positive; the type model (narrowing, refinements, `Dynamic`, RBS); config keys, flags, baselines; comparisons to Sorbet, Steep, mypy, PHPStan; whether Rigor handles Rails, RSpec, or a given gem; how to type a method; "what is Rigor / why use it / is it right for us?". Trigger on any Rigor question seeking understanding — even casual, comparative, or grumbling. Skip only when it's purely "set it up / fix / reduce it for me" (use rigor-next-steps).
+description: >-
+  Answer a question about Rigor from version-matched bundled docs and tool output. Use when the user
+  asks why a diagnostic fired, how a type/config/flag works, or how Rigor compares with another tool; not
+  when they ask you to set up, fix, or reduce something.
 license: MPL-2.0
 metadata:
   version: 0.2.0

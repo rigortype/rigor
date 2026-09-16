@@ -1,7 +1,9 @@
 ---
 name: rigor-ci-setup
-description: |
-  Wire Rigor type-checking into a project's CI pipeline: run it in its own isolated Ruby-4.0 job and surface diagnostics inline on the pull / merge request via a CI-native output format (SARIF, GitHub Actions annotations, GitLab Code Quality, Checkstyle, JUnit) or through reviewdog. Triggers: "add Rigor to CI", "run rigor in GitHub Actions / GitLab CI", "show Rigor errors on the PR", "set up reviewdog for rigor". NOT for first-time project configuration (use rigor-project-init to create `.rigor.yml` first) or reducing a baseline (use rigor-baseline-reduce).
+description: >-
+  Set up Rigor in a project's CI and surface diagnostics on pull or merge requests. Use when adding or
+  changing GitHub Actions, GitLab CI, SARIF, or reviewdog wiring; not for first-time Rigor configuration
+  or baseline reduction.
 license: MPL-2.0
 metadata:
   version: 0.1.0

@@ -1,7 +1,9 @@
 ---
 name: rigor-plugin-review
-description: |
-  Review an existing Rigor plugin's source against the current authoring contract and produce a prioritized upgrade path — the modernization counterpart to rigor-plugin-author. Audits config-default declaration (ADR-40), the AST-walk model (node_rule vs a hand-rolled traversal), return-type / narrowing hooks (dynamic_return / narrowing_facts, not the removed flow_contribution_for or type_specifier), the ADR-60 WD4 authoring helpers (diagnostic / diagnostics_for / suggest / producer_value / read_fact), engine-collaboration vs reimplementation, cache-producer soundness, manifest-field hygiene, and doc freshness. Triggers: "review this Rigor plugin", "does my plugin follow best practices", "upgrade our rigor-prefixed plugin to the latest contract", "modernize this plugin", "is this plugin using the current API". NOT for authoring a new plugin (use rigor-plugin-author), enabling bundled plugins on a project (use rigor-plugin-tune), or tuning plugin config.
+description: >-
+  Audit an existing Rigor plugin against the current authoring contract and produce a prioritized upgrade
+  path. Use when modernizing or reviewing a `rigor-*` plugin; not for authoring a new plugin, enabling
+  bundled plugins, or tuning project config.
 license: MPL-2.0
 metadata:
   version: 0.1.0

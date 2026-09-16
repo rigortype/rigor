@@ -1,7 +1,8 @@
 ---
 name: rigor-worktree
-description: |
-  Create a git worktree for isolated or parallel work with its gem bundle already in place — `bin/rigor-worktree` clones `vendor/bundle` copy-on-write from the main clone (APFS clonefile: seconds, near-zero disk, isolated and writable) instead of a shared `vendor` symlink where one worktree's `bundle install` mutates everyone's gems. Use when asked to "make a worktree", "set up a worktree for a subagent", "give each worker its own checkout", or "spin up an isolated tree for a dependency-bump branch", or when a lib-editing agent needs its own tree apart from one running `exe/rigor`. Also the reference for worktree gotchas — an empty `references/` and the shared `.git`.
+description: >-
+  Create an isolated Rigor worktree with its copy-on-write gem bundle. Use for parallel work, a
+  subagent checkout, or a dependency-bump branch; not for ordinary branch work that needs no isolation.
 metadata:
   internal: true
 ---

@@ -1,7 +1,9 @@
 ---
 name: rigor-rbs-setup
-description: |
-  Install community RBS for the project's gems with `rbs collection install`, so Rigor stops typing calls into RBS-less dependencies as `Dynamic` and gains real coverage (and real bug-catching) on them. Rigor auto-detects the resulting `rbs_collection.lock.yaml` — no Rigor config change needed. Triggers: "set up rbs collection", "my gems type as Dynamic", "rigor check says N gems have no RBS available", "reduce false positives from untyped gems". NOT for first-time Rigor setup (use rigor-project-init first) and NOT for a gem that has no entry in the community collection (that needs rigor-plugin-author or a Rigor issue).
+description: >-
+  Install community RBS for a project's gems so Rigor can type dependencies that currently become
+  `Dynamic`. Use when `rbs collection` is missing or untyped gems limit coverage; not for first-time
+  Rigor setup or a gem with no community RBS entry.
 license: MPL-2.0
 metadata:
   version: 0.1.0

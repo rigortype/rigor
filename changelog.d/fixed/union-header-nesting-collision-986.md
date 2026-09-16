@@ -1,0 +1,1 @@
+- **[inference]** Compact-header re-anchoring now unions colliding header-nesting buckets instead of letting fold order pick a winner, so an ancestor name two declarations of one class both wrote resolves the same whichever file the project folds first. [#1029](https://github.com/rigortype/rigor/pull/1029)
